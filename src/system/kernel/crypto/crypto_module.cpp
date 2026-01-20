@@ -24,7 +24,8 @@ struct crypto_module_info {
 //	uint32 (*get_capabilities)();
 };
 
-static status_t
+//static status_t
+status_t
 crypto_std_ops(int32 op, ...)
 {
 	switch (op) {
@@ -45,19 +46,7 @@ crypto_std_ops(int32 op, ...)
 
 	return B_ERROR;
 }
-/*
-static module_info sCryptoModule = {
-    "kernel/crypto",
-    0,
-    crypto_std_ops
-};
 
-module_info* modules[] = {
-    &sCryptoModule,
-    NULL
-};
-
-*/
 static struct crypto_module_info sCryptoModuleInfo = {
     {
         "crypto/v1",
@@ -69,6 +58,8 @@ static struct crypto_module_info sCryptoModuleInfo = {
     BUnregisterCryptoAlgorithm,
     BSubmitCryptoRequest
 };
+
+extern "C" __attribute__((visibility("default"))) module_info* modules[];
 
 module_info* modules[] = {
     (module_info*)&sCryptoModuleInfo,

@@ -60,6 +60,7 @@
 #include <vfs.h>
 #include <vm/vm.h>
 #include <boot/kernel_args.h>
+#include "crypto/BCryptoCore.h"
 
 #include "vm/VMAnonymousCache.h"
 
@@ -363,6 +364,25 @@ main2(void* /*unused*/)
 
 	TRACE("device_manager_init_post_modules\n");
 	device_manager_init_post_modules(&sKernelArgs);
+
+	TRACE("Init Crypto Subsystem\n");
+	
+	extern status_t crypto_std_ops(int32 op, ...);
+	status_t cryptoStatus = crypto_std_ops(B_MODULE_INIT);
+	if (cryptoStatus == B_OK) {
+		dprintf("BCrypto: Crypto Subsystem initialized via direct call.\n");
+	} else {
+		dprintf("BCrypto: Crypto Subsystem initialization FAILED: %s\n", 
+				strerror(cryptoStatus));
+	}
+    //module_info* cryptoDummy;
+    //if (get_module("crypto/v1", &cryptoDummy) == B_OK) {
+    //    dprintf("BCrypto: Kernel module 'crypto/v1' loaded and initialized.\n");
+    //    // Lo rilasciamo subito, ma ormai l'inizializzazione è avvenuta
+    //    put_module("crypto/v1");
+    //} else {
+    //    dprintf("BCrypto: Failed to load 'crypto/v1' during boot!\n");
+    //}
 
 	boot_splash_set_stage(BOOT_SPLASH_STAGE_7_RUN_BOOT_SCRIPT);
 	boot_splash_uninit();

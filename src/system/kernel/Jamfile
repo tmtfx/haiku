@@ -109,35 +109,12 @@ UseHeaders [ FDirName $(HAIKU_TOP) headers private kernel device_manager ] : tru
 UseHeaders [ FDirName $(HAIKU_TOP) headers private kernel util ] : true ;
 
 ObjectCcFlags BCryptoCore.cpp BCryptoCPU.cpp BCryptoEntropy.cpp 
-	: -fno-pic -fvisibility=hidden -mno-red-zone -mcmodel=kernel ;
-#KernelMergeObject kernel_crypto.o : $(cryptoSources) ;
+	: -fno-pic -mno-red-zone -mcmodel=kernel ;
+#-fvisibility=hidden
+
 KernelMergeObject kernel_crypto.o : $(cryptoSources) ;
 
-# : $(TARGET_KERNEL_PIC_CCFLAGS) ;
-#KernelMergeObject kernel_crypto.o :
-#	crypto_module.cpp
-#	BCryptoCore.cpp
-#	BCryptoCPU.cpp
-#	BCryptoEntropy.cpp
-#	
-#	# Driver hardware
-#	AESNI.cpp
-#	PadLock.cpp
-#	PadLockRNG.cpp
-#	
-#	# Fallback software
-#	SoftCrypto.cpp
-#	soft_aes.cpp
-##    crypto/crypto_module.cpp
-##    crypto/BCryptoCore.cpp
-##    crypto/BCryptoCPU.cpp
-##    crypto/BCryptoEntropy.cpp
-##    crypto/drivers/padlock/PadLock.cpp
-##    crypto/drivers/padlock/PadLockRNG.cpp
-##    crypto/drivers/aesni/AESNI.cpp
-##    crypto/drivers/software/SoftCrypto.cpp
-#    : $(TARGET_KERNEL_PIC_CCFLAGS)
-#;
+
 # We need to specify the dependency on the generated syscalls files explicitly.
 Includes [ FGristFiles syscalls.cpp ]
 	:
