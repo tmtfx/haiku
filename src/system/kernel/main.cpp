@@ -288,6 +288,7 @@ _start(kernel_args *bootKernelArgs, int currentCPU)
 	return 0;
 }
 
+extern "C" status_t crypto_std_ops(int op, ...);
 
 static int32
 main2(void* /*unused*/)
@@ -367,7 +368,7 @@ main2(void* /*unused*/)
 
 	TRACE("Init Crypto Subsystem\n");
 	
-	extern status_t crypto_std_ops(int32 op, ...);
+	
 	status_t cryptoStatus = crypto_std_ops(B_MODULE_INIT);
 	if (cryptoStatus == B_OK) {
 		dprintf("BCrypto: Crypto Subsystem initialized via direct call.\n");

@@ -4,7 +4,7 @@
  */
 #include <KernelExport.h>
 #include <string.h>
-#include <KernelDebug.h>
+//#include <KernelDebug.h>
 #include <vm/vm.h>        // IS_USER_ADDRESS, copyin/copyout
 
 #include "CryptoDevice.h"
@@ -13,6 +13,7 @@
 #include "drivers/padlock/PadLock.h"
 #include "drivers/aesni/AESNI.h"
 #include "SoftCrypto.h"
+#include <user_runtime.h>
 
 //-----------------------------------------------------------
 // Device hooks
@@ -26,11 +27,9 @@ static device_hooks sCryptoHooks = {
     crypto_open,
     crypto_close,
     crypto_free,
-    NULL,   // read
-    NULL,   // write
     crypto_control,
-    NULL,
-    NULL,
+    NULL,//crypto_read,   // read
+    NULL,//crypto_write,   // write
     NULL,
     NULL
 };
@@ -69,7 +68,8 @@ static status_t crypto_control(void* cookie, uint32 op, void* data, size_t lengt
         return B_BAD_VALUE;
 
     BCryptoUserRequest userReq;
-    status_t st = memcpy_from_user(&userReq, data, sizeof(userReq));
+    //status_t st = memcpy_from_user(&userReq, data, sizeof(userReq));
+    status_t st = user_memcpy(&userReq, data, sizeof(userReq));
     if (st != B_OK)
         return st;
 
@@ -115,7 +115,7 @@ static status_t crypto_control(void* cookie, uint32 op, void* data, size_t lengt
 
     // Copia eventuale IV aggiornato in userland
     if (req.iv && req.ivLength >= 16)
-        memcpy_to_user(userReq.iv, req.iv, 16);
+        user_memcpy(userReq.iv, req.iv, 16);
 
     return B_OK;
 }

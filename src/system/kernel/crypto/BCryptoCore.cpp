@@ -8,7 +8,9 @@
 #include <util/AutoLock.h>
 //#include <AutoLocker.h>
 #include <util/DoublyLinkedList.h>
+#include "BCryptoCapabilities.h"
 #include <new>
+#include <debug.h>
 
 using BPrivate::AutoLocker;
 
@@ -28,12 +30,21 @@ struct AlgoNode : DoublyLinkedListLinkImpl<AlgoNode> {
 };
 
 static DoublyLinkedList<AlgoNode> sAlgorithms;
+static uint32 sCryptoCapabilities = 0;
 
 extern "C" status_t
 crypto_init_core()
 {
+	dprintf("BCrypto: [2] Entrato in crypto_init_core\n");
     mutex_init(&sCryptoLock, "crypto core lock");
+    sCryptoCapabilities = BGetCryptoCapabilities();
     return B_OK;
+}
+
+uint32
+BGetStoredCryptoCapabilities()
+{
+    return sCryptoCapabilities;
 }
 
 void
@@ -74,24 +85,11 @@ BUnregisterCryptoAlgorithm(BCryptoAlgorithmID algorithm)
 	}
 	return B_ENTRY_NOT_FOUND;
 
-/*
-    for (AlgoNode* node = sAlgorithms.Head();
-         node != NULL;
-         node = sAlgorithms.GetNext(node)) {
-
-        if (node->algo->algorithm == algorithm) {
-            sAlgorithms.Remove(node);
-            delete node;
-            return B_OK;
-        }
-    }
-    return B_ENTRY_NOT_FOUND;*/
 }
 
 status_t
 BSubmitCryptoRequest(BCryptoRequest* request)
 {
-    //BAutolock _(sCryptoLock);
     MutexLocker _(sCryptoLock);
 
     BCryptoAlgorithm* best = NULL;

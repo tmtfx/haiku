@@ -13,6 +13,7 @@
 #include "BCryptoCapabilities.h"
 #include "BCryptoAlgorithm.h"
 #include "BCryptoDefs.h"
+#include <debug.h> //da rimuovere una volta verificato
 
 extern "C" status_t crypto_init_core();
 
@@ -25,9 +26,10 @@ struct crypto_module_info {
 };
 
 //static status_t
-status_t
-crypto_std_ops(int32 op, ...)
+extern "C" __attribute__((visibility("default"))) status_t
+crypto_std_ops(int op, ...)
 {
+	dprintf("BCrypto: [1] Entrato in crypto_std_ops\n");
 	switch (op) {
 		case B_MODULE_INIT:
 		{

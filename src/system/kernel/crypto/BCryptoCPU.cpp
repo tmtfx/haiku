@@ -10,6 +10,7 @@
 uint32
 BGetCryptoCapabilities()
 {
+	dprintf("BCrypto: [3] Entrato in BGetCryptoCapabilities\n");
     uint32 caps = 0;
 
 #if ARCH_X86 || ARCH_X86_64
