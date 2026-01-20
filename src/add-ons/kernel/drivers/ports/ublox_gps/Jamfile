@@ -1,0 +1,10 @@
+# Jamfile per ublox_gps
+SubDir HAIKU_TOP src add-ons kernel drivers ports ublox_gps ;
+
+UsePrivateHeaders kernel usb ;
+
+KernelAddon ublox_gps :
+	ublox_gps.cpp
+	;
+
+PackageBuildUserAddOnDrivers ports : ublox_gps ;
