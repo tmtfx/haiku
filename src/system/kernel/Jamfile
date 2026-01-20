@@ -1,6 +1,6 @@
 SubDir HAIKU_TOP src system kernel ;
 
-SubDir crypto ;
+#SubDir crypto ;
 
 {
 	local defines =
@@ -15,6 +15,15 @@ SubDir crypto ;
 SEARCH_SOURCE += [ FDirName $(SUBDIR) events ] ;
 SEARCH_SOURCE += [ FDirName $(SUBDIR) locks ] ;
 SEARCH_SOURCE += [ FDirName $(SUBDIR) scheduler ] ;
+SEARCH_SOURCE += [ FDirName $(SUBDIR) crypto ] ;
+SEARCH_SOURCE += [ FDirName $(SUBDIR) crypto drivers aesni ] ;
+SEARCH_SOURCE += [ FDirName $(SUBDIR) crypto drivers padlock ] ;
+SEARCH_SOURCE += [ FDirName $(SUBDIR) crypto drivers software ] ;
+
+SubDirHdrs $(HAIKU_TOP) src system kernel crypto ;
+SubDirHdrs $(HAIKU_TOP) src system kernel crypto drivers aesni ;
+SubDirHdrs $(HAIKU_TOP) src system kernel crypto drivers padlock ;
+SubDirHdrs $(HAIKU_TOP) src system kernel crypto drivers software ;
 
 UsePrivateHeaders libroot ;
 UsePrivateHeaders shared ;
@@ -80,17 +89,55 @@ KernelMergeObject kernel_core.o :
 	: $(TARGET_KERNEL_PIC_CCFLAGS)
 ;
 
-KernelMergeObject kernel_crypto.o :
-    crypto/crypto_module.cpp
-    crypto/BCryptoCore.cpp
-    crypto/BCryptoCPU.cpp
-    crypto/BCryptoEntropy.cpp
-    crypto/drivers/padlock/PadLock.cpp
-    crypto/drivers/padlock/PadLockRNG.cpp
-    crypto/drivers/aesni/AESNI.cpp
-    crypto/drivers/software/SoftCrypto.cpp
-    : $(TARGET_KERNEL_PIC_CCFLAGS)
-;
+local cryptoSources = 
+	crypto_module.cpp 
+	BCryptoCore.cpp 
+	BCryptoCPU.cpp 
+	BCryptoEntropy.cpp 
+	SoftCrypto.cpp 
+	soft_aes.cpp ;
+
+if $(TARGET_ARCH) in x86 x86_64 {
+	cryptoSources += AESNI.cpp PadLock.cpp PadLockRNG.cpp ;
+}
+UsePrivateHeaders kernel ;
+UsePrivateHeaders shared ;
+UsePrivateHeaders drivers ;
+UsePrivateKernelHeaders ;
+
+UseHeaders [ FDirName $(HAIKU_TOP) headers private kernel device_manager ] : true ;
+UseHeaders [ FDirName $(HAIKU_TOP) headers private kernel util ] : true ;
+
+ObjectCcFlags BCryptoCore.cpp BCryptoCPU.cpp BCryptoEntropy.cpp 
+	: -fno-pic -fvisibility=hidden -mno-red-zone -mcmodel=kernel ;
+#KernelMergeObject kernel_crypto.o : $(cryptoSources) ;
+KernelMergeObject kernel_crypto.o : $(cryptoSources) ;
+
+# : $(TARGET_KERNEL_PIC_CCFLAGS) ;
+#KernelMergeObject kernel_crypto.o :
+#	crypto_module.cpp
+#	BCryptoCore.cpp
+#	BCryptoCPU.cpp
+#	BCryptoEntropy.cpp
+#	
+#	# Driver hardware
+#	AESNI.cpp
+#	PadLock.cpp
+#	PadLockRNG.cpp
+#	
+#	# Fallback software
+#	SoftCrypto.cpp
+#	soft_aes.cpp
+##    crypto/crypto_module.cpp
+##    crypto/BCryptoCore.cpp
+##    crypto/BCryptoCPU.cpp
+##    crypto/BCryptoEntropy.cpp
+##    crypto/drivers/padlock/PadLock.cpp
+##    crypto/drivers/padlock/PadLockRNG.cpp
+##    crypto/drivers/aesni/AESNI.cpp
+##    crypto/drivers/software/SoftCrypto.cpp
+#    : $(TARGET_KERNEL_PIC_CCFLAGS)
+#;
 # We need to specify the dependency on the generated syscalls files explicitly.
 Includes [ FGristFiles syscalls.cpp ]
 	:
@@ -173,6 +220,8 @@ if $(HAIKU_ARCH) in x86_64 arm {
 		kernel_lib_posix.o
 		kernel_lib_posix_arch_$(TARGET_ARCH).o
 		kernel_misc.o
+		
+		kernel_crypto.o
 
 		: $(HAIKU_TOP)/src/system/ldscripts/$(TARGET_ARCH)/kernel.ld
 		: --orphan-handling=warn -L $(HAIKU_TOP)/src/system/ldscripts/common/

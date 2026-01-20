@@ -5,9 +5,9 @@
 
 #include "PadLockRNG.h"
 
-#include "BCryptoCore.h"
-#include "BCryptoCapabilities.h"
-#include "BCryptoDefs.h"
+#include "../../BCryptoCore.h"
+#include "../../BCryptoCapabilities.h"
+#include "../../BCryptoDefs.h"
 
 #include <string.h>
 

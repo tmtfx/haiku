@@ -13,7 +13,7 @@
 
 #include "AESNI.h"
 
-#include "BCryptoCapabilities.h"
+#include "../../BCryptoCapabilities.h"
 #include <string.h>
 
 #if ARCH_X86

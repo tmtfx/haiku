@@ -6,7 +6,7 @@
 #define _B_CRYPTO_DEVICE_H_
 
 #include <Drivers.h>
-#include "BCryptoRequest.h"
+#include "../../BCryptoRequest.h"
 
 #define B_CRYPTO_DEVICE_NAME "crypto"
 

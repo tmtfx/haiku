@@ -5,11 +5,23 @@
 #include "BCryptoCore.h"
 
 #include <lock.h>
-#include <Autolock.h>
-#include <Locker.h>
+#include <util/AutoLock.h>
+//#include <AutoLocker.h>
 #include <util/DoublyLinkedList.h>
+#include <new>
 
-static BLocker sCryptoLock;
+using BPrivate::AutoLocker;
+
+struct MutexLocking {
+	typedef mutex* Lockable;
+	static inline status_t Lock(Lockable lock) { return mutex_lock(lock); }
+	static inline void Unlock(Lockable lock) { mutex_unlock(lock); }
+};
+
+//typedef AutoLocker<mutex, mutex_lock, mutex_unlock> MutexLocker;
+
+//static BLocker sCryptoLock;
+static mutex sCryptoLock;
 
 struct AlgoNode : DoublyLinkedListLinkImpl<AlgoNode> {
     BCryptoAlgorithm* algo;
@@ -17,12 +29,29 @@ struct AlgoNode : DoublyLinkedListLinkImpl<AlgoNode> {
 
 static DoublyLinkedList<AlgoNode> sAlgorithms;
 
+extern "C" status_t
+crypto_init_core()
+{
+    mutex_init(&sCryptoLock, "crypto core lock");
+    return B_OK;
+}
+
+void
+crypto_uninit_core()
+{
+    mutex_destroy(&sCryptoLock);
+}
 status_t
 BRegisterCryptoAlgorithm(BCryptoAlgorithm* algorithm)
 {
-    BAutolock _(sCryptoLock);
+    //BAutolock _(sCryptoLock);
+    MutexLocker _(sCryptoLock);
 
-    AlgoNode* node = new AlgoNode;
+    //AlgoNode* node = new AlgoNode;
+    AlgoNode* node = new(std::nothrow) AlgoNode;
+    if (node == NULL)
+        return B_NO_MEMORY;
+        
     node->algo = algorithm;
     sAlgorithms.Add(node);
 
@@ -32,8 +61,20 @@ BRegisterCryptoAlgorithm(BCryptoAlgorithm* algorithm)
 status_t
 BUnregisterCryptoAlgorithm(BCryptoAlgorithmID algorithm)
 {
-    BAutolock _(sCryptoLock);
+	//BAutolock _(sCryptoLock);
+	MutexLocker _(sCryptoLock);
+	
+	DoublyLinkedList<AlgoNode>::Iterator it = sAlgorithms.GetIterator();
+	while (AlgoNode* node = it.Next()) {
+		if (node->algo->algorithm == algorithm) {
+			sAlgorithms.Remove(node);
+			delete node;
+			return B_OK;
+		}
+	}
+	return B_ENTRY_NOT_FOUND;
 
+/*
     for (AlgoNode* node = sAlgorithms.Head();
          node != NULL;
          node = sAlgorithms.GetNext(node)) {
@@ -44,16 +85,28 @@ BUnregisterCryptoAlgorithm(BCryptoAlgorithmID algorithm)
             return B_OK;
         }
     }
-    return B_ENTRY_NOT_FOUND;
+    return B_ENTRY_NOT_FOUND;*/
 }
 
 status_t
 BSubmitCryptoRequest(BCryptoRequest* request)
 {
-    BAutolock _(sCryptoLock);
+    //BAutolock _(sCryptoLock);
+    MutexLocker _(sCryptoLock);
 
     BCryptoAlgorithm* best = NULL;
 
+	DoublyLinkedList<AlgoNode>::Iterator it = sAlgorithms.GetIterator();
+	while (AlgoNode* node = it.Next()) {
+		BCryptoAlgorithm* algo = node->algo;
+
+		if (algo->algorithm != request->algorithm)
+			continue;
+
+		if (!best || algo->priority > best->priority)
+			best = algo;
+	}
+    /*
     for (AlgoNode* node = sAlgorithms.Head();
          node != NULL;
          node = sAlgorithms.GetNext(node)) {
@@ -66,6 +119,7 @@ BSubmitCryptoRequest(BCryptoRequest* request)
         if (!best || algo->priority > best->priority)
             best = algo;
     }
+    */
 
     if (!best)
         return B_NOT_SUPPORTED;

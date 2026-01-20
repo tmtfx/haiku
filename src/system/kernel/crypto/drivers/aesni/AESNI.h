@@ -7,8 +7,8 @@
 #define _AES_NI_H_
 
 #include <SupportDefs.h>
-#include "BCryptoDefs.h"
-#include "BCryptoCore.h"
+#include "../../BCryptoDefs.h"
+#include "../../BCryptoCore.h"
 
 #if ARCH_X86
 #include <emmintrin.h>

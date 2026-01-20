@@ -4,20 +4,15 @@
  */
 #include "PadLock.h"
 
-#include "BCryptoCore.h"
-#include "BCryptoCapabilities.h"
-#include "BCryptoDefs.h"
+#include "../../BCryptoCore.h"
+#include "../../BCryptoCapabilities.h"
+#include "../../BCryptoDefs.h"
 
 #include <string.h>
 
 #if ARCH_X86
 #include <arch/x86/arch_cpu.h>
 #endif
-/*
-struct PadLockAESContext {
-    uint8 key[32];
-    size_t keyLength;
-};*/
 
 static status_t
 padlock_aes_process_block(bool encrypt,

@@ -13,8 +13,10 @@ struct BCryptoRequest {
     BCryptoOperation		operation;
     BCryptoAlgorithmID		algorithm;
     const void*				key;
+    //void*					key;
     size_t					keyLength;
-    const void*				iv;
+    //const void*					iv;
+    void*					iv;
     size_t					ivLength;
     const iovec*			source;
     iovec*					destination;

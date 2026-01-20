@@ -25,7 +25,7 @@ soft_aes_cbc_process_internal(BCryptoRequest* request, bool encrypt)
         return B_BAD_VALUE;
 
     SoftAESContext ctx{};
-    status_t st = soft_aes_set_key(&ctx, request->key, request->keyLength);
+    status_t st = soft_aes_set_key(&ctx, (const uint8*)request->key, request->keyLength);
     if (st != B_OK)
         return st;
 
@@ -104,14 +104,10 @@ status_t BInitSoftCrypto()
 
 /* roba vecchia */
 
-
+/*
 static const uint8 rcon[10] = {
     0x01,0x02,0x04,0x08,0x10,0x20,0x40,0x80,0x1B,0x36
 };
-
-/* ------------------------------------------------------------- */
-/* AES helpers                                                   */
-/* ------------------------------------------------------------- */
 
 static uint32
 rotword(uint32 w)
@@ -152,10 +148,6 @@ aes_key_expand(const uint8* key, size_t keyLen, SoftAESContext& ctx)
     }
 }
 
-/* ------------------------------------------------------------- */
-/* AES block operations                                         */
-/* ------------------------------------------------------------- */
-
 static void
 add_round_key(uint8* state, const uint32* rk)
 {
@@ -184,10 +176,6 @@ shift_rows(uint8* s)
     t=s[3];  s[3]=s[15]; s[15]=s[11]; s[11]=s[7]; s[7]=t;
 }
 
-/* ------------------------------------------------------------- */
-/* AES encrypt (CBC)                                            */
-/* ------------------------------------------------------------- */
-
 static void
 aes_encrypt_block(uint8* block, SoftAESContext& ctx)
 {
@@ -203,10 +191,6 @@ aes_encrypt_block(uint8* block, SoftAESContext& ctx)
     shift_rows(block);
     add_round_key(block, ctx.roundKeys + 4*ctx.rounds);
 }
-
-/* ------------------------------------------------------------- */
-/* CBC entry point                                              */
-/* ------------------------------------------------------------- */
 
 status_t
 soft_aes_cbc_process(BCryptoRequest* request)
@@ -254,10 +238,6 @@ soft_aes_cbc_process(BCryptoRequest* request)
     return B_OK;
 }
 
-/* ------------------------------------------------------------- */
-/* Registration                                                 */
-/* ------------------------------------------------------------- */
-
 status_t
 BInitSoftCrypto()
 {
@@ -270,3 +250,4 @@ BInitSoftCrypto()
 
     return BRegisterCryptoAlgorithm(&sSoftAES);
 }
+*/
