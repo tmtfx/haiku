@@ -1,5 +1,7 @@
 SubDir HAIKU_TOP src system kernel ;
 
+SubDir crypto ;
+
 {
 	local defines =
 		HAIKU_ARCH=\\\"$(TARGET_ARCH)\\\"
@@ -78,6 +80,17 @@ KernelMergeObject kernel_core.o :
 	: $(TARGET_KERNEL_PIC_CCFLAGS)
 ;
 
+KernelMergeObject kernel_crypto.o :
+    crypto/crypto_module.cpp
+    crypto/BCryptoCore.cpp
+    crypto/BCryptoCPU.cpp
+    crypto/BCryptoEntropy.cpp
+    crypto/drivers/padlock/PadLock.cpp
+    crypto/drivers/padlock/PadLockRNG.cpp
+    crypto/drivers/aesni/AESNI.cpp
+    crypto/drivers/software/SoftCrypto.cpp
+    : $(TARGET_KERNEL_PIC_CCFLAGS)
+;
 # We need to specify the dependency on the generated syscalls files explicitly.
 Includes [ FGristFiles syscalls.cpp ]
 	:
@@ -117,6 +130,8 @@ KernelLd kernel_$(TARGET_ARCH) :
 	kernel_lib_posix.o
 	kernel_lib_posix_arch_$(TARGET_ARCH).o
 	kernel_misc.o
+	
+	kernel_crypto.o
 
 	: $(HAIKU_TOP)/src/system/ldscripts/$(TARGET_ARCH)/kernel.ld
 	: --orphan-handling=warn -L $(HAIKU_TOP)/src/system/ldscripts/common/
