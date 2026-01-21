@@ -12,6 +12,7 @@
 #include "drivers/padlock/PadLock.h"
 #include "drivers/aesni/AESNI.h"
 #include "SoftCrypto.h"
+#include "../BCryptoDefs.h"
 //#include <user_runtime.h>
 static void
 secure_memzero(void* p, size_t s)
@@ -60,9 +61,77 @@ static status_t crypto_free(void* cookie)
     return B_OK;
 }
 
+status_t
+crypto_control(void* cookie, uint32 op, void* arg, size_t length)
+{
+    switch (op) {
+        case CRYPTO_IOCTL_PROCESS: {
+            BCryptoUserRequest userReq;
+            
+            // Copia la struttura di controllo dall'utente
+            if (user_memcpy(&userReq, arg, sizeof(BCryptoUserRequest)) != B_OK)
+                return B_BAD_ADDRESS;
+
+            // Prepariamo la richiesta interna al kernel (BCryptoRequest)
+            BCryptoRequest req;
+            req.operation = userReq.operation;
+            req.algorithm = userReq.algorithm;
+            req.mode = userReq.mode;
+            req.flags = userReq.flags;
+            
+            // Sanificazione lunghezze
+            if (userReq.keyLength > 64 || userReq.ivLength > 64)
+                return B_BAD_VALUE;
+
+            // Buffer temporanei nel kernel per evitare di toccare la memoria utente durante l'algoritmo
+            uint8 localKey[64];
+            uint8 localIV[64];
+
+            if (user_memcpy(localKey, userReq.key, userReq.keyLength) != B_OK)
+                return B_BAD_ADDRESS;
+            if (user_memcpy(localIV, userReq.iv, userReq.ivLength) != B_OK)
+                return B_BAD_ADDRESS;
+
+            req.key = localKey;
+            req.keyLength = userReq.keyLength;
+            req.iv = localIV;
+            req.ivLength = userReq.ivLength;
+
+            // Gestione iovec: anche l'array di descrittori va copiato
+            if (userReq.vectorCount > 32) return B_DEVICE_FULL;
+            iovec localSrc[32], localDst[32];
+
+            if (user_memcpy(localSrc, userReq.source, sizeof(iovec) * userReq.vectorCount) != B_OK)
+                return B_BAD_ADDRESS;
+            if (user_memcpy(localDst, userReq.destination, sizeof(iovec) * userReq.vectorCount) != B_OK)
+                return B_BAD_ADDRESS;
+
+            req.source = localSrc;
+            req.destination = localDst;
+            req.vectorCount = userReq.vectorCount;
+            req.completionCallback = NULL; // Il kernel non può chiamare funzioni utente
+
+            // Eseguiamo l'operazione
+            status_t status = crypto_process_request(&req);
+
+            // Se l'operazione ha aggiornato l'IV (tipico in CBC), lo riportiamo all'utente
+            user_memcpy(userReq.iv, req.iv, userReq.ivLength);
+            
+            // Gestione asincrona tramite semaforo (se fornito)
+            if (userReq.completionSem >= 0) {
+                userReq.result = status;
+                release_sem(userReq.completionSem);
+            }
+
+            return status;
+        }
+    }
+    return B_DEV_INVALID_IOCTL;
+}
 //-----------------------------------------------------------
 // ioctl / copyin/copyout sicuro
 //-----------------------------------------------------------
+/*
 static status_t crypto_control(void* cookie, uint32 op, void* data, size_t length)
 {
     if (op != B_CRYPTO_IOCTL_SUBMIT)
@@ -175,6 +244,7 @@ static status_t crypto_control(void* cookie, uint32 op, void* data, size_t lengt
 
     return B_OK;
 }
+*/
 
 //-----------------------------------------------------------
 // Driver entry points

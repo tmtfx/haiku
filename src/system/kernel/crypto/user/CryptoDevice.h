@@ -15,7 +15,7 @@
 enum {
     B_CRYPTO_IOCTL_SUBMIT = B_DEVICE_OP_CODES_END + 1
 };
-
+/*
 struct BCryptoUserRequest {
     BCryptoOperation    operation;
     BCryptoAlgorithmID  algorithm;
@@ -32,6 +32,25 @@ struct BCryptoUserRequest {
     iovec* destination;
     size_t vectorCount;
     status_t (*completionCallback)(BCryptoRequest*, status_t);
-};
+};*/
+typedef struct {
+    BCryptoOperation    operation;
+    BCryptoAlgorithmID  algorithm;
+    BCryptoMode         mode;
+    uint32              flags;
+
+    void* key;
+    size_t              keyLength;
+    void* iv;
+    size_t              ivLength;
+
+    const iovec*        source;
+    iovec*              destination;
+    size_t              vectorCount;
+
+    // Sostituiamo il puntatore a funzione con un semaforo
+    sem_id              completionSem; 
+    status_t            result;
+} BCryptoUserRequest;
 
 #endif

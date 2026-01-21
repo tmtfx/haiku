@@ -43,5 +43,11 @@ enum {
     B_CRYPTO_ALG_ASYNC       = 0x04
 };
 
+enum {
+    B_CRYPTO_IOCTL_BASE = B_DEVICE_OP_CODES_END + 100,
+    
+    // Questo comando invia una richiesta e riceve un risultato
+    B_CRYPTO_IOCTL_PROCESS = B_CRYPTO_IOCTL_BASE
+};
 
 #endif
