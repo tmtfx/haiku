@@ -21,6 +21,16 @@
 #include <arch/x86/arch_cpu.h>
 #include <wmmintrin.h>
 
+static void
+secure_memzero(void* p, size_t s)
+{
+    if (p == NULL)
+        return;
+    volatile uint8* cp = (volatile uint8*)p;
+    while (s--)
+        *cp++ = 0;
+}
+
 /* ------------------------------------------------------------- */
 /* Key expansion helpers                                         */
 /* ------------------------------------------------------------- */
@@ -327,7 +337,7 @@ aesni_process(BCryptoRequest* request)
 
 out:
     //memset(&ctx, 0, sizeof(ctx)); // hygiene
-    explicit_bzero(&ctx, sizeof(ctx)); // se non va rimettere prima ma in fase di compilazione potrebbe essere ignorato!!!!!
+    secure_memzero(&ctx, sizeof(ctx)); // se non va rimettere prima ma in fase di compilazione potrebbe essere ignorato!!!!!
     return st;
 }
 

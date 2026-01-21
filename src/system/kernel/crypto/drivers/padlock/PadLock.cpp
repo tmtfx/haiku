@@ -13,6 +13,15 @@
 #if ARCH_X86
 #include <arch/x86/arch_cpu.h>
 #endif
+static void
+secure_memzero(void* p, size_t s)
+{
+    if (p == NULL)
+        return;
+    volatile uint8* cp = (volatile uint8*)p;
+    while (s--)
+        *cp++ = 0;
+}
 
 static status_t
 padlock_aes_process_block(bool encrypt,
@@ -116,7 +125,7 @@ padlock_process(BCryptoRequest* request)
     }
 
     memcpy(request->iv, ctx.iv, 16);
-    explicit_bzero(&ctx, sizeof(ctx));
+    secure_memzero(&ctx, sizeof(ctx));
     
     if (request->completionCallback) {
         request->completionCallback(request, st);

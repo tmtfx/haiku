@@ -102,7 +102,7 @@ BInitPadLockRNG()
     static BCryptoAlgorithm sPadLockRNG = {
         .algorithm = B_CRYPTO_RNG,
         .mode      = B_CRYPTO_MODE_NONE,  // per RNG non c’è modalità
-        .flags     = B_CRYPTO_HW_ACCEL,
+        .flags     = B_CRYPTO_ALG_HW_ACCEL,
         .priority  = 100, // massimo, è hardware puro
         .Process   = padlock_rng_process
     };

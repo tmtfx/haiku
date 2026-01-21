@@ -215,7 +215,20 @@ void soft_aes_decrypt_block(SoftAESContext* ctx, const uint8* in, uint8* out) {
 /* ---------------------------------------------------------------- */
 /* Secure zeroing of context                                         */
 /* ---------------------------------------------------------------- */
-void soft_aes_zero(SoftAESContext* ctx) {
-    if (!ctx) return;
-    memset(ctx, 0, sizeof(*ctx));
+static void
+secure_memzero(void* p, size_t s)
+{
+    if (p == NULL)
+        return;
+    volatile uint8* cp = (volatile uint8*)p;
+    while (s--)
+        *cp++ = 0;
+}
+
+void
+soft_aes_zero(SoftAESContext* ctx)
+{
+    if (!ctx) 
+        return;
+    secure_memzero(ctx, sizeof(*ctx));
 }

@@ -13,7 +13,15 @@
 #include "drivers/aesni/AESNI.h"
 #include "SoftCrypto.h"
 //#include <user_runtime.h>
-
+static void
+secure_memzero(void* p, size_t s)
+{
+    if (p == NULL)
+        return;
+    volatile uint8* cp = (volatile uint8*)p;
+    while (s--)
+        *cp++ = 0;
+}
 //-----------------------------------------------------------
 // Device hooks
 //-----------------------------------------------------------
@@ -162,8 +170,8 @@ static status_t crypto_control(void* cookie, uint32 op, void* data, size_t lengt
         user_memcpy(userReq.iv, req.iv, out);
     }
 
-    explicit_bzero(keyBuffer, sizeof(keyBuffer));
-    explicit_bzero(ivBuffer, sizeof(ivBuffer));
+    secure_memzero(keyBuffer, sizeof(keyBuffer));
+    secure_memzero(ivBuffer, sizeof(ivBuffer));
 
     return B_OK;
 }
