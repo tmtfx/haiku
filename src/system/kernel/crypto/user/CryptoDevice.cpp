@@ -13,8 +13,10 @@
 #include "drivers/aesni/AESNI.h"
 #include "SoftCrypto.h"
 #include "../BCryptoDefs.h"
+#include "../BCryptoCore.h"
 //#include <user_runtime.h>
 static void
+/* funzione helper per zeroing memoria
 secure_memzero(void* p, size_t s)
 {
     if (p == NULL)
@@ -23,6 +25,7 @@ secure_memzero(void* p, size_t s)
     while (s--)
         *cp++ = 0;
 }
+*/
 //-----------------------------------------------------------
 // Device hooks
 //-----------------------------------------------------------
@@ -65,7 +68,7 @@ status_t
 crypto_control(void* cookie, uint32 op, void* arg, size_t length)
 {
     switch (op) {
-        case CRYPTO_IOCTL_PROCESS: {
+        case B_CRYPTO_IOCTL_PROCESS: {
             BCryptoUserRequest userReq;
             
             // Copia la struttura di controllo dall'utente

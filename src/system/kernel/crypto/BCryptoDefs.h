@@ -5,7 +5,7 @@
 #ifndef _B_CRYPTO_DEFS_H_
 #define _B_CRYPTO_DEFS_H_
 
-
+#include <Drivers.h>
 #include <SupportDefs.h>
 
 enum BCryptoAlgorithmID {
