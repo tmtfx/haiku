@@ -12,10 +12,10 @@
 struct BCryptoRequest {
     BCryptoOperation		operation;
     BCryptoAlgorithmID		algorithm;
+    BCryptoMode				mode;
+    uint32					flags; 
     const void*				key;
-    //void*					key;
     size_t					keyLength;
-    //const void*					iv;
     void*					iv;
     size_t					ivLength;
     const iovec*			source;

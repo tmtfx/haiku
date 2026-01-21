@@ -6,7 +6,8 @@
 #define _B_CRYPTO_DEVICE_H_
 
 #include <Drivers.h>
-#include "../../BCryptoRequest.h"
+#include <iovec.h>
+#include "../../BCryptoDefs.h"
 
 #define B_CRYPTO_DEVICE_NAME "crypto"
 
@@ -17,16 +18,19 @@ enum {
 struct BCryptoUserRequest {
     BCryptoOperation    operation;
     BCryptoAlgorithmID  algorithm;
-
+	BCryptoMode         mode;
+	uint32              flags;
+	
     void* key;
     size_t keyLength;
 
     void* iv;
     size_t ivLength;
 
-    iovec* source;
+    const iovec* source;
     iovec* destination;
     size_t vectorCount;
+    status_t (*completionCallback)(BCryptoRequest*, status_t);
 };
 
 #endif

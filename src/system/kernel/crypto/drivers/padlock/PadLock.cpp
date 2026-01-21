@@ -16,7 +16,8 @@
 
 static status_t
 padlock_aes_process_block(bool encrypt,
-                          const PadLockAESContext* ctx,
+                          //const PadLockAESContext* ctx,
+                          PadLockAESContext* ctx,
                           const uint8* in,
                           uint8* out,
                           size_t length)
@@ -69,9 +70,14 @@ padlock_aes_process_block(bool encrypt,
 static status_t
 padlock_process(BCryptoRequest* request)
 {
-    if (request->algorithm != B_CRYPTO_AES_CBC)
+	if (!request)
+        return B_BAD_VALUE;
+    //if (request->algorithm != B_CRYPTO_AES_CBC)
+    if (request->algorithm != B_CRYPTO_AES)
         return B_NOT_SUPPORTED;
-
+    if (request->mode != B_CRYPTO_MODE_CBC)
+        return B_NOT_SUPPORTED;
+        
     if (request->keyLength != 16 &&
         request->keyLength != 24 &&
         request->keyLength != 32)
@@ -86,15 +92,18 @@ padlock_process(BCryptoRequest* request)
     ctx.keyLength = request->keyLength;
 
     bool encrypt = (request->operation == B_CRYPTO_ENCRYPT);
+    status_t st = B_OK;
 
     for (size_t i = 0; i < request->vectorCount; i++) {
         const iovec& src = request->source[i];
         iovec& dst       = request->destination[i];
 
+        if (src.iov_len != dst.iov_len)
+            return B_BAD_VALUE;
         if (src.iov_len % 16 != 0)
             return B_BAD_VALUE;
 
-        status_t st = padlock_aes_process_block(
+        st = padlock_aes_process_block(
             encrypt,
             &ctx,
             (const uint8*)src.iov_base,
@@ -103,12 +112,20 @@ padlock_process(BCryptoRequest* request)
         );
 
         if (st != B_OK)
-            return st;
+            break;
     }
 
     memcpy(request->iv, ctx.iv, 16);
-    return B_OK;
+    explicit_bzero(&ctx, sizeof(ctx));
+    
+    if (request->completionCallback) {
+        request->completionCallback(request, st);
+        return B_OK; // in async, ritorna sempre B_OK
+    }
+
+    return st;
 }
+
 
 
 status_t
@@ -119,8 +136,9 @@ BInitPadLockCrypto()
         return B_UNSUPPORTED;
 
     static BCryptoAlgorithm sPadLockAES = {
-        .algorithm = B_CRYPTO_AES_CBC,
-        .flags     = B_CRYPTO_HW_ACCEL,
+        .algorithm = B_CRYPTO_AES,
+        .mode      = B_CRYPTO_MODE_CBC,
+        .flags     = B_CRYPTO_ALG_HW_ACCEL,
         .priority  = 90,
         .Process   = padlock_process
     };

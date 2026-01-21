@@ -6,7 +6,6 @@
 
 #include <lock.h>
 #include <util/AutoLock.h>
-//#include <AutoLocker.h>
 #include <util/DoublyLinkedList.h>
 #include "BCryptoCapabilities.h"
 #include <new>
@@ -21,8 +20,9 @@ struct MutexLocking {
 };
 
 //typedef AutoLocker<mutex, mutex_lock, mutex_unlock> MutexLocker;
+//typedef AutoLocker<mutex, MutexLocking::Lock, MutexLocking::Unlock> MutexLocker;
 
-//static BLocker sCryptoLock;
+
 static mutex sCryptoLock;
 
 struct AlgoNode : DoublyLinkedListLinkImpl<AlgoNode> {
@@ -41,30 +41,46 @@ crypto_init_core()
     return B_OK;
 }
 
+extern "C" void
+crypto_uninit_core()
+{
+    mutex_destroy(&sCryptoLock);
+}
 uint32
 BGetStoredCryptoCapabilities()
 {
     return sCryptoCapabilities;
 }
 
-void
-crypto_uninit_core()
-{
-    mutex_destroy(&sCryptoLock);
-}
 status_t
 BRegisterCryptoAlgorithm(BCryptoAlgorithm* algorithm)
 {
-    //BAutolock _(sCryptoLock);
+	if (!algorithm)
+        return B_BAD_VALUE;
+        
     MutexLocker _(sCryptoLock);
 
-    //AlgoNode* node = new AlgoNode;
     AlgoNode* node = new(std::nothrow) AlgoNode;
     if (node == NULL)
         return B_NO_MEMORY;
         
     node->algo = algorithm;
-    sAlgorithms.Add(node);
+    //sAlgorithms.Add(node);
+    //append by priority
+    DoublyLinkedList<AlgoNode>::Iterator it = sAlgorithms.GetIterator();
+    AlgoNode* insertBefore = nullptr;
+
+    while (AlgoNode* existing = it.Next()) {
+        if (algorithm->priority > existing->algo->priority) {
+            insertBefore = existing;
+            break;
+        }
+    }
+    
+    if (insertBefore)
+        sAlgorithms.InsertBefore(insertBefore, node);
+    else
+        sAlgorithms.Add(node); 
 
     return B_OK;
 }
@@ -72,7 +88,6 @@ BRegisterCryptoAlgorithm(BCryptoAlgorithm* algorithm)
 status_t
 BUnregisterCryptoAlgorithm(BCryptoAlgorithmID algorithm)
 {
-	//BAutolock _(sCryptoLock);
 	MutexLocker _(sCryptoLock);
 	
 	DoublyLinkedList<AlgoNode>::Iterator it = sAlgorithms.GetIterator();
@@ -90,9 +105,12 @@ BUnregisterCryptoAlgorithm(BCryptoAlgorithmID algorithm)
 status_t
 BSubmitCryptoRequest(BCryptoRequest* request)
 {
-    MutexLocker _(sCryptoLock);
+	if (!request)
+        return B_BAD_VALUE;
 
-    BCryptoAlgorithm* best = NULL;
+    MutexLocker _(sCryptoLock);
+    
+    //priority ordered list already done: the first found is the best
 
 	DoublyLinkedList<AlgoNode>::Iterator it = sAlgorithms.GetIterator();
 	while (AlgoNode* node = it.Next()) {
@@ -100,27 +118,18 @@ BSubmitCryptoRequest(BCryptoRequest* request)
 
 		if (algo->algorithm != request->algorithm)
 			continue;
+        //sync
+		if (!request->completionCallback)
+            return algo->Process(request);
+        //async
+        status_t st = algo->Process(request);
 
-		if (!best || algo->priority > best->priority)
-			best = algo;
+        if (st != B_OK)
+            return st;
+
+        // Il driver si occuperà di chiamare request->completionCallback()
+        return B_OK;
 	}
-    /*
-    for (AlgoNode* node = sAlgorithms.Head();
-         node != NULL;
-         node = sAlgorithms.GetNext(node)) {
-
-        BCryptoAlgorithm* algo = node->algo;
-
-        if (algo->algorithm != request->algorithm)
-            continue;
-
-        if (!best || algo->priority > best->priority)
-            best = algo;
-    }
-    */
-
-    if (!best)
-        return B_NOT_SUPPORTED;
-
-    return best->Process(request);
+	
+	return B_NOT_SUPPORTED;
 }

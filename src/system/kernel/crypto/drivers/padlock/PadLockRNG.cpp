@@ -57,6 +57,9 @@ padlock_rng_generate(uint8* buffer, size_t length)
 static status_t
 padlock_rng_process(BCryptoRequest* request)
 {
+	if (!request)
+        return B_BAD_VALUE;
+    
     if (request->algorithm != B_CRYPTO_RNG)
         return B_NOT_SUPPORTED;
 
@@ -65,20 +68,27 @@ padlock_rng_process(BCryptoRequest* request)
 
     if (request->vectorCount == 0)
         return B_BAD_VALUE;
+    
+    status_t st = B_OK;
 
     for (size_t i = 0; i < request->vectorCount; i++) {
         iovec& dst = request->destination[i];
 
-        status_t st = padlock_rng_generate(
+        st = padlock_rng_generate(
             (uint8*)dst.iov_base,
             dst.iov_len
         );
 
         if (st != B_OK)
-            return st;
+            break;
     }
 
-    return B_OK;
+    if (request->completionCallback) {
+        request->completionCallback(request, st);
+        return B_OK; // async sempre OK
+    }
+
+    return st;
 }
 
 status_t
@@ -91,6 +101,7 @@ BInitPadLockRNG()
 
     static BCryptoAlgorithm sPadLockRNG = {
         .algorithm = B_CRYPTO_RNG,
+        .mode      = B_CRYPTO_MODE_NONE,  // per RNG non c’è modalità
         .flags     = B_CRYPTO_HW_ACCEL,
         .priority  = 100, // massimo, è hardware puro
         .Process   = padlock_rng_process

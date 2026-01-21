@@ -26,8 +26,3 @@ status_t BInitSoftCrypto(void);
 #endif
 
 #endif // _SOFT_CRYPTO_H_
-
-
-
-
-

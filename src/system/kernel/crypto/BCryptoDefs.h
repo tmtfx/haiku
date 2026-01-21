@@ -9,12 +9,26 @@
 #include <SupportDefs.h>
 
 enum BCryptoAlgorithmID {
-    B_CRYPTO_AES_CBC      = 0x0001,
-    B_CRYPTO_AES_GCM      = 0x0002,
-    B_CRYPTO_SHA1         = 0x0010,
-    B_CRYPTO_SHA256       = 0x0011,
-    B_CRYPTO_SHA512       = 0x0012,
-    B_CRYPTO_RNG          = 0x0020
+    // Cifrari simmetrici
+    B_CRYPTO_AES        = 0x0001,
+
+    // Hash
+    B_CRYPTO_SHA1       = 0x0010,
+    B_CRYPTO_SHA256     = 0x0011,
+    B_CRYPTO_SHA512     = 0x0012,
+
+    // RNG
+    B_CRYPTO_RNG        = 0x0020
+};
+
+enum BCryptoMode {
+    B_CRYPTO_MODE_NONE = 0x00,
+
+    // AES modes
+    B_CRYPTO_MODE_ECB  = 0x01,
+    B_CRYPTO_MODE_CBC  = 0x02,
+    B_CRYPTO_MODE_CTR  = 0x03,
+    B_CRYPTO_MODE_GCM  = 0x04
 };
 
 enum BCryptoOperation {
@@ -24,9 +38,9 @@ enum BCryptoOperation {
 };
 
 enum {
-    B_CRYPTO_HW_ACCEL    = 0x01,
-    B_CRYPTO_SOFTWARE    = 0x02,
-    B_CRYPTO_ASYNC       = 0x04
+    B_CRYPTO_ALG_HW_ACCEL    = 0x01,
+    B_CRYPTO_ALG_SOFTWARE    = 0x02,
+    B_CRYPTO_ALG_ASYNC       = 0x04
 };
 
 

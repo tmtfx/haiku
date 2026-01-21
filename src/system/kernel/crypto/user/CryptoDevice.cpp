@@ -4,7 +4,6 @@
  */
 #include <KernelExport.h>
 #include <string.h>
-//#include <KernelDebug.h>
 #include <vm/vm.h>        // IS_USER_ADDRESS, copyin/copyout
 
 #include "CryptoDevice.h"
@@ -13,7 +12,7 @@
 #include "drivers/padlock/PadLock.h"
 #include "drivers/aesni/AESNI.h"
 #include "SoftCrypto.h"
-#include <user_runtime.h>
+//#include <user_runtime.h>
 
 //-----------------------------------------------------------
 // Device hooks
@@ -68,7 +67,6 @@ static status_t crypto_control(void* cookie, uint32 op, void* data, size_t lengt
         return B_BAD_VALUE;
 
     BCryptoUserRequest userReq;
-    //status_t st = memcpy_from_user(&userReq, data, sizeof(userReq));
     status_t st = user_memcpy(&userReq, data, sizeof(userReq));
     if (st != B_OK)
         return st;
@@ -76,29 +74,72 @@ static status_t crypto_control(void* cookie, uint32 op, void* data, size_t lengt
     // Validazione vettori
     if (userReq.vectorCount == 0 || !userReq.destination)
         return B_BAD_VALUE;
+    
+    if (userReq.vectorCount > IOV_MAX)
+        return B_BAD_VALUE;
 
     for (size_t i = 0; i < userReq.vectorCount; i++) {
         if (!IS_USER_ADDRESS(userReq.destination[i].iov_base))
             return B_BAD_ADDRESS;
+        
+        if (userReq.source) {
+            if (!IS_USER_ADDRESS(userReq.source[i].iov_base))
+                return B_BAD_ADDRESS;
+        }
 
-        // opzionale: lunghezza multiplo AES
-        if ((userReq.algorithm == B_CRYPTO_AES_CBC) &&
-            (userReq.destination[i].iov_len % 16 != 0))
-            return B_BAD_VALUE;
+
+        if (userReq.algorithm == B_CRYPTO_AES) {
+            switch (userReq.mode) {
+                case B_CRYPTO_MODE_ECB:
+                case B_CRYPTO_MODE_CBC:
+                    if (userReq.destination[i].iov_len % 16 != 0)
+                        return B_BAD_VALUE;
+                    break;
+
+                case B_CRYPTO_MODE_CTR:
+                case B_CRYPTO_MODE_GCM:
+                    break;
+
+                default:
+                    return B_BAD_VALUE;
+            }
+        }
     }
 
+    uint8 keyBuffer[64];
+    uint8 ivBuffer[32];
+    
     // Costruzione request kernel
     BCryptoRequest req {};
     req.operation   = userReq.operation;
     req.algorithm   = userReq.algorithm;
-    req.key         = userReq.key;
+    req.mode        = userReq.mode;
+    req.flags       = userReq.flags;
+    
+
+    if (userReq.key && userReq.keyLength > 0) {
+    	if (userReq.keyLength > sizeof(keyBuffer))
+            return B_BAD_VALUE;
+        st = user_memcpy(keyBuffer, userReq.key, userReq.keyLength);
+        if (st != B_OK)
+            return st;
+        req.key = keyBuffer;
+    }
     req.keyLength   = userReq.keyLength;
-    req.iv          = userReq.iv;
+    if (userReq.iv && userReq.ivLength > 0) {
+        if (userReq.ivLength > sizeof(ivBuffer))
+            return B_BAD_VALUE;
+
+        st = user_memcpy(ivBuffer, userReq.iv, userReq.ivLength);
+        if (st != B_OK)
+            return st;
+        req.iv = ivBuffer;
+    }
     req.ivLength    = userReq.ivLength;
     req.source      = userReq.source;
     req.destination = userReq.destination;
     req.vectorCount = userReq.vectorCount;
-    req.completionCallback = nullptr;
+    req.completionCallback = userReq.completionCallback;//nullptr;
     req.userCookie = nullptr;
 
     // RNG speciale: alimenta kernel entropy pool
@@ -114,8 +155,15 @@ static status_t crypto_control(void* cookie, uint32 op, void* data, size_t lengt
         return st;
 
     // Copia eventuale IV aggiornato in userland
-    if (req.iv && req.ivLength >= 16)
-        user_memcpy(userReq.iv, req.iv, 16);
+    //if (req.iv && req.ivLength >= 16)
+    //    user_memcpy(userReq.iv, req.iv, 16);
+    if (req.iv && userReq.iv) {
+        size_t out = min_c(req.ivLength, userReq.ivLength);
+        user_memcpy(userReq.iv, req.iv, out);
+    }
+
+    explicit_bzero(keyBuffer, sizeof(keyBuffer));
+    explicit_bzero(ivBuffer, sizeof(ivBuffer));
 
     return B_OK;
 }

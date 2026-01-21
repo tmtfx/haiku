@@ -7,10 +7,14 @@
 
 
 #include <SupportDefs.h>
+#include "BCryptoDefs.h"
+
 #include "BCryptoRequest.h"
+//struct BCryptoRequest; //invece di #include "BCryptoRequest.h", dipendenze circolari
 
 struct BCryptoAlgorithm {
     BCryptoAlgorithmID  algorithm;
+    BCryptoMode        mode;
     uint32  flags;
     int32   priority;
     status_t (*Process)(BCryptoRequest* request);
