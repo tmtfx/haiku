@@ -3,20 +3,24 @@
  * All rights reserved. Distributed under the terms of the MIT license.
  */
 #include <KernelExport.h>
+#include <Drivers.h>
 #include <string.h>
 #include <vm/vm.h>        // IS_USER_ADDRESS, copyin/copyout
-
+#include <device_manager.h>
 #include "CryptoDevice.h"
 #include "BCryptoCore.h"
+#include "BCryptoDefs.h"
 #include "BCryptoEntropy.h"
-#include "drivers/padlock/PadLock.h"
-#include "drivers/aesni/AESNI.h"
-#include "SoftCrypto.h"
-#include "../BCryptoDefs.h"
-#include "../BCryptoCore.h"
+
+//#include "drivers/padlock/PadLock.h"
+//#include "drivers/aesni/AESNI.h"
+//#include "SoftCrypto.h"
+
+//#include "../BCryptoDefs.h" SE NON LO TROVA DECOMMENTA
+//#include "../BCryptoCore.h" SE NON LO TROVA DECOMMENTA
 //#include <user_runtime.h>
-static void
 /* funzione helper per zeroing memoria
+static void
 secure_memzero(void* p, size_t s)
 {
     if (p == NULL)
@@ -29,64 +33,56 @@ secure_memzero(void* p, size_t s)
 //-----------------------------------------------------------
 // Device hooks
 //-----------------------------------------------------------
-static status_t crypto_open(const char* name, uint32 flags, void** cookie);
-static status_t crypto_close(void* cookie);
-static status_t crypto_free(void* cookie);
-static status_t crypto_control(void* cookie, uint32 op, void* data, size_t length);
-
-static device_hooks sCryptoHooks = {
-    crypto_open,
-    crypto_close,
-    crypto_free,
-    crypto_control,
-    NULL,//crypto_read,   // read
-    NULL,//crypto_write,   // write
-    NULL,
-    NULL
-};
-
-//-----------------------------------------------------------
-// Open / Close / Free
-//-----------------------------------------------------------
-static status_t crypto_open(const char* name, uint32 flags, void** cookie)
+/*static status_t
+crypto_open(const char* name, uint32 flags, void** cookie)
+{
+    *cookie = NULL;
+    return B_OK;
+}*/
+static status_t
+crypto_open_modern(void* device_cookie, const char* name, int flags, void** cookie)
 {
     *cookie = NULL;
     return B_OK;
 }
 
-static status_t crypto_close(void* cookie)
+static status_t
+crypto_open_legacy(const char* name, uint32 flags, void** cookie)
+{
+    return crypto_open_modern(NULL, name, (int)flags, cookie);
+}
+
+static status_t
+crypto_close(void* cookie)
 {
     return B_OK;
 }
 
-static status_t crypto_free(void* cookie)
+static status_t
+crypto_free(void* cookie)
 {
     return B_OK;
 }
 
-status_t
+static status_t
 crypto_control(void* cookie, uint32 op, void* arg, size_t length)
 {
     switch (op) {
         case B_CRYPTO_IOCTL_PROCESS: {
             BCryptoUserRequest userReq;
             
-            // Copia la struttura di controllo dall'utente
             if (user_memcpy(&userReq, arg, sizeof(BCryptoUserRequest)) != B_OK)
                 return B_BAD_ADDRESS;
 
-            // Prepariamo la richiesta interna al kernel (BCryptoRequest)
             BCryptoRequest req;
             req.operation = userReq.operation;
             req.algorithm = userReq.algorithm;
             req.mode = userReq.mode;
             req.flags = userReq.flags;
             
-            // Sanificazione lunghezze
             if (userReq.keyLength > 64 || userReq.ivLength > 64)
                 return B_BAD_VALUE;
 
-            // Buffer temporanei nel kernel per evitare di toccare la memoria utente durante l'algoritmo
             uint8 localKey[64];
             uint8 localIV[64];
 
@@ -100,8 +96,9 @@ crypto_control(void* cookie, uint32 op, void* arg, size_t length)
             req.iv = localIV;
             req.ivLength = userReq.ivLength;
 
-            // Gestione iovec: anche l'array di descrittori va copiato
-            if (userReq.vectorCount > 32) return B_DEVICE_FULL;
+            if (userReq.vectorCount > 32) 
+                return B_DEVICE_FULL;
+
             iovec localSrc[32], localDst[32];
 
             if (user_memcpy(localSrc, userReq.source, sizeof(iovec) * userReq.vectorCount) != B_OK)
@@ -112,15 +109,14 @@ crypto_control(void* cookie, uint32 op, void* arg, size_t length)
             req.source = localSrc;
             req.destination = localDst;
             req.vectorCount = userReq.vectorCount;
-            req.completionCallback = NULL; // Il kernel non può chiamare funzioni utente
+            req.completionCallback = NULL;
 
-            // Eseguiamo l'operazione
-            status_t status = crypto_process_request(&req);
+            // Chiamata al core del framework
+            status_t status = BSubmitCryptoRequest(&req);
 
-            // Se l'operazione ha aggiornato l'IV (tipico in CBC), lo riportiamo all'utente
+            // Riporta l'IV aggiornato all'utente
             user_memcpy(userReq.iv, req.iv, userReq.ivLength);
             
-            // Gestione asincrona tramite semaforo (se fornito)
             if (userReq.completionSem >= 0) {
                 userReq.result = status;
                 release_sem(userReq.completionSem);
@@ -131,124 +127,42 @@ crypto_control(void* cookie, uint32 op, void* arg, size_t length)
     }
     return B_DEV_INVALID_IOCTL;
 }
-//-----------------------------------------------------------
-// ioctl / copyin/copyout sicuro
-//-----------------------------------------------------------
-/*
-static status_t crypto_control(void* cookie, uint32 op, void* data, size_t length)
-{
-    if (op != B_CRYPTO_IOCTL_SUBMIT)
-        return B_BAD_VALUE;
 
-    if (!IS_USER_ADDRESS(data))
-        return B_BAD_ADDRESS;
 
-    if (length != sizeof(BCryptoUserRequest))
-        return B_BAD_VALUE;
+//static device_hooks sCryptoHooks = {
+device_hooks sCryptoHooks = {
+    crypto_open_legacy,
+    crypto_close,
+    crypto_free,
+    crypto_control,
+    NULL,//crypto_read,   // read
+    NULL,//crypto_write,   // write
+    NULL,
+    NULL
+};
 
-    BCryptoUserRequest userReq;
-    status_t st = user_memcpy(&userReq, data, sizeof(userReq));
-    if (st != B_OK)
-        return st;
-
-    // Validazione vettori
-    if (userReq.vectorCount == 0 || !userReq.destination)
-        return B_BAD_VALUE;
+struct device_module_info sCryptoDeviceModule = {
+    {
+        "drivers/crypto/api/v1",
+        0,
+        NULL
+    },
+    NULL, // init_device
+    NULL, // uninit_device
+    NULL, // remove_device
     
-    if (userReq.vectorCount > IOV_MAX)
-        return B_BAD_VALUE;
-
-    for (size_t i = 0; i < userReq.vectorCount; i++) {
-        if (!IS_USER_ADDRESS(userReq.destination[i].iov_base))
-            return B_BAD_ADDRESS;
-        
-        if (userReq.source) {
-            if (!IS_USER_ADDRESS(userReq.source[i].iov_base))
-                return B_BAD_ADDRESS;
-        }
-
-
-        if (userReq.algorithm == B_CRYPTO_AES) {
-            switch (userReq.mode) {
-                case B_CRYPTO_MODE_ECB:
-                case B_CRYPTO_MODE_CBC:
-                    if (userReq.destination[i].iov_len % 16 != 0)
-                        return B_BAD_VALUE;
-                    break;
-
-                case B_CRYPTO_MODE_CTR:
-                case B_CRYPTO_MODE_GCM:
-                    break;
-
-                default:
-                    return B_BAD_VALUE;
-            }
-        }
-    }
-
-    uint8 keyBuffer[64];
-    uint8 ivBuffer[32];
+    crypto_open_modern,
+    crypto_close,
+    crypto_free,
+    NULL, // read
+    NULL, // write
+    NULL, // io
+    crypto_control,
     
-    // Costruzione request kernel
-    BCryptoRequest req {};
-    req.operation   = userReq.operation;
-    req.algorithm   = userReq.algorithm;
-    req.mode        = userReq.mode;
-    req.flags       = userReq.flags;
-    
-
-    if (userReq.key && userReq.keyLength > 0) {
-    	if (userReq.keyLength > sizeof(keyBuffer))
-            return B_BAD_VALUE;
-        st = user_memcpy(keyBuffer, userReq.key, userReq.keyLength);
-        if (st != B_OK)
-            return st;
-        req.key = keyBuffer;
-    }
-    req.keyLength   = userReq.keyLength;
-    if (userReq.iv && userReq.ivLength > 0) {
-        if (userReq.ivLength > sizeof(ivBuffer))
-            return B_BAD_VALUE;
-
-        st = user_memcpy(ivBuffer, userReq.iv, userReq.ivLength);
-        if (st != B_OK)
-            return st;
-        req.iv = ivBuffer;
-    }
-    req.ivLength    = userReq.ivLength;
-    req.source      = userReq.source;
-    req.destination = userReq.destination;
-    req.vectorCount = userReq.vectorCount;
-    req.completionCallback = userReq.completionCallback;//nullptr;
-    req.userCookie = nullptr;
-
-    // RNG speciale: alimenta kernel entropy pool
-    if (req.algorithm == B_CRYPTO_RNG && req.operation == B_CRYPTO_DIGEST) {
-        st = PadLockFeedEntropy();
-        if (st != B_OK)
-            return st;
-    }
-
-    // submit: il kernel seleziona automaticamente AES-NI > PadLock > SoftCrypto
-    st = BSubmitCryptoRequest(&req);
-    if (st != B_OK)
-        return st;
-
-    // Copia eventuale IV aggiornato in userland
-    //if (req.iv && req.ivLength >= 16)
-    //    user_memcpy(userReq.iv, req.iv, 16);
-    if (req.iv && userReq.iv) {
-        size_t out = min_c(req.ivLength, userReq.ivLength);
-        user_memcpy(userReq.iv, req.iv, out);
-    }
-
-    secure_memzero(keyBuffer, sizeof(keyBuffer));
-    secure_memzero(ivBuffer, sizeof(ivBuffer));
-
-    return B_OK;
-}
-*/
-
+    NULL, // select
+    NULL  // deselect
+};
+//--------------------------
 //-----------------------------------------------------------
 // Driver entry points
 //-----------------------------------------------------------

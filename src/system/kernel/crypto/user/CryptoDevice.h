@@ -10,7 +10,7 @@
 #include "../../BCryptoDefs.h"
 #include "../../BCryptoRequest.h"
 
-#define B_CRYPTO_DEVICE_NAME "crypto"
+#define B_CRYPTO_DEVICE_NAME "crypto/v1"
 
 enum {
     B_CRYPTO_IOCTL_SUBMIT = B_DEVICE_OP_CODES_END + 1
@@ -31,7 +31,7 @@ struct BCryptoUserRequest {
     const iovec* source;
     iovec* destination;
     size_t vectorCount;
-    status_t (*completionCallback)(BCryptoRequest*, status_t);
+    status_t (*completionCallback)(BCryptoRequest*, status_t); // non possiamo passare uno spazio di memoria utente SMEP SMAP
 };*/
 typedef struct {
     BCryptoOperation    operation;
