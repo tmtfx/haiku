@@ -168,6 +168,8 @@ struct device_module_info sCryptoDeviceModule = {
 //-----------------------------------------------------------
 // Driver entry points
 //-----------------------------------------------------------
+extern "C" status_t crypto_std_ops(int op, ...);
+
 extern "C" status_t init_hardware()
 {
 	dprintf("crypto: init_hardware\n");
@@ -177,18 +179,20 @@ extern "C" status_t init_hardware()
 extern "C" status_t init_driver()
 {
 	dprintf("crypto: init_driver\n");
-	status_t status = crypto_init_core();
+	/*status_t status = crypto_init_core();
     if (status != B_OK) {
         dprintf("crypto: fallimento crypto_init_core!\n");
         return status;
     }
-    return B_OK;
+    return B_OK;*/
+    return crypto_std_ops(B_MODULE_INIT);
 }
 
 extern "C" void uninit_driver()
 {
 	dprintf("crypto: uninit_driver\n");
-    crypto_uninit_core();
+    //crypto_uninit_core();
+    crypto_std_ops(B_MODULE_UNINIT);
 }
 
 extern "C" int32 api_version = B_CUR_DRIVER_API_VERSION;
