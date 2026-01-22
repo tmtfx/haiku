@@ -13,9 +13,9 @@
 
 #include "AESNI.h"
 
-#include "../../BCryptoCapabilities.h"
+#include "BCryptoCapabilities.h"
 #include <string.h>
-#include "../../BCryptoAlgorithm.h"
+#include "BCryptoAlgorithm.h"
 #if ARCH_X86
 
 #include <arch/x86/arch_cpu.h>

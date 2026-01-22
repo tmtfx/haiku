@@ -19,7 +19,6 @@
 //#include "../BCryptoDefs.h" SE NON LO TROVA DECOMMENTA
 //#include "../BCryptoCore.h" SE NON LO TROVA DECOMMENTA
 //#include <user_runtime.h>
-/* funzione helper per zeroing memoria
 static void
 secure_memzero(void* p, size_t s)
 {
@@ -29,7 +28,7 @@ secure_memzero(void* p, size_t s)
     while (s--)
         *cp++ = 0;
 }
-*/
+
 //-----------------------------------------------------------
 // Device hooks
 //-----------------------------------------------------------
@@ -39,6 +38,7 @@ crypto_open(const char* name, uint32 flags, void** cookie)
     *cookie = NULL;
     return B_OK;
 }*/
+
 static status_t
 crypto_open_modern(void* device_cookie, const char* name, int flags, void** cookie)
 {
@@ -121,6 +121,8 @@ crypto_control(void* cookie, uint32 op, void* arg, size_t length)
                 userReq.result = status;
                 release_sem(userReq.completionSem);
             }
+            secure_memzero(localKey, sizeof(localKey));
+            secure_memzero(localIV, sizeof(localIV));
 
             return status;
         }
@@ -168,17 +170,28 @@ struct device_module_info sCryptoDeviceModule = {
 //-----------------------------------------------------------
 extern "C" status_t init_hardware()
 {
+	dprintf("crypto: init_hardware\n");
     return B_OK;
 }
 
 extern "C" status_t init_driver()
 {
+	dprintf("crypto: init_driver\n");
+	status_t status = crypto_init_core();
+    if (status != B_OK) {
+        dprintf("crypto: fallimento crypto_init_core!\n");
+        return status;
+    }
     return B_OK;
 }
 
 extern "C" void uninit_driver()
 {
+	dprintf("crypto: uninit_driver\n");
+    crypto_uninit_core();
 }
+
+extern "C" int32 api_version = B_CUR_DRIVER_API_VERSION;
 
 extern "C" const char** publish_devices()
 {

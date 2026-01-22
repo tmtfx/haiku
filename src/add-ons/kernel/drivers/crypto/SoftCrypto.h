@@ -7,8 +7,8 @@
 #define _SOFT_CRYPTO_H_
 
 #include <SupportDefs.h>
-#include "../../BCryptoCore.h"
-#include "../../BCryptoDefs.h"
+#include "BCryptoCore.h"
+#include "BCryptoDefs.h"
 #include "soft_aes.h" // AES core
 
 #ifdef __cplusplus

@@ -5,10 +5,10 @@
 #include <module.h>
 #include <KernelExport.h>
 
-#include "drivers/padlock/PadLockRNG.h"
-#include "drivers/padlock/PadLock.h"
-#include "drivers/aesni/AESNI.h"
-#include "drivers/software/SoftCrypto.h"
+#include "PadLockRNG.h"
+#include "PadLock.h"
+#include "AESNI.h"
+#include "SoftCrypto.h"
 #include "BCryptoCore.h"
 #include "BCryptoCapabilities.h"
 #include "BCryptoAlgorithm.h"

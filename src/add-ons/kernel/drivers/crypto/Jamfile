@@ -1,0 +1,24 @@
+SubDir HAIKU_TOP src add-ons kernel drivers crypto ;
+
+UsePrivateHeaders kernel drivers crypto ;
+UsePrivateKernelHeaders ;
+
+UseHeaders [ FDirName $(HAIKU_TOP) headers private kernel ] : true ;
+UseHeaders [ FDirName $(HAIKU_TOP) headers private kernel util ] : true ;
+
+KernelAddon crypto :
+    CryptoDevice.cpp
+    crypto_module.cpp
+    BCryptoCore.cpp
+    BCryptoCPU.cpp
+    BCryptoEntropy.cpp
+    # Engines
+    PadLock.cpp
+    PadLockRNG.cpp
+    AESNI.cpp
+    SoftCrypto.cpp
+    soft_aes.cpp
+;
+
+AddFilesToHaikuImage system add-ons kernel drivers bin : crypto ;
+#AddSymlinkToHaikuImage system add-ons kernel drivers dev crypto : v1 : ../bin/crypto ;

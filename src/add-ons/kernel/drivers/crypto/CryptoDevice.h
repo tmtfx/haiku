@@ -7,8 +7,8 @@
 
 #include <Drivers.h>
 #include <iovec.h>
-#include "../../BCryptoDefs.h"
-#include "../../BCryptoRequest.h"
+#include "BCryptoDefs.h"
+#include "BCryptoRequest.h"
 
 #define B_CRYPTO_DEVICE_NAME "crypto/v1"
 

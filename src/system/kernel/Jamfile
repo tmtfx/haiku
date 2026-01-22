@@ -1,5 +1,4 @@
 SubDir HAIKU_TOP src system kernel ;
-#SubDir crypto ;
 
 {
 	local defines =
@@ -10,29 +9,10 @@ SubDir HAIKU_TOP src system kernel ;
 	SubDirCcFlags $(defines) ;
 	SubDirC++Flags $(defines) ;
 }
-local cryptoDir = [ FDirName crypto ] ;
-local padlockDir = [ FDirName crypto drivers padlock ] ;
-local aesniDir = [ FDirName crypto drivers aesni ] ;
-local softDir = [ FDirName crypto drivers software ] ;
-local userDir = [ FDirName crypto user ] ;
 
 SEARCH_SOURCE += [ FDirName $(SUBDIR) events ] ;
 SEARCH_SOURCE += [ FDirName $(SUBDIR) locks ] ;
 SEARCH_SOURCE += [ FDirName $(SUBDIR) scheduler ] ;
-SEARCH_SOURCE += [ FDirName $(SUBDIR) crypto ] ;
-SEARCH_SOURCE += [ FDirName $(SUBDIR) crypto drivers aesni ] ;
-SEARCH_SOURCE += [ FDirName $(SUBDIR) crypto drivers padlock ] ;
-SEARCH_SOURCE += [ FDirName $(SUBDIR) crypto drivers software ] ;
-
-#SEARCH_SOURCE += [ FDirName $(HAIKU_TOP) src system kernel crypto ] ;
-#SEARCH_SOURCE += [ FDirName $(HAIKU_TOP) src system kernel crypto drivers padlock ] ;
-#SEARCH_SOURCE += [ FDirName $(HAIKU_TOP) src system kernel crypto drivers aesni ] ;
-#SEARCH_SOURCE += [ FDirName $(HAIKU_TOP) src system kernel crypto drivers software ] ;
-
-SubDirHdrs $(HAIKU_TOP) src system kernel crypto ;
-SubDirHdrs $(HAIKU_TOP) src system kernel crypto drivers aesni ;
-SubDirHdrs $(HAIKU_TOP) src system kernel crypto drivers padlock ;
-SubDirHdrs $(HAIKU_TOP) src system kernel crypto drivers software ;
 
 UsePrivateHeaders libroot ;
 UsePrivateHeaders shared ;
@@ -98,36 +78,6 @@ KernelMergeObject kernel_core.o :
 	: $(TARGET_KERNEL_PIC_CCFLAGS)
 ;
 
-local cryptoSources = 
-	$(cryptoDir)/crypto_module.cpp 
-	$(cryptoDir)/BCryptoCore.cpp 
-	$(cryptoDir)/BCryptoCPU.cpp 
-	$(cryptoDir)/BCryptoEntropy.cpp 
-	$(softDir)/SoftCrypto.cpp 
-	$(softDir)/soft_aes.cpp 
-	$(userDir)/CryptoDevice.cpp ;
-
-if $(TARGET_ARCH) in x86 x86_64 {
-	cryptoSources += 
-		$(aesniDir)/AESNI.cpp 
-		$(padlockDir)/PadLock.cpp 
-		$(padlockDir)/PadLockRNG.cpp ;
-		#AESNI.cpp PadLock.cpp PadLockRNG.cpp ;
-}
-UsePrivateHeaders kernel ;
-UsePrivateHeaders shared ;
-UsePrivateHeaders drivers ;
-UsePrivateKernelHeaders ;
-
-UseHeaders [ FDirName $(HAIKU_TOP) headers private kernel device_manager ] : true ;
-UseHeaders [ FDirName $(HAIKU_TOP) headers private kernel util ] : true ;
-
-ObjectCcFlags BCryptoCore.cpp BCryptoCPU.cpp BCryptoEntropy.cpp 
-	: -fno-pic -mno-red-zone -mcmodel=kernel ;
-
-KernelMergeObject kernel_crypto.o : $(cryptoSources) ;
-
-
 # We need to specify the dependency on the generated syscalls files explicitly.
 Includes [ FGristFiles syscalls.cpp ]
 	:
@@ -155,13 +105,9 @@ KernelLd kernel_$(TARGET_ARCH) :
 	kernel_slab.o
 	kernel_util.o
 	kernel_vm.o
-	
-	kernel_crypto.o
 
 	kernel_arch_$(TARGET_KERNEL_ARCH).o
 	kernel_platform_$(TARGET_KERNEL_PLATFORM).o
-
-
 
 	linkhack.so
 
@@ -212,8 +158,6 @@ if $(HAIKU_ARCH) in x86_64 arm {
 		kernel_lib_posix.o
 		kernel_lib_posix_arch_$(TARGET_ARCH).o
 		kernel_misc.o
-		
-		kernel_crypto.o
 
 		: $(HAIKU_TOP)/src/system/ldscripts/$(TARGET_ARCH)/kernel.ld
 		: --orphan-handling=warn -L $(HAIKU_TOP)/src/system/ldscripts/common/

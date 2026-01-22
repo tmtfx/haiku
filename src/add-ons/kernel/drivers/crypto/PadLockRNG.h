@@ -6,8 +6,8 @@
 #define _B_PADLOCK_RNG_H_
 
 #include <SupportDefs.h>
-#include "../../BCryptoCore.h"
-#include "../../BCryptoDefs.h"
+#include "BCryptoCore.h"
+#include "BCryptoDefs.h"
 
 // Registrazione RNG PadLock
 status_t BInitPadLockRNG();

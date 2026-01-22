@@ -5,7 +5,7 @@
 #ifndef _B_PADLOCK_CRYPTO_H_
 #define _B_PADLOCK_CRYPTO_H_
 
-#include "../../BCryptoAlgorithm.h"
+#include "BCryptoAlgorithm.h"
 
 struct PadLockAESContext {
     uint8 key[32];       // max 256-bit key
