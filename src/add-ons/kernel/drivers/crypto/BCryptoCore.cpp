@@ -3,20 +3,38 @@
  * All rights reserved. Distributed under the terms of the MIT license.
  */
 #include "BCryptoCore.h"
+#include "BCryptoDefs.h"
+#include "BCryptoCPU.h"
+
+/*extern "C" {
+    status_t crypto_manager_init();
+    void crypto_manager_uninit();
+    status_t register_crypto_device(crypto_device_info* info);
+}*/
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+    #include "BCryptoDevice.h" 
+    // Se BCryptoDevice.h non ha già l'extern "C" al suo interno, 
+    // lo forziamo qui per le funzioni del manager.
+#ifdef __cplusplus
+}
+#endif
 
 #include <lock.h>
 #include <util/AutoLock.h>
 #include <util/DoublyLinkedList.h>
-#include "BCryptoCapabilities.h"
 #include <new>
 #include <debug.h>
+#include <malloc.h> // Per malloc/free
 
 using BPrivate::AutoLocker;
 
 struct MutexLocking {
-	typedef mutex* Lockable;
-	static inline status_t Lock(Lockable lock) { return mutex_lock(lock); }
-	static inline void Unlock(Lockable lock) { mutex_unlock(lock); }
+    typedef mutex* Lockable;
+    static inline status_t Lock(Lockable lock) { return mutex_lock(lock); }
+    static inline void Unlock(Lockable lock) { mutex_unlock(lock); }
 };
 
 //typedef AutoLocker<mutex, mutex_lock, mutex_unlock> MutexLocker;
@@ -32,6 +50,7 @@ secure_memzero(void* p, size_t s)
 }
 
 static mutex sCryptoLock;
+static bool sCoreInitialized = false;
 
 struct AlgoNode : DoublyLinkedListLinkImpl<AlgoNode> {
     BCryptoAlgorithm* algo;
@@ -43,17 +62,52 @@ static uint32 sCryptoCapabilities = 0;
 extern "C" status_t
 crypto_init_core()
 {
-	dprintf("BCrypto: [2] Entrato in crypto_init_core\n");
+    if (sCoreInitialized) return B_OK;
+    
+    dprintf("BCrypto: [2] Entrato in crypto_init_core\n");
     mutex_init(&sCryptoLock, "crypto core lock");
-    sCryptoCapabilities = BGetCryptoCapabilities();
+    
+    // 1. Inizializza il manager dei dispositivi
+    status_t status = crypto_manager_init();
+    if (status != B_OK) {
+        mutex_destroy(&sCryptoLock);
+        return status;
+    }
+    
+    // 2. Rileva e registra la CPU nel Manager
+    crypto_device_info cpuInfo;
+    if (BGetCPUCryptoInfo(&cpuInfo) == B_OK) {
+        status = register_crypto_device(&cpuInfo);
+        if (status == B_OK) {
+            dprintf("BCrypto: CPU registrata nel Manager.\n");
+            sCryptoCapabilities = cpuInfo.hw_type; 
+        }
+    }
+
+    sCoreInitialized = true;
     return B_OK;
 }
 
 extern "C" void
 crypto_uninit_core()
 {
+    if (!sCoreInitialized) return;
+
+    dprintf("BCrypto: Pulizia Core e Manager\n");
+    
+    // Svuota la lista degli algoritmi
+    MutexLocker _(&sCryptoLock);
+    while (AlgoNode* node = sAlgorithms.RemoveHead()) {
+        delete node;
+    }
+
+    crypto_manager_uninit();
     mutex_destroy(&sCryptoLock);
+    
+    sCoreInitialized = false;
+    sCryptoCapabilities = 0;
 }
+
 uint32
 BGetStoredCryptoCapabilities()
 {
@@ -122,6 +176,7 @@ static status_t _FinalizeRequest(BCryptoRequest* request, status_t st) {
 status_t
 BSubmitCryptoRequest(BCryptoRequest* request)
 {
+	// TODO malloc is slow!!!!!! maybe we can use lock_memory
 	dprintf("BCrypto: Richiesta giunta in BSubmitCryptoRequest\n");
     if (!request) {
     	dprintf("BCrypto: non c'è richiesta!\n");

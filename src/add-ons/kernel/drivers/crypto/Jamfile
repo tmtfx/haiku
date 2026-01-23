@@ -8,6 +8,7 @@ UseHeaders [ FDirName $(HAIKU_TOP) headers private kernel util ] : true ;
 
 KernelAddon crypto :
     CryptoDevice.cpp
+    BCryptoDevice.cpp
     crypto_module.cpp
     BCryptoCore.cpp
     BCryptoCPU.cpp

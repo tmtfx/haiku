@@ -1,100 +1,108 @@
 /*
+ * Hardware-accelerated AES using VIA PadLock ACE
  * Copyright 2026, Fabio Tomat <f.t.public@gmail.com>
  * All rights reserved. Distributed under the terms of the MIT license.
  */
 #include "PadLock.h"
-
 #include "BCryptoCore.h"
-#include "BCryptoCapabilities.h"
 #include "BCryptoDefs.h"
+#include "BCryptoCPU.h" // Per BGetStoredCryptoCapabilities
 
 #include <string.h>
 
-#if ARCH_X86
-#include <arch/x86/arch_cpu.h>
-#endif
+#if defined(__x86_64__) || defined(__i386__)
+
 static void
 secure_memzero(void* p, size_t s)
 {
-    if (p == NULL)
-        return;
+    if (p == NULL) return;
     volatile uint8* cp = (volatile uint8*)p;
-    while (s--)
-        *cp++ = 0;
+    while (s--) *cp++ = 0;
 }
 
 static status_t
-padlock_aes_process_block(bool encrypt,
-                          //const PadLockAESContext* ctx,
-                          PadLockAESContext* ctx,
-                          const uint8* in,
-                          uint8* out,
-                          size_t length)
+padlock_aes_process_block(bool encrypt, PadLockAESContext* ctx,
+                         const uint8* in, uint8* out, size_t length)
 {
-#if ARCH_X86
     if (length % 16 != 0)
         return B_BAD_VALUE;
 
-    size_t blocks = length / 16;
-	
-	// ACE setup
-    uint32 eax = 0; // EAX = key length + encrypt/decrypt flag
+    uint32 ctrl = 0; 
     switch (ctx->keyLength) {
-        case 16: eax = 0x0080; break; // 128-bit
-        case 24: eax = 0x00C0; break; // 192-bit
-        case 32: eax = 0x0100; break; // 256-bit
+        case 16: ctrl = 0x0080; break;
+        case 24: ctrl = 0x00C0; break;
+        case 32: ctrl = 0x0100; break;
         default: return B_BAD_VALUE;
     }
-    if (encrypt) eax |= 0x1; // encrypt flag
-	
-    for (size_t i = 0; i < blocks; i++) {
-        const uint8* src = in + i*16;
-        uint8* dst       = out + i*16;
+    if (encrypt) ctrl |= 0x200;
 
-        asm volatile(
-            "movdqu (%0), %%xmm0\n\t"    // carica blocco input
-            "movdqu (%1), %%xmm1\n\t"    // carica IV
-            "movdqu (%2), %%xmm2\n\t"    // carica key
-            "mov %3, %%eax\n\t"          // EAX = encrypt + key len
-            "xcryptcbc %%xmm0, %%xmm2\n\t"
-            "movdqu %%xmm0, (%4)\n\t"    // store output
-            :
-            : "r"(src), "r"(ctx->iv), "r"(ctx->key), "r"(eax), "r"(dst)
-            : "eax", "xmm0", "xmm1", "xmm2", "memory"
-        );
+    // Definiamo i suffissi e i registri in base all'architettura
+#ifdef __x86_64__
+    #define PUSHF "pushfq"
+    #define POPF  "popfq"
+    #define ADDR_REG "r" // a 64-bit i puntatori sono a 64-bit
+#else
+    #define PUSHF "pushfl"
+    #define POPF  "popfl"
+    #define ADDR_REG "r"
+#endif
 
-        // Aggiorna IV
-        if (encrypt)
-            memcpy(ctx->iv, dst, 16);
-        else
-            memcpy(ctx->iv, src, 16);
-    }
+    asm volatile(
+        PUSHF "\n\t"
+        POPF  "\n\t"        // Resetta i flag per ACE
+        "xcryptcbc\n\t"
+        : "+S"(in), "+D"(out)
+        : "d"(ctrl), "b"(ctx->key), "a"(ctx->iv), "c"(length / 16)
+        : "memory", "cc"
+    );
 
     return B_OK;
-#else
-    return B_NOT_SUPPORTED;
-#endif
 }
+/*
+static status_t
+padlock_aes_process_block(bool encrypt, PadLockAESContext* ctx,
+                         const uint8* in, uint8* out, size_t length)
+{
+    if (length % 16 != 0)
+        return B_BAD_VALUE;
+
+    // ACE setup: EAX controlla l'operazione
+    // Bit 0-3: Round count (automatico se 0)
+    // Bit 7: Key size (0=128, 1=192, 2=256 - mappato diversamente in EAX)
+    uint32 ctrl = 0; 
+    switch (ctx->keyLength) {
+        case 16: ctrl = 0x0080; break;
+        case 24: ctrl = 0x00C0; break;
+        case 32: ctrl = 0x0100; break;
+        default: return B_BAD_VALUE;
+    }
+    if (encrypt) ctrl |= 0x200; // Bit per encryption su alcune versioni, o via flag dedicata
+
+    // L'istruzione xcryptcbc su VIA richiede:
+    // ESI: source, EDI: dest, EBX: key, EDX: control, EAX: IV (o puntatore a IV)
+    // Nota: l'assembly inline per PadLock è molto specifico sull'allineamento.
+    asm volatile(
+        "pushfl\n\t"
+        "popfl\n\t"        // Resetta i flag per ACE
+        "xcryptcbc\n\t"
+        : "+S"(in), "+D"(out)
+        : "d"(ctrl), "b"(ctx->key), "a"(ctx->iv), "c"(length / 16)
+        : "memory"
+    );
+
+    return B_OK;
+}*/
 
 static status_t
 padlock_process(BCryptoRequest* request)
 {
-	if (!request) return B_BAD_VALUE;
-    //if (request->algorithm != B_CRYPTO_AES_CBC)
     if (request->algorithm != B_CRYPTO_AES || request->mode != B_CRYPTO_MODE_CBC)
         return B_NOT_SUPPORTED;
         
-    if (request->keyLength != 16 &&
-        request->keyLength != 24 &&
-        request->keyLength != 32)
-        return B_BAD_VALUE;
-
-    if (request->ivLength != 16)
-        return B_BAD_VALUE;
-
     PadLockAESContext ctx{};
     memcpy(ctx.key, request->key, request->keyLength);
-    memcpy(ctx.iv, request->iv, 16);
+    if (request->iv)
+        memcpy(ctx.iv, request->iv, 16);
     ctx.keyLength = request->keyLength;
 
     bool encrypt = (request->operation == B_CRYPTO_ENCRYPT);
@@ -104,90 +112,40 @@ padlock_process(BCryptoRequest* request)
         const iovec& src = request->source[i];
         iovec& dst       = request->destination[i];
         
-        if (src.iov_len != dst.iov_len)
-            return B_BAD_VALUE;
-        if (src.iov_len % 16 != 0)
-            return B_BAD_VALUE;
+        if (src.iov_len == 0) continue;
 
-        st = padlock_aes_process_block(
-            encrypt,
-            &ctx,
-            (const uint8*)src.iov_base,
-            (uint8*)dst.iov_base,
-            src.iov_len
-        );
-
-        /*
-        //fix smap moved to BCryptoCore
-        size_t len       = src.iov_len;
-        if (len == 0) continue;
-        
-        uint8* kernelBuffer = (uint8*)malloc(len);
-        if (kernelBuffer == NULL) {
-            st = B_NO_MEMORY;
-            break;
-        }
-        if (user_memcpy(kernelBuffer, src.iov_base, len) != B_OK) {
-            free(kernelBuffer);
-            st = B_BAD_ADDRESS;
-            break;
-        }
-
-        if (src.iov_len != dst.iov_len)
-            return B_BAD_VALUE;
-        if (src.iov_len % 16 != 0)
-            return B_BAD_VALUE;
-
-        st = padlock_aes_process_block(
-            encrypt,
-            &ctx,
-            kernelBuffer,
-            kernelBuffer,
-            len
-        );
-        
-        if (st == B_OK) {
-            if (user_memcpy(dst.iov_base, kernelBuffer, len) != B_OK)
-                st = B_BAD_ADDRESS;
-        }
-
-        free(kernelBuffer);
-        */
-
-        if (st != B_OK)
-            break;
+        st = padlock_aes_process_block(encrypt, &ctx, 
+                                      (const uint8*)src.iov_base, 
+                                      (uint8*)dst.iov_base, 
+                                      src.iov_len);
+        if (st != B_OK) break;
     }
 
-    memcpy(request->iv, ctx.iv, 16);
+    if (request->iv)
+        memcpy(request->iv, ctx.iv, 16);
+        
     secure_memzero(&ctx, sizeof(ctx));
-    
-    if (request->completionCallback) {
-        request->completionCallback(request, st);
-        return B_OK; // in async, ritorna sempre B_OK
-    }
-
     return st;
 }
-
-
 
 status_t
 BInitPadLockCrypto()
 {
-    uint32 caps = BGetCryptoCapabilities();
-    if (!(caps & B_CPU_CRYPTO_PADLOCK))
+    // Verifichiamo se BCryptoCPU ha trovato PadLock
+    if (!(BGetStoredCryptoCapabilities() & B_CRYPTO_HW_VIA_PADLOCK))
         return B_UNSUPPORTED;
 
     static BCryptoAlgorithm sPadLockAES = {
-        .algorithm = B_CRYPTO_AES,
-        .mode      = B_CRYPTO_MODE_CBC,
-        .flags     = B_CRYPTO_ALG_HW_ACCEL,
-        .priority  = 90,
-        .Process   = padlock_process
+        B_CRYPTO_AES,
+        B_CRYPTO_MODE_CBC,
+        B_CRYPTO_ALG_HW_ACCEL,
+        85, // Poco sotto AES-NI come priorità
+        padlock_process
     };
 
     return BRegisterCryptoAlgorithm(&sPadLockAES);
 }
 
-
-
+#else
+status_t BInitPadLockCrypto() { return B_NOT_SUPPORTED; }
+#endif

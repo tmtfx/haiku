@@ -150,6 +150,7 @@ status_t BInitSoftCrypto()
 {
     static BCryptoAlgorithm sSoftAES = {
         .algorithm = B_CRYPTO_AES,
+        .mode      = B_CRYPTO_MODE_CBC,
         .flags     = B_CRYPTO_ALG_SOFTWARE,
         .priority  = 10,        // priorità minima
         .Process   = soft_aes_cbc_process

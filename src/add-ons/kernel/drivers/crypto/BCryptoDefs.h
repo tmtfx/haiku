@@ -12,6 +12,14 @@
 #   define B_PENDING B_DEV_PENDING
 #endif
 
+struct crypto_device_info {
+    char vendor_name[32];      // es: "Intel", "VIA", "Hifn"
+    uint32 algos_supported;    // Bitmask di BCryptoAlgorithmID (AES, SHA...)
+    uint32 hw_type;           // Bitmask di BCryptoHwCapability
+    uint32 max_throughput;     // Per decidere quale dispositivo usare se ne hai due
+    void* device_cookie;
+};
+
 enum BCryptoAlgorithmID {
     // Cifrari simmetrici
     B_CRYPTO_AES        = 0x0001,
@@ -24,16 +32,15 @@ enum BCryptoAlgorithmID {
     // RNG
     B_CRYPTO_RNG        = 0x0020
 };
-/*
-enum BCryptoMode {
-    B_CRYPTO_MODE_NONE = 0x00,
 
-    // AES modes
-    B_CRYPTO_MODE_ECB  = 0x01,
-    B_CRYPTO_MODE_CBC  = 0x02,
-    B_CRYPTO_MODE_CTR  = 0x03,
-    B_CRYPTO_MODE_GCM  = 0x04
-};*/
+enum BCryptoHwCapability {
+    B_CRYPTO_HW_AES_NI        = 1 << 0,  // Set di istruzioni x86 (AES-NI)
+    B_CRYPTO_HW_SHA_NI        = 1 << 1,  // Set di istruzioni x86 (SHA-NI)
+    B_CRYPTO_HW_VIA_PADLOCK   = 1 << 2,  // Motore VIA ACE
+    B_CRYPTO_HW_RNG           = 1 << 3,  // Generatore di numeri casuali (VIA o altro)
+    B_CRYPTO_HW_ACCEL_ENGINE  = 1 << 4   // Dispositivo esterno (PCIe/USB)
+};
+
 enum BCryptoMode {
     B_CRYPTO_MODE_ANY = 0,  // let the driver decide internally what to do
     B_CRYPTO_MODE_ECB = 1 << 0, // 1

@@ -10,7 +10,6 @@
 #include "AESNI.h"
 #include "SoftCrypto.h"
 #include "BCryptoCore.h"
-#include "BCryptoCapabilities.h"
 #include "BCryptoAlgorithm.h"
 #include "BCryptoDefs.h"
 #include <debug.h> //da rimuovere una volta verificato

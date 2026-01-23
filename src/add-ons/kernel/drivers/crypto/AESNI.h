@@ -10,22 +10,27 @@
 #include "BCryptoDefs.h"
 #include "BCryptoCore.h"
 
-#if ARCH_X86
-#include <emmintrin.h>
-#endif
+#include <immintrin.h> // Necessario per __m128i
 
 struct AESNIContext {
-#if ARCH_X86
-    __m128i encRoundKeys[15];
+    __m128i encRoundKeys[15]; // Massimo 14 round per AES-256 + 1
     __m128i decRoundKeys[15];
+    int     rounds;
+    uint8   iv[16];
+} __attribute__((aligned(16))); // L'allineamento a 16 byte è vitale per SSE
+
+// AGGIUNTA QUI:
+#ifdef __cplusplus
+extern "C" {
 #endif
-    size_t rounds;
-    uint8  iv[16];
-};
 
 status_t BInitAESNICrypto();
 
-#endif /* _AES_NI_H_ */
+#ifdef __cplusplus
+}
+#endif
+
+#endif
 
 /*struct AESNIContext {
     uint8 roundKeys[240];  // max 14 rounds * 16 bytes
