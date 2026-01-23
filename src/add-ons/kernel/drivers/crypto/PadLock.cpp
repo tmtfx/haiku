@@ -79,12 +79,9 @@ padlock_aes_process_block(bool encrypt,
 static status_t
 padlock_process(BCryptoRequest* request)
 {
-	if (!request)
-        return B_BAD_VALUE;
+	if (!request) return B_BAD_VALUE;
     //if (request->algorithm != B_CRYPTO_AES_CBC)
-    if (request->algorithm != B_CRYPTO_AES)
-        return B_NOT_SUPPORTED;
-    if (request->mode != B_CRYPTO_MODE_CBC)
+    if (request->algorithm != B_CRYPTO_AES || request->mode != B_CRYPTO_MODE_CBC)
         return B_NOT_SUPPORTED;
         
     if (request->keyLength != 16 &&
@@ -106,7 +103,7 @@ padlock_process(BCryptoRequest* request)
     for (size_t i = 0; i < request->vectorCount; i++) {
         const iovec& src = request->source[i];
         iovec& dst       = request->destination[i];
-
+        
         if (src.iov_len != dst.iov_len)
             return B_BAD_VALUE;
         if (src.iov_len % 16 != 0)
@@ -119,6 +116,43 @@ padlock_process(BCryptoRequest* request)
             (uint8*)dst.iov_base,
             src.iov_len
         );
+
+        /*
+        //fix smap moved to BCryptoCore
+        size_t len       = src.iov_len;
+        if (len == 0) continue;
+        
+        uint8* kernelBuffer = (uint8*)malloc(len);
+        if (kernelBuffer == NULL) {
+            st = B_NO_MEMORY;
+            break;
+        }
+        if (user_memcpy(kernelBuffer, src.iov_base, len) != B_OK) {
+            free(kernelBuffer);
+            st = B_BAD_ADDRESS;
+            break;
+        }
+
+        if (src.iov_len != dst.iov_len)
+            return B_BAD_VALUE;
+        if (src.iov_len % 16 != 0)
+            return B_BAD_VALUE;
+
+        st = padlock_aes_process_block(
+            encrypt,
+            &ctx,
+            kernelBuffer,
+            kernelBuffer,
+            len
+        );
+        
+        if (st == B_OK) {
+            if (user_memcpy(dst.iov_base, kernelBuffer, len) != B_OK)
+                st = B_BAD_ADDRESS;
+        }
+
+        free(kernelBuffer);
+        */
 
         if (st != B_OK)
             break;

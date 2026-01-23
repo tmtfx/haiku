@@ -38,7 +38,8 @@ soft_aes_cbc_process_internal(BCryptoRequest* request, bool encrypt)
     for (size_t i = 0; i < request->vectorCount; i++) {
         const iovec& src = request->source[i];
         iovec& dst       = request->destination[i];
-
+        
+        
         if (src.iov_len % 16 != 0)
             return B_BAD_VALUE;
 
@@ -62,6 +63,56 @@ soft_aes_cbc_process_internal(BCryptoRequest* request, bool encrypt)
             }
         }
     }
+
+        /* fix smap moved to BCryptoCore
+        size_t len       = src.iov_len;
+        if (len == 0) continue;
+
+        uint8* kernelBuffer = (uint8*)malloc(len);
+        if (kernelBuffer == NULL) return B_NO_MEMORY;
+
+        if (user_memcpy(kernelBuffer, src.iov_base, len) != B_OK) {
+            free(kernelBuffer);
+            return B_BAD_ADDRESS;
+        }
+
+        if (len % 16 != 0)
+            return B_BAD_VALUE;
+
+        size_t blocks = len / 16;
+        for (size_t b = 0; b < blocks; b++) {
+            uint8* block = kernelBuffer + b * 16;
+            uint8 current_ciphertext_block[16];
+
+            if (encrypt) {
+                // ENCRYPT: l'IV è il risultato (già nel buffer), facile.
+                for (int j = 0; j < 16; j++)
+                    block[j] ^= iv[j];
+            
+                soft_aes_encrypt_block(&ctx, block, block);
+                memcpy(iv, block, 16); 
+            } else {
+                // DECRYPT: dobbiamo salvare il ciphertext prima di sovrascriverlo!
+                memcpy(current_ciphertext_block, block, 16); 
+            
+                soft_aes_decrypt_block(&ctx, block, block);
+            
+                for (int j = 0; j < 16; j++)
+                    block[j] ^= iv[j];
+            
+                // Il ciphertext di questo blocco diventa l'IV per il prossimo
+                memcpy(iv, current_ciphertext_block, 16);
+            }
+            
+        }
+        
+        if (user_memcpy(dst.iov_base, kernelBuffer, len) != B_OK) {
+            free(kernelBuffer);
+            return B_BAD_ADDRESS;
+        }
+
+        free(kernelBuffer);
+    }*/
 
     memcpy(request->iv, iv, 16);
 

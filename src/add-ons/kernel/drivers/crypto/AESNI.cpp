@@ -271,20 +271,18 @@ static status_t
 aesni_process(BCryptoRequest* request)
 {
     AESNIContext ctx{};
-    status_t st;
+    status_t st = B_OK;
 
     /* ---- validate algorithm ---- */
     switch (request->algorithm) {
         case B_CRYPTO_AES_ECB:
             break;
-
         case B_CRYPTO_AES_CBC:
         case B_CRYPTO_AES_CTR:
             if (request->ivLength != 16)
                 return B_BAD_VALUE;
             memcpy(ctx.iv, request->iv, 16);
             break;
-
         default:
             return B_NOT_SUPPORTED;
     }
@@ -300,7 +298,7 @@ aesni_process(BCryptoRequest* request)
     for (size_t i = 0; i < request->vectorCount; i++) {
         const iovec& src = request->source[i];
         iovec& dst       = request->destination[i];
-
+        
         switch (request->algorithm) {
             case B_CRYPTO_AES_ECB:
                 st = aesni_process_ecb(
@@ -326,6 +324,44 @@ aesni_process(BCryptoRequest* request)
                     src.iov_len);
                 break;
         }
+        /*
+        // smap fix moved to BCryptoCore
+        size_t len       = src.iov_len; 
+        if (len == 0) continue;
+        
+        uint8* kernelBuffer = (uint8*)malloc(len);
+        if (kernelBuffer == NULL) {
+            st = B_NO_MEMORY;
+            goto out;
+        }
+        if (user_memcpy(kernelBuffer, src.iov_base, len) != B_OK) {
+            free(kernelBuffer);
+            st = B_BAD_ADDRESS;
+            goto out;
+        }
+
+        switch (request->algorithm) {
+            case B_CRYPTO_AES_ECB:
+                st = aesni_process_ecb(encrypt, &ctx, kernelBuffer, kernelBuffer, len);
+                break;
+
+            case B_CRYPTO_AES_CBC:
+                st = aesni_process_cbc(encrypt, &ctx, kernelBuffer, kernelBuffer, len);
+                break;
+
+            case B_CRYPTO_AES_CTR:
+                st = aesni_process_ctr(&ctx, kernelBuffer, kernelBuffer, len);
+                break;
+        }
+        
+        if (st == B_OK) {
+            // COPIA DA KERNEL A USERLAND (Restituiamo il risultato cifrato)
+            if (user_memcpy(dst.iov_base, kernelBuffer, len) != B_OK)
+                st = B_BAD_ADDRESS;
+        }
+        
+        free(kernelBuffer);
+        */
 
         if (st != B_OK)
             goto out;
@@ -336,51 +372,18 @@ aesni_process(BCryptoRequest* request)
         memcpy(request->iv, ctx.iv, 16);
 
 out:
-    //memset(&ctx, 0, sizeof(ctx)); // hygiene
     secure_memzero(&ctx, sizeof(ctx)); // se non va rimettere prima ma in fase di compilazione potrebbe essere ignorato!!!!!
+    
+    /* BSubmitCryptoRequest already handles completionCallback
+    if (request->completionCallback) {
+        request->completionCallback(request, st);
+        return B_OK; // Per le chiamate asincrone, il core si aspetta B_OK
+    }*/
+    
     return st;
 }
 
-/*
-static status_t
-aesni_process(BCryptoRequest* request)
-{
-    if (request->algorithm != B_CRYPTO_AES_CBC)
-        return B_NOT_SUPPORTED;
 
-    if (request->ivLength != 16)
-        return B_BAD_VALUE;
-
-    AESNIContext ctx{};
-    memcpy(ctx.iv, request->iv, 16);
-
-    status_t st = aesni_expand_key(ctx, request->key, request->keyLength);
-    if (st != B_OK)
-        return st;
-
-    bool encrypt = (request->operation == B_CRYPTO_ENCRYPT);
-
-    for (size_t i = 0; i < request->vectorCount; i++) {
-        const iovec& src = request->source[i];
-        iovec& dst = request->destination[i];
-
-        st = aesni_process_blocks(
-            encrypt,
-            &ctx,
-            (const uint8*)src.iov_base,
-            (uint8*)dst.iov_base,
-            src.iov_len);
-
-        if (st != B_OK)
-            return st;
-    }
-
-    memcpy(request->iv, ctx.iv, 16);
-   
-    memset(&ctx, 0, sizeof(ctx)) // zeroing: AES keys are kept on the stack
-    return B_OK;
-}
-*/
 
 status_t
 BInitAESNICrypto()

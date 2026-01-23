@@ -7,6 +7,10 @@
 
 #include <Drivers.h>
 #include <SupportDefs.h>
+#include <Errors.h>
+#ifndef B_PENDING
+#   define B_PENDING B_DEV_PENDING
+#endif
 
 enum BCryptoAlgorithmID {
     // Cifrari simmetrici

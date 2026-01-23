@@ -21,7 +21,15 @@ struct MutexLocking {
 
 //typedef AutoLocker<mutex, mutex_lock, mutex_unlock> MutexLocker;
 //typedef AutoLocker<mutex, MutexLocking::Lock, MutexLocking::Unlock> MutexLocker;
-
+static void
+secure_memzero(void* p, size_t s)
+{
+    if (p == NULL)
+        return;
+    volatile uint8* cp = (volatile uint8*)p;
+    while (s--)
+        *cp++ = 0;
+}
 
 static mutex sCryptoLock;
 
@@ -101,35 +109,181 @@ BUnregisterCryptoAlgorithm(BCryptoAlgorithmID algorithm)
 	return B_ENTRY_NOT_FOUND;
 
 }
+// Funzione helper per gestire la callback in modo uniforme
+static status_t _FinalizeRequest(BCryptoRequest* request, status_t st) {
+    if (request->completionCallback) {
+        request->completionCallback(request, st);
+        return B_OK;
+    }
+    return st;
+}
 
 status_t
 BSubmitCryptoRequest(BCryptoRequest* request)
 {
-	if (!request)
+    if (!request)
         return B_BAD_VALUE;
 
     MutexLocker _(sCryptoLock);
     
-    //priority ordered list already done: the first found is the best
+    DoublyLinkedList<AlgoNode>::Iterator it = sAlgorithms.GetIterator();
+    while (AlgoNode* node = it.Next()) {
+        BCryptoAlgorithm* algo = node->algo;
 
-	DoublyLinkedList<AlgoNode>::Iterator it = sAlgorithms.GetIterator();
-	while (AlgoNode* node = it.Next()) {
-		BCryptoAlgorithm* algo = node->algo;
+        if (algo->algorithm != request->algorithm)
+            continue;
+        if (algo->mode != request->mode && request->mode != 0)
+            continue;
+            
+        // --- SCENARIO 1: Driver con supporto Asincrono Reale (Schede PCIe) ---
+        // Se l'algoritmo ha un flag che indica "Gestisco io la memoria/DMA"
+        if (algo->flags & B_CRYPTO_ALG_ASYNC) {
+            status_t st = algo->Process(request);
+            
+            if (st == B_PENDING) {
+                // Il driver ha preso in carico tutto. 
+                // Il Core non tocca i buffer e non chiama la callback.
+                return B_OK; 
+            }
+            // Se ritorna B_OK o errore, proseguiamo alla gestione callback
+            return _FinalizeRequest(request, st);
+        }
+        
+        // --- SCENARIO 2: Driver Sincroni (AESNI, PadLock, Soft) ---
+        // Qui usiamo il loop SMAP che abbiamo perfezionato
+        status_t st = B_OK;
 
-		if (algo->algorithm != request->algorithm)
-			continue;
-        //sync
-		if (!request->completionCallback)
-            return algo->Process(request);
-        //async
-        status_t st = algo->Process(request);
+        for (size_t i = 0; i < request->vectorCount; i++) {
+            // Usiamo riferimenti locali ma non modifichiamo l'originale se const
+            const iovec& srcOrig = request->source[i];
+            iovec& dstOrig       = request->destination[i];
+            
+            if (srcOrig.iov_len == 0) continue;
+            
+            uint8* kBuffer = (uint8*)malloc(srcOrig.iov_len);
+            if (kBuffer == NULL) return B_NO_MEMORY;
 
-        if (st != B_OK)
-            return st;
+            if (user_memcpy(kBuffer, srcOrig.iov_base, srcOrig.iov_len) != B_OK) {
+                free(kBuffer);
+                return B_BAD_ADDRESS;
+            }
 
-        // Il driver si occuperà di chiamare request->completionCallback()
-        return B_OK;
-	}
-	
-	return B_NOT_SUPPORTED;
+            /* --- IL TRUCCO --- */
+            // Salviamo gli indirizzi utente originali
+            void* oldSrcBase = srcOrig.iov_base;
+            void* oldDstBase = dstOrig.iov_base;
+
+            // Usiamo il const_cast solo per il tempo della chiamata al driver.
+            // Siccome siamo nel Kernel e abbiamo il lock, è sicuro.
+            const_cast<iovec&>(srcOrig).iov_base = kBuffer;
+            dstOrig.iov_base = kBuffer;
+
+            // 3. ESECUZIONE DEL DRIVER
+            st = algo->Process(request);
+
+            // 4. GESTIONE RISULTATO
+            if (st == B_OK) {
+                user_memcpy(oldDstBase, kBuffer, srcOrig.iov_len);
+            }
+
+            secure_memzero(kBuffer, srcOrig.iov_len);
+            free(kBuffer);
+
+            // RIPRISTINO: rimettiamo i puntatori utente originali
+            const_cast<iovec&>(srcOrig).iov_base = oldSrcBase;
+            dstOrig.iov_base = oldDstBase;
+
+            if (st != B_OK) break;
+        }
+
+        /*// 5. GESTIONE CALLBACK
+        if (request->completionCallback) {
+            request->completionCallback(request, st);
+            return B_OK; 
+        }
+
+        return st;*/
+        return _FinalizeRequest(request, st);
+    }
+    
+    return B_NOT_SUPPORTED;
 }
+
+
+/*
+status_t
+BSubmitCryptoRequest(BCryptoRequest* request)
+{
+    if (!request)
+        return B_BAD_VALUE;
+
+    MutexLocker _(sCryptoLock);
+    
+    DoublyLinkedList<AlgoNode>::Iterator it = sAlgorithms.GetIterator();
+    while (AlgoNode* node = it.Next()) {
+        BCryptoAlgorithm* algo = node->algo;
+
+        // 1. Controllo Algoritmo e Modo
+        if (algo->algorithm != request->algorithm)
+            continue;
+        if (algo->mode != request->mode && request->mode != 0)
+            continue;
+
+        // 2. GESTIONE SMAP CENTRALIZZATA
+        // Prepariamo i buffer per ogni iovec prima di chiamare il driver
+        for (size_t i = 0; i < request->vectorCount; i++) {
+            const iovec& src = request->source[i];
+            iovec& dst = request->destination[i];
+            
+            if (src.iov_len == 0) continue;
+            
+            // Creiamo un buffer kernel temporaneo
+            uint8* kBuffer = (uint8*)malloc(src.iov_len);
+            if (kBuffer == NULL) return B_NO_MEMORY;
+
+            // Salviamo i puntatori utente originali
+            void* userSrcBase = src.iov_base;
+            void* userDstBase = dst.iov_base;
+
+            // Copiamo i dati dall'utente al kernel
+            if (user_memcpy(kBuffer, userSrcBase, src.iov_len) != B_OK) {
+                free(kBuffer);
+                return B_BAD_ADDRESS;
+            }
+
+            // Sostituiamo i puntatori: ora il driver vedrà solo memoria kernel!
+            src.iov_base = kBuffer;
+            dst.iov_base = kBuffer;
+
+            // 3. ESECUZIONE DEL DRIVER
+            status_t st = algo->Process(request);
+
+            // 4. GESTIONE RISULTATO E SMAP (Rollback/Commit)
+            if (st == B_OK) {
+                // Successo: copiamo i dati cifrati/decifrati all'utente
+                user_memcpy(userDstBase, kBuffer, src.iov_len);
+            }
+
+            // Pulizia
+            secure_memzero(kBuffer, src.iov_len);
+            free(kBuffer);
+
+            // Ripristiniamo i puntatori originali per l'utente
+            src.iov_base = userSrcBase;
+            dst.iov_base = userDstBase;
+
+            if (st != B_OK) return st;
+        }
+
+        // 5. GESTIONE CALLBACK (Centralizzata)
+        // Se c'è una callback, la chiamiamo noi qui. I driver non devono più farlo!
+        if (request->completionCallback) {
+            request->completionCallback(request, B_OK);
+            return B_OK; 
+        }
+
+        return B_OK;
+    }
+    
+    return B_NOT_SUPPORTED;
+}*/

@@ -69,6 +69,7 @@ crypto_control(void* cookie, uint32 op, void* arg, size_t length)
 {
     switch (op) {
         case B_CRYPTO_IOCTL_PROCESS: {
+        	dprintf("crypto: elaborazione IOCTL\n");
             BCryptoUserRequest userReq;
             
             if (user_memcpy(&userReq, arg, sizeof(BCryptoUserRequest)) != B_OK)
@@ -195,7 +196,8 @@ extern "C" void uninit_driver()
     crypto_std_ops(B_MODULE_UNINIT);
 }
 
-extern "C" int32 api_version = B_CUR_DRIVER_API_VERSION;
+extern "C" int32 api_version;
+int32 api_version = B_CUR_DRIVER_API_VERSION;
 
 extern "C" const char** publish_devices()
 {
