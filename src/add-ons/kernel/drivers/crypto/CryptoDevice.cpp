@@ -72,8 +72,9 @@ crypto_control(void* cookie, uint32 op, void* arg, size_t length)
         	dprintf("crypto: elaborazione IOCTL\n");
             BCryptoUserRequest userReq;
             
-            if (user_memcpy(&userReq, arg, sizeof(BCryptoUserRequest)) != B_OK)
+            if (user_memcpy(&userReq, arg, sizeof(BCryptoUserRequest)) != B_OK) 
                 return B_BAD_ADDRESS;
+            
 
             BCryptoRequest req;
             req.operation = userReq.operation;
@@ -83,14 +84,17 @@ crypto_control(void* cookie, uint32 op, void* arg, size_t length)
             
             if (userReq.keyLength > 64 || userReq.ivLength > 64)
                 return B_BAD_VALUE;
+            
 
             uint8 localKey[64];
             uint8 localIV[64];
 
-            if (user_memcpy(localKey, userReq.key, userReq.keyLength) != B_OK)
+            if (user_memcpy(localKey, userReq.key, userReq.keyLength) != B_OK) 
                 return B_BAD_ADDRESS;
-            if (user_memcpy(localIV, userReq.iv, userReq.ivLength) != B_OK)
+            
+            if (user_memcpy(localIV, userReq.iv, userReq.ivLength) != B_OK) 
                 return B_BAD_ADDRESS;
+            
 
             req.key = localKey;
             req.keyLength = userReq.keyLength;
@@ -99,12 +103,14 @@ crypto_control(void* cookie, uint32 op, void* arg, size_t length)
 
             if (userReq.vectorCount > 32) 
                 return B_DEVICE_FULL;
+            
 
             iovec localSrc[32], localDst[32];
 
-            if (user_memcpy(localSrc, userReq.source, sizeof(iovec) * userReq.vectorCount) != B_OK)
+            if (user_memcpy(localSrc, userReq.source, sizeof(iovec) * userReq.vectorCount) != B_OK) 
                 return B_BAD_ADDRESS;
-            if (user_memcpy(localDst, userReq.destination, sizeof(iovec) * userReq.vectorCount) != B_OK)
+            
+            if (user_memcpy(localDst, userReq.destination, sizeof(iovec) * userReq.vectorCount) != B_OK) 
                 return B_BAD_ADDRESS;
 
             req.source = localSrc;

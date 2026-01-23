@@ -24,7 +24,7 @@ enum BCryptoAlgorithmID {
     // RNG
     B_CRYPTO_RNG        = 0x0020
 };
-
+/*
 enum BCryptoMode {
     B_CRYPTO_MODE_NONE = 0x00,
 
@@ -33,6 +33,13 @@ enum BCryptoMode {
     B_CRYPTO_MODE_CBC  = 0x02,
     B_CRYPTO_MODE_CTR  = 0x03,
     B_CRYPTO_MODE_GCM  = 0x04
+};*/
+enum BCryptoMode {
+    B_CRYPTO_MODE_ANY = 0,  // let the driver decide internally what to do
+    B_CRYPTO_MODE_ECB = 1 << 0, // 1
+    B_CRYPTO_MODE_CBC = 1 << 1, // 2
+    B_CRYPTO_MODE_CTR = 1 << 2, // 4
+    B_CRYPTO_MODE_GCM = 1 << 3  // 8
 };
 
 enum BCryptoOperation {

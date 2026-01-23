@@ -63,6 +63,7 @@ BGetStoredCryptoCapabilities()
 status_t
 BRegisterCryptoAlgorithm(BCryptoAlgorithm* algorithm)
 {
+	dprintf("BCrypto: Registro algo %d, priorità %d\n", algorithm->algorithm, algorithm->priority);
 	if (!algorithm)
         return B_BAD_VALUE;
         
@@ -121,20 +122,33 @@ static status_t _FinalizeRequest(BCryptoRequest* request, status_t st) {
 status_t
 BSubmitCryptoRequest(BCryptoRequest* request)
 {
-    if (!request)
+	dprintf("BCrypto: Richiesta giunta in BSubmitCryptoRequest\n");
+    if (!request) {
+    	dprintf("BCrypto: non c'è richiesta!\n");
         return B_BAD_VALUE;
+    }
 
     MutexLocker _(sCryptoLock);
-    
     DoublyLinkedList<AlgoNode>::Iterator it = sAlgorithms.GetIterator();
+
     while (AlgoNode* node = it.Next()) {
         BCryptoAlgorithm* algo = node->algo;
+        dprintf("BCrypto: Controllo algo registrato %d (cerco %d)\n", 
+                algo->algorithm, request->algorithm);
 
         if (algo->algorithm != request->algorithm)
             continue;
-        if (algo->mode != request->mode && request->mode != 0)
-            continue;
-            
+        dprintf("BCrypto: Algo trovato! Controllo modo %d (cerco %d)\n", 
+                algo->mode, request->mode);
+        //if (algo->mode != request->mode && request->mode != 0)
+        //    continue;
+        if (algo->mode != B_CRYPTO_MODE_ANY) {
+            // Verifichiamo se il bit richiesto è presente nella maschera del driver
+            // Esempio: (3 & 2) -> 2. Se il risultato è 0, il bit non c'è.
+            if ((algo->mode & request->mode) == 0)
+                continue;
+        }
+        dprintf("BCrypto: Trovato un algoritmo e modalità come quella richeista\n");
         // --- SCENARIO 1: Driver con supporto Asincrono Reale (Schede PCIe) ---
         // Se l'algoritmo ha un flag che indica "Gestisco io la memoria/DMA"
         if (algo->flags & B_CRYPTO_ALG_ASYNC) {
@@ -161,9 +175,13 @@ BSubmitCryptoRequest(BCryptoRequest* request)
             if (srcOrig.iov_len == 0) continue;
             
             uint8* kBuffer = (uint8*)malloc(srcOrig.iov_len);
-            if (kBuffer == NULL) return B_NO_MEMORY;
+            if (kBuffer == NULL) {
+            	dprintf("BCrypto: errore nel creare lo spazio per fix SMAP\n");
+            	return B_NO_MEMORY;
+            }
 
             if (user_memcpy(kBuffer, srcOrig.iov_base, srcOrig.iov_len) != B_OK) {
+            	dprintf("BCrypto: errore nel copiare srcOrig.iov_base in kBuffer\n");
                 free(kBuffer);
                 return B_BAD_ADDRESS;
             }
@@ -179,6 +197,7 @@ BSubmitCryptoRequest(BCryptoRequest* request)
             dstOrig.iov_base = kBuffer;
 
             // 3. ESECUZIONE DEL DRIVER
+            dprintf("BCrypto: Lancio elaborazione in BSubmitCryptoRequest\n");
             st = algo->Process(request);
 
             // 4. GESTIONE RISULTATO
@@ -193,7 +212,10 @@ BSubmitCryptoRequest(BCryptoRequest* request)
             const_cast<iovec&>(srcOrig).iov_base = oldSrcBase;
             dstOrig.iov_base = oldDstBase;
 
-            if (st != B_OK) break;
+            if (st != B_OK) {
+            	dprintf("BCrypto: l'elaborazione hybrid/sincrona non ha avuto successo\n");
+            	break;
+            }
         }
 
         /*// 5. GESTIONE CALLBACK
@@ -208,82 +230,3 @@ BSubmitCryptoRequest(BCryptoRequest* request)
     
     return B_NOT_SUPPORTED;
 }
-
-
-/*
-status_t
-BSubmitCryptoRequest(BCryptoRequest* request)
-{
-    if (!request)
-        return B_BAD_VALUE;
-
-    MutexLocker _(sCryptoLock);
-    
-    DoublyLinkedList<AlgoNode>::Iterator it = sAlgorithms.GetIterator();
-    while (AlgoNode* node = it.Next()) {
-        BCryptoAlgorithm* algo = node->algo;
-
-        // 1. Controllo Algoritmo e Modo
-        if (algo->algorithm != request->algorithm)
-            continue;
-        if (algo->mode != request->mode && request->mode != 0)
-            continue;
-
-        // 2. GESTIONE SMAP CENTRALIZZATA
-        // Prepariamo i buffer per ogni iovec prima di chiamare il driver
-        for (size_t i = 0; i < request->vectorCount; i++) {
-            const iovec& src = request->source[i];
-            iovec& dst = request->destination[i];
-            
-            if (src.iov_len == 0) continue;
-            
-            // Creiamo un buffer kernel temporaneo
-            uint8* kBuffer = (uint8*)malloc(src.iov_len);
-            if (kBuffer == NULL) return B_NO_MEMORY;
-
-            // Salviamo i puntatori utente originali
-            void* userSrcBase = src.iov_base;
-            void* userDstBase = dst.iov_base;
-
-            // Copiamo i dati dall'utente al kernel
-            if (user_memcpy(kBuffer, userSrcBase, src.iov_len) != B_OK) {
-                free(kBuffer);
-                return B_BAD_ADDRESS;
-            }
-
-            // Sostituiamo i puntatori: ora il driver vedrà solo memoria kernel!
-            src.iov_base = kBuffer;
-            dst.iov_base = kBuffer;
-
-            // 3. ESECUZIONE DEL DRIVER
-            status_t st = algo->Process(request);
-
-            // 4. GESTIONE RISULTATO E SMAP (Rollback/Commit)
-            if (st == B_OK) {
-                // Successo: copiamo i dati cifrati/decifrati all'utente
-                user_memcpy(userDstBase, kBuffer, src.iov_len);
-            }
-
-            // Pulizia
-            secure_memzero(kBuffer, src.iov_len);
-            free(kBuffer);
-
-            // Ripristiniamo i puntatori originali per l'utente
-            src.iov_base = userSrcBase;
-            dst.iov_base = userDstBase;
-
-            if (st != B_OK) return st;
-        }
-
-        // 5. GESTIONE CALLBACK (Centralizzata)
-        // Se c'è una callback, la chiamiamo noi qui. I driver non devono più farlo!
-        if (request->completionCallback) {
-            request->completionCallback(request, B_OK);
-            return B_OK; 
-        }
-
-        return B_OK;
-    }
-    
-    return B_NOT_SUPPORTED;
-}*/
