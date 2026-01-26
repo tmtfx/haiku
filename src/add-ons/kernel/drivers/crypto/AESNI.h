@@ -7,7 +7,8 @@
 #define _AES_NI_H_
 
 #include <SupportDefs.h>
-#include "BCryptoDefs.h"
+//#include "BCryptoDefs.h"
+#include <crypto/BCryptoDefs.h>
 #include "BCryptoCore.h"
 
 #include <immintrin.h> // Necessario per __m128i

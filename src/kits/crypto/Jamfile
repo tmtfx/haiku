@@ -1,0 +1,11 @@
+SubDir HAIKU_TOP src kits crypto ;
+
+# Usa gli header pubblici e privati del tuo nuovo kit
+UsePublicHeaders crypto ;
+#UsePrivateHeaders crypto ;
+
+SharedLibrary libcrypto_api.so :
+	BCrypto.cpp
+	:
+	be # Linka la libreria base di Haiku
+;

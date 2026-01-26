@@ -3,6 +3,9 @@ SubDir HAIKU_TOP src add-ons kernel drivers crypto ;
 UsePrivateHeaders kernel drivers crypto ;
 UsePrivateKernelHeaders ;
 
+UsePublicHeaders crypto ;
+UsePrivateHeaders crypto ;
+
 UseHeaders [ FDirName $(HAIKU_TOP) headers private kernel ] : true ;
 UseHeaders [ FDirName $(HAIKU_TOP) headers private kernel util ] : true ;
 

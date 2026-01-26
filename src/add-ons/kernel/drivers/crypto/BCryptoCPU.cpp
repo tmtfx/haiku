@@ -67,7 +67,8 @@ BGetCryptoCapabilities()
     return caps;
 }
 */
-#include "BCryptoDefs.h"
+//#include "BCryptoDefs.h"
+#include <crypto/BCryptoDefs.h>
 #include "BCryptoCPU.h"
 #include <arch/x86/arch_cpu.h>
 #include <string.h> 

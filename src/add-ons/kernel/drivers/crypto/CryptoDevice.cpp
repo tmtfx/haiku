@@ -9,16 +9,12 @@
 #include <device_manager.h>
 #include "CryptoDevice.h"
 #include "BCryptoCore.h"
-#include "BCryptoDefs.h"
+//#include "BCryptoDefs.h"
+#include <crypto/BCryptoDefs.h>
+#include <crypto/BCryptoRequest.h>
+#include <crypto/BCryptoKernelInternal.h>
 #include "BCryptoEntropy.h"
 
-//#include "drivers/padlock/PadLock.h"
-//#include "drivers/aesni/AESNI.h"
-//#include "SoftCrypto.h"
-
-//#include "../BCryptoDefs.h" SE NON LO TROVA DECOMMENTA
-//#include "../BCryptoCore.h" SE NON LO TROVA DECOMMENTA
-//#include <user_runtime.h>
 static void
 secure_memzero(void* p, size_t s)
 {
@@ -43,6 +39,17 @@ static status_t
 crypto_open_modern(void* device_cookie, const char* name, int flags, void** cookie)
 {
     *cookie = NULL;
+    /* 
+     * TODO: atomizzare le richieste per dispositivi pci-e
+     * per ora lasciamo così
+    */
+    /* 
+    // Crea un "contesto" per questa apertura
+    crypto_session* session = new(std::nothrow) crypto_session;
+    if (session == NULL) return B_NO_MEMORY;
+    
+    *cookie = session; // Ora 'session' verrà passato a tutte le control() successive
+    */
     return B_OK;
 }
 
@@ -69,7 +76,6 @@ crypto_control(void* cookie, uint32 op, void* arg, size_t length)
 {
     switch (op) {
         case B_CRYPTO_IOCTL_PROCESS: {
-        	dprintf("crypto: elaborazione IOCTL\n");
             BCryptoUserRequest userReq;
             
             if (user_memcpy(&userReq, arg, sizeof(BCryptoUserRequest)) != B_OK) 
@@ -122,10 +128,17 @@ crypto_control(void* cookie, uint32 op, void* arg, size_t length)
             status_t status = BSubmitCryptoRequest(&req);
 
             // Riporta l'IV aggiornato all'utente
-            user_memcpy(userReq.iv, req.iv, userReq.ivLength);
+            //user_memcpy(userReq.iv, req.iv, userReq.ivLength);
+            if (status == B_OK && userReq.iv != NULL) {
+                if (user_memcpy(userReq.iv, localIV, userReq.ivLength) != B_OK) {
+                    // Se fallisce qui, il dato è cifrato ma l'utente non ha l'IV nuovo
+                    status = B_BAD_ADDRESS;
+                }
+            }
             
             if (userReq.completionSem >= 0) {
                 userReq.result = status;
+                user_memcpy(arg, &userReq, sizeof(BCryptoUserRequest));
                 release_sem(userReq.completionSem);
             }
             secure_memzero(localKey, sizeof(localKey));

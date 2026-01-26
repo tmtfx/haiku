@@ -2,21 +2,14 @@
  * Copyright 2026, Fabio Tomat <f.t.public@gmail.com>
  * All rights reserved. Distributed under the terms of the MIT license.
  */
-#ifndef _B_CRYPTO_DEVICE_H_
-#define _B_CRYPTO_DEVICE_H_
+#ifndef _B_CRYPTO_REQUEST_H_
+#define _B_CRYPTO_REQUEST_H_
 
-#include <Drivers.h>
+#include <OS.h>
+#include <SupportDefs.h>
 #include <iovec.h>
-//#include "BCryptoDefs.h"
-//#include <crypto/BCryptoDefs.h>
-//#include "BCryptoRequest.h"
+#include <crypto/BCryptoDefs.h>
 
-#define B_CRYPTO_DEVICE_NAME "crypto/v1"
-
-/*enum {
-    B_CRYPTO_IOCTL_SUBMIT = B_DEVICE_OP_CODES_END + 1
-};*/
-/*
 typedef struct {
     BCryptoOperation    operation;
     BCryptoAlgorithmID  algorithm;
@@ -37,5 +30,5 @@ typedef struct {
     status_t            result;
 } BCryptoUserRequest;
 
-*/
-#endif
+#endif // _B_CRYPTO_REQUEST_H_
+

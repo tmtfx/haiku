@@ -5,7 +5,8 @@
 #ifndef _B_CRYPTO_DEVICE_H_
 #define _B_CRYPTO_DEVICE_H_
 
-#include "BCryptoDefs.h"
+//#include "BCryptoDefs.h"
+#include <crypto/BCryptoDefs.h>
 
 #ifdef __cplusplus
 extern "C" {

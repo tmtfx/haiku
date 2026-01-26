@@ -6,13 +6,15 @@
 
 #include "AESNI.h"
 
-#include "BCryptoDefs.h"
+//#include "BCryptoDefs.h"
+#include <crypto/BCryptoDefs.h>
 #include <string.h>
 #include "BCryptoAlgorithm.h"
 #if defined(__x86_64__) || defined(__i386__)
 
 #include <arch/x86/arch_cpu.h>
 #include <wmmintrin.h>
+#include <tmmintrin.h> //temp
 #pragma GCC target("aes,sse4.2")
 
 static void
@@ -25,33 +27,32 @@ secure_memzero(void* p, size_t s)
         *cp++ = 0;
 }
 
-static inline __m128i
-aesni_keyassist(__m128i key, int rcon)
-{
-    __m128i tmp = _mm_aeskeygenassist_si128(key, rcon);
-    tmp = _mm_shuffle_epi32(tmp, 0xff);
-    key = _mm_xor_si128(key, _mm_slli_si128(key, 4));
-    key = _mm_xor_si128(key, _mm_slli_si128(key, 4));
-    key = _mm_xor_si128(key, _mm_slli_si128(key, 4));
-    return _mm_xor_si128(key, tmp);
-}
-
 static void
 aesni_expand_key_128(AESNIContext& ctx, const uint8* key)
 {
-    ctx.rounds = 10;
+    __m128i k = _mm_loadu_si128((const __m128i*)key);
+    ctx.encRoundKeys[0] = k;
 
-    ctx.encRoundKeys[0] = _mm_loadu_si128((const __m128i*)key);
-    ctx.encRoundKeys[1] = aesni_keyassist(ctx.encRoundKeys[0], 0x01);
-    ctx.encRoundKeys[2] = aesni_keyassist(ctx.encRoundKeys[1], 0x02);
-    ctx.encRoundKeys[3] = aesni_keyassist(ctx.encRoundKeys[2], 0x04);
-    ctx.encRoundKeys[4] = aesni_keyassist(ctx.encRoundKeys[3], 0x08);
-    ctx.encRoundKeys[5] = aesni_keyassist(ctx.encRoundKeys[4], 0x10);
-    ctx.encRoundKeys[6] = aesni_keyassist(ctx.encRoundKeys[5], 0x20);
-    ctx.encRoundKeys[7] = aesni_keyassist(ctx.encRoundKeys[6], 0x40);
-    ctx.encRoundKeys[8] = aesni_keyassist(ctx.encRoundKeys[7], 0x80);
-    ctx.encRoundKeys[9] = aesni_keyassist(ctx.encRoundKeys[8], 0x1B);
-    ctx.encRoundKeys[10] = aesni_keyassist(ctx.encRoundKeys[9], 0x36);
+    auto expand = [&](__m128i current, int rcon) {
+        __m128i t = _mm_aeskeygenassist_si128(current, rcon);
+        t = _mm_shuffle_epi32(t, 0xff);
+        current = _mm_xor_si128(current, _mm_slli_si128(current, 4));
+        current = _mm_xor_si128(current, _mm_slli_si128(current, 4));
+        current = _mm_xor_si128(current, _mm_slli_si128(current, 4));
+        return _mm_xor_si128(current, t);
+    };
+
+    ctx.encRoundKeys[1] = k = expand(k, 0x01);
+    ctx.encRoundKeys[2] = k = expand(k, 0x02);
+    ctx.encRoundKeys[3] = k = expand(k, 0x04);
+    ctx.encRoundKeys[4] = k = expand(k, 0x08);
+    ctx.encRoundKeys[5] = k = expand(k, 0x10);
+    ctx.encRoundKeys[6] = k = expand(k, 0x20);
+    ctx.encRoundKeys[7] = k = expand(k, 0x40);
+    ctx.encRoundKeys[8] = k = expand(k, 0x80);
+    ctx.encRoundKeys[9] = k = expand(k, 0x1b);
+    ctx.encRoundKeys[10] = k = expand(k, 0x36);
+    ctx.rounds = 10;
 }
 static inline void
 aesni_192_assist(__m128i* t1, __m128i* t2, __m128i t3)
@@ -228,29 +229,23 @@ aesni_expand_key(AESNIContext& ctx, const uint8* key, size_t keyLength)
 /* ------------------------------------------------------------- */
 /* AES-NI CBC processing                                         */
 /* ------------------------------------------------------------- */
-
 static status_t
-aesni_process_cbc(bool encrypt,
-                     AESNIContext* ctx,
-                     const uint8* in,
-                     uint8* out,
-                     size_t length)
+aesni_process_cbc(bool encrypt, AESNIContext* ctx, const uint8* in, uint8* out, size_t length)
 {
-    if (length % 16 != 0)
-        return B_BAD_VALUE;
-
+    if (length % 16 != 0) return B_BAD_VALUE;
     size_t blocks = length / 16;
+
     __m128i iv = _mm_loadu_si128((const __m128i*)ctx->iv);
 
     for (size_t i = 0; i < blocks; i++) {
         __m128i block = _mm_loadu_si128((const __m128i*)(in + i * 16));
-
+        
         if (encrypt) {
             block = _mm_xor_si128(block, iv);
             block = _mm_xor_si128(block, ctx->encRoundKeys[0]);
-            for (int r = 1; r < (int)ctx->rounds; r++)
+            for (int r = 1; r < 10; r++)
                 block = _mm_aesenc_si128(block, ctx->encRoundKeys[r]);
-            block = _mm_aesenclast_si128(block, ctx->encRoundKeys[ctx->rounds]);
+            block = _mm_aesenclast_si128(block, ctx->encRoundKeys[10]);
             iv = block;
         } else {
             __m128i tmp = block;
@@ -261,14 +256,11 @@ aesni_process_cbc(bool encrypt,
             block = _mm_xor_si128(block, iv);
             iv = tmp;
         }
-
         _mm_storeu_si128((__m128i*)(out + i * 16), block);
     }
-
     _mm_storeu_si128((__m128i*)ctx->iv, iv);
     return B_OK;
 }
-
 static status_t
 aesni_process_ecb(bool encrypt,
                   AESNIContext* ctx,
@@ -338,8 +330,6 @@ aesni_process_ctr(AESNIContext* ctx,
     return B_OK;
 }
 
-/* ... (tutte le funzioni di key expansion e process_cbc/ecb/ctr rimangono identiche) ... */
-
 static status_t
 aesni_process(BCryptoRequest* request)
 {
@@ -347,7 +337,6 @@ aesni_process(BCryptoRequest* request)
     status_t st = B_OK;
 
     /* ---- validate algorithm ---- */
-    // Nota: Usiamo B_CRYPTO_AES come ID base, il modo è nel request->mode
     if (request->ivLength > 0) {
         if (request->ivLength != 16)
             return B_BAD_VALUE;
@@ -362,14 +351,12 @@ aesni_process(BCryptoRequest* request)
     bool encrypt = (request->operation == B_CRYPTO_ENCRYPT);
 
     /* ---- process iovecs ---- */
-    // Grazie al Core, src.iov_base e dst.iov_base sono già indirizzi kernel sicuri
     for (size_t i = 0; i < request->vectorCount; i++) {
         const iovec& src = request->source[i];
         iovec& dst       = request->destination[i];
         
         if (src.iov_len == 0) continue;
 
-        // Decidiamo il modo in base alla richiesta
         if (request->mode == B_CRYPTO_MODE_ECB) {
             st = aesni_process_ecb(encrypt, &ctx, (const uint8*)src.iov_base, 
                                    (uint8*)dst.iov_base, src.iov_len);
@@ -387,7 +374,6 @@ aesni_process(BCryptoRequest* request)
             goto out;
     }
 
-    /* ---- copy back IV / counter per operazioni concatenate ---- */
     if (request->mode != B_CRYPTO_MODE_ECB && request->iv != NULL)
         memcpy(request->iv, ctx.iv, 16);
 
@@ -398,7 +384,6 @@ out:
 extern "C" status_t
 BInitAESNICrypto()
 {
-    // Usiamo la funzione del Core per vedere cosa ha rilevato BCryptoCPU
     if (!(BGetStoredCryptoCapabilities() & B_CRYPTO_HW_AES_NI))
         return B_UNSUPPORTED;
 

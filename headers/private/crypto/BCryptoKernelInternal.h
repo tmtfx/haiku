@@ -2,12 +2,13 @@
  * Copyright 2026, Fabio Tomat <f.t.public@gmail.com>
  * All rights reserved. Distributed under the terms of the MIT license.
  */
-#ifndef _B_CRYPTO_REQUEST_H_
-#define _B_CRYPTO_REQUEST_H_
+#ifndef _B_CRYPTO_KERNEL_INTERNAL_H_
+#define _B_CRYPTO_KERNEL_INTERNAL_H_
 
+#include <OS.h>
 #include <SupportDefs.h>
 #include <iovec.h>
-#include "BCryptoDefs.h"
+#include <crypto/BCryptoDefs.h>
 
 struct BCryptoRequest {
     BCryptoOperation		operation;
@@ -24,6 +25,4 @@ struct BCryptoRequest {
     status_t				(*completionCallback)(BCryptoRequest*, status_t);
     void*					userCookie;
 };
-
-#endif
-
+#endif // _B_CRYPTO_KERNEL_INTERNAL_H_

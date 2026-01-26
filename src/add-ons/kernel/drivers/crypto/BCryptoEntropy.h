@@ -5,7 +5,8 @@
 #ifndef _B_CRYPTO_ENTROPY_H_
 #define _B_CRYPTO_ENTROPY_H_
 
-#include <SupportDefs.h>
+//#include <SupportDefs.h>
+#include <crypto/BCryptoDefs.h>
 
 status_t PadLockFeedEntropy();
 

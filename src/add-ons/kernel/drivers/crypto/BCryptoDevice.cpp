@@ -1,5 +1,6 @@
 #include "BCryptoDevice.h"
-#include "BCryptoDefs.h"
+//#include "BCryptoDefs.h"
+#include <crypto/BCryptoDefs.h>
 #include <lock.h>      // Per mutex
 #include <debug.h>
 #include <string.h>
@@ -35,8 +36,7 @@ register_crypto_device(crypto_device_info* info)
     // Copiamo le info nel registro
     memcpy(&sRegisteredDevices[sDeviceCount], info, sizeof(crypto_device_info));
     
-    dprintf("BCrypto: Registrato dispositivo [%s], Algos: 0x%" B_PRIx32 ", HW: 0x%" B_PRIx32 "\n", 
-        info->vendor_name, info->algos_supported, info->hw_type);
+    //dprintf("BCrypto: Registrato dispositivo [%s], Algos: 0x%" B_PRIx32 ", HW: 0x%" B_PRIx32 "\n", info->vendor_name, info->algos_supported, info->hw_type);
 
     sDeviceCount++;
 

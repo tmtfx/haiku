@@ -20,7 +20,8 @@ status_t BSubmitCryptoRequest(BCryptoRequest* request);
 #ifndef _B_CRYPTO_CORE_H_
 #define _B_CRYPTO_CORE_H_
 
-#include "BCryptoDefs.h"
+//#include "BCryptoDefs.h"
+#include <crypto/BCryptoDefs.h>
 #include "BCryptoAlgorithm.h"
 
 #ifdef __cplusplus

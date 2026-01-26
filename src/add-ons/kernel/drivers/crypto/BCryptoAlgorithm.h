@@ -7,9 +7,11 @@
 
 
 #include <SupportDefs.h>
-#include "BCryptoDefs.h"
+//#include "BCryptoDefs.h"
+#include <crypto/BCryptoDefs.h>
+#include <crypto/BCryptoKernelInternal.h>
+//#include "BCryptoRequest.h"
 
-#include "BCryptoRequest.h"
 //struct BCryptoRequest; //invece di #include "BCryptoRequest.h", dipendenze circolari
 
 struct BCryptoAlgorithm {

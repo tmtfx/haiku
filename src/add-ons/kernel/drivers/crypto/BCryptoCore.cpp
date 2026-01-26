@@ -3,7 +3,8 @@
  * All rights reserved. Distributed under the terms of the MIT license.
  */
 #include "BCryptoCore.h"
-#include "BCryptoDefs.h"
+//#include "BCryptoDefs.h"
+#include <crypto/BCryptoDefs.h>
 #include "BCryptoCPU.h"
 
 /*extern "C" {
@@ -64,7 +65,7 @@ crypto_init_core()
 {
     if (sCoreInitialized) return B_OK;
     
-    dprintf("BCrypto: [2] Entrato in crypto_init_core\n");
+    //dprintf("BCrypto: [2] Entrato in crypto_init_core\n");
     mutex_init(&sCryptoLock, "crypto core lock");
     
     // 1. Inizializza il manager dei dispositivi
@@ -79,7 +80,7 @@ crypto_init_core()
     if (BGetCPUCryptoInfo(&cpuInfo) == B_OK) {
         status = register_crypto_device(&cpuInfo);
         if (status == B_OK) {
-            dprintf("BCrypto: CPU registrata nel Manager.\n");
+            //dprintf("BCrypto: CPU registrata nel Manager.\n");
             sCryptoCapabilities = cpuInfo.hw_type; 
         }
     }
@@ -93,7 +94,7 @@ crypto_uninit_core()
 {
     if (!sCoreInitialized) return;
 
-    dprintf("BCrypto: Pulizia Core e Manager\n");
+    //dprintf("BCrypto: Pulizia Core e Manager\n");
     
     // Svuota la lista degli algoritmi
     MutexLocker _(&sCryptoLock);
@@ -117,7 +118,7 @@ BGetStoredCryptoCapabilities()
 status_t
 BRegisterCryptoAlgorithm(BCryptoAlgorithm* algorithm)
 {
-	dprintf("BCrypto: Registro algo %d, priorità %d\n", algorithm->algorithm, algorithm->priority);
+	//dprintf("BCrypto: Registro algo %d, priorità %d\n", algorithm->algorithm, algorithm->priority);
 	if (!algorithm)
         return B_BAD_VALUE;
         
@@ -177,9 +178,11 @@ status_t
 BSubmitCryptoRequest(BCryptoRequest* request)
 {
 	// TODO malloc is slow!!!!!! maybe we can use lock_memory
-	dprintf("BCrypto: Richiesta giunta in BSubmitCryptoRequest\n");
+	//dprintf("BCrypto: Richiesta giunta in BSubmitCryptoRequest\n");
+	bool slowFast = false;
+	
     if (!request) {
-    	dprintf("BCrypto: non c'è richiesta!\n");
+    	//dprintf("BCrypto: non c'è richiesta!\n");
         return B_BAD_VALUE;
     }
 
@@ -188,13 +191,9 @@ BSubmitCryptoRequest(BCryptoRequest* request)
 
     while (AlgoNode* node = it.Next()) {
         BCryptoAlgorithm* algo = node->algo;
-        dprintf("BCrypto: Controllo algo registrato %d (cerco %d)\n", 
-                algo->algorithm, request->algorithm);
 
         if (algo->algorithm != request->algorithm)
             continue;
-        dprintf("BCrypto: Algo trovato! Controllo modo %d (cerco %d)\n", 
-                algo->mode, request->mode);
         //if (algo->mode != request->mode && request->mode != 0)
         //    continue;
         if (algo->mode != B_CRYPTO_MODE_ANY) {
@@ -203,7 +202,6 @@ BSubmitCryptoRequest(BCryptoRequest* request)
             if ((algo->mode & request->mode) == 0)
                 continue;
         }
-        dprintf("BCrypto: Trovato un algoritmo e modalità come quella richeista\n");
         // --- SCENARIO 1: Driver con supporto Asincrono Reale (Schede PCIe) ---
         // Se l'algoritmo ha un flag che indica "Gestisco io la memoria/DMA"
         if (algo->flags & B_CRYPTO_ALG_ASYNC) {
@@ -228,49 +226,89 @@ BSubmitCryptoRequest(BCryptoRequest* request)
             iovec& dstOrig       = request->destination[i];
             
             if (srcOrig.iov_len == 0) continue;
+            if (slowFast) {
+                /* slower safer */
+                uint8* kSrcBuffer = (uint8*)malloc(srcOrig.iov_len);
+                uint8* kDstBuffer = (uint8*)malloc(srcOrig.iov_len);
+
+                if (kSrcBuffer == NULL || kDstBuffer == NULL) {
+                    free(kSrcBuffer);
+                    free(kDstBuffer);
+                    return B_NO_MEMORY;
+                }
             
-            uint8* kBuffer = (uint8*)malloc(srcOrig.iov_len);
-            if (kBuffer == NULL) {
-            	dprintf("BCrypto: errore nel creare lo spazio per fix SMAP\n");
-            	return B_NO_MEMORY;
-            }
+                if (user_memcpy(kSrcBuffer, srcOrig.iov_base, srcOrig.iov_len) != B_OK) {
+                    free(kSrcBuffer);
+                    free(kDstBuffer);
+                    return B_BAD_ADDRESS;
+                }
+                // Salviamo gli indirizzi utente originali
+                void* oldSrcBase = srcOrig.iov_base;
+                void* oldDstBase = dstOrig.iov_base;
+                
+                // Usiamo il const_cast solo per il tempo della chiamata al driver.
+                // Siccome siamo nel Kernel e abbiamo il lock, è sicuro.
+                const_cast<iovec&>(srcOrig).iov_base = kSrcBuffer;
+                dstOrig.iov_base = kDstBuffer;
+                
+                // 3. ESECUZIONE DEL DRIVER
+                st = algo->Process(request);
+                
+                if (st == B_OK) {
+                	if (user_memcpy(oldDstBase, kDstBuffer, srcOrig.iov_len) != B_OK)
+                        st = B_BAD_ADDRESS;
+                }
+                
+                secure_memzero(kSrcBuffer, srcOrig.iov_len);
+                secure_memzero(kDstBuffer, srcOrig.iov_len);
+                free(kSrcBuffer);
+                free(kDstBuffer);
+                
+                const_cast<iovec&>(srcOrig).iov_base = oldSrcBase;
+                dstOrig.iov_base = oldDstBase;
+                
+                if (st != B_OK) {
+            	    //dprintf("BCrypto: l'elaborazione hybrid/sincrona non ha avuto successo\n");
+            	    break;
+                }
+            } else {
+                /* faster should be inline */
+            
+                uint8* kBuffer = (uint8*)malloc(srcOrig.iov_len);
+                if (kBuffer == NULL) {
+                	return B_NO_MEMORY;
+                }
 
-            if (user_memcpy(kBuffer, srcOrig.iov_base, srcOrig.iov_len) != B_OK) {
-            	dprintf("BCrypto: errore nel copiare srcOrig.iov_base in kBuffer\n");
+                if (user_memcpy(kBuffer, srcOrig.iov_base, srcOrig.iov_len) != B_OK) {
+                    free(kBuffer);
+                    return B_BAD_ADDRESS;
+                }
+                // Salviamo gli indirizzi utente originali
+                void* oldSrcBase = srcOrig.iov_base;
+                void* oldDstBase = dstOrig.iov_base;
+                
+                // Usiamo il const_cast solo per il tempo della chiamata al driver.
+                // Siccome siamo nel Kernel e abbiamo il lock, è sicuro.
+                const_cast<iovec&>(srcOrig).iov_base = kBuffer;
+            	dstOrig.iov_base = kBuffer;
+            	
+            	// 3. ESECUZIONE DEL DRIVER
+                st = algo->Process(request);
+                
+                if (st == B_OK) {
+                	user_memcpy(oldDstBase, kBuffer, srcOrig.iov_len);
+                }
+                secure_memzero(kBuffer, srcOrig.iov_len);
                 free(kBuffer);
-                return B_BAD_ADDRESS;
+                
+                const_cast<iovec&>(srcOrig).iov_base = oldSrcBase;
+                dstOrig.iov_base = oldDstBase;
+                if (st != B_OK) {
+            	    //dprintf("BCrypto: l'elaborazione hybrid/sincrona non ha avuto successo\n");
+            	    break;
+                }
             }
 
-            /* --- IL TRUCCO --- */
-            // Salviamo gli indirizzi utente originali
-            void* oldSrcBase = srcOrig.iov_base;
-            void* oldDstBase = dstOrig.iov_base;
-
-            // Usiamo il const_cast solo per il tempo della chiamata al driver.
-            // Siccome siamo nel Kernel e abbiamo il lock, è sicuro.
-            const_cast<iovec&>(srcOrig).iov_base = kBuffer;
-            dstOrig.iov_base = kBuffer;
-
-            // 3. ESECUZIONE DEL DRIVER
-            dprintf("BCrypto: Lancio elaborazione in BSubmitCryptoRequest\n");
-            st = algo->Process(request);
-
-            // 4. GESTIONE RISULTATO
-            if (st == B_OK) {
-                user_memcpy(oldDstBase, kBuffer, srcOrig.iov_len);
-            }
-
-            secure_memzero(kBuffer, srcOrig.iov_len);
-            free(kBuffer);
-
-            // RIPRISTINO: rimettiamo i puntatori utente originali
-            const_cast<iovec&>(srcOrig).iov_base = oldSrcBase;
-            dstOrig.iov_base = oldDstBase;
-
-            if (st != B_OK) {
-            	dprintf("BCrypto: l'elaborazione hybrid/sincrona non ha avuto successo\n");
-            	break;
-            }
         }
 
         /*// 5. GESTIONE CALLBACK

@@ -12,6 +12,11 @@
 #   define B_PENDING B_DEV_PENDING
 #endif
 
+enum {
+    B_CRYPTO_IOCTL_SUBMIT = B_DEVICE_OP_CODES_END + 1
+};
+//#define B_CRYPTO_IOCTL_PROCESS  (B_DEVICE_OP_CODES_END + 1)
+
 struct crypto_device_info {
     char vendor_name[32];      // es: "Intel", "VIA", "Hifn"
     uint32 algos_supported;    // Bitmask di BCryptoAlgorithmID (AES, SHA...)
