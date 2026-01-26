@@ -178,11 +178,23 @@ status_t
 BSubmitCryptoRequest(BCryptoRequest* request)
 {
 	// TODO malloc is slow!!!!!! maybe we can use lock_memory
-	//dprintf("BCrypto: Richiesta giunta in BSubmitCryptoRequest\n");
+	/*
+	 * This bool flag (slowFast) is for debug purposes:
+	 * using a single buffer extremely improves performance
+	 * as AES-NI works on XMM registers, usually working in-place
+	 * doesn't corrupt data (no source overwrite while reading)
+	 *
+	 * in case data would be loaded in a different way by a future driver 
+	 * this would cause problems.
+	 * 
+	 * if it's not a problem, using slowFast as false gives a 1,5x 
+	 * boost in performance
+	*/
 	bool slowFast = false;
+	// Soglia sicura per lavorare sullo stack: 512 byte ( Small Buffer Optimization )
+	const size_t kStackThreshold = 512;
 	
     if (!request) {
-    	//dprintf("BCrypto: non c'è richiesta!\n");
         return B_BAD_VALUE;
     }
 
@@ -216,35 +228,48 @@ BSubmitCryptoRequest(BCryptoRequest* request)
             return _FinalizeRequest(request, st);
         }
         
+        
+        
         // --- SCENARIO 2: Driver Sincroni (AESNI, PadLock, Soft) ---
-        // Qui usiamo il loop SMAP che abbiamo perfezionato
+        // Qui usiamo il loop SMAP
         status_t st = B_OK;
 
         for (size_t i = 0; i < request->vectorCount; i++) {
             // Usiamo riferimenti locali ma non modifichiamo l'originale se const
             const iovec& srcOrig = request->source[i];
             iovec& dstOrig       = request->destination[i];
+            size_t len = srcOrig.iov_len;
+            if (len == 0) continue;
             
-            if (srcOrig.iov_len == 0) continue;
+            // Salviamo gli indirizzi utente originali
+            void* oldSrcBase = srcOrig.iov_base;
+            void* oldDstBase = dstOrig.iov_base;
+            
             if (slowFast) {
                 /* slower safer */
-                uint8* kSrcBuffer = (uint8*)malloc(srcOrig.iov_len);
-                uint8* kDstBuffer = (uint8*)malloc(srcOrig.iov_len);
-
-                if (kSrcBuffer == NULL || kDstBuffer == NULL) {
-                    free(kSrcBuffer);
-                    free(kDstBuffer);
-                    return B_NO_MEMORY;
+                uint8 stackSrc[kStackThreshold];
+                uint8 stackDst[kStackThreshold];
+                uint8* kSrcBuffer = nullptr;
+                uint8* kDstBuffer = nullptr;
+                bool heapUsed = false;
+				if (len <= kStackThreshold) {
+					kSrcBuffer = stackSrc;
+                    kDstBuffer = stackDst;
+                } else {
+                    kSrcBuffer = (uint8*)malloc(len);
+                    kDstBuffer = (uint8*)malloc(len);
+                    if (!kSrcBuffer || !kDstBuffer) {
+                        free(kSrcBuffer); free(kDstBuffer);
+                        return B_NO_MEMORY;
+                    }
+                    heapUsed = true;
                 }
             
-                if (user_memcpy(kSrcBuffer, srcOrig.iov_base, srcOrig.iov_len) != B_OK) {
-                    free(kSrcBuffer);
-                    free(kDstBuffer);
+                if (user_memcpy(kSrcBuffer, srcOrig.iov_base, len) != B_OK) {
+                    if (heapUsed) { free(kSrcBuffer); free(kDstBuffer); }
                     return B_BAD_ADDRESS;
                 }
-                // Salviamo gli indirizzi utente originali
-                void* oldSrcBase = srcOrig.iov_base;
-                void* oldDstBase = dstOrig.iov_base;
+                
                 
                 // Usiamo il const_cast solo per il tempo della chiamata al driver.
                 // Siccome siamo nel Kernel e abbiamo il lock, è sicuro.
@@ -255,37 +280,31 @@ BSubmitCryptoRequest(BCryptoRequest* request)
                 st = algo->Process(request);
                 
                 if (st == B_OK) {
-                	if (user_memcpy(oldDstBase, kDstBuffer, srcOrig.iov_len) != B_OK)
+                	if (user_memcpy(oldDstBase, kDstBuffer, len) != B_OK)
                         st = B_BAD_ADDRESS;
                 }
                 
-                secure_memzero(kSrcBuffer, srcOrig.iov_len);
-                secure_memzero(kDstBuffer, srcOrig.iov_len);
-                free(kSrcBuffer);
-                free(kDstBuffer);
-                
-                const_cast<iovec&>(srcOrig).iov_base = oldSrcBase;
-                dstOrig.iov_base = oldDstBase;
-                
-                if (st != B_OK) {
-            	    //dprintf("BCrypto: l'elaborazione hybrid/sincrona non ha avuto successo\n");
-            	    break;
-                }
+                secure_memzero(kSrcBuffer, len);
+                secure_memzero(kDstBuffer, len);
+                if (heapUsed) { free(kSrcBuffer); free(kDstBuffer); }
             } else {
                 /* faster should be inline */
-            
-                uint8* kBuffer = (uint8*)malloc(srcOrig.iov_len);
-                if (kBuffer == NULL) {
-                	return B_NO_MEMORY;
+                uint8 stackBuffer[kStackThreshold]; // Buffer pre-allocato sullo stack
+                uint8* kBuffer = nullptr;
+                bool usedHeap = false;
+                
+                if (len <= kStackThreshold) {
+                    kBuffer = stackBuffer;
+                } else {
+                	kBuffer = (uint8*)malloc(len);
+                    if (kBuffer == NULL) return B_NO_MEMORY;
+                    usedHeap = true;
                 }
 
-                if (user_memcpy(kBuffer, srcOrig.iov_base, srcOrig.iov_len) != B_OK) {
-                    free(kBuffer);
+                if (user_memcpy(kBuffer, oldSrcBase, len) != B_OK) {
+                    if (usedHeap) free(kBuffer);
                     return B_BAD_ADDRESS;
                 }
-                // Salviamo gli indirizzi utente originali
-                void* oldSrcBase = srcOrig.iov_base;
-                void* oldDstBase = dstOrig.iov_base;
                 
                 // Usiamo il const_cast solo per il tempo della chiamata al driver.
                 // Siccome siamo nel Kernel e abbiamo il lock, è sicuro.
@@ -296,19 +315,19 @@ BSubmitCryptoRequest(BCryptoRequest* request)
                 st = algo->Process(request);
                 
                 if (st == B_OK) {
-                	user_memcpy(oldDstBase, kBuffer, srcOrig.iov_len);
+                	if (user_memcpy(oldDstBase, kBuffer, len) != B_OK)
+                        st = B_BAD_ADDRESS;
                 }
-                secure_memzero(kBuffer, srcOrig.iov_len);
-                free(kBuffer);
                 
-                const_cast<iovec&>(srcOrig).iov_base = oldSrcBase;
-                dstOrig.iov_base = oldDstBase;
-                if (st != B_OK) {
-            	    //dprintf("BCrypto: l'elaborazione hybrid/sincrona non ha avuto successo\n");
-            	    break;
-                }
+                // Pulizia di sicurezza (Sensitive data)
+                secure_memzero(kBuffer, len);
+                if (usedHeap) free(kBuffer);
             }
-
+            // Ripristiniamo i puntatori originali per l'utente/callback
+            const_cast<iovec&>(srcOrig).iov_base = oldSrcBase;
+            dstOrig.iov_base = oldDstBase;
+            
+            if (st != B_OK) break;
         }
 
         /*// 5. GESTIONE CALLBACK
