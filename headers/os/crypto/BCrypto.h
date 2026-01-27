@@ -18,6 +18,8 @@ public:
 			status_t			InitCheck() const;
 
 			// Metodi semplificati
+			status_t			GetRandomBytes(void* buffer, size_t len);
+			
 			status_t			Encrypt(uint8* key, size_t keyLen,
 									uint8* iv, size_t ivLen,
 									const void* in, void* out, size_t len);

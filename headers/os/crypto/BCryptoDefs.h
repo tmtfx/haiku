@@ -12,10 +12,12 @@
 #   define B_PENDING B_DEV_PENDING
 #endif
 
+#define B_CRYPTO_IOCTL_GET_RANDOM   _IOWR('crpt', 10, BCryptoRandomRequest)
+/* refuso
 enum {
     B_CRYPTO_IOCTL_SUBMIT = B_DEVICE_OP_CODES_END + 1
 };
-//#define B_CRYPTO_IOCTL_PROCESS  (B_DEVICE_OP_CODES_END + 1)
+//#define B_CRYPTO_IOCTL_PROCESS  (B_DEVICE_OP_CODES_END + 1)*/
 
 struct crypto_device_info {
     char vendor_name[32];      // es: "Intel", "VIA", "Hifn"

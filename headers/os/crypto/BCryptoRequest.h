@@ -30,5 +30,11 @@ typedef struct {
     status_t            result;
 } BCryptoUserRequest;
 
+struct BCryptoRandomRequest {
+    void* buffer;
+    size_t length;
+    status_t result;
+};
+
 #endif // _B_CRYPTO_REQUEST_H_
 

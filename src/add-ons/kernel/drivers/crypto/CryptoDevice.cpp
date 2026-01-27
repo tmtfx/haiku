@@ -146,6 +146,54 @@ crypto_control(void* cookie, uint32 op, void* arg, size_t length)
 
             return status;
         }
+        
+        case B_CRYPTO_IOCTL_GET_RANDOM: {
+            BCryptoRandomRequest randomReq;
+
+            // 1. Copia la richiesta dallo spazio utente
+            if (user_memcpy(&randomReq, arg, sizeof(BCryptoRandomRequest)) != B_OK)
+                return B_BAD_ADDRESS;
+
+            if (randomReq.buffer == NULL || randomReq.length == 0)
+                return B_BAD_VALUE;
+
+            // Limite di sicurezza per singola richiesta (es. 1MB)
+            if (randomReq.length > 1024 * 1024)
+                return B_BAD_VALUE;
+
+            // 2. Small Buffer Optimization (SBO)
+            uint8 stackBuffer[512];
+            uint8* kBuffer = NULL;
+            bool usedHeap = false;
+
+            if (randomReq.length <= sizeof(stackBuffer)) {
+                kBuffer = stackBuffer;
+            } else {
+                kBuffer = (uint8*)malloc(randomReq.length);
+                if (kBuffer == NULL) return B_NO_MEMORY;
+                usedHeap = true;
+            }
+
+            // 3. Chiamata al generatore hardware (che vive nel Core o nel modulo CPU)
+            // Nota: BFillBufferWithRandom è una funzione che dovrai esportare dal Core
+            status_t status = BFillBufferWithRandom(kBuffer, randomReq.length);
+
+            // 4. Copia i dati generati all'utente
+            if (status == B_OK) {
+                if (user_memcpy(randomReq.buffer, kBuffer, randomReq.length) != B_OK)
+                    status = B_BAD_ADDRESS;
+            }
+
+            // 5. Pulizia e rilascio
+            secure_memzero(kBuffer, randomReq.length);
+            if (usedHeap) free(kBuffer);
+
+            // Riporta il risultato nella struct originale se necessario
+            randomReq.result = status;
+            user_memcpy(arg, &randomReq, sizeof(BCryptoRandomRequest));
+
+            return status;
+        }
     }
     return B_DEV_INVALID_IOCTL;
 }
