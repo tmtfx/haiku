@@ -8,7 +8,10 @@
 //#include <SupportDefs.h>
 #include <crypto/BCryptoDefs.h>
 
-status_t PadLockFeedEntropy();
+status_t EntropyManager();
+status_t BStartEntropyFeeder(); // Avvia il thread in background
+void     BStopEntropyFeeder();  // Ferma il thread
+status_t EntropyManager();      // Esegue un singolo versamento (opzionale)
 
 #endif
 

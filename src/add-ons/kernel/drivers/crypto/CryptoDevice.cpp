@@ -11,7 +11,6 @@
 #include "BCryptoCore.h"
 //#include "BCryptoDefs.h"
 #include <crypto/BCryptoDefs.h>
-#include <crypto/BCryptoRequest.h>
 #include <crypto/BCryptoKernelInternal.h>
 #include "BCryptoEntropy.h"
 
@@ -78,9 +77,7 @@ crypto_control(void* cookie, uint32 op, void* arg, size_t length)
         case B_CRYPTO_IOCTL_PROCESS: {
             BCryptoUserRequest userReq;
             
-            if (user_memcpy(&userReq, arg, sizeof(BCryptoUserRequest)) != B_OK) 
-                return B_BAD_ADDRESS;
-            
+            if (user_memcpy(&userReq, arg, sizeof(BCryptoUserRequest)) != B_OK) return B_BAD_ADDRESS;
 
             BCryptoRequest req;
             req.operation = userReq.operation;

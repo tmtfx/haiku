@@ -8,9 +8,11 @@
 #include "PadLockRNG.h"
 #include "PadLock.h"
 #include "AESNI.h"
+#include "x86CPURNG.h"
 #include "SoftCrypto.h"
 #include "BCryptoCore.h"
 #include "BCryptoAlgorithm.h"
+#include "BCryptoEntropy.h"
 //#include "BCryptoDefs.h"
 #include <crypto/BCryptoDefs.h>
 #include <debug.h> //da rimuovere una volta verificato
@@ -37,9 +39,11 @@ crypto_std_ops(int op, ...)
             if (status != B_OK)
                 return status;
 			BInitPadLockRNG();
+			BInitx86CPURNG();
 			BInitPadLockCrypto();
 			BInitAESNICrypto();
 			BInitSoftCrypto();
+			//BStartEntropyFeeder();
 			return B_OK;
 		}
 		case B_MODULE_UNINIT:

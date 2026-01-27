@@ -6,7 +6,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <string.h>
-#include "BCryptoRequest.h"
+#include "BCryptoDefs.h"
 
 BCrypto::BCrypto() {
 	fFd = open("/dev/crypto/v1", O_RDWR);
@@ -74,11 +74,7 @@ status_t
 BCrypto::Process(BCryptoUserRequest& userReq)
 {
     if (fFd < 0) return B_NO_INIT;
-    
-	if (userReq.completionCallback != NULL) {
-        return ioctl(fFd, B_CRYPTO_IOCTL_PROCESS, &userReq);
-    }
-    
+        
     sem_id doneSem = create_sem(0, "crypto_completion");
     if (doneSem < B_OK) return doneSem;
 

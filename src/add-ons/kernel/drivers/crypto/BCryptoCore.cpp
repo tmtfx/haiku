@@ -6,6 +6,7 @@
 //#include "BCryptoDefs.h"
 #include <crypto/BCryptoDefs.h>
 #include "BCryptoCPU.h"
+#include <string.h>
 
 /*extern "C" {
     status_t crypto_manager_init();
@@ -204,8 +205,8 @@ BSubmitCryptoRequest(BCryptoRequest* request)
     while (AlgoNode* node = it.Next()) {
         BCryptoAlgorithm* algo = node->algo;
 
-        if (algo->algorithm != request->algorithm)
-            continue;
+        if (algo->algorithm != request->algorithm) continue;
+
         //if (algo->mode != request->mode && request->mode != 0)
         //    continue;
         if (algo->mode != B_CRYPTO_MODE_ANY) {
@@ -264,12 +265,25 @@ BSubmitCryptoRequest(BCryptoRequest* request)
                     }
                     heapUsed = true;
                 }
+                status_t status;
+                if (request->flags & B_CRYPTO_ALG_KERNEL_SPACE) {
+                    memcpy(kSrcBuffer, srcOrig.iov_base, len);
+                    status = B_OK;
+                } else {
+                    status = user_memcpy(kSrcBuffer, srcOrig.iov_base, len);
+                }
+
+                if (status != B_OK) {
+                    if (heapUsed) { free(kSrcBuffer); free(kDstBuffer); }
+                    return B_BAD_ADDRESS;
+                }
+                /* prima di feed entropy
             
                 if (user_memcpy(kSrcBuffer, srcOrig.iov_base, len) != B_OK) {
                     if (heapUsed) { free(kSrcBuffer); free(kDstBuffer); }
                     return B_BAD_ADDRESS;
                 }
-                
+                */
                 
                 // Usiamo il const_cast solo per il tempo della chiamata al driver.
                 // Siccome siamo nel Kernel e abbiamo il lock, è sicuro.
@@ -300,12 +314,28 @@ BSubmitCryptoRequest(BCryptoRequest* request)
                     if (kBuffer == NULL) return B_NO_MEMORY;
                     usedHeap = true;
                 }
+                
+                status_t memcpy_status;
+                if (request->flags & B_CRYPTO_ALG_KERNEL_SPACE) {
+                    // Se la richiesta viene dal kernel (come il nostro feeder)
+                    memcpy(kBuffer, oldSrcBase, len);
+                    memcpy_status = B_OK;
+                } else {
+                    // Se viene da un IOCTL (spazio utente)
+                    memcpy_status = user_memcpy(kBuffer, oldSrcBase, len);
+                }
+
+                if (memcpy_status != B_OK) {
+                    if (usedHeap) free(kBuffer);
+                    return B_BAD_ADDRESS;
+                }
+                /* prima del feed_entropy
 
                 if (user_memcpy(kBuffer, oldSrcBase, len) != B_OK) {
                     if (usedHeap) free(kBuffer);
                     return B_BAD_ADDRESS;
                 }
-                
+                */
                 // Usiamo il const_cast solo per il tempo della chiamata al driver.
                 // Siccome siamo nel Kernel e abbiamo il lock, è sicuro.
                 const_cast<iovec&>(srcOrig).iov_base = kBuffer;
@@ -339,6 +369,24 @@ BSubmitCryptoRequest(BCryptoRequest* request)
         return st;*/
         return _FinalizeRequest(request, st);
     }
-    
     return B_NOT_SUPPORTED;
+}
+
+status_t
+BFillBufferWithRandom(void* buffer, size_t length)
+{
+    // Invece di chiamare direttamente RDRAND, cerchiamo il miglior RNG registrato
+    BCryptoRequest req{};
+    iovec vec = { buffer, length };
+    
+    req.operation = B_CRYPTO_DIGEST; // O una costante B_CRYPTO_GENERATE
+    req.algorithm = B_CRYPTO_RNG;
+    req.destination = &vec;
+    req.source = req.destination;
+    req.vectorCount = 1;
+    req.flags = B_CRYPTO_ALG_HW_ACCEL | B_CRYPTO_ALG_KERNEL_SPACE ; // Vogliamo solo hardware!
+    
+    // Passiamo per la logica ufficiale, così se c'è PadLock o RDRAND, 
+    // il Core sceglie quello a priorità maggiore.
+    return BSubmitCryptoRequest(&req);
 }

@@ -8,7 +8,6 @@
 #include <SupportDefs.h>
 #include <os/kernel/OS.h>
 #include <crypto/BCryptoDefs.h> // Il tuo file con le costanti
-#include <crypto/BCryptoRequest.h>
 
 class BCrypto {
 public:

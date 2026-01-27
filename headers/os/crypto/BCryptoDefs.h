@@ -5,19 +5,14 @@
 #ifndef _B_CRYPTO_DEFS_H_
 #define _B_CRYPTO_DEFS_H_
 
+#include <OS.h>
 #include <Drivers.h>
 #include <SupportDefs.h>
+#include <iovec.h>
 #include <Errors.h>
 #ifndef B_PENDING
 #   define B_PENDING B_DEV_PENDING
 #endif
-
-#define B_CRYPTO_IOCTL_GET_RANDOM   _IOWR('crpt', 10, BCryptoRandomRequest)
-/* refuso
-enum {
-    B_CRYPTO_IOCTL_SUBMIT = B_DEVICE_OP_CODES_END + 1
-};
-//#define B_CRYPTO_IOCTL_PROCESS  (B_DEVICE_OP_CODES_END + 1)*/
 
 struct crypto_device_info {
     char vendor_name[32];      // es: "Intel", "VIA", "Hifn"
@@ -44,8 +39,11 @@ enum BCryptoHwCapability {
     B_CRYPTO_HW_AES_NI        = 1 << 0,  // Set di istruzioni x86 (AES-NI)
     B_CRYPTO_HW_SHA_NI        = 1 << 1,  // Set di istruzioni x86 (SHA-NI)
     B_CRYPTO_HW_VIA_PADLOCK   = 1 << 2,  // Motore VIA ACE
-    B_CRYPTO_HW_RNG           = 1 << 3,  // Generatore di numeri casuali (VIA o altro)
-    B_CRYPTO_HW_ACCEL_ENGINE  = 1 << 4   // Dispositivo esterno (PCIe/USB)
+    B_CRYPTO_HW_RNG           = 1 << 3,  // RNG generico
+    B_CRYPTO_HW_ACCEL_ENGINE  = 1 << 4,  // Dispositivo esterno (PCIe/USB)
+    B_CRYPTO_HW_RDRAND        = 1 << 5,  // RNG Intel/AMD
+    B_CRYPTO_HW_PADLOCK_RNG   = 1 << 6   // RNG di VIA PADLOCK
+    
 };
 
 enum BCryptoMode {
@@ -65,14 +63,42 @@ enum BCryptoOperation {
 enum {
     B_CRYPTO_ALG_HW_ACCEL    = 0x01,
     B_CRYPTO_ALG_SOFTWARE    = 0x02,
-    B_CRYPTO_ALG_ASYNC       = 0x04
+    B_CRYPTO_ALG_ASYNC       = 0x04,
+    B_CRYPTO_ALG_KERNEL_SPACE= 0x08
+};
+
+
+
+typedef struct {
+    BCryptoOperation    operation;
+    BCryptoAlgorithmID  algorithm;
+    BCryptoMode         mode;
+    uint32              flags;
+
+    void* key;
+    size_t              keyLength;
+    void* iv;
+    size_t              ivLength;
+
+    const iovec*        source;
+    iovec*              destination;
+    size_t              vectorCount;
+
+    // Sostituiamo il puntatore a funzione con un semaforo
+    sem_id              completionSem; 
+    status_t            result;
+} BCryptoUserRequest;
+
+struct BCryptoRandomRequest {
+    void* buffer;
+    size_t length;
+    status_t result;
 };
 
 enum {
     B_CRYPTO_IOCTL_BASE = B_DEVICE_OP_CODES_END + 100,
-    
+    B_CRYPTO_IOCTL_PROCESS    = B_CRYPTO_IOCTL_BASE + 1,
+    B_CRYPTO_IOCTL_GET_RANDOM = B_CRYPTO_IOCTL_BASE + 2
     // Questo comando invia una richiesta e riceve un risultato
-    B_CRYPTO_IOCTL_PROCESS = B_CRYPTO_IOCTL_BASE
 };
-
 #endif
