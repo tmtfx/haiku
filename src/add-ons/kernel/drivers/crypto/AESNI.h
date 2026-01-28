@@ -7,7 +7,6 @@
 #define _AES_NI_H_
 
 #include <SupportDefs.h>
-//#include "BCryptoDefs.h"
 #include <crypto/BCryptoDefs.h>
 #include "BCryptoCore.h"
 
@@ -20,7 +19,6 @@ struct AESNIContext {
     uint8   iv[16];
 } __attribute__((aligned(16))); // L'allineamento a 16 byte è vitale per SSE
 
-// AGGIUNTA QUI:
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -31,16 +29,4 @@ status_t BInitAESNICrypto();
 }
 #endif
 
-#endif
-
-/*struct AESNIContext {
-    uint8 roundKeys[240];  // max 14 rounds * 16 bytes
-    size_t nr;             // number of rounds
-    uint8 iv[16];          // IV for CBC
-};*/
-/*
-status_t aesni_process_request(BCryptoRequest* request);
-
-status_t BInitAESNICrypto();
-
-#endif // _AES_NI_H_*/
+#endif // _AES_NI_H_

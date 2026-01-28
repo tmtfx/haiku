@@ -6,7 +6,6 @@
 #define _B_PADLOCK_CRYPTO_H_
 
 #include "BCryptoAlgorithm.h"
-//#include "BCryptoDefs.h"
 #include <crypto/BCryptoDefs.h>
 
 struct PadLockAESContext {

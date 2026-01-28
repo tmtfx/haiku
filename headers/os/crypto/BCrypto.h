@@ -33,6 +33,9 @@ private:
 			status_t			_DoOperation(uint32 op, uint8* key, 
 									size_t keyLen, uint8* iv, size_t ivLen,
 									const void* in, void* out, size_t len);
+			BCryptoUserRequest  fInternalReq;
+			iovec               fInternalSrc[32]; // Spazio stabile per i vettori
+            iovec               fInternalDst[32];
 };
 
 #endif // _BCRYPTO_H

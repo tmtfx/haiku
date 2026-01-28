@@ -5,7 +5,6 @@
  */
 #include "PadLock.h"
 #include "BCryptoCore.h"
-//#include "BCryptoDefs.h"
 #include <crypto/BCryptoDefs.h>
 #include "BCryptoCPU.h" // Per BGetStoredCryptoCapabilities
 

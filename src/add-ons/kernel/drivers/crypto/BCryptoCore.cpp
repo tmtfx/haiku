@@ -3,16 +3,9 @@
  * All rights reserved. Distributed under the terms of the MIT license.
  */
 #include "BCryptoCore.h"
-//#include "BCryptoDefs.h"
 #include <crypto/BCryptoDefs.h>
 #include "BCryptoCPU.h"
 #include <string.h>
-
-/*extern "C" {
-    status_t crypto_manager_init();
-    void crypto_manager_uninit();
-    status_t register_crypto_device(crypto_device_info* info);
-}*/
 
 #ifdef __cplusplus
 extern "C" {
@@ -39,8 +32,6 @@ struct MutexLocking {
     static inline void Unlock(Lockable lock) { mutex_unlock(lock); }
 };
 
-//typedef AutoLocker<mutex, mutex_lock, mutex_unlock> MutexLocker;
-//typedef AutoLocker<mutex, MutexLocking::Lock, MutexLocking::Unlock> MutexLocker;
 static void
 secure_memzero(void* p, size_t s)
 {
@@ -66,7 +57,6 @@ crypto_init_core()
 {
     if (sCoreInitialized) return B_OK;
     
-    //dprintf("BCrypto: [2] Entrato in crypto_init_core\n");
     mutex_init(&sCryptoLock, "crypto core lock");
     
     // 1. Inizializza il manager dei dispositivi
@@ -94,8 +84,6 @@ extern "C" void
 crypto_uninit_core()
 {
     if (!sCoreInitialized) return;
-
-    //dprintf("BCrypto: Pulizia Core e Manager\n");
     
     // Svuota la lista degli algoritmi
     MutexLocker _(&sCryptoLock);
@@ -130,7 +118,6 @@ BRegisterCryptoAlgorithm(BCryptoAlgorithm* algorithm)
         return B_NO_MEMORY;
         
     node->algo = algorithm;
-    //sAlgorithms.Add(node);
     //append by priority
     DoublyLinkedList<AlgoNode>::Iterator it = sAlgorithms.GetIterator();
     AlgoNode* insertBefore = nullptr;
@@ -234,7 +221,7 @@ BSubmitCryptoRequest(BCryptoRequest* request)
         // --- SCENARIO 2: Driver Sincroni (AESNI, PadLock, Soft) ---
         // Qui usiamo il loop SMAP
         status_t st = B_OK;
-
+        
         for (size_t i = 0; i < request->vectorCount; i++) {
             // Usiamo riferimenti locali ma non modifichiamo l'originale se const
             const iovec& srcOrig = request->source[i];
@@ -248,8 +235,8 @@ BSubmitCryptoRequest(BCryptoRequest* request)
             
             if (slowFast) {
                 /* slower safer */
-                uint8 stackSrc[kStackThreshold];
-                uint8 stackDst[kStackThreshold];
+                uint8 stackSrc[kStackThreshold] __attribute__((aligned(16)));;
+                uint8 stackDst[kStackThreshold] __attribute__((aligned(16)));;
                 uint8* kSrcBuffer = nullptr;
                 uint8* kDstBuffer = nullptr;
                 bool heapUsed = false;
@@ -303,15 +290,15 @@ BSubmitCryptoRequest(BCryptoRequest* request)
                 if (heapUsed) { free(kSrcBuffer); free(kDstBuffer); }
             } else {
                 /* faster should be inline */
-                uint8 stackBuffer[kStackThreshold]; // Buffer pre-allocato sullo stack
+                uint8 stackBuffer[kStackThreshold] __attribute__((aligned(16)));; // Buffer pre-allocato sullo stack
                 uint8* kBuffer = nullptr;
-                bool usedHeap = false;
+                bool usedHeap = false;//false; se metto true non andrà mai in stack
                 
                 if (len <= kStackThreshold) {
                     kBuffer = stackBuffer;
                 } else {
                 	kBuffer = (uint8*)malloc(len);
-                    if (kBuffer == NULL) return B_NO_MEMORY;
+                    if (kBuffer == NULL) { return B_NO_MEMORY; break; }
                     usedHeap = true;
                 }
                 
@@ -329,13 +316,13 @@ BSubmitCryptoRequest(BCryptoRequest* request)
                     if (usedHeap) free(kBuffer);
                     return B_BAD_ADDRESS;
                 }
-                /* prima del feed_entropy
-
-                if (user_memcpy(kBuffer, oldSrcBase, len) != B_OK) {
-                    if (usedHeap) free(kBuffer);
-                    return B_BAD_ADDRESS;
-                }
-                */
+                
+                // prima del feed_entropy
+                //if (user_memcpy(kBuffer, oldSrcBase, len) != B_OK) {
+                //    if (usedHeap) free(kBuffer);
+                //    return B_BAD_ADDRESS;
+                //}
+                
                 // Usiamo il const_cast solo per il tempo della chiamata al driver.
                 // Siccome siamo nel Kernel e abbiamo il lock, è sicuro.
                 const_cast<iovec&>(srcOrig).iov_base = kBuffer;

@@ -7,7 +7,6 @@
 
 #include <SupportDefs.h>
 #include "BCryptoCore.h"
-//#include "BCryptoDefs.h"
 #include <crypto/BCryptoDefs.h>
 
 // Registrazione RNG PadLock

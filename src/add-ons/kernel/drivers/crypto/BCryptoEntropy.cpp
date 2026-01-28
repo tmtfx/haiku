@@ -4,7 +4,6 @@
  */
 #include "BCryptoEntropy.h"
 #include "BCryptoCore.h"
-//#include "BCryptoDefs.h"
 #include <crypto/BCryptoDefs.h>
 #include <Random.h>
 #include <random.h>

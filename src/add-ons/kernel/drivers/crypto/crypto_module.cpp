@@ -13,9 +13,7 @@
 #include "BCryptoCore.h"
 #include "BCryptoAlgorithm.h"
 #include "BCryptoEntropy.h"
-//#include "BCryptoDefs.h"
 #include <crypto/BCryptoDefs.h>
-#include <debug.h> //da rimuovere una volta verificato
 
 extern "C" status_t crypto_init_core();
 
@@ -24,14 +22,11 @@ struct crypto_module_info {
 	status_t (*register_algorithm)(BCryptoAlgorithm* algorithm);
 	status_t (*unregister_algorithm)(BCryptoAlgorithmID algorithm);
 	status_t (*submit_request)(BCryptoRequest* request);
-//	uint32 (*get_capabilities)();
 };
 
-//static status_t
 extern "C" __attribute__((visibility("default"))) status_t
 crypto_std_ops(int op, ...)
 {
-	//dprintf("BCrypto: [1] Entrato in crypto_std_ops\n");
 	switch (op) {
 		case B_MODULE_INIT:
 		{
@@ -43,7 +38,7 @@ crypto_std_ops(int op, ...)
 			BInitPadLockCrypto();
 			BInitAESNICrypto();
 			BInitSoftCrypto();
-			//BStartEntropyFeeder();
+			BStartEntropyFeeder();
 			return B_OK;
 		}
 		case B_MODULE_UNINIT:
@@ -59,7 +54,6 @@ static struct crypto_module_info sCryptoModuleInfo = {
         0,
         crypto_std_ops
     },
-    // Qui aggiungerai i puntatori alle funzioni del tuo framework
     BRegisterCryptoAlgorithm,
     BUnregisterCryptoAlgorithm,
     BSubmitCryptoRequest

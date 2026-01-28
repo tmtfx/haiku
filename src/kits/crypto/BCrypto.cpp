@@ -1,5 +1,5 @@
 /*
- * Copyright 2018, Your Name <your@email.address>
+ * Copyright 2026, Fabio Tomat <f.t.public@gmail.com>
  * All rights reserved. Distributed under the terms of the MIT license.
  */
 #include "BCrypto.h"
@@ -69,37 +69,44 @@ status_t BCrypto::_DoOperation(uint32 op, uint8* key, size_t keyLen,
 
 	return B_OK;
 }
-
-status_t
-BCrypto::Process(BCryptoUserRequest& userReq)
-{
+status_t BCrypto::Process(BCryptoUserRequest& userReq) {
     if (fFd < 0) return B_NO_INIT;
-        
-    sem_id doneSem = create_sem(0, "crypto_completion");
-    if (doneSem < B_OK) return doneSem;
 
-    userReq.completionSem = doneSem;
-    
-    status_t st = ioctl(fFd, B_CRYPTO_IOCTL_PROCESS, &userReq);
+    // 1. Setup richiesta interna
+    fInternalReq.algorithm = userReq.algorithm;
+    fInternalReq.mode = userReq.mode;
+    fInternalReq.operation = userReq.operation;
+    fInternalReq.key = userReq.key;
+    fInternalReq.keyLength = userReq.keyLength;
+    fInternalReq.iv = userReq.iv;
+    fInternalReq.ivLength = userReq.ivLength;
+    fInternalReq.vectorCount = userReq.vectorCount;
+    fInternalReq.completionSem = -1;
+
+    // 2. Copia dei vettori (per stabilità SMAP)
+    if (userReq.vectorCount > 0 && userReq.vectorCount <= 32) {
+        memcpy(fInternalSrc, userReq.source, sizeof(iovec) * userReq.vectorCount);
+        memcpy(fInternalDst, userReq.destination, sizeof(iovec) * userReq.vectorCount);
+    } else {
+        return B_BAD_VALUE;
+    }
+
+    fInternalReq.source = fInternalSrc;
+    fInternalReq.destination = fInternalDst;
+
+    // 3. Chiamata al Kernel
+    status_t st = ioctl(fFd, B_CRYPTO_IOCTL_PROCESS, &fInternalReq);
+
+    // 4. RITORNO DATI SELETTIVO (Cruciale!)
     if (st == B_OK) {
-        // Se il driver ritorna B_OK ma l'operazione è asincrona (B_PENDING internamente),
-        // aspettiamo il semaforo. Se è già finito, acquire_sem ritorna subito.
-        acquire_sem(doneSem);
-        st = userReq.result;
+        // Aggiorniamo solo il risultato e l'IV, NON i puntatori source/dest
+        userReq.result = fInternalReq.result;
+        
+        // Se il driver ha aggiornato l'IV nella nostra struct interna, 
+        // lo riportiamo nel buffer dell'utente
+        if (userReq.iv != NULL && fInternalReq.iv != NULL) {
+            memcpy(userReq.iv, fInternalReq.iv, userReq.ivLength);
+        }
     }
-
-    delete_sem(doneSem);
-    return st;
-/*
-    if (ioctl(fFd, B_CRYPTO_IOCTL_PROCESS, &userReq) < 0) {
-        delete_sem(doneSem);
-        return B_ERROR;
-    }
-
-    acquire_sem(doneSem);
-
-    status_t result = userReq.result;
-    delete_sem(doneSem);
-
-    return result;*/
+    return (st == B_OK) ? fInternalReq.result : st;
 }

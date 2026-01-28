@@ -5,7 +5,6 @@
 #ifndef _B_CRYPTO_CPU_H_
 #define _B_CRYPTO_CPU_H_
 
-//#include "BCryptoDefs.h"
 #include <crypto/BCryptoDefs.h>
 
 #ifdef __cplusplus

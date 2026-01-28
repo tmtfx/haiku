@@ -1,5 +1,4 @@
 #include "BCryptoDevice.h"
-//#include "BCryptoDefs.h"
 #include <crypto/BCryptoDefs.h>
 #include <lock.h>      // Per mutex
 #include <debug.h>

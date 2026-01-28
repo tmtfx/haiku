@@ -9,7 +9,6 @@
 #include <device_manager.h>
 #include "CryptoDevice.h"
 #include "BCryptoCore.h"
-//#include "BCryptoDefs.h"
 #include <crypto/BCryptoDefs.h>
 #include <crypto/BCryptoKernelInternal.h>
 #include "BCryptoEntropy.h"
@@ -27,12 +26,6 @@ secure_memzero(void* p, size_t s)
 //-----------------------------------------------------------
 // Device hooks
 //-----------------------------------------------------------
-/*static status_t
-crypto_open(const char* name, uint32 flags, void** cookie)
-{
-    *cookie = NULL;
-    return B_OK;
-}*/
 
 static status_t
 crypto_open_modern(void* device_cookie, const char* name, int flags, void** cookie)
@@ -125,7 +118,6 @@ crypto_control(void* cookie, uint32 op, void* arg, size_t length)
             status_t status = BSubmitCryptoRequest(&req);
 
             // Riporta l'IV aggiornato all'utente
-            //user_memcpy(userReq.iv, req.iv, userReq.ivLength);
             if (status == B_OK && userReq.iv != NULL) {
                 if (user_memcpy(userReq.iv, localIV, userReq.ivLength) != B_OK) {
                     // Se fallisce qui, il dato è cifrato ma l'utente non ha l'IV nuovo
@@ -133,11 +125,11 @@ crypto_control(void* cookie, uint32 op, void* arg, size_t length)
                 }
             }
             
-            if (userReq.completionSem >= 0) {
-                userReq.result = status;
-                user_memcpy(arg, &userReq, sizeof(BCryptoUserRequest));
-                release_sem(userReq.completionSem);
-            }
+            //if (userReq.completionSem >= 0) {
+            //    userReq.result = status;
+            //    user_memcpy(arg, &userReq, sizeof(BCryptoUserRequest));
+            //    release_sem(userReq.completionSem);
+            //}
             secure_memzero(localKey, sizeof(localKey));
             secure_memzero(localIV, sizeof(localIV));
 
@@ -196,7 +188,6 @@ crypto_control(void* cookie, uint32 op, void* arg, size_t length)
 }
 
 
-//static device_hooks sCryptoHooks = {
 device_hooks sCryptoHooks = {
     crypto_open_legacy,
     crypto_close,
@@ -244,19 +235,12 @@ extern "C" status_t init_hardware()
 extern "C" status_t init_driver()
 {
 	dprintf("crypto: init_driver\n");
-	/*status_t status = crypto_init_core();
-    if (status != B_OK) {
-        dprintf("crypto: fallimento crypto_init_core!\n");
-        return status;
-    }
-    return B_OK;*/
     return crypto_std_ops(B_MODULE_INIT);
 }
 
 extern "C" void uninit_driver()
 {
 	dprintf("crypto: uninit_driver\n");
-    //crypto_uninit_core();
     crypto_std_ops(B_MODULE_UNINIT);
 }
 

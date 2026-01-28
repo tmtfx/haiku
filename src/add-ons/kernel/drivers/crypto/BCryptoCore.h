@@ -5,7 +5,6 @@
 #ifndef _B_CRYPTO_CORE_H_
 #define _B_CRYPTO_CORE_H_
 
-//#include "BCryptoDefs.h"
 #include <crypto/BCryptoDefs.h>
 #include "BCryptoAlgorithm.h"
 
@@ -16,7 +15,6 @@ extern "C" {
 status_t crypto_init_core();
 void     crypto_uninit_core();
 
-// Questa è la riga incriminata: controlla che il nome sia identico
 uint32   BGetStoredCryptoCapabilities();
 
 status_t BRegisterCryptoAlgorithm(BCryptoAlgorithm* algorithm);
