@@ -7,14 +7,20 @@
 #include <unistd.h>
 #include <string.h>
 #include "BCryptoDefs.h"
+#include <cstdio>
+
 
 BCrypto::BCrypto() {
 	fFd = open("/dev/crypto/v1", O_RDWR);
+	fInternalSrc = new iovec[32];
+    fInternalDst = new iovec[32];
 }
 
 BCrypto::~BCrypto() {
 	if (fFd >= 0)
 		close(fFd);
+	delete[] fInternalSrc;
+    delete[] fInternalDst;
 }
 
 status_t BCrypto::InitCheck() const {
@@ -71,6 +77,12 @@ status_t BCrypto::_DoOperation(uint32 op, uint8* key, size_t keyLen,
 }
 status_t BCrypto::Process(BCryptoUserRequest& userReq) {
     if (fFd < 0) return B_NO_INIT;
+    // Azzeriamo TUTTO prima di iniziare, per evitare rimasugli di vecchie chiamate
+    memset(&fInternalReq, 0, sizeof(fInternalReq));
+    memset(fInternalSrc, 0, sizeof(iovec) * 32);
+    memset(fInternalDst, 0, sizeof(iovec) * 32);
+    
+    if (userReq.vectorCount > 32) return B_BAD_VALUE;
 
     // 1. Setup richiesta interna
     fInternalReq.algorithm = userReq.algorithm;
@@ -83,12 +95,28 @@ status_t BCrypto::Process(BCryptoUserRequest& userReq) {
     fInternalReq.vectorCount = userReq.vectorCount;
     fInternalReq.completionSem = -1;
 
-    // 2. Copia dei vettori (per stabilità SMAP)
+    /*// 2. Copia dei vettori (per stabilità SMAP) // nota questo ha problemi e genera comunque smap
     if (userReq.vectorCount > 0 && userReq.vectorCount <= 32) {
         memcpy(fInternalSrc, userReq.source, sizeof(iovec) * userReq.vectorCount);
         memcpy(fInternalDst, userReq.destination, sizeof(iovec) * userReq.vectorCount);
     } else {
         return B_BAD_VALUE;
+    }*/
+    // 2c. Copia SICURA dei vettori
+    // Invece di fidarci del puntatore, lo trattiamo con i guanti
+    if (userReq.source != NULL && userReq.vectorCount > 0) {
+        printf("BCrypto: Sto per copiare source...\n"); // Debug
+        for (uint32 i = 0; i < userReq.vectorCount; i++) {
+            // Proviamo a copiare i campi manualmente uno ad uno
+            fInternalSrc[i].iov_base = userReq.source[i].iov_base;
+            fInternalSrc[i].iov_len  = userReq.source[i].iov_len;
+        }
+        printf("BCrypto: Copia source completata.\n");
+    }
+    if (userReq.destination != NULL && userReq.vectorCount > 0) {
+        for (uint32 i = 0; i < userReq.vectorCount; i++) {
+            fInternalDst[i] = userReq.destination[i];
+        }
     }
 
     fInternalReq.source = fInternalSrc;
@@ -100,6 +128,7 @@ status_t BCrypto::Process(BCryptoUserRequest& userReq) {
     // 4. RITORNO DATI SELETTIVO (Cruciale!)
     if (st == B_OK) {
         // Aggiorniamo solo il risultato e l'IV, NON i puntatori source/dest
+        /*
         userReq.result = fInternalReq.result;
         
         // Se il driver ha aggiornato l'IV nella nostra struct interna, 
@@ -107,6 +136,7 @@ status_t BCrypto::Process(BCryptoUserRequest& userReq) {
         if (userReq.iv != NULL && fInternalReq.iv != NULL) {
             memcpy(userReq.iv, fInternalReq.iv, userReq.ivLength);
         }
+        */
     }
     return (st == B_OK) ? fInternalReq.result : st;
 }

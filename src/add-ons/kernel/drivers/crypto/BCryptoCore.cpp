@@ -325,16 +325,26 @@ BSubmitCryptoRequest(BCryptoRequest* request)
                 
                 // Usiamo il const_cast solo per il tempo della chiamata al driver.
                 // Siccome siamo nel Kernel e abbiamo il lock, è sicuro.
-                const_cast<iovec&>(srcOrig).iov_base = kBuffer;
-            	dstOrig.iov_base = kBuffer;
+                //const_cast<iovec&>(srcOrig).iov_base = kBuffer;
+            	//dstOrig.iov_base = kBuffer;
             	
             	// 3. ESECUZIONE DEL DRIVER
-                st = algo->Process(request);
+                //st = algo->Process(request);
+                BCryptoRequest localReq = *request; // Copia la struttura base
+                iovec tempSrc = { kBuffer, len };
+                iovec tempDst = { kBuffer, len };
+                localReq.source = &tempSrc;
+                localReq.destination = &tempDst;
+                localReq.vectorCount = 1;
+                localReq.iv = request->iv;
+
+                st = algo->Process(&localReq);
                 
                 if (st == B_OK) {
                 	if (user_memcpy(oldDstBase, kBuffer, len) != B_OK)
                         st = B_BAD_ADDRESS;
                 }
+                
                 
                 // Pulizia di sicurezza (Sensitive data)
                 secure_memzero(kBuffer, len);
