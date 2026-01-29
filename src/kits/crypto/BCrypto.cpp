@@ -105,13 +105,11 @@ status_t BCrypto::Process(BCryptoUserRequest& userReq) {
     // 2c. Copia SICURA dei vettori
     // Invece di fidarci del puntatore, lo trattiamo con i guanti
     if (userReq.source != NULL && userReq.vectorCount > 0) {
-        printf("BCrypto: Sto per copiare source...\n"); // Debug
         for (uint32 i = 0; i < userReq.vectorCount; i++) {
             // Proviamo a copiare i campi manualmente uno ad uno
             fInternalSrc[i].iov_base = userReq.source[i].iov_base;
             fInternalSrc[i].iov_len  = userReq.source[i].iov_len;
         }
-        printf("BCrypto: Copia source completata.\n");
     }
     if (userReq.destination != NULL && userReq.vectorCount > 0) {
         for (uint32 i = 0; i < userReq.vectorCount; i++) {
