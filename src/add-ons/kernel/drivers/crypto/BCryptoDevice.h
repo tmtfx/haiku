@@ -6,11 +6,6 @@
 #define _B_CRYPTO_DEVICE_H_
 
 #include <crypto/BCryptoDefs.h>
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 /**
  * Inizializza le strutture dati del manager dei dispositivi (array/liste e mutex).
  * Chiamato da BCryptoCore durante l'init del driver.
@@ -40,9 +35,5 @@ crypto_device_info* find_best_device(BCryptoAlgorithmID algo);
  * Restituisce il numero di dispositivi hardware registrati.
  */
 int32 get_registered_device_count(void);
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // _B_CRYPTO_DEVICE_H_

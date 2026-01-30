@@ -11,10 +11,6 @@
 
 #include <SupportDefs.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 /* AES context for key schedule */
 typedef struct SoftAESContext {
     uint8 encRoundKeys[240];   // max 14 rounds * 16 bytes
@@ -31,9 +27,5 @@ void soft_aes_decrypt_block(SoftAESContext* ctx, const uint8* in, uint8* out);
 
 /* Securely zeroize context */
 void soft_aes_zero(SoftAESContext* ctx);
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // _SOFT_AES_H_

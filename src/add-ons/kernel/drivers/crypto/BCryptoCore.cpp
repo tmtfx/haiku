@@ -7,15 +7,9 @@
 #include "BCryptoCPU.h"
 #include <string.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-    #include "BCryptoDevice.h" 
+#include "BCryptoDevice.h" 
     // Se BCryptoDevice.h non ha già l'extern "C" al suo interno, 
     // lo forziamo qui per le funzioni del manager.
-#ifdef __cplusplus
-}
-#endif
 
 #include <lock.h>
 #include <util/AutoLock.h>
@@ -52,7 +46,7 @@ struct AlgoNode : DoublyLinkedListLinkImpl<AlgoNode> {
 static DoublyLinkedList<AlgoNode> sAlgorithms;
 static uint32 sCryptoCapabilities = 0;
 
-extern "C" status_t
+status_t
 crypto_init_core()
 {
     if (sCoreInitialized) return B_OK;
@@ -79,7 +73,7 @@ crypto_init_core()
     return B_OK;
 }
 
-extern "C" void
+void
 crypto_uninit_core()
 {
     if (!sCoreInitialized) return;
@@ -195,54 +189,85 @@ BSubmitCryptoRequest(BCryptoRequest* request)
             return _FinalizeRequest(request, st);
         }
         
-        // --- SCENARIO 3: Zero-Copy (Mappatura diretta memmoria utente) ---
-        status_t st = B_OK;
-        for (size_t i = 0; i < request->vectorCount; i++) {
-            const iovec& srcOrig = request->source[i];
-            iovec& dstOrig       = request->destination[i];
-            size_t len = srcOrig.iov_len;
+        if (request->operation == B_CRYPTO_DIGEST) {
+            status_t st = B_OK;
+            size_t lockedCount = 0;
 
-            if (len == 0) continue;
+            // Lock sorgenti
+            for (size_t i = 0; i < request->vectorCount; i++) {
+                st = lock_memory(request->source[i].iov_base, request->source[i].iov_len, B_READ_DEVICE);
+                if (st != B_OK) break;
+                lockedCount++;
+            }
 
-            // 1. Blocchiamo e mappiamo la memoria dell'utente
-            // lock_memory assicura che le pagine non vengano spostate o mandate in swap
-            status_t lockStatus = lock_memory(srcOrig.iov_base, len, B_READ_DEVICE);
-            if (lockStatus != B_OK) return lockStatus;
-
-            // Se sorgente e destinazione sono diverse, blocchiamo anche la destinazione
-            bool separateDest = (srcOrig.iov_base != dstOrig.iov_base);
-            if (separateDest) {
-                st = lock_memory(dstOrig.iov_base, len, B_READ_DEVICE);
-                if (st != B_OK) {
-                    unlock_memory(srcOrig.iov_base, len, B_READ_DEVICE);
-                    return st;
+            if (st == B_OK) {
+                // Lock destinazione
+                st = lock_memory(request->destination[0].iov_base, request->destination[0].iov_len, B_READ_DEVICE);
+                if (st == B_OK) {
+                    __asm__ __volatile__ ("stac" : : : "cc");
+                    st = algo->Process(request); 
+                    __asm__ __volatile__ ("clac" : : : "cc");
+                    
+                    unlock_memory(request->destination[0].iov_base, request->destination[0].iov_len, B_READ_DEVICE);
                 }
             }
-            
-            __asm__ __volatile__ ("stac" : : : "cc");//user_access_enable();
 
-            // 2. Prepariamo una richiesta locale "Direct"
-            // AES-NI può lavorare direttamente sull'indirizzo utente se siamo nel contesto del thread chiamante
-            BCryptoRequest localReq = *request;
-            localReq.source = const_cast<iovec*>(&srcOrig);
-            localReq.destination = &dstOrig;
-            localReq.vectorCount = 1;
-
-            // 3. ESECUZIONE DEL DRIVER (AES-NI)
-            // Ora il driver riceve puntatori che puntano alla RAM fisica dell'utente
-            st = algo->Process(&localReq);
-            
-            __asm__ __volatile__ ("clac" : : : "cc");//user_access_disable();
-
-            // 4. Sblocchiamo la memoria
-            unlock_memory(srcOrig.iov_base, len, B_READ_DEVICE);
-            if (separateDest) {
-                unlock_memory(dstOrig.iov_base, len, B_READ_DEVICE);
+            // Unlock sorgenti (solo quelli effettivamente lockati)
+            for (size_t i = 0; i < lockedCount; i++) {
+                unlock_memory(request->source[i].iov_base, request->source[i].iov_len, B_READ_DEVICE);
             }
+            
+            return _FinalizeRequest(request, st);
+        } else {
+        
+            status_t st = B_OK;
+            for (size_t i = 0; i < request->vectorCount; i++) {
+                const iovec& srcOrig = request->source[i];
+                iovec& dstOrig       = request->destination[i];
+                size_t len = srcOrig.iov_len;
 
-            if (st != B_OK) break;
+                if (len == 0) continue;
+    
+                // 1. Blocchiamo e mappiamo la memoria dell'utente
+                // lock_memory assicura che le pagine non vengano spostate o mandate in swap
+                status_t lockStatus = lock_memory(srcOrig.iov_base, len, B_READ_DEVICE);
+                if (lockStatus != B_OK) return lockStatus;
+
+                // Se sorgente e destinazione sono diverse, blocchiamo anche la destinazione
+                bool separateDest = (srcOrig.iov_base != dstOrig.iov_base);
+                if (separateDest) {
+                    st = lock_memory(dstOrig.iov_base, len, B_READ_DEVICE);
+                    if (st != B_OK) {
+                        unlock_memory(srcOrig.iov_base, len, B_READ_DEVICE);
+                        return st;
+                    }
+                }
+                
+                __asm__ __volatile__ ("stac" : : : "cc");//user_access_enable();
+        
+                // 2. Prepariamo una richiesta locale "Direct"
+                // AES-NI può lavorare direttamente sull'indirizzo utente se siamo nel contesto del thread chiamante
+                BCryptoRequest localReq = *request;
+                localReq.source = const_cast<iovec*>(&srcOrig);
+                localReq.destination = &dstOrig;
+                localReq.vectorCount = 1;
+    
+                        // 3. ESECUZIONE DEL DRIVER (AES-NI)
+                // Ora il driver riceve puntatori che puntano alla RAM fisica dell'utente
+                st = algo->Process(&localReq);
+                
+                __asm__ __volatile__ ("clac" : : : "cc");//user_access_disable();
+    
+                // 4. Sblocchiamo la memoria
+                unlock_memory(srcOrig.iov_base, len, B_READ_DEVICE);
+                if (separateDest) {
+                    unlock_memory(dstOrig.iov_base, len, B_READ_DEVICE);
+                }
+    
+                if (st != B_OK) break;
+            }
+            return _FinalizeRequest(request, st);
         }
-        return _FinalizeRequest(request, st);
     }
     return B_NOT_SUPPORTED;
 }

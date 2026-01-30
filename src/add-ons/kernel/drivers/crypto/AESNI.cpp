@@ -261,6 +261,7 @@ aesni_process_cbc(bool encrypt, AESNIContext* ctx, const uint8* in, uint8* out, 
     _mm_storeu_si128((__m128i*)ctx->iv, iv);
     return B_OK;
 }
+
 static status_t
 aesni_process_ecb(bool encrypt,
                   AESNIContext* ctx,
@@ -381,7 +382,8 @@ out:
     secure_memzero(&ctx, sizeof(ctx));
     return st;
 }
-extern "C" status_t
+
+status_t
 BInitAESNICrypto()
 {
     if (!(BGetStoredCryptoCapabilities() & B_CRYPTO_HW_AES_NI))

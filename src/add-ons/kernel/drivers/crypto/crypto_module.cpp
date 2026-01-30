@@ -5,17 +5,16 @@
 #include <module.h>
 #include <KernelExport.h>
 
+#include "BCryptoCore.h"
+#include "BCryptoAlgorithm.h"
+#include "BCryptoEntropy.h"
+#include <crypto/BCryptoDefs.h>
 #include "PadLockRNG.h"
 #include "PadLock.h"
 #include "AESNI.h"
 #include "x86CPURNG.h"
 #include "SoftCrypto.h"
-#include "BCryptoCore.h"
-#include "BCryptoAlgorithm.h"
-#include "BCryptoEntropy.h"
-#include <crypto/BCryptoDefs.h>
-
-extern "C" status_t crypto_init_core();
+#include "SoftDigest.h"
 
 struct crypto_module_info {
 	module_info info;
@@ -39,6 +38,7 @@ crypto_std_ops(int op, ...)
 			BInitAESNICrypto();
 			BInitSoftCrypto();
 			BStartEntropyFeeder();
+			BInitSoftDigest();
 			return B_OK;
 		}
 		case B_MODULE_UNINIT:

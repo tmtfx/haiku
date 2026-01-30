@@ -23,6 +23,8 @@ KernelAddon crypto :
     x86CPURNG.cpp
     SoftCrypto.cpp
     soft_aes.cpp
+    SoftDigest.cpp
+    soft_sha.cpp
 ;
 
 AddFilesToHaikuImage system add-ons kernel drivers bin : crypto ;

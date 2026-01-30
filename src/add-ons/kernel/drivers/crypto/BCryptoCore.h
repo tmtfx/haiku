@@ -8,10 +8,6 @@
 #include <crypto/BCryptoDefs.h>
 #include "BCryptoAlgorithm.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 status_t crypto_init_core();
 void     crypto_uninit_core();
 
@@ -21,9 +17,5 @@ status_t BRegisterCryptoAlgorithm(BCryptoAlgorithm* algorithm);
 status_t BUnregisterCryptoAlgorithm(BCryptoAlgorithmID algorithm);
 status_t BSubmitCryptoRequest(BCryptoRequest* request);
 status_t BFillBufferWithRandom(void* buffer, size_t length);
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // _B_CRYPTO_CORE_H_

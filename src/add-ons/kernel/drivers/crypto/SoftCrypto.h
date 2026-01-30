@@ -8,22 +8,12 @@
 
 #include <SupportDefs.h>
 #include "BCryptoCore.h"
-//#include "BCryptoDefs.h"
 #include <crypto/BCryptoDefs.h>
-#include "soft_aes.h" // AES core
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 /* BCryptoRequest adapter for software AES CBC */
 status_t soft_aes_cbc_process(BCryptoRequest* request);
 
 /* Register software AES fallback */
 status_t BInitSoftCrypto(void);
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // _SOFT_CRYPTO_H_

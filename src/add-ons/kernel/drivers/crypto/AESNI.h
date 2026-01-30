@@ -19,14 +19,6 @@ struct AESNIContext {
     uint8   iv[16];
 } __attribute__((aligned(16))); // L'allineamento a 16 byte è vitale per SSE
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 status_t BInitAESNICrypto();
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // _AES_NI_H_

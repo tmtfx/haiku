@@ -10,7 +10,7 @@ static crypto_device_info sRegisteredDevices[MAX_CRYPTO_DEVICES];
 static int32 sDeviceCount = 0;
 static mutex sDeviceListLock;
 
-extern "C" {
+
 // Inizializza il manager
 status_t
 crypto_manager_init()
@@ -80,6 +80,4 @@ crypto_manager_uninit()
     
     mutex_unlock(&sDeviceListLock);
     mutex_destroy(&sDeviceListLock);
-}
-
 }

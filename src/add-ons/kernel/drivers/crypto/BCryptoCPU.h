@@ -7,18 +7,10 @@
 
 #include <crypto/BCryptoDefs.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-/**
+/*
  * Rileva le capacità crittografiche della CPU (AES-NI, SHA, VIA PadLock)
  * e riempie la struttura crypto_device_info fornita.
  */
 status_t BGetCPUCryptoInfo(crypto_device_info* info);
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // _B_CRYPTO_CPU_H_
