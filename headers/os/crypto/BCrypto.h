@@ -24,7 +24,7 @@ public:
 			ssize_t             Decrypt(uint8* key, size_t keyLen, 
 			                            uint8* iv, size_t ivLen,
                                         const void* in, size_t inLen, 
-                                        void* out, size_t outSize) 
+                                        void* out, size_t outSize);
 			ssize_t             Encrypt(uint8* key, size_t keyLen, 
                                         uint8* iv, size_t ivLen,
                                         const void* in, size_t inLen, 
