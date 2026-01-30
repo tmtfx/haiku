@@ -102,5 +102,6 @@ BInitx86CPURNG()
 
     return BRegisterCryptoAlgorithm(&sCPURNG);
 }
-
+#else
+status_t BInitx86CPURNG() { return B_NOT_SUPPORTED; }
 #endif

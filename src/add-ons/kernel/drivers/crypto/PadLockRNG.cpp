@@ -89,5 +89,6 @@ BInitPadLockRNG()
 
     return BRegisterCryptoAlgorithm(&sPadLockRNG);
 }
-
+#else
+status_t BInitPadLockRNG() { return B_NOT_SUPPORTED; }
 #endif
