@@ -10,6 +10,11 @@
 #include <cstdio>
 #include <new>
 
+#include <vector>
+#include <algorithm>
+#define MAX_KERNEL_VECTORS 32
+#define COALESCE_THRESHOLD (128 * 1024) // 128 KB
+
 
 BCrypto::BCrypto() : fFd(-1),
       fPaddingEnabled(true),        // Di default lo abilitiamo (scelta sicura)
@@ -230,11 +235,79 @@ BCrypto::Decrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
     // Restituiamo il numero di byte "reali" (senza padding)
     return (ssize_t)finalLen;
 }
-
-status_t BCrypto::Process(BCryptoUserRequest& userReq) {
+status_t 
+BCrypto::Process(BCryptoUserRequest& userReq) 
+{
     if (fFd < 0) return B_NO_INIT;
-    
-    status_t st = ioctl(fFd, B_CRYPTO_IOCTL_PROCESS, &userReq);
-    if (st < 0) return B_ERROR;
-	return userReq.result;
+
+    const size_t kMinZeroCopySize = 4096; 
+    const int kMaxVects = 32;
+
+    size_t vIndex = 0;
+    while (vIndex < userReq.vectorCount) {
+        
+        // Se il vettore attuale è piccolo, usiamo il Coalescing (Ottimizzato)
+        if (userReq.source[vIndex].iov_len < kMinZeroCopySize) {
+            size_t coalesceTotal = 0;
+            int vInCoalesce = 0;
+            int maxToScan = std::min(kMaxVects, (int)(userReq.vectorCount - vIndex));
+            
+            for (int j = 0; j < maxToScan; j++) {
+                // Ci fermiamo se il totale diventa troppo grande o troviamo un vettore "gigante"
+                if (userReq.source[vIndex + j].iov_len >= kMinZeroCopySize) break;
+                
+                coalesceTotal += userReq.source[vIndex + j].iov_len;
+                vInCoalesce++;
+            }
+
+            void* bounceBuffer = malloc(coalesceTotal);
+            if (!bounceBuffer) return B_NO_MEMORY;
+
+            // PACK
+            size_t offset = 0;
+            for (int j = 0; j < vInCoalesce; j++) {
+                memcpy((uint8*)bounceBuffer + offset, userReq.source[vIndex + j].iov_base, userReq.source[vIndex + j].iov_len);
+                offset += userReq.source[vIndex + j].iov_len;
+            }
+
+            iovec singleIov = { bounceBuffer, coalesceTotal };
+            BCryptoUserRequest batchReq = userReq;
+            batchReq.source = &singleIov;
+            batchReq.destination = &singleIov;
+            batchReq.vectorCount = 1;
+
+            status_t err = ioctl(fFd, B_CRYPTO_IOCTL_PROCESS, &batchReq);
+
+            if (err >= 0) {
+                offset = 0;
+                for (int j = 0; j < vInCoalesce; j++) {
+                    memcpy(userReq.destination[vIndex + j].iov_base, (uint8*)bounceBuffer + offset, userReq.destination[vIndex + j].iov_len);
+                    offset += userReq.destination[vIndex + j].iov_len;
+                }
+            }
+
+            free(bounceBuffer);
+            if (err < 0) return err;
+            vIndex += vInCoalesce;
+
+        } else {
+            // --- STRATEGIA: ZERO-COPY DIRETTO (VELOCE) ---
+            // Se il vettore è grande, ne mandiamo fino a 32 in un colpo solo.
+            // Non stiamo a fare troppi controlli, il driver gestirà il resto.
+            
+            int vInDirect = std::min(kMaxVects, (int)(userReq.vectorCount - vIndex));
+
+            BCryptoUserRequest directReq = userReq;
+            directReq.source = &userReq.source[vIndex];
+            directReq.destination = &userReq.destination[vIndex];
+            directReq.vectorCount = vInDirect;
+
+            status_t err = ioctl(fFd, B_CRYPTO_IOCTL_PROCESS, &directReq);
+            if (err < 0) return err;
+
+            vIndex += vInDirect;
+        }
+    }
+
+    return B_OK;
 }
