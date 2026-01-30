@@ -7,7 +7,7 @@
 
 #include <SupportDefs.h>
 #include <os/kernel/OS.h>
-#include <crypto/BCryptoDefs.h> // Il tuo file con le costanti
+#include <crypto/BCryptoDefs.h>
 
 class BCrypto {
 public:
@@ -16,26 +16,30 @@ public:
 
 			status_t			InitCheck() const;
 
-			// Metodi semplificati
+
 			status_t			GetRandomBytes(void* buffer, size_t len);
-			
-			status_t			Encrypt(uint8* key, size_t keyLen,
-									uint8* iv, size_t ivLen,
-									const void* in, void* out, size_t len);
-									
-			status_t			Decrypt(uint8* key, size_t keyLen,
-									uint8* iv, size_t ivLen,
-									const void* in, void* out, size_t len);
+			void                SetPadding(bool enable, BCryptoPaddingType type = B_CRYPTO_PKCS7);
+			size_t              GetOutputSize(size_t inputLen, BCryptoOperation op);
+			// Shorthand methods
+			ssize_t             Decrypt(uint8* key, size_t keyLen, 
+			                            uint8* iv, size_t ivLen,
+                                        const void* in, size_t inLen, 
+                                        void* out, size_t outSize) 
+			ssize_t             Encrypt(uint8* key, size_t keyLen, 
+                                        uint8* iv, size_t ivLen,
+                                        const void* in, size_t inLen, 
+                                        void* out, size_t outSize);
 			status_t			Process(BCryptoUserRequest& userReq);
 
 private:
 			int					fFd;
+			bool                fPaddingEnabled;
+			BCryptoPaddingType  fPaddingType;
+			uint8               fLastBlockBuffer[16];
+			size_t fBufferSize;
 			status_t			_DoOperation(uint32 op, uint8* key, 
 									size_t keyLen, uint8* iv, size_t ivLen,
 									const void* in, void* out, size_t len);
-			BCryptoUserRequest  fInternalReq;
-			iovec*              fInternalSrc; // Puntatore invece di array fisso
-            iovec*              fInternalDst;
 };
 
 #endif // _BCRYPTO_H

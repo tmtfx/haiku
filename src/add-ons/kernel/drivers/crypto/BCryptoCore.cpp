@@ -32,15 +32,15 @@ struct MutexLocking {
     static inline void Unlock(Lockable lock) { mutex_unlock(lock); }
 };
 
-static void
-secure_memzero(void* p, size_t s)
-{
-    if (p == NULL)
-        return;
-    volatile uint8* cp = (volatile uint8*)p;
-    while (s--)
-        *cp++ = 0;
-}
+//static void
+//secure_memzero(void* p, size_t s)
+//{
+//    if (p == NULL)
+//        return;
+//    volatile uint8* cp = (volatile uint8*)p;
+//    while (s--)
+//        *cp++ = 0;
+//}
 
 static mutex sCryptoLock;
 static bool sCoreInitialized = false;
@@ -71,7 +71,6 @@ crypto_init_core()
     if (BGetCPUCryptoInfo(&cpuInfo) == B_OK) {
         status = register_crypto_device(&cpuInfo);
         if (status == B_OK) {
-            //dprintf("BCrypto: CPU registrata nel Manager.\n");
             sCryptoCapabilities = cpuInfo.hw_type; 
         }
     }
@@ -107,7 +106,6 @@ BGetStoredCryptoCapabilities()
 status_t
 BRegisterCryptoAlgorithm(BCryptoAlgorithm* algorithm)
 {
-	//dprintf("BCrypto: Registro algo %d, priorità %d\n", algorithm->algorithm, algorithm->priority);
 	if (!algorithm)
         return B_BAD_VALUE;
         
@@ -165,23 +163,6 @@ static status_t _FinalizeRequest(BCryptoRequest* request, status_t st) {
 status_t
 BSubmitCryptoRequest(BCryptoRequest* request)
 {
-	// TODO malloc is slow!!!!!! maybe we can use lock_memory
-	/*
-	 * This bool flag (slowFast) is for debug purposes:
-	 * using a single buffer extremely improves performance
-	 * as AES-NI works on XMM registers, usually working in-place
-	 * doesn't corrupt data (no source overwrite while reading)
-	 *
-	 * in case data would be loaded in a different way by a future driver 
-	 * this would cause problems.
-	 * 
-	 * if it's not a problem, using slowFast as false gives a 1,5x 
-	 * boost in performance
-	*/
-	bool slowFast = false;
-	// Soglia sicura per lavorare sullo stack: 512 byte ( Small Buffer Optimization )
-	const size_t kStackThreshold = 512;
-	
     if (!request) {
         return B_BAD_VALUE;
     }
@@ -194,8 +175,6 @@ BSubmitCryptoRequest(BCryptoRequest* request)
 
         if (algo->algorithm != request->algorithm) continue;
 
-        //if (algo->mode != request->mode && request->mode != 0)
-        //    continue;
         if (algo->mode != B_CRYPTO_MODE_ANY) {
             // Verifichiamo se il bit richiesto è presente nella maschera del driver
             // Esempio: (3 & 2) -> 2. Se il risultato è 0, il bit non c'è.
@@ -216,154 +195,53 @@ BSubmitCryptoRequest(BCryptoRequest* request)
             return _FinalizeRequest(request, st);
         }
         
-        
-        
-        // --- SCENARIO 2: Driver Sincroni (AESNI, PadLock, Soft) ---
-        // Qui usiamo il loop SMAP
+        // --- SCENARIO 3: Zero-Copy (Mappatura diretta memmoria utente) ---
         status_t st = B_OK;
-        
         for (size_t i = 0; i < request->vectorCount; i++) {
-            // Usiamo riferimenti locali ma non modifichiamo l'originale se const
             const iovec& srcOrig = request->source[i];
             iovec& dstOrig       = request->destination[i];
             size_t len = srcOrig.iov_len;
+
             if (len == 0) continue;
-            
-            // Salviamo gli indirizzi utente originali
-            void* oldSrcBase = srcOrig.iov_base;
-            void* oldDstBase = dstOrig.iov_base;
-            
-            if (slowFast) {
-                /* slower safer */
-                uint8 stackSrc[kStackThreshold] __attribute__((aligned(16)));;
-                uint8 stackDst[kStackThreshold] __attribute__((aligned(16)));;
-                uint8* kSrcBuffer = nullptr;
-                uint8* kDstBuffer = nullptr;
-                bool heapUsed = false;
-				if (len <= kStackThreshold) {
-					kSrcBuffer = stackSrc;
-                    kDstBuffer = stackDst;
-                } else {
-                    kSrcBuffer = (uint8*)malloc(len);
-                    kDstBuffer = (uint8*)malloc(len);
-                    if (!kSrcBuffer || !kDstBuffer) {
-                        free(kSrcBuffer); free(kDstBuffer);
-                        return B_NO_MEMORY;
-                    }
-                    heapUsed = true;
-                }
-                status_t status;
-                if (request->flags & B_CRYPTO_ALG_KERNEL_SPACE) {
-                    memcpy(kSrcBuffer, srcOrig.iov_base, len);
-                    status = B_OK;
-                } else {
-                    status = user_memcpy(kSrcBuffer, srcOrig.iov_base, len);
-                }
 
-                if (status != B_OK) {
-                    if (heapUsed) { free(kSrcBuffer); free(kDstBuffer); }
-                    return B_BAD_ADDRESS;
-                }
-                /* prima di feed entropy
-            
-                if (user_memcpy(kSrcBuffer, srcOrig.iov_base, len) != B_OK) {
-                    if (heapUsed) { free(kSrcBuffer); free(kDstBuffer); }
-                    return B_BAD_ADDRESS;
-                }
-                */
-                
-                // Usiamo il const_cast solo per il tempo della chiamata al driver.
-                // Siccome siamo nel Kernel e abbiamo il lock, è sicuro.
-                const_cast<iovec&>(srcOrig).iov_base = kSrcBuffer;
-                dstOrig.iov_base = kDstBuffer;
-                
-                // 3. ESECUZIONE DEL DRIVER
-                st = algo->Process(request);
-                
-                if (st == B_OK) {
-                	if (user_memcpy(oldDstBase, kDstBuffer, len) != B_OK)
-                        st = B_BAD_ADDRESS;
-                }
-                
-                secure_memzero(kSrcBuffer, len);
-                secure_memzero(kDstBuffer, len);
-                if (heapUsed) { free(kSrcBuffer); free(kDstBuffer); }
-            } else {
-                /* faster should be inline */
-                uint8 stackBuffer[kStackThreshold] __attribute__((aligned(16)));; // Buffer pre-allocato sullo stack
-                uint8* kBuffer = nullptr;
-                bool usedHeap = false;//false; se metto true non andrà mai in stack
-                
-                if (len <= kStackThreshold) {
-                    kBuffer = stackBuffer;
-                } else {
-                	kBuffer = (uint8*)malloc(len);
-                    if (kBuffer == NULL) { return B_NO_MEMORY; break; }
-                    usedHeap = true;
-                }
-                
-                status_t memcpy_status;
-                if (request->flags & B_CRYPTO_ALG_KERNEL_SPACE) {
-                    // Se la richiesta viene dal kernel (come il nostro feeder)
-                    memcpy(kBuffer, oldSrcBase, len);
-                    memcpy_status = B_OK;
-                } else {
-                    // Se viene da un IOCTL (spazio utente)
-                    memcpy_status = user_memcpy(kBuffer, oldSrcBase, len);
-                }
+            // 1. Blocchiamo e mappiamo la memoria dell'utente
+            // lock_memory assicura che le pagine non vengano spostate o mandate in swap
+            status_t lockStatus = lock_memory(srcOrig.iov_base, len, B_READ_DEVICE);
+            if (lockStatus != B_OK) return lockStatus;
 
-                if (memcpy_status != B_OK) {
-                    if (usedHeap) free(kBuffer);
-                    return B_BAD_ADDRESS;
+            // Se sorgente e destinazione sono diverse, blocchiamo anche la destinazione
+            bool separateDest = (srcOrig.iov_base != dstOrig.iov_base);
+            if (separateDest) {
+                st = lock_memory(dstOrig.iov_base, len, B_READ_DEVICE);
+                if (st != B_OK) {
+                    unlock_memory(srcOrig.iov_base, len, B_READ_DEVICE);
+                    return st;
                 }
-                
-                // prima del feed_entropy
-                //if (user_memcpy(kBuffer, oldSrcBase, len) != B_OK) {
-                //    if (usedHeap) free(kBuffer);
-                //    return B_BAD_ADDRESS;
-                //}
-                
-                // Usiamo il const_cast solo per il tempo della chiamata al driver.
-                // Siccome siamo nel Kernel e abbiamo il lock, è sicuro.
-                //const_cast<iovec&>(srcOrig).iov_base = kBuffer;
-            	//dstOrig.iov_base = kBuffer;
-            	
-            	// 3. ESECUZIONE DEL DRIVER
-                //st = algo->Process(request);
-                BCryptoRequest localReq = *request; // Copia la struttura base
-                iovec tempSrc = { kBuffer, len };
-                iovec tempDst = { kBuffer, len };
-                localReq.source = &tempSrc;
-                localReq.destination = &tempDst;
-                localReq.vectorCount = 1;
-                localReq.iv = request->iv;
-
-                st = algo->Process(&localReq);
-                
-                if (st == B_OK) {
-                	if (user_memcpy(oldDstBase, kBuffer, len) != B_OK)
-                        st = B_BAD_ADDRESS;
-                }
-                
-                
-                // Pulizia di sicurezza (Sensitive data)
-                secure_memzero(kBuffer, len);
-                if (usedHeap) free(kBuffer);
             }
-            // Ripristiniamo i puntatori originali per l'utente/callback
-            const_cast<iovec&>(srcOrig).iov_base = oldSrcBase;
-            dstOrig.iov_base = oldDstBase;
             
+            __asm__ __volatile__ ("stac" : : : "cc");//user_access_enable();
+
+            // 2. Prepariamo una richiesta locale "Direct"
+            // AES-NI può lavorare direttamente sull'indirizzo utente se siamo nel contesto del thread chiamante
+            BCryptoRequest localReq = *request;
+            localReq.source = const_cast<iovec*>(&srcOrig);
+            localReq.destination = &dstOrig;
+            localReq.vectorCount = 1;
+
+            // 3. ESECUZIONE DEL DRIVER (AES-NI)
+            // Ora il driver riceve puntatori che puntano alla RAM fisica dell'utente
+            st = algo->Process(&localReq);
+            
+            __asm__ __volatile__ ("clac" : : : "cc");//user_access_disable();
+
+            // 4. Sblocchiamo la memoria
+            unlock_memory(srcOrig.iov_base, len, B_READ_DEVICE);
+            if (separateDest) {
+                unlock_memory(dstOrig.iov_base, len, B_READ_DEVICE);
+            }
+
             if (st != B_OK) break;
         }
-
-        /*// 5. GESTIONE CALLBACK
-        if (request->completionCallback) {
-            request->completionCallback(request, st);
-            return B_OK; 
-        }
-
-        return st;*/
         return _FinalizeRequest(request, st);
     }
     return B_NOT_SUPPORTED;

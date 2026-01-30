@@ -8,28 +8,29 @@
 #include <string.h>
 #include "BCryptoDefs.h"
 #include <cstdio>
+#include <new>
 
 
-BCrypto::BCrypto() {
+BCrypto::BCrypto() : fFd(-1),
+      fPaddingEnabled(true),        // Di default lo abilitiamo (scelta sicura)
+      fPaddingType(B_CRYPTO_PKCS7), // Standard universale
+{
 	fFd = open("/dev/crypto/v1", O_RDWR);
-	fInternalSrc = new iovec[32];
-    fInternalDst = new iovec[32];
 }
 
 BCrypto::~BCrypto() {
 	if (fFd >= 0)
 		close(fFd);
-	delete[] fInternalSrc;
-    delete[] fInternalDst;
 }
 
 status_t BCrypto::InitCheck() const {
 	return fFd >= 0 ? B_OK : B_ERROR;
 }
 
-status_t BCrypto::Encrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
-	const void* in, void* out, size_t len) {
-	return _DoOperation(B_CRYPTO_ENCRYPT, key, keyLen, iv, ivLen, in, out, len);
+void
+BCrypto::SetPadding(bool enable,BCryptoPaddingType type){
+	fPaddingEnabled=enable;
+	fPaddingType=type;
 }
 
 status_t 
@@ -48,93 +49,192 @@ BCrypto::GetRandomBytes(void* buffer, size_t len)
     return req.result;
 }
 
-status_t BCrypto::_DoOperation(uint32 op, uint8* key, size_t keyLen, 
-	uint8* iv, size_t ivLen, const void* in, void* out, size_t len) {
-	
-	if (fFd < 0) return B_NO_INIT;
 
-	iovec src = { (void*)in, len };
-	iovec dst = { out, len };
-	
-	BCryptoUserRequest req;
-	memset(&req, 0, sizeof(req));
-	
-	req.operation = static_cast<BCryptoOperation>(op);
-	req.algorithm = B_CRYPTO_AES; // O parametrizzabile
-	req.mode = B_CRYPTO_MODE_CBC;
-	req.key = key;
-	req.keyLength = keyLen;
-	req.iv = iv;
-	req.ivLength = ivLen;
-	req.source = &src;
-	req.destination = &dst;
-	req.vectorCount = 1;
+size_t 
+BCrypto::GetOutputSize(size_t inputLen, BCryptoOperation op)
+{
+    if (!fPaddingEnabled || fPaddingType == B_CRYPTO_PADDING_NONE)
+        return inputLen;
 
-	if (ioctl(fFd, B_CRYPTO_IOCTL_PROCESS, &req) < 0)
-		return B_ERROR;
-
-	return B_OK;
+    if (op == B_CRYPTO_ENCRYPT) {
+       switch (fPaddingType) {
+            case B_CRYPTO_PKCS7:
+            case B_CRYPTO_ISO7816:
+                // Arrotonda sempre al multiplo di 16 successivo
+                // Se inputLen è 16, diventa 32. Se è 15, diventa 16.
+                return (inputLen + 16) & ~15;
+            
+            case B_CRYPTO_ZERO_PADDING:
+                // Solo se necessario per arrivare a 16
+                return (inputLen + 15) & ~15;
+                
+            default:
+                return inputLen;
+        }
+    }
+    return inputLen; // Per Decrypt restituiamo la dimensione del buffer cifrato
 }
+
+
+ssize_t 
+BCrypto::Encrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
+                 const void* in, size_t inLen, void* out, size_t outSize) 
+{
+    size_t requiredSize = GetOutputSize(inLen, B_CRYPTO_ENCRYPT);
+    if (outSize < requiredSize)
+        return B_BAD_VALUE;
+
+    uint8* dataToProcess = (uint8*)in;
+    uint8* tempBuffer = nullptr;
+    size_t processLen = inLen;
+
+    if (fPaddingEnabled && fPaddingType != B_CRYPTO_PADDING_NONE) {
+        processLen = requiredSize;
+        tempBuffer = new(std::nothrow) uint8[processLen];
+        if (!tempBuffer) return B_NO_MEMORY;
+        
+        memcpy(tempBuffer, in, inLen);
+        size_t padLen = processLen - inLen;
+        switch (fPaddingType) {
+            case B_CRYPTO_PKCS7:
+                // Ogni byte ha il valore della lunghezza del padding (es. 0x03, 0x03, 0x03)
+                memset(tempBuffer + inLen, (uint8)padLen, padLen);
+                break;
+
+            case B_CRYPTO_ISO7816:
+                // Il primo byte è 0x80, i restanti sono 0x00
+                tempBuffer[inLen] = 0x80;
+                if (padLen > 1)
+                    memset(tempBuffer + inLen + 1, 0, padLen - 1);
+                break;
+
+            case B_CRYPTO_ZERO_PADDING:
+                // Tutti i byte sono 0x00
+                memset(tempBuffer + inLen, 0, padLen);
+                break;
+
+            default:
+                // Se non gestito, facciamo finta di nulla o diamo errore
+                delete[] tempBuffer;
+                return B_NOT_SUPPORTED;
+        }
+        
+        dataToProcess = tempBuffer;
+    }
+
+    // Usiamo lo shortcut dei parametri pre-configurati
+    BCryptoUserRequest req;
+    memset(&req, 0, sizeof(req));
+    req.operation   = B_CRYPTO_ENCRYPT;
+    req.algorithm   = B_CRYPTO_AES;
+    req.mode        = B_CRYPTO_MODE_CBC;
+    req.key         = key;
+    req.keyLength   = keyLen;
+    req.iv          = iv;
+    req.ivLength    = ivLen;
+    
+    iovec src = { dataToProcess, processLen };
+    iovec dst = { out, processLen };
+    req.source      = &src;
+    req.destination = &dst;
+    req.vectorCount = 1;
+
+    status_t st = Process(req);
+    
+    if (tempBuffer) delete[] tempBuffer;
+
+    if (st != B_OK) return st;
+    return (ssize_t)processLen;
+}
+ssize_t 
+BCrypto::Decrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
+                 const void* in, size_t inLen, void* out, size_t outSize) 
+{
+    // Validazione base: AES richiede blocchi da 16
+    if (inLen == 0 || (inLen % 16) != 0 || outSize < inLen)
+        return B_BAD_VALUE;
+
+    iovec src = { (void*)in, inLen };
+    iovec dst = { out, inLen };
+
+    BCryptoUserRequest req;
+    memset(&req, 0, sizeof(req));
+    req.operation   = B_CRYPTO_DECRYPT;
+    req.algorithm   = B_CRYPTO_AES;
+    req.mode        = B_CRYPTO_MODE_CBC;
+    req.key         = key;
+    req.keyLength   = keyLen;
+    req.iv          = iv;
+    req.ivLength    = ivLen;
+    req.source      = &src;
+    req.destination = &dst;
+    req.vectorCount = 1;
+
+    status_t st = Process(req);
+    if (st != B_OK) return st;
+
+    size_t finalLen = inLen;
+
+    if (fPaddingEnabled && fPaddingType != B_CRYPTO_PADDING_NONE) {
+        uint8* pOut = (uint8*)out;
+
+        switch (fPaddingType) {
+            case B_CRYPTO_PKCS7: {
+                uint8 padValue = pOut[inLen - 1];
+                // Il valore del padding deve essere tra 1 e 16
+                if (padValue < 1 || padValue > 16) 
+                    return B_BAD_DATA;
+
+                // 2. TUTTI i byte del padding devono avere lo stesso valore
+                for (size_t i = inLen - padValue; i < inLen; i++) {
+                    if (pOut[i] != padValue)
+                        return B_BAD_DATA; // Padding non valido!
+                }
+                
+                finalLen = inLen - padValue;
+                break;
+            }
+
+            case B_CRYPTO_ISO7816: {
+                // Il padding ISO7816 deve finire con 0x80 seguito da zero o più 0x00
+                // Cerchiamo lo 0x80 partendo dal fondo
+                ssize_t i = inLen - 1;
+                while (i >= (ssize_t)(inLen - 16) && pOut[i] == 0x00) {
+                    i--;
+                }
+                
+                if (i >= 0 && pOut[i] == 0x80) {
+                    finalLen = i;
+                } else {
+                    return B_BAD_DATA; // Non abbiamo trovato lo 0x80 dove previsto
+                }
+                break;
+            }
+
+            case B_CRYPTO_ZERO_PADDING: {
+                // Cerchiamo il primo byte non zero partendo dal fondo
+                finalLen = 0;
+                for (ssize_t i = inLen - 1; i >= 0; i--) {
+                    if (pOut[i] != 0x00) {
+                        finalLen = i + 1;
+                        break;
+                    }
+                }
+                break;
+            }
+
+            default:
+                break;
+        }
+    }
+    // Restituiamo il numero di byte "reali" (senza padding)
+    return (ssize_t)finalLen;
+}
+
 status_t BCrypto::Process(BCryptoUserRequest& userReq) {
     if (fFd < 0) return B_NO_INIT;
-    // Azzeriamo TUTTO prima di iniziare, per evitare rimasugli di vecchie chiamate
-    memset(&fInternalReq, 0, sizeof(fInternalReq));
-    memset(fInternalSrc, 0, sizeof(iovec) * 32);
-    memset(fInternalDst, 0, sizeof(iovec) * 32);
     
-    if (userReq.vectorCount > 32) return B_BAD_VALUE;
-
-    // 1. Setup richiesta interna
-    fInternalReq.algorithm = userReq.algorithm;
-    fInternalReq.mode = userReq.mode;
-    fInternalReq.operation = userReq.operation;
-    fInternalReq.key = userReq.key;
-    fInternalReq.keyLength = userReq.keyLength;
-    fInternalReq.iv = userReq.iv;
-    fInternalReq.ivLength = userReq.ivLength;
-    fInternalReq.vectorCount = userReq.vectorCount;
-    fInternalReq.completionSem = -1;
-
-    /*// 2. Copia dei vettori (per stabilità SMAP) // nota questo ha problemi e genera comunque smap
-    if (userReq.vectorCount > 0 && userReq.vectorCount <= 32) {
-        memcpy(fInternalSrc, userReq.source, sizeof(iovec) * userReq.vectorCount);
-        memcpy(fInternalDst, userReq.destination, sizeof(iovec) * userReq.vectorCount);
-    } else {
-        return B_BAD_VALUE;
-    }*/
-    // 2c. Copia SICURA dei vettori
-    // Invece di fidarci del puntatore, lo trattiamo con i guanti
-    if (userReq.source != NULL && userReq.vectorCount > 0) {
-        for (uint32 i = 0; i < userReq.vectorCount; i++) {
-            // Proviamo a copiare i campi manualmente uno ad uno
-            fInternalSrc[i].iov_base = userReq.source[i].iov_base;
-            fInternalSrc[i].iov_len  = userReq.source[i].iov_len;
-        }
-    }
-    if (userReq.destination != NULL && userReq.vectorCount > 0) {
-        for (uint32 i = 0; i < userReq.vectorCount; i++) {
-            fInternalDst[i] = userReq.destination[i];
-        }
-    }
-
-    fInternalReq.source = fInternalSrc;
-    fInternalReq.destination = fInternalDst;
-
-    // 3. Chiamata al Kernel
-    status_t st = ioctl(fFd, B_CRYPTO_IOCTL_PROCESS, &fInternalReq);
-
-    // 4. RITORNO DATI SELETTIVO (Cruciale!)
-    if (st == B_OK) {
-        // Aggiorniamo solo il risultato e l'IV, NON i puntatori source/dest
-        /*
-        userReq.result = fInternalReq.result;
-        
-        // Se il driver ha aggiornato l'IV nella nostra struct interna, 
-        // lo riportiamo nel buffer dell'utente
-        if (userReq.iv != NULL && fInternalReq.iv != NULL) {
-            memcpy(userReq.iv, fInternalReq.iv, userReq.ivLength);
-        }
-        */
-    }
-    return (st == B_OK) ? fInternalReq.result : st;
+    status_t st = ioctl(fFd, B_CRYPTO_IOCTL_PROCESS, &userReq);
+    if (st < 0) return B_ERROR;
+	return userReq.result;
 }

@@ -101,4 +101,12 @@ enum {
     B_CRYPTO_IOCTL_GET_RANDOM = B_CRYPTO_IOCTL_BASE + 2
     // Questo comando invia una richiesta e riceve un risultato
 };
+
+typedef enum {
+    B_CRYPTO_PADDING_NONE = 0,
+    B_CRYPTO_PKCS7        = 1,
+    B_CRYPTO_ISO7816      = 2,
+    B_CRYPTO_ZERO_PADDING = 3
+} BCryptoPaddingType;
+
 #endif
