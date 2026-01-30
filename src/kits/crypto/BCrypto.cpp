@@ -13,7 +13,7 @@
 
 BCrypto::BCrypto() : fFd(-1),
       fPaddingEnabled(true),        // Di default lo abilitiamo (scelta sicura)
-      fPaddingType(B_CRYPTO_PKCS7), // Standard universale
+      fPaddingType(B_CRYPTO_PKCS7) // Standard universale
 {
 	fFd = open("/dev/crypto/v1", O_RDWR);
 }
