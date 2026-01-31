@@ -398,6 +398,31 @@ BCrypto::_FillRequest(BCryptoUserRequest& req, BCryptoOperation op, BCryptoAlgor
 status_t
 BCrypto::_ProcessDigest(BCryptoUserRequest& userReq)
 {
+    // 1. INIT
+    status_t err = ioctl(fFd, B_CRYPTO_IOCTL_HASH_INIT, &userReq.algorithm);
+    if (err != B_OK) return err;
+
+    // 2. UPDATE (Cicliamo sui vettori iovec dell'utente)
+    for (size_t i = 0; i < userReq.vectorCount; i++) {
+        BCryptoUserRequest updateReq = userReq;
+        updateReq.source = &userReq.source[i];
+        updateReq.vectorCount = 1;
+        
+        err = ioctl(fFd, B_CRYPTO_IOCTL_HASH_UPDATE, &updateReq);
+        if (err != B_OK) break;
+    }
+
+    // 3. FINAL
+    if (err == B_OK) {
+        err = ioctl(fFd, B_CRYPTO_IOCTL_HASH_FINAL, &userReq);
+    }
+
+    return err;
+}
+
+status_t
+BCrypto::_ProcessDigestInRAM(BCryptoUserRequest& userReq)
+{
     size_t totalSize = 0;
     for (size_t i = 0; i < userReq.vectorCount; i++)
         totalSize += userReq.source[i].iov_len;
