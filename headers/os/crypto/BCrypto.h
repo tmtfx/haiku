@@ -30,6 +30,7 @@ public:
                                         const void* in, size_t inLen,
                                         void* out, size_t outSize);
 			status_t			Process(BCryptoUserRequest& userReq);
+			size_t              GetHashLength(BCryptoAlgorithmID algo);
 
 private:
 			int					fFd;
@@ -49,7 +50,6 @@ private:
             status_t            _ProcessDigest(BCryptoUserRequest& userReq);
             void                _ApplyPadding(uint8* buffer, size_t inputLen, size_t totalLen);
             size_t              _RemovePadding(uint8* buffer, size_t len);
-            size_t              _GetHashLength(BCryptoAlgorithmID algo);
 };
 
 #endif // _BCRYPTO_H

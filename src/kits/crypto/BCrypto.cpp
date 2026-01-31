@@ -427,7 +427,7 @@ BCrypto::_ProcessDigest(BCryptoUserRequest& userReq)
     status_t err = ioctl(fFd, B_CRYPTO_IOCTL_PROCESS, &digestReq);
 
     if (err == B_OK && userReq.destination != nullptr) {
-        size_t hLen = _GetHashLength(userReq.algorithm);
+        size_t hLen = GetHashLength(userReq.algorithm);
         if (hLen > 0) {
             // Copiamo il risultato nel primo iovec di destinazione dell'utente
             memcpy(userReq.destination[0].iov_base, hashResult, hLen);
@@ -436,6 +436,57 @@ BCrypto::_ProcessDigest(BCryptoUserRequest& userReq)
 
     free(bounceBuffer);
     return err;
+    
+    /* versione flattata
+    size_t totalSize = 0;
+    for (size_t i = 0; i < userReq.vectorCount; i++)
+        totalSize += userReq.source[i].iov_len;
+
+    if (totalSize == 0) return B_BAD_VALUE;
+
+    void* bounceBuffer = malloc(totalSize);
+    if (!bounceBuffer) return B_NO_MEMORY;
+
+    // Compattiamo i dati
+    size_t offset = 0;
+    for (size_t i = 0; i < userReq.vectorCount; i++) {
+        memcpy((uint8*)bounceBuffer + offset, 
+               userReq.source[i].iov_base, userReq.source[i].iov_len);
+        offset += userReq.source[i].iov_len;
+    }
+
+    uint8 hashResult[64];
+    memset(hashResult, 0, sizeof(hashResult));
+
+    // DEFINIAMO GLI IOVEC QUI E NON PASSIAMO I LORO INDIRIZZI A FUNZIONI ESTERNE
+    iovec localSrc = { bounceBuffer, totalSize };
+    iovec localDst = { hashResult, sizeof(hashResult) };
+
+    // Prepariamo la richiesta direttamente
+    BCryptoUserRequest digestReq;
+    memset(&digestReq, 0, sizeof(digestReq));
+    
+    digestReq.operation   = B_CRYPTO_DIGEST;
+    digestReq.algorithm   = userReq.algorithm;
+    digestReq.mode        = B_CRYPTO_MODE_ANY;
+    digestReq.source      = &localSrc;  // Punta a localSrc in questo stack
+    digestReq.destination = &localDst; // Punta a localDst in questo stack
+    digestReq.vectorCount = 1;
+
+    // Chiamata diretta
+    status_t err = ioctl(fFd, B_CRYPTO_IOCTL_PROCESS, &digestReq);
+
+    if (err == B_OK && userReq.destination != nullptr) {
+        size_t hLen = GetHashLength(userReq.algorithm);
+        if (hLen > 0) {
+            // Copiamo il risultato finale nel buffer dell'utente
+            memcpy(userReq.destination[0].iov_base, hashResult, hLen);
+        }
+    }
+
+    free(bounceBuffer);
+    return err;
+    */
 }
 
 size_t
@@ -505,7 +556,7 @@ BCrypto::_ApplyPadding(uint8* buffer, size_t inputLen, size_t totalLen)
     }
 }
 size_t
-BCrypto::_GetHashLength(BCryptoAlgorithmID algo)
+BCrypto::GetHashLength(BCryptoAlgorithmID algo)
 {
     switch (algo) {
         case B_CRYPTO_MD5:       return 16;

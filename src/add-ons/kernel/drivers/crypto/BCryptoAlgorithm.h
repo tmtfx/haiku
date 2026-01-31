@@ -18,4 +18,13 @@ struct BCryptoAlgorithm {
     status_t (*Process)(BCryptoRequest* request);
 };
 
+class BCryptoAlgorithm : public DoublyLinkedListLinkImpl<BCryptoAlgorithm> {
+public:
+    // ... i metodi esistenti (Process, ecc.) ...
+
+    virtual status_t HashInit(void** context, size_t* contextSize) = 0;
+    virtual status_t HashUpdate(void* context, const iovec* vecs, size_t count) = 0;
+    virtual status_t HashFinal(void* context, uint8* outDigest) = 0;
+};
+
 #endif

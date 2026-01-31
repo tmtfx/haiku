@@ -30,7 +30,15 @@ secure_memzero(void* p, size_t s)
 static status_t
 crypto_open_modern(void* device_cookie, const char* name, int flags, void** cookie)
 {
-    *cookie = NULL;
+    //*cookie = NULL;
+    crypto_session* session = (crypto_session*)malloc(sizeof(crypto_session));
+    if (session == NULL)
+        return B_NO_MEMORY;
+
+    memset(session, 0, sizeof(crypto_session));
+    session->is_active = false;
+    
+    *cookie = session;
     /* 
      * TODO: atomizzare le richieste per dispositivi pci-e
      * per ora lasciamo così
@@ -54,6 +62,12 @@ crypto_open_legacy(const char* name, uint32 flags, void** cookie)
 static status_t
 crypto_close(void* cookie)
 {
+	crypto_session* session = (crypto_session*)cookie;
+    if (session) {
+        if (session->algorithm_state)
+            free(session->algorithm_state);
+        free(session);
+    }
     return B_OK;
 }
 
@@ -134,6 +148,49 @@ crypto_control(void* cookie, uint32 op, void* arg, size_t length)
             secure_memzero(localIV, sizeof(localIV));
 
             return status;
+        }
+        
+        case B_CRYPTO_IOCTL_HASH_INIT: {
+            BCryptoAlgorithmID algo;
+            if (user_memcpy(&algo, arg, sizeof(BCryptoAlgorithmID)) != B_OK)
+                return B_BAD_ADDRESS;
+
+            crypto_session* session = (crypto_session*)cookie;
+    
+            // Se c'era uno stato precedente, puliamolo
+            if (session->algorithm_state) {
+                free(session->algorithm_state);
+                session->algorithm_state = NULL;
+            }
+
+            session->algorithm = algo;
+            // Qui chiameremo una nuova funzione del Core per preparare il contesto
+            return BHashInit(session); 
+        }
+        
+        case B_CRYPTO_IOCTL_HASH_UPDATE: {
+            BCryptoUserRequest userReq;
+            if (user_memcpy(&userReq, arg, sizeof(BCryptoUserRequest)) != B_OK)
+                return B_BAD_ADDRESS;
+
+            crypto_session* session = (crypto_session*)cookie;
+            if (!session->is_active) return B_BAD_VALUE;
+
+            // Chiamata al core per processare il chunk
+            return BHashUpdate(session, &userReq);
+        }
+        
+        case B_CRYPTO_IOCTL_HASH_FINAL: {
+            BCryptoUserRequest userReq;
+            if (user_memcpy(&userReq, arg, sizeof(BCryptoUserRequest)) != B_OK)
+                return B_BAD_ADDRESS;
+
+            crypto_session* session = (crypto_session*)cookie;
+            if (!session->is_active) return B_BAD_VALUE;
+
+            status_t st = BHashFinal(session, &userReq);
+            session->is_active = false; // Sessione conclusa
+            return st;
         }
         
         case B_CRYPTO_IOCTL_GET_RANDOM: {
