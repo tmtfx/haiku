@@ -28,8 +28,14 @@ enum BCryptoAlgorithmID {
 
     // Hash
     B_CRYPTO_SHA1       = 0x0010,
-    B_CRYPTO_SHA256     = 0x0011,
-    B_CRYPTO_SHA512     = 0x0012,
+    B_CRYPTO_SHA224     = 0x0011,
+    B_CRYPTO_SHA256     = 0x0012,
+    B_CRYPTO_SHA384     = 0x0013,
+    B_CRYPTO_SHA512     = 0x0014,
+    B_CRYPTO_SHA3_256   = 0x0015,
+    B_CRYPTO_SHA3_512   = 0x0016,
+    B_CRYPTO_MD5        = 0x0017,
+    B_CRYPTO_BLAKE2B    = 0x0018,
 
     // RNG
     B_CRYPTO_RNG        = 0x0020

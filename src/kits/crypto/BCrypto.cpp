@@ -79,8 +79,42 @@ BCrypto::GetOutputSize(size_t inputLen, BCryptoOperation op)
     }
     return inputLen; // Per Decrypt restituiamo la dimensione del buffer cifrato
 }
+ssize_t 
+BCrypto::Encrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
+                 const void* in, size_t inLen, void* out, size_t outSize) 
+{
+    size_t requiredSize = GetOutputSize(inLen, B_CRYPTO_ENCRYPT);
+    if (outSize < requiredSize) return B_BAD_VALUE;
 
+    uint8* dataToProcess = (uint8*)in;
+    uint8* tempBuffer = nullptr;
+    size_t processLen = inLen;
 
+    // Se il padding è attivo e necessario (o se PKCS7 richiede sempre un blocco extra)
+    if (fPaddingEnabled && fPaddingType != B_CRYPTO_PADDING_NONE) {
+        processLen = requiredSize;
+        tempBuffer = new(std::nothrow) uint8[processLen];
+        if (!tempBuffer) return B_NO_MEMORY;
+        
+        memcpy(tempBuffer, in, inLen);
+        _ApplyPadding(tempBuffer, inLen, processLen); 
+        dataToProcess = tempBuffer;
+    }
+
+    iovec src = { dataToProcess, processLen };
+    iovec dst = { out, processLen };
+    
+    BCryptoUserRequest req;
+    // Specifichiamo ALGO e MODE correttamente
+    _FillRequest(req, B_CRYPTO_ENCRYPT, B_CRYPTO_AES, B_CRYPTO_MODE_CBC,
+                 key, keyLen, iv, ivLen, &src, &dst, 1);
+
+    status_t st = Process(req); 
+    
+    if (tempBuffer) delete[] tempBuffer;
+    return (st == B_OK) ? (ssize_t)processLen : st;
+}
+/*
 ssize_t 
 BCrypto::Encrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
                  const void* in, size_t inLen, void* out, size_t outSize) 
@@ -150,7 +184,32 @@ BCrypto::Encrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
 
     if (st != B_OK) return st;
     return (ssize_t)processLen;
+}*/
+ssize_t 
+BCrypto::Decrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
+                 const void* in, size_t inLen, void* out, size_t outSize) 
+{
+    if (inLen == 0 || (inLen % 16) != 0 || outSize < inLen) return B_BAD_VALUE;
+
+    iovec src = { (void*)in, inLen };
+    iovec dst = { out, inLen };
+
+    BCryptoUserRequest req;
+    _FillRequest(req, B_CRYPTO_DECRYPT, B_CRYPTO_AES, B_CRYPTO_MODE_CBC,
+                 key, keyLen, iv, ivLen, &src, &dst, 1);
+
+    status_t st = Process(req); 
+    if (st != B_OK) return st;
+
+    size_t finalLen = inLen;
+    if (fPaddingEnabled && fPaddingType != B_CRYPTO_PADDING_NONE) {
+        finalLen = _RemovePadding((uint8*)out, inLen);
+        if (finalLen == (size_t)B_BAD_DATA) return B_BAD_DATA;
+    }
+
+    return (ssize_t)finalLen;
 }
+/*
 ssize_t 
 BCrypto::Decrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
                  const void* in, size_t inLen, void* out, size_t outSize) 
@@ -234,11 +293,15 @@ BCrypto::Decrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
     }
     // Restituiamo il numero di byte "reali" (senza padding)
     return (ssize_t)finalLen;
-}
+}*/
 status_t 
 BCrypto::Process(BCryptoUserRequest& userReq) 
 {
     if (fFd < 0) return B_NO_INIT;
+    
+    if (userReq.operation == B_CRYPTO_DIGEST) {
+        return _ProcessDigest(userReq);
+    }
 
     const size_t kMinZeroCopySize = 4096; 
     const int kMaxVects = 32;
@@ -310,4 +373,150 @@ BCrypto::Process(BCryptoUserRequest& userReq)
     }
 
     return B_OK;
+}
+
+
+
+void
+BCrypto::_FillRequest(BCryptoUserRequest& req, BCryptoOperation op, BCryptoAlgorithmID algo, BCryptoMode mode,
+                      uint8* key, size_t keyLen, uint8* iv, size_t ivLen, 
+                      iovec* src, iovec* dst, int vCount)
+{
+    memset(&req, 0, sizeof(req));
+    req.operation   = op;
+    req.algorithm   = algo;
+    req.mode        = mode;
+    req.key         = key;
+    req.keyLength   = keyLen;
+    req.iv          = iv;
+    req.ivLength    = ivLen;
+    req.source      = src;
+    req.destination = dst;
+    req.vectorCount = vCount;
+}
+
+status_t
+BCrypto::_ProcessDigest(BCryptoUserRequest& userReq)
+{
+    size_t totalSize = 0;
+    for (size_t i = 0; i < userReq.vectorCount; i++)
+        totalSize += userReq.source[i].iov_len;
+
+    if (totalSize == 0) return B_BAD_VALUE;
+
+    // Coalescing forzato per garantire l'atomicità dell'hash nel driver
+    void* bounceBuffer = malloc(totalSize);
+    if (!bounceBuffer) return B_NO_MEMORY;
+
+    size_t offset = 0;
+    for (size_t i = 0; i < userReq.vectorCount; i++) {
+        memcpy((uint8*)bounceBuffer + offset, 
+               userReq.source[i].iov_base, userReq.source[i].iov_len);
+        offset += userReq.source[i].iov_len;
+    }
+
+    uint8 hashResult[64]; // Buffer locale per ospitare il digest più grande possibile
+    iovec src = { bounceBuffer, totalSize };
+    iovec dst = { hashResult, sizeof(hashResult) };
+
+    // Prepariamo la richiesta per il driver usando i tuoi enum
+    BCryptoUserRequest digestReq;
+    _FillRequest(digestReq, B_CRYPTO_DIGEST, userReq.algorithm, B_CRYPTO_MODE_ANY,
+                 nullptr, 0, nullptr, 0, &src, &dst, 1);
+
+    status_t err = ioctl(fFd, B_CRYPTO_IOCTL_PROCESS, &digestReq);
+
+    if (err == B_OK && userReq.destination != nullptr) {
+        size_t hLen = _GetHashLength(userReq.algorithm);
+        if (hLen > 0) {
+            // Copiamo il risultato nel primo iovec di destinazione dell'utente
+            memcpy(userReq.destination[0].iov_base, hashResult, hLen);
+        }
+    }
+
+    free(bounceBuffer);
+    return err;
+}
+
+size_t
+BCrypto::_RemovePadding(uint8* buffer, size_t len)
+{
+    if (len == 0 || (len % 16) != 0) return B_BAD_DATA;
+
+    switch (fPaddingType) {
+        case B_CRYPTO_PKCS7: {
+            uint8 padValue = buffer[len - 1];
+            if (padValue < 1 || padValue > 16) return B_BAD_DATA;
+            for (size_t i = len - padValue; i < len; i++) {
+                if (buffer[i] != padValue) return B_BAD_DATA;
+            }
+            return len - padValue;
+        }
+
+        case B_CRYPTO_ISO7816: {
+            ssize_t i = len - 1;
+            // Cerchiamo lo 0x80 partendo dal fondo, saltando gli zeri
+            while (i >= (ssize_t)(len - 16) && buffer[i] == 0x00) {
+                i--;
+            }
+            if (i >= 0 && buffer[i] == 0x80) {
+                return (size_t)i;
+            }
+            return B_BAD_DATA;
+        }
+
+        case B_CRYPTO_ZERO_PADDING: {
+            size_t i = len;
+            while (i > 0 && buffer[i - 1] == 0) i--;
+            return i;
+        }
+
+        default:
+            return len;
+    }
+}
+
+void
+BCrypto::_ApplyPadding(uint8* buffer, size_t inputLen, size_t totalLen)
+{
+    size_t padLen = totalLen - inputLen;
+    if (padLen == 0) return;
+
+    switch (fPaddingType) {
+        case B_CRYPTO_PKCS7:
+            // Ogni byte ha il valore della lunghezza del padding
+            memset(buffer + inputLen, (uint8)padLen, padLen);
+            break;
+
+        case B_CRYPTO_ISO7816:
+            // Il primo byte è 0x80, i restanti sono 0x00
+            buffer[inputLen] = 0x80;
+            if (padLen > 1)
+                memset(buffer + inputLen + 1, 0, padLen - 1);
+            break;
+
+        case B_CRYPTO_ZERO_PADDING:
+            // Tutti i byte sono 0x00
+            memset(buffer + inputLen, 0, padLen);
+            break;
+
+        default:
+            break;
+    }
+}
+size_t
+BCrypto::_GetHashLength(BCryptoAlgorithmID algo)
+{
+    switch (algo) {
+        case B_CRYPTO_MD5:       return 16;
+        case B_CRYPTO_SHA1:      return 20;
+        case B_CRYPTO_SHA224:    return 28;
+        case B_CRYPTO_SHA256:    return 32;
+        case B_CRYPTO_SHA3_256:  return 32;
+        case B_CRYPTO_SHA384:    return 48;
+        case B_CRYPTO_SHA512:    return 64;
+        case B_CRYPTO_SHA3_512:  return 64;
+        case B_CRYPTO_BLAKE2B:   return 64;
+        default:                 return 0;
+    }
 }

@@ -21,13 +21,13 @@ public:
 			void                SetPadding(bool enable, BCryptoPaddingType type = B_CRYPTO_PKCS7);
 			size_t              GetOutputSize(size_t inputLen, BCryptoOperation op);
 			// Shorthand methods
-			ssize_t             Decrypt(uint8* key, size_t keyLen, 
+			ssize_t             Decrypt(uint8* key, size_t keyLen,
 			                            uint8* iv, size_t ivLen,
-                                        const void* in, size_t inLen, 
+                                        const void* in, size_t inLen,
                                         void* out, size_t outSize);
-			ssize_t             Encrypt(uint8* key, size_t keyLen, 
+			ssize_t             Encrypt(uint8* key, size_t keyLen,
                                         uint8* iv, size_t ivLen,
-                                        const void* in, size_t inLen, 
+                                        const void* in, size_t inLen,
                                         void* out, size_t outSize);
 			status_t			Process(BCryptoUserRequest& userReq);
 
@@ -37,9 +37,19 @@ private:
 			BCryptoPaddingType  fPaddingType;
 			uint8               fLastBlockBuffer[16];
 			size_t fBufferSize;
-			status_t			_DoOperation(uint32 op, uint8* key, 
+			status_t			_DoOperation(uint32 op, uint8* key,
 									size_t keyLen, uint8* iv, size_t ivLen,
 									const void* in, void* out, size_t len);
+            void                _FillRequest(BCryptoUserRequest& req, BCryptoOperation op,
+                                             BCryptoAlgorithmID algo, BCryptoMode mode,
+                                             uint8* key, size_t keyLen,
+                                             uint8* iv, size_t ivLen, 
+                                             iovec* src, iovec* dst,
+                                             int vCount);
+            status_t            _ProcessDigest(BCryptoUserRequest& userReq);
+            void                _ApplyPadding(uint8* buffer, size_t inputLen, size_t totalLen);
+            size_t              _RemovePadding(uint8* buffer, size_t len);
+            size_t              _GetHashLength(BCryptoAlgorithmID algo);
 };
 
 #endif // _BCRYPTO_H
