@@ -177,7 +177,8 @@ BHashUpdate(crypto_session* session, BCryptoUserRequest* request)
     MutexLocker _(sCryptoLock);
     AlgoNode* node = _FindAlgorithm(session->algorithm, B_CRYPTO_MODE_ANY);
     if (!node || !node->algo->HashUpdate) return B_NOT_SUPPORTED;
-
+    
+    bool isSoftware = (node->algo->flags & B_CRYPTO_ALG_SOFTWARE);
     // Lock della memoria sorgente (chunk attuale)
     status_t st = B_OK;
     size_t lockedCount = 0;
@@ -188,9 +189,13 @@ BHashUpdate(crypto_session* session, BCryptoUserRequest* request)
     }
 
     if (st == B_OK) {
-        __asm__ __volatile__ ("stac" : : : "cc");//user_access_enable(); // stac
+    	if (!isSoftware) {
+            __asm__ __volatile__ ("stac" : : : "cc");//user_access_enable(); // stac
+    	}
         st = node->algo->HashUpdate(session->algorithm_state, request->source, request->vectorCount);
-        __asm__ __volatile__ ("clac" : : : "cc");//user_access_disable(); // clac
+        if (!isSoftware) {
+            __asm__ __volatile__ ("clac" : : : "cc");//user_access_disable(); // clac
+        }
     }
 
     // Sblocchiamo subito
@@ -207,6 +212,8 @@ BHashFinal(crypto_session* session, BCryptoUserRequest* request)
     AlgoNode* node = _FindAlgorithm(session->algorithm, B_CRYPTO_MODE_ANY);
     if (!node || !node->algo->HashFinal) return B_NOT_SUPPORTED;
 
+    bool isSoftware = (node->algo->flags & B_CRYPTO_ALG_SOFTWARE);
+    
     uint8 tempDigest[64]; // Massimo per SHA-512
     status_t st = node->algo->HashFinal(session->algorithm_state, tempDigest);
 
@@ -216,9 +223,13 @@ BHashFinal(crypto_session* session, BCryptoUserRequest* request)
         // Assumiamo che request->destination[0] sia valido
         st = lock_memory(request->destination[0].iov_base, hashLen, B_READ_DEVICE);
         if (st == B_OK) {
-            __asm__ __volatile__ ("stac" : : : "cc");//user_access_enable();
+            if (!isSoftware) {
+                __asm__ __volatile__ ("stac" : : : "cc");//user_access_enable();
+            }
             memcpy(request->destination[0].iov_base, tempDigest, hashLen);
-            __asm__ __volatile__ ("clac" : : : "cc");//user_access_disable();
+            if (!isSoftware) {
+                __asm__ __volatile__ ("clac" : : : "cc");//user_access_disable();
+            }
             unlock_memory(request->destination[0].iov_base, hashLen, B_READ_DEVICE);
         }
     }
@@ -241,6 +252,10 @@ BSubmitCryptoRequest(BCryptoRequest* request)
         return B_NOT_SUPPORTED;
     
     BCryptoAlgorithm* algo = node->algo;
+    
+    
+    bool isSoftware = (algo->flags & B_CRYPTO_ALG_SOFTWARE);
+
 
         // --- SCENARIO 1: Driver con supporto Asincrono Reale (Schede PCIe) ---
         // Se l'algoritmo ha un flag che indica "Gestisco io la memoria/DMA"
@@ -271,10 +286,13 @@ BSubmitCryptoRequest(BCryptoRequest* request)
             // Lock destinazione
             st = lock_memory(request->destination[0].iov_base, request->destination[0].iov_len, B_READ_DEVICE);
             if (st == B_OK) {
-                __asm__ __volatile__ ("stac" : : : "cc");
+            	if (!isSoftware) {
+                    __asm__ __volatile__ ("stac" : : : "cc");
+            	}
                 st = algo->Process(request); 
-                __asm__ __volatile__ ("clac" : : : "cc");
-                
+                if (!isSoftware) {
+                    __asm__ __volatile__ ("clac" : : : "cc");
+                }
                 unlock_memory(request->destination[0].iov_base, request->destination[0].iov_len, B_READ_DEVICE);
             }
         }
@@ -309,8 +327,9 @@ BSubmitCryptoRequest(BCryptoRequest* request)
                 }
             }
                 
-            __asm__ __volatile__ ("stac" : : : "cc");//user_access_enable();
-        
+            if (!isSoftware) {
+                __asm__ __volatile__ ("stac" : : : "cc");//user_access_enable();
+            }
             // 2. Prepariamo una richiesta locale "Direct"
             // AES-NI può lavorare direttamente sull'indirizzo utente se siamo nel contesto del thread chiamante
             BCryptoRequest localReq = *request;
@@ -322,8 +341,9 @@ BSubmitCryptoRequest(BCryptoRequest* request)
             // Ora il driver riceve puntatori che puntano alla RAM fisica dell'utente
             st = algo->Process(&localReq);
             
-            __asm__ __volatile__ ("clac" : : : "cc");//user_access_disable();
-    
+            if (!isSoftware) {
+                __asm__ __volatile__ ("clac" : : : "cc");//user_access_disable();
+            }
             // 4. Sblocchiamo la memoria
             unlock_memory(srcOrig.iov_base, len, B_READ_DEVICE);
             if (separateDest) {
