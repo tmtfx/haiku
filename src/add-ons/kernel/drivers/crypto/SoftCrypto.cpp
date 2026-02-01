@@ -15,7 +15,6 @@
 static status_t
 soft_aes_cbc_process_internal(BCryptoRequest* request, bool encrypt)
 {
-    // ... i tuoi controlli iniziali (keyLength, ivLength, etc) ...
     if (!request)
         return B_BAD_VALUE;
 
@@ -30,28 +29,21 @@ soft_aes_cbc_process_internal(BCryptoRequest* request, bool encrypt)
     //if (request->ivLength != 16) return B_BAD_VALUE;
 
     bool useIV = (request->mode == B_CRYPTO_MODE_CBC);
-    if (useIV && (request->iv == NULL || request->ivLength < 16))
-        return B_BAD_VALUE;
-    
-    SoftAESContext ctx{};
-    // USIAMO user_memcpy per la chiave e l'IV! 
-    // Perché? Perché non siamo sicuri che il Core abbia fatto STAC su questi specifici indirizzi.
-    // user_memcpy è sicura: se l'indirizzo è sbagliato, ritorna errore invece di crashare.
-    uint8 k[32];
-    if (user_memcpy(k, request->key, request->keyLength) != B_OK)
-        return B_BAD_ADDRESS;
-    
-    // Visto che il Core ha già fatto STAC e lock_memory, 
-    // qui USIAMO memcpy normale, NON user_memcpy.
-    //status_t st = soft_aes_set_key(&ctx, (const uint8*)request->key, request->keyLength);
-    status_t st = soft_aes_set_key(&ctx, k, request->keyLength);
-    if (st != B_OK) return st;
-
+    //if (useIV && (request->iv == NULL || request->ivLength < 16)) return B_BAD_VALUE;
     uint8 iv[16] = {0};
     if (useIV) {
-        if (user_memcpy(iv, request->iv, 16) != B_OK)
-            return B_BAD_ADDRESS;
+        if (request->iv == NULL || request->ivLength < 16)
+            return B_BAD_VALUE;
+        // Leggiamo l'IV una volta sola all'inizio
+        memcpy(iv, request->iv, 16);
     }
+    uint8 k[32];
+    memcpy(k, request->key, request->keyLength);
+    SoftAESContext ctx{};
+    
+    
+    status_t st = soft_aes_set_key(&ctx, k, request->keyLength);
+    if (st != B_OK) return st;
 
     for (size_t i = 0; i < request->vectorCount; i++) {
         const iovec& src = request->source[i];
@@ -59,38 +51,32 @@ soft_aes_cbc_process_internal(BCryptoRequest* request, bool encrypt)
         
         // Verifica allineamento blocchi AES
         if (src.iov_len % 16 != 0) return B_BAD_VALUE;
+        uint8* in_ptr = (uint8*)src.iov_base;
+        uint8* out_ptr = (uint8*)dst.iov_base;
         
         size_t blocks = src.iov_len / 16;
         for (size_t b = 0; b < blocks; b++) {
-            uint8 tmp_in[16];
-            uint8 tmp_out[16];
-
-            // Accesso diretto ai buffer lockati
-            //memcpy(tmp_in, (uint8*)src.iov_base + b*16, 16);
-            if (user_memcpy(tmp_in, (uint8*)src.iov_base + b*16, 16) != B_OK)
-                return B_BAD_ADDRESS;
+            uint8 block[16];
+            memcpy(block, in_ptr + (b * 16), 16);
 
             if (encrypt) {
-            	if (useIV) {
-                    for (int j = 0; j < 16; j++) tmp_in[j] ^= iv[j];
+                if (useIV) {
+                    for (int j = 0; j < 16; j++) block[j] ^= iv[j];
                 }
-                soft_aes_encrypt_block(&ctx, tmp_in, tmp_out);
-                if (useIV) memcpy(iv, tmp_out, 16);
+                soft_aes_encrypt_block(&ctx, block, block);
+                if (useIV) memcpy(iv, block, 16);
             } else {
                 uint8 next_iv[16];
+                if (useIV) memcpy(next_iv, block, 16);
+                
+                soft_aes_decrypt_block(&ctx, block, block);
+                
                 if (useIV) {
-                    memcpy(next_iv, tmp_in, 16); // Salvo il blocco cifrato per il prossimo IV
-                }
-                soft_aes_decrypt_block(&ctx, tmp_in, tmp_out);
-                if (useIV) {
-                    for (int j = 0; j < 16; j++) tmp_out[j] ^= iv[j];
+                    for (int j = 0; j < 16; j++) block[j] ^= iv[j];
                     memcpy(iv, next_iv, 16);
                 }
             }
-
-            //memcpy((uint8*)dst.iov_base + b*16, tmp_out, 16);
-            if (user_memcpy((uint8*)dst.iov_base + b*16, tmp_out, 16) != B_OK)
-                return B_BAD_ADDRESS;
+            memcpy(out_ptr + (b * 16), block, 16);
         }
     }
 
@@ -99,8 +85,7 @@ soft_aes_cbc_process_internal(BCryptoRequest* request, bool encrypt)
         memcpy(request->iv, iv, 16);
     }*/
     if (useIV) {
-        if (user_memcpy(request->iv, iv, 16) != B_OK)
-            return B_BAD_ADDRESS;
+        memcpy(request->iv, iv, 16);
     }
     soft_aes_zero(&ctx);
     return B_OK;
@@ -195,7 +180,6 @@ status_t soft_aes_cbc_process(BCryptoRequest* request)
 {
     if (!request)
         return B_BAD_VALUE;
-    dprintf("utilizzo cifratura via software");
     bool encrypt = (request->operation == B_CRYPTO_ENCRYPT);
     status_t st = soft_aes_cbc_process_internal(request, encrypt);
 
