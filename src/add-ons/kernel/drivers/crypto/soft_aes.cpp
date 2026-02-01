@@ -70,7 +70,30 @@ static uint8 mul(uint8 a, uint8 b) {
     }
     return r;
 }
-
+static void shift_rows(uint8* s) {
+    uint8 t[16];
+    // Riga 0: nessuna rotazione
+    t[0] = s[0]; t[4] = s[4]; t[8] = s[8]; t[12] = s[12];
+    // Riga 1: rotazione a sinistra di 1
+    t[1] = s[5]; t[5] = s[9]; t[9] = s[13]; t[13] = s[1];
+    // Riga 2: rotazione a sinistra di 2
+    t[2] = s[10]; t[6] = s[14]; t[10] = s[2]; t[14] = s[6];
+    // Riga 3: rotazione a sinistra di 3
+    t[3] = s[15]; t[7] = s[3]; t[11] = s[7]; t[15] = s[11];
+    memcpy(s, t, 16);
+}
+static void inv_shift_rows(uint8* s) {
+    uint8 t[16];
+    // Riga 0: nessuna rotazione
+    t[0] = s[0]; t[4] = s[4]; t[8] = s[8]; t[12] = s[12];
+    // Riga 1: rotazione a DESTRA di 1
+    t[1] = s[13]; t[5] = s[1]; t[9] = s[5]; t[13] = s[9];
+    // Riga 2: rotazione a DESTRA di 2
+    t[2] = s[10]; t[6] = s[14]; t[10] = s[2]; t[14] = s[6];
+    // Riga 3: rotazione a DESTRA di 3
+    t[3] = s[7]; t[7] = s[11]; t[11] = s[15]; t[15] = s[3];
+    memcpy(s, t, 16);
+}
 static void mix_columns(uint8* s) {
     uint8 t[16];
     for (int c = 0; c < 4; c++) {
@@ -171,19 +194,24 @@ void soft_aes_encrypt_block(SoftAESContext* ctx, const uint8* in, uint8* out) {
     for (int i = 0; i < 16; i++)
         state[i] ^= ctx->encRoundKeys[i];
 
+    // Round intermedi (1 a rounds-1)
     for (int r = 1; r < ctx->rounds; r++) {
-        for (int i = 0; i < 16; i++)
-            state[i] = sbox[state[i]];
+        // 1. SubBytes
+        for (int i = 0; i < 16; i++) state[i] = sbox[state[i]];
+        // 2. ShiftRows (Mancava!)
+        shift_rows(state);
+        // 3. MixColumns
         mix_columns(state);
+        // 4. AddRoundKey
         for (int i = 0; i < 16; i++)
-            state[i] ^= ctx->encRoundKeys[16*r + i];
+            state[i] ^= ctx->encRoundKeys[16 * r + i];
     }
 
-    // Final round
+    // Final round (senza MixColumns)
+    for (int i = 0; i < 16; i++) state[i] = sbox[state[i]];
+    shift_rows(state);
     for (int i = 0; i < 16; i++)
-        state[i] = sbox[state[i]];
-    for (int i = 0; i < 16; i++)
-        state[i] ^= ctx->encRoundKeys[16*ctx->rounds + i];
+        state[i] ^= ctx->encRoundKeys[16 * ctx->rounds + i];
 
     memcpy(out, state, 16);
 }
@@ -192,22 +220,28 @@ void soft_aes_decrypt_block(SoftAESContext* ctx, const uint8* in, uint8* out) {
     uint8 state[16];
     memcpy(state, in, 16);
 
+    // Round iniziale (AddRoundKey con l'ultima chiave)
     for (int i = 0; i < 16; i++)
-        state[i] ^= ctx->decRoundKeys[16*ctx->rounds + i];
+        state[i] ^= ctx->encRoundKeys[16 * ctx->rounds + i];
 
-    for (int r = ctx->rounds-1; r > 0; r--) {
+    // Round intermedi a ritroso
+    for (int r = ctx->rounds - 1; r > 0; r--) {
+        inv_shift_rows(state);
+        for (int i = 0; i < 16; i++) state[i] = inv_sbox[state[i]];
+        
+        // AddRoundKey
         for (int i = 0; i < 16; i++)
-            state[i] = inv_sbox[state[i]];
+            state[i] ^= ctx->encRoundKeys[16 * r + i];
+        
+        // InvMixColumns
         inv_mix_columns(state);
-        for (int i = 0; i < 16; i++)
-            state[i] ^= ctx->decRoundKeys[16*r + i];
     }
 
+    // Final round
+    inv_shift_rows(state);
+    for (int i = 0; i < 16; i++) state[i] = inv_sbox[state[i]];
     for (int i = 0; i < 16; i++)
-        state[i] = inv_sbox[state[i]];
-
-    for (int i = 0; i < 16; i++)
-        state[i] ^= ctx->decRoundKeys[i];
+        state[i] ^= ctx->encRoundKeys[i];
 
     memcpy(out, state, 16);
 }
