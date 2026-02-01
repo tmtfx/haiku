@@ -80,11 +80,11 @@ BInitPadLockRNG()
         return B_UNSUPPORTED;
 
     static BCryptoAlgorithm sPadLockRNG = {
-        B_CRYPTO_RNG,
-        B_CRYPTO_MODE_ANY,
-        B_CRYPTO_ALG_HW_ACCEL,
-        100, // Massima priorità per l'hardware RNG
-        padlock_rng_process
+        .algorithm = B_CRYPTO_RNG,
+        .mode = B_CRYPTO_MODE_ANY,
+        .flags = B_CRYPTO_ALG_HW_ACCEL,
+        .priority = 100, // Massima priorità per l'hardware RNG
+        .Process = padlock_rng_process
     };
 
     return BRegisterCryptoAlgorithm(&sPadLockRNG);

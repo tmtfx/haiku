@@ -136,11 +136,11 @@ BInitPadLockCrypto()
         return B_UNSUPPORTED;
 
     static BCryptoAlgorithm sPadLockAES = {
-        B_CRYPTO_AES,
-        B_CRYPTO_MODE_CBC,
-        B_CRYPTO_ALG_HW_ACCEL,
-        85, // Poco sotto AES-NI come priorità
-        padlock_process
+        .algorithm = B_CRYPTO_AES,
+        .mode = B_CRYPTO_MODE_CBC,
+        .flags = B_CRYPTO_ALG_HW_ACCEL,
+        .priority = 85, // Poco sotto AES-NI come priorità
+        .Process = padlock_process
     };
 
     return BRegisterCryptoAlgorithm(&sPadLockAES);

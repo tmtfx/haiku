@@ -390,11 +390,11 @@ BInitAESNICrypto()
         return B_UNSUPPORTED;
 
     static BCryptoAlgorithm sAESNI = {
-        B_CRYPTO_AES,                               // ID Algoritmo
-        (BCryptoMode)(B_CRYPTO_MODE_CBC | B_CRYPTO_MODE_ECB | B_CRYPTO_MODE_CTR), // Modi supportati
-        B_CRYPTO_ALG_HW_ACCEL,                      // Flags
-        90,                                         // Priorità (Alta perché hardware)
-        aesni_process                               // Callback
+        .algorithm = B_CRYPTO_AES,                               // ID Algoritmo
+        .mode = (BCryptoMode)(B_CRYPTO_MODE_CBC | B_CRYPTO_MODE_ECB | B_CRYPTO_MODE_CTR), // Modi supportati
+        .flags = B_CRYPTO_ALG_HW_ACCEL,                      // Flags
+        .priority = 90,                                         // Priorità (Alta perché hardware)
+        .Process = aesni_process                               // Callback
     };
 
     return BRegisterCryptoAlgorithm(&sAESNI);

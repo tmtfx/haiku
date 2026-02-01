@@ -5,6 +5,8 @@
 
 #include "BCryptoCPU.h"
 #include "BCryptoCore.h"
+#include <crypto/BCryptoDefs.h>
+#include "BCryptoAlgorithm.h"
 #include <string.h>
 
 #if defined(__x86_64__) || defined(__i386__)
@@ -93,11 +95,11 @@ BInitx86CPURNG()
         return B_UNSUPPORTED;
 
     static BCryptoAlgorithm sCPURNG = {
-        B_CRYPTO_RNG,
-        B_CRYPTO_MODE_ANY,
-        B_CRYPTO_ALG_HW_ACCEL,
-        90, // Un pelino meno di PadLock se presenti entrambi, o viceversa
-        cpu_rng_process
+        .algorithm = B_CRYPTO_RNG,
+        .mode = B_CRYPTO_MODE_ANY,
+        .flags = B_CRYPTO_ALG_HW_ACCEL,
+        .priority = 90, // Un pelino meno di PadLock se presenti entrambi, o viceversa
+        .Process = cpu_rng_process
     };
 
     return BRegisterCryptoAlgorithm(&sCPURNG);
