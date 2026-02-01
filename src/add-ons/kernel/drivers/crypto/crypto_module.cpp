@@ -15,6 +15,7 @@
 #include "x86CPURNG.h"
 #include "SoftCrypto.h"
 #include "SoftDigest.h"
+#include "x86CPUDigest.h"
 
 struct crypto_module_info {
 	module_info info;
@@ -35,9 +36,10 @@ crypto_std_ops(int op, ...)
 			BInitPadLockRNG();
 			BInitx86CPURNG();
 			BInitPadLockCrypto();
-			//BInitAESNICrypto();
+			BInitAESNICrypto();
 			BInitSoftCrypto();
 			BStartEntropyFeeder();
+			BInitx86CPUDigest();
 			BInitSoftDigest();
 			return B_OK;
 		}

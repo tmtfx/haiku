@@ -20,6 +20,7 @@ KernelAddon crypto :
     PadLock.cpp
     PadLockRNG.cpp
     AESNI.cpp
+    x86CPUDigest.cpp
     x86CPURNG.cpp
     SoftCrypto.cpp
     soft_aes.cpp
