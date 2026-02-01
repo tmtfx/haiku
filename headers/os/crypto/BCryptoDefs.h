@@ -14,6 +14,8 @@
 #   define B_PENDING B_DEV_PENDING
 #endif
 
+#define B_CRYPTO_HASH_MAX_SIZE 64
+
 struct crypto_device_info {
     char vendor_name[32];      // es: "Intel", "VIA", "Hifn"
     uint32 algos_supported;    // Bitmask di BCryptoAlgorithmID (AES, SHA...)
@@ -117,5 +119,22 @@ typedef enum {
     B_CRYPTO_ISO7816      = 2,
     B_CRYPTO_ZERO_PADDING = 3
 } BCryptoPaddingType;
+
+static inline size_t
+decode_hash_length(BCryptoAlgorithmID algo)
+{
+    switch (algo) {
+        case B_CRYPTO_MD5:       return 16;
+        case B_CRYPTO_SHA1:      return 20;
+        case B_CRYPTO_SHA224:    return 28;
+        case B_CRYPTO_SHA256:    return 32;
+        case B_CRYPTO_SHA3_256:  return 32;
+        case B_CRYPTO_SHA384:    return 48;
+        case B_CRYPTO_SHA512:    return 64;
+        case B_CRYPTO_SHA3_512:  return 64;
+        case B_CRYPTO_BLAKE2B:   return 64;
+        default:                 return 0;
+    }
+}
 
 #endif

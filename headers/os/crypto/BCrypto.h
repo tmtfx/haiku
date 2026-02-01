@@ -8,6 +8,7 @@
 #include <SupportDefs.h>
 #include <os/kernel/OS.h>
 #include <crypto/BCryptoDefs.h>
+#include <DataIO.h>
 
 class BCrypto {
 public:
@@ -30,7 +31,12 @@ public:
                                         const void* in, size_t inLen,
                                         void* out, size_t outSize);
 			status_t			Process(BCryptoUserRequest& userReq);
-			size_t              GetHashLength(BCryptoAlgorithmID algo);
+			size_t              GetHashLength(BCryptoAlgorithmID algo) const;
+			status_t            Digest(BCryptoAlgorithmID algo, const void* data,
+			                           size_t len, void* outHash);
+			status_t            Digest(BCryptoAlgorithmID algo, BDataIO* source,
+			                           void* outHash);
+			
 
 private:
 			int					fFd;
@@ -38,16 +44,12 @@ private:
 			BCryptoPaddingType  fPaddingType;
 			uint8               fLastBlockBuffer[16];
 			size_t fBufferSize;
-			status_t			_DoOperation(uint32 op, uint8* key,
-									size_t keyLen, uint8* iv, size_t ivLen,
-									const void* in, void* out, size_t len);
             void                _FillRequest(BCryptoUserRequest& req, BCryptoOperation op,
                                              BCryptoAlgorithmID algo, BCryptoMode mode,
                                              uint8* key, size_t keyLen,
                                              uint8* iv, size_t ivLen, 
                                              iovec* src, iovec* dst,
                                              int vCount);
-            status_t            _ProcessDigest(BCryptoUserRequest& userReq);
             void                _ApplyPadding(uint8* buffer, size_t inputLen, size_t totalLen);
             size_t              _RemovePadding(uint8* buffer, size_t len);
 };

@@ -14,6 +14,8 @@
 /* ---------------------------------------------------------------- */
 /* Public BCryptoRequest wrapper for Digest                        */
 /* ---------------------------------------------------------------- */
+
+////////   One-shot function    /////////
 status_t
 soft_digest_process(BCryptoRequest* request)
 {
@@ -56,6 +58,51 @@ soft_digest_process(BCryptoRequest* request)
     return B_OK;
 }
 
+static status_t
+soft_sha256_init_bridge(void** context, size_t* contextSize)
+{
+    if (context == NULL || contextSize == NULL)
+        return B_BAD_VALUE;
+
+    *contextSize = sizeof(SoftSHA256Context);
+    *context = malloc(*contextSize);
+    if (*context == NULL)
+        return B_NO_MEMORY;
+
+    soft_sha256_init((SoftSHA256Context*)*context);
+    return B_OK;
+}
+
+static status_t
+soft_sha256_update_bridge(void* context, const iovec* vecs, size_t count)
+{
+    if (context == NULL || (vecs == NULL && count > 0))
+        return B_BAD_VALUE;
+
+    SoftSHA256Context* ctx = (SoftSHA256Context*)context;
+
+    for (size_t i = 0; i < count; i++) {
+        if (vecs[i].iov_base != NULL && vecs[i].iov_len > 0)
+            soft_sha256_update(ctx, (const uint8*)vecs[i].iov_base, vecs[i].iov_len);
+    }
+
+    return B_OK;
+}
+
+static status_t
+soft_sha256_final_bridge(void* context, uint8* outDigest)
+{
+    if (context == NULL || outDigest == NULL)
+        return B_BAD_VALUE;
+
+    SoftSHA256Context* ctx = (SoftSHA256Context*)context;
+    soft_sha256_finalize(ctx, outDigest);
+
+    // Nota: la free(context) la farà il Core dopo aver chiamato Final
+    return B_OK;
+}
+
+
 /* ---------------------------------------------------------------- */
 /* Register software Digest                                         */
 /* ---------------------------------------------------------------- */
@@ -66,7 +113,11 @@ status_t BInitSoftDigest()
         .mode      = B_CRYPTO_MODE_ANY,
         .flags     = B_CRYPTO_ALG_SOFTWARE,
         .priority  = 10,             // Priorità software (bassa)
-        .Process   = soft_digest_process
+        .Process   = soft_digest_process,
+        
+        .HashInit   = soft_sha256_init_bridge,
+        .HashUpdate = soft_sha256_update_bridge,
+        .HashFinal  = soft_sha256_final_bridge
     };
 
     return BRegisterCryptoAlgorithm(&sSoftSHA256);

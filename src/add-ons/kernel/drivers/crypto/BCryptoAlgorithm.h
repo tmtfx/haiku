@@ -9,22 +9,17 @@
 #include <SupportDefs.h>
 #include <crypto/BCryptoDefs.h>
 #include <crypto/BCryptoKernelInternal.h>
+#include <util/DoublyLinkedList.h>
 
-struct BCryptoAlgorithm {
+struct BCryptoAlgorithm : public DoublyLinkedListLinkImpl<BCryptoAlgorithm> {
     BCryptoAlgorithmID  algorithm;
     BCryptoMode        mode;
     uint32  flags;
     int32   priority;
     status_t (*Process)(BCryptoRequest* request);
+
+    status_t (*HashInit)(void** context, size_t* contextSize);
+    status_t (*HashUpdate)(void* context, const iovec* vecs, size_t count);
+    status_t (*HashFinal)(void* context, uint8* outDigest);
 };
-
-class BCryptoAlgorithm : public DoublyLinkedListLinkImpl<BCryptoAlgorithm> {
-public:
-    // ... i metodi esistenti (Process, ecc.) ...
-
-    virtual status_t HashInit(void** context, size_t* contextSize) = 0;
-    virtual status_t HashUpdate(void* context, const iovec* vecs, size_t count) = 0;
-    virtual status_t HashFinal(void* context, uint8* outDigest) = 0;
-};
-
 #endif

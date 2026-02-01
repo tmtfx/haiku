@@ -8,15 +8,13 @@
 #include <string.h>
 
 #include "BCryptoDevice.h" 
-    // Se BCryptoDevice.h non ha già l'extern "C" al suo interno, 
-    // lo forziamo qui per le funzioni del manager.
 
 #include <lock.h>
 #include <util/AutoLock.h>
 #include <util/DoublyLinkedList.h>
 #include <new>
 #include <debug.h>
-#include <malloc.h> // Per malloc/free
+#include <malloc.h>
 
 using BPrivate::AutoLocker;
 
@@ -25,16 +23,6 @@ struct MutexLocking {
     static inline status_t Lock(Lockable lock) { return mutex_lock(lock); }
     static inline void Unlock(Lockable lock) { mutex_unlock(lock); }
 };
-
-//static void
-//secure_memzero(void* p, size_t s)
-//{
-//    if (p == NULL)
-//        return;
-//    volatile uint8* cp = (volatile uint8*)p;
-//    while (s--)
-//        *cp++ = 0;
-//}
 
 static mutex sCryptoLock;
 static bool sCoreInitialized = false;
@@ -96,6 +84,22 @@ BGetStoredCryptoCapabilities()
 {
     return sCryptoCapabilities;
 }
+
+
+static AlgoNode*
+_FindAlgorithm(BCryptoAlgorithmID id, BCryptoMode mode)
+{
+    DoublyLinkedList<AlgoNode>::Iterator it = sAlgorithms.GetIterator();
+    while (AlgoNode* node = it.Next()) {
+        if (node->algo->algorithm == id) {
+            if (mode == B_CRYPTO_MODE_ANY || (node->algo->mode & mode) != 0)
+                return node;
+        }
+    }
+    return NULL;
+}
+
+
 
 status_t
 BRegisterCryptoAlgorithm(BCryptoAlgorithm* algorithm)
@@ -159,7 +163,7 @@ BHashInit(crypto_session* session)
 {
     MutexLocker _(sCryptoLock);
     AlgoNode* node = _FindAlgorithm(session->algorithm, B_CRYPTO_MODE_ANY);
-    if (!node) return B_NOT_SUPPORTED;
+    if (!node || !node->algo->HashInit) return B_NOT_SUPPORTED;
 
     status_t st = node->algo->HashInit(&session->algorithm_state, &session->state_size);
     if (st == B_OK) {
@@ -172,7 +176,7 @@ BHashUpdate(crypto_session* session, BCryptoUserRequest* request)
 {
     MutexLocker _(sCryptoLock);
     AlgoNode* node = _FindAlgorithm(session->algorithm, B_CRYPTO_MODE_ANY);
-    if (!node) return B_NOT_SUPPORTED;
+    if (!node || !node->algo->HashUpdate) return B_NOT_SUPPORTED;
 
     // Lock della memoria sorgente (chunk attuale)
     status_t st = B_OK;
@@ -184,9 +188,9 @@ BHashUpdate(crypto_session* session, BCryptoUserRequest* request)
     }
 
     if (st == B_OK) {
-        user_access_enable(); // stac
+        __asm__ __volatile__ ("stac" : : : "cc");//user_access_enable(); // stac
         st = node->algo->HashUpdate(session->algorithm_state, request->source, request->vectorCount);
-        user_access_disable(); // clac
+        __asm__ __volatile__ ("clac" : : : "cc");//user_access_disable(); // clac
     }
 
     // Sblocchiamo subito
@@ -201,21 +205,21 @@ BHashFinal(crypto_session* session, BCryptoUserRequest* request)
 {
     MutexLocker _(sCryptoLock);
     AlgoNode* node = _FindAlgorithm(session->algorithm, B_CRYPTO_MODE_ANY);
-    if (!node) return B_NOT_SUPPORTED;
+    if (!node || !node->algo->HashFinal) return B_NOT_SUPPORTED;
 
     uint8 tempDigest[64]; // Massimo per SHA-512
     status_t st = node->algo->HashFinal(session->algorithm_state, tempDigest);
 
     if (st == B_OK) {
+        size_t hashLen = decode_hash_length(session->algorithm);
         // Copiamo il risultato nel buffer di destinazione dell'utente
         // Assumiamo che request->destination[0] sia valido
-        st = lock_memory(request->destination[0].iov_base, request->destination[0].iov_len, B_READ_DEVICE);
+        st = lock_memory(request->destination[0].iov_base, hashLen, B_READ_DEVICE);
         if (st == B_OK) {
-            user_access_enable();
-            memcpy(request->destination[0].iov_base, tempDigest, 
-                   _GetHashLength(session->algorithm));
-            user_access_disable();
-            unlock_memory(request->destination[0].iov_base, request->destination[0].iov_len, B_READ_DEVICE);
+            __asm__ __volatile__ ("stac" : : : "cc");//user_access_enable();
+            memcpy(request->destination[0].iov_base, tempDigest, hashLen);
+            __asm__ __volatile__ ("clac" : : : "cc");//user_access_disable();
+            unlock_memory(request->destination[0].iov_base, hashLen, B_READ_DEVICE);
         }
     }
 
@@ -314,7 +318,7 @@ BSubmitCryptoRequest(BCryptoRequest* request)
             localReq.destination = &dstOrig;
             localReq.vectorCount = 1;
     
-                    // 3. ESECUZIONE DEL DRIVER (AES-NI)
+            // 3. ESECUZIONE DEL DRIVER (AES-NI)
             // Ora il driver riceve puntatori che puntano alla RAM fisica dell'utente
             st = algo->Process(&localReq);
             
@@ -352,15 +356,3 @@ BFillBufferWithRandom(void* buffer, size_t length)
     return BSubmitCryptoRequest(&req);
 }
 
-static AlgoNode*
-_FindAlgorithm(BCryptoAlgorithmID id, BCryptoMode mode)
-{
-    DoublyLinkedList<AlgoNode>::Iterator it = sAlgorithms.GetIterator();
-    while (AlgoNode* node = it.Next()) {
-        if (node->algo->algorithm == id) {
-            if (mode == B_CRYPTO_MODE_ANY || (node->algo->mode & mode) != 0)
-                return node;
-        }
-    }
-    return NULL;
-}

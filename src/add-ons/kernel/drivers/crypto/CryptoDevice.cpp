@@ -39,17 +39,7 @@ crypto_open_modern(void* device_cookie, const char* name, int flags, void** cook
     session->is_active = false;
     
     *cookie = session;
-    /* 
-     * TODO: atomizzare le richieste per dispositivi pci-e
-     * per ora lasciamo così
-    */
-    /* 
-    // Crea un "contesto" per questa apertura
-    crypto_session* session = new(std::nothrow) crypto_session;
-    if (session == NULL) return B_NO_MEMORY;
-    
-    *cookie = session; // Ora 'session' verrà passato a tutte le control() successive
-    */
+
     return B_OK;
 }
 
@@ -64,8 +54,11 @@ crypto_close(void* cookie)
 {
 	crypto_session* session = (crypto_session*)cookie;
     if (session) {
-        if (session->algorithm_state)
+        if (session->algorithm_state) {
+            secure_memzero(session->algorithm_state, session->state_size);
             free(session->algorithm_state);
+        }
+        secure_memzero(session, sizeof(crypto_session));
         free(session);
     }
     return B_OK;
@@ -156,18 +149,30 @@ crypto_control(void* cookie, uint32 op, void* arg, size_t length)
                 return B_BAD_ADDRESS;
 
             crypto_session* session = (crypto_session*)cookie;
-    
-            // Se c'era uno stato precedente, puliamolo
-            if (session->algorithm_state) {
-                free(session->algorithm_state);
-                session->algorithm_state = NULL;
-            }
-
+            
+            // 1. Salva temporaneamente il vecchio stato
+            void* oldState = session->algorithm_state;
+            size_t oldSize = session->state_size;
+            BCryptoAlgorithmID oldAlgo = session->algorithm;
+            
+            // 2. Tenta l'inizializzazione sul nuovo
             session->algorithm = algo;
-            // Qui chiameremo una nuova funzione del Core per preparare il contesto
-            return BHashInit(session); 
+            session->algorithm_state = NULL; // BHashInit allocherà il nuovo
+            
+            status_t st = BHashInit(session);
+            if (st == B_OK) {
+                // Successo: ora possiamo liberare il vecchio
+                if (oldState) {
+                    secure_memzero(oldState, oldSize);
+                    free(oldState);
+                }
+            } else {
+                // Fallimento: ripristina lo stato precedente
+                session->algorithm = oldAlgo;
+                session->algorithm_state = oldState;
+            }
+            return st;
         }
-        
         case B_CRYPTO_IOCTL_HASH_UPDATE: {
             BCryptoUserRequest userReq;
             if (user_memcpy(&userReq, arg, sizeof(BCryptoUserRequest)) != B_OK)
@@ -176,20 +181,47 @@ crypto_control(void* cookie, uint32 op, void* arg, size_t length)
             crypto_session* session = (crypto_session*)cookie;
             if (!session->is_active) return B_BAD_VALUE;
 
-            // Chiamata al core per processare il chunk
+            // Trasformiamo i puntatori utente in iovec locali (come in PROCESS)
+            iovec localSrc[32];
+            if (userReq.vectorCount > 32) return B_DEVICE_FULL;
+            
+            if (user_memcpy(localSrc, userReq.source, sizeof(iovec) * userReq.vectorCount) != B_OK)
+                return B_BAD_ADDRESS;
+
+            // Temporaneamente sovrascriviamo il puntatore della struct locale con quello kernel
+            userReq.source = localSrc;
+
             return BHashUpdate(session, &userReq);
         }
-        
         case B_CRYPTO_IOCTL_HASH_FINAL: {
             BCryptoUserRequest userReq;
             if (user_memcpy(&userReq, arg, sizeof(BCryptoUserRequest)) != B_OK)
                 return B_BAD_ADDRESS;
 
             crypto_session* session = (crypto_session*)cookie;
-            if (!session->is_active) return B_BAD_VALUE;
+            if (!session || !session->is_active) 
+                return B_BAD_VALUE;
+
+            // Per il Final, dobbiamo mappare il buffer di destinazione
+            // Di solito il digest sta in un singolo buffer, quindi prendiamo solo il primo iovec
+            iovec localDst[1]; 
+            if (user_memcpy(localDst, userReq.destination, sizeof(iovec)) != B_OK)
+                return B_BAD_ADDRESS;
+
+            // Verifichiamo che il buffer sia grande abbastanza per l'algoritmo corrente
+            if (localDst[0].iov_len < decode_hash_length(session->algorithm))
+                return B_BAD_VALUE;
+
+            // Passiamo la struct aggiornata al Core
+            userReq.destination = localDst;
+            userReq.vectorCount = 1; // Per la finalizzazione standard basta un vettore
 
             status_t st = BHashFinal(session, &userReq);
-            session->is_active = false; // Sessione conclusa
+            
+            // La sessione è conclusa, ma NON liberiamo qui algorithm_state.
+            // Lo stato verrà liberato al prossimo HASH_INIT o alla crypto_close.
+            session->is_active = false; 
+            
             return st;
         }
         

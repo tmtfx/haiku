@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <string.h>
 #include "BCryptoDefs.h"
+#include <DataIO.h>
 #include <cstdio>
 #include <new>
 
@@ -300,7 +301,18 @@ BCrypto::Process(BCryptoUserRequest& userReq)
     if (fFd < 0) return B_NO_INIT;
     
     if (userReq.operation == B_CRYPTO_DIGEST) {
-        return _ProcessDigest(userReq);
+        status_t err = ioctl(fFd, B_CRYPTO_IOCTL_HASH_INIT, &userReq.algorithm);
+        if (err != B_OK) return err;
+
+        for (size_t i = 0; i < userReq.vectorCount; i++) {
+            BCryptoUserRequest updateReq = userReq;
+            updateReq.source = &userReq.source[i];
+            updateReq.vectorCount = 1;
+            err = ioctl(fFd, B_CRYPTO_IOCTL_HASH_UPDATE, &updateReq);
+            if (err != B_OK) return err;
+        }
+
+        return ioctl(fFd, B_CRYPTO_IOCTL_HASH_FINAL, &userReq);
     }
 
     const size_t kMinZeroCopySize = 4096; 
@@ -396,124 +408,66 @@ BCrypto::_FillRequest(BCryptoUserRequest& req, BCryptoOperation op, BCryptoAlgor
 }
 
 status_t
-BCrypto::_ProcessDigest(BCryptoUserRequest& userReq)
+BCrypto::Digest(BCryptoAlgorithmID algo, const void* data, size_t len, void* outHash)
 {
-    // 1. INIT
-    status_t err = ioctl(fFd, B_CRYPTO_IOCTL_HASH_INIT, &userReq.algorithm);
+	//printf("BCrypto: digest diretto\n");
+	//fflush(stdout);
+	size_t hLen = GetHashLength(algo);
+	if (hLen == 0) return B_BAD_VALUE;
+    iovec src = { (void*)data, len };
+    uint8 tempHash[64];
+    iovec dst = { tempHash, sizeof(tempHash) };
+
+    BCryptoUserRequest req;
+    _FillRequest(req, B_CRYPTO_DIGEST, algo, B_CRYPTO_MODE_ANY,
+                 nullptr, 0, nullptr, 0, &src, &dst, 1);
+
+    // Mandiamo direttamente al driver. Il Core userà algo->Process()
+    status_t err = ioctl(fFd, B_CRYPTO_IOCTL_PROCESS, &req);
+    
+    if (err == B_OK)
+        memcpy(outHash, tempHash, hLen);
+        
+    return err;
+}
+status_t
+BCrypto::Digest(BCryptoAlgorithmID algo, BDataIO* source, void* outHash)
+{
+	//printf("BCrypto: digest in straming\n");
+	//fflush(stdout);
+    // A. Inizializzazione
+    status_t err = ioctl(fFd, B_CRYPTO_IOCTL_HASH_INIT, &algo);
     if (err != B_OK) return err;
 
-    // 2. UPDATE (Cicliamo sui vettori iovec dell'utente)
-    for (size_t i = 0; i < userReq.vectorCount; i++) {
-        BCryptoUserRequest updateReq = userReq;
-        updateReq.source = &userReq.source[i];
-        updateReq.vectorCount = 1;
+    // B. Ciclo di Update (Leggiamo il file/socket a pezzi)
+    uint8 buffer[65536]; // Pezzi da 64KB, amichevoli per la cache
+    ssize_t bytesRead;
+    
+    while ((bytesRead = source->Read(buffer, sizeof(buffer))) > 0) {
+        iovec src = { buffer, (size_t)bytesRead };
+        BCryptoUserRequest req;
+        _FillRequest(req, B_CRYPTO_DIGEST, algo, B_CRYPTO_MODE_ANY,
+                     nullptr, 0, nullptr, 0, &src, nullptr, 1);
         
-        err = ioctl(fFd, B_CRYPTO_IOCTL_HASH_UPDATE, &updateReq);
+        err = ioctl(fFd, B_CRYPTO_IOCTL_HASH_UPDATE, &req);
         if (err != B_OK) break;
     }
 
-    // 3. FINAL
+    // C. Finalizzazione
     if (err == B_OK) {
-        err = ioctl(fFd, B_CRYPTO_IOCTL_HASH_FINAL, &userReq);
+        uint8 tempHash[64];
+        iovec dst = { tempHash, sizeof(tempHash) };
+        BCryptoUserRequest req;
+        _FillRequest(req, B_CRYPTO_DIGEST, algo, B_CRYPTO_MODE_ANY,
+                     nullptr, 0, nullptr, 0, nullptr, &dst, 1);
+                     
+        err = ioctl(fFd, B_CRYPTO_IOCTL_HASH_FINAL, &req);
+        if (err == B_OK)
+            memcpy(outHash, tempHash, GetHashLength(algo));
     }
 
     return err;
 }
-
-status_t
-BCrypto::_ProcessDigestInRAM(BCryptoUserRequest& userReq)
-{
-    size_t totalSize = 0;
-    for (size_t i = 0; i < userReq.vectorCount; i++)
-        totalSize += userReq.source[i].iov_len;
-
-    if (totalSize == 0) return B_BAD_VALUE;
-
-    // Coalescing forzato per garantire l'atomicità dell'hash nel driver
-    void* bounceBuffer = malloc(totalSize);
-    if (!bounceBuffer) return B_NO_MEMORY;
-
-    size_t offset = 0;
-    for (size_t i = 0; i < userReq.vectorCount; i++) {
-        memcpy((uint8*)bounceBuffer + offset, 
-               userReq.source[i].iov_base, userReq.source[i].iov_len);
-        offset += userReq.source[i].iov_len;
-    }
-
-    uint8 hashResult[64]; // Buffer locale per ospitare il digest più grande possibile
-    iovec src = { bounceBuffer, totalSize };
-    iovec dst = { hashResult, sizeof(hashResult) };
-
-    // Prepariamo la richiesta per il driver usando i tuoi enum
-    BCryptoUserRequest digestReq;
-    _FillRequest(digestReq, B_CRYPTO_DIGEST, userReq.algorithm, B_CRYPTO_MODE_ANY,
-                 nullptr, 0, nullptr, 0, &src, &dst, 1);
-
-    status_t err = ioctl(fFd, B_CRYPTO_IOCTL_PROCESS, &digestReq);
-
-    if (err == B_OK && userReq.destination != nullptr) {
-        size_t hLen = GetHashLength(userReq.algorithm);
-        if (hLen > 0) {
-            // Copiamo il risultato nel primo iovec di destinazione dell'utente
-            memcpy(userReq.destination[0].iov_base, hashResult, hLen);
-        }
-    }
-
-    free(bounceBuffer);
-    return err;
-    
-    /* versione flattata
-    size_t totalSize = 0;
-    for (size_t i = 0; i < userReq.vectorCount; i++)
-        totalSize += userReq.source[i].iov_len;
-
-    if (totalSize == 0) return B_BAD_VALUE;
-
-    void* bounceBuffer = malloc(totalSize);
-    if (!bounceBuffer) return B_NO_MEMORY;
-
-    // Compattiamo i dati
-    size_t offset = 0;
-    for (size_t i = 0; i < userReq.vectorCount; i++) {
-        memcpy((uint8*)bounceBuffer + offset, 
-               userReq.source[i].iov_base, userReq.source[i].iov_len);
-        offset += userReq.source[i].iov_len;
-    }
-
-    uint8 hashResult[64];
-    memset(hashResult, 0, sizeof(hashResult));
-
-    // DEFINIAMO GLI IOVEC QUI E NON PASSIAMO I LORO INDIRIZZI A FUNZIONI ESTERNE
-    iovec localSrc = { bounceBuffer, totalSize };
-    iovec localDst = { hashResult, sizeof(hashResult) };
-
-    // Prepariamo la richiesta direttamente
-    BCryptoUserRequest digestReq;
-    memset(&digestReq, 0, sizeof(digestReq));
-    
-    digestReq.operation   = B_CRYPTO_DIGEST;
-    digestReq.algorithm   = userReq.algorithm;
-    digestReq.mode        = B_CRYPTO_MODE_ANY;
-    digestReq.source      = &localSrc;  // Punta a localSrc in questo stack
-    digestReq.destination = &localDst; // Punta a localDst in questo stack
-    digestReq.vectorCount = 1;
-
-    // Chiamata diretta
-    status_t err = ioctl(fFd, B_CRYPTO_IOCTL_PROCESS, &digestReq);
-
-    if (err == B_OK && userReq.destination != nullptr) {
-        size_t hLen = GetHashLength(userReq.algorithm);
-        if (hLen > 0) {
-            // Copiamo il risultato finale nel buffer dell'utente
-            memcpy(userReq.destination[0].iov_base, hashResult, hLen);
-        }
-    }
-
-    free(bounceBuffer);
-    return err;
-    */
-}
-
 size_t
 BCrypto::_RemovePadding(uint8* buffer, size_t len)
 {
@@ -581,18 +535,7 @@ BCrypto::_ApplyPadding(uint8* buffer, size_t inputLen, size_t totalLen)
     }
 }
 size_t
-BCrypto::GetHashLength(BCryptoAlgorithmID algo)
+BCrypto::GetHashLength(BCryptoAlgorithmID algo) const
 {
-    switch (algo) {
-        case B_CRYPTO_MD5:       return 16;
-        case B_CRYPTO_SHA1:      return 20;
-        case B_CRYPTO_SHA224:    return 28;
-        case B_CRYPTO_SHA256:    return 32;
-        case B_CRYPTO_SHA3_256:  return 32;
-        case B_CRYPTO_SHA384:    return 48;
-        case B_CRYPTO_SHA512:    return 64;
-        case B_CRYPTO_SHA3_512:  return 64;
-        case B_CRYPTO_BLAKE2B:   return 64;
-        default:                 return 0;
-    }
+	return decode_hash_length(algo);
 }
