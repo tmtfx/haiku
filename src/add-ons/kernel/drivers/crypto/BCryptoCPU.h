@@ -6,6 +6,20 @@
 #define _B_CRYPTO_CPU_H_
 
 #include <crypto/BCryptoDefs.h>
+#include <x86gprintrin.h>
+
+typedef struct alignas(64) {
+    uint8_t buffer[1024]; // 512 minimi, 1024 per sicurezza con AVX/XSAVE
+} fpu_state_t;
+
+#define B_PREPARE_CPU_STATE() \
+    fpu_state_t fpu_save; \
+    cpu_status cpu_state = disable_interrupts(); \
+    _fxsave(&fpu_save);
+
+#define B_RESTORE_CPU_STATE() \
+    _fxrstor(&fpu_save); \
+    restore_interrupts(cpu_state);
 
 /*
  * Rileva le capacità crittografiche della CPU (AES-NI, SHA, VIA PadLock)

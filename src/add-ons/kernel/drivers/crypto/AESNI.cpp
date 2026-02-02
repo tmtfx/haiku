@@ -11,7 +11,7 @@
 #include <string.h>
 #include "BCryptoAlgorithm.h"
 #if defined(__x86_64__) || defined(__i386__)
-
+#include "BCryptoCPU.h"
 #include <arch/x86/arch_cpu.h>
 #include <wmmintrin.h>
 #include <tmmintrin.h> //temp
@@ -350,6 +350,7 @@ aesni_process(BCryptoRequest* request)
         return st;
 
     bool encrypt = (request->operation == B_CRYPTO_ENCRYPT);
+    fpu_state_t fpu_save;
 
     /* ---- process iovecs ---- */
     for (size_t i = 0; i < request->vectorCount; i++) {
@@ -357,6 +358,9 @@ aesni_process(BCryptoRequest* request)
         iovec& dst       = request->destination[i];
         
         if (src.iov_len == 0) continue;
+        
+        cpu_status cpu = disable_interrupts();
+        _fxsave(&fpu_save);
 
         if (request->mode == B_CRYPTO_MODE_ECB) {
             st = aesni_process_ecb(encrypt, &ctx, (const uint8*)src.iov_base, 
@@ -370,6 +374,8 @@ aesni_process(BCryptoRequest* request)
         } else {
             st = B_NOT_SUPPORTED;
         }
+        _fxrstor(&fpu_save);
+        restore_interrupts(cpu);
 
         if (st != B_OK)
             goto out;
