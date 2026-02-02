@@ -27,7 +27,15 @@ static const uint32 K256[64] __attribute__((aligned(16))) = {
     0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
     0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
 };
-
+#define SHA256_ROUND(msg0, msg1, msg2, msg3, st0, st1, k_idx) \
+    { \
+        __m128i k_vec = _mm_loadu_si128((const __m128i*)&K256[k_idx]); \
+        st1 = _mm_sha256rnds2_epu32(st1, st0, _mm_add_epi32(msg0, k_vec)); \
+        st0 = _mm_sha256rnds2_epu32(st0, st1, _mm_add_epi32(_mm_alignr_epi8(msg0, msg0, 8), k_vec)); \
+        msg0 = _mm_sha256msg1_epu32(msg0, msg1); \
+        msg0 = _mm_add_epi32(msg0, _mm_sha256msg2_epu32(_mm_alignr_epi8(msg3, msg2, 4), msg3)); \
+    }
+/*
 #define SHA256_ROUND(msg0, msg1, msg2, msg3, st0, st1, k_idx) \
     { \
         __m128i k_vec = _mm_loadu_si128((const __m128i*)&K256[k_idx]); \
@@ -37,7 +45,8 @@ static const uint32 K256[64] __attribute__((aligned(16))) = {
         msg0 = _mm_sha256msg1_epu32(msg0, msg1); \
         msg0 = _mm_add_epi32(msg0, _mm_sha256msg2_epu32(_mm_alignr_epi8(msg3, msg2, 4), msg3)); \
     }
-
+    */
+/*
 static void
 sha256_transform_block(__m128i& state0, __m128i& state1, const uint8* data)
 {
@@ -69,6 +78,59 @@ sha256_transform_block(__m128i& state0, __m128i& state1, const uint8* data)
 
     state0 = _mm_add_epi32(state0, abef_save);
     state1 = _mm_add_epi32(state1, cdgh_save);
+}
+*/
+static void
+sha256_transform_block(__m128i& st0, __m128i& st1, const uint8* data)
+{
+    __m128i msg0, msg1, msg2, msg3;
+    __m128i old_st0 = st0;
+    __m128i old_st1 = st1;
+
+    // Caricamento messaggio con inversione endianness per SHA-NI
+    msg0 = _mm_shuffle_epi8(_mm_loadu_si128((const __m128i*)(data + 0)),  MASK_ENDIAN);
+    msg1 = _mm_shuffle_epi8(_mm_loadu_si128((const __m128i*)(data + 16)), MASK_ENDIAN);
+    msg2 = _mm_shuffle_epi8(_mm_loadu_si128((const __m128i*)(data + 32)), MASK_ENDIAN);
+    msg3 = _mm_shuffle_epi8(_mm_loadu_si128((const __m128i*)(data + 48)), MASK_ENDIAN);
+
+    // 64 Round (4 per macro = 16 chiamate)
+    SHA256_ROUND(msg0, msg1, msg2, msg3, st0, st1, 0);
+    SHA256_ROUND(msg1, msg2, msg3, msg0, st0, st1, 4);
+    SHA256_ROUND(msg2, msg3, msg0, msg1, st0, st1, 8);
+    SHA256_ROUND(msg3, msg0, msg1, msg2, st0, st1, 12);
+    SHA256_ROUND(msg0, msg1, msg2, msg3, st0, st1, 16);
+    SHA256_ROUND(msg1, msg2, msg3, msg0, st0, st1, 20);
+    SHA256_ROUND(msg2, msg3, msg0, msg1, st0, st1, 24);
+    SHA256_ROUND(msg3, msg0, msg1, msg2, st0, st1, 28);
+    SHA256_ROUND(msg0, msg1, msg2, msg3, st0, st1, 32);
+    SHA256_ROUND(msg1, msg2, msg3, msg0, st0, st1, 36);
+    SHA256_ROUND(msg2, msg3, msg0, msg1, st0, st1, 40);
+    SHA256_ROUND(msg3, msg0, msg1, msg2, st0, st1, 44);
+    SHA256_ROUND(msg0, msg1, msg2, msg3, st0, st1, 48);
+    SHA256_ROUND(msg1, msg2, msg3, msg0, st0, st1, 52);
+    SHA256_ROUND(msg2, msg3, msg0, msg1, st0, st1, 56);
+    SHA256_ROUND(msg3, msg0, msg1, msg2, st0, st1, 60);
+
+    st0 = _mm_add_epi32(st0, old_st0);
+    st1 = _mm_add_epi32(st1, old_st1);
+}
+static void
+extract_digest(__m128i st0, __m128i st1, uint8* out)
+{
+    uint32_t raw[8];
+    _mm_storeu_si128((__m128i*)&raw[0], st0);
+    _mm_storeu_si128((__m128i*)&raw[4], st1);
+
+    uint32_t* out32 = (uint32_t*)out;
+    // Mappatura Intel SHA-NI a SHA-256 A,B,C,D,E,F,G,H
+    out32[0] = __builtin_bswap32(raw[3]); // A
+    out32[1] = __builtin_bswap32(raw[2]); // B
+    out32[2] = __builtin_bswap32(raw[1]); // C
+    out32[3] = __builtin_bswap32(raw[0]); // D
+    out32[4] = __builtin_bswap32(raw[7]); // E
+    out32[5] = __builtin_bswap32(raw[6]); // F
+    out32[6] = __builtin_bswap32(raw[5]); // G
+    out32[7] = __builtin_bswap32(raw[4]); // H
 }
 /*
 status_t
@@ -155,39 +217,36 @@ x86_sha256_process(BCryptoRequest* request)
     return B_OK;
 }
 */
+/*
 status_t
 x86_sha256_process(BCryptoRequest* request)
 {
     if (request->algorithm != B_CRYPTO_SHA256)
         return B_BAD_VALUE;
 
-    // 1. Inizializzazione Stato (Ordine DCBA e HGFE per SHA-NI)
-    __m128i st0 = _mm_set_epi32(0xa54ff53a, 0x3c6ef372, 0xbb67ae85, 0x6a09e667);
-    __m128i st1 = _mm_set_epi32(0x5be0cd19, 0x1f83d9ab, 0x9b05688c, 0x510e527f);
+    // 1. Inizializzazione Stato (Ordine corretto per SHA-NI)
+    __m128i st0 = _mm_set_epi32(0xa54ff53a, 0x3c6ef372, 0xbb67ae85, 0x6a09e667); // DCBA
+    __m128i st1 = _mm_set_epi32(0x5be0cd19, 0x1f83d9ab, 0x9b05688c, 0x510e527f); // HGFE
 
     uint64 totalByteCount = 0;
     
-    // Iteriamo sui vettori (nel caso di Full RAM sarà uno solo, ma così è robusto)
     for (size_t i = 0; i < request->vectorCount; i++) {
         const uint8* data = (const uint8*)request->source[i].iov_base;
         size_t len = request->source[i].iov_len;
         totalByteCount += len;
 
-        // Processa tutti i blocchi da 64 byte disponibili
         while (len >= 64) {
             sha256_transform_block(st0, st1, data);
             data += 64;
             len -= 64;
         }
 
-        // Gestione dell'ultimo pezzo + Padding
-        // Lo facciamo solo se siamo all'ultimo vettore
+        // Padding finale (solo sull'ultimo vettore)
         if (i == request->vectorCount - 1) {
             uint8 pad[128];
             memset(pad, 0, 128);
             memcpy(pad, data, len);
-            
-            pad[len] = 0x80; // Bit di stop
+            pad[len] = 0x80;
             
             size_t padLen = (len < 56) ? 64 : 128;
             uint64 bits = __builtin_bswap64(totalByteCount * 8);
@@ -199,24 +258,70 @@ x86_sha256_process(BCryptoRequest* request)
         }
     }
 
-    // 2. ESTRAZIONE E CONVERSIONE (Il punto critico)
-    // SHA-NI tiene lo stato internamente in un modo che richiede 
-    // uno swap delle parole e un'inversione di endianness per SHA-256 standard.
-    
-    // Invertiamo l'endianness di ogni word a 32 bit (Little -> Big)
-    st0 = _mm_shuffle_epi8(st0, MASK_ENDIAN);
-    st1 = _mm_shuffle_epi8(st1, MASK_ENDIAN);
+    // 2. ESTRAZIONE MANUALE (Per evitare i pattern ripetitivi)
+    // Scarichiamo i registri in array temporanei per rimetterli in ordine
+    uint32_t raw_st0[4];
+    uint32_t raw_st1[4];
+    _mm_storeu_si128((__m128i*)raw_st0, st0);
+    _mm_storeu_si128((__m128i*)raw_st1, st1);
 
-    // Lo standard SHA-256 vuole l'output come A B C D E F G H.
-    // st0 ora contiene (A,B,C,D) in ordine di memoria, st1 (E,F,G,H).
     if (request->destination[0].iov_base) {
-        uint8* out = (uint8*)request->destination[0].iov_base;
-        _mm_storeu_si128((__m128i*)out, st0);
-        _mm_storeu_si128((__m128i*)(out + 16), st1);
+        uint32_t* out32 = (uint32_t*)request->destination[0].iov_base;
+        
+        // Mappatura Intel SHA-NI -> SHA-256 Standard:
+        // raw_st0 contiene {FE, HG, DC, BA} (a seconda di come lo vede la CPU)
+        // La logica corretta per rimetterli in A,B,C,D,E,F,G,H è:
+        out32[0] = __builtin_bswap32(raw_st0[3]); // A
+        out32[1] = __builtin_bswap32(raw_st0[2]); // B
+        out32[2] = __builtin_bswap32(raw_st0[1]); // C
+        out32[3] = __builtin_bswap32(raw_st0[0]); // D
+        out32[4] = __builtin_bswap32(raw_st1[3]); // E
+        out32[5] = __builtin_bswap32(raw_st1[2]); // F
+        out32[6] = __builtin_bswap32(raw_st1[1]); // G
+        out32[7] = __builtin_bswap32(raw_st1[0]); // H
     }
 
     return B_OK;
 }
+*/
+status_t
+x86_sha256_process(BCryptoRequest* request)
+{
+    if (request->algorithm != B_CRYPTO_SHA256) return B_BAD_VALUE;
+
+    __m128i st0 = _mm_set_epi32(0xa54ff53a, 0x3c6ef372, 0xbb67ae85, 0x6a09e667);
+    __m128i st1 = _mm_set_epi32(0x5be0cd19, 0x1f83d9ab, 0x9b05688c, 0x510e527f);
+    uint64 totalLen = 0;
+
+    for (size_t i = 0; i < request->vectorCount; i++) {
+        const uint8* data = (const uint8*)request->source[i].iov_base;
+        size_t len = request->source[i].iov_len;
+        totalLen += len;
+
+        while (len >= 64) {
+            sha256_transform_block(st0, st1, data);
+            data += 64; len -= 64;
+        }
+
+        if (i == request->vectorCount - 1) {
+            uint8 pad[128];
+            memset(pad, 0, 128);
+            memcpy(pad, data, len);
+            pad[len] = 0x80;
+            size_t padLen = (len < 56) ? 64 : 128;
+            uint64_t bits = __builtin_bswap64(totalLen * 8);
+            memcpy(pad + padLen - 8, &bits, 8);
+            sha256_transform_block(st0, st1, pad);
+            if (padLen == 128) sha256_transform_block(st0, st1, pad + 64);
+        }
+    }
+
+    if (request->destination[0].iov_base)
+        extract_digest(st0, st1, (uint8*)request->destination[0].iov_base);
+
+    return B_OK;
+}
+/*
 static status_t
 x86_sha256_init_bridge(void** context, size_t* contextSize)
 {
@@ -230,6 +335,16 @@ x86_sha256_init_bridge(void** context, size_t* contextSize)
     ctx->buffer_len = 0;
     ctx->total_len = 0;
     *context = ctx;
+    return B_OK;
+}*/
+status_t x86_sha256_init_bridge(void** ctx, size_t* size) {
+    *size = sizeof(x86_sha256_context);
+    *ctx = malloc(*size);
+    if (!*ctx) return B_NO_MEMORY;
+    x86_sha256_context* s = (x86_sha256_context*)*ctx;
+    s->state0 = _mm_set_epi32(0xa54ff53a, 0x3c6ef372, 0xbb67ae85, 0x6a09e667);
+    s->state1 = _mm_set_epi32(0x5be0cd19, 0x1f83d9ab, 0x9b05688c, 0x510e527f);
+    s->buffer_len = 0; s->total_len = 0;
     return B_OK;
 }
 /*
@@ -263,6 +378,7 @@ x86_sha256_final_bridge(void* context, uint8* outDigest)
 
     return B_OK;
 }*/
+/*
 static status_t
 x86_sha256_final_bridge(void* context, uint8* outDigest)
 {
@@ -306,6 +422,23 @@ x86_sha256_final_bridge(void* context, uint8* outDigest)
     // La free del contesto la gestisce il BCryptoCore dopo questa chiamata
     return B_OK;
 }
+*/
+status_t x86_sha256_final_bridge(void* ctx, uint8* out) {
+    x86_sha256_context* s = (x86_sha256_context*)ctx;
+    uint8 pad[128];
+    memcpy(pad, s->buffer, s->buffer_len);
+    pad[s->buffer_len] = 0x80;
+    size_t padLen = (s->buffer_len < 56) ? 64 : 128;
+    memset(pad + s->buffer_len + 1, 0, padLen - s->buffer_len - 1);
+    uint64_t bits = __builtin_bswap64(s->total_len * 8);
+    memcpy(pad + padLen - 8, &bits, 8);
+    sha256_transform_block(s->state0, s->state1, pad);
+    if (padLen == 128) sha256_transform_block(s->state0, s->state1, pad + 64);
+    extract_digest(s->state0, s->state1, out);
+    free(ctx);
+    return B_OK;
+}
+/*
 static status_t
 x86_sha256_update_bridge(void* context, const iovec* vecs, size_t count)
 {
@@ -336,6 +469,24 @@ x86_sha256_update_bridge(void* context, const iovec* vecs, size_t count)
         if (len > 0) {
             memcpy(ctx->buffer + ctx->buffer_len, data, len);
             ctx->buffer_len += len;
+        }
+    }
+    return B_OK;
+}*/
+status_t x86_sha256_update_bridge(void* ctx, const iovec* vecs, size_t count) {
+    x86_sha256_context* s = (x86_sha256_context*)ctx;
+    for (size_t i = 0; i < count; i++) {
+        const uint8* data = (const uint8*)vecs[i].iov_base;
+        size_t len = vecs[i].iov_len;
+        s->total_len += len;
+        while (len > 0) {
+            size_t copy = (64 - s->buffer_len < len) ? 64 - s->buffer_len : len;
+            memcpy(s->buffer + s->buffer_len, data, copy);
+            s->buffer_len += copy; data += copy; len -= copy;
+            if (s->buffer_len == 64) {
+                sha256_transform_block(s->state0, s->state1, s->buffer);
+                s->buffer_len = 0;
+            }
         }
     }
     return B_OK;
