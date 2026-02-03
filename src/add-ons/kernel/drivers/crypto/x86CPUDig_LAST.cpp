@@ -16,223 +16,25 @@
 
 #pragma GCC target("sha,sse4.1")
 
+//static const __m128i MASK_ENDIAN = _mm_set_epi8(12,13,14,15, 8,9,10,11, 4,5,6,7, 0,1,2,3);
+static const __m128i MASK_ENDIAN = _mm_set_epi8(
+    12, 13, 14, 15, 
+    8, 9, 10, 11, 
+    4, 5, 6, 7, 
+    0, 1, 2, 3
+);
 
-static const uint32_t K256[64] alignas(16) = {
-    0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,
-    0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
-    0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,
-    0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
-    0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,
-    0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
-    0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,
-    0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
-    0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,
-    0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
-    0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,
-    0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
-    0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,
-    0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
-    0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,
-    0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2
+static const uint32 K256[64] alignas(16) = {
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
 };
-/*
-static inline void
-sha256_transform(__m128i& state0, __m128i& state1, const uint8_t* data)
-{
-    __m128i a = state0;
-    __m128i b = state1;
-    __m128i m0, m1, m2, m3;
-    __m128i t;*/
-    /*
-    alignas(16) static const uint8_t kShuffleEndianBytes[16] = {
-    12,13,14,15,
-     8, 9,10,11,
-     4, 5, 6, 7,
-     0, 1, 2, 3
-};*/
 
-
-/*
-alignas(16) static const uint8_t kShuffleEndianBytes[16] = {
-    3, 2, 1, 0,  // Prima parola (indici 0-3 nel registro)
-    7, 6, 5, 4,  // Seconda parola (indici 4-7)
-    11, 10, 9, 8, // Terza parola (indici 8-11)
-    15, 14, 13, 12 // Quarta parola (indici 12-15)
-};
-const __m128i SHUF_ENDIAN =
-    _mm_load_si128((const __m128i*)kShuffleEndianBytes);
-
-    m0 = _mm_shuffle_epi8(_mm_loadu_si128((const __m128i*)(data +  0)), SHUF_ENDIAN);
-    m1 = _mm_shuffle_epi8(_mm_loadu_si128((const __m128i*)(data + 16)), SHUF_ENDIAN);
-    m2 = _mm_shuffle_epi8(_mm_loadu_si128((const __m128i*)(data + 32)), SHUF_ENDIAN);
-    m3 = _mm_shuffle_epi8(_mm_loadu_si128((const __m128i*)(data + 48)), SHUF_ENDIAN);
-
-#define RND(m, k) \
-    t = _mm_add_epi32(m, _mm_loadu_si128((const __m128i*)(k))); \
-    b = _mm_sha256rnds2_epu32(b, a, t); \
-    a = _mm_sha256rnds2_epu32(a, b, _mm_alignr_epi8(t, t, 8));
-
-    // rounds 0–15
-    RND(m0, K256 +  0)
-    RND(m1, K256 +  4)
-    RND(m2, K256 +  8)
-    RND(m3, K256 + 12)*/
-
-    // rounds 16–31
-    /*m0 = _mm_sha256msg1_epu32(m0, m1);
-    m1 = _mm_sha256msg1_epu32(m1, m2);
-    m2 = _mm_sha256msg1_epu32(m2, m3);
-    m3 = _mm_sha256msg1_epu32(m3, m0);
-
-    m0 = _mm_add_epi32(m0, _mm_sha256msg2_epu32(m2, m3));
-    m1 = _mm_add_epi32(m1, _mm_sha256msg2_epu32(m3, m0));
-    m2 = _mm_add_epi32(m2, _mm_sha256msg2_epu32(m0, m1));
-    m3 = _mm_add_epi32(m3, _mm_sha256msg2_epu32(m1, m2));
-
-    RND(m0, K256 + 16)
-    RND(m1, K256 + 20)
-    RND(m2, K256 + 24)
-    RND(m3, K256 + 28)
-
-    // rounds 32–47
-    m0 = _mm_sha256msg1_epu32(m0, m1);
-    m1 = _mm_sha256msg1_epu32(m1, m2);
-    m2 = _mm_sha256msg1_epu32(m2, m3);
-    m3 = _mm_sha256msg1_epu32(m3, m0);
-
-    m0 = _mm_add_epi32(m0, _mm_sha256msg2_epu32(m2, m3));
-    m1 = _mm_add_epi32(m1, _mm_sha256msg2_epu32(m3, m0));
-    m2 = _mm_add_epi32(m2, _mm_sha256msg2_epu32(m0, m1));
-    m3 = _mm_add_epi32(m3, _mm_sha256msg2_epu32(m1, m2));
-
-    RND(m0, K256 + 32)
-    RND(m1, K256 + 36)
-    RND(m2, K256 + 40)
-    RND(m3, K256 + 44)
-
-    // rounds 48–63  ⬅️ QUESTO MANCAVA
-    m0 = _mm_sha256msg1_epu32(m0, m1);
-    m1 = _mm_sha256msg1_epu32(m1, m2);
-    m2 = _mm_sha256msg1_epu32(m2, m3);
-    m3 = _mm_sha256msg1_epu32(m3, m0);
-
-    m0 = _mm_add_epi32(m0, _mm_sha256msg2_epu32(m2, m3));
-    m1 = _mm_add_epi32(m1, _mm_sha256msg2_epu32(m3, m0));
-    m2 = _mm_add_epi32(m2, _mm_sha256msg2_epu32(m0, m1));
-    m3 = _mm_add_epi32(m3, _mm_sha256msg2_epu32(m1, m2));
-
-    RND(m0, K256 + 48)
-    RND(m1, K256 + 52)
-    RND(m2, K256 + 56)
-    RND(m3, K256 + 60)*/
-/*#define SHA256_RND(msg, k_ptr) \
-    t = _mm_add_epi32(msg, _mm_loadu_si128((const __m128i*)(k_ptr))); \
-    state1 = _mm_sha256rnds2_epu32(state1, state0, t); \
-    state0 = _mm_sha256rnds2_epu32(state0, state1, _mm_alignr_epi8(t, t, 8));
-    // Rounds 16-31
-    m0 = _mm_sha256msg1_epu32(m0, m1);
-    m0 = _mm_add_epi32(m0, _mm_sha256msg2_epu32(_mm_alignr_epi8(m3, m2, 4), m3));
-    SHA256_RND(m0, K256 + 16)
-    // ... ripeti lo schema per m1, m2, m3 ...
-    m1 = _mm_sha256msg1_epu32(m1, m2);
-    m1 = _mm_add_epi32(m1, _mm_sha256msg2_epu32(_mm_alignr_epi8(m0, m3, 4), m0));
-    SHA256_RND(m1, K256 + 20)
-
-    m2 = _mm_sha256msg1_epu32(m2, m3);
-    m2 = _mm_add_epi32(m2, _mm_sha256msg2_epu32(_mm_alignr_epi8(m1, m0, 4), m1));
-    SHA256_RND(m2, K256 + 24)
-
-    m3 = _mm_sha256msg1_epu32(m3, m0);
-    m3 = _mm_add_epi32(m3, _mm_sha256msg2_epu32(_mm_alignr_epi8(m2, m1, 4), m2));
-    SHA256_RND(m3, K256 + 28)
-
-    // Rounds 32-47
-    m0 = _mm_sha256msg1_epu32(m0, m1);
-    m0 = _mm_add_epi32(m0, _mm_sha256msg2_epu32(_mm_alignr_epi8(m3, m2, 4), m3));
-    SHA256_RND(m0, K256 + 32)
-    m1 = _mm_sha256msg1_epu32(m1, m2);
-    m1 = _mm_add_epi32(m1, _mm_sha256msg2_epu32(_mm_alignr_epi8(m0, m3, 4), m0));
-    SHA256_RND(m1, K256 + 36)
-    m2 = _mm_sha256msg1_epu32(m2, m3);
-    m2 = _mm_add_epi32(m2, _mm_sha256msg2_epu32(_mm_alignr_epi8(m1, m0, 4), m1));
-    SHA256_RND(m2, K256 + 40)
-    m3 = _mm_sha256msg1_epu32(m3, m0);
-    m3 = _mm_add_epi32(m3, _mm_sha256msg2_epu32(_mm_alignr_epi8(m2, m1, 4), m2));
-    SHA256_RND(m3, K256 + 44)
-
-    // Rounds 48-63
-    m0 = _mm_sha256msg1_epu32(m0, m1);
-    m0 = _mm_add_epi32(m0, _mm_sha256msg2_epu32(_mm_alignr_epi8(m3, m2, 4), m3));
-    SHA256_RND(m0, K256 + 48)
-    m1 = _mm_sha256msg1_epu32(m1, m2);
-    m1 = _mm_add_epi32(m1, _mm_sha256msg2_epu32(_mm_alignr_epi8(m0, m3, 4), m0));
-    SHA256_RND(m1, K256 + 52)
-    m2 = _mm_sha256msg1_epu32(m2, m3);
-    m2 = _mm_add_epi32(m2, _mm_sha256msg2_epu32(_mm_alignr_epi8(m1, m0, 4), m1));
-    SHA256_RND(m2, K256 + 56)
-    m3 = _mm_sha256msg1_epu32(m3, m0);
-    m3 = _mm_add_epi32(m3, _mm_sha256msg2_epu32(_mm_alignr_epi8(m2, m1, 4), m2));
-    SHA256_RND(m3, K256 + 60)
-
-#undef RND
-
-    //state0 = _mm_add_epi32(state0, a);
-    //state1 = _mm_add_epi32(state1, b);
-    state0 = _mm_add_epi32(a, state0);
-    state1 = _mm_add_epi32(b, state1);
-}*/
-static inline void
-sha256_transform(__m128i& st0, __m128i& st1, const uint8_t* data)
-{
-    // 1. SALVA lo stato iniziale (per l'accumulo finale)
-    __m128i old_st0 = st0;
-    __m128i old_st1 = st1;
-    
-    __m128i m0, m1, m2, m3, t;
-
-    // 2. CARICA i dati (Usa la maschera che inverte solo le word: 3,2,1,0...)
-    alignas(16) static const uint8_t kShuf[16] = {12,13,14,15,
-     8, 9,10,11,
-     4, 5, 6, 7,
-     0, 1, 2, 3
-    };//3,2,1,0, 7,6,5,4, 11,10,9,8, 15,14,13,12};
-    const __m128i mask = _mm_load_si128((const __m128i*)kShuf);
-
-    m0 = _mm_shuffle_epi8(_mm_loadu_si128((const __m128i*)(data + 0)),  mask);
-    m1 = _mm_shuffle_epi8(_mm_loadu_si128((const __m128i*)(data + 16)), mask);
-    m2 = _mm_shuffle_epi8(_mm_loadu_si128((const __m128i*)(data + 32)), mask);
-    m3 = _mm_shuffle_epi8(_mm_loadu_si128((const __m128i*)(data + 48)), mask);
-
-    // 3. DEFINISCI LA MACRO (Qui stiamo usando st0 e st1 direttamente)
-    // Nota l'ordine: st1 (EFGH) viene aggiornato per primo usando st0 (ABCD)
-#define RND4(msg, k_idx) \
-    t = _mm_add_epi32(msg, _mm_loadu_si128((const __m128i*)&K256[k_idx])); \
-    st1 = _mm_sha256rnds2_epu32(st1, st0, t); \
-    st0 = _mm_sha256rnds2_epu32(st0, st1, _mm_alignr_epi8(t, t, 8));
-
-    // Round 0-15
-    RND4(m0, 0); RND4(m1, 4); RND4(m2, 8); RND4(m3, 12);
-
-    // Round 16-63 (Message Schedule + RND)
-    for (int j = 16; j < 64; j += 16) {
-        m0 = _mm_add_epi32(_mm_sha256msg1_epu32(m0, m1), _mm_sha256msg2_epu32(_mm_alignr_epi8(m3, m2, 4), m3));
-        RND4(m0, j);
-        m1 = _mm_add_epi32(_mm_sha256msg1_epu32(m1, m2), _mm_sha256msg2_epu32(_mm_alignr_epi8(m0, m3, 4), m0));
-        RND4(m1, j+4);
-        m2 = _mm_add_epi32(_mm_sha256msg1_epu32(m2, m3), _mm_sha256msg2_epu32(_mm_alignr_epi8(m1, m0, 4), m1));
-        RND4(m2, j+8);
-        m3 = _mm_add_epi32(_mm_sha256msg1_epu32(m3, m0), _mm_sha256msg2_epu32(_mm_alignr_epi8(m2, m1, 4), m2));
-        RND4(m3, j+12);
-    }
-
-    // 4. ACCUMULO FINALE (Somma lo stato iniziale a quello calcolato)
-    st0 = _mm_add_epi32(st0, old_st0);
-    st1 = _mm_add_epi32(st1, old_st1);
-}
-//static const __m128i SHUF_ENDIAN = { 0x0c0d0e0f0,0x08090a0b,0x04050607,0x00010203 };
-
-
-static const __m128i MASK_ENDIAN = _mm_set_epi8(12,13,14,15, 8,9,10,11, 4,5,6,7, 0,1,2,3);
 #define SHA256_ROUND(msg0, msg1, msg2, msg3, st0, st1, k_idx) \
     { \
         __m128i k_vec = _mm_loadu_si128((const __m128i*)&K256[k_idx]); \
@@ -241,6 +43,7 @@ static const __m128i MASK_ENDIAN = _mm_set_epi8(12,13,14,15, 8,9,10,11, 4,5,6,7,
         msg0 = _mm_sha256msg1_epu32(msg0, msg1); \
         msg0 = _mm_add_epi32(msg0, _mm_sha256msg2_epu32(_mm_alignr_epi8(msg3, msg2, 4), msg3)); \
     }
+
 static void
 sha256_transform_block(__m128i& st0, __m128i& st1, const uint8* data)
 {
@@ -273,7 +76,6 @@ sha256_transform_block(__m128i& st0, __m128i& st1, const uint8* data)
     st0 = _mm_add_epi32(st0, old_st0);
     st1 = _mm_add_epi32(st1, old_st1);
 }
-/*
 static void
 sha256_transform_64bytes(__m128i& st0, __m128i& st1, const uint8* data)
 {
@@ -401,78 +203,92 @@ sha256_transform_64bytes(__m128i& st0, __m128i& st1, const uint8* data)
     // SOMMA FINALE (Fondamentale!)
     st0 = _mm_add_epi32(st0, old_st0);
     st1 = _mm_add_epi32(st1, old_st1);
+}
+/*
+static void
+extract_digest(__m128i st0, __m128i st1, uint8* out)
+{
+    alignas(16) uint32_t raw[8];
+    // SHA-NI memorizza st0 = (D,C,B,A) e st1 = (H,G,F,E)
+    _mm_storeu_si128((__m128i*)&raw[0], st0);
+    _mm_storeu_si128((__m128i*)&raw[4], st1);
+
+    uint32_t* out32 = (uint32_t*)out;
+    // Invertiamo i byte per scrivere in Big Endian come richiesto da NIST
+    out32[0] = __builtin_bswap32(_mm_extract_epi32(st0, 3)); // A
+    out32[1] = __builtin_bswap32(_mm_extract_epi32(st0, 2)); // B
+    out32[2] = __builtin_bswap32(_mm_extract_epi32(st0, 1)); // C
+    out32[3] = __builtin_bswap32(_mm_extract_epi32(st0, 0)); // D
+    out32[4] = __builtin_bswap32(_mm_extract_epi32(st1, 3)); // E
+    out32[5] = __builtin_bswap32(_mm_extract_epi32(st1, 2)); // F
+    out32[6] = __builtin_bswap32(_mm_extract_epi32(st1, 1)); // G
+    out32[7] = __builtin_bswap32(_mm_extract_epi32(st1, 0)); // H*/
+    /*out32[0] = __builtin_bswap32(raw[3]); // A
+    out32[1] = __builtin_bswap32(raw[2]); // B
+    out32[2] = __builtin_bswap32(raw[1]); // C
+    out32[3] = __builtin_bswap32(raw[0]); // D
+    out32[4] = __builtin_bswap32(raw[7]); // E
+    out32[5] = __builtin_bswap32(raw[6]); // F
+    out32[6] = __builtin_bswap32(raw[5]); // G
+    out32[7] = __builtin_bswap32(raw[4]); // H*/
+    /*out32[0] = __builtin_bswap32(raw[0]);
+    out32[1] = __builtin_bswap32(raw[1]);
+    out32[2] = __builtin_bswap32(raw[2]);
+    out32[3] = __builtin_bswap32(raw[3]);
+    out32[4] = __builtin_bswap32(raw[4]);
+    out32[5] = __builtin_bswap32(raw[5]);
+    out32[6] = __builtin_bswap32(raw[6]);
+    out32[7] = __builtin_bswap32(raw[7]);
+}*/
+static void
+extract_digest(__m128i st0, __m128i st1, uint8* out)
+{
+    uint32_t* out32 = (uint32_t*)out;
+
+    // Usiamo le intrinseche di estrazione che sono più affidabili dello store + pointer
+    // Ricorda: st0 = (D, C, B, A), st1 = (H, G, F, E)
+    // Lo standard vuole A, B, C, D, E, F, G, H
+    
+    out32[0] = __builtin_bswap32(_mm_extract_epi32(st0, 3)); // A
+    out32[1] = __builtin_bswap32(_mm_extract_epi32(st0, 2)); // B
+    out32[2] = __builtin_bswap32(_mm_extract_epi32(st0, 1)); // C
+    out32[3] = __builtin_bswap32(_mm_extract_epi32(st0, 0)); // D
+    out32[4] = __builtin_bswap32(_mm_extract_epi32(st1, 3)); // E
+    out32[5] = __builtin_bswap32(_mm_extract_epi32(st1, 2)); // F
+    out32[6] = __builtin_bswap32(_mm_extract_epi32(st1, 1)); // G
+    out32[7] = __builtin_bswap32(_mm_extract_epi32(st1, 0)); // H
+    
+    /*
+    out32[0] = __builtin_bswap32(_mm_extract_epi32(st0, 0)); // A? Prova l'indice 0
+    out32[1] = __builtin_bswap32(_mm_extract_epi32(st0, 1)); // B
+    out32[2] = __builtin_bswap32(_mm_extract_epi32(st0, 2)); // C
+    out32[3] = __builtin_bswap32(_mm_extract_epi32(st0, 3)); // D
+    out32[4] = __builtin_bswap32(_mm_extract_epi32(st1, 0)); // E
+    out32[5] = __builtin_bswap32(_mm_extract_epi32(st1, 1)); // F
+    out32[6] = __builtin_bswap32(_mm_extract_epi32(st1, 2)); // G
+    out32[7] = __builtin_bswap32(_mm_extract_epi32(st1, 3)); // H
+    */
+}
+/*
+static void
+extract_digest(__m128i st0, __m128i st1, uint8* out)
+{
+    alignas(16) uint32_t raw[8];
+    _mm_storeu_si128((__m128i*)&raw[0], st0);
+    _mm_storeu_si128((__m128i*)&raw[4], st1);
+
+    uint32_t* out32 = (uint32_t*)out;
+    out32[0] = __builtin_bswap32(raw[3]); // A
+    out32[1] = __builtin_bswap32(raw[2]); // B
+    out32[2] = __builtin_bswap32(raw[1]); // C
+    out32[3] = __builtin_bswap32(raw[0]); // D
+    out32[4] = __builtin_bswap32(raw[7]); // E
+    out32[5] = __builtin_bswap32(raw[6]); // F
+    out32[6] = __builtin_bswap32(raw[5]); // G
+    out32[7] = __builtin_bswap32(raw[4]); // H
 }*/
 
-static inline void
-extract_digest(__m128i st0, __m128i st1, uint8_t* out)
-{
-    uint32_t* o = (uint32_t*)out;
-/*
-    o[0] = __builtin_bswap32(_mm_extract_epi32(st0, 3));
-    o[1] = __builtin_bswap32(_mm_extract_epi32(st0, 2));
-    o[2] = __builtin_bswap32(_mm_extract_epi32(st0, 1));
-    o[3] = __builtin_bswap32(_mm_extract_epi32(st0, 0));
-    o[4] = __builtin_bswap32(_mm_extract_epi32(st1, 3));
-    o[5] = __builtin_bswap32(_mm_extract_epi32(st1, 2));
-    o[6] = __builtin_bswap32(_mm_extract_epi32(st1, 1));
-    o[7] = __builtin_bswap32(_mm_extract_epi32(st1, 0));*/
-    /*
-    o[0] = _mm_extract_epi32(st0, 3);
-    o[1] = _mm_extract_epi32(st0, 2);
-    o[2] = _mm_extract_epi32(st0, 1);
-    o[3] = _mm_extract_epi32(st0, 0);
-    o[4] = _mm_extract_epi32(st1, 3);
-    o[5] = _mm_extract_epi32(st1, 2);
-    o[6] = _mm_extract_epi32(st1, 1);
-    o[7] = _mm_extract_epi32(st1, 0);
-    */
-    o[0] = __builtin_bswap32(_mm_extract_epi32(st0, 0)); // A
-    o[1] = __builtin_bswap32(_mm_extract_epi32(st0, 1)); // B
-    o[2] = __builtin_bswap32(_mm_extract_epi32(st0, 2)); // C
-    o[3] = __builtin_bswap32(_mm_extract_epi32(st0, 3)); // D
-    o[4] = __builtin_bswap32(_mm_extract_epi32(st1, 0)); // E
-    o[5] = __builtin_bswap32(_mm_extract_epi32(st1, 1)); // F
-    o[6] = __builtin_bswap32(_mm_extract_epi32(st1, 2)); // G
-    o[7] = __builtin_bswap32(_mm_extract_epi32(st1, 3)); // H
-}
-status_t
-x86_sha256_process(BCryptoRequest* request)
-{
-    B_PREPARE_CPU_STATE();
-
-    // 1. STATO INIZIALE (Standard SHA-256)
-    // Usiamo l'ordine richiesto dalle istruzioni Intel: (D, C, B, A) e (H, G, F, E)
-    __m128i st0 = _mm_set_epi32(0xa54ff53a, 0x3c6ef372, 0xbb67ae85, 0x6a09e667); 
-    __m128i st1 = _mm_set_epi32(0x5be0cd19, 0x1f83d9ab, 0x9b05688c, 0x510e527f);
-
-    // 2. BLOCCO DI PADDING MANUALE PER "abc"
-    // 64 byte totali: 'a','b','c', 0x80, 00... (52 volte), 00 00 00 00 00 00 00 18
-    alignas(16) uint8_t abc_pad[64] = {0};
-    abc_pad[0] = 'a'; abc_pad[1] = 'b'; abc_pad[2] = 'c';
-    abc_pad[3] = 0x80;
-    // La lunghezza in bit per "abc" è 24 (0x18). Va in Big-Endian negli ultimi 8 byte.
-    abc_pad[63] = 0x18; 
-
-    // 3. TRASFORMAZIONE (Usa la tua funzione sha256_transform)
-    sha256_transform(st0, st1, abc_pad);
-
-    // 4. ESTRAZIONE
-    // Se lo stato è (D,C,B,A), l'indice 0 è A.
-    uint32_t* out = (uint32_t*)request->destination[0].iov_base;
-    out[0] = __builtin_bswap32(_mm_extract_epi32(st0, 0)); // A
-    out[1] = __builtin_bswap32(_mm_extract_epi32(st0, 1)); // B
-    out[2] = __builtin_bswap32(_mm_extract_epi32(st0, 2)); // C
-    out[3] = __builtin_bswap32(_mm_extract_epi32(st0, 3)); // D
-    out[4] = __builtin_bswap32(_mm_extract_epi32(st1, 0)); // E
-    out[5] = __builtin_bswap32(_mm_extract_epi32(st1, 1)); // F
-    out[6] = __builtin_bswap32(_mm_extract_epi32(st1, 2)); // G
-    out[7] = __builtin_bswap32(_mm_extract_epi32(st1, 3)); // H
-
-    B_RESTORE_CPU_STATE();
-    return B_OK;
-}
 // --- ONE-SHOT PROCESS ---
-/*
 status_t
 x86_sha256_process(BCryptoRequest* request)
 {
@@ -482,12 +298,10 @@ x86_sha256_process(BCryptoRequest* request)
 
     B_PREPARE_CPU_STATE();
 
-    __m128i st0 = _mm_set_epi32(0xa54ff53a, 0x3c6ef372, 0xbb67ae85, 0x6a09e667); // A, B, C, D
-    __m128i st1 = _mm_set_epi32(0x5be0cd19, 0x1f83d9ab, 0x9b05688c, 0x510e527f); // E, F, G, H
-    //__m128i st0 = _mm_set_epi32(0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a); // D, C, B, A
-    //__m128i st1 = _mm_set_epi32(0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19); // H, G, F, E
-    //__m128i st0 = _mm_set_epi32(0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a); // (D,C,B,A)
-    //__m128i st1 = _mm_set_epi32(0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19); // (H,G,F,E)
+    //__m128i st0 = _mm_set_epi32(0xa54ff53a, 0x3c6ef372, 0xbb67ae85, 0x6a09e667); // A, B, C, D
+    //__m128i st1 = _mm_set_epi32(0x5be0cd19, 0x1f83d9ab, 0x9b05688c, 0x510e527f); // E, F, G, H
+    __m128i st0 = _mm_set_epi32(0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a); // D, C, B, A
+    __m128i st1 = _mm_set_epi32(0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19); // H, G, F, E
     uint64 totalBytes = 0;
     // Calcoliamo prima la lunghezza totale per il padding finale
     for (size_t i = 0; i < request->vectorCount; i++)
@@ -501,8 +315,7 @@ x86_sha256_process(BCryptoRequest* request)
 
         // Processa i blocchi pieni
         while (len >= 64) {
-            //sha256_transform_64bytes(st0, st1, data);
-            sha256_transform(st0, st1, data);
+            sha256_transform_64bytes(st0, st1, data);
             data += 64; 
             len -= 64;
         }
@@ -517,21 +330,20 @@ x86_sha256_process(BCryptoRequest* request)
             
             // Se non c'è spazio per i 64 bit di lunghezza, usiamo due blocchi
             size_t padLen = (len < 56) ? 64 : 128;
-            uint64_t bitLen = __builtin_bswap64((uint64_t)totalBytes * 8);
+            uint64_t bitLen = __builtin_bswap64(totalBytes * 8);
             memcpy(pad + padLen - 8, &bitLen, 8);
             
             // USA SEMPRE LA STESSA FUNZIONE!
-            //sha256_transform_64bytes(st0, st1, pad);
-            sha256_transform(st0, st1, pad);
+            sha256_transform_64bytes(st0, st1, pad);
             if (padLen == 128) 
-                sha256_transform(st0, st1, pad + 64);
+                sha256_transform_64bytes(st0, st1, pad + 64);
         }
     }
 
     extract_digest(st0, st1, (uint8*)request->destination[0].iov_base);
     B_RESTORE_CPU_STATE();
     return B_OK;
-}*/
+}
 
 // --- BRIDGE FUNCTIONS (STREAMING) ---
 
