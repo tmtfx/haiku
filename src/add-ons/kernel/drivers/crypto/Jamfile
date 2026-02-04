@@ -8,6 +8,13 @@ UsePrivateHeaders crypto ;
 
 UseHeaders [ FDirName $(HAIKU_TOP) headers private kernel ] : true ;
 UseHeaders [ FDirName $(HAIKU_TOP) headers private kernel util ] : true ;
+UsePrivateHeaders [ FDirName $(HAIKU_TOP) headers private kernel arch x86 ] ;
+
+if $(TARGET_ARCH) = x86_64 || $(TARGET_ARCH) = x86 {
+    local archFlags = -msha -msse4.1 -msse4.2 -mavx ;
+    CCFLAGS += $(archFlags) ;
+    CXXFLAGS += $(archFlags) ;
+}
 
 KernelAddon crypto :
     CryptoDevice.cpp
@@ -29,4 +36,3 @@ KernelAddon crypto :
 ;
 
 AddFilesToHaikuImage system add-ons kernel drivers bin : crypto ;
-#AddSymlinkToHaikuImage system add-ons kernel drivers dev crypto : v1 : ../bin/crypto ;
