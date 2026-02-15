@@ -24,6 +24,11 @@ struct crypto_device_info {
     void* device_cookie;
 };
 
+struct UserAccessExposer {
+    UserAccessExposer() { __asm__ __volatile__ ("stac" : : : "cc"); }
+    ~UserAccessExposer() { __asm__ __volatile__ ("clac" : : : "cc"); }
+};
+
 enum BCryptoAlgorithmID {
     // Cifrari simmetrici
     B_CRYPTO_AES        = 0x0001,

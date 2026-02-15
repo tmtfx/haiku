@@ -243,9 +243,9 @@ aesni_process_cbc(bool encrypt, AESNIContext* ctx, const uint8* in, uint8* out, 
         if (encrypt) {
             block = _mm_xor_si128(block, iv);
             block = _mm_xor_si128(block, ctx->encRoundKeys[0]);
-            for (int r = 1; r < 10; r++)
+            for (int r = 1; r < (int)ctx->rounds; r++)
                 block = _mm_aesenc_si128(block, ctx->encRoundKeys[r]);
-            block = _mm_aesenclast_si128(block, ctx->encRoundKeys[10]);
+            block = _mm_aesenclast_si128(block, ctx->encRoundKeys[ctx->rounds]);
             iv = block;
         } else {
             __m128i tmp = block;

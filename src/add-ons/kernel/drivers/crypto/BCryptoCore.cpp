@@ -316,21 +316,23 @@ BSubmitCryptoRequest(BCryptoRequest* request)
                     return st;
                 }
             }
-            __asm__ __volatile__ ("stac" : : : "cc");//user_access_enable();
-            // 2. Prepariamo una richiesta locale "Direct"
-            // AES-NI può lavorare direttamente sull'indirizzo utente se siamo nel contesto del thread chiamante
-            BCryptoRequest localReq = *request;
-            //localReq.source = const_cast<iovec*>(&srcOrig);
-            //localReq.destination = &dstOrig;
-            localReq.source = &request->source[i];
-            localReq.destination = &request->destination[i];
-            localReq.vectorCount = 1;
+            //__asm__ __volatile__ ("stac" : : : "cc");//user_access_enable();
+            {
+                UserAccessExposer access;
+                // 2. Prepariamo una richiesta locale "Direct"
+                // AES-NI può lavorare direttamente sull'indirizzo utente se siamo nel contesto del thread chiamante
+                BCryptoRequest localReq = *request;
+                //localReq.source = const_cast<iovec*>(&srcOrig);
+                //localReq.destination = &dstOrig;
+                localReq.source = &request->source[i];
+                localReq.destination = &request->destination[i];
+                localReq.vectorCount = 1;
     
-            // 3. ESECUZIONE DEL DRIVER (AES-NI)
-            // Ora il driver riceve puntatori che puntano alla RAM fisica dell'utente
-            st = algo->Process(&localReq);
-            
-            __asm__ __volatile__ ("clac" : : : "cc");//user_access_disable();
+                // 3. ESECUZIONE DEL DRIVER (AES-NI)
+                // Ora il driver riceve puntatori che puntano alla RAM fisica dell'utente
+                st = algo->Process(&localReq);
+            }
+            //__asm__ __volatile__ ("clac" : : : "cc");//user_access_disable();
             // 4. Sblocchiamo la memoria
             unlock_memory(srcOrig.iov_base, len, B_READ_DEVICE);
             if (separateDest) {
