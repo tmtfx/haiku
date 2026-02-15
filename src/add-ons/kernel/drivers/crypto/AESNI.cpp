@@ -353,7 +353,7 @@ aesni_process(BCryptoRequest* request)
     fpu_state_t fpu_save;
 
     /* ---- process iovecs ---- */
-    for (size_t i = 0; i < request->vectorCount; i++) {
+    /*for (size_t i = 0; i < request->vectorCount; i++) {
         const iovec& src = request->source[i];
         iovec& dst       = request->destination[i];
         
@@ -379,6 +379,38 @@ aesni_process(BCryptoRequest* request)
 
         if (st != B_OK)
             goto out;
+    }*/
+    for (size_t i = 0; i < request->vectorCount; i++) {
+        const uint8* srcBase = (const uint8*)request->source[i].iov_base;
+        uint8* dstBase = (uint8*)request->destination[i].iov_base;
+        size_t remaining = request->source[i].iov_len;
+    
+        while (remaining > 0) {
+            // Elaboriamo al massimo 32KB per volta prima di ridare respiro alla CPU
+            size_t chunkSize = min_c(remaining, (size_t)32 * 1024);
+    
+            cpu_status cpu = disable_interrupts();
+            _fxsave(&fpu_save);
+    
+            if (request->mode == B_CRYPTO_MODE_CBC) {
+                st = aesni_process_cbc(encrypt, &ctx, srcBase, dstBase, chunkSize);
+            } else if (request->mode == B_CRYPTO_MODE_CBC) {
+                st = aesni_process_cbc(encrypt, &ctx, srcBase, dstBase, chunkSize);
+            } else if (request->mode == B_CRYPTO_MODE_CTR) {
+                st = aesni_process_ctr(&ctx, srcBase, dstBase, chunkSize);
+            } else {
+                st = B_NOT_SUPPORTED;
+            }
+    
+            _fxrstor(&fpu_save);
+            restore_interrupts(cpu);
+    
+            if (st != B_OK) goto out;
+    
+            remaining -= chunkSize;
+            srcBase += chunkSize;
+            dstBase += chunkSize;
+        }
     }
 
     if (request->mode != B_CRYPTO_MODE_ECB && request->iv != NULL)
