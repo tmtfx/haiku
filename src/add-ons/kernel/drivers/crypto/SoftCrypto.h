@@ -11,7 +11,7 @@
 #include <crypto/BCryptoDefs.h>
 
 /* BCryptoRequest adapter for software AES CBC */
-status_t soft_aes_cbc_process(BCryptoRequest* request);
+status_t soft_aes_process(BCryptoRequest* request);
 
 /* Register software AES fallback */
 status_t BInitSoftCrypto(void);
