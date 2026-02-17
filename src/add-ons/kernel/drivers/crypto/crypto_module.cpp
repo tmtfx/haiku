@@ -39,7 +39,7 @@ crypto_std_ops(int op, ...)
 			BInitAESNICrypto();
 			BInitSoftCrypto();
 			BStartEntropyFeeder();
-			BInitx86CPUDigest();
+			//BInitx86CPUDigest();
 			BInitSoftDigest();
 			return B_OK;
 		}
