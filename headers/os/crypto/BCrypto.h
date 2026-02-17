@@ -36,12 +36,16 @@ public:
 			                           size_t len, void* outHash);
 			status_t            Digest(BCryptoAlgorithmID algo, BDataIO* source,
 			                           void* outHash);
+			void                SetAlgorithm(BCryptoAlgorithmID algo);
+			void                SetMode(BCryptoMode mode);
 			
 
 private:
 			int					fFd;
 			bool                fPaddingEnabled;
 			BCryptoPaddingType  fPaddingType;
+			BCryptoAlgorithmID  fAlgorithm;
+			BCryptoMode         fMode;
 			uint8               fLastBlockBuffer[16];
 			size_t fBufferSize;
             void                _FillRequest(BCryptoUserRequest& req, BCryptoOperation op,

@@ -20,6 +20,8 @@
 BCrypto::BCrypto() : fFd(-1),
       fPaddingEnabled(true),        // Di default lo abilitiamo (scelta sicura)
       fPaddingType(B_CRYPTO_PKCS7) // Standard universale
+      fAlgorithm(B_CRYPTO_AES),    // Default sensato
+      fMode(B_CRYPTO_MODE_CBC)      // Default sensato
 {
 	fFd = open("/dev/crypto/v1", O_RDWR);
 }
@@ -31,6 +33,14 @@ BCrypto::~BCrypto() {
 
 status_t BCrypto::InitCheck() const {
 	return fFd >= 0 ? B_OK : B_ERROR;
+}
+
+void BCrypto::SetAlgorithm(BCryptoAlgorithmID algo) {
+    fAlgorithm = algo;
+}
+
+void BCrypto::SetMode(BCryptoMode mode) {
+    fMode = mode;
 }
 
 void
@@ -107,7 +117,7 @@ BCrypto::Encrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
     
     BCryptoUserRequest req;
     // Specifichiamo ALGO e MODE correttamente
-    _FillRequest(req, B_CRYPTO_ENCRYPT, B_CRYPTO_AES, B_CRYPTO_MODE_CBC,
+    _FillRequest(req, B_CRYPTO_ENCRYPT, fAlgorithm, fMode,
                  key, keyLen, iv, ivLen, &src, &dst, 1);
 
     status_t st = Process(req); 
@@ -190,13 +200,16 @@ ssize_t
 BCrypto::Decrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
                  const void* in, size_t inLen, void* out, size_t outSize) 
 {
-    if (inLen == 0 || (inLen % 16) != 0 || outSize < inLen) return B_BAD_VALUE;
+	if (fMode != B_CRYPTO_MODE_CTR && fMode != B_CRYPTO_MODE_GCM) {
+        if (inLen == 0 || (inLen % 16) != 0) return B_BAD_VALUE;
+    }
+    if (outSize < inLen) return B_BAD_VALUE;
 
     iovec src = { (void*)in, inLen };
     iovec dst = { out, inLen };
 
     BCryptoUserRequest req;
-    _FillRequest(req, B_CRYPTO_DECRYPT, B_CRYPTO_AES, B_CRYPTO_MODE_CBC,
+    _FillRequest(req, B_CRYPTO_DECRYPT, fAlgorithm, fMode,
                  key, keyLen, iv, ivLen, &src, &dst, 1);
 
     status_t st = Process(req); 

@@ -392,8 +392,8 @@ aesni_process(BCryptoRequest* request)
             cpu_status cpu = disable_interrupts();
             _fxsave(&fpu_save);
     
-            if (request->mode == B_CRYPTO_MODE_CBC) {
-                st = aesni_process_cbc(encrypt, &ctx, srcBase, dstBase, chunkSize);
+            if (request->mode == B_CRYPTO_MODE_ECB) {
+                st = aesni_process_ecb(encrypt, &ctx, srcBase, dstBase, chunkSize);
             } else if (request->mode == B_CRYPTO_MODE_CBC) {
                 st = aesni_process_cbc(encrypt, &ctx, srcBase, dstBase, chunkSize);
             } else if (request->mode == B_CRYPTO_MODE_CTR) {
