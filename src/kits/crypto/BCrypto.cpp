@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <string.h>
 #include "BCryptoDefs.h"
+#include <StorageDefs.h>
 #include <DataIO.h>
 #include <cstdio>
 #include <new>
@@ -19,11 +20,14 @@
 
 BCrypto::BCrypto() : fFd(-1),
       fPaddingEnabled(true),        // Di default lo abilitiamo (scelta sicura)
-      fPaddingType(B_CRYPTO_PKCS7) // Standard universale
+      fPaddingType(B_CRYPTO_PKCS7), // Standard universale
       fAlgorithm(B_CRYPTO_AES),    // Default sensato
       fMode(B_CRYPTO_MODE_CBC)      // Default sensato
 {
-	fFd = open("/dev/crypto/v1", O_RDWR);
+	//fFd = open("/dev/crypto/v1", O_RDWR);
+	char path[B_PATH_NAME_LENGTH];
+	snprintf(path, sizeof(path), "/dev/%s", B_CRYPTO_DEVICE_NAME);
+	fFd = open(path, O_RDWR);
 }
 
 BCrypto::~BCrypto() {
@@ -41,6 +45,58 @@ void BCrypto::SetAlgorithm(BCryptoAlgorithmID algo) {
 
 void BCrypto::SetMode(BCryptoMode mode) {
     fMode = mode;
+}
+
+bool BCrypto::IsAlgorithmSupported(BCryptoAlgorithmID algorithm, uint32 flags)
+{
+	char path[B_PATH_NAME_LENGTH];
+    snprintf(path, sizeof(path), "/dev/%s", B_CRYPTO_DEVICE_NAME);
+    
+    int fd = open(path, O_RDWR);
+	if (fd < 0) {
+		printf("DEBUG: Fallita apertura device!\n");
+		return B_ERROR;
+	}
+	if (flags == 0) {
+		status_t status = ioctl(fd, B_CRYPTO_IOCTL_CHECK_ALGO, &algorithm);
+		close(fd);
+		return (status == B_OK);
+	}
+	BCryptoAlgorithmInfo info;
+    memset(&info, 0, sizeof(info));
+    info.cookie = 0;
+    bool found = false;
+    while (ioctl(fd, B_CRYPTO_IOCTL_GET_NEXT_ALGO, &info) == B_OK) {
+        if (info.id == algorithm) {
+            // Verifichiamo se i flag corrispondono alla richiesta
+            // (Usiamo l'operatore AND per supportare richieste di flag multipli)
+            if ((info.flags & flags) == flags) {
+                found = true;    
+            }
+            break;
+        }
+    }
+    close(fd);
+    return found ? true : false;
+}
+
+status_t BCrypto::GetNextAlgorithm(uint32* cookie,BCryptoAlgorithmInfo* info)
+{
+	if (fFd < 0) return B_NO_INIT;
+	if (info == NULL || cookie == NULL) return B_BAD_VALUE;
+	//return ioctl(fFd, B_CRYPTO_IOCTL_GET_NEXT_ALGO, info);
+	// Sincronizziamo il cookie della struct con quello passato dall'utente
+    info->cookie = *cookie;
+
+    // Chiamata al driver tramite il file descriptor dell'oggetto
+    status_t status = ioctl(fFd, B_CRYPTO_IOCTL_GET_NEXT_ALGO, info);
+
+    if (status == B_OK) {
+        // Aggiorniamo il valore del cookie per la prossima chiamata
+        *cookie = info->cookie;
+    }
+
+    return status;
 }
 
 void
