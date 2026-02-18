@@ -14,6 +14,8 @@
 #   define B_PENDING B_DEV_PENDING
 #endif
 
+#define B_CRYPTO_DEVICE_NAME "crypto/v1"
+
 #define B_CRYPTO_HASH_MAX_SIZE 64
 /*
 struct crypto_device_info {
