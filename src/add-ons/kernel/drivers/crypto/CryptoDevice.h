@@ -8,6 +8,6 @@
 #include <Drivers.h>
 #include <iovec.h>
 
-#define B_CRYPTO_DEVICE_NAME "crypto/v1"
+
 
 #endif
