@@ -256,7 +256,7 @@ ssize_t
 BCrypto::Decrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
                  const void* in, size_t inLen, void* out, size_t outSize) 
 {
-	if (fMode != B_CRYPTO_MODE_CTR && fMode != B_CRYPTO_MODE_GCM) {
+	if (fMode != B_CRYPTO_MODE_CTR && fMode != B_CRYPTO_MODE_GCM && fAlgorithm != B_CRYPTO_CHACHA20) {
         if (inLen == 0 || (inLen % 16) != 0) return B_BAD_VALUE;
     }
     if (outSize < inLen) return B_BAD_VALUE;
