@@ -40,9 +40,8 @@ public:
 			void                SetMode(BCryptoMode mode);
 			static bool         IsAlgorithmSupported(BCryptoAlgorithmID algo, 
                                                      uint32 flags = 0);
-            static status_t     GetNextAlgorithm(uint32* cookie, 
+            status_t            GetNextAlgorithm(uint32* cookie, 
                                                  BCryptoAlgorithmInfo* info);
-			
 
 private:
 			int					fFd;
