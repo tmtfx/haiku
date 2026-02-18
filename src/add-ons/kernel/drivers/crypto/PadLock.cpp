@@ -139,6 +139,7 @@ BInitPadLockCrypto()
         .algorithm = B_CRYPTO_AES,
         .mode = B_CRYPTO_MODE_CBC,
         .flags = B_CRYPTO_ALG_HW_ACCEL,
+        .name      = "AES CBC (VIA Padlock)",
         .priority = 85, // Poco sotto AES-NI come priorità
         .Process = padlock_process
     };

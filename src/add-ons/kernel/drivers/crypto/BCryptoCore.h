@@ -17,6 +17,8 @@ status_t BRegisterCryptoAlgorithm(BCryptoAlgorithm* algorithm);
 status_t BUnregisterCryptoAlgorithm(BCryptoAlgorithmID algorithm);
 status_t BSubmitCryptoRequest(BCryptoRequest* request);
 status_t BFillBufferWithRandom(void* buffer, size_t length);
+status_t BGetAlgorithmInfo(BCryptoAlgorithmInfo* info);
+status_t BCheckAlgorithmAvailability(BCryptoAlgorithmID id);
 extern status_t BHashInit(crypto_session* session);
 extern status_t BHashUpdate(crypto_session* session, BCryptoUserRequest* request);
 extern status_t BHashFinal(crypto_session* session, BCryptoUserRequest* request);

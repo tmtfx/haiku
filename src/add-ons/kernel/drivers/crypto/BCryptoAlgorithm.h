@@ -13,13 +13,14 @@
 
 struct BCryptoAlgorithm : public DoublyLinkedListLinkImpl<BCryptoAlgorithm> {
     BCryptoAlgorithmID  algorithm;
-    BCryptoMode        mode;
-    uint32  flags;
-    int32   priority;
-    status_t (*Process)(BCryptoRequest* request);
+    BCryptoMode         mode;
+    uint32              flags;
+    char                name[32];
+    int32               priority;
+    status_t            (*Process)(BCryptoRequest* request);
 
-    status_t (*HashInit)(void** context, size_t* contextSize);
-    status_t (*HashUpdate)(void* context, const iovec* vecs, size_t count);
-    status_t (*HashFinal)(void* context, uint8* outDigest);
+    status_t            (*HashInit)(void** context, size_t* contextSize);
+    status_t            (*HashUpdate)(void* context, const iovec* vecs, size_t count);
+    status_t            (*HashFinal)(void* context, uint8* outDigest);
 };
 #endif

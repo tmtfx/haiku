@@ -389,6 +389,7 @@ status_t BInitx86CPUDigest() {
         .algorithm = B_CRYPTO_SHA256,
         .mode      = B_CRYPTO_MODE_ANY,
         .flags     = B_CRYPTO_ALG_HW_ACCEL,
+        .name      = "SHA256 (Hardware)",
         .priority  = 95, 
         .Process   = x86_sha256_process,
         .HashInit   = x86_sha256_init_bridge,

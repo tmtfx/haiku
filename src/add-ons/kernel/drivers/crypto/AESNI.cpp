@@ -431,6 +431,7 @@ BInitAESNICrypto()
         .algorithm = B_CRYPTO_AES,                               // ID Algoritmo
         .mode = (BCryptoMode)(B_CRYPTO_MODE_CBC | B_CRYPTO_MODE_ECB | B_CRYPTO_MODE_CTR), // Modi supportati
         .flags = B_CRYPTO_ALG_HW_ACCEL,                      // Flags
+        .name      = "AES CBC-ECB-CTR (Intel AES-NI)",
         .priority = 90,                                         // Priorità (Alta perché hardware)
         .Process = aesni_process                               // Callback
     };

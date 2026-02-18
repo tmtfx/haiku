@@ -98,6 +98,7 @@ BInitx86CPURNG()
         .algorithm = B_CRYPTO_RNG,
         .mode = B_CRYPTO_MODE_ANY,
         .flags = B_CRYPTO_ALG_HW_ACCEL,
+        .name      = "RNG (Hardware)",
         .priority = 90, // Un pelino meno di PadLock se presenti entrambi, o viceversa
         .Process = cpu_rng_process
     };

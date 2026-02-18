@@ -112,6 +112,7 @@ status_t BInitSoftDigest()
         .algorithm = B_CRYPTO_SHA256,
         .mode      = B_CRYPTO_MODE_ANY,
         .flags     = B_CRYPTO_ALG_SOFTWARE,
+        .name      = "SHA256 (Software)",
         .priority  = 10,             // Priorità software (bassa)
         .Process   = soft_digest_process,
         

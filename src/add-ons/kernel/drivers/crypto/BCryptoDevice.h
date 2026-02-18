@@ -31,9 +31,10 @@ status_t register_crypto_device(crypto_device_info* info);
  */
 crypto_device_info* find_best_device(BCryptoAlgorithmID algo);
 
-/**
- * Restituisce il numero di dispositivi hardware registrati.
- */
 int32 get_registered_device_count(void);
+
+crypto_device_info* find_best_device(BCryptoAlgorithmID algo);
+
+crypto_device_info* get_device_at(int32 index);
 
 #endif // _B_CRYPTO_DEVICE_H_

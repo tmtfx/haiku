@@ -99,6 +99,49 @@ _FindAlgorithm(BCryptoAlgorithmID id, BCryptoMode mode)
     return NULL;
 }
 
+// Ritorna B_OK se l'algoritmo esiste, B_ENTRY_NOT_FOUND altrimenti
+status_t
+BCheckAlgorithmAvailability(BCryptoAlgorithmID id)
+{
+    MutexLocker _(sCryptoLock);
+    
+    DoublyLinkedList<AlgoNode>::Iterator it = sAlgorithms.GetIterator();
+    while (AlgoNode* node = it.Next()) {
+        if (node->algo->algorithm == id)
+            return B_OK;
+    }
+    
+    return B_ENTRY_NOT_FOUND;
+}
+
+// Riempie la struct info basandosi sul cookie (indice)
+status_t
+BGetAlgorithmInfo(BCryptoAlgorithmInfo* info)
+{
+    if (info == NULL)
+        return B_BAD_VALUE;
+
+    MutexLocker _(sCryptoLock);
+    
+    uint32 target = info->cookie;
+    uint32 current = 0;
+
+    DoublyLinkedList<AlgoNode>::Iterator it = sAlgorithms.GetIterator();
+    while (AlgoNode* node = it.Next()) {
+        if (current == target) {
+            info->id = node->algo->algorithm;
+            info->flags = node->algo->flags;
+            strlcpy(info->vendor, node->algo->name, sizeof(info->vendor));
+            
+            // Prepariamo il cookie per la chiamata successiva
+            info->cookie = target + 1;
+            return B_OK;
+        }
+        current++;
+    }
+
+    return B_ENTRY_NOT_FOUND;
+}
 
 /*   NOTE TODO
  * Il "Dangling Pointer" in BRegisterCryptoAlgorithm
@@ -353,7 +396,7 @@ BFillBufferWithRandom(void* buffer, size_t length)
     BCryptoRequest req{};
     iovec vec = { buffer, length };
     
-    req.operation = B_CRYPTO_DIGEST; // O una costante B_CRYPTO_GENERATE
+    req.operation = B_CRYPTO_RANDOM; // O una costante B_CRYPTO_GENERATE
     req.algorithm = B_CRYPTO_RNG;
     req.destination = &vec;
     req.source = req.destination;

@@ -7,7 +7,21 @@
 #include "SoftCrypto.h"
 #include <string.h>
 #include "soft_aes.h"
+#include "soft_chacha20.h"
 #include <debug.h>
+
+/*
+ * funzione helper per aes CTR
+ */
+static void
+aes_increment_counter(uint8* counter)
+{
+    // Incrementa il contatore a 128 bit (Big-Endian come da standard NIST)
+    for (int i = 15; i >= 0; i--) {
+        if (++counter[i] != 0)
+            break;
+    }
+}
 
 /* ---------------------------------------------------------------- */
 /* Internal helper: AES CBC processing                               */
@@ -40,9 +54,17 @@ soft_aes_process_internal(BCryptoRequest* request, bool encrypt)
     for (size_t i = 0; i < request->vectorCount; i++) {
         uint8* in_ptr = (uint8*)request->source[i].iov_base;
         uint8* out_ptr = (uint8*)request->destination[i].iov_base;
-        size_t blocks = request->source[i].iov_len / 16;
+        size_t len = request->source[i].iov_len;
+        //size_t blocks = request->source[i].iov_len / 16;
+        // Per ECB e CBC, la lunghezza deve essere multipla di 16
+        if (request->mode != B_CRYPTO_MODE_CTR && (len % 16) != 0) {
+            soft_aes_zero(&ctx);
+            return B_BAD_VALUE;
+        }
+        size_t blocks = len / 16;
+        size_t b = 0;
 
-        for (size_t b = 0; b < blocks; b++) {
+        for (b = 0; b < blocks; b++) {
             uint8 block[16];
             memcpy(block, in_ptr + (b * 16), 16);
 
@@ -73,6 +95,7 @@ soft_aes_process_internal(BCryptoRequest* request, bool encrypt)
                 for (int j = 15; j >= 0; j--) {
                     if (++iv[j] != 0) break;
                 }
+                aes_increment_counter(iv);
             }
             memcpy(out_ptr + (b * 16), block, 16);
         }
@@ -162,6 +185,69 @@ soft_aes_cbc_process_internal(BCryptoRequest* request, bool encrypt)
     return B_OK;
 }
 */
+/* Wrapper per ChaCha20 in SoftCrypto.cpp */
+static status_t
+soft_chacha20_process(BCryptoRequest* request)
+{
+    if (!request || request->algorithm != B_CRYPTO_CHACHA20)
+        return B_BAD_VALUE;
+
+    // ChaCha20 usa chiavi da 256 bit (32 byte)
+    if (request->keyLength != 32)
+        return B_BAD_VALUE;
+
+    // Prepariamo il contesto
+    ChaCha20Context ctx;
+    uint32 initialCounter = 0;
+    uint8 nonce[12];
+
+    if (request->iv && request->ivLength >= 16) {
+        // I primi 4 byte dell'IV diventano il contatore
+        memcpy(&initialCounter, request->iv, 4);
+        // I restanti 12 byte sono il nonce
+        memcpy(nonce, (uint8*)request->iv + 4, 12);
+    } else if (request->iv && request->ivLength >= 12) {
+        // Se l'utente passa solo 12 byte, assumiamo siano il nonce e counter=0
+        initialCounter = 0;
+        memcpy(nonce, request->iv, 12);
+    }else {
+        // Se l'utente non dà l'IV, usiamo tutto a zero (pericoloso ma evita crash)
+        memset(nonce, 0, 12);
+        initialCounter = 0;
+    }
+
+    chacha20_init(&ctx, (uint8*)request->key, nonce, initialCounter);
+
+    // Processiamo ogni frammento (iovec)
+    for (size_t i = 0; i < request->vectorCount; i++) {
+    	if (request->source[i].iov_len == 0) continue;
+        chacha20_process(&ctx, 
+            (const uint8*)request->source[i].iov_base, 
+            (uint8*)request->destination[i].iov_base, 
+            request->source[i].iov_len);
+    }
+
+    // Aggiorniamo l'IV nella richiesta così l'utente può continuare la cifratura
+    //if (request->iv && request->ivLength >= 16) {
+    //    memcpy(request->iv, &ctx.state[12], 4); // Nuovo contatore
+    //}
+    // Fondamentale: riportiamo il nuovo stato del contatore nell'IV originale
+    // in modo che chiamate successive continuino lo stream correttamente
+    if (request->iv && request->ivLength >= 4) {
+        memcpy(request->iv, &ctx.state[12], 4);
+    }
+
+    // Pulizia
+    memset(&ctx, 0, sizeof(ctx));
+    
+    status_t status = B_OK;
+    
+    if (request->completionCallback) {
+        request->completionCallback(request, status);
+        return B_OK;
+    }
+    return status;
+}
 
 /* ---------------------------------------------------------------- */
 /* Public BCryptoRequest wrapper                                      */
@@ -193,6 +279,7 @@ status_t BInitSoftCrypto()
         .algorithm = B_CRYPTO_AES,
         .mode      = B_CRYPTO_MODE_CBC,
         .flags     = B_CRYPTO_ALG_SOFTWARE,
+        .name      = "AES-CBC (Software)",
         .priority  = 10,
         .Process   = soft_aes_process
     };
@@ -204,9 +291,35 @@ status_t BInitSoftCrypto()
         .algorithm = B_CRYPTO_AES,
         .mode      = B_CRYPTO_MODE_ECB,
         .flags     = B_CRYPTO_ALG_SOFTWARE,
+        .name      = "AES-ECB (Software)",
         .priority  = 10,
         .Process   = soft_aes_process // Nota: dovrai gestire il caso ECB nel process!
     };
     
-    return BRegisterCryptoAlgorithm(&sSoftAES_ECB);
+    //return BRegisterCryptoAlgorithm(&sSoftAES_ECB);
+    status = BRegisterCryptoAlgorithm(&sSoftAES_ECB);
+    if (status != B_OK)
+        return status;
+        
+    static BCryptoAlgorithm sSoftAES_CTR = {
+        .algorithm = B_CRYPTO_AES,
+        .mode      = B_CRYPTO_MODE_CTR,
+        .flags     = B_CRYPTO_ALG_SOFTWARE,
+        .name      = "AES-CTR (Software)",
+        .priority  = 10,
+        .Process   = soft_aes_process // punterà alla funzione aggiornata
+    };
+    status = BRegisterCryptoAlgorithm(&sSoftAES_CTR);
+    if (status != B_OK)
+        return status;
+    
+    static BCryptoAlgorithm sSoftChaCha20 = {
+        .algorithm = B_CRYPTO_CHACHA20,
+        .mode      = B_CRYPTO_MODE_ANY,
+        .flags     = B_CRYPTO_ALG_SOFTWARE,
+        .name      = "ChaCha20 (Software)",
+        .priority  = 10,
+        .Process   = soft_chacha20_process 
+    };
+    return BRegisterCryptoAlgorithm(&sSoftChaCha20);
 }

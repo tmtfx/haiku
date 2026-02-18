@@ -83,6 +83,7 @@ BInitPadLockRNG()
         .algorithm = B_CRYPTO_RNG,
         .mode = B_CRYPTO_MODE_ANY,
         .flags = B_CRYPTO_ALG_HW_ACCEL,
+        .name      = "RNG (VIA Padlock)",
         .priority = 100, // Massima priorità per l'hardware RNG
         .Process = padlock_rng_process
     };

@@ -49,6 +49,7 @@ get_registered_device_count(void)
     return sDeviceCount;
 }
 // Funzione per trovare il miglior dispositivo per un certo algoritmo
+/*
 crypto_device_info*
 find_best_device(BCryptoAlgorithmID algo)
 {
@@ -67,6 +68,38 @@ find_best_device(BCryptoAlgorithmID algo)
     mutex_unlock(&sDeviceListLock);
     
     return best;
+}*/
+crypto_device_info*
+find_best_device(BCryptoAlgorithmID algo)
+{
+    uint32 block = B_GET_BLOCK(algo);
+    uint32 bit = B_GET_BIT(algo);
+    
+    crypto_device_info* best = NULL;
+    uint32 maxThroughput = 0;
+
+    mutex_lock(&sDeviceListLock);
+    for (int i = 0; i < sDeviceCount; i++) {
+        // Controllo immediato sul blocco di bit corretto
+        if (sRegisteredDevices[i].algos_supported[block] & bit) {
+            if (sRegisteredDevices[i].max_throughput > maxThroughput) {
+                maxThroughput = sRegisteredDevices[i].max_throughput;
+                best = &sRegisteredDevices[i];
+            }
+        }
+    }
+    mutex_unlock(&sDeviceListLock);
+    
+    return best;
+}
+
+crypto_device_info*
+get_device_at(int32 index)
+{
+    if (index < 0 || index >= sDeviceCount)
+        return NULL;
+
+    return &sRegisteredDevices[index];
 }
 
 void

@@ -8,10 +8,14 @@
 #include <vm/vm.h>        // IS_USER_ADDRESS, copyin/copyout
 #include <device_manager.h>
 #include "CryptoDevice.h"
+//#include "BCryptoDevice.h"
+
 #include "BCryptoCore.h"
 #include <crypto/BCryptoDefs.h>
 #include <crypto/BCryptoKernelInternal.h>
 #include "BCryptoEntropy.h"
+
+//#define B_CRYPTO_DEVICE_NAME "crypto/v1"
 
 static void
 secure_memzero(void* p, size_t s)
@@ -271,6 +275,117 @@ crypto_control(void* cookie, uint32 op, void* arg, size_t length)
             user_memcpy(arg, &randomReq, sizeof(BCryptoRandomRequest));
 
             return status;
+        }
+        /* questo ritorna tutto anche i moduli ignorati perché più lenti, 
+         * quello dopo comunque fa una scansione hardware che non dobbiamo rifare
+         
+        case B_CRYPTO_IOCTL_GET_NEXT_ALGO: {
+            BCryptoAlgorithmInfo info;
+            if (user_memcpy(&info, arg, sizeof(BCryptoAlgorithmInfo)) != B_OK)
+                return B_BAD_ADDRESS;
+
+            uint32 targetCookie = info.cookie; // Usiamo il cookie come indice globale dei bit
+            uint32 globalBitIdx = 0;
+            bool found = false;
+
+            int32 devCount = get_registered_device_count();
+            
+            for (int32 i = 0; i < devCount; i++) {
+                crypto_device_info* dev = get_device_at(i);
+                if (!dev) continue;
+
+                // Scansioniamo tutti i 128 bit (4 blocchi da 32)
+                for (int block = 0; block < B_CRYPTO_MAX_ALGO_BLOCKS; block++) {
+                    for (int bit = 0; bit < 32; bit++) {
+                        if (dev->algos_supported[block] & (1UL << bit)) {
+                            // Abbiamo trovato un algoritmo supportato
+                            if (globalBitIdx == targetCookie) {
+                                info.id = (BCryptoAlgorithmID)B_CRYPTO_ALGO_ID(block, bit);
+                                info.flags = (dev->hw_type != 0) ? B_CRYPTO_ALG_HW_ACCEL : B_CRYPTO_ALG_SOFTWARE;
+                                strlcpy(info.vendor, dev->vendor_name, sizeof(info.vendor));
+                                
+                                info.cookie = targetCookie + 1;
+                                found = true;
+                                break;
+                            }
+                            globalBitIdx++;
+                        }
+                    }
+                    if (found) break;
+                }
+                if (found) break;
+            }
+
+            if (!found) return B_ENTRY_NOT_FOUND;
+            return user_memcpy(arg, &info, sizeof(BCryptoAlgorithmInfo));
+        }
+        case B_CRYPTO_IOCTL_GET_NEXT_ALGO: {
+            BCryptoAlgorithmInfo info;
+            
+            // 1. Leggiamo la richiesta dell'utente (contiene il cookie corrente)
+            if (user_memcpy(&info, arg, sizeof(BCryptoAlgorithmInfo)) != B_OK)
+                return B_BAD_ADDRESS;
+
+            uint32 targetCookie = info.cookie; 
+            uint32 globalBitIdx = 0;
+            bool found = false;
+
+            // 2. Iteriamo su tutti i possibili blocchi e bit definiti in BCryptoDefs.h
+            for (int block = 0; block < B_CRYPTO_MAX_ALGO_BLOCKS; block++) {
+                for (int bit = 0; bit < 32; bit++) {
+                    BCryptoAlgorithmID currentAlgo = (BCryptoAlgorithmID)B_CRYPTO_ALGO_ID(block, bit);
+                    
+                    // Saltiamo l'ID 0 (B_CRYPTO_ALGO_NONE)
+                    if (currentAlgo == B_CRYPTO_ALGO_NONE)
+                        continue;
+
+                    // 3. Verifichiamo se esiste almeno un dispositivo che supporta questo algoritmo
+                    // find_best_device ci restituisce già il migliore basandosi sul throughput
+                    crypto_device_info* bestDev = find_best_device(currentAlgo);
+                    
+                    if (bestDev != NULL) {
+                        // Se questo è l'ennesimo algoritmo trovato che corrisponde al cookie richiesto
+                        if (globalBitIdx == targetCookie) {
+                            info.id = currentAlgo;
+                            info.flags = (bestDev->hw_type != 0) ? B_CRYPTO_ALG_HW_ACCEL : B_CRYPTO_ALG_SOFTWARE;
+                            strlcpy(info.vendor, bestDev->vendor_name, sizeof(info.vendor));
+                            
+                            // Prepariamo il cookie per la prossima chiamata (es. se target era 0, ora è 1)
+                            info.cookie = targetCookie + 1;
+                            found = true;
+                            break;
+                        }
+                        // Incrementiamo il contatore degli algoritmi validi trovati finora
+                        globalBitIdx++;
+                    }
+                }
+                if (found) break;
+            }
+
+            if (!found) 
+                return B_ENTRY_NOT_FOUND; // Fine della lista
+
+            // 4. Copiamo i dati trovati nello spazio utente
+            return user_memcpy(arg, &info, sizeof(BCryptoAlgorithmInfo));
+        }*/
+        case B_CRYPTO_IOCTL_CHECK_ALGO: {
+            BCryptoAlgorithmID algo;
+            if (user_memcpy(&algo, arg, sizeof(BCryptoAlgorithmID)) != B_OK)
+                return B_BAD_ADDRESS;
+
+            return BCheckAlgorithmAvailability(algo);
+        }
+
+        case B_CRYPTO_IOCTL_GET_NEXT_ALGO: {
+            BCryptoAlgorithmInfo info;
+            if (user_memcpy(&info, arg, sizeof(BCryptoAlgorithmInfo)) != B_OK)
+                return B_BAD_ADDRESS;
+
+            status_t status = BGetAlgorithmInfo(&info);
+            if (status != B_OK)
+                return status;
+
+            return user_memcpy(arg, &info, sizeof(BCryptoAlgorithmInfo));
         }
     }
     return B_DEV_INVALID_IOCTL;

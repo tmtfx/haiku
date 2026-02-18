@@ -12,6 +12,9 @@
         : "=a" (eax), "=b" (ebx), "=c" (ecx), "=d" (edx) \
         : "a" (leaf), "c" (sub_leaf))
 
+#define SET_ALGO(info, algo) \
+    (info)->algos_supported[B_GET_BLOCK(algo)] |= B_GET_BIT(algo)
+
 status_t
 BGetCPUCryptoInfo(crypto_device_info* info)
 {
@@ -33,12 +36,14 @@ BGetCPUCryptoInfo(crypto_device_info* info)
     // 2. Controllo Standard (CPUID Leaf 1) -> AES-NI
     x86_cpuid(1, 0, eax, ebx, ecx, edx);
     if (ecx & (1 << 25)) {
-        info->algos_supported |= B_CRYPTO_AES;
+        //info->algos_supported |= B_CRYPTO_AES;
+        SET_ALGO(info, B_CRYPTO_AES);
         info->hw_type |= B_CRYPTO_HW_AES_NI;
     }
 	// RDRAND è il bit 30 di ECX
     if (ecx & (1 << 30)) {
-        info->algos_supported |= B_CRYPTO_RNG;
+        //info->algos_supported |= B_CRYPTO_RNG;
+        SET_ALGO(info, B_CRYPTO_RNG);
         info->hw_type |= B_CRYPTO_HW_RDRAND;
     }
     // 3. Controllo Extended Features (CPUID Leaf 7, Sub-leaf 0) -> SHA-NI
@@ -48,7 +53,9 @@ BGetCPUCryptoInfo(crypto_device_info* info)
         x86_cpuid(7, 0, eax, ebx, ecx, edx);
         // SHA-NI è il bit 29 di EBX
         if (ebx & (1 << 29)) {
-            info->algos_supported |= B_CRYPTO_SHA1 | B_CRYPTO_SHA256;
+            //info->algos_supported |= B_CRYPTO_SHA1 | B_CRYPTO_SHA256;
+            SET_ALGO(info, B_CRYPTO_SHA1);
+            SET_ALGO(info, B_CRYPTO_SHA256);
             info->hw_type |= B_CRYPTO_HW_SHA_NI;
         }
     }
@@ -60,11 +67,13 @@ BGetCPUCryptoInfo(crypto_device_info* info)
         if (eax >= 0xC0000001) {
             x86_cpuid(0xC0000001, 0, eax, ebx, ecx, edx);
             if ((edx & 0x0C) == 0x0C) {
-                info->algos_supported |= B_CRYPTO_RNG;
+                //info->algos_supported |= B_CRYPTO_RNG;
+                SET_ALGO(info, B_CRYPTO_RNG);
                 info->hw_type |= B_CRYPTO_HW_PADLOCK_RNG;
             }
             if ((edx & 0xC0) == 0xC0) {
-                info->algos_supported |= B_CRYPTO_AES;
+                //info->algos_supported |= B_CRYPTO_AES;
+                SET_ALGO(info, B_CRYPTO_AES);
                 info->hw_type |= B_CRYPTO_HW_VIA_PADLOCK;
             }
         }
