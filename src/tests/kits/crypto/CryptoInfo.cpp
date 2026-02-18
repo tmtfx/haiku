@@ -15,7 +15,7 @@ int main() {
     // Apriamo il dispositivo API del framework
     int fd = open("/dev/crypto/v1", O_RDWR);
     if (fd < 0) {
-        perror("Errore: Impossibile aprire /dev/crypto/api");
+        perror("Errore: Impossibile aprire /dev/crypto/v1");
         return 1;
     }
 
