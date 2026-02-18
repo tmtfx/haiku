@@ -52,7 +52,7 @@ int main() {
     status_t status = crypto.Encrypt(key, 32, iv, 16, plaintext, len, ciphertext, len);
 
     //if (status == B_OK) {
-    if (status > 0) {
+    if (status >= 0) {
         printf("Cifratura completata con successo!\n");
         print_hex("Output", ciphertext, 16);
         
@@ -64,6 +64,37 @@ int main() {
         }
     } else {
         printf("Errore durante la cifratura: %s\n", strerror(status));
+    }
+    
+    printf("\n--- Test Decrypt ---\n");
+    uint8 decryptedText[128] = {0};
+    memset(iv, 0, 16);
+    iv[0] = 0x01; // Resetta il contatore a 1
+    iv[11] = 0x4a; // Il tuo nonce
+    /*BCrypto cryptoDec; 
+    cryptoDec.SetAlgorithm(B_CRYPTO_CHACHA20);
+    cryptoDec.SetMode(B_CRYPTO_MODE_ANY);
+    cryptoDec.SetPadding(false);*/
+
+    // Per decifrare dobbiamo usare lo STESSO IV e la STESSA KEY
+    // Nota: ChaCha20 è un cifrario a flusso (stream cipher), 
+    // quindi l'operazione di Decrypt è identica a Encrypt.
+    ssize_t decResult = crypto.Decrypt(key, 32, iv, 16, ciphertext, len, decryptedText, 128);
+
+    if (decResult >= 0) {
+        printf("Decifratura completata (%zd byte).\n", decResult);
+        
+        // Confronto con il plaintext originale
+        if (memcmp(plaintext, decryptedText, len) == 0) {
+            printf("RISULTATO: DECRYPT CORRETTO! Il testo corrisponde.\n");
+            printf("Testo: \"%s\"\n", decryptedText);
+        } else {
+            printf("RISULTATO: DECRYPT FALLITO! I dati non corrispondono.\n");
+            print_hex("Originale", (uint8*)plaintext, 16);
+            print_hex("Ottenuto ", decryptedText, 16);
+        }
+    } else {
+        printf("Errore durante la decifratura: %s\n", strerror((status_t)decResult));
     }
 
     return 0;
