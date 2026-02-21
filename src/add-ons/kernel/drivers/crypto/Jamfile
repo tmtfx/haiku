@@ -34,6 +34,7 @@ KernelAddon crypto :
     soft_chacha20.cpp
     SoftDigest.cpp
     soft_sha.cpp
+    soft_blake.cpp
 ;
 
 AddFilesToHaikuImage system add-ons kernel drivers bin : crypto ;
