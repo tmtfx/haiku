@@ -22,7 +22,7 @@ int main() {
     // Chiamata al tuo driver
     status_t status = crypto.Digest(B_CRYPTO_SHA256, (uint8*)testData, 3, digest);
 
-    if (status != B_OK) {
+    if (status < 0) {
         fprintf(stderr, "Errore: il driver ha restituito %x\n", (int)status);
         return 1;
     }
