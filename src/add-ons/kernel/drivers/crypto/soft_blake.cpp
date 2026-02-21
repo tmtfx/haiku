@@ -151,30 +151,7 @@ static inline uint32 load32(const void *p) {
     memcpy(&v, p, 4);
     return v;
 }
-/*
-#define Gs(r,i,a,b,c,d) \
-	do { \
-		a = a + b + m[blake2_sigma[r][2*i]]; \
-		d = rotr32(d ^ a, 16); \
-		c = c + d; \
-		b = rotr32(b ^ c, 12); \
-		a = a + b + m[blake2_sigma[r][2*i+1]]; \
-		d = rotr32(d ^ a, 8); \
-		c = c + d; \
-		b = rotr32(b ^ c, 7); \
-	} while(0)
-*/
-/*#define Gs(r,i,a,b,c,d) \
-    do { \
-        a = (uint32)(a + b + m[blake2_sigma[r][2*i]]); \
-        d = rotr32(d ^ a, 16); \
-        c = (uint32)(c + d); \
-        b = rotr32(b ^ c, 12); \
-        a = (uint32)(a + b + m[blake2_sigma[r][2*i+1]]); \
-        d = rotr32(d ^ a, 8); \
-        c = (uint32)(c + d); \
-        b = rotr32(b ^ c, 7); \
-    } while(0)*/
+
 #define Gs(r,i,a,b,c,d) \
     do { \
         a = (uint32)(a + b + m[blake2_sigma[r][2*i]]); \
@@ -212,27 +189,6 @@ static void soft_blake2s_compress(SoftBlake2sContext* ctx, const uint8 block[64]
 
 	// BLAKE2s fa 10 round invece di 12
 	for (i = 0; i < 10; ++i) {
-	/*for (int r = 0; r < 10; ++r) {
-		#define Gs(a,b,c,d,m1,m2) \
-            a = (uint32)(a + b + m1); d = rotr32(d ^ a, 16); \
-            c = (uint32)(c + d);      b = rotr32(b ^ c, 12); \
-            a = (uint32)(a + b + m2); d = rotr32(d ^ a, 8); \
-            c = (uint32)(c + d);      b = rotr32(b ^ c, 7);
-
-        // Colonne
-        Gs(v[0], v[4], v[8],  v[12], m[blake2_sigma[r][0]], m[blake2_sigma[r][1]]);
-        Gs(v[1], v[5], v[9],  v[13], m[blake2_sigma[r][2]], m[blake2_sigma[r][3]]);
-        Gs(v[2], v[6], v[10], v[14], m[blake2_sigma[r][4]], m[blake2_sigma[r][5]]);
-        Gs(v[3], v[7], v[11], v[15], m[blake2_sigma[r][6]], m[blake2_sigma[r][7]]);
-        // Diagonali
-        Gs(v[0], v[5], v[10], v[15], m[blake2_sigma[r][8]], m[blake2_sigma[r][9]]);
-        Gs(v[1], v[6], v[11], v[12], m[blake2_sigma[r][10]], m[blake2_sigma[r][11]]);
-        Gs(v[2], v[7], v[8],  v[13], m[blake2_sigma[r][12]], m[blake2_sigma[r][13]]);
-        Gs(v[3], v[4], v[9],  v[14], m[blake2_sigma[r][14]], m[blake2_sigma[r][15]]);
-        
-        #undef G
-        */
-		
 		Gs(i, 0, v[0], v[4], v[8], v[12]);
 		Gs(i, 1, v[1], v[5], v[9], v[13]);
 		Gs(i, 2, v[2], v[6], v[10], v[14]);
@@ -241,7 +197,6 @@ static void soft_blake2s_compress(SoftBlake2sContext* ctx, const uint8 block[64]
 		Gs(i, 5, v[1], v[6], v[11], v[12]);
 		Gs(i, 6, v[2], v[7], v[8], v[13]);
 		Gs(i, 7, v[3], v[4], v[9], v[14]);
-		
 	}
 
 	for (i = 0; i < 8; ++i)
@@ -250,14 +205,6 @@ static void soft_blake2s_compress(SoftBlake2sContext* ctx, const uint8 block[64]
 
 void soft_blake2s_init(SoftBlake2sContext* ctx, size_t outlen)
 {
-	/*
-	memset(ctx, 0, sizeof(SoftBlake2sContext));
-	for (int i = 0; i < 8; ++i) ctx->h[i] = blake2s_iv[i];
-	// XOR con parametri: outlen e keylen (0 in questo caso)
-	//ctx->h[0] ^= 0x01010000 | (uint32)outlen;
-	ctx->h[0] ^= 0x01010000 ^ (uint32)outlen;
-	ctx->outlen = outlen;
-	*/
 	memset(ctx, 0, sizeof(SoftBlake2sContext));
     for (int i = 0; i < 8; ++i) ctx->h[i] = blake2s_iv[i];
     
@@ -310,7 +257,169 @@ void soft_blake2s_finalize(SoftBlake2sContext* ctx, uint8* out)
 /* ---------------------------------------------------
  *              BLAKE3
  * --------------------------------------------------- */
- 
+
+static void soft_blake3_compress(const uint32 cv[8], const uint8 block[64], 
+                                 uint32 t, uint32 flags, uint32 block_len, uint32 out[16])
+{
+    uint32 m[16];
+    uint32 v[16];
+    for (int i = 0; i < 16; i++) m[i] = load32(block + i * 4);
+
+    // Inizializzazione stato
+    for (int i = 0; i < 8; i++) v[i] = cv[i];
+    for (int i = 0; i < 4; i++) v[i+8] = blake2s_iv[i];
+    v[12] = t;        // Counter t0
+    v[13] = 0;        // BLAKE3 usa t1 solo per messaggi immensi (> 2^32)
+    v[14] = block_len;       // In BLAKE3 la lunghezza del blocco è fissa a 64
+    v[15] = flags;
+
+    for (int r = 0; r < 7; r++) { // BLAKE3 fa solo 7 round!
+        #define Gw(a,b,c,d,m1,m2) \
+            a = (uint32)(a + b + m1); d = rotr32(d ^ a, 16); \
+            c = (uint32)(c + d);      b = rotr32(b ^ c, 12); \
+            a = (uint32)(a + b + m2); d = rotr32(d ^ a, 8); \
+            c = (uint32)(c + d);      b = rotr32(b ^ c, 7);
+
+        Gw(v[0], v[4], v[8],  v[12], m[blake2_sigma[r][0]], m[blake2_sigma[r][1]]);
+        Gw(v[1], v[5], v[9],  v[13], m[blake2_sigma[r][2]], m[blake2_sigma[r][3]]);
+        Gw(v[2], v[6], v[10], v[14], m[blake2_sigma[r][4]], m[blake2_sigma[r][5]]);
+        Gw(v[3], v[7], v[11], v[15], m[blake2_sigma[r][6]], m[blake2_sigma[r][7]]);
+        Gw(v[0], v[5], v[10], v[15], m[blake2_sigma[r][8]], m[blake2_sigma[r][9]]);
+        Gw(v[1], v[6], v[11], v[12], m[blake2_sigma[r][10]], m[blake2_sigma[r][11]]);
+        Gw(v[2], v[7], v[8],  v[13], m[blake2_sigma[r][12]], m[blake2_sigma[r][13]]);
+        Gw(v[3], v[4], v[9],  v[14], m[blake2_sigma[r][14]], m[blake2_sigma[r][15]]);
+    }
+
+    // Output: XOR tra le due metà
+    for (int i = 0; i < 8; i++) {
+        out[i] = v[i] ^ v[i+8];
+        out[i+8] = v[i+8] ^ cv[i];
+    }
+}
+
+static void blake3_compress_chunk(const uint32 cv_in[8], const uint8* chunk, 
+                                  size_t chunk_len, uint32 t, uint32 flags, 
+                                  uint32 out_cv[8])
+{
+    uint32 cv[8];
+    memcpy(cv, cv_in, 32);
+    uint32 chunk_flags = flags | BLAKE3_CHUNK_START;
+    
+    size_t bytes_left = chunk_len;
+    const uint8* p = chunk;
+
+    while (bytes_left > 64) {
+        uint32 out16[16];
+        soft_blake3_compress(cv, p, t, chunk_flags, 64, out16); // Lunghezza 64
+        memcpy(cv, out16, 32);
+        chunk_flags = flags; 
+        bytes_left -= 64;
+        p += 64;
+    }
+
+    uint32 final_flags = chunk_flags | BLAKE3_CHUNK_END;
+    uint32 out16[16];
+    uint8 last_block[64] = {0};
+    memcpy(last_block, p, bytes_left);
+    
+    // Qui bytes_left sarà 3 per "abc", permettendo di ottenere l'hash corretto
+    soft_blake3_compress(cv, last_block, t, final_flags, (uint32)bytes_left, out16);
+    memcpy(out_cv, out16, 32);
+}
+
+static void blake3_push_stack(SoftBlake3Context* ctx, uint32 cv[8]) {
+    uint32 i = 0;
+    // Mentre abbiamo nodi da unire (albero di Merkle)
+    while (ctx->stack_depth & (1 << i)) {
+        uint32 parent_out[16];
+        uint8 block[64];
+        // Copiamo i due CV figli in un unico blocco da 64 byte
+        memcpy(block, ctx->stack[i], 32);
+        memcpy(block + 32, cv, 32);
+        
+        soft_blake3_compress(blake2s_iv, block, 0, BLAKE3_PARENT, 64, parent_out);
+        memcpy(cv, parent_out, 32);
+        i++;
+    }
+    memcpy(ctx->stack[i], cv, 32);
+    ctx->stack_depth++;
+}
+
+void soft_blake3_init(SoftBlake3Context* ctx)
+{
+    memset(ctx, 0, sizeof(SoftBlake3Context));
+    for (int i = 0; i < 8; i++) {
+        ctx->h[i] = blake2s_iv[i];
+    }
+    // I flag iniziali sono 0, verranno impostati durante il processo
+}
+
+
+void soft_blake3_update(SoftBlake3Context* ctx, const uint8* in, size_t inlen)
+{
+    while (inlen > 0) {
+        // Se il buffer del chunk corrente è pieno, comprimilo
+        if (ctx->buflen == BLAKE3_CHUNK_SIZE) {
+            uint32 chunk_cv[8];
+            // t è l'indice del chunk (0, 1, 2...)
+            blake3_compress_chunk(ctx->h, ctx->buf, BLAKE3_CHUNK_SIZE, 
+                                  ctx->t[0]++, ctx->flags, chunk_cv);
+            blake3_push_stack(ctx, chunk_cv);
+            ctx->buflen = 0;
+        }
+
+        size_t want = BLAKE3_CHUNK_SIZE - ctx->buflen;
+        size_t take = (inlen < want) ? inlen : want;
+        memcpy(ctx->buf + ctx->buflen, in, take);
+
+        ctx->buflen += take;
+        in += take;
+        inlen -= take;
+    }
+}
+
+
+
+
+void soft_blake3_finalize(SoftBlake3Context* ctx, uint8* out, size_t outlen)
+{
+    // 1. Comprimi l'ultimo chunk rimasto nel buffer
+    uint32 current_cv[8];
+    uint32 chunk_flags = ctx->flags;
+    
+    // Se l'albero è vuoto (messaggio corto), questo è anche il ROOT
+    if (ctx->stack_depth == 0) chunk_flags |= BLAKE3_ROOT;
+    
+    blake3_compress_chunk(ctx->h, ctx->buf, ctx->buflen, 
+                          ctx->t[0], chunk_flags, current_cv);
+
+    // 2. Risali l'albero (Merge dei nodi nello stack)
+    while (ctx->stack_depth > 0) {
+        ctx->stack_depth--;
+        uint32 parent_out[16];
+        uint8 block[64];
+        
+        // Il nodo a sinistra viene dallo stack, quello a destra è il corrente
+        memcpy(block, ctx->stack[ctx->stack_depth], 32);
+        memcpy(block + 32, current_cv, 32);
+        
+        uint32 flags = BLAKE3_PARENT;
+        if (ctx->stack_depth == 0) flags |= BLAKE3_ROOT;
+        
+        soft_blake3_compress(blake2s_iv, block, 0, flags, 64, parent_out);
+        memcpy(current_cv, parent_out, 32);
+    }
+
+    // 3. Output finale (estrazione Little Endian dal CV risultante)
+    for (int i = 0; i < 8; i++) {
+        out[i*4+0] = (uint8)(current_cv[i] >> 0);
+        out[i*4+1] = (uint8)(current_cv[i] >> 8);
+        out[i*4+2] = (uint8)(current_cv[i] >> 16);
+        out[i*4+3] = (uint8)(current_cv[i] >> 24);
+    }
+}
+
+/* vecchia implementazione 
 static const uint32 blake3_iv[8] = {
     0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
     0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
@@ -491,7 +600,11 @@ void soft_blake3_finalize(SoftBlake3Context* ctx, uint8* out, size_t outlen)
     // 3. Copiamo il risultato finale
     memcpy(out, current_cv, outlen < 32 ? outlen : 32);
 }
-/*
+*/
+
+
+
+/* vecchia vecchia  implementazione senza albero di merkle
 void soft_blake3_update(SoftBlake3Context* ctx, const uint8* in, size_t inlen) {
     while (inlen > 0) {
         // Se il buffer è pieno (64 byte), comprimiamo

@@ -33,17 +33,36 @@ typedef struct {
 } SoftBlake2sContext;
 
 /* Contesto per BLAKE3 */
+//typedef struct {
+//    uint32 cv[8];
+//    uint64 chunk_counter;
+//    uint8  buf[64];
+//    uint8  buflen;
+//    uint8  blocks_compressed;
+//    uint8  flags;
+//    /* BLAKE3 richiede uno stack per l'albero di Merkle per file grandi */
+//    uint32 stack[8 * 64];
+//    size_t stack_len;
+//} SoftBlake3Context;
+
+#define BLAKE3_CHUNK_START          (1u << 0)
+#define BLAKE3_CHUNK_END            (1u << 1)
+#define BLAKE3_PARENT               (1u << 2)
+#define BLAKE3_ROOT                 (1u << 3)
+#define BLAKE3_CHUNK_SIZE           1024
+#define BLAKE3_BLOCK_SIZE           64
+
+// Il contesto deve tracciare lo stato dell'albero
 typedef struct {
-    uint32 cv[8];
-    uint64 chunk_counter;
-    uint8  buf[64];
-    uint8  buflen;
-    uint8  blocks_compressed;
-    uint8  flags;
-    /* BLAKE3 richiede uno stack per l'albero di Merkle per file grandi */
-    uint32 stack[8 * 64];
-    size_t stack_len;
+    uint32 h[8];
+    uint32 t[2];        // Counter (numero di blocchi nel chunk corrente)
+    uint32 stack[54][8]; // Per conservare gli hash dei nodi genitori
+    uint8  stack_depth;
+    uint8  buf[BLAKE3_CHUNK_SIZE];
+    size_t buflen;
+    uint32 flags;
 } SoftBlake3Context;
+
 
 /* Prototipi BLAKE2b */
 void soft_blake2b_init(SoftBlake2bContext* ctx, size_t outlen);
