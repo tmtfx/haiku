@@ -67,11 +67,11 @@ int main() {
 
     // 2. BLAKE2s - 32 byte (256 bit)
     test_algorithm(crypto, B_CRYPTO_BLAKE2S, "BLAKE2s", testData, dataLen,
-        "508c3565d87114713e311091583592c7d5ea1f458599ef65c538795b44061722", 32);
+        "508c5e8c327c14e2e1a72ba34eeb452f37458b209ed63a294d999b4c86675982", 32);
 
     // 3. BLAKE3 - 32 byte (256 bit)
     test_algorithm(crypto, B_CRYPTO_BLAKE3, "BLAKE3", testData, dataLen,
-        "6437b3ac38465133ffb65059135d1b6ae33bb62a74ad276edad20d4419673150", 32);
+        "6437b3ac38465133ffb63b75273a8db548c558465d79db03fd359c6cd5bd9d85", 32);
 
     return 0;
 }

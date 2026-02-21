@@ -212,6 +212,27 @@ static void soft_blake2s_compress(SoftBlake2sContext* ctx, const uint8 block[64]
 
 	// BLAKE2s fa 10 round invece di 12
 	for (i = 0; i < 10; ++i) {
+	/*for (int r = 0; r < 10; ++r) {
+		#define Gs(a,b,c,d,m1,m2) \
+            a = (uint32)(a + b + m1); d = rotr32(d ^ a, 16); \
+            c = (uint32)(c + d);      b = rotr32(b ^ c, 12); \
+            a = (uint32)(a + b + m2); d = rotr32(d ^ a, 8); \
+            c = (uint32)(c + d);      b = rotr32(b ^ c, 7);
+
+        // Colonne
+        Gs(v[0], v[4], v[8],  v[12], m[blake2_sigma[r][0]], m[blake2_sigma[r][1]]);
+        Gs(v[1], v[5], v[9],  v[13], m[blake2_sigma[r][2]], m[blake2_sigma[r][3]]);
+        Gs(v[2], v[6], v[10], v[14], m[blake2_sigma[r][4]], m[blake2_sigma[r][5]]);
+        Gs(v[3], v[7], v[11], v[15], m[blake2_sigma[r][6]], m[blake2_sigma[r][7]]);
+        // Diagonali
+        Gs(v[0], v[5], v[10], v[15], m[blake2_sigma[r][8]], m[blake2_sigma[r][9]]);
+        Gs(v[1], v[6], v[11], v[12], m[blake2_sigma[r][10]], m[blake2_sigma[r][11]]);
+        Gs(v[2], v[7], v[8],  v[13], m[blake2_sigma[r][12]], m[blake2_sigma[r][13]]);
+        Gs(v[3], v[4], v[9],  v[14], m[blake2_sigma[r][14]], m[blake2_sigma[r][15]]);
+        
+        #undef G
+        */
+		
 		Gs(i, 0, v[0], v[4], v[8], v[12]);
 		Gs(i, 1, v[1], v[5], v[9], v[13]);
 		Gs(i, 2, v[2], v[6], v[10], v[14]);
@@ -220,6 +241,7 @@ static void soft_blake2s_compress(SoftBlake2sContext* ctx, const uint8 block[64]
 		Gs(i, 5, v[1], v[6], v[11], v[12]);
 		Gs(i, 6, v[2], v[7], v[8], v[13]);
 		Gs(i, 7, v[3], v[4], v[9], v[14]);
+		
 	}
 
 	for (i = 0; i < 8; ++i)
