@@ -50,7 +50,7 @@ enum BCryptoAlgorithmID {
     B_CRYPTO_CHACHA20       = B_CRYPTO_ALGO_ID(0, 2), // 2
 
     // Hash (Blocco 1)
-    B_CRYPTO_SHA1           = B_CRYPTO_ALGO_ID(1, 0), // 32
+    B_CRYPTO_SHA1           = B_CRYPTO_ALGO_ID(1, 0), // 32, da 0 a 31 poi cambiare blocco
     B_CRYPTO_SHA224         = B_CRYPTO_ALGO_ID(1, 1),
     B_CRYPTO_SHA256         = B_CRYPTO_ALGO_ID(1, 2),
     B_CRYPTO_SHA384         = B_CRYPTO_ALGO_ID(1, 3),
@@ -59,30 +59,12 @@ enum BCryptoAlgorithmID {
     B_CRYPTO_SHA3_512       = B_CRYPTO_ALGO_ID(1, 6),
     B_CRYPTO_MD5            = B_CRYPTO_ALGO_ID(1, 7),
     B_CRYPTO_BLAKE2B        = B_CRYPTO_ALGO_ID(1, 8),
+    B_CRYPTO_BLAKE2S        = B_CRYPTO_ALGO_ID(1, 9),// Ottimizzato 32-bit
+    B_CRYPTO_BLAKE3         = B_CRYPTO_ALGO_ID(1, 10),
 
     // RNG e altro (Blocco 2)
     B_CRYPTO_RNG            = B_CRYPTO_ALGO_ID(2, 0)  // 64
 };
-/*
-enum BCryptoAlgorithmID {
-    // Cifrari simmetrici
-    B_CRYPTO_AES        = 0x0001,
-
-    // Hash
-    B_CRYPTO_SHA1       = 0x0010,
-    B_CRYPTO_SHA224     = 0x0011,
-    B_CRYPTO_SHA256     = 0x0012,
-    B_CRYPTO_SHA384     = 0x0013,
-    B_CRYPTO_SHA512     = 0x0014,
-    B_CRYPTO_SHA3_256   = 0x0015,
-    B_CRYPTO_SHA3_512   = 0x0016,
-    B_CRYPTO_MD5        = 0x0017,
-    B_CRYPTO_BLAKE2B    = 0x0018,
-    B_CRYPTO_CHACHA20   = 0x0019,
-
-    // RNG
-    B_CRYPTO_RNG        = 0x0020
-};*/
 
 enum BCryptoHwCapability {
     B_CRYPTO_HW_AES_NI        = 1 << 0,  // Set di istruzioni x86 (AES-NI)
@@ -183,6 +165,8 @@ decode_hash_length(BCryptoAlgorithmID algo)
         case B_CRYPTO_SHA512:    return 64;
         case B_CRYPTO_SHA3_512:  return 64;
         case B_CRYPTO_BLAKE2B:   return 64;
+        case B_CRYPTO_BLAKE2S:   return 32;
+        case B_CRYPTO_BLAKE3:    return 32;
         default:                 return 0;
     }
 }
