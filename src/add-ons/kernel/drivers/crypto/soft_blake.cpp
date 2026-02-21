@@ -4,6 +4,7 @@
  */
 #include "soft_blake.h"
 #include <string.h>
+#include <debug.h> //da rimuovere
 
 /* ---------------------------------------------------
  *              BLAKE2b
@@ -141,8 +142,8 @@ static const uint32 blake2s_iv[8] = {
 };
 
 // Rotazione a destra per 32 bit
-static inline uint32 rotr32(uint32 w, uint32 n) {
-	return (w >> n) | (w << (32 - n));
+static inline uint32 rotr32(const uint32 w, const uint32 n) {
+    return (w >> n) | (w << (32 - n));
 }
 
 static inline uint32 load32(const void *p) {
@@ -150,7 +151,7 @@ static inline uint32 load32(const void *p) {
     memcpy(&v, p, 4);
     return v;
 }
-
+/*
 #define Gs(r,i,a,b,c,d) \
 	do { \
 		a = a + b + m[blake2_sigma[r][2*i]]; \
@@ -162,7 +163,29 @@ static inline uint32 load32(const void *p) {
 		c = c + d; \
 		b = rotr32(b ^ c, 7); \
 	} while(0)
-
+*/
+/*#define Gs(r,i,a,b,c,d) \
+    do { \
+        a = (uint32)(a + b + m[blake2_sigma[r][2*i]]); \
+        d = rotr32(d ^ a, 16); \
+        c = (uint32)(c + d); \
+        b = rotr32(b ^ c, 12); \
+        a = (uint32)(a + b + m[blake2_sigma[r][2*i+1]]); \
+        d = rotr32(d ^ a, 8); \
+        c = (uint32)(c + d); \
+        b = rotr32(b ^ c, 7); \
+    } while(0)*/
+#define Gs(r,i,a,b,c,d) \
+    do { \
+        a = (uint32)(a + b + m[blake2_sigma[r][2*i]]); \
+        d = rotr32(d ^ a, 16); \
+        c = (uint32)(c + d); \
+        b = rotr32(b ^ c, 12); \
+        a = (uint32)(a + b + m[blake2_sigma[r][2*i+1]]); \
+        d = rotr32(d ^ a, 8); \
+        c = (uint32)(c + d); \
+        b = rotr32(b ^ c, 7); \
+    } while(0)
 static void soft_blake2s_compress(SoftBlake2sContext* ctx, const uint8 block[64])
 {
 	uint32 m[16];
@@ -180,6 +203,12 @@ static void soft_blake2s_compress(SoftBlake2sContext* ctx, const uint8 block[64]
 	v[13] ^= ctx->t[1];
 	v[14] ^= ctx->f[0]; // Flag finale
 	v[15] ^= ctx->f[1];
+	
+	
+	if (ctx->t[0] == 3) { // solo per il test "abc"
+        dprintf("DEBUG: v[12]=%08x, v[14]=%08x\n", v[12], v[14]);
+    }
+    dprintf("DEBUG: m[0]=%08x, m[1]=%08x\n", (unsigned int)m[0], (unsigned int)m[1]);
 
 	// BLAKE2s fa 10 round invece di 12
 	for (i = 0; i < 10; ++i) {
@@ -199,12 +228,23 @@ static void soft_blake2s_compress(SoftBlake2sContext* ctx, const uint8 block[64]
 
 void soft_blake2s_init(SoftBlake2sContext* ctx, size_t outlen)
 {
+	/*
 	memset(ctx, 0, sizeof(SoftBlake2sContext));
 	for (int i = 0; i < 8; ++i) ctx->h[i] = blake2s_iv[i];
 	// XOR con parametri: outlen e keylen (0 in questo caso)
 	//ctx->h[0] ^= 0x01010000 | (uint32)outlen;
 	ctx->h[0] ^= 0x01010000 ^ (uint32)outlen;
 	ctx->outlen = outlen;
+	*/
+	memset(ctx, 0, sizeof(SoftBlake2sContext));
+    for (int i = 0; i < 8; ++i) ctx->h[i] = blake2s_iv[i];
+    
+    // BLAKE2s specifica: h[0] ^= 0x01010000 | (keylen << 8) | outlen
+    // Con keylen = 0 e outlen = 32: 0x01010020
+    uint32 param = 0x01010000 | (uint32)outlen;
+    ctx->h[0] ^= param; 
+    
+    ctx->outlen = outlen;
 }
 
 void soft_blake2s_update(SoftBlake2sContext* ctx, const uint8* in, size_t inlen)
@@ -226,7 +266,7 @@ void soft_blake2s_finalize(SoftBlake2sContext* ctx, uint8* out)
 	if (ctx->t[0] < (uint32)ctx->buflen) ctx->t[1]++;
 	
 	ctx->f[0] = 0xFFFFFFFF; // Flag ultimo blocco (32-bit)
-	ctx->f[1] = 0;
+	//ctx->f[1] = 0;
 	
 	memset(ctx->buf + ctx->buflen, 0, 64 - ctx->buflen);
 	soft_blake2s_compress(ctx, ctx->buf);
