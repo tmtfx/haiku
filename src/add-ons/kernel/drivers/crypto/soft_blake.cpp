@@ -180,12 +180,6 @@ static void soft_blake2s_compress(SoftBlake2sContext* ctx, const uint8 block[64]
 	v[13] ^= ctx->t[1];
 	v[14] ^= ctx->f[0]; // Flag finale
 	v[15] ^= ctx->f[1];
-	
-	
-	if (ctx->t[0] == 3) { // solo per il test "abc"
-        dprintf("DEBUG: v[12]=%08x, v[14]=%08x\n", v[12], v[14]);
-    }
-    dprintf("DEBUG: m[0]=%08x, m[1]=%08x\n", (unsigned int)m[0], (unsigned int)m[1]);
 
 	// BLAKE2s fa 10 round invece di 12
 	for (i = 0; i < 10; ++i) {
@@ -258,6 +252,17 @@ void soft_blake2s_finalize(SoftBlake2sContext* ctx, uint8* out)
  *              BLAKE3
  * --------------------------------------------------- */
 
+// BLAKE3 usa una permutazione diversa da BLAKE2
+static const uint8 blake3_msg_schedule[7][16] = {
+	{  0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14, 15 },
+	{  2,  6,  3, 10,  7,  0,  4, 13,  1, 11, 12,  5,  9, 14, 15,  8 },
+	{  3,  4, 10, 12, 13,  2,  7, 14,  6,  5,  9,  0, 11, 15,  8,  1 },
+	{ 10,  7, 12,  9, 14,  3, 13, 15,  4,  0, 11,  2,  5,  8,  1,  6 },
+	{ 12, 13,  9, 11, 15, 10, 14,  8,  7,  2,  5,  3,  0,  1,  6,  4 },
+	{  9, 14, 11, 15,  8, 12,  5,  1, 13,  3,  0, 10,  2,  6,  4,  7 },
+	{ 11, 15,  8,  1, 14,  9,  5, 12,  6,  0, 10,  2, 13,  4,  7,  3 }
+};
+
 static void soft_blake3_compress(const uint32 cv[8], const uint8 block[64], 
                                  uint32 t, uint32 flags, uint32 block_len, uint32 out[16])
 {
@@ -280,14 +285,14 @@ static void soft_blake3_compress(const uint32 cv[8], const uint8 block[64],
             a = (uint32)(a + b + m2); d = rotr32(d ^ a, 8); \
             c = (uint32)(c + d);      b = rotr32(b ^ c, 7);
 
-        Gw(v[0], v[4], v[8],  v[12], m[blake2_sigma[r][0]], m[blake2_sigma[r][1]]);
-        Gw(v[1], v[5], v[9],  v[13], m[blake2_sigma[r][2]], m[blake2_sigma[r][3]]);
-        Gw(v[2], v[6], v[10], v[14], m[blake2_sigma[r][4]], m[blake2_sigma[r][5]]);
-        Gw(v[3], v[7], v[11], v[15], m[blake2_sigma[r][6]], m[blake2_sigma[r][7]]);
-        Gw(v[0], v[5], v[10], v[15], m[blake2_sigma[r][8]], m[blake2_sigma[r][9]]);
-        Gw(v[1], v[6], v[11], v[12], m[blake2_sigma[r][10]], m[blake2_sigma[r][11]]);
-        Gw(v[2], v[7], v[8],  v[13], m[blake2_sigma[r][12]], m[blake2_sigma[r][13]]);
-        Gw(v[3], v[4], v[9],  v[14], m[blake2_sigma[r][14]], m[blake2_sigma[r][15]]);
+        Gw(v[0], v[4], v[8],  v[12], m[blake3_msg_schedule[r][0]], m[blake3_msg_schedule[r][1]]);
+        Gw(v[1], v[5], v[9],  v[13], m[blake3_msg_schedule[r][2]], m[blake3_msg_schedule[r][3]]);
+        Gw(v[2], v[6], v[10], v[14], m[blake3_msg_schedule[r][4]], m[blake3_msg_schedule[r][5]]);
+        Gw(v[3], v[7], v[11], v[15], m[blake3_msg_schedule[r][6]], m[blake3_msg_schedule[r][7]]);
+        Gw(v[0], v[5], v[10], v[15], m[blake3_msg_schedule[r][8]], m[blake3_msg_schedule[r][9]]);
+        Gw(v[1], v[6], v[11], v[12], m[blake3_msg_schedule[r][10]], m[blake3_msg_schedule[r][11]]);
+        Gw(v[2], v[7], v[8],  v[13], m[blake3_msg_schedule[r][12]], m[blake3_msg_schedule[r][13]]);
+        Gw(v[3], v[4], v[9],  v[14], m[blake3_msg_schedule[r][14]], m[blake3_msg_schedule[r][15]]);
     }
 
     // Output: XOR tra le due metà
