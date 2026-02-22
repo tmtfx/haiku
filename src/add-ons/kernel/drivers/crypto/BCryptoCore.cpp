@@ -309,6 +309,7 @@ BSubmitCryptoRequest(BCryptoRequest* request)
     }
     
     if (request->operation == B_CRYPTO_DIGEST) {
+    	/*  HARD WAY */
         status_t st = B_OK;
         size_t lockedCount = 0;
 
@@ -323,9 +324,10 @@ BSubmitCryptoRequest(BCryptoRequest* request)
             // Lock destinazione
             st = lock_memory(request->destination[0].iov_base, request->destination[0].iov_len, B_READ_DEVICE);
             if (st == B_OK) {
-                __asm__ __volatile__ ("stac" : : : "cc");
-                st = algo->Process(request); 
-                __asm__ __volatile__ ("clac" : : : "cc");
+            	{
+            		UserAccessExposer access;
+            		st = algo->Process(request); 
+                }
                 unlock_memory(request->destination[0].iov_base, request->destination[0].iov_len, B_READ_DEVICE);
             }
         }
@@ -336,6 +338,44 @@ BSubmitCryptoRequest(BCryptoRequest* request)
         }
             
         return _FinalizeRequest(request, st);
+        /* DEBUG WAY 
+        status_t st = B_OK;
+        size_t hashLen = decode_hash_length(request->algorithm);
+    
+        // 1. Alloca buffer kernel per l'input (supponendo vectorCount 1 per il test)
+        // Se hai più vettori, dovresti sommare le lunghezze e concatenarli.
+        void* kSrc = malloc(request->source[0].iov_len);
+        if (kSrc == NULL) return B_NO_MEMORY;
+
+        // 2. Alloca buffer kernel per il digest di output
+        uint8 kDest[64]; // Massimo per SHA512/BLAKE2b
+
+        // 3. Copia i dati dall'utente al kernel (gestisce SMAP in sicurezza)
+        if (user_memcpy(kSrc, request->source[0].iov_base, request->source[0].iov_len) != B_OK) {
+            free(kSrc);
+            return B_BAD_ADDRESS;
+        }
+
+        // 4. Prepara la richiesta "Kernel-to-Kernel"
+        iovec kSrcVec = { kSrc, request->source[0].iov_len };
+        iovec kDestVec = { kDest, hashLen };
+    
+        BCryptoRequest kReq = *request;
+        kReq.source = &kSrcVec;
+        kReq.destination = &kDestVec;
+        kReq.vectorCount = 1;
+
+        // 5. Esegui il driver (niente UserAccessExposer qui, è memoria kernel!)
+        st = algo->Process(&kReq);
+
+        // 6. Se è andata bene, riporta il digest all'utente
+        if (st == B_OK) {
+            if (user_memcpy(request->destination[0].iov_base, kDest, hashLen) != B_OK)
+                st = B_BAD_ADDRESS;
+        }
+
+        free(kSrc);
+        return _FinalizeRequest(request, st);*/
     } else {
         status_t st = B_OK;
         for (size_t i = 0; i < request->vectorCount; i++) {
