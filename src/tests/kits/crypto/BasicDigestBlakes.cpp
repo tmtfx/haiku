@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <crypto/BCrypto.h>
+#include <crypto/BCryptoDefs.h>
+
 
 void print_hex(const char* label, uint8* hash, size_t len) {
     printf("%-15s: ", label);
@@ -10,23 +12,8 @@ void print_hex(const char* label, uint8* hash, size_t len) {
 
 bool test_algorithm(BCrypto& crypto, BCryptoAlgorithmID id, const char* name, 
                     const char* input, size_t inputLen, const char* expected, size_t hashLen) {
-    uint s;
-    switch (id) {
-    	case B_CRYPTO_BLAKE2B: {
-            s = 64; // Massimo per BLAKE2b
-            break;
-    	}
-    	case B_CRYPTO_BLAKE2S: {
-    		s =32;
-            break;
-    	}
-    	case B_CRYPTO_BLAKE3: {
-    		s = 32; // Massimo per BLAKE2b
-            break;
-    	}
-    	default:
-    	    s = 32;
-    }
+    
+    uint s = decode_hash_length(id);
     uint8 digest[s];
     memset(digest, 0, sizeof(digest));
 
