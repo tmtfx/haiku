@@ -20,6 +20,9 @@ typedef struct {
     uint8  buf[128];
     size_t buflen;
     size_t outlen;
+    
+    uint64 v_work[16]; 
+    uint64 m_work[16];
 } SoftBlake2bContext;
 
 /* Contesto per BLAKE2s (32-bit) */
@@ -30,6 +33,9 @@ typedef struct {
     uint8  buf[64];
     size_t buflen;
     size_t outlen;
+    
+    uint32 v_work[16]; 
+    uint32 m_work[16];
 } SoftBlake2sContext;
 
 /* Contesto per BLAKE3 */
@@ -56,11 +62,15 @@ typedef struct {
 typedef struct {
     uint32 h[8];
     uint32 t[2];        // Counter (numero di blocchi nel chunk corrente)
-    uint32 stack[54][8]; // Per conservare gli hash dei nodi genitori
+    uint32 stack[64][8]; // Per conservare gli hash dei nodi genitori
     uint8  stack_depth;
     uint8  buf[BLAKE3_CHUNK_SIZE];
     size_t buflen;
     uint32 flags;
+    
+    // BUFFER DI LAVORO (Sposta il carico dallo stack allo heap)
+    uint32 v_work[16]; 
+    uint32 m_work[16];
 } SoftBlake3Context;
 
 
