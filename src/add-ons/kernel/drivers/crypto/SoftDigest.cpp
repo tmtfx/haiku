@@ -68,42 +68,88 @@ soft_digest_process(BCryptoRequest* request)
         }
         case B_CRYPTO_BLAKE2B: {
         	if (destLen < 64) return B_BAD_VALUE;
-            SoftBlake2bContext ctx;
-            soft_blake2b_init(&ctx, 64);
+            //SoftBlake2bContext ctx;
+            //soft_blake2b_init(&ctx, 64);
+            SoftBlake2bContext* ctx = (SoftBlake2bContext*)malloc(sizeof(SoftBlake2bContext));
+            if (ctx == NULL) return B_NO_MEMORY;
+
+            soft_blake2b_init(ctx, 64);
             for (size_t i = 0; i < request->vectorCount; i++) {
                 if (request->source[i].iov_base && request->source[i].iov_len > 0)
-                    soft_blake2b_update(&ctx, (const uint8*)request->source[i].iov_base, request->source[i].iov_len);
+                    //soft_blake2b_update(&ctx, (const uint8*)request->source[i].iov_base, request->source[i].iov_len);
+                    soft_blake2b_update(ctx, (const uint8*)request->source[i].iov_base, request->source[i].iov_len);
             }
-            soft_blake2b_finalize(&ctx, digest);
-            memcpy(request->destination[0].iov_base, digest, 64);
-            memset(&ctx, 0, sizeof(SoftBlake2bContext));
+            //soft_blake2b_finalize(&ctx, digest);
+            soft_blake2b_finalize(ctx, digest);
+            //memcpy(request->destination[0].iov_base, digest, 64);
+            if (request->destination[0].iov_base != NULL) {
+                memcpy(request->destination[0].iov_base, digest, 64);
+            } else {
+                free(ctx); // Non dimenticare di liberare se fallisci qui!
+                return B_BAD_VALUE;
+            }
+            //memset(&ctx, 0, sizeof(SoftBlake2bContext));
+            memset(ctx, 0, sizeof(SoftBlake2bContext));
+            free(ctx);
             break;
         }
         case B_CRYPTO_BLAKE2S: {
         	if (destLen < 32) return B_BAD_VALUE;
-        	SoftBlake2sContext ctx;
-            soft_blake2s_init(&ctx, 32);
+        	//SoftBlake2sContext ctx;
+            //soft_blake2s_init(&ctx, 32);
+            SoftBlake2sContext* ctx = (SoftBlake2sContext*)malloc(sizeof(SoftBlake2sContext));
+            if (ctx == NULL) return B_NO_MEMORY;
+
+            soft_blake2s_init(ctx, 32);
             for (size_t i = 0; i < request->vectorCount; i++) {
                 if (request->source[i].iov_base && request->source[i].iov_len > 0)
-                    soft_blake2s_update(&ctx, (const uint8*)request->source[i].iov_base, request->source[i].iov_len);
+                    //soft_blake2s_update(&ctx, (const uint8*)request->source[i].iov_base, request->source[i].iov_len);
+                    soft_blake2s_update(ctx, (const uint8*)request->source[i].iov_base, request->source[i].iov_len);
             }
-            soft_blake2s_finalize(&ctx, digest);
-            memcpy(request->destination[0].iov_base, digest, 32);
-            memset(&ctx, 0, sizeof(SoftBlake2sContext));
+            //soft_blake2s_finalize(&ctx, digest);
+            soft_blake2s_finalize(ctx, digest);
+            //memcpy(request->destination[0].iov_base, digest, 32);
+            if (request->destination[0].iov_base != NULL) {
+                memcpy(request->destination[0].iov_base, digest, 32);
+            } else {
+                free(ctx); // Non dimenticare di liberare se fallisci qui!
+                return B_BAD_VALUE;
+            }
+            //memset(&ctx, 0, sizeof(SoftBlake2sContext));
+            memset(ctx, 0, sizeof(SoftBlake2sContext));
+            free(ctx);
             break;
         }
         
         case B_CRYPTO_BLAKE3: {
         	if (destLen < 32) return B_BAD_VALUE;
-            SoftBlake3Context ctx;
-            soft_blake3_init(&ctx);
+        	/* attenzione può occupare 3.2k meglio usare malloc */
+            //SoftBlake3Context ctx;
+            //soft_blake3_init(&ctx);
+            SoftBlake3Context* ctx = (SoftBlake3Context*)malloc(sizeof(SoftBlake3Context));
+            if (ctx == NULL)
+                return B_NO_MEMORY;
+
+            soft_blake3_init(ctx);
             for (size_t i = 0; i < request->vectorCount; i++) {
                 if (request->source[i].iov_base && request->source[i].iov_len > 0)
-                    soft_blake3_update(&ctx, (const uint8*)request->source[i].iov_base, request->source[i].iov_len);
+                    //soft_blake3_update(&ctx, (const uint8*)request->source[i].iov_base, request->source[i].iov_len); se nello stack, ma noi usiamo malloc
+                    soft_blake3_update(ctx, (const uint8*)request->source[i].iov_base, request->source[i].iov_len);
             }
-            soft_blake3_finalize(&ctx, digest, 32);
-            memcpy(request->destination[0].iov_base, digest, 32);
-            memset(&ctx, 0, sizeof(SoftBlake3Context));
+            //soft_blake3_finalize(&ctx, digest, 32); se in stack ma noi usiamo heap
+            soft_blake3_finalize(ctx, digest, 32);
+            dprintf("BLAKE3 Kernel Digest: %02x%02x%02x%02x\n", digest[0], digest[1], digest[2], digest[3]);
+            //memcpy(request->destination[0].iov_base, digest, 32);
+            if (request->destination[0].iov_base != NULL) {
+                memcpy(request->destination[0].iov_base, digest, 32);
+            } else {
+                free(ctx); // Non dimenticare di liberare se fallisci qui!
+                return B_BAD_VALUE;
+            }
+            
+            //memset(&ctx, 0, sizeof(SoftBlake3Context));
+            memset(ctx, 0, sizeof(SoftBlake3Context));
+            free(ctx);
             break;
         }
         
@@ -333,7 +379,7 @@ status_t BInitSoftDigest()
             .HashInit  = soft_blake2s_init_bridge,
             .HashUpdate = soft_blake2s_update_bridge,
             .HashFinal = soft_blake2s_final_bridge
-        },
+        }/*,
         {
             .algorithm = B_CRYPTO_BLAKE3,
             .flags     = B_CRYPTO_ALG_SOFTWARE,
@@ -343,7 +389,7 @@ status_t BInitSoftDigest()
             .HashInit  = soft_blake3_init_bridge,
             .HashUpdate = soft_blake3_update_bridge,
             .HashFinal = soft_blake3_final_bridge
-        }
+        }*/
     };
 
     status_t status = B_OK;
