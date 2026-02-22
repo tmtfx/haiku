@@ -169,7 +169,7 @@ soft_sha256_final_bridge(void* context, uint8* outDigest)
     soft_sha256_finalize(ctx, outDigest);
 
     // Nota: la free(context) la farà il Core dopo aver chiamato Final
-    memset(&ctx, 0, sizeof(SoftSHA256Context));
+    memset(ctx, 0, sizeof(SoftSHA256Context));
     return B_OK;
 }
 
