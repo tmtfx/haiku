@@ -303,7 +303,7 @@ static void soft_blake3_compress(const uint32 cv[8], const uint8 block[64],
 }
 
 static void blake3_compress_chunk(const uint32 cv_in[8], const uint8* chunk, 
-                                  size_t chunk_len, uint32 t, uint32 flags, 
+                                  size_t chunk_len, uint32 chunk_counter, uint32 flags, 
                                   uint32 out_cv[8])
 {
     uint32 cv[8];
@@ -312,14 +312,16 @@ static void blake3_compress_chunk(const uint32 cv_in[8], const uint8* chunk,
     
     size_t bytes_left = chunk_len;
     const uint8* p = chunk;
+    uint32 block_counter = 0;  // ← AGGIUNTO: counter dei blocchi nel chunk
 
     while (bytes_left > 64) {
         uint32 out16[16];
-        soft_blake3_compress(cv, p, t, chunk_flags, 64, out16); // Lunghezza 64
+        soft_blake3_compress(cv, p, block_counter, chunk_flags, 64, out16); // ← MODIFICATO: usa block_counter
         memcpy(cv, out16, 32);
         chunk_flags = flags; 
         bytes_left -= 64;
         p += 64;
+        block_counter++;  // ← AGGIUNTO: incrementa per ogni blocco
     }
 
     uint32 final_flags = chunk_flags | BLAKE3_CHUNK_END;
@@ -327,8 +329,8 @@ static void blake3_compress_chunk(const uint32 cv_in[8], const uint8* chunk,
     uint8 last_block[64] = {0};
     memcpy(last_block, p, bytes_left);
     
-    // Qui bytes_left sarà 3 per "abc", permettendo di ottenere l'hash corretto
-    soft_blake3_compress(cv, last_block, t, final_flags, (uint32)bytes_left, out16);
+    // Qui bytes_left sarà 3 per "abc", block_counter = 0
+    soft_blake3_compress(cv, last_block, block_counter, final_flags, (uint32)bytes_left, out16); // ← MODIFICATO
     memcpy(out_cv, out16, 32);
 }
 
