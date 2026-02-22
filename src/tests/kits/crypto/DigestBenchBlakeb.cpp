@@ -51,10 +51,10 @@ int main(int argc, char** argv) {
     memset(digest, 0, sizeof(digest));
     
     printf("DEBUG: Indirizzo buffer digest (userspace): %p\n", digest);
-    size_t hashLen = crypto.GetHashLength(B_CRYPTO_SHA256);
+    size_t hashLen = crypto.GetHashLength(B_CRYPTO_BLAKE2B);
     bigtime_t start, end;
 
-    printf("Benchmark SHA-256 su: %s (%.2f MB)\n", filename, sizeMB);
+    printf("Benchmark BLAKE2B su: %s (%.2f MB)\n", filename, sizeMB);
     printf("-------------------------------------------------------------------------------\n");
 /*
     // --- TEST 1: STREAMING (BDataIO) ---
@@ -82,7 +82,7 @@ int main(int argc, char** argv) {
         
         printf("Esecuzione Test Full RAM...\n");
         start = system_time();
-        status_t status = crypto.Digest(B_CRYPTO_SHA256, fullBuffer, size, digest);
+        status_t status = crypto.Digest(B_CRYPTO_BLAKE2B, fullBuffer, size, digest);
         end = system_time();
 
         if (status == B_OK) {
