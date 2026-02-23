@@ -45,13 +45,13 @@ int main(int argc, char** argv) {
     uint8 digest[64];
     memset(digest, 0, sizeof(digest));
     
-    printf("DEBUG: Indirizzo buffer digest (userspace): %p\n", digest);
+    //printf("DEBUG: Indirizzo buffer digest (userspace): %p\n", digest);
     size_t hashLen = crypto.GetHashLength(B_CRYPTO_SHA256);
     bigtime_t start, end;
 
     printf("Benchmark SHA-256 su: %s (%.2f MB)\n", filename, sizeMB);
     printf("-------------------------------------------------------------------------------\n");
-/*
+
     // --- TEST 1: STREAMING (BDataIO) ---
     printf("Esecuzione Test Streaming...\n");
     start = system_time();
@@ -64,7 +64,9 @@ int main(int argc, char** argv) {
         print_hash("Streaming IO", digest, hashLen, duration, mbps);
     } else {
         fprintf(stderr, "Errore Streaming: %s\n", strerror(status));
-    }*/
+    }
+    
+    printf("-------------------------------------------------------------------------------\n");
 
     // --- TEST 2: BUFFERIZZATO (void*) ---
     // Prepariamo la memoria
@@ -89,6 +91,7 @@ int main(int argc, char** argv) {
         }
         free(fullBuffer);
     }
+    
 
     printf("-------------------------------------------------------------------------------\n");
     return 0;
