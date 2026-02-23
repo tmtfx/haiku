@@ -41,6 +41,7 @@ crypto_std_ops(int op, ...)
 			BStartEntropyFeeder();
 			//BInitx86CPUDigest();
 			BInitSoftDigest();
+			//BInitHybridDigest();
 			return B_OK;
 		}
 		case B_MODULE_UNINIT:

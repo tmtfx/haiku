@@ -27,14 +27,16 @@ KernelAddon crypto :
     PadLock.cpp
     PadLockRNG.cpp
     AESNI.cpp
-    x86CPUDigest.cpp
+    #x86CPUDigest.cpp
     x86CPURNG.cpp
     SoftCrypto.cpp
     soft_aes.cpp
     soft_chacha20.cpp
     SoftDigest.cpp
+    #HybridB2Digest.cpp
     soft_sha.cpp
     soft_blake.cpp
+    #hybrid_blake_opt.cpp
 ;
 
 AddFilesToHaikuImage system add-ons kernel drivers bin : crypto ;
