@@ -270,9 +270,9 @@ static const uint8 blake3_msg_schedule[7][16] = {
 static void soft_blake3_compress(SoftBlake3Context* ctx, const uint32 cv[8], const uint8 block[64], 
                                  uint32 t, uint32 flags, uint32 block_len, uint32 out[16])
 {
-	if (flags & 8) { // 8 è il valore bitwise di ROOT
-        dprintf("DEBUG: Sto processando il blocco ROOT!\n");
-    }
+	//if (flags & 8) { // 8 è il valore bitwise di ROOT
+    //    dprintf("DEBUG: Sto processando il blocco ROOT!\n");
+    //}
     /* non usiamo più per rischio di riempire lo stack li abbiamo messi nel contesto
     uint32 m[16];
     uint32 v[16];*/
