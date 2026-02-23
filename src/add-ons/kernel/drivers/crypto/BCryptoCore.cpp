@@ -240,9 +240,11 @@ BHashUpdate(crypto_session* session, BCryptoUserRequest* request)
     }
 
     if (st == B_OK) {
-        __asm__ __volatile__ ("stac" : : : "cc");//user_access_enable(); // stac
+        /*__asm__ __volatile__ ("stac" : : : "cc");//user_access_enable(); // stac
         st = node->algo->HashUpdate(session->algorithm_state, request->source, request->vectorCount);
-        __asm__ __volatile__ ("clac" : : : "cc");//user_access_disable(); // clac
+        __asm__ __volatile__ ("clac" : : : "cc");//user_access_disable(); // clac*/
+        UserAccessExposer access;
+        st = node->algo->HashUpdate(session->algorithm_state, request->source, request->vectorCount);
     }
 
     // Sblocchiamo subito
@@ -268,9 +270,13 @@ BHashFinal(crypto_session* session, BCryptoUserRequest* request)
         // Assumiamo che request->destination[0] sia valido
         st = lock_memory(request->destination[0].iov_base, hashLen, B_READ_DEVICE);
         if (st == B_OK) {
-            __asm__ __volatile__ ("stac" : : : "cc");//user_access_enable();
+            /*__asm__ __volatile__ ("stac" : : : "cc");//user_access_enable();
             memcpy(request->destination[0].iov_base, tempDigest, hashLen);
-            __asm__ __volatile__ ("clac" : : : "cc");//user_access_disable();
+            __asm__ __volatile__ ("clac" : : : "cc");//user_access_disable();*/
+            {
+            	UserAccessExposer access;
+            	memcpy(request->destination[0].iov_base, tempDigest, hashLen);
+            }
             unlock_memory(request->destination[0].iov_base, hashLen, B_READ_DEVICE);
         }
     }
