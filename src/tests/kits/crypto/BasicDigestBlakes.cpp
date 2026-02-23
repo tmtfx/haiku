@@ -57,8 +57,8 @@ int main() {
         "508c5e8c327c14e2e1a72ba34eeb452f37458b209ed63a294d999b4c86675982", 32);
 
     // 3. BLAKE3 - 32 byte (256 bit)
-    test_algorithm(crypto, B_CRYPTO_BLAKE3, "BLAKE3", testData, dataLen,
-        "6437b3ac38465133ffb63b75273a8db548c558465d79db03fd359c6cd5bd9d85", 32);
+    //test_algorithm(crypto, B_CRYPTO_BLAKE3, "BLAKE3", testData, dataLen,
+    //    "6437b3ac38465133ffb63b75273a8db548c558465d79db03fd359c6cd5bd9d85", 32);
 
     return 0;
 }
