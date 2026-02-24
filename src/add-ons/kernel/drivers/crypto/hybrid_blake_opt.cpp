@@ -267,6 +267,7 @@ void hybrid_blake2b_update(SoftBlake2bContext* ctx, const uint8* in, size_t inLe
             //if (sUseAVX2) blake2b_compress_avx2(ctx, ctx->buf);
             //else blake2b_compress_sse(ctx, ctx->buf);
             blake2b_compress_sse(ctx, ctx->buf); //ONLY For test purposes
+            //soft_blake2b_compress(ctx, ctx->buf); //ONLY For test purposes
             ctx->buflen = 0;
         }
     }
@@ -281,6 +282,7 @@ void hybrid_blake2b_finalize(SoftBlake2bContext* ctx, uint8* out) {
     //if (sUseAVX2) blake2b_compress_avx2(ctx, ctx->buf);
     //else blake2b_compress_sse(ctx, ctx->buf); 
     blake2b_compress_sse(ctx, ctx->buf); //ONLY For test purposes
+    //soft_blake2b_compress(ctx, ctx->buf); //ONLY For test purposes
     uint8* p = out;
     for (size_t i = 0; i < (ctx->outlen / 8); i++) {
         uint64_t v = B_HOST_TO_LENDIAN_INT64(ctx->h[i]);
