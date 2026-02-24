@@ -1,37 +1,42 @@
 /*
+ * Hybrid Optimized Digest for Haiku kernel crypto
  * Copyright 2026, Fabio Tomat <f.t.public@gmail.com>
- * Hybrid Optimized Digest for Haiku kernel
+ * All rights reserved. Distributed under the terms of the MIT license.
  */
 
-#include "soft_blake.h"         // Manterremo i contesti esistenti
-#include "hybrid_blake_opt.h"   // Qui dichiareremo le versioni SSE/AVX
+#include "soft_blake.h"         
+#include "hybrid_blake_opt.h"   
 #include "BCryptoAlgorithm.h"
+#include "BCryptoCore.h"
 #include <crypto/BCryptoDefs.h>
 #include <arch/x86/arch_cpu.h>
+#include <string.h>
+#include <stdlib.h>
 
-// I bridge richiameranno le versioni ottimizzate invece di quelle "soft" standard
+// Helper interno per il processo one-shot
 static status_t
 hybrid_blake2_process(BCryptoRequest* request)
 {
-	if (request == NULL)
+    if (request == NULL || !request->source || !request->destination)
         return B_BAD_VALUE;
-	switch(request->algorithm){
-		case B_CRYPTO_BLAKE2B: {
-			if (destLen < 64) return B_BAD_VALUE;
+
+    size_t destLen = request->destination[0].iov_len;
+    uint8 digest[64]; // Buffer per il risultato finale
+    
+    switch(request->algorithm) {
+        case B_CRYPTO_BLAKE2B: {
+            if (destLen < 64) return B_BAD_VALUE;
             SoftBlake2bContext* ctx = (SoftBlake2bContext*)malloc(sizeof(SoftBlake2bContext));
             if (ctx == NULL) return B_NO_MEMORY;
+
             hybrid_blake2b_init(ctx, 64);
             for (size_t i = 0; i < request->vectorCount; i++) {
                 if (request->source[i].iov_base && request->source[i].iov_len > 0)
                     hybrid_blake2b_update(ctx, (const uint8*)request->source[i].iov_base, request->source[i].iov_len);
             }
             hybrid_blake2b_finalize(ctx, digest);
-            if (request->destination[0].iov_base != NULL) {
-                memcpy(request->destination[0].iov_base, digest, 64);
-            } else {
-                free(ctx); // Non dimenticare di liberare se fallisci qui!
-                return B_BAD_VALUE;
-            }
+            memcpy(request->destination[0].iov_base, digest, 64);
+            
             memset(ctx, 0, sizeof(SoftBlake2bContext));
             free(ctx);
             break;
@@ -48,20 +53,25 @@ hybrid_blake2_process(BCryptoRequest* request)
                     hybrid_blake2s_update(ctx, (const uint8*)request->source[i].iov_base, request->source[i].iov_len);
             }
             hybrid_blake2s_finalize(ctx, digest);
-            if (request->destination[0].iov_base != NULL) {
-                memcpy(request->destination[0].iov_base, digest, 32);
-            } else {
-                free(ctx);
-                return B_BAD_VALUE;
-            }
+            memcpy(request->destination[0].iov_base, digest, 32);
+
             memset(ctx, 0, sizeof(SoftBlake2sContext));
             free(ctx);
             break;
         }
         default:
-            return B_BAD_VALUE;
-	}
+            return B_NOT_SUPPORTED;
+    }
+    
+    if (request->completionCallback)
+        request->completionCallback(request, B_OK);
+
+    return B_OK;
 }
+
+/* ---------------------------------------------------------------- */
+/* Bridges for Multi-part Hash (Init/Update/Final)                  */
+/* ---------------------------------------------------------------- */
 
 // --- BRIDGE PER BLAKE2B ---
 static status_t
@@ -79,7 +89,7 @@ hybrid_blake2b_init_bridge(void** context, size_t* contextSize)
 static status_t
 hybrid_blake2b_update_bridge(void* context, const iovec* vecs, size_t count)
 {
-	if (context == NULL) return B_BAD_VALUE;
+    if (context == NULL) return B_BAD_VALUE;
     SoftBlake2bContext* ctx = (SoftBlake2bContext*)context;
     for (size_t i = 0; i < count; i++) {
         if (vecs[i].iov_base && vecs[i].iov_len > 0)
@@ -94,13 +104,11 @@ hybrid_blake2b_final_bridge(void* context, uint8* outDigest)
     if (context == NULL || outDigest == NULL) return B_BAD_VALUE;
     SoftBlake2bContext* ctx = (SoftBlake2bContext*)context;
     hybrid_blake2b_finalize(ctx, outDigest);
-    
-    memset(ctx, 0, sizeof(SoftBlake2bContext)); // Cancella tracce sensibili
-    // La free(context) verrà eseguita dal chiamante (BCryptoCore)
+    memset(ctx, 0, sizeof(SoftBlake2bContext));
     return B_OK;
 }
 
-// --- BRIDGE PER BLAKE2S (32-bit) ---
+// --- BRIDGE PER BLAKE2S ---
 static status_t
 hybrid_blake2s_init_bridge(void** context, size_t* contextSize)
 {
@@ -116,7 +124,7 @@ hybrid_blake2s_init_bridge(void** context, size_t* contextSize)
 static status_t
 hybrid_blake2s_update_bridge(void* context, const iovec* vecs, size_t count)
 {
-	if (context == NULL) return B_BAD_VALUE;
+    if (context == NULL) return B_BAD_VALUE;
     SoftBlake2sContext* ctx = (SoftBlake2sContext*)context;
     for (size_t i = 0; i < count; i++) {
         if (vecs[i].iov_base && vecs[i].iov_len > 0)
@@ -131,51 +139,62 @@ hybrid_blake2s_final_bridge(void* context, uint8* outDigest)
     if (context == NULL || outDigest == NULL) return B_BAD_VALUE;
     SoftBlake2sContext* ctx = (SoftBlake2sContext*)context;
     hybrid_blake2s_finalize(ctx, outDigest);
-    
-    memset(ctx, 0, sizeof(SoftBlake2sContext)); // Cancella tracce sensibili
-    // La free(context) verrà eseguita dal chiamante (BCryptoCore)
+    memset(ctx, 0, sizeof(SoftBlake2sContext));
     return B_OK;
 }
 
+/* ---------------------------------------------------------------- */
+/* Registration                                                     */
+/* ---------------------------------------------------------------- */
+static BCryptoAlgorithm sBlake2sSSE;
+static BCryptoAlgorithm sBlake2b;
 
 status_t 
 BInitHybridDigest() 
 {
-#if defined(__SSE4_1__) || defined(__AVX2__)
-	cpuid_info info;
-    get_cpuid(&info, 1, 0);
-    bool hasSSE41 = (info.eax_1.ecx & (1 << 19)) != 0;
-    if (!hasSSE41) {
-        return B_NOT_SUPPORTED; 
-    }
-    static BCryptoAlgorithm sHybridAlgos[] = {
-        {
-            .algorithm = B_CRYPTO_BLAKE2S,
-            .flags     = B_CRYPTO_ALG_SOFTWARE, // Resta software, ma ottimizzato
-            .name      = "BLAKE2s (Hybrid/SIMD)",
-            .priority  = 20, 
-            .Process   = hybrid_blake2_process,
-            .HashInit   = hybrid_blake2s_init_bridge,
-            .HashUpdate = hybrid_blake2s_update_bridge,
-            .HashFinal  = hybrid_blake2s_final_bridge
-        },
-        {
-            .algorithm = B_CRYPTO_BLAKE2B,
-            .flags     = B_CRYPTO_ALG_SOFTWARE,
-            .name      = "BLAKE2b (Hybrid/SIMD)",
-            .priority  = 20,
-            .Process   = hybrid_blake2_process,
-            .HashInit   = hybrid_blake2b_init_bridge,
-            .HashUpdate = hybrid_blake2b_update_bridge,
-            .HashFinal  = hybrid_blake2b_final_bridge
-        }
+#if defined(__x86_64__) || defined(__i386__)
+    //cpuid_info info;
+    //get_cpuid(&info, 1, 0);
+    //bool hasSSE41 = (info.eax_1.ecx & (1 << 19)) != 0;
+    bool hasSSE41 = x86_check_feature(IA32_FEATURE_EXT_SSE4_1, FEATURE_EXT);
+
+    //get_cpuid(&info, 7, 0);
+    //bool hasAVX2 = (info.eax_7.ebx & (1 << 5)) != 0;
+    bool hasAVX2 = x86_check_feature(IA32_FEATURE_AVX2, FEATURE_7_EBX);
+
+    if (!hasSSE41) return B_NOT_SUPPORTED;
+    
+    hybrid_set_use_avx2(hasAVX2);
+
+    // --- BLAKE2s: SSE4.1 è sempre presente se siamo qui ---
+    sBlake2sSSE = {
+        .algorithm = B_CRYPTO_BLAKE2S,
+        .flags     = B_CRYPTO_ALG_SOFTWARE,
+        .name      = "BLAKE2s (Hybrid/SSE4.1)",
+        .priority  = 25,
+        .Process   = hybrid_blake2_process,
+        .HashInit  = hybrid_blake2s_init_bridge,
+        .HashUpdate = hybrid_blake2s_update_bridge,
+        .HashFinal = hybrid_blake2s_final_bridge
     };
-    status_t status = B_OK;
-    for (size_t i = 0; i < sizeof(sHybridAlgos)/sizeof(sHybridAlgos[0]); i++) {
-        status = BRegisterCryptoAlgorithm(&sHybridAlgos[i]);
-        if (status != B_OK) break;
-    }
-    return status;
+    BRegisterCryptoAlgorithm(&sBlake2sSSE);
+
+    // --- BLAKE2b: Registrazione basata su capacità CPU ---
+    const char* b2bName = hasAVX2 ? "BLAKE2b (Hybrid/AVX2)" : "BLAKE2b (Hybrid/SSE4.1)";
+    sBlake2b = {
+        .algorithm = B_CRYPTO_BLAKE2B,
+        .flags     = B_CRYPTO_ALG_SOFTWARE,
+        //.name      = b2bName,
+        .priority  = hasAVX2 ? 25 : 20,
+        .Process   = hybrid_blake2_process,
+        .HashInit  = hybrid_blake2b_init_bridge,
+        .HashUpdate = hybrid_blake2b_update_bridge,
+        .HashFinal = hybrid_blake2b_final_bridge
+    };
+    strlcpy(sBlake2b.name, b2bName, sizeof(sBlake2b.name));
+    BRegisterCryptoAlgorithm(&sBlake2b);
+
+    return B_OK;
 #else
     return B_NOT_SUPPORTED;
 #endif

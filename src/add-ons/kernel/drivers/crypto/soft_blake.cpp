@@ -51,8 +51,8 @@ static inline uint64 rotr64(uint64 w, uint32 n) {
 		c = c + d; \
 		b = rotr64(b ^ c, 63); \
 	} while(0)
-
 static void soft_blake2b_compress(SoftBlake2bContext* ctx, const uint8 block[128])
+//extern "C" void soft_blake2b_compress(SoftBlake2bContext* ctx, const uint8 block[128])
 {
 	//uint64 m[16];
 	//uint64 v[16];
@@ -166,6 +166,7 @@ static inline uint32 load32(const void *p) {
         b = rotr32(b ^ c, 7); \
     } while(0)
 static void soft_blake2s_compress(SoftBlake2sContext* ctx, const uint8 block[64])
+//extern "C" void soft_blake2s_compress(SoftBlake2sContext* ctx, const uint8 block[64])
 {
 	//uint32 m[16];
 	//uint32 v[16];

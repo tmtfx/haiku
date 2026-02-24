@@ -16,6 +16,7 @@
 #include "SoftCrypto.h"
 #include "SoftDigest.h"
 #include "x86CPUDigest.h"
+#include "HybridB2Digest.h"
 
 struct crypto_module_info {
 	module_info info;
@@ -41,7 +42,7 @@ crypto_std_ops(int op, ...)
 			BStartEntropyFeeder();
 			//BInitx86CPUDigest();
 			BInitSoftDigest();
-			//BInitHybridDigest();
+			BInitHybridDigest();
 			return B_OK;
 		}
 		case B_MODULE_UNINIT:

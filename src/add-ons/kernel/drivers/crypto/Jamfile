@@ -11,7 +11,7 @@ UseHeaders [ FDirName $(HAIKU_TOP) headers private kernel util ] : true ;
 UsePrivateHeaders [ FDirName $(HAIKU_TOP) headers private kernel arch x86 ] ;
 
 if $(TARGET_ARCH) = x86_64 || $(TARGET_ARCH) = x86 {
-    local archFlags = -msha -msse4.1 -msse4.2 -mavx ;
+    local archFlags = -msha -msse4.1 -msse4.2 -mavx -mavx2 ;
     CCFLAGS += $(archFlags) ;
     CXXFLAGS += $(archFlags) ;
 }
@@ -33,10 +33,10 @@ KernelAddon crypto :
     soft_aes.cpp
     soft_chacha20.cpp
     SoftDigest.cpp
-    #HybridB2Digest.cpp
+    HybridB2Digest.cpp
     soft_sha.cpp
     soft_blake.cpp
-    #hybrid_blake_opt.cpp
+    hybrid_blake_opt.cpp
 ;
 
 AddFilesToHaikuImage system add-ons kernel drivers bin : crypto ;

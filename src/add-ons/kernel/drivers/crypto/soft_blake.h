@@ -14,10 +14,10 @@
 
 /* Contesto per BLAKE2b (64-bit) */
 typedef struct {
-    uint64 h[8];
+    uint64 h[8] __attribute__((aligned(32)));
     uint64 t[2];
     uint64 f[2];
-    uint8  buf[128];
+    uint8  buf[128] __attribute__((aligned(32)));
     size_t buflen;
     size_t outlen;
     
@@ -27,10 +27,10 @@ typedef struct {
 
 /* Contesto per BLAKE2s (32-bit) */
 typedef struct {
-    uint32 h[8];
+    uint32 h[8] __attribute__((aligned(16)));
     uint32 t[2];
     uint32 f[2];
-    uint8  buf[64];
+    uint8  buf[64] __attribute__((aligned(16)));
     size_t buflen;
     size_t outlen;
     
