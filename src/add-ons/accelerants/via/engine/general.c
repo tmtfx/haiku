@@ -2,6 +2,7 @@
    Mark Watson 12/1999,
    Apsed,
    Rudolf Cornelissen 10/2002-2/2016
+   Modified for VX900 support 2026
 */
 
 #define MODULE_BIT 0x00008000
@@ -90,7 +91,7 @@ status_t eng_general_powerup()
 {
 	status_t status;
 
-	LOG(1,("POWERUP: Haiku VIA Accelerant 0.19 running.\n"));
+	LOG(1,("POWERUP: Haiku VIA Accelerant 0.19 (VX900 Patched) running.\n"));
 
 	/* preset no laptop */
 	si->ps.laptop = false;
@@ -127,6 +128,12 @@ status_t eng_general_powerup()
 		si->ps.card_type = VT7205;
 		si->ps.card_arch = KM400;
 		LOG(4,("POWERUP: Detected VIA KM400 Unichrome (VT7205)\n"));
+		status = engxx_general_powerup();
+		break;
+	case 0x71221106:
+		si->ps.card_type = VT7122;
+		si->ps.card_arch = VX900;
+		LOG(4,("POWERUP: Detected VIA VX900 (VT7122)\n"));
 		status = engxx_general_powerup();
 		break;
 	default:
@@ -535,6 +542,65 @@ static status_t eng_general_bios_to_powergraphics()
  *
  * Mode slopspace is reflected in fbc->bytes_per_row BTW. */
 status_t eng_general_validate_pic_size (display_mode *target, uint32 *bytes_per_row, bool *acc_mode)
+{
+    uint32 video_pitch;
+    uint32 crtc_mask;
+    uint32 max_crtc_width;
+    uint8 depth = 8;
+
+    /* Disabilitiamo l'accelerazione per ora (motore Chrome vs Unichrome) */
+    *acc_mode = false;
+
+    /* 1. Selezione profondità e maschera di allineamento */
+    switch (target->space)
+    {
+        case B_CMAP8:  crtc_mask = 0x07; depth =  8; break;
+        case B_RGB15:  
+        case B_RGB16:  crtc_mask = 0x03; depth = 16; break;
+        case B_RGB24:  crtc_mask = 0x07; depth = 24; break;
+        case B_RGB32:  crtc_mask = 0x01; depth = 32; break;
+        default:
+            LOG(8,("INIT: unknown color space: 0x%08x\n", target->space));
+            return B_ERROR;
+    }
+
+    /* 2. Logica limiti per Architettura (Usando i nuovi enum) */
+    switch (si->ps.card_arch)
+    {
+        case VX900:
+            max_crtc_width = 4096; 
+            break;
+        case K8M800:
+        case KM400:
+            max_crtc_width = 2048;
+            break;
+        default:
+            max_crtc_width = 1600; // Limite prudenziale per vecchissime schede
+            break;
+    }
+
+    /* 3. Validazione dimensioni */
+    if (target->virtual_width > max_crtc_width) 
+        target->virtual_width = max_crtc_width;
+    
+    if (target->virtual_height > 4096) 
+        target->virtual_height = 4096;
+
+    /* 4. Calcolo Pitch (unaccelerated) */
+    /* Questa formula assicura che la larghezza in memoria sia 
+       multipla dell'allineamento richiesto dal CRTC VIA */
+    video_pitch = ((target->virtual_width + crtc_mask) & ~crtc_mask);
+
+    /* 5. Calcolo Bytes Per Row */
+    *bytes_per_row = video_pitch * (depth >> 3);
+
+    LOG(2,("INIT: Arch %d, Pitch %d, BPR %d\n", 
+        si->ps.card_arch, video_pitch, *bytes_per_row));
+
+    return B_OK;
+}
+
+status_t eng_general_validate_pic_size_old (display_mode *target, uint32 *bytes_per_row, bool *acc_mode)
 {
 	uint32 video_pitch;
 	uint32 acc_mask, crtc_mask;

@@ -105,6 +105,7 @@ static uint16 via_device_list[] = {
 	0x3205, /* KM400 Unichrome (VT3205) */
 //	0x3344, /* P4M800 Pro (VT3344) */
 	0x7205, /* KM400 Unichrome (VT7205) */
+	0x7122, /* VX900 Chrome9 (VT7122)*/
 	0
 };
 
@@ -677,7 +678,17 @@ static status_t open_hook (const char* name, uint32 flags, void** cookie) {
 	si->function = di->pcii.function;
 
 	/* device at bus #0, device #0, function #0 holds byte value at byte-index 0xf6 */
-	si->ps.chip_rev = ((*pci_bus->read_pci_config)(0, 0, 0, 0xf6, 1));
+	//si->ps.chip_rev = ((*pci_bus->read_pci_config)(0, 0, 0, 0xf6, 1));
+	if (di->pcii.device_id == 0x7122) {
+        /* Per il VX900 usiamo la revisione diretta dal PCI info della scheda */
+        si->ps.chip_rev = di->pcii.revision;
+        LOG(2, ("INIT: VX900 detected, using PCI revision: 0x%02x\n", si->ps.chip_rev));
+    } else {
+        /* Metodo legacy per i vecchi chipset VIA (CLE266, KM400, ecc.) */
+        /* device at bus #0, device #0, function #0 holds byte value at byte-index 0xf6 */
+        si->ps.chip_rev = ((*pci_bus->read_pci_config)(0, 0, 0, 0xf6, 1));
+        LOG(2, ("INIT: Legacy VIA detected, using Northbridge revision\n"));
+    }
 
 	/* map the device */
 	result = map_device(di);
