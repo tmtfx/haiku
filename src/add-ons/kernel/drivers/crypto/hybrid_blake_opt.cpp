@@ -168,93 +168,103 @@ static const uint64 blake2b_iv[8] = {
 // --- BLAKE2b SSE4.1 FALLBACK ---
 __attribute__((target("ssse3,sse4.1")))
 static void blake2b_compress_sse(SoftBlake2bContext* ctx, const uint8 block[128]) {
-	if (ctx == NULL || block == NULL) {
-    	dprintf("BLAKE2b Error: NULL pointer!\n");
-    	return;
-	}
-	uint64 v[16];
-    uint64 m[16];
+    // 1. Caricamento Messaggio (m0-m7 contengono i 128 byte del blocco)
+    // Carichiamo direttamente dalla RAM nei registri XMM
+    const __m128i* m_ptr = (const __m128i*)block;
+    __m128i m0 = _mm_loadu_si128(m_ptr + 0);
+    __m128i m1 = _mm_loadu_si128(m_ptr + 1);
+    __m128i m2 = _mm_loadu_si128(m_ptr + 2);
+    __m128i m3 = _mm_loadu_si128(m_ptr + 3);
+    __m128i m4 = _mm_loadu_si128(m_ptr + 4);
+    __m128i m5 = _mm_loadu_si128(m_ptr + 5);
+    __m128i m6 = _mm_loadu_si128(m_ptr + 6);
+    __m128i m7 = _mm_loadu_si128(m_ptr + 7);
 
-    // Caricamento dati (manteniamo il tuo memcpy per sicurezza LE)
-    for (int i = 0; i < 16; ++i)
-        memcpy(&m[i], block + i * 8, 8);
+    // 2. Inizializzazione Stato nei registri
+    // r0,r1 = v0..v3 | r2,r3 = v4..v7 | r4,r5 = v8..v11 | r6,r7 = v12..v15
+    __m128i r0 = _mm_loadu_si128((__m128i*)&ctx->h[0]);
+    __m128i r1 = _mm_loadu_si128((__m128i*)&ctx->h[2]);
+    __m128i r2 = _mm_loadu_si128((__m128i*)&ctx->h[4]);
+    __m128i r3 = _mm_loadu_si128((__m128i*)&ctx->h[6]);
+    
+    __m128i r4 = _mm_set_epi64x(blake2b_iv[1], blake2b_iv[0]);
+    __m128i r5 = _mm_set_epi64x(blake2b_iv[3], blake2b_iv[2]);
+    __m128i r6 = _mm_set_epi64x(blake2b_iv[5] ^ ctx->t[1], blake2b_iv[4] ^ ctx->t[0]);
+    __m128i r7 = _mm_set_epi64x(blake2b_iv[7] ^ ctx->f[1], blake2b_iv[6] ^ ctx->f[0]);
 
-    // Inizializzazione v (Identica alla tua soft_blake)
-    for (int i = 0; i < 8; ++i) v[i] = ctx->h[i];
-    for (int i = 0; i < 8; ++i) v[i + 8] = blake2b_iv[i];
-
-    v[12] ^= ctx->t[0];
-    v[13] ^= ctx->t[1];
-    v[14] ^= ctx->f[0];
-    v[15] ^= ctx->f[1];
+    // Usiamo un array di puntatori per accedere ai messaggi m0..m7 tramite indici sigma
+    // Nota: m_ext serve per simulare l'accesso m[sigma]
+    const uint64_t* m = (const uint64_t*)block;
 
     for (int r = 0; r < 12; r++) {
-        // --- COLONNE (G0+G1 e G2+G3) ---
-        __m128i v01 = _mm_loadu_si128((__m128i*)&v[0]);
-        __m128i v23 = _mm_loadu_si128((__m128i*)&v[2]);
-        __m128i v45 = _mm_loadu_si128((__m128i*)&v[4]);
-        __m128i v67 = _mm_loadu_si128((__m128i*)&v[6]);
-        __m128i v89 = _mm_loadu_si128((__m128i*)&v[8]);
-        __m128i vAB = _mm_loadu_si128((__m128i*)&v[10]);
-        __m128i vCD = _mm_loadu_si128((__m128i*)&v[12]);
-        __m128i vEF = _mm_loadu_si128((__m128i*)&v[14]);
-
-        // G0 e G1 in parallelo
-        G_SSE41(v01, v45, v89, vCD, 
-                _mm_set_epi64x(m[sigma[r][2]], m[sigma[r][0]]),   // m[2*0], m[2*1]
-                _mm_set_epi64x(m[sigma[r][3]], m[sigma[r][1]]));  // m[2*0+1], m[2*1+1]
-        
-        // G2 e G3 in parallelo
-        G_SSE41(v23, v67, vAB, vEF, 
+        // --- STEP 1: COLONNE ---
+        G_SSE41(r0, r2, r4, r6, 
+                _mm_set_epi64x(m[sigma[r][2]], m[sigma[r][0]]), 
+                _mm_set_epi64x(m[sigma[r][3]], m[sigma[r][1]]));
+        G_SSE41(r1, r3, r5, r7, 
                 _mm_set_epi64x(m[sigma[r][6]], m[sigma[r][4]]), 
                 _mm_set_epi64x(m[sigma[r][7]], m[sigma[r][5]]));
 
-        // Store temporaneo per riorganizzare le diagonali
-        _mm_storeu_si128((__m128i*)&v[0], v01);  _mm_storeu_si128((__m128i*)&v[2], v23);
-        _mm_storeu_si128((__m128i*)&v[4], v45);  _mm_storeu_si128((__m128i*)&v[6], v67);
-        _mm_storeu_si128((__m128i*)&v[8], v89);  _mm_storeu_si128((__m128i*)&v[10], vAB);
-        _mm_storeu_si128((__m128i*)&v[12], vCD); _mm_storeu_si128((__m128i*)&v[14], vEF);
+        // --- STEP 2: DIAGONALIZZAZIONE (Rotazione righe nei registri) ---
+        // Riga 1 (r2, r3): Ruota di 1 elemento (64 bit) verso sinistra
+        __m128i t0 = r2;
+        r2 = _mm_alignr_epi8(r3, r2, 8); // [r3_low, r2_high]
+        r3 = _mm_alignr_epi8(t0, r3, 8); // [r2_low, r3_high]
 
-        // --- DIAGONALI (G4+G5 e G6+G7) ---
-        // Caricamento manuale per rispettare gli indici: v0+v1, v5+v6, v10+v11, v15+v12 ecc.
-        __m128i d4_v051015_a = _mm_set_epi64x(v[1],  v[0]);  // va per G4, G5
-        __m128i d4_v051015_b = _mm_set_epi64x(v[6],  v[5]);  // vb
-        __m128i d4_v051015_c = _mm_set_epi64x(v[11], v[10]); // vc
-        __m128i d4_v051015_d = _mm_set_epi64x(v[12], v[15]); // vd
+        // Riga 2 (r4, r5): Scambio completo (128 bit)
+        t0 = r4; r4 = r5; r5 = t0;
 
-        G_SSE41(d4_v051015_a, d4_v051015_b, d4_v051015_c, d4_v051015_d,
-                _mm_set_epi64x(m[sigma[r][10]], m[sigma[r][8]]),
+        // Riga 3 (r6, r7): Ruota di 1 elemento (64 bit) verso destra
+        t0 = r6;
+        r6 = _mm_alignr_epi8(r6, r7, 8);
+        r7 = _mm_alignr_epi8(r7, t0, 8);
+
+        // --- STEP 3: DIAGONALI ---
+        G_SSE41(r0, r2, r4, r6, 
+                _mm_set_epi64x(m[sigma[r][10]], m[sigma[r][8]]), 
                 _mm_set_epi64x(m[sigma[r][11]], m[sigma[r][9]]));
-
-        __m128i d6_v27813_a = _mm_set_epi64x(v[3],  v[2]);  // va per G6, G7
-        __m128i d6_v27813_b = _mm_set_epi64x(v[4],  v[7]);  // vb
-        __m128i d6_v27813_c = _mm_set_epi64x(v[9],  v[8]);  // vc
-        __m128i d6_v27813_d = _mm_set_epi64x(v[14], v[13]); // vd
-
-        G_SSE41(d6_v27813_a, d6_v27813_b, d6_v27813_c, d6_v27813_d,
-                _mm_set_epi64x(m[sigma[r][14]], m[sigma[r][12]]),
+        G_SSE41(r1, r3, r5, r7, 
+                _mm_set_epi64x(m[sigma[r][14]], m[sigma[r][12]]), 
                 _mm_set_epi64x(m[sigma[r][15]], m[sigma[r][13]]));
 
-        // Un-diagonalize (Scrittura finale del round)
-        v[0] = _mm_extract_epi64(d4_v051015_a, 0); v[1] = _mm_extract_epi64(d4_v051015_a, 1);
-        v[5] = _mm_extract_epi64(d4_v051015_b, 0); v[6] = _mm_extract_epi64(d4_v051015_b, 1);
-        v[10]= _mm_extract_epi64(d4_v051015_c, 0); v[11]= _mm_extract_epi64(d4_v051015_c, 1);
-        v[15]= _mm_extract_epi64(d4_v051015_d, 0); v[12]= _mm_extract_epi64(d4_v051015_d, 1);
+        // --- STEP 4: UN-DIAGONALIZZAZIONE (Invertiamo le rotazioni) ---
+        // Riga 1: Ruota destra di 64 bit
+        t0 = r2;
+        r2 = _mm_alignr_epi8(r2, r3, 8);
+        r3 = _mm_alignr_epi8(r3, t0, 8);
 
-        v[2] = _mm_extract_epi64(d6_v27813_a, 0);  v[3] = _mm_extract_epi64(d6_v27813_a, 1);
-        v[7] = _mm_extract_epi64(d6_v27813_b, 0);  v[4] = _mm_extract_epi64(d6_v27813_b, 1);
-        v[8] = _mm_extract_epi64(d6_v27813_c, 0);  v[9] = _mm_extract_epi64(d6_v27813_c, 1);
-        v[13]= _mm_extract_epi64(d6_v27813_d, 0);  v[14]= _mm_extract_epi64(d6_v27813_d, 1);
+        // Riga 2: Scambio completo
+        t0 = r4; r4 = r5; r5 = t0;
+
+        // Riga 3: Ruota sinistra di 64 bit
+        t0 = r6;
+        r6 = _mm_alignr_epi8(r7, r6, 8);
+        r7 = _mm_alignr_epi8(t0, r7, 8);
     }
 
-    for (int i = 0; i < 8; i++)
-        ctx->h[i] ^= v[i] ^ v[i + 8];
+    // 5. Finalizzazione: XOR dello stato con h originale e con le metà di v
+    __m128i h0 = _mm_loadu_si128((__m128i*)&ctx->h[0]);
+    __m128i h1 = _mm_loadu_si128((__m128i*)&ctx->h[2]);
+    __m128i h2 = _mm_loadu_si128((__m128i*)&ctx->h[4]);
+    __m128i h3 = _mm_loadu_si128((__m128i*)&ctx->h[6]);
 
+    h0 = _mm_xor_si128(h0, _mm_xor_si128(r0, r4));
+    h1 = _mm_xor_si128(h1, _mm_xor_si128(r1, r5));
+    h2 = _mm_xor_si128(h2, _mm_xor_si128(r2, r6));
+    h3 = _mm_xor_si128(h3, _mm_xor_si128(r3, r7));
+
+    _mm_storeu_si128((__m128i*)&ctx->h[0], h0);
+    _mm_storeu_si128((__m128i*)&ctx->h[2], h1);
+    _mm_storeu_si128((__m128i*)&ctx->h[4], h2);
+    _mm_storeu_si128((__m128i*)&ctx->h[6], h3);
 }
 
 // --- INTERFACCIA PUBBLICA ---
 
-void hybrid_blake2b_init(SoftBlake2bContext* ctx, size_t outLen) { soft_blake2b_init(ctx, outLen); }
+void hybrid_blake2b_init(SoftBlake2bContext* ctx, size_t outLen) {
+	if (sUseAVX2) dprintf("BCrypto: Blake2b with avx");
+    soft_blake2b_init(ctx, outLen);
+}
 
 void hybrid_blake2b_update(SoftBlake2bContext* ctx, const uint8* in, size_t inLen) {
     while (inLen > 0) {
@@ -264,9 +274,9 @@ void hybrid_blake2b_update(SoftBlake2bContext* ctx, const uint8* in, size_t inLe
         ctx->buflen += fill; in += fill; inLen -= fill;
         if (ctx->buflen == 128 && inLen > 0) {
             ctx->t[0] += 128; if (ctx->t[0] < 128) ctx->t[1]++;
-            //if (sUseAVX2) blake2b_compress_avx2(ctx, ctx->buf);
-            //else blake2b_compress_sse(ctx, ctx->buf);
-            blake2b_compress_sse(ctx, ctx->buf); //ONLY For test purposes
+            if (sUseAVX2) blake2b_compress_avx2(ctx, ctx->buf);
+            else blake2b_compress_sse(ctx, ctx->buf);
+            //blake2b_compress_sse(ctx, ctx->buf); //ONLY For test purposes
             //soft_blake2b_compress(ctx, ctx->buf); //ONLY For test purposes
             ctx->buflen = 0;
         }
@@ -279,9 +289,9 @@ void hybrid_blake2b_finalize(SoftBlake2bContext* ctx, uint8* out) {
     //ctx->f[0] = true;
     ctx->f[0] = 0xFFFFFFFFFFFFFFFF;
     memset(ctx->buf + ctx->buflen, 0, 128 - ctx->buflen);
-    //if (sUseAVX2) blake2b_compress_avx2(ctx, ctx->buf);
-    //else blake2b_compress_sse(ctx, ctx->buf); 
-    blake2b_compress_sse(ctx, ctx->buf); //ONLY For test purposes
+    if (sUseAVX2) blake2b_compress_avx2(ctx, ctx->buf);
+    else blake2b_compress_sse(ctx, ctx->buf); 
+    //blake2b_compress_sse(ctx, ctx->buf); //ONLY For test purposes
     //soft_blake2b_compress(ctx, ctx->buf); //ONLY For test purposes
     uint8* p = out;
     for (size_t i = 0; i < (ctx->outlen / 8); i++) {
