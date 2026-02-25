@@ -102,7 +102,6 @@ static void blake2b_compress_avx2(SoftBlake2bContext* ctx, const uint8 block[128
         __m256i m0 = _mm256_setr_epi64x(m[sigma[r][0]], m[sigma[r][2]], m[sigma[r][4]], m[sigma[r][6]]);
         __m256i m1 = _mm256_setr_epi64x(m[sigma[r][1]], m[sigma[r][3]], m[sigma[r][5]], m[sigma[r][7]]);
 
-        // Round parte 1 (Colonne)
         v0 = _mm256_add_epi64(_mm256_add_epi64(v0, v1), m0); // Somma m0
         v3 = _mm256_xor_si256(v3, v0); 
         v3 = _mm256_or_si256(_mm256_srli_epi64(v3, 32), _mm256_slli_epi64(v3, 32));
@@ -110,14 +109,12 @@ static void blake2b_compress_avx2(SoftBlake2bContext* ctx, const uint8 block[128
         v1 = _mm256_xor_si256(v1, v2); 
         v1 = _mm256_or_si256(_mm256_srli_epi64(v1, 24), _mm256_slli_epi64(v1, 40));
         
-        // Aggiungiamo la somma del secondo set di messaggi qui!
         v0 = _mm256_add_epi64(v0, m1); 
 
         v1 = _mm256_permute4x64_epi64(v1, 0x39); 
         v2 = _mm256_permute4x64_epi64(v2, 0x4E); 
         v3 = _mm256_permute4x64_epi64(v3, 0x93);
 
-        // Round parte 2 (Diagonali)
         __m256i m2 = _mm256_setr_epi64x(m[sigma[r][8]], m[sigma[r][10]], m[sigma[r][12]], m[sigma[r][14]]);
         __m256i m3 = _mm256_setr_epi64x(m[sigma[r][9]], m[sigma[r][11]], m[sigma[r][13]], m[sigma[r][15]]);
         
@@ -128,7 +125,6 @@ static void blake2b_compress_avx2(SoftBlake2bContext* ctx, const uint8 block[128
         v1 = _mm256_xor_si256(v1, v2); 
         v1 = _mm256_or_si256(_mm256_srli_epi64(v1, 63), _mm256_slli_epi64(v1, 1));
         
-        // Aggiungiamo la somma del quarto set di messaggi qui!
         v0 = _mm256_add_epi64(v0, m3); 
 
         v1 = _mm256_permute4x64_epi64(v1, 0x93); 
@@ -166,6 +162,17 @@ static const uint64 blake2b_iv[8] = {
     } while (0)
 //extern "C" void soft_blake2b_compress(SoftBlake2bContext* ctx, const uint8 block[128]);
 // --- BLAKE2b SSE4.1 FALLBACK ---
+/* BLAKE2b Compression Function - SSE4.1 Optimized
+ * * Questa implementazione parallelizza il calcolo di due funzioni G alla volta,
+ * mantenendo l'intero stato (16 parole da 64-bit) all'interno degli 8 registri 
+ * XMM (r0-r7). 
+ *
+ * Layout dei registri (ogni registro XMM tiene due uint64):
+ * r0: [v1,  v0]   r1: [v3,  v2]  <- Riga 0
+ * r2: [v5,  v4]   r3: [v7,  v6]  <- Riga 1
+ * r4: [v9,  v8]   r5: [v11, v10] <- Riga 2
+ * r6: [v13, v12]  r7: [v15, v14] <- Riga 3
+ */
 __attribute__((target("ssse3,sse4.1")))
 static void blake2b_compress_sse(SoftBlake2bContext* ctx, const uint8 block[128]) {
     // 1. Caricamento Messaggio (m0-m7 contengono i 128 byte del blocco)
@@ -198,28 +205,34 @@ static void blake2b_compress_sse(SoftBlake2bContext* ctx, const uint8 block[128]
 
     for (int r = 0; r < 12; r++) {
         // --- STEP 1: COLONNE ---
+        // G0 e G1 processati in parallelo su r0, r2, r4, r6
         G_SSE41(r0, r2, r4, r6, 
                 _mm_set_epi64x(m[sigma[r][2]], m[sigma[r][0]]), 
                 _mm_set_epi64x(m[sigma[r][3]], m[sigma[r][1]]));
+        // G2 e G3 processati in parallelo su r1, r3, r5, r7
         G_SSE41(r1, r3, r5, r7, 
                 _mm_set_epi64x(m[sigma[r][6]], m[sigma[r][4]]), 
                 _mm_set_epi64x(m[sigma[r][7]], m[sigma[r][5]]));
 
         // --- STEP 2: DIAGONALIZZAZIONE (Rotazione righe nei registri) ---
-        // Riga 1 (r2, r3): Ruota di 1 elemento (64 bit) verso sinistra
+        // Per calcolare le diagonali, ruotiamo le righe della matrice di stato.
+        // Usiamo _mm_alignr_epi8 (SSSE3) per shiftare i dati tra i registri a 128-bit.
+        
+        // Riga 1: Rotazione sinistra di 1 elemento (64-bit)
         __m128i t0 = r2;
         r2 = _mm_alignr_epi8(r3, r2, 8); // [r3_low, r2_high]
         r3 = _mm_alignr_epi8(t0, r3, 8); // [r2_low, r3_high]
 
-        // Riga 2 (r4, r5): Scambio completo (128 bit)
+        // Riga 2: Rotazione di 2 elementi (scambio dei registri r4 <-> r5)
         t0 = r4; r4 = r5; r5 = t0;
 
-        // Riga 3 (r6, r7): Ruota di 1 elemento (64 bit) verso destra
+        // Riga 3: Rotazione destra di 1 elemento (64-bit)
         t0 = r6;
         r6 = _mm_alignr_epi8(r6, r7, 8);
         r7 = _mm_alignr_epi8(r7, t0, 8);
 
-        // --- STEP 3: DIAGONALI ---
+        // --- STEP 3: CALCOLO DIAGONALI ---
+        // G4+G5 e G6+G7 in parallelo
         G_SSE41(r0, r2, r4, r6, 
                 _mm_set_epi64x(m[sigma[r][10]], m[sigma[r][8]]), 
                 _mm_set_epi64x(m[sigma[r][11]], m[sigma[r][9]]));
@@ -227,22 +240,25 @@ static void blake2b_compress_sse(SoftBlake2bContext* ctx, const uint8 block[128]
                 _mm_set_epi64x(m[sigma[r][14]], m[sigma[r][12]]), 
                 _mm_set_epi64x(m[sigma[r][15]], m[sigma[r][13]]));
 
-        // --- STEP 4: UN-DIAGONALIZZAZIONE (Invertiamo le rotazioni) ---
-        // Riga 1: Ruota destra di 64 bit
+        // --- STEP 4: UN-DIAGONALIZZAZIONE ---
+        // Riportiamo i registri all'ordine originale (colonne) per il prossimo round.
+        
+        // Riga 1: Inverte rotazione sinistra (ruota destra 64-bit)
         t0 = r2;
         r2 = _mm_alignr_epi8(r2, r3, 8);
         r3 = _mm_alignr_epi8(r3, t0, 8);
 
-        // Riga 2: Scambio completo
+        // Riga 2: Inverte scambio (scambia di nuovo r4 <-> r5)
         t0 = r4; r4 = r5; r5 = t0;
 
-        // Riga 3: Ruota sinistra di 64 bit
+        // Riga 3: Inverte rotazione destra (ruota sinistra 64-bit)
         t0 = r6;
         r6 = _mm_alignr_epi8(r7, r6, 8);
         r7 = _mm_alignr_epi8(t0, r7, 8);
     }
 
-    // 5. Finalizzazione: XOR dello stato con h originale e con le metà di v
+    // --- FINALIZZAZIONE ---
+    // XOR dello stato finale con l'hash originale (h = h ^ v_low ^ v_high)
     __m128i h0 = _mm_loadu_si128((__m128i*)&ctx->h[0]);
     __m128i h1 = _mm_loadu_si128((__m128i*)&ctx->h[2]);
     __m128i h2 = _mm_loadu_si128((__m128i*)&ctx->h[4]);
@@ -253,6 +269,7 @@ static void blake2b_compress_sse(SoftBlake2bContext* ctx, const uint8 block[128]
     h2 = _mm_xor_si128(h2, _mm_xor_si128(r2, r6));
     h3 = _mm_xor_si128(h3, _mm_xor_si128(r3, r7));
 
+    // Store finale dei risultati nel contesto
     _mm_storeu_si128((__m128i*)&ctx->h[0], h0);
     _mm_storeu_si128((__m128i*)&ctx->h[2], h1);
     _mm_storeu_si128((__m128i*)&ctx->h[4], h2);
@@ -286,7 +303,6 @@ void hybrid_blake2b_update(SoftBlake2bContext* ctx, const uint8* in, size_t inLe
 void hybrid_blake2b_finalize(SoftBlake2bContext* ctx, uint8* out) {
     ctx->t[0] += ctx->buflen;
     if (ctx->t[0] < ctx->buflen) ctx->t[1]++;
-    //ctx->f[0] = true;
     ctx->f[0] = 0xFFFFFFFFFFFFFFFF;
     memset(ctx->buf + ctx->buflen, 0, 128 - ctx->buflen);
     if (sUseAVX2) blake2b_compress_avx2(ctx, ctx->buf);
@@ -307,8 +323,6 @@ void hybrid_blake2b_finalize(SoftBlake2bContext* ctx, uint8* out) {
         memcpy(p, &v, remainder);
     }
 }
-
-// --- FUNZIONI IBRIDE (Interfaccia) ---
 
 void hybrid_blake2s_init(SoftBlake2sContext* ctx, size_t outLen) { soft_blake2s_init(ctx, outLen); }
 
