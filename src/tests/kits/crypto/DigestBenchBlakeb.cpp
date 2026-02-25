@@ -56,11 +56,11 @@ int main(int argc, char** argv) {
 
     printf("Benchmark BLAKE2B su: %s (%.2f MB)\n", filename, sizeMB);
     printf("-------------------------------------------------------------------------------\n");
-/*
+
     // --- TEST 1: STREAMING (BDataIO) ---
     printf("Esecuzione Test Streaming...\n");
     start = system_time();
-    status_t status = crypto.Digest(B_CRYPTO_SHA256, &file, digest);
+    status_t status = crypto.Digest(B_CRYPTO_BLAKE2B, &file, digest);
     end = system_time();
 
     if (status == B_OK) {
@@ -69,7 +69,7 @@ int main(int argc, char** argv) {
         print_hash("Streaming IO", digest, hashLen, duration, mbps);
     } else {
         fprintf(stderr, "Errore Streaming: %s\n", strerror(status));
-    }*/
+    }
 
     // --- TEST 2: BUFFERIZZATO (void*) ---
     // Prepariamo la memoria
