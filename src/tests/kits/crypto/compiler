@@ -30,7 +30,7 @@ echo "Compilazione di $input in $output..."
 
 g++ -o "$output" "$input" \
     -I /boot/system/develop/headers/os/ \
-    -I /boot/home/Projects/myHaiku/haiku/headers/os \
+    -I /boot/home/config/non-packaged/headers/os \
     -L /boot/home/config/non-packaged/lib \
     -lcrypto -lcrypto_api -lbe
 
