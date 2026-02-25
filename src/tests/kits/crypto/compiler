@@ -1,0 +1,42 @@
+#!/bin/bash
+
+# 1. Verifica che sia stato passato esattamente un argomento
+if [ "$#" -ne 1 ]; then
+    echo "Utilizzo: $0 <file.cpp>"
+    echo "Esempio:  $0 mio_progetto.cpp"
+    exit 1
+fi
+
+input=$1
+
+# 2. Verifica che il file abbia estensione .cpp
+if [[ ! "$input" == *.cpp ]]; then
+    echo "Errore: Il file di input deve avere estensione .cpp"
+    exit 1
+fi
+
+# 3. Verifica che il file esista fisicamente
+if [ ! -f "$input" ]; then
+    echo "Errore: Il file '$input' non esiste."
+    exit 1
+fi
+
+# 4. Rimuove l'estensione .cpp per generare il nome dell'output
+# ${input%.cpp} taglia la parte finale corrispondente a ".cpp"
+output="${input%.cpp}"
+
+# 5. Esecuzione del comando di compilazione
+echo "Compilazione di $input in $output..."
+
+g++ -o "$output" "$input" \
+    -I /boot/system/develop/headers/os/ \
+    -I /boot/home/Projects/myHaiku/haiku/headers/os \
+    -L /boot/home/config/non-packaged/lib \
+    -lcrypto -lcrypto_api -lbe
+
+# Verifica se la compilazione è andata a buon fine
+if [ $? -eq 0 ]; then
+    echo "Compilazione completata con successo!"
+else
+    echo "Errore durante la compilazione."
+fi
