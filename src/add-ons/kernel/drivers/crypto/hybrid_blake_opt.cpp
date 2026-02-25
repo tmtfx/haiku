@@ -89,49 +89,7 @@ static void blake2s_compress_sse(SoftBlake2sContext* ctx, const uint8 block[64])
 }
 
 // --- BLAKE2b AVX2 ---
-__attribute__((target("avx2")))
-static void blake2b_compress_avx2(SoftBlake2bContext* ctx, const uint8 block[128]) {
-    const uint64* m = (const uint64*)block;
-    __m256i v0 = _mm256_loadu_si256((__m256i*)&ctx->h[0]);
-    __m256i v1 = _mm256_loadu_si256((__m256i*)&ctx->h[4]);
-    __m256i v2 = _mm256_setr_epi64x(0x6A09E667F3BCC908ULL, 0xBB67AE8584CAA73BULL, 0x3C6EF372FE94F82BULL, 0xA54FF53A5F1D36F1ULL);
-    __m256i v3 = _mm256_setr_epi64x(0x510E527FADE682D1ULL ^ ctx->t[0], 0x9B05688C2B3E6C1FULL ^ ctx->t[1], 
-                                    0x1F83D9ABFB41BD6BULL ^ ctx->f[0], 0x5BE0CD19137E2179ULL ^ ctx->f[1]);
 
-    for(int r=0; r<12; r++) {
-        __m256i m0 = _mm256_setr_epi64x(m[sigma[r][0]], m[sigma[r][2]], m[sigma[r][4]], m[sigma[r][6]]);
-        __m256i m1 = _mm256_setr_epi64x(m[sigma[r][1]], m[sigma[r][3]], m[sigma[r][5]], m[sigma[r][7]]);
-
-        v0 = _mm256_add_epi64(_mm256_add_epi64(v0, v1), m0); // Somma m0
-        v3 = _mm256_xor_si256(v3, v0); 
-        v3 = _mm256_or_si256(_mm256_srli_epi64(v3, 32), _mm256_slli_epi64(v3, 32));
-        v2 = _mm256_add_epi64(v2, v3);
-        v1 = _mm256_xor_si256(v1, v2); 
-        v1 = _mm256_or_si256(_mm256_srli_epi64(v1, 24), _mm256_slli_epi64(v1, 40));
-        
-        v0 = _mm256_add_epi64(v0, m1); 
-
-        v1 = _mm256_permute4x64_epi64(v1, 0x39); 
-        v2 = _mm256_permute4x64_epi64(v2, 0x4E); 
-        v3 = _mm256_permute4x64_epi64(v3, 0x93);
-
-        __m256i m2 = _mm256_setr_epi64x(m[sigma[r][8]], m[sigma[r][10]], m[sigma[r][12]], m[sigma[r][14]]);
-        __m256i m3 = _mm256_setr_epi64x(m[sigma[r][9]], m[sigma[r][11]], m[sigma[r][13]], m[sigma[r][15]]);
-        
-        v0 = _mm256_add_epi64(_mm256_add_epi64(v0, v1), m2); // Somma m2
-        v3 = _mm256_xor_si256(v3, v0); 
-        v3 = _mm256_or_si256(_mm256_srli_epi64(v3, 16), _mm256_slli_epi64(v3, 48));
-        v2 = _mm256_add_epi64(v2, v3);
-        v1 = _mm256_xor_si256(v1, v2); 
-        v1 = _mm256_or_si256(_mm256_srli_epi64(v1, 63), _mm256_slli_epi64(v1, 1));
-        
-        v0 = _mm256_add_epi64(v0, m3); 
-
-        v1 = _mm256_permute4x64_epi64(v1, 0x93); 
-        v2 = _mm256_permute4x64_epi64(v2, 0x4E); 
-        v3 = _mm256_permute4x64_epi64(v3, 0x39);
-    }
-}
 
 static const uint64 blake2b_iv[8] = {
 	0x6a09e667f3bcc908ULL, 0xbb67ae8584caa73bULL,
@@ -139,6 +97,79 @@ static const uint64 blake2b_iv[8] = {
 	0x510e527fade682d1ULL, 0x9b05688c2b3e6c1fULL,
 	0x1f83d9abfb41bd6bULL, 0x5be0cd19137e2179ULL
 };
+
+__attribute__((target("avx2")))
+static void blake2b_compress_avx2(SoftBlake2bContext* ctx, const uint8 block[128]) {
+    const uint64* m = (const uint64*)block;
+
+    // 1. Inizializzazione Stato (4 righe da 4 elementi uint64)
+    __m256i v0 = _mm256_loadu_si256((__m256i*)&ctx->h[0]); // h0..h3
+    __m256i v1 = _mm256_loadu_si256((__m256i*)&ctx->h[4]); // h4..h7
+    __m256i v2 = _mm256_setr_epi64x(blake2b_iv[0], blake2b_iv[1], blake2b_iv[2], blake2b_iv[3]);
+    __m256i v3 = _mm256_setr_epi64x(blake2b_iv[4] ^ ctx->t[0], blake2b_iv[5] ^ ctx->t[1], 
+                                    blake2b_iv[6] ^ ctx->f[0], blake2b_iv[7] ^ ctx->f[1]);
+
+    for (int r = 0; r < 12; r++) {
+        // --- COLONNE ---
+        __m256i m0 = _mm256_setr_epi64x(m[sigma[r][0]], m[sigma[r][2]], m[sigma[r][4]], m[sigma[r][6]]);
+        __m256i m1 = _mm256_setr_epi64x(m[sigma[r][1]], m[sigma[r][3]], m[sigma[r][5]], m[sigma[r][7]]);
+        
+        // G_AVX2 (v0, v1, v2, v3, m0, m1)
+        v0 = _mm256_add_epi64(_mm256_add_epi64(v0, v1), m0);
+        v3 = _mm256_xor_si256(v3, v0);
+        v3 = _mm256_or_si256(_mm256_srli_epi64(v3, 32), _mm256_slli_epi64(v3, 32)); // ROR 32
+        v2 = _mm256_add_epi64(v2, v3);
+        v1 = _mm256_xor_si256(v1, v2);
+        v1 = _mm256_or_si256(_mm256_srli_epi64(v1, 24), _mm256_slli_epi64(v1, 40)); // ROR 24
+        
+        v0 = _mm256_add_epi64(_mm256_add_epi64(v0, v1), m1);
+        v3 = _mm256_xor_si256(v3, v0);
+        v3 = _mm256_or_si256(_mm256_srli_epi64(v3, 16), _mm256_slli_epi64(v3, 48)); // ROR 16
+        v2 = _mm256_add_epi64(v2, v3);
+        v1 = _mm256_xor_si256(v1, v2);
+        v1 = _mm256_or_si256(_mm256_srli_epi64(v1, 63), _mm256_slli_epi64(v1, 1));  // ROR 63
+
+        // --- DIAGONALIZZAZIONE (Shuffling delle righe) ---
+        v1 = _mm256_permute4x64_epi64(v1, 0x39); // Ruota di 1 (01 11 10 00)
+        v2 = _mm256_permute4x64_epi64(v2, 0x4E); // Ruota di 2 (01 00 11 10)
+        v3 = _mm256_permute4x64_epi64(v3, 0x93); // Ruota di 3 (10 01 00 11)
+
+        // --- DIAGONALI ---
+        __m256i m2 = _mm256_setr_epi64x(m[sigma[r][8]],  m[sigma[r][10]], m[sigma[r][12]], m[sigma[r][14]]);
+        __m256i m3 = _mm256_setr_epi64x(m[sigma[r][9]],  m[sigma[r][11]], m[sigma[r][13]], m[sigma[r][15]]);
+
+        v0 = _mm256_add_epi64(_mm256_add_epi64(v0, v1), m2);
+        v3 = _mm256_xor_si256(v3, v0);
+        v3 = _mm256_or_si256(_mm256_srli_epi64(v3, 32), _mm256_slli_epi64(v3, 32));
+        v2 = _mm256_add_epi64(v2, v3);
+        v1 = _mm256_xor_si256(v1, v2);
+        v1 = _mm256_or_si256(_mm256_srli_epi64(v1, 24), _mm256_slli_epi64(v1, 40));
+        
+        v0 = _mm256_add_epi64(_mm256_add_epi64(v0, v1), m3);
+        v3 = _mm256_xor_si256(v3, v0);
+        v3 = _mm256_or_si256(_mm256_srli_epi64(v3, 16), _mm256_slli_epi64(v3, 48));
+        v2 = _mm256_add_epi64(v2, v3);
+        v1 = _mm256_xor_si256(v1, v2);
+        v1 = _mm256_or_si256(_mm256_srli_epi64(v1, 63), _mm256_slli_epi64(v1, 1));
+
+        // --- UN-DIAGONALIZZAZIONE ---
+        v1 = _mm256_permute4x64_epi64(v1, 0x93); 
+        v2 = _mm256_permute4x64_epi64(v2, 0x4E);
+        v3 = _mm256_permute4x64_epi64(v3, 0x39);
+    }
+
+    // FINALIZZAZIONE
+    __m256i h0 = _mm256_loadu_si256((__m256i*)&ctx->h[0]);
+    __m256i h1 = _mm256_loadu_si256((__m256i*)&ctx->h[4]);
+    
+    // h = h ^ v_riga0 ^ v_riga2
+    _mm256_storeu_si256((__m256i*)&ctx->h[0], _mm256_xor_si256(h0, _mm256_xor_si256(v0, v2)));
+    // h = h ^ v_riga1 ^ v_riga3
+    _mm256_storeu_si256((__m256i*)&ctx->h[4], _mm256_xor_si256(h1, _mm256_xor_si256(v1, v3)));
+}
+
+
+
 #define G_SSE41(va, vb, vc, vd, m_low, m_high) \
     do { \
         va = _mm_add_epi64(va, vb); \
@@ -279,7 +310,7 @@ static void blake2b_compress_sse(SoftBlake2bContext* ctx, const uint8 block[128]
 // --- INTERFACCIA PUBBLICA ---
 
 void hybrid_blake2b_init(SoftBlake2bContext* ctx, size_t outLen) {
-	if (sUseAVX2) dprintf("BCrypto: Blake2b with avx");
+	if (sUseAVX2) dprintf("BCrypto: Blake2b with avx\n");
     soft_blake2b_init(ctx, outLen);
 }
 
