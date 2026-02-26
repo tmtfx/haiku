@@ -24,74 +24,57 @@ static status_t
 padlock_aes_process_block(bool encrypt, PadLockAESContext* ctx,
                          const uint8* in, uint8* out, size_t length)
 {
+	// 1. Check allineamento (Cruciale per evitare General Protection Fault)
+    // L'istruzione xcryptcbc richiede che source, destination, IV e Key 
+    // siano allineati a 16 byte.
+    if (((uintptr_t)in & 0xF) != 0 || ((uintptr_t)out & 0xF) != 0)
+        return B_BAD_VALUE;
+        
     if (length % 16 != 0)
         return B_BAD_VALUE;
 
+    // 2. Control Word per VIA Nano / ACE2
+    // Bit 0-3: Round count (0 = automatico basato sulla chiave)
+    // Bit 9: 0 = Decrypt, 1 = Encrypt
+    // Bit 10-11: Key Size (0 = 128, 1 = 192, 2 = 256)
     uint32 ctrl = 0; 
     switch (ctx->keyLength) {
-        case 16: ctrl = 0x0080; break;
-        case 24: ctrl = 0x00C0; break;
-        case 32: ctrl = 0x0100; break;
+        //case 16: ctrl = 0x0080; break;
+        //case 24: ctrl = 0x00C0; break;
+        //case 32: ctrl = 0x0100; break;
+        case 16: ctrl = 0x0;    break; // AES-128: Bit 7 = 0, Bit 8 = 0
+        case 24: ctrl = 0x400;  break; // AES-192: Bit 10 = 1 (alcune versioni) o Bit 7/8
+        case 32: ctrl = 0x800;  break; // AES-256
         default: return B_BAD_VALUE;
     }
     if (encrypt) ctrl |= 0x200;
 
+    // Variabili locali per gestire i registri che la CPU modificherà
+    size_t blocks = length / 16;
+    uint8* ivPtr = ctx->iv;
+    
     // Definiamo i suffissi e i registri in base all'architettura
 #ifdef __x86_64__
     #define PUSHF "pushfq"
     #define POPF  "popfq"
-    #define ADDR_REG "r" // a 64-bit i puntatori sono a 64-bit
+    //#define ADDR_REG "r" // a 64-bit i puntatori sono a 64-bit
 #else
     #define PUSHF "pushfl"
     #define POPF  "popfl"
-    #define ADDR_REG "r"
+    //#define ADDR_REG "r"
 #endif
 
     asm volatile(
         PUSHF "\n\t"
-        POPF  "\n\t"        // Resetta i flag per ACE
+        POPF  "\n\t"        // Resetta i flag EFLAGS (fondamentale per Padlock)
         "xcryptcbc\n\t"
-        : "+S"(in), "+D"(out)
-        : "d"(ctrl), "b"(ctx->key), "a"(ctx->iv), "c"(length / 16)
+        : "+S"(in), "+D"(out), "+a"(ivPtr), "+c"(blocks)
+        : "d"(ctrl), "b"(ctx->key)
         : "memory", "cc"
     );
 
     return B_OK;
 }
-/*
-static status_t
-padlock_aes_process_block(bool encrypt, PadLockAESContext* ctx,
-                         const uint8* in, uint8* out, size_t length)
-{
-    if (length % 16 != 0)
-        return B_BAD_VALUE;
-
-    // ACE setup: EAX controlla l'operazione
-    // Bit 0-3: Round count (automatico se 0)
-    // Bit 7: Key size (0=128, 1=192, 2=256 - mappato diversamente in EAX)
-    uint32 ctrl = 0; 
-    switch (ctx->keyLength) {
-        case 16: ctrl = 0x0080; break;
-        case 24: ctrl = 0x00C0; break;
-        case 32: ctrl = 0x0100; break;
-        default: return B_BAD_VALUE;
-    }
-    if (encrypt) ctrl |= 0x200; // Bit per encryption su alcune versioni, o via flag dedicata
-
-    // L'istruzione xcryptcbc su VIA richiede:
-    // ESI: source, EDI: dest, EBX: key, EDX: control, EAX: IV (o puntatore a IV)
-    // Nota: l'assembly inline per PadLock è molto specifico sull'allineamento.
-    asm volatile(
-        "pushfl\n\t"
-        "popfl\n\t"        // Resetta i flag per ACE
-        "xcryptcbc\n\t"
-        : "+S"(in), "+D"(out)
-        : "d"(ctrl), "b"(ctx->key), "a"(ctx->iv), "c"(length / 16)
-        : "memory"
-    );
-
-    return B_OK;
-}*/
 
 static status_t
 padlock_process(BCryptoRequest* request)
@@ -121,6 +104,7 @@ padlock_process(BCryptoRequest* request)
         if (st != B_OK) break;
     }
 
+    // Riporta l'IV aggiornato al chiamante
     if (request->iv)
         memcpy(request->iv, ctx.iv, 16);
         
