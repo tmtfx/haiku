@@ -9,7 +9,7 @@
 #include <immintrin.h>
 
 
-status_t BInitHybridDigest();
+status_t BInitHybridB2Digest();
 
 status_t hybrid_blake2_process(BCryptoRequest* request);
 /*void soft_sha256_init(SoftSHA256Context* ctx);

@@ -1,5 +1,5 @@
 /*
- * Hybrid Optimized Digest for Haiku kernel crypto
+ * Blake2 Hybrid Optimized Digest for Haiku kernel crypto
  * Copyright 2026, Fabio Tomat <f.t.public@gmail.com>
  * All rights reserved. Distributed under the terms of the MIT license.
  */
@@ -150,7 +150,7 @@ static BCryptoAlgorithm sBlake2sSSE;
 static BCryptoAlgorithm sBlake2b;
 
 status_t 
-BInitHybridDigest() 
+BInitHybridB2Digest() 
 {
 #if defined(__x86_64__) || defined(__i386__)
     //cpuid_info info;
