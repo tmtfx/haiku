@@ -7,7 +7,7 @@
 #include "BCryptoCore.h"
 #include <crypto/BCryptoDefs.h>
 #include "BCryptoCPU.h" // Per BGetStoredCryptoCapabilities
-
+#include <debug.h>
 #include <string.h>
 
 #if defined(__x86_64__) || defined(__i386__)
@@ -27,11 +27,15 @@ padlock_aes_process_block(bool encrypt, PadLockAESContext* ctx,
 	// 1. Check allineamento (Cruciale per evitare General Protection Fault)
     // L'istruzione xcryptcbc richiede che source, destination, IV e Key 
     // siano allineati a 16 byte.
-    if (((uintptr_t)in & 0xF) != 0 || ((uintptr_t)out & 0xF) != 0)
+    if (((uintptr_t)in & 0xF) != 0 || ((uintptr_t)out & 0xF) != 0){
+    	dprintf("PADLOCK: Buffer non allineato! src:%p dst:%p", in, out);
         return B_BAD_VALUE;
+    }
         
-    if (length % 16 != 0)
+    if (length % 16 != 0) {
+    	dprintf("PADLOCK: lunghezza non multipla di 16");
         return B_BAD_VALUE;
+    }
 
     // 2. Control Word per VIA Nano / ACE2
     // Bit 0-3: Round count (0 = automatico basato sulla chiave)
