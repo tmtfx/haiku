@@ -17,6 +17,7 @@
 #include "SoftDigest.h"
 #include "x86CPUDigest.h"
 #include "HybridB2Digest.h"
+#include "HybridSHADigest.h"
 
 struct crypto_module_info {
 	module_info info;

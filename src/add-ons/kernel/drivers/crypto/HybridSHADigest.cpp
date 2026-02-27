@@ -179,7 +179,7 @@ static BCryptoAlgorithm sSHA1SSE;
 static BCryptoAlgorithm sSHA512;
 
 status_t 
-BInitHybridB2Digest() 
+BInitHybridSHADigest() 
 {
 #if defined(__x86_64__) || defined(__i386__)
     //cpuid_info info;
