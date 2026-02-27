@@ -39,4 +39,9 @@ void soft_sha256_init(SoftSHA256Context* ctx);
 void soft_sha256_update(SoftSHA256Context* ctx, const uint8* input, size_t len);
 void soft_sha256_finalize(SoftSHA256Context* ctx, uint8 digest[32]);
 
+void soft_sha1_init(SoftSHA1Context* ctx);
+void soft_sha224_init(SoftSHA256Context* ctx);
+void soft_sha384_init(SoftSHA512Context* ctx);
+void soft_sha512_init(SoftSHA512Context* ctx);
+
 #endif

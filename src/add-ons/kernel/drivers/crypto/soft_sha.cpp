@@ -92,3 +92,53 @@ void soft_sha256_finalize(SoftSHA256Context* ctx, uint8 digest[32]) {
         digest[i*4+3] = (uint8)(ctx->state[i]);
     }
 }
+
+
+
+/* --- SHA-1 --- */
+void soft_sha1_init(SoftSHA1Context* ctx) {
+    ctx->state[0] = 0x67452301;
+    ctx->state[1] = 0xEFCDAB89;
+    ctx->state[2] = 0x98BADCFE;
+    ctx->state[3] = 0x10325476;
+    ctx->state[4] = 0xC3D2E1F0;
+    ctx->count = 0;
+}
+
+
+void soft_sha224_init(SoftSHA256Context* ctx) {
+    // SHA-224 usa IV diversi da SHA-256
+    ctx->state[0] = 0xc1059ed8; ctx->state[1] = 0x367cd507;
+    ctx->state[2] = 0x3070dd17; ctx->state[3] = 0xf70e5939;
+    ctx->state[4] = 0xffc00b31; ctx->state[5] = 0x68581511;
+    ctx->state[6] = 0x64f98fa7; ctx->state[7] = 0xbefa4fa4;
+    ctx->count = 0;
+}
+/* --- SHA-512 --- */
+void soft_sha512_init(SoftSHA512Context* ctx) {
+    ctx->state[0] = 0x6a09e667f3bcc908ULL;
+    ctx->state[1] = 0xbb67ae8584caa73bULL;
+    ctx->state[2] = 0x3c6ef372fe94f82bULL;
+    ctx->state[3] = 0xa54ff53a5f1d36f1ULL;
+    ctx->state[4] = 0x510e527fad6849adbULL;
+    ctx->state[5] = 0x9b05688c2b3e6c1fULL;
+    ctx->state[6] = 0x1f83d9abfb41bd6bULL;
+    ctx->state[7] = 0x5be0cd19137e2179ULL;
+    ctx->count[0] = 0; // SHA-512 usa 128 bit per il conteggio
+    ctx->count[1] = 0;
+}
+
+/* --- SHA-384 --- */
+void soft_sha384_init(SoftSHA512Context* ctx) {
+    // SHA-384 usa la stessa struttura di SHA-512 ma IV diversi
+    ctx->state[0] = 0xcbbb9d5dc1059ed8ULL;
+    ctx->state[1] = 0x629a292a367cd507ULL;
+    ctx->state[2] = 0x9159015a3070dd17ULL;
+    ctx->state[3] = 0x152fecd8f70e5939ULL;
+    ctx->state[4] = 0x67332667ffc00b31ULL;
+    ctx->state[5] = 0x8eb44a8768581511ULL;
+    ctx->state[6] = 0xdb0c2e0d64f98fa7ULL;
+    ctx->state[7] = 0x47b5481dbefa4fa4ULL;
+    ctx->count[0] = 0;
+    ctx->count[1] = 0;
+}
