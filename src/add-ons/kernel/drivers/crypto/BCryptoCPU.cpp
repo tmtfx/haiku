@@ -7,15 +7,6 @@
 #include <arch/x86/arch_cpu.h>
 #include <string.h> 
 
-bool gHasSSE41 = false;
-bool gHasAVX2 = false;
-
-void bcrypto_detect_cpu_features() {
-    gHasSSE41 = x86_check_feature(IA32_FEATURE_EXT_SSE4_1, FEATURE_EXT);
-    gHasAVX2 = x86_check_feature(IA32_FEATURE_AVX2, FEATURE_7_EBX);
-}
-
-
 #define x86_cpuid(leaf, sub_leaf, eax, ebx, ecx, edx) \
     __asm__ volatile ("cpuid" \
         : "=a" (eax), "=b" (ebx), "=c" (ecx), "=d" (edx) \
@@ -41,34 +32,37 @@ BGetCPUCryptoInfo(crypto_device_info* info)
     if (ebx == 0x756e6547) strlcpy(info->vendor_name, "Intel", 32); 
     else if (ebx == 0x68747541 || ebx == 0x69746e65) strlcpy(info->vendor_name, "AMD", 32); 
     else if (ebx == 0x746e6543) strlcpy(info->vendor_name, "VIA", 32);
-
-    // 2. Controllo Standard (CPUID Leaf 1) -> AES-NI
-    x86_cpuid(1, 0, eax, ebx, ecx, edx);
-    if (ecx & (1 << 25)) {
-        //info->algos_supported |= B_CRYPTO_AES;
+    
+    // 1. AES-NI e RDRAND (Foglia 1, ECX -> FEATURE_EXT)
+    if (x86_check_feature(IA32_FEATURE_EXT_AES, FEATURE_EXT)) {
         SET_ALGO(info, B_CRYPTO_AES);
         info->hw_type |= B_CRYPTO_HW_AES_NI;
     }
-	// RDRAND è il bit 30 di ECX
-    if (ecx & (1 << 30)) {
-        //info->algos_supported |= B_CRYPTO_RNG;
+    
+    if (x86_check_feature(IA32_FEATURE_EXT_RDRND, FEATURE_EXT)) {
         SET_ALGO(info, B_CRYPTO_RNG);
         info->hw_type |= B_CRYPTO_HW_RDRAND;
     }
-    // 3. Controllo Extended Features (CPUID Leaf 7, Sub-leaf 0) -> SHA-NI
-    // Prima verifichiamo che il foglio 7 sia supportato
-    x86_cpuid(0, 0, eax, ebx, ecx, edx);
-    if (eax >= 7) {
-        x86_cpuid(7, 0, eax, ebx, ecx, edx);
-        // SHA-NI è il bit 29 di EBX
-        if (ebx & (1 << 29)) {
-            //info->algos_supported |= B_CRYPTO_SHA1 | B_CRYPTO_SHA256;
-            SET_ALGO(info, B_CRYPTO_SHA1);
-            SET_ALGO(info, B_CRYPTO_SHA256);
-            info->hw_type |= B_CRYPTO_HW_SHA_NI;
-        }
+
+    if (x86_check_feature(IA32_FEATURE_EXT_SSE4_1, FEATURE_EXT)) {
+        info->hw_type |= B_CRYPTO_HW_SSE41;
     }
 
+    // 2. AVX2 e SHA-NI (Foglia 7, EBX -> FEATURE_7_EBX)
+    if (x86_check_feature(IA32_FEATURE_AVX2, FEATURE_7_EBX)) {
+        info->hw_type |= B_CRYPTO_HW_AVX2;
+    }
+
+    if (x86_check_feature(IA32_FEATURE_SHA_NI, FEATURE_7_EBX)) {
+        SET_ALGO(info, B_CRYPTO_SHA1);
+        SET_ALGO(info, B_CRYPTO_SHA256);
+        info->hw_type |= B_CRYPTO_HW_SHA_NI;
+    }
+
+    // 3. VAES (Istruzioni AES vettoriali 256/512 bit - FEATURE_7_ECX)
+    if (x86_check_feature(IA32_FEATURE_VAES, FEATURE_7_ECX)) {
+        // Potresti voler aggiungere un flag B_CRYPTO_HW_VAES in futuro
+    }
     // 4. Controllo VIA PadLock (Solo se è VIA)
     x86_cpuid(0, 0, eax, ebx, ecx, edx);
     if (ebx == 0x746e6543) {
