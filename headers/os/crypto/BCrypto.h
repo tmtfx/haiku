@@ -42,6 +42,8 @@ public:
                                                      uint32 flags = 0);
             status_t            GetNextAlgorithm(uint32* cookie, 
                                                  BCryptoAlgorithmInfo* info);
+            status_t            GetEngineName(BCryptoAlgorithmID algo, 
+                                              char* outName, size_t nameSize);
 
 private:
 			int					fFd;
