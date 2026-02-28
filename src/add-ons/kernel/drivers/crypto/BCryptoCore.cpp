@@ -151,7 +151,11 @@ BGetAlgorithmInfo(BCryptoAlgorithmInfo* info)
  *
  *     node->algo = algorithm; // ERRORE POTENZIALE
  *
- * Se il driver che registra l'algoritmo ha dichiarato BCryptoAlgorithm come variabile locale (sullo stack) o se il driver viene scaricato, node->algo punterà a memoria non valida. Soluzione: Dato che nel driver abbiamo usato static, per ora funziona, ma per un Core robusto sarebbe meglio fare una copia della struttura o assicurarsi che il driver resti in memoria.
+ * Se il driver che registra l'algoritmo ha dichiarato BCryptoAlgorithm come 
+ * variabile locale (sullo stack) o se il driver viene scaricato, node->algo 
+ * punterà a memoria non valida. Soluzione: Dato che nel driver abbiamo usato 
+ * static, per ora funziona, ma per un Core robusto sarebbe meglio fare una 
+ * copia della struttura o assicurarsi che il driver resti in memoria.
  */
 status_t
 BRegisterCryptoAlgorithm(BCryptoAlgorithm* algorithm)
