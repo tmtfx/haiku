@@ -99,6 +99,28 @@ status_t BCrypto::GetNextAlgorithm(uint32* cookie,BCryptoAlgorithmInfo* info)
     return status;
 }
 
+status_t
+BCrypto::GetEngineName(BCryptoAlgorithmID algo, char* outName, size_t nameSize)
+{
+    if (fFd < 0) return B_NO_INIT;
+    if (outName == NULL || nameSize == 0) return B_BAD_VALUE;
+
+    BCryptoAlgorithmInfo info;
+    uint32 cookie = 0;
+    
+    // Iteriamo sugli algoritmi registrati nel core
+    while (GetNextAlgorithm(&cookie, &info) == B_OK) {
+        if (info.id == algo) {
+            // Trovato! Essendo la lista ordinata per priorità nel Core,
+            // il primo che incontriamo è quello che verrà effettivamente usato.
+            strlcpy(outName, info.vendor, nameSize);
+            return B_OK;
+        }
+    }
+
+    return B_ENTRY_NOT_FOUND;
+}
+
 void
 BCrypto::SetPadding(bool enable,BCryptoPaddingType type){
 	fPaddingEnabled=enable;
@@ -181,77 +203,7 @@ BCrypto::Encrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
     if (tempBuffer) delete[] tempBuffer;
     return (st == B_OK) ? (ssize_t)processLen : st;
 }
-/*
-ssize_t 
-BCrypto::Encrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
-                 const void* in, size_t inLen, void* out, size_t outSize) 
-{
-    size_t requiredSize = GetOutputSize(inLen, B_CRYPTO_ENCRYPT);
-    if (outSize < requiredSize)
-        return B_BAD_VALUE;
 
-    uint8* dataToProcess = (uint8*)in;
-    uint8* tempBuffer = nullptr;
-    size_t processLen = inLen;
-
-    if (fPaddingEnabled && fPaddingType != B_CRYPTO_PADDING_NONE) {
-        processLen = requiredSize;
-        tempBuffer = new(std::nothrow) uint8[processLen];
-        if (!tempBuffer) return B_NO_MEMORY;
-        
-        memcpy(tempBuffer, in, inLen);
-        size_t padLen = processLen - inLen;
-        switch (fPaddingType) {
-            case B_CRYPTO_PKCS7:
-                // Ogni byte ha il valore della lunghezza del padding (es. 0x03, 0x03, 0x03)
-                memset(tempBuffer + inLen, (uint8)padLen, padLen);
-                break;
-
-            case B_CRYPTO_ISO7816:
-                // Il primo byte è 0x80, i restanti sono 0x00
-                tempBuffer[inLen] = 0x80;
-                if (padLen > 1)
-                    memset(tempBuffer + inLen + 1, 0, padLen - 1);
-                break;
-
-            case B_CRYPTO_ZERO_PADDING:
-                // Tutti i byte sono 0x00
-                memset(tempBuffer + inLen, 0, padLen);
-                break;
-
-            default:
-                // Se non gestito, facciamo finta di nulla o diamo errore
-                delete[] tempBuffer;
-                return B_NOT_SUPPORTED;
-        }
-        
-        dataToProcess = tempBuffer;
-    }
-
-    // Usiamo lo shortcut dei parametri pre-configurati
-    BCryptoUserRequest req;
-    memset(&req, 0, sizeof(req));
-    req.operation   = B_CRYPTO_ENCRYPT;
-    req.algorithm   = B_CRYPTO_AES;
-    req.mode        = B_CRYPTO_MODE_CBC;
-    req.key         = key;
-    req.keyLength   = keyLen;
-    req.iv          = iv;
-    req.ivLength    = ivLen;
-    
-    iovec src = { dataToProcess, processLen };
-    iovec dst = { out, processLen };
-    req.source      = &src;
-    req.destination = &dst;
-    req.vectorCount = 1;
-
-    status_t st = Process(req);
-    
-    if (tempBuffer) delete[] tempBuffer;
-
-    if (st != B_OK) return st;
-    return (ssize_t)processLen;
-}*/
 ssize_t 
 BCrypto::Decrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
                  const void* in, size_t inLen, void* out, size_t outSize) 
@@ -279,91 +231,7 @@ BCrypto::Decrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
 
     return (ssize_t)finalLen;
 }
-/*
-ssize_t 
-BCrypto::Decrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
-                 const void* in, size_t inLen, void* out, size_t outSize) 
-{
-    // Validazione base: AES richiede blocchi da 16
-    if (inLen == 0 || (inLen % 16) != 0 || outSize < inLen)
-        return B_BAD_VALUE;
 
-    iovec src = { (void*)in, inLen };
-    iovec dst = { out, inLen };
-
-    BCryptoUserRequest req;
-    memset(&req, 0, sizeof(req));
-    req.operation   = B_CRYPTO_DECRYPT;
-    req.algorithm   = B_CRYPTO_AES;
-    req.mode        = B_CRYPTO_MODE_CBC;
-    req.key         = key;
-    req.keyLength   = keyLen;
-    req.iv          = iv;
-    req.ivLength    = ivLen;
-    req.source      = &src;
-    req.destination = &dst;
-    req.vectorCount = 1;
-
-    status_t st = Process(req);
-    if (st != B_OK) return st;
-
-    size_t finalLen = inLen;
-
-    if (fPaddingEnabled && fPaddingType != B_CRYPTO_PADDING_NONE) {
-        uint8* pOut = (uint8*)out;
-
-        switch (fPaddingType) {
-            case B_CRYPTO_PKCS7: {
-                uint8 padValue = pOut[inLen - 1];
-                // Il valore del padding deve essere tra 1 e 16
-                if (padValue < 1 || padValue > 16) 
-                    return B_BAD_DATA;
-
-                // 2. TUTTI i byte del padding devono avere lo stesso valore
-                for (size_t i = inLen - padValue; i < inLen; i++) {
-                    if (pOut[i] != padValue)
-                        return B_BAD_DATA; // Padding non valido!
-                }
-                
-                finalLen = inLen - padValue;
-                break;
-            }
-
-            case B_CRYPTO_ISO7816: {
-                // Il padding ISO7816 deve finire con 0x80 seguito da zero o più 0x00
-                // Cerchiamo lo 0x80 partendo dal fondo
-                ssize_t i = inLen - 1;
-                while (i >= (ssize_t)(inLen - 16) && pOut[i] == 0x00) {
-                    i--;
-                }
-                
-                if (i >= 0 && pOut[i] == 0x80) {
-                    finalLen = i;
-                } else {
-                    return B_BAD_DATA; // Non abbiamo trovato lo 0x80 dove previsto
-                }
-                break;
-            }
-
-            case B_CRYPTO_ZERO_PADDING: {
-                // Cerchiamo il primo byte non zero partendo dal fondo
-                finalLen = 0;
-                for (ssize_t i = inLen - 1; i >= 0; i--) {
-                    if (pOut[i] != 0x00) {
-                        finalLen = i + 1;
-                        break;
-                    }
-                }
-                break;
-            }
-
-            default:
-                break;
-        }
-    }
-    // Restituiamo il numero di byte "reali" (senza padding)
-    return (ssize_t)finalLen;
-}*/
 status_t 
 BCrypto::Process(BCryptoUserRequest& userReq) 
 {
