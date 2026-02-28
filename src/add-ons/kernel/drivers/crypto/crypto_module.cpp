@@ -8,6 +8,7 @@
 #include "BCryptoCore.h"
 #include "BCryptoAlgorithm.h"
 #include "BCryptoEntropy.h"
+#include "BCryptoCPU.h"
 #include <crypto/BCryptoDefs.h>
 #include "PadLockRNG.h"
 #include "PadLock.h"
@@ -32,6 +33,7 @@ crypto_std_ops(int op, ...)
 	switch (op) {
 		case B_MODULE_INIT:
 		{
+			bcrypto_detect_cpu_features();
 			status_t status = crypto_init_core();
             if (status != B_OK)
                 return status;
