@@ -6,6 +6,7 @@
 #include "soft_sha.h"
 #include "hybrid_sha_opt.h"
 #include "BCryptoCPU.h"
+#include "BCryptoCore.h"
 #include <smmintrin.h> // SSE4.1
 #include <immintrin.h> // AVX2
 #include <string.h>
@@ -19,6 +20,7 @@
 
 
 //static spinlock sSHALock = B_SPINLOCK_INITIALIZER;
+static uint32 sCaps = 0;
 static uint32 sW_SSE[64] __attribute__((aligned(16)));
 static uint32 sW_AVX2[64] __attribute__((aligned(32)));
 //static fpu_state_t global_fpu_save __attribute__((aligned(16)));
@@ -617,6 +619,7 @@ void hybrid_SHA512_init(SoftSHA512Context* ctx, size_t outLen) {
 
 /* ---------- FUNZIONI UPDATE --------- */
 void hybrid_SHA1_update(SoftSHA1Context* ctx, const uint8* in, size_t inLen) {
+	sCaps = BGetStoredCryptoCapabilities();
     while (inLen > 0) {
         size_t left = 64 - ctx->buflen;
         size_t fill = (inLen > left) ? left : inLen;
@@ -629,21 +632,27 @@ void hybrid_SHA1_update(SoftSHA1Context* ctx, const uint8* in, size_t inLen) {
         if (ctx->buflen == 64) {
         	//fpu_state_t fpu_save __attribute__((aligned(16)));
         	//BCryptoFPUContext fpu_save;
-            cpu_status cpu = disable_interrupts();
+            
             //_fxsave(&fpu_save);
             //bcrypto_save_regs(&fpu_save);
-            bcrypto_save_regs(&ctx->fpu_save);
+            
+            //cpu_status cpu = disable_interrupts();
+            //bcrypto_save_regs(&ctx->fpu_save);
+            B_PREPARE_CPU_STATE();
             
             ctx->count += 512;
-            if (gHasAVX2) 
+            //if (gHasAVX2) 
+            if (sCaps & B_CRYPTO_HW_AVX2)
                 hybrid_sha1_transform_avx2(ctx, ctx->buffer);
             else 
                 hybrid_sha1_transform_sse(ctx, ctx->buffer);
             
             //_fxrstor(&fpu_save);
             //bcrypto_restore_regs(&fpu_save);
-            bcrypto_restore_regs(&ctx->fpu_save);
-            restore_interrupts(cpu);
+            
+            //bcrypto_restore_regs(&ctx->fpu_save);
+            //restore_interrupts(cpu);
+            B_RESTORE_CPU_STATE();
             
             ctx->buflen = 0;
         }
@@ -651,6 +660,7 @@ void hybrid_SHA1_update(SoftSHA1Context* ctx, const uint8* in, size_t inLen) {
 }
 
 void hybrid_SHA256_update(SoftSHA256Context* ctx, const uint8* in, size_t inLen) {
+	sCaps = BGetStoredCryptoCapabilities();
     while (inLen > 0) {
         size_t left = 64 - ctx->buflen; // SHA256 block size = 64
         size_t fill = (inLen > left) ? left : inLen;
@@ -664,17 +674,20 @@ void hybrid_SHA256_update(SoftSHA256Context* ctx, const uint8* in, size_t inLen)
         	// --- PROTEZIONE KERNEL ---
         	//fpu_state_t fpu_save __attribute__((aligned(16)));
         	//BCryptoFPUContext fpu_save;
-        	
-            cpu_status cpu = disable_interrupts();
+
             //acquire_spinlock(&sSHALock);
             //_fxsave(&fpu_save);
             //_fxsave(&global_fpu_save);
             //bcrypto_save_regs(&fpu_save);
-            bcrypto_save_regs(&ctx->fpu_save);
+                    	
+            //cpu_status cpu = disable_interrupts();
+            //bcrypto_save_regs(&ctx->fpu_save);
+            B_PREPARE_CPU_STATE();
             
             //ctx->count += 512; // conta i bit (64 bytes * 8)
             
-            if (gHasAVX2) 
+            //if (gHasAVX2)
+            if (sCaps & B_CRYPTO_HW_AVX2)
                 hybrid_sha256_transform_avx2(ctx, ctx->buffer);
             else 
                 //hybrid_sha256_transform_sse_full(ctx, ctx->buffer);
@@ -683,9 +696,13 @@ void hybrid_SHA256_update(SoftSHA256Context* ctx, const uint8* in, size_t inLen)
             //_fxrstor(&fpu_save);
             //_fxrstor(&global_fpu_save);
             //bcrypto_restore_regs(&fpu_save);
-            bcrypto_restore_regs(&ctx->fpu_save);
+            
             //release_spinlock(&sSHALock);
-            restore_interrupts(cpu);
+            
+            //bcrypto_restore_regs(&ctx->fpu_save);
+            //restore_interrupts(cpu);
+            
+            B_RESTORE_CPU_STATE();
             
             ctx->count += 512;
             ctx->buflen = 0;
@@ -694,6 +711,7 @@ void hybrid_SHA256_update(SoftSHA256Context* ctx, const uint8* in, size_t inLen)
 }
 
 void hybrid_SHA512_update(SoftSHA512Context* ctx, const uint8* in, size_t inLen) {
+	sCaps = BGetStoredCryptoCapabilities();
     while (inLen > 0) {
         size_t left = 128 - ctx->buflen; // SHA-512 usa blocchi da 128 byte
         size_t fill = (inLen > left) ? left : inLen;
@@ -706,24 +724,28 @@ void hybrid_SHA512_update(SoftSHA512Context* ctx, const uint8* in, size_t inLen)
         if (ctx->buflen == 128) {
         	//fpu_state_t fpu_save __attribute__((aligned(32)));
         	//BCryptoFPUContext fpu_save;
-            cpu_status cpu = disable_interrupts();
+            
             //_fxsave(&fpu_save);
             //bcrypto_save_regs(&fpu_save);
-            bcrypto_save_regs(&ctx->fpu_save);
+            //cpu_status cpu = disable_interrupts();
+            //bcrypto_save_regs(&ctx->fpu_save);
+            B_PREPARE_CPU_STATE();
             // Aggiorniamo il contatore a 128 bit (count[0] low, count[1] high)
             uint64_t old_low = ctx->count[0];
             ctx->count[0] += 1024; // 128 bytes * 8 bits
             if (ctx->count[0] < old_low) ctx->count[1]++;
 
-            if (gHasAVX2) 
+            //if (gHasAVX2) 
+            if (sCaps & B_CRYPTO_HW_AVX2)
                 hybrid_sha512_transform_avx2(ctx, ctx->buffer);
             else 
                 hybrid_sha512_transform_sse(ctx, ctx->buffer);
             
             //_fxrstor(&fpu_save);
             //bcrypto_restore_regs(&fpu_save);
-            bcrypto_restore_regs(&ctx->fpu_save);
-            restore_interrupts(cpu);
+            //bcrypto_restore_regs(&ctx->fpu_save);
+            //restore_interrupts(cpu);
+            B_RESTORE_CPU_STATE();
             
             ctx->buflen = 0;
         }

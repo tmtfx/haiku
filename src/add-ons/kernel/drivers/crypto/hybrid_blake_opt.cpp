@@ -5,7 +5,8 @@
  */
 #include "soft_blake.h"
 #include "hybrid_blake_opt.h"
-#include "BCryptoCPU.h"
+//#include "BCryptoCPU.h"
+#include "BCryptoCore.h"
 #include <smmintrin.h> // SSE4.1
 #include <immintrin.h> // AVX2
 #include <string.h>
@@ -13,7 +14,7 @@
 #include <debug.h>
 
 //static bool sUseAVX2 = false;
-
+static uint32 sCaps = 0;
 //void hybrid_set_use_avx2(bool enable) {
 //    sUseAVX2 = enable;
 //}
@@ -311,11 +312,11 @@ static void blake2b_compress_sse(SoftBlake2bContext* ctx, const uint8 block[128]
 // --- INTERFACCIA PUBBLICA ---
 
 void hybrid_blake2b_init(SoftBlake2bContext* ctx, size_t outLen) {
-	if (gHasAVX2) dprintf("BCrypto: Blake2b with avx\n");
     soft_blake2b_init(ctx, outLen);
 }
 
 void hybrid_blake2b_update(SoftBlake2bContext* ctx, const uint8* in, size_t inLen) {
+	sCaps = BGetStoredCryptoCapabilities();
     while (inLen > 0) {
         size_t left = 128 - ctx->buflen;
         size_t fill = (inLen > left) ? left : inLen;
@@ -323,7 +324,8 @@ void hybrid_blake2b_update(SoftBlake2bContext* ctx, const uint8* in, size_t inLe
         ctx->buflen += fill; in += fill; inLen -= fill;
         if (ctx->buflen == 128 && inLen > 0) {
             ctx->t[0] += 128; if (ctx->t[0] < 128) ctx->t[1]++;
-            if (gHasAVX2) blake2b_compress_avx2(ctx, ctx->buf);
+            if (sCaps & B_CRYPTO_HW_AVX2) blake2b_compress_avx2(ctx, ctx->buf);
+            //if (gHasAVX2) blake2b_compress_avx2(ctx, ctx->buf);
             else blake2b_compress_sse(ctx, ctx->buf);
             //blake2b_compress_sse(ctx, ctx->buf); //ONLY For test purposes
             //soft_blake2b_compress(ctx, ctx->buf); //ONLY For test purposes
@@ -333,11 +335,13 @@ void hybrid_blake2b_update(SoftBlake2bContext* ctx, const uint8* in, size_t inLe
 }
 
 void hybrid_blake2b_finalize(SoftBlake2bContext* ctx, uint8* out) {
+	sCaps = BGetStoredCryptoCapabilities();
     ctx->t[0] += ctx->buflen;
     if (ctx->t[0] < ctx->buflen) ctx->t[1]++;
     ctx->f[0] = 0xFFFFFFFFFFFFFFFF;
     memset(ctx->buf + ctx->buflen, 0, 128 - ctx->buflen);
-    if (gHasAVX2) blake2b_compress_avx2(ctx, ctx->buf);
+    //if (gHasAVX2) blake2b_compress_avx2(ctx, ctx->buf);
+    if (sCaps & B_CRYPTO_HW_AVX2) blake2b_compress_avx2(ctx, ctx->buf);
     else blake2b_compress_sse(ctx, ctx->buf); 
     //blake2b_compress_sse(ctx, ctx->buf); //ONLY For test purposes
     //soft_blake2b_compress(ctx, ctx->buf); //ONLY For test purposes
