@@ -8,6 +8,7 @@
 #include "hybrid_blake_opt.h"   
 #include "BCryptoAlgorithm.h"
 #include "BCryptoCore.h"
+#include "BCryptoCPU.h"
 #include <crypto/BCryptoDefs.h>
 #include <arch/x86/arch_cpu.h>
 #include <string.h>
@@ -153,6 +154,7 @@ status_t
 BInitHybridB2Digest() 
 {
 #if defined(__x86_64__) || defined(__i386__)
+    /*
     //cpuid_info info;
     //get_cpuid(&info, 1, 0);
     //bool hasSSE41 = (info.eax_1.ecx & (1 << 19)) != 0;
@@ -164,7 +166,8 @@ BInitHybridB2Digest()
 
     if (!hasSSE41) return B_NOT_SUPPORTED;
     
-    hybrid_set_use_avx2(hasAVX2);
+    hybrid_set_use_avx2(hasAVX2);*/
+    if (!gHasSSE41) return B_NOT_SUPPORTED;
 
     // --- BLAKE2s: SSE4.1 è sempre presente se siamo qui ---
     sBlake2sSSE = {
@@ -180,12 +183,12 @@ BInitHybridB2Digest()
     BRegisterCryptoAlgorithm(&sBlake2sSSE);
 
     // --- BLAKE2b: Registrazione basata su capacità CPU ---
-    const char* b2bName = hasAVX2 ? "BLAKE2b (Hybrid/AVX2)" : "BLAKE2b (Hybrid/SSE4.1)";
+    const char* b2bName = gHasAVX2 ? "BLAKE2b (Hybrid/AVX2)" : "BLAKE2b (Hybrid/SSE4.1)";
     sBlake2b = {
         .algorithm = B_CRYPTO_BLAKE2B,
         .flags     = B_CRYPTO_ALG_SOFTWARE,
         //.name      = b2bName,
-        .priority  = hasAVX2 ? 25 : 20,
+        .priority  = gHasAVX2 ? 25 : 20,
         .Process   = hybrid_blake2_process,
         .HashInit  = hybrid_blake2b_init_bridge,
         .HashUpdate = hybrid_blake2b_update_bridge,

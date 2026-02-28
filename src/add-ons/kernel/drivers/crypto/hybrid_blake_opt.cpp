@@ -5,17 +5,18 @@
  */
 #include "soft_blake.h"
 #include "hybrid_blake_opt.h"
+#include "BCryptoCPU.h"
 #include <smmintrin.h> // SSE4.1
 #include <immintrin.h> // AVX2
 #include <string.h>
 #include <ByteOrder.h>
 #include <debug.h>
 
-static bool sUseAVX2 = false;
+//static bool sUseAVX2 = false;
 
-void hybrid_set_use_avx2(bool enable) {
-    sUseAVX2 = enable;
-}
+//void hybrid_set_use_avx2(bool enable) {
+//    sUseAVX2 = enable;
+//}
 
 // --- TABELLA SIGMA (Permutazioni) ---
 static const uint8 sigma[12][16] = {
@@ -310,7 +311,7 @@ static void blake2b_compress_sse(SoftBlake2bContext* ctx, const uint8 block[128]
 // --- INTERFACCIA PUBBLICA ---
 
 void hybrid_blake2b_init(SoftBlake2bContext* ctx, size_t outLen) {
-	if (sUseAVX2) dprintf("BCrypto: Blake2b with avx\n");
+	if (gHasAVX2) dprintf("BCrypto: Blake2b with avx\n");
     soft_blake2b_init(ctx, outLen);
 }
 
@@ -322,7 +323,7 @@ void hybrid_blake2b_update(SoftBlake2bContext* ctx, const uint8* in, size_t inLe
         ctx->buflen += fill; in += fill; inLen -= fill;
         if (ctx->buflen == 128 && inLen > 0) {
             ctx->t[0] += 128; if (ctx->t[0] < 128) ctx->t[1]++;
-            if (sUseAVX2) blake2b_compress_avx2(ctx, ctx->buf);
+            if (gHasAVX2) blake2b_compress_avx2(ctx, ctx->buf);
             else blake2b_compress_sse(ctx, ctx->buf);
             //blake2b_compress_sse(ctx, ctx->buf); //ONLY For test purposes
             //soft_blake2b_compress(ctx, ctx->buf); //ONLY For test purposes
@@ -336,7 +337,7 @@ void hybrid_blake2b_finalize(SoftBlake2bContext* ctx, uint8* out) {
     if (ctx->t[0] < ctx->buflen) ctx->t[1]++;
     ctx->f[0] = 0xFFFFFFFFFFFFFFFF;
     memset(ctx->buf + ctx->buflen, 0, 128 - ctx->buflen);
-    if (sUseAVX2) blake2b_compress_avx2(ctx, ctx->buf);
+    if (gHasAVX2) blake2b_compress_avx2(ctx, ctx->buf);
     else blake2b_compress_sse(ctx, ctx->buf); 
     //blake2b_compress_sse(ctx, ctx->buf); //ONLY For test purposes
     //soft_blake2b_compress(ctx, ctx->buf); //ONLY For test purposes
