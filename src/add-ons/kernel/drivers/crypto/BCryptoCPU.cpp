@@ -7,6 +7,15 @@
 #include <arch/x86/arch_cpu.h>
 #include <string.h> 
 
+bool gHasSSE41 = false;
+bool gHasAVX2 = false;
+
+void bcrypto_detect_cpu_features() {
+    gHasSSE41 = x86_check_feature(IA32_FEATURE_EXT_SSE4_1, FEATURE_EXT);
+    gHasAVX2 = x86_check_feature(IA32_FEATURE_AVX2, FEATURE_7_EBX);
+}
+
+
 #define x86_cpuid(leaf, sub_leaf, eax, ebx, ecx, edx) \
     __asm__ volatile ("cpuid" \
         : "=a" (eax), "=b" (ebx), "=c" (ecx), "=d" (edx) \

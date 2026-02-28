@@ -8,6 +8,11 @@
 #include <crypto/BCryptoDefs.h>
 #include <x86gprintrin.h>
 
+extern bool gHasSSE41;
+extern bool gHasAVX2;
+
+void bcrypto_detect_cpu_features();
+
 typedef struct alignas(64) {
     uint8_t buffer[1024]; // 512 minimi, 1024 per sicurezza con AVX/XSAVE
 } fpu_state_t;
