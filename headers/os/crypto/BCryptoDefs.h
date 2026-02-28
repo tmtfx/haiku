@@ -68,8 +68,10 @@ enum BCryptoHwCapability {
     B_CRYPTO_HW_RNG           = 1 << 3,  // RNG generico
     B_CRYPTO_HW_ACCEL_ENGINE  = 1 << 4,  // Dispositivo esterno (PCIe/USB)
     B_CRYPTO_HW_RDRAND        = 1 << 5,  // RNG Intel/AMD
-    B_CRYPTO_HW_PADLOCK_RNG   = 1 << 6   // RNG di VIA PADLOCK
-    
+    B_CRYPTO_HW_PADLOCK_RNG   = 1 << 6,   // RNG di VIA PADLOCK
+    B_CRYPTO_HW_SSE41         = 1 << 7,
+    B_CRYPTO_HW_AVX2          = 1 << 8,
+    B_CRYPTO_HW_AVX512        = 1 << 9
 };
 
 enum BCryptoMode {
