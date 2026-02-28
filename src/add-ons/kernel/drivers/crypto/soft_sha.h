@@ -6,6 +6,10 @@
 #define _SOFT_SHA_H_
 
 #include <SupportDefs.h>
+
+extern const uint32 K256[64];
+extern const uint64 K512[80];
+
 /*
 struct SoftSHA256Context {
     uint32 state[8];
@@ -16,6 +20,8 @@ struct SoftSHA1Context {
     uint32 state[5] __attribute__((aligned(16)));
     uint64 count;
     uint8  buffer[64] __attribute__((aligned(16)));
+    size_t buflen;
+    size_t outlen;
 };
 
 // SHA-256 (e 224) Context
@@ -23,6 +29,8 @@ struct SoftSHA256Context {
     uint32 state[8] __attribute__((aligned(16)));
     uint64 count;
     uint8  buffer[64] __attribute__((aligned(16)));
+    size_t buflen;
+    size_t outlen;
 };
 typedef struct SoftSHA256Context SoftSHA224Context;
 
@@ -32,6 +40,8 @@ struct SoftSHA512Context {
     uint64 state[8] __attribute__((aligned(32)));
     uint64 count[2];
     uint8  buffer[128] __attribute__((aligned(32)));
+    size_t buflen;
+    size_t outlen;
 };
 typedef struct SoftSHA512Context SoftSHA384Context;
 

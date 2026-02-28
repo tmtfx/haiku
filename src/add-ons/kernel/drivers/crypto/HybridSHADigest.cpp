@@ -4,14 +4,19 @@
  * All rights reserved. Distributed under the terms of the MIT license.
  */
 
-#include "soft_sha.h"         
-#include "hybrid_sha_opt.h"   
+#include "soft_sha.h"     
+#include "hybrid_sha_opt.h"
+#include "HybridSHADigest.h"
 #include "BCryptoAlgorithm.h"
 #include "BCryptoCore.h"
+#include "BCryptoCPU.h"
 #include <crypto/BCryptoDefs.h>
 #include <arch/x86/arch_cpu.h>
 #include <string.h>
+#include <malloc.h>
 #include <stdlib.h>
+#include <cstdio>
+
 
 static void
 _free_context(void* ctx, size_t size)
@@ -133,7 +138,7 @@ hybrid_sha_process(BCryptoRequest* request)
     return B_OK;
 }
 */
-static status_t
+status_t
 hybrid_sha_process(BCryptoRequest* request)
 {
     if (request == NULL || !request->source || !request->destination)
@@ -159,10 +164,11 @@ hybrid_sha_process(BCryptoRequest* request)
     // 2. Update
     switch (request->algorithm) {
         case B_CRYPTO_SHA1:   st = hybrid_SHA1_update_bridge(ctx, request->source, request->vectorCount); break;
-        case B_CRYPTO_SHA224: st = hybrid_SHA224_update_bridge(ctx, request->source, request->vectorCount); break;
+        case B_CRYPTO_SHA224: st = hybrid_SHA256_update_bridge(ctx, request->source, request->vectorCount); break;
         case B_CRYPTO_SHA256: st = hybrid_SHA256_update_bridge(ctx, request->source, request->vectorCount); break;
-        case B_CRYPTO_SHA384: st = hybrid_SHA384_update_bridge(ctx, request->source, request->vectorCount); break;
+        case B_CRYPTO_SHA384: st = hybrid_SHA512_update_bridge(ctx, request->source, request->vectorCount); break;
         case B_CRYPTO_SHA512: st = hybrid_SHA512_update_bridge(ctx, request->source, request->vectorCount); break;
+        default: return B_NOT_SUPPORTED;
     }
 
     // 3. Final
@@ -174,6 +180,7 @@ hybrid_sha_process(BCryptoRequest* request)
             case B_CRYPTO_SHA256: st = hybrid_SHA256_final_bridge(ctx, digest); break;
             case B_CRYPTO_SHA384: st = hybrid_SHA384_final_bridge(ctx, digest); break;
             case B_CRYPTO_SHA512: st = hybrid_SHA512_final_bridge(ctx, digest); break;
+            default: return B_NOT_SUPPORTED;
         }
         
         if (st == B_OK) {
@@ -540,21 +547,20 @@ status_t
 BInitHybridSHADigest() 
 {
 #if defined(__x86_64__) || defined(__i386__)
-    //cpuid_info info;
-    //get_cpuid(&info, 1, 0);
-    //bool hasSSE41 = (info.eax_1.ecx & (1 << 19)) != 0;
-    bool hasSSE41 = x86_check_feature(IA32_FEATURE_EXT_SSE4_1, FEATURE_EXT);
+    //bool hasSSE41 = x86_check_feature(IA32_FEATURE_EXT_SSE4_1, FEATURE_EXT);
 
-    //get_cpuid(&info, 7, 0);
-    //bool hasAVX2 = (info.eax_7.ebx & (1 << 5)) != 0;
-    bool hasAVX2 = x86_check_feature(IA32_FEATURE_AVX2, FEATURE_7_EBX);
+    //bool hasAVX2 = x86_check_feature(IA32_FEATURE_AVX2, FEATURE_7_EBX);
 
-    if (!hasSSE41) return B_NOT_SUPPORTED;
+    //if (!hasSSE41) return B_NOT_SUPPORTED;
     
-    hybrid_set_use_avx2(hasAVX2);
+    //hybrid_set_use_avx2(hasAVX2);
     
-    uint32 priority = hasAVX2 ? 30 : 20;
-    const char* suffix = hasAVX2 ? "(Hybrid/AVX2)" : "(Hybrid/SSE4.1)";
+    //uint32 priority = hasAVX2 ? 30 : 20;
+    //const char* suffix = hasAVX2 ? "(Hybrid/AVX2)" : "(Hybrid/SSE4.1)";
+    if (!gHasSSE41) return B_NOT_SUPPORTED;
+
+    int priority = gHasAVX2 ? 30 : 20;
+    const char* suffix = gHasAVX2 ? "(Hybrid/AVX2)" : "(Hybrid/SSE4.1)";
 
     // --- SHA1: SSE4.1 è sempre presente se siamo qui ---
     sSHA1 = {
