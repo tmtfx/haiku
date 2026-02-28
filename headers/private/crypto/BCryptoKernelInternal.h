@@ -11,6 +11,11 @@
 #include <crypto/BCryptoDefs.h>
 #include <arch/x86/arch_cpu.h>
 
+struct BCryptoFPUContext {
+    uint8 state[2560] __attribute__((aligned(64)));
+} __attribute__((aligned(64)));
+
+
 struct BCryptoRequest {
     BCryptoOperation		operation;
     BCryptoAlgorithmID		algorithm;
@@ -46,4 +51,10 @@ struct UserAccessExposer {
     }
 };
 
+
+// Prototipi delle funzioni di salvataggio/ripristino
+extern "C" {
+    void bcrypto_save_regs(BCryptoFPUContext* ctx);
+    void bcrypto_restore_regs(BCryptoFPUContext* ctx);
+}
 #endif // _B_CRYPTO_KERNEL_INTERNAL_H_

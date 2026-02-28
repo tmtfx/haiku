@@ -18,6 +18,54 @@
 
 using BPrivate::AutoLocker;
 
+extern bool gHasXsave;
+extern uint64 gXsaveMask;
+
+void bcrypto_save_regs(BCryptoFPUContext* ctx) {
+    // Verifica di sicurezza: l'indirizzo DEVE essere allineato a 64 byte
+    if (((uintptr_t)ctx->state & 63) != 0) {
+        return; // O gestisci l'errore: XSAVE crasherebbe qui
+    }
+
+    if (gHasXsave) {
+        // Usiamo l'assembly inline per invocare XSAVE
+        // edx:eax contiene la maschera dei registri da salvare
+        uint32 low = (uint32)gXsaveMask;
+        uint32 high = (uint32)(gXsaveMask >> 32);
+        
+        asm volatile (
+            "xsave %[state]"
+            : : [state] "m" (ctx->state), "a" (low), "d" (high)
+            : "memory"
+        );
+    } else {
+        asm volatile (
+            "fxsave %[state]"
+            : : [state] "m" (ctx->state)
+            : "memory"
+        );
+    }
+}
+
+void bcrypto_restore_regs(BCryptoFPUContext* ctx) {
+    if (gHasXsave) {
+        uint32 low = (uint32)gXsaveMask;
+        uint32 high = (uint32)(gXsaveMask >> 32);
+        
+        asm volatile (
+            "xrstor %[state]"
+            : : [state] "m" (ctx->state), "a" (low), "d" (high)
+            : "memory"
+        );
+    } else {
+        asm volatile (
+            "fxrstor %[state]"
+            : : [state] "m" (ctx->state)
+            : "memory"
+        );
+    }
+}
+
 struct MutexLocking {
     typedef mutex* Lockable;
     static inline status_t Lock(Lockable lock) { return mutex_lock(lock); }

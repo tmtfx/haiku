@@ -11,15 +11,17 @@
 #include <string.h>
 #include <ByteOrder.h>
 #include <debug.h>
+#include <KernelExport.h>
 
-//static bool sUseAVX2 = false;
-
-//void hybrid_set_use_avx2(bool enable) {
-//    sUseAVX2 = enable;
-//}
 
 #include <tmmintrin.h> // SSSE3 per _mm_shuffle_epi8
 #include <smmintrin.h> // SSE4.1
+
+
+//static spinlock sSHALock = B_SPINLOCK_INITIALIZER;
+static uint32 sW_SSE[64] __attribute__((aligned(16)));
+static uint32 sW_AVX2[64] __attribute__((aligned(32)));
+//static fpu_state_t global_fpu_save __attribute__((aligned(16)));
 
 /* ----- SHA1 ---- */
 
@@ -172,12 +174,16 @@ static const uint32 IV224[8] = {
 
 __attribute__((target("sse4.1")))
 void hybrid_sha256_transform_sse(SoftSHA256Context* ctx, const uint8* data) {
-    uint32 W[64];
+    //uint32 W[64] __attribute__((aligned(16)));
+    uint32* W = sW_SSE;
     uint32 a, b, c, d, e, f, g, h;
 
     // 1. Caricamento scalare con byte swap
     for (int i = 0; i < 16; i++) {
-        W[i] = B_BENDIAN_TO_HOST_INT32(((uint32*)data)[i]);
+    	uint32 tmp;
+        memcpy(&tmp, data + (i * 4), 4);
+        W[i] = B_BENDIAN_TO_HOST_INT32(tmp);
+        //W[i] = B_BENDIAN_TO_HOST_INT32(((uint32*)data)[i]);
     }
 
     // 2. Scheduling Scalare
@@ -198,6 +204,7 @@ void hybrid_sha256_transform_sse(SoftSHA256Context* ctx, const uint8* data) {
     ctx->state[0] += a; ctx->state[1] += b; ctx->state[2] += c; ctx->state[3] += d;
     ctx->state[4] += e; ctx->state[5] += f; ctx->state[6] += g; ctx->state[7] += h;
 }
+
 /*- --------------------- SCHEDULER SHA256 FULL SSE --------------------------- -*/
 // sigma0(x) = ROR(x, 7) ^ ROR(x, 18) ^ (x >> 3)
 // Versione vettoriale SSE
@@ -217,6 +224,7 @@ static inline __m128i SCHED_s1(__m128i x) {
     return _mm_xor_si128(_mm_xor_si128(t1, t2), t3);
 }
 
+/*
 __attribute__((target("sse4.1")))
 void hybrid_sha256_transform_sse_full(SoftSHA256Context* ctx, const uint8* data) {
     uint32 W[64] __attribute__((aligned(16)));
@@ -281,6 +289,65 @@ void hybrid_sha256_transform_sse_full(SoftSHA256Context* ctx, const uint8* data)
     // Aggiornamento stato
     ctx->state[0] += a; ctx->state[1] += b; ctx->state[2] += c; ctx->state[3] += d;
     ctx->state[4] += e; ctx->state[5] += f; ctx->state[6] += g; ctx->state[7] += h;
+}*/
+__attribute__((target("sse4.1")))
+void hybrid_sha256_transform_sse_full(SoftSHA256Context* ctx, const uint8* data) {
+    //static uint32 W[64] __attribute__((aligned(16)));
+    uint32* W = sW_SSE;
+    uint32 a, b, c, d, e, f, g, h;
+
+    const __m128i mask = _mm_set_epi8(12,13,14,15, 8,9,10,11, 4,5,6,7, 0,1,2,3);
+
+    // 1. Caricamento prime 16 parole
+    for (int i = 0; i < 4; i++) {
+        __m128i raw = _mm_loadu_si128((const __m128i*)(data + i * 16));
+        _mm_storeu_si128((__m128i*)&W[i * 4], _mm_shuffle_epi8(raw, mask));
+    }
+
+    // 2. Scheduling SSE (16-63)
+    for (int i = 16; i < 64; i += 4) {
+        __m128i v0 = _mm_loadu_si128((__m128i*)&W[i - 16]);
+        __m128i v1 = _mm_loadu_si128((__m128i*)&W[i - 12]);
+        __m128i v2 = _mm_loadu_si128((__m128i*)&W[i - 8]);
+        __m128i v3 = _mm_loadu_si128((__m128i*)&W[i - 4]);
+
+        // s0 = sigma0(W[i-15...i-12])
+        __m128i w_i_15 = _mm_alignr_epi8(v1, v0, 4);
+        __m128i s0_v = SCHED_s0(w_i_15);
+
+        // w_i_7 = W[i-7...i-4]
+        __m128i w_i_7 = _mm_alignr_epi8(v3, v2, 4);
+
+        // Calcolo base: W[i-16] + sigma0(W[i-15]) + W[i-7]
+        __m128i res = _mm_add_epi32(_mm_add_epi32(v0, s0_v), w_i_7);
+
+        // --- GESTIONE RICORSIVA SIGMA1 ---
+        // I primi due elementi di res (W_i, W_i+1) hanno bisogno di sigma1(W_i-2, W_i-1)
+        __m128i s1_lo = SCHED_s1(_mm_alignr_epi8(res, v3, 8)); // Usa W[i-2], W[i-1] dal registro precedente
+        // Azzeriamo la parte alta perché s1_lo è valido solo per i primi due
+        s1_lo = _mm_and_si128(s1_lo, _mm_set_epi32(0, 0, -1, -1));
+        res = _mm_add_epi32(res, s1_lo);
+
+        // Ora che abbiamo calcolato W_i e W_i+1, possiamo calcolare W_i+2 e W_i+3
+        __m128i s1_hi = SCHED_s1(_mm_alignr_epi8(res, res, 8)); // Usa i W[i], W[i+1] appena calcolati
+        s1_hi = _mm_and_si128(s1_hi, _mm_set_epi32(-1, -1, 0, 0));
+        res = _mm_add_epi32(res, s1_hi);
+
+        _mm_storeu_si128((__m128i*)&W[i], res);
+    }
+
+    // 3. Round di compressione (Scalari)
+    a = ctx->state[0]; b = ctx->state[1]; c = ctx->state[2]; d = ctx->state[3];
+    e = ctx->state[4]; f = ctx->state[5]; g = ctx->state[6]; h = ctx->state[7];
+
+    for (int i = 0; i < 64; i++) {
+        uint32 t1 = h + S1(e) + Ch(e, f, g) + K256[i] + W[i];
+        uint32 t2 = S0(a) + Maj(a, b, c);
+        h = g; g = f; f = e; e = d + t1; d = c; c = b; b = a; a = t1 + t2;
+    }
+
+    ctx->state[0] += a; ctx->state[1] += b; ctx->state[2] += c; ctx->state[3] += d;
+    ctx->state[4] += e; ctx->state[5] += f; ctx->state[6] += g; ctx->state[7] += h;
 }
 
 /* --------------- SCHEDULER SHA256 AVX2 ------------------------*/
@@ -299,7 +366,8 @@ void hybrid_sha256_transform_sse_full(SoftSHA256Context* ctx, const uint8* data)
 __attribute__((target("avx2")))
 void hybrid_sha256_transform_avx2(SoftSHA256Context* ctx, const uint8* data) {
     // Allineamento a 32 byte per massime prestazioni AVX2
-    alignas(32) uint32 W[64];
+    //static uint32 W[64] __attribute__((aligned(32)));
+    uint32* W = sW_AVX2;
     uint32 a, b, c, d, e, f, g, h;
 
     // Maschera per il byte-swap (Big Endian -> Host)
@@ -311,14 +379,14 @@ void hybrid_sha256_transform_avx2(SoftSHA256Context* ctx, const uint8* data) {
     // 1. Caricamento prime 16 parole (0-15)
     for (int i = 0; i < 2; i++) {
         __m256i raw = _mm256_loadu_si256((const __m256i*)(data + i * 32));
-        _mm256_store_si256((__m256i*)&W[i * 8], _mm256_shuffle_epi8(raw, mask));
+        _mm256_storeu_si256((__m256i*)&W[i * 8], _mm256_shuffle_epi8(raw, mask));
     }
 
     // 2. Scheduling AVX2 (16-63)
     // Dividiamo il calcolo in due metà per rispettare la dipendenza W[i-2]
     for (int i = 16; i < 64; i += 8) {
         // --- PARTE A: Calcola W[i...i+3] ---
-        __m128i v16_a = _mm_load_si128((__m128i*)&W[i - 16]);
+        __m128i v16_a = _mm_loadu_si128((__m128i*)&W[i - 16]);
         __m128i v15_a = _mm_loadu_si128((__m128i*)&W[i - 15]);
         __m128i v7_a  = _mm_loadu_si128((__m128i*)&W[i - 7]);
         __m128i v2_a  = _mm_loadu_si128((__m128i*)&W[i - 2]);
@@ -335,11 +403,11 @@ void hybrid_sha256_transform_avx2(SoftSHA256Context* ctx, const uint8* data) {
             _mm_srli_epi32(v2_a, 10));
 
         __m128i res_a = _mm_add_epi32(_mm_add_epi32(v16_a, s0_a), _mm_add_epi32(v7_a, s1_a));
-        _mm_store_si128((__m128i*)&W[i], res_a);
+        _mm_storeu_si128((__m128i*)&W[i], res_a);
 
         // --- PARTE B: Calcola W[i+4...i+7] ---
         // Ora W[i] e W[i+1] sono pronti, quindi v2_b (W[i+2]) sarà corretto
-        __m128i v16_b = _mm_load_si128((__m128i*)&W[i - 12]);
+        __m128i v16_b = _mm_loadu_si128((__m128i*)&W[i - 12]);
         __m128i v15_b = _mm_loadu_si128((__m128i*)&W[i - 11]);
         __m128i v7_b  = _mm_loadu_si128((__m128i*)&W[i - 3]);
         __m128i v2_b  = _mm_loadu_si128((__m128i*)&W[i + 2]); // Dipende da res_a
@@ -355,7 +423,7 @@ void hybrid_sha256_transform_avx2(SoftSHA256Context* ctx, const uint8* data) {
             _mm_srli_epi32(v2_b, 10));
 
         __m128i res_b = _mm_add_epi32(_mm_add_epi32(v16_b, s0_b), _mm_add_epi32(v7_b, s1_b));
-        _mm_store_si128((__m128i*)&W[i + 4], res_b);
+        _mm_storeu_si128((__m128i*)&W[i + 4], res_b);
     }
 
     // 3. Round di compressione
@@ -559,11 +627,24 @@ void hybrid_SHA1_update(SoftSHA1Context* ctx, const uint8* in, size_t inLen) {
         inLen -= fill;
 
         if (ctx->buflen == 64) {
+        	//fpu_state_t fpu_save __attribute__((aligned(16)));
+        	//BCryptoFPUContext fpu_save;
+            cpu_status cpu = disable_interrupts();
+            //_fxsave(&fpu_save);
+            //bcrypto_save_regs(&fpu_save);
+            bcrypto_save_regs(&ctx->fpu_save);
+            
             ctx->count += 512;
             if (gHasAVX2) 
                 hybrid_sha1_transform_avx2(ctx, ctx->buffer);
             else 
                 hybrid_sha1_transform_sse(ctx, ctx->buffer);
+            
+            //_fxrstor(&fpu_save);
+            //bcrypto_restore_regs(&fpu_save);
+            bcrypto_restore_regs(&ctx->fpu_save);
+            restore_interrupts(cpu);
+            
             ctx->buflen = 0;
         }
     }
@@ -580,13 +661,33 @@ void hybrid_SHA256_update(SoftSHA256Context* ctx, const uint8* in, size_t inLen)
         inLen -= fill;
 
         if (ctx->buflen == 64) {
-            ctx->count += 512; // conta i bit (64 bytes * 8)
+        	// --- PROTEZIONE KERNEL ---
+        	//fpu_state_t fpu_save __attribute__((aligned(16)));
+        	//BCryptoFPUContext fpu_save;
+        	
+            cpu_status cpu = disable_interrupts();
+            //acquire_spinlock(&sSHALock);
+            //_fxsave(&fpu_save);
+            //_fxsave(&global_fpu_save);
+            //bcrypto_save_regs(&fpu_save);
+            bcrypto_save_regs(&ctx->fpu_save);
+            
+            //ctx->count += 512; // conta i bit (64 bytes * 8)
             
             if (gHasAVX2) 
                 hybrid_sha256_transform_avx2(ctx, ctx->buffer);
             else 
-                hybrid_sha256_transform_sse_full(ctx, ctx->buffer);
+                //hybrid_sha256_transform_sse_full(ctx, ctx->buffer);
+                hybrid_sha256_transform_sse(ctx, ctx->buffer);
             
+            //_fxrstor(&fpu_save);
+            //_fxrstor(&global_fpu_save);
+            //bcrypto_restore_regs(&fpu_save);
+            bcrypto_restore_regs(&ctx->fpu_save);
+            //release_spinlock(&sSHALock);
+            restore_interrupts(cpu);
+            
+            ctx->count += 512;
             ctx->buflen = 0;
         }
     }
@@ -603,6 +704,12 @@ void hybrid_SHA512_update(SoftSHA512Context* ctx, const uint8* in, size_t inLen)
         inLen -= fill;
 
         if (ctx->buflen == 128) {
+        	//fpu_state_t fpu_save __attribute__((aligned(32)));
+        	//BCryptoFPUContext fpu_save;
+            cpu_status cpu = disable_interrupts();
+            //_fxsave(&fpu_save);
+            //bcrypto_save_regs(&fpu_save);
+            bcrypto_save_regs(&ctx->fpu_save);
             // Aggiorniamo il contatore a 128 bit (count[0] low, count[1] high)
             uint64_t old_low = ctx->count[0];
             ctx->count[0] += 1024; // 128 bytes * 8 bits
@@ -612,6 +719,11 @@ void hybrid_SHA512_update(SoftSHA512Context* ctx, const uint8* in, size_t inLen)
                 hybrid_sha512_transform_avx2(ctx, ctx->buffer);
             else 
                 hybrid_sha512_transform_sse(ctx, ctx->buffer);
+            
+            //_fxrstor(&fpu_save);
+            //bcrypto_restore_regs(&fpu_save);
+            bcrypto_restore_regs(&ctx->fpu_save);
+            restore_interrupts(cpu);
             
             ctx->buflen = 0;
         }

@@ -50,11 +50,15 @@ int main(int argc, char** argv) {
     uint8 digest[64];
     memset(digest, 0, sizeof(digest));
     
+    char engineName[64] = "Sconosciuto";
+    crypto.GetEngineName(B_CRYPTO_BLAKE2B, engineName, sizeof(engineName));
+    
     printf("DEBUG: Indirizzo buffer digest (userspace): %p\n", digest);
     size_t hashLen = crypto.GetHashLength(B_CRYPTO_BLAKE2B);
     bigtime_t start, end;
 
     printf("Benchmark BLAKE2B su: %s (%.2f MB)\n", filename, sizeMB);
+    printf("Motore crittografico: %s\n", engineName);
     printf("-------------------------------------------------------------------------------\n");
 
     // --- TEST 1: STREAMING (BDataIO) ---
