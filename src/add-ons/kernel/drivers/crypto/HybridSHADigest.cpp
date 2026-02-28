@@ -547,6 +547,10 @@ status_t
 BInitHybridSHADigest() 
 {
 #if defined(__x86_64__) || defined(__i386__)
+    uint32 caps = BGetStoredCryptoCapabilities();
+    if (!(caps & B_CRYPTO_HW_SSE41)) 
+        return B_NOT_SUPPORTED;
+    bool hasAVX2 = (caps & B_CRYPTO_HW_AVX2);
     //bool hasSSE41 = x86_check_feature(IA32_FEATURE_EXT_SSE4_1, FEATURE_EXT);
 
     //bool hasAVX2 = x86_check_feature(IA32_FEATURE_AVX2, FEATURE_7_EBX);
@@ -557,10 +561,10 @@ BInitHybridSHADigest()
     
     //uint32 priority = hasAVX2 ? 30 : 20;
     //const char* suffix = hasAVX2 ? "(Hybrid/AVX2)" : "(Hybrid/SSE4.1)";
-    if (!gHasSSE41) return B_NOT_SUPPORTED;
+    //if (!gHasSSE41) return B_NOT_SUPPORTED;
 
-    int priority = gHasAVX2 ? 30 : 20;
-    const char* suffix = gHasAVX2 ? "(Hybrid/AVX2)" : "(Hybrid/SSE4.1)";
+    int priority = hasAVX2 ? 30 : 20;
+    const char* suffix = hasAVX2 ? "(Hybrid/AVX2)" : "(Hybrid/SSE4.1)";
 
     // --- SHA1: SSE4.1 è sempre presente se siamo qui ---
     sSHA1 = {
