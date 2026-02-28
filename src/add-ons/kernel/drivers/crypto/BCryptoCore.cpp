@@ -6,7 +6,7 @@
 #include <crypto/BCryptoDefs.h>
 #include "BCryptoCPU.h"
 #include <string.h>
-
+#include <crypto/BCryptoKernelInternal.h>
 #include "BCryptoDevice.h" 
 
 #include <lock.h>

@@ -10,7 +10,6 @@
 #include <SupportDefs.h>
 #include <iovec.h>
 #include <Errors.h>
-#include <arch/x86/arch_cpu.h>
 #ifndef B_PENDING
 #   define B_PENDING B_DEV_PENDING
 #endif
@@ -34,17 +33,6 @@ struct crypto_device_info {
     uint32 hw_type;
     uint32 max_throughput;
     void* device_cookie;
-};
-
-struct UserAccessExposer {
-    UserAccessExposer() {
-    	if (x86_check_feature(IA32_FEATURE_SMAP, FEATURE_7_EBX))
-            __asm__ __volatile__ ("stac" : : : "cc");
-    }
-    ~UserAccessExposer() {
-    	if (x86_check_feature(IA32_FEATURE_SMAP, FEATURE_7_EBX))
-            __asm__ __volatile__ ("clac" : : : "cc");
-    }
 };
 
 #define B_CRYPTO_ALGO_ID(block, bit) (((block) << 5) | (bit))
@@ -111,7 +99,7 @@ typedef struct {
     BCryptoAlgorithmID  id;          // Out
     BCryptoMode         mode;        // Out
     uint32              flags;       // Out (B_CRYPTO_ALG_SOFTWARE, etc.)
-    char                vendor[32];  // Out (Copiato da crypto_device_info)
+    char                vendor[32];  // Out
 } BCryptoAlgorithmInfo;
 
 typedef struct {

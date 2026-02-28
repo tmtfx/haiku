@@ -9,6 +9,7 @@
 #include <SupportDefs.h>
 #include <iovec.h>
 #include <crypto/BCryptoDefs.h>
+#include <arch/x86/arch_cpu.h>
 
 struct BCryptoRequest {
     BCryptoOperation		operation;
@@ -32,6 +33,17 @@ struct crypto_session {
     void*               algorithm_state; // Puntatore al contesto specifico (es: SHA256_CTX)
     size_t              state_size;
     bool                is_active;       // True se Init è stata chiamata
+};
+
+struct UserAccessExposer {
+    UserAccessExposer() {
+    	if (x86_check_feature(IA32_FEATURE_SMAP, FEATURE_7_EBX))
+            __asm__ __volatile__ ("stac" : : : "cc");
+    }
+    ~UserAccessExposer() {
+    	if (x86_check_feature(IA32_FEATURE_SMAP, FEATURE_7_EBX))
+            __asm__ __volatile__ ("clac" : : : "cc");
+    }
 };
 
 #endif // _B_CRYPTO_KERNEL_INTERNAL_H_
