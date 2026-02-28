@@ -1,6 +1,10 @@
 SubDir HAIKU_TOP src kits crypto ;
 
 # Usa gli header pubblici e privati del tuo nuovo kit
+UsePrivateKernelHeaders ;
+UseHeaders [ FDirName $(HAIKU_TOP) headers private kernel ] : true ;
+UseHeaders [ FDirName $(HAIKU_TOP) headers private kernel util ] : true ;
+UsePrivateHeaders [ FDirName $(HAIKU_TOP) headers private kernel arch x86 ] ;
 
 UsePublicHeaders crypto support ;
 
