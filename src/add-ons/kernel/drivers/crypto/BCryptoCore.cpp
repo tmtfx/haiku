@@ -18,9 +18,6 @@
 
 using BPrivate::AutoLocker;
 
-extern bool gHasXsave;
-extern uint64 gXsaveMask;
-
 void bcrypto_save_regs(BCryptoFPUContext* ctx) {
     // Verifica di sicurezza: l'indirizzo DEVE essere allineato a 64 byte
     if (((uintptr_t)ctx->state & 63) != 0) {
@@ -38,12 +35,35 @@ void bcrypto_save_regs(BCryptoFPUContext* ctx) {
             : : [state] "m" (ctx->state), "a" (low), "d" (high)
             : "memory"
         );
+        /* valutare se è meglio:
+        asm volatile (
+            "xsave %[state]"
+            : "=m" (ctx->state)  // Diciamo a GCC che scriviamo in memoria
+            : [state] "m" (ctx->state), "a" (low), "d" (high)
+            : "memory"
+        );
+        */
+        /* oppure questo se da invalid lvalue
+        asm volatile (
+            "xsave %[state]"
+            : "=m" (*ctx) // Diciamo a GCC: "Guarda che scrivo nella memoria puntata da ctx"
+            : [state] "m" (*ctx), "a" (low), "d" (high)
+            : "memory"
+        );*/
     } else {
         asm volatile (
             "fxsave %[state]"
             : : [state] "m" (ctx->state)
             : "memory"
         );
+        /* valutare se è meglio:
+        asm volatile (
+            "fxsave %[state]"
+            : "=m" (ctx->state)
+            : [state] "m" (ctx->state)
+            : "memory"
+        );
+        */
     }
 }
 
