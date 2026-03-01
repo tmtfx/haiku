@@ -16,6 +16,10 @@ int main() {
 
     printf("=== BCrypto SHA-NI Diagnostic Test ===\n");
     printf("Input: '%s' (3 bytes)\n", testData);
+    
+    char engineName[64] = "Sconosciuto";
+    crypto.GetEngineName(B_CRYPTO_SHA256, engineName, sizeof(engineName));
+    printf("Motore digest: %s\n", engineName);
 
     memset(digest, 0, sizeof(digest));
     
