@@ -314,6 +314,7 @@ x86_sha256_process(BCryptoRequest* request)
 
     // Protezione CPU
     B_PREPARE_CPU_STATE();
+    
 
     __m128i st0 = _mm_set_epi32(0xa54ff53a, 0x3c6ef372, 0xbb67ae85, 0x6a09e667);
     __m128i st1 = _mm_set_epi32(0x5be0cd19, 0x1f83d9ab, 0x9b05688c, 0x510e527f);
