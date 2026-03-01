@@ -7,6 +7,9 @@
 #include <arch/x86/arch_cpu.h>
 #include <string.h> 
 
+bool gHasXsave = false;
+uint64 gXsaveMask = 0;
+
 #define x86_cpuid(leaf, sub_leaf, eax, ebx, ecx, edx) \
     __asm__ volatile ("cpuid" \
         : "=a" (eax), "=b" (ebx), "=c" (ecx), "=d" (edx) \
@@ -33,6 +36,14 @@ BGetCPUCryptoInfo(crypto_device_info* info)
     else if (ebx == 0x68747541 || ebx == 0x69746e65) strlcpy(info->vendor_name, "AMD", 32); 
     else if (ebx == 0x746e6543) strlcpy(info->vendor_name, "VIA", 32);
     
+    if (x86_check_feature(IA32_FEATURE_EXT_XSAVE, FEATURE_EXT) &&
+        x86_check_feature(IA32_FEATURE_EXT_OSXSAVE, FEATURE_EXT)) {
+        gHasXsave = true;
+        // Leggiamo la maschera XCR0 (questo va fatto comunque via assembly)
+        uint32 low, high;
+        asm volatile("xgetbv" : "=a" (low), "=d" (high) : "c" (0));
+        gXsaveMask = ((uint64)high << 32) | low;
+    }
     // 1. AES-NI e RDRAND (Foglia 1, ECX -> FEATURE_EXT)
     if (x86_check_feature(IA32_FEATURE_EXT_AES, FEATURE_EXT)) {
         SET_ALGO(info, B_CRYPTO_AES);
