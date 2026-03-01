@@ -23,7 +23,7 @@ struct SoftSHA1Context {
     uint8  buffer[64] __attribute__((aligned(16)));
     size_t buflen;
     size_t outlen;
-    BCryptoFPUContext fpu_save;
+    alignas(16) BCryptoFPUContext fpu_save;
 };
 
 // SHA-256 (e 224) Context
@@ -33,7 +33,7 @@ struct SoftSHA256Context {
     uint8  buffer[64] __attribute__((aligned(16)));
     size_t buflen;
     size_t outlen;
-    BCryptoFPUContext fpu_save;
+    alignas(16) BCryptoFPUContext fpu_save;
 };
 typedef struct SoftSHA256Context SoftSHA224Context;
 
@@ -45,7 +45,7 @@ struct SoftSHA512Context {
     uint8  buffer[128] __attribute__((aligned(32)));
     size_t buflen;
     size_t outlen;
-    BCryptoFPUContext fpu_save;
+    alignas(32) BCryptoFPUContext fpu_save;
 };
 typedef struct SoftSHA512Context SoftSHA384Context;
 
