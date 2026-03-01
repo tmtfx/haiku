@@ -353,20 +353,19 @@ hybrid_SHA512_init_bridge(void** context, size_t* contextSize)
 }*/
 /* --- BRIDGE PER SHA1 --- */
 
-static status_t
-hybrid_SHA1_init_bridge(void** context, size_t* contextSize)
+status_t hybrid_SHA1_init_bridge(void** context, size_t* contextSize)
 {
     if (context == NULL || contextSize == NULL) return B_BAD_VALUE;
     *contextSize = sizeof(SoftSHA1Context);
-    *context = malloc(*contextSize);
+    //*context = malloc(*contextSize);
+    *context = memalign(16, *contextSize);
     if (*context == NULL) return B_NO_MEMORY;
 
     hybrid_SHA1_init((SoftSHA1Context*)*context, 20);
     return B_OK;
 }
 
-static status_t
-hybrid_SHA1_update_bridge(void* context, const iovec* vecs, size_t count)
+status_t hybrid_SHA1_update_bridge(void* context, const iovec* vecs, size_t count)
 {
     if (context == NULL) return B_BAD_VALUE;
     SoftSHA1Context* ctx = (SoftSHA1Context*)context;
@@ -377,8 +376,7 @@ hybrid_SHA1_update_bridge(void* context, const iovec* vecs, size_t count)
     return B_OK;
 }
 
-static status_t
-hybrid_SHA1_final_bridge(void* context, uint8* outDigest)
+status_t hybrid_SHA1_final_bridge(void* context, uint8* outDigest)
 {
     if (context == NULL || outDigest == NULL) return B_BAD_VALUE;
     SoftSHA1Context* ctx = (SoftSHA1Context*)context;
@@ -388,20 +386,19 @@ hybrid_SHA1_final_bridge(void* context, uint8* outDigest)
 }
 
 /* --- BRIDGE PER SHA224 --- */
-static status_t
-hybrid_SHA224_init_bridge(void** context, size_t* contextSize)
+status_t hybrid_SHA224_init_bridge(void** context, size_t* contextSize)
 {
     if (context == NULL || contextSize == NULL) return B_BAD_VALUE;
     *contextSize = sizeof(SoftSHA256Context);
-    *context = malloc(*contextSize);
+    //*context = malloc(*contextSize);
+    *context = memalign(16, *contextSize);
     if (*context == NULL) return B_NO_MEMORY;
 
     hybrid_SHA224_init((SoftSHA256Context*)*context, 28);
     return B_OK;
 }
 
-static status_t
-hybrid_SHA224_update_bridge(void* context, const iovec* vecs, size_t count)
+status_t hybrid_SHA224_update_bridge(void* context, const iovec* vecs, size_t count)
 {
 	if (context == NULL) return B_BAD_VALUE;
     SoftSHA256Context* ctx = (SoftSHA256Context*)context;
@@ -414,8 +411,7 @@ hybrid_SHA224_update_bridge(void* context, const iovec* vecs, size_t count)
     return B_OK;
 }
 
-static status_t
-hybrid_SHA224_final_bridge(void* context, uint8* outDigest)
+status_t hybrid_SHA224_final_bridge(void* context, uint8* outDigest)
 {
     if (context == NULL || outDigest == NULL) return B_BAD_VALUE;
     SoftSHA256Context* ctx = (SoftSHA256Context*)context;
@@ -425,20 +421,19 @@ hybrid_SHA224_final_bridge(void* context, uint8* outDigest)
 }
 
 /* --- BRIDGE PER SHA256 --- */
-static status_t
-hybrid_SHA256_init_bridge(void** context, size_t* contextSize)
+status_t hybrid_SHA256_init_bridge(void** context, size_t* contextSize)
 {
     if (context == NULL || contextSize == NULL) return B_BAD_VALUE;
     *contextSize = sizeof(SoftSHA256Context);
-    *context = malloc(*contextSize);
+    //*context = malloc(*contextSize);
+    *context = memalign(16, *contextSize);
     if (*context == NULL) return B_NO_MEMORY;
 
     hybrid_SHA256_init((SoftSHA256Context*)*context, 32);
     return B_OK;
 }
 
-static status_t
-hybrid_SHA256_update_bridge(void* context, const iovec* vecs, size_t count)
+status_t hybrid_SHA256_update_bridge(void* context, const iovec* vecs, size_t count)
 {
     if (context == NULL) return B_BAD_VALUE;
     SoftSHA256Context* ctx = (SoftSHA256Context*)context;
@@ -449,8 +444,7 @@ hybrid_SHA256_update_bridge(void* context, const iovec* vecs, size_t count)
     return B_OK;
 }
 
-static status_t
-hybrid_SHA256_final_bridge(void* context, uint8* outDigest)
+status_t hybrid_SHA256_final_bridge(void* context, uint8* outDigest)
 {
     if (context == NULL || outDigest == NULL) return B_BAD_VALUE;
     SoftSHA256Context* ctx = (SoftSHA256Context*)context;
@@ -460,8 +454,7 @@ hybrid_SHA256_final_bridge(void* context, uint8* outDigest)
 }
 
 /* --- BRIDGE PER SHA384 --- */
-static status_t
-hybrid_SHA384_init_bridge(void** context, size_t* contextSize)
+status_t hybrid_SHA384_init_bridge(void** context, size_t* contextSize)
 {
     if (context == NULL || contextSize == NULL) return B_BAD_VALUE;
     *contextSize = sizeof(SoftSHA512Context);
@@ -472,8 +465,7 @@ hybrid_SHA384_init_bridge(void** context, size_t* contextSize)
     return B_OK;
 }
 
-static status_t
-hybrid_SHA384_update_bridge(void* context, const iovec* vecs, size_t count)
+status_t hybrid_SHA384_update_bridge(void* context, const iovec* vecs, size_t count)
 {
     if (context == NULL || vecs == NULL) return B_BAD_VALUE;
     
@@ -489,8 +481,7 @@ hybrid_SHA384_update_bridge(void* context, const iovec* vecs, size_t count)
     return B_OK;
 }
 
-static status_t
-hybrid_SHA384_final_bridge(void* context, uint8* outDigest)
+status_t hybrid_SHA384_final_bridge(void* context, uint8* outDigest)
 {
     if (context == NULL || outDigest == NULL) return B_BAD_VALUE;
     SoftSHA512Context* ctx = (SoftSHA512Context*)context;
@@ -500,8 +491,7 @@ hybrid_SHA384_final_bridge(void* context, uint8* outDigest)
 }
 
 /* --- BRIDGE PER SHA512 --- */
-static status_t
-hybrid_SHA512_init_bridge(void** context, size_t* contextSize)
+status_t hybrid_SHA512_init_bridge(void** context, size_t* contextSize)
 {
     if (context == NULL || contextSize == NULL) return B_BAD_VALUE;
     *contextSize = sizeof(SoftSHA512Context);
@@ -512,8 +502,7 @@ hybrid_SHA512_init_bridge(void** context, size_t* contextSize)
     return B_OK;
 }
 
-static status_t
-hybrid_SHA512_update_bridge(void* context, const iovec* vecs, size_t count)
+status_t hybrid_SHA512_update_bridge(void* context, const iovec* vecs, size_t count)
 {
     if (context == NULL) return B_BAD_VALUE;
     SoftSHA512Context* ctx = (SoftSHA512Context*)context;
@@ -524,8 +513,7 @@ hybrid_SHA512_update_bridge(void* context, const iovec* vecs, size_t count)
     return B_OK;
 }
 
-static status_t
-hybrid_SHA512_final_bridge(void* context, uint8* outDigest)
+status_t hybrid_SHA512_final_bridge(void* context, uint8* outDigest)
 {
     if (context == NULL || outDigest == NULL) return B_BAD_VALUE;
     SoftSHA512Context* ctx = (SoftSHA512Context*)context;
