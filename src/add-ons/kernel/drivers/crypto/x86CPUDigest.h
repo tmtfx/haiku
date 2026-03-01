@@ -15,7 +15,6 @@ struct x86_sha256_context {
     uint8   buffer[64];
     size_t  buffer_len;
     uint64  total_len;
-    
 } __attribute__((aligned(16)));
 
 status_t BInitx86CPUDigest();
