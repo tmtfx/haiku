@@ -16,6 +16,7 @@ void hex_to_bytes(const char* hex, uint8* bytes, size_t len) {
 
 void usage(const char* prog) {
     printf("Utilizzo: %s -e|-d -k <key_hex> [-i <iv_hex>] -p <none|pkcs7|iso|zero> -f <input> -o <output>\n", prog);
+    printf("Per esempio: %s -e -k 00112233445566778899aabbccddeeff -i ffeeddccbbaa99887766554433221100 -p pkcs7 -f file.zip -o file.enc\n", prog);
     exit(1);
 }
 
