@@ -22,7 +22,7 @@
 //static spinlock sSHALock = B_SPINLOCK_INITIALIZER;
 static uint32 sCaps = 0;
 static uint32 sW_SSE[64] __attribute__((aligned(16)));
-static uint32 sW_AVX2[64] __attribute__((aligned(32)));
+//static uint32 sW_AVX2[64] __attribute__((aligned(32)));
 //static fpu_state_t global_fpu_save __attribute__((aligned(16)));
 
 /* ----- SHA1 ---- */
@@ -226,72 +226,6 @@ static inline __m128i SCHED_s1(__m128i x) {
     return _mm_xor_si128(_mm_xor_si128(t1, t2), t3);
 }
 
-/*
-__attribute__((target("sse4.1")))
-void hybrid_sha256_transform_sse_full(SoftSHA256Context* ctx, const uint8* data) {
-    uint32 W[64] __attribute__((aligned(16)));
-    uint32 a, b, c, d, e, f, g, h;
-
-    // Maschera per il byte-swap (Big Endian -> Little Endian)
-    const __m128i mask = _mm_set_epi8(12,13,14,15, 8,9,10,11, 4,5,6,7, 0,1,2,3);
-
-    // 1. Caricamento prime 16 parole (0-15)
-    for (int i = 0; i < 4; i++) {
-        __m128i raw = _mm_loadu_si128((const __m128i*)(data + i * 16));
-        _mm_store_si128((__m128i*)&W[i * 4], _mm_shuffle_epi8(raw, mask));
-    }
-
-    // 2. Scheduling SSE (16-63)
-    // Usiamo registri per minimizzare gli accessi alla stack
-    for (int i = 16; i < 64; i += 4) {
-        __m128i v0 = _mm_load_si128((__m128i*)&W[i - 16]);
-        __m128i v1 = _mm_load_si128((__m128i*)&W[i - 12]);
-        __m128i v2 = _mm_load_si128((__m128i*)&W[i - 8]);
-        __m128i v3 = _mm_load_si128((__m128i*)&W[i - 4]);
-
-        // s0 = sigma0(W[i-15])
-        // w_i_15 = {W[i-15], W[i-14], W[i-13], W[i-12]}
-        __m128i w_i_15 = _mm_alignr_epi8(v1, v0, 4);
-        __m128i s0_v = SCHED_s0(w_i_15);
-
-        // w_i_7 = {W[i-7], W[i-6], W[i-5], W[i-4]}
-        __m128i w_i_7 = _mm_alignr_epi8(v3, v2, 4);
-
-        // Calcolo parziale: W[i-16] + s0 + W[i-7]
-        __m128i res = _mm_add_epi32(_mm_add_epi32(v0, s0_v), w_i_7);
-
-        // Gestione di s1 = sigma1(W[i-2]) - QUI STA IL TRUCCO
-        // W[i] e W[i+1] dipendono da v3 (già calcolato)
-        // W[i+2] e W[i+3] dipendono da W[i] e W[i+1] (calcolati ora)
-        
-        // Fase 1: Calcoliamo i primi due elementi del registro
-        __m128i s1_part1 = SCHED_s1(_mm_alignr_epi8(res, v3, 8)); // W[i-2], W[i-1]
-        res = _mm_add_epi32(res, s1_part1);
-
-        // Fase 2: Usiamo i risultati appena ottenuti per calcolare gli ultimi due
-        __m128i s1_part2 = SCHED_s1(_mm_alignr_epi8(res, res, 8)); // W[i], W[i+1]
-        // Filtriamo solo gli ultimi due con uno shuffle/mask
-        s1_part2 = _mm_and_si128(s1_part2, _mm_set_epi32(-1, -1, 0, 0));
-        res = _mm_add_epi32(res, s1_part2);
-
-        _mm_store_si128((__m128i*)&W[i], res);
-    }
-
-    // 3. Round di compressione
-    a = ctx->state[0]; b = ctx->state[1]; c = ctx->state[2]; d = ctx->state[3];
-    e = ctx->state[4]; f = ctx->state[5]; g = ctx->state[6]; h = ctx->state[7];
-
-    // Srotoliamo i round per evitare l'overhead del loop o carichiamo K256
-    for (int i = 0; i < 64; i++) {
-        uint32 t1 = h + S1(e) + Ch(e, f, g) + K256[i] + W[i];
-        uint32 t2 = S0(a) + Maj(a, b, c);
-        h = g; g = f; f = e; e = d + t1; d = c; c = b; b = a; a = t1 + t2;
-    }
-
-    // Aggiornamento stato
-    ctx->state[0] += a; ctx->state[1] += b; ctx->state[2] += c; ctx->state[3] += d;
-    ctx->state[4] += e; ctx->state[5] += f; ctx->state[6] += g; ctx->state[7] += h;
-}*/
 __attribute__((target("sse4.1")))
 void hybrid_sha256_transform_sse_full(SoftSHA256Context* ctx, const uint8* data) {
     //static uint32 W[64] __attribute__((aligned(16)));
@@ -369,8 +303,9 @@ __attribute__((target("avx2")))
 void hybrid_sha256_transform_avx2(SoftSHA256Context* ctx, const uint8* data) {
     // Allineamento a 32 byte per massime prestazioni AVX2
     //static uint32 W[64] __attribute__((aligned(32)));
-    uint32* W = sW_AVX2;
-    uint32 a, b, c, d, e, f, g, h;
+    //uint32* W = sW_AVX2;
+    uint32 W[64] __attribute__((aligned(32)));
+    alignas(32) uint32 a, b, c, d, e, f, g, h;
 
     // Maschera per il byte-swap (Big Endian -> Host)
     const __m256i mask = _mm256_set_epi8(
@@ -441,6 +376,8 @@ void hybrid_sha256_transform_avx2(SoftSHA256Context* ctx, const uint8* data) {
     // Aggiornamento stato finale
     ctx->state[0] += a; ctx->state[1] += b; ctx->state[2] += c; ctx->state[3] += d;
     ctx->state[4] += e; ctx->state[5] += f; ctx->state[6] += g; ctx->state[7] += h;
+    
+    _mm256_zeroupper();
 }
 
 /* --- IV vengono usati nell'inizializzazione gia fatta in soft_sha.cpp ----- 
