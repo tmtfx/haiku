@@ -21,7 +21,7 @@
 
 //static spinlock sSHALock = B_SPINLOCK_INITIALIZER;
 static uint32 sCaps = 0;
-static uint32 sW_SSE[64] __attribute__((aligned(16)));
+//static uint32 sW_SSE[64] __attribute__((aligned(16)));
 //static uint32 sW_AVX2[64] __attribute__((aligned(32)));
 //static fpu_state_t global_fpu_save __attribute__((aligned(16)));
 
@@ -176,8 +176,8 @@ static const uint32 IV224[8] = {
 
 __attribute__((target("sse4.1")))
 void hybrid_sha256_transform_sse(SoftSHA256Context* ctx, const uint8* data) {
-    //uint32 W[64] __attribute__((aligned(16)));
-    uint32* W = sW_SSE;
+    uint32 W[64] __attribute__((aligned(16)));
+    //uint32* W = sW_SSE;
     uint32 a, b, c, d, e, f, g, h;
 
     // 1. Caricamento scalare con byte swap
@@ -228,8 +228,8 @@ static inline __m128i SCHED_s1(__m128i x) {
 
 __attribute__((target("sse4.1")))
 void hybrid_sha256_transform_sse_full(SoftSHA256Context* ctx, const uint8* data) {
-    //static uint32 W[64] __attribute__((aligned(16)));
-    uint32* W = sW_SSE;
+    static uint32 W[64] __attribute__((aligned(16)));
+    //uint32* W = sW_SSE;
     uint32 a, b, c, d, e, f, g, h;
 
     const __m128i mask = _mm_set_epi8(12,13,14,15, 8,9,10,11, 4,5,6,7, 0,1,2,3);
@@ -298,7 +298,7 @@ void hybrid_sha256_transform_sse_full(SoftSHA256Context* ctx, const uint8* data)
         _mm256_or_si256(_mm256_srli_epi32(x, 17), _mm256_slli_epi32(x, 15)), \
         _mm256_or_si256(_mm256_srli_epi32(x, 19), _mm256_slli_epi32(x, 13))), \
         _mm256_srli_epi32(x, 10))
-
+/* nope, copilot gpt-5.2 dice che la logica dei W è sbagliata usata così
 __attribute__((target("avx2")))
 void hybrid_sha256_transform_avx2(SoftSHA256Context* ctx, const uint8* data) {
     // Allineamento a 32 byte per massime prestazioni AVX2
@@ -377,6 +377,51 @@ void hybrid_sha256_transform_avx2(SoftSHA256Context* ctx, const uint8* data) {
     ctx->state[0] += a; ctx->state[1] += b; ctx->state[2] += c; ctx->state[3] += d;
     ctx->state[4] += e; ctx->state[5] += f; ctx->state[6] += g; ctx->state[7] += h;
     
+    _mm256_zeroupper();
+}*/
+__attribute__((target("avx2")))
+void hybrid_sha256_transform_avx2(SoftSHA256Context* ctx, const uint8* data)
+{
+    // W locale: niente static, niente race, deterministico
+    uint32 W[64] __attribute__((aligned(32)));
+    uint32 a, b, c, d, e, f, g, h;
+
+    // Maschera per byteswap su 32-bit words (ripetuta sui due lane 128-bit)
+    const __m256i bswap_mask = _mm256_set_epi8(
+        12,13,14,15,  8, 9,10,11,  4, 5, 6, 7,  0, 1, 2, 3,
+        12,13,14,15,  8, 9,10,11,  4, 5, 6, 7,  0, 1, 2, 3
+    );
+
+    // 1) Load + byte-swap di W[0..15] usando AVX2 (64 byte totali)
+    // Ogni load prende 32 byte = 8 word.
+    for (int i = 0; i < 2; i++) {
+        __m256i raw = _mm256_loadu_si256((const __m256i*)(data + i * 32));
+        __m256i swp = _mm256_shuffle_epi8(raw, bswap_mask);
+        _mm256_store_si256((__m256i*)&W[i * 8], swp);
+    }
+
+    // 2) Schedule scalare W[16..63] (corretto per definizione)
+    for (int i = 16; i < 64; i++) {
+        W[i] = s1(W[i - 2]) + W[i - 7] + s0(W[i - 15]) + W[i - 16];
+    }
+
+    // 3) Round di compressione scalari (come la tua versione funzionante)
+    a = ctx->state[0]; b = ctx->state[1]; c = ctx->state[2]; d = ctx->state[3];
+    e = ctx->state[4]; f = ctx->state[5]; g = ctx->state[6]; h = ctx->state[7];
+
+    for (int i = 0; i < 64; i++) {
+        uint32 t1 = h + S1(e) + Ch(e, f, g) + K256[i] + W[i];
+        uint32 t2 = S0(a) + Maj(a, b, c);
+        h = g; g = f; f = e;
+        e = d + t1;
+        d = c; c = b; b = a;
+        a = t1 + t2;
+    }
+
+    ctx->state[0] += a; ctx->state[1] += b; ctx->state[2] += c; ctx->state[3] += d;
+    ctx->state[4] += e; ctx->state[5] += f; ctx->state[6] += g; ctx->state[7] += h;
+
+    // Buona pratica quando usi AVX in codice che può poi chiamare SSE “legacy”
     _mm256_zeroupper();
 }
 
