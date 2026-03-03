@@ -12,6 +12,7 @@
 
 extern bool gHasXsave;
 extern uint64 gXsaveMask;
+extern uint32 gXsaveSize;
 
 typedef struct alignas(64) {
     uint8_t buffer[1024]; // 512 minimi, 1024 per sicurezza con AVX/XSAVE
