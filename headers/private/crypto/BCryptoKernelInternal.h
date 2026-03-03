@@ -54,7 +54,7 @@ struct UserAccessExposer {
 
 // Prototipi delle funzioni di salvataggio/ripristino
 extern "C" {
-    void bcrypto_save_regs(BCryptoFPUContext* ctx);
+    bool bcrypto_save_regs(BCryptoFPUContext* ctx);
     void bcrypto_restore_regs(BCryptoFPUContext* ctx);
 }
 #endif // _B_CRYPTO_KERNEL_INTERNAL_H_
