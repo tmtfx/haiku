@@ -18,6 +18,9 @@ bool test_algorithm(BCrypto& crypto, BCryptoAlgorithmID id, const char* name,
     memset(digest, 0, sizeof(digest));
 
     printf("\n--- Test %s ---\n", name);
+    char engineName[64] = "Sconosciuto";
+    crypto.GetEngineName(id, engineName, sizeof(engineName));
+    printf("Motore digest: %s\n", engineName);
     status_t status = crypto.Digest(id, (uint8*)input, inputLen, digest);
 
     if (status != B_OK) {
