@@ -199,7 +199,7 @@ ctx->state1 = _mm_set_epi32(
 status_t x86_sha256_update_bridge(void* ctx_void, const iovec* vecs, size_t count) {
     x86_sha256_context* ctx = (x86_sha256_context*)ctx_void;
     cpu_status cpu_state = disable_interrupts();
-    bcrypto_save_regs(&ctx->fpu_save);
+    bcrypto_save_regs(&ctx->fpu_save); // TODO verificare uscita bool prima di procedere
     for (size_t i = 0; i < count; i++)
         _update(ctx, (const uint8*)vecs[i].iov_base, vecs[i].iov_len);
     bcrypto_restore_regs(&ctx->fpu_save);
@@ -210,7 +210,7 @@ status_t x86_sha256_update_bridge(void* ctx_void, const iovec* vecs, size_t coun
 status_t x86_sha256_final_bridge(void* ctx_void, uint8* out) {
     x86_sha256_context* ctx = (x86_sha256_context*)ctx_void;
     cpu_status cpu_state = disable_interrupts();
-    bcrypto_save_regs(&ctx->fpu_save);
+    bcrypto_save_regs(&ctx->fpu_save); // TODO verificare uscita bool prima di procedere
 
     alignas(16) uint8 pad[128];
     uint64 total_bits = ctx->total_len * 8;
