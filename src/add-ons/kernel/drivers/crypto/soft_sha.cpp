@@ -108,6 +108,7 @@ void soft_sha256_init(SoftSHA256Context* ctx) {
     ctx->state[4] = 0x510e527f; ctx->state[5] = 0x9b05688c; ctx->state[6] = 0x1f83d9ab; ctx->state[7] = 0x5be0cd19;
     ctx->count = 0;
     ctx->outlen = 32;
+    ctx->canary = 0xDEADC0DE;
 }
 /*
 void soft_sha256_update(SoftSHA256Context* ctx, const uint8* input, size_t len) {
