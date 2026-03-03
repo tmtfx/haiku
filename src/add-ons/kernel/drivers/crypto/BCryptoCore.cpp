@@ -18,10 +18,10 @@
 
 using BPrivate::AutoLocker;
 
-void bcrypto_save_regs(BCryptoFPUContext* ctx) {
+bool bcrypto_save_regs(BCryptoFPUContext* ctx) {
     // Verifica di sicurezza: l'indirizzo DEVE essere allineato a 64 byte
     if (((uintptr_t)ctx->state & 63) != 0) {
-        return; // O gestisci l'errore: XSAVE crasherebbe qui
+        return false; // O gestisci l'errore: XSAVE crasherebbe qui
     }
 
     if (gHasXsave) {
@@ -62,6 +62,7 @@ void bcrypto_save_regs(BCryptoFPUContext* ctx) {
             : "memory"
         );
     }
+    return true;
 }
 
 void bcrypto_restore_regs(BCryptoFPUContext* ctx) {
