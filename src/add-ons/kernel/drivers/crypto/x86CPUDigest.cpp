@@ -198,16 +198,19 @@ ctx->state1 = _mm_set_epi32(
 
 status_t x86_sha256_update_bridge(void* ctx_void, const iovec* vecs, size_t count) {
     x86_sha256_context* ctx = (x86_sha256_context*)ctx_void;
-    B_PREPARE_CPU_STATE();
+    cpu_status cpu_state = disable_interrupts();
+    bcrypto_save_regs(&ctx->fpu_save);
     for (size_t i = 0; i < count; i++)
         _update(ctx, (const uint8*)vecs[i].iov_base, vecs[i].iov_len);
-    B_RESTORE_CPU_STATE();
+    bcrypto_restore_regs(&ctx->fpu_save);
+    restore_interrupts(cpu_state);
     return B_OK;
 }
 
 status_t x86_sha256_final_bridge(void* ctx_void, uint8* out) {
     x86_sha256_context* ctx = (x86_sha256_context*)ctx_void;
-    B_PREPARE_CPU_STATE();
+    cpu_status cpu_state = disable_interrupts();
+    bcrypto_save_regs(&ctx->fpu_save);
 
     alignas(16) uint8 pad[128];
     uint64 total_bits = ctx->total_len * 8;
@@ -228,7 +231,8 @@ status_t x86_sha256_final_bridge(void* ctx_void, uint8* out) {
 
     extract_digest(ctx->state0, ctx->state1, out);
     
-    B_RESTORE_CPU_STATE();
+    bcrypto_restore_regs(&ctx->fpu_save);
+    restore_interrupts(cpu_state);
     free(ctx);
     return B_OK;
 }
