@@ -11,8 +11,10 @@
 #include <crypto/BCryptoDefs.h>
 #include <arch/x86/arch_cpu.h>
 
+#define B_MAX_XSAVE_SIZE 5120
+
 struct BCryptoFPUContext {
-    uint8 state[2560] __attribute__((aligned(64)));
+    uint8 state[B_MAX_XSAVE_SIZE] __attribute__((aligned(64))); //servono 2560 ma per test mettimo pagina intera
 } __attribute__((aligned(64)));
 
 
