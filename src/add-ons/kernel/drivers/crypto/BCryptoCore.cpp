@@ -19,9 +19,22 @@
 using BPrivate::AutoLocker;
 
 bool bcrypto_save_regs(BCryptoFPUContext* ctx) {
-    // Verifica di sicurezza: l'indirizzo DEVE essere allineato a 64 byte
+	// Verifica di sicurezza: l'indirizzo DEVE essere allineato a 64 byte
+	if (((uintptr_t)ctx & 63) != 0) {
+        return false; 
+    }
+    /* oppure così, ma è più lenta:
+    if (((uintptr_t)ctx % 64) != 0) {
+        return false; 
+    }*/
+    /* questo nel caso dovessi aggiungere altri campi prima
     if (((uintptr_t)ctx->state & 63) != 0) {
         return false; // O gestisci l'errore: XSAVE crasherebbe qui
+    }*/
+    if (gXsaveSize > B_MAX_XSAVE_SIZE) {
+        dprintf("BCRYPTO: La CPU richiede %u byte, ma il buffer è di soli %d!", 
+              gXsaveSize, B_MAX_XSAVE_SIZE);
+        return false;
     }
 
     if (gHasXsave) {
@@ -289,10 +302,17 @@ BHashInit(crypto_session* session)
 
     status_t st = node->algo->HashInit(&session->algorithm_state, &session->state_size);
     if (st == B_OK) {
+    	dprintf("BCRYPTO: Session Init - Algo: %d, StateSize: %ld, Ptr: %p\n", 
+                (int)session->algorithm, session->state_size, session->algorithm_state);
     	/* O blocco la memoria del contesto
     	 * o forzo in update la residenza in memoria del contesto */
     	// BLOCCO DELLA MEMORIA DEL CONTESTO
-        // Usiamo B_READ_DEVICE | B_WRITE_DEVICE perché XSAVE scrive e XRSTOR legge.
+        
+        // Se state_size è sospettosamente piccolo (es. < 1024), sospetta un errore nel driver
+        if (session->state_size < 1024) {
+             dprintf("BCRYPTO: ATTENZIONE! state_size molto piccolo, XSAVE potrebbe sforare!\n");
+        }
+        
         st = lock_memory(session->algorithm_state, session->state_size, B_READ_DEVICE);
         
         if (st != B_OK) {
