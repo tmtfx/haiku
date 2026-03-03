@@ -79,7 +79,7 @@ alignas(32) const uint64_t K512[] =
     0x4cc5d4becb3e42b6ULL, 0x597f299cfc657e2aULL,
     0x5fcb6fab3ad6faecULL, 0x6c44198c4a475817ULL
 };
-static void sha256_transform(SoftSHA256Context* ctx, const uint8* data) {
+void sha256_transform(SoftSHA256Context* ctx, const uint8* data) {
     uint32 a, b, c, d, e, f, g, h, i, t1, t2, W[64];
 
     for (i = 0; i < 16; i++) {
