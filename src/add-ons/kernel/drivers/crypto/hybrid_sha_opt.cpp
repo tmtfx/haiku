@@ -620,8 +620,9 @@ void hybrid_SHA1_update(SoftSHA1Context* ctx, const uint8* in, size_t inLen) {
             
             //cpu_status cpu = disable_interrupts();
             //bcrypto_save_regs(&ctx->fpu_save);
-            B_PREPARE_CPU_STATE();
-            
+            cpu_status cpu_state = disable_interrupts();
+            bcrypto_save_regs(&ctx->fpu_save);
+                   
             ctx->count += 512;
             //if (gHasAVX2) 
             if (sCaps & B_CRYPTO_HW_AVX2)
@@ -634,7 +635,8 @@ void hybrid_SHA1_update(SoftSHA1Context* ctx, const uint8* in, size_t inLen) {
             
             //bcrypto_restore_regs(&ctx->fpu_save);
             //restore_interrupts(cpu);
-            B_RESTORE_CPU_STATE();
+            bcrypto_restore_regs(&ctx->fpu_save);
+            restore_interrupts(cpu_state);
             
             ctx->buflen = 0;
         }
@@ -664,7 +666,9 @@ void hybrid_SHA256_update(SoftSHA256Context* ctx, const uint8* in, size_t inLen)
                     	
             //cpu_status cpu = disable_interrupts();
             //bcrypto_save_regs(&ctx->fpu_save);
-            B_PREPARE_CPU_STATE();
+            //B_PREPARE_CPU_STATE();
+            cpu_status cpu_state = disable_interrupts();
+            bcrypto_save_regs(&ctx->fpu_save);
             
             //ctx->count += 512; // conta i bit (64 bytes * 8)
             
@@ -684,7 +688,8 @@ void hybrid_SHA256_update(SoftSHA256Context* ctx, const uint8* in, size_t inLen)
             //bcrypto_restore_regs(&ctx->fpu_save);
             //restore_interrupts(cpu);
             
-            B_RESTORE_CPU_STATE();
+            bcrypto_restore_regs(&ctx->fpu_save);
+            restore_interrupts(cpu_state);
             
             ctx->count += 512;
             ctx->buflen = 0;
@@ -711,7 +716,8 @@ void hybrid_SHA512_update(SoftSHA512Context* ctx, const uint8* in, size_t inLen)
             //bcrypto_save_regs(&fpu_save);
             //cpu_status cpu = disable_interrupts();
             //bcrypto_save_regs(&ctx->fpu_save);
-            B_PREPARE_CPU_STATE();
+            cpu_status cpu_state = disable_interrupts();
+            bcrypto_save_regs(&ctx->fpu_save);
             // Aggiorniamo il contatore a 128 bit (count[0] low, count[1] high)
             uint64_t old_low = ctx->count[0];
             ctx->count[0] += 1024; // 128 bytes * 8 bits
@@ -727,7 +733,8 @@ void hybrid_SHA512_update(SoftSHA512Context* ctx, const uint8* in, size_t inLen)
             //bcrypto_restore_regs(&fpu_save);
             //bcrypto_restore_regs(&ctx->fpu_save);
             //restore_interrupts(cpu);
-            B_RESTORE_CPU_STATE();
+            bcrypto_restore_regs(&ctx->fpu_save);
+            restore_interrupts(cpu_state);
             
             ctx->buflen = 0;
         }
