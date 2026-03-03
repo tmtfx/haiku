@@ -30,40 +30,37 @@ void bcrypto_save_regs(BCryptoFPUContext* ctx) {
         uint32 low = (uint32)gXsaveMask;
         uint32 high = (uint32)(gXsaveMask >> 32);
         
-        asm volatile (
+        /*asm volatile (
             "xsave %[state]"
             : : [state] "m" (ctx->state), "a" (low), "d" (high)
             : "memory"
-        );
+        );*/
         /* valutare se è meglio:
         asm volatile (
             "xsave %[state]"
             : "=m" (ctx->state)  // Diciamo a GCC che scriviamo in memoria
             : [state] "m" (ctx->state), "a" (low), "d" (high)
             : "memory"
-        );
-        */
-        /* oppure questo se da invalid lvalue
+        );*/
         asm volatile (
             "xsave %[state]"
             : "=m" (*ctx) // Diciamo a GCC: "Guarda che scrivo nella memoria puntata da ctx"
             : [state] "m" (*ctx), "a" (low), "d" (high)
             : "memory"
-        );*/
+        );
     } else {
-        asm volatile (
+        /*asm volatile (
             "fxsave %[state]"
             : : [state] "m" (ctx->state)
             : "memory"
-        );
-        /* valutare se è meglio:
+        );*/
+        /* valutare se è meglio:*/
         asm volatile (
             "fxsave %[state]"
             : "=m" (ctx->state)
             : [state] "m" (ctx->state)
             : "memory"
         );
-        */
     }
 }
 
@@ -291,6 +288,18 @@ BHashInit(crypto_session* session)
 
     status_t st = node->algo->HashInit(&session->algorithm_state, &session->state_size);
     if (st == B_OK) {
+    	/* O blocco la memoria del contesto
+    	 * o forzo in update la residenza in memoria del contesto */
+    	// BLOCCO DELLA MEMORIA DEL CONTESTO
+        // Usiamo B_READ_DEVICE | B_WRITE_DEVICE perché XSAVE scrive e XRSTOR legge.
+        st = lock_memory(session->algorithm_state, session->state_size, B_READ_DEVICE);
+        
+        if (st != B_OK) {
+            // Se il lock fallisce, dobbiamo pulire lo stato appena creato dal driver
+            // (Assumendo che tu abbia una funzione di cleanup o che il driver gestisca l'errore)
+            return st; 
+        }
+        // ---------------------------------- //
         session->is_active = true;
     }
     return st;
@@ -312,9 +321,15 @@ BHashUpdate(crypto_session* session, BCryptoUserRequest* request)
     }
 
     if (st == B_OK) {
-        /*__asm__ __volatile__ ("stac" : : : "cc");//user_access_enable(); // stac
-        st = node->algo->HashUpdate(session->algorithm_state, request->source, request->vectorCount);
-        __asm__ __volatile__ ("clac" : : : "cc");//user_access_disable(); // clac*/
+    	/* O forzo la residenza in memoria del contesto FPU
+    	 * o faccio lock_memory sul contesto in BHashInit */
+        // FORZA la residenza della memoria del contesto FPU
+        // Scriviamo uno zero (o leggiamo) nel primo e ultimo byte della struct
+        // per assicurarci che il kernel carichi la pagina PRIMA di disabilitare gli interrupt.
+        //volatile uint8* fpu_ptr = (volatile uint8*)&((SoftSHA256Context*)session->algorithm_state)->fpu_save;
+        //fpu_ptr[0] = fpu_ptr[0]; 
+        //fpu_ptr[sizeof(BCryptoFPUContext) - 1] = fpu_ptr[sizeof(BCryptoFPUContext) - 1];
+        
         UserAccessExposer access;
         st = node->algo->HashUpdate(session->algorithm_state, request->source, request->vectorCount);
     }
@@ -329,6 +344,9 @@ BHashUpdate(crypto_session* session, BCryptoUserRequest* request)
 status_t
 BHashFinal(crypto_session* session, BCryptoUserRequest* request)
 {
+	if (session == NULL || !session->is_active)
+        return B_BAD_VALUE;
+        
     MutexLocker _(sCryptoLock);
     AlgoNode* node = _FindAlgorithm(session->algorithm, B_CRYPTO_MODE_ANY);
     if (!node || !node->algo->HashFinal) return B_NOT_SUPPORTED;
@@ -352,6 +370,14 @@ BHashFinal(crypto_session* session, BCryptoUserRequest* request)
             unlock_memory(request->destination[0].iov_base, hashLen, B_READ_DEVICE);
         }
     }
+    // 3. CLEANUP DELLA SESSIONE
+    // Sblocchiamo la memoria del contesto che avevamo lockato in BHashInit
+    if (session->algorithm_state != NULL) {
+        unlock_memory(session->algorithm_state, session->state_size, B_READ_DEVICE);
+    }
+
+    // Segniamo la sessione come non più attiva
+    session->is_active = false;
 
     return st;
 }
