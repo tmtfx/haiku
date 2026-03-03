@@ -363,6 +363,7 @@ aesni_process(BCryptoRequest* request)
     	cpu_status cpu_state = disable_interrupts();
         //bcrypto_save_regs(&ctx->fpu_save);
         if (!bcrypto_save_regs(&ctx->fpu_save)) {
+        	restore_interrupts(cpu_state);
         	dprintf("AESNI: Cannot save fpu regs");
         	return B_NO_MEMORY;
         }
@@ -388,6 +389,7 @@ aesni_process(BCryptoRequest* request)
             cpu_status cpu_state = disable_interrupts();
             //bcrypto_save_regs(&ctx->fpu_save);
             if (!bcrypto_save_regs(&ctx->fpu_save)) {
+            	restore_interrupts(cpu_state);
             	dprintf("AESNI: Cannot save fpu regs");
             	return B_NO_MEMORY;
             }
