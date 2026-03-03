@@ -618,12 +618,18 @@ void hybrid_SHA1_update(SoftSHA1Context* ctx, const uint8* in, size_t inLen) {
             //_fxsave(&fpu_save);
             //bcrypto_save_regs(&fpu_save);
             
-            //cpu_status cpu = disable_interrupts();
-            //bcrypto_save_regs(&ctx->fpu_save);
             cpu_status cpu_state = disable_interrupts();
-            bcrypto_save_regs(&ctx->fpu_save);
+            //bcrypto_save_regs(&ctx->fpu_save);
+            if (!bcrypto_save_regs(&ctx->fpu_save)) {
+                restore_interrupts(cpu_state);
+                dprintf("fallback to soft_sha");
+                //sha1_transform(ctx, ctx->buffer);
+                ctx->count += 512;
+                ctx->buflen = 0;
+                return;
+            }
                    
-            ctx->count += 512;
+            
             //if (gHasAVX2) 
             if (sCaps & B_CRYPTO_HW_AVX2)
                 hybrid_sha1_transform_avx2(ctx, ctx->buffer);
@@ -637,7 +643,7 @@ void hybrid_SHA1_update(SoftSHA1Context* ctx, const uint8* in, size_t inLen) {
             //restore_interrupts(cpu);
             bcrypto_restore_regs(&ctx->fpu_save);
             restore_interrupts(cpu_state);
-            
+            ctx->count += 512;
             ctx->buflen = 0;
         }
     }
@@ -668,7 +674,16 @@ void hybrid_SHA256_update(SoftSHA256Context* ctx, const uint8* in, size_t inLen)
             //bcrypto_save_regs(&ctx->fpu_save);
             //B_PREPARE_CPU_STATE();
             cpu_status cpu_state = disable_interrupts();
-            bcrypto_save_regs(&ctx->fpu_save);
+            //bcrypto_save_regs(&ctx->fpu_save);
+            if (!bcrypto_save_regs(&ctx->fpu_save)) {
+                restore_interrupts(cpu_state);
+                
+                dprintf("fallback to soft_sha");
+                sha256_transform(ctx, ctx->buffer);
+                ctx->count += 512;
+                ctx->buflen = 0;
+                return;
+            }
             
             //ctx->count += 512; // conta i bit (64 bytes * 8)
             
@@ -717,7 +732,18 @@ void hybrid_SHA512_update(SoftSHA512Context* ctx, const uint8* in, size_t inLen)
             //cpu_status cpu = disable_interrupts();
             //bcrypto_save_regs(&ctx->fpu_save);
             cpu_status cpu_state = disable_interrupts();
-            bcrypto_save_regs(&ctx->fpu_save);
+            //bcrypto_save_regs(&ctx->fpu_save);
+            if (!bcrypto_save_regs(&ctx->fpu_save)) {
+                restore_interrupts(cpu_state);
+                
+                dprintf("fallback to soft_sha");
+                uint64_t old_low = ctx->count[0];
+                ctx->count[0] += 1024; // 128 bytes * 8 bits
+                if (ctx->count[0] < old_low) ctx->count[1]++;
+                //sha512_transform(ctx, ctx->buffer);  TODO DA IMPLEMENTARE in soft_sha
+                ctx->buflen = 0;
+                return;
+            }
             // Aggiorniamo il contatore a 128 bit (count[0] low, count[1] high)
             uint64_t old_low = ctx->count[0];
             ctx->count[0] += 1024; // 128 bytes * 8 bits
