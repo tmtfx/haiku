@@ -5,10 +5,12 @@
 #include <crypto/BCryptoDefs.h>
 #include "BCryptoCPU.h"
 #include <arch/x86/arch_cpu.h>
-#include <string.h> 
+#include <string.h>
+#include <debug.h>
 
 bool gHasXsave = false;
 uint64 gXsaveMask = 0;
+uint32 gXsaveSize;
 
 #define x86_cpuid(leaf, sub_leaf, eax, ebx, ecx, edx) \
     __asm__ volatile ("cpuid" \
@@ -17,6 +19,26 @@ uint64 gXsaveMask = 0;
 
 #define SET_ALGO(info, algo) \
     (info)->algos_supported[B_GET_BLOCK(algo)] |= B_GET_BIT(algo)
+
+
+void 
+detect_cpu_xsave_size() {
+    uint32 eax, ebx, ecx, edx;
+
+    // CPUID foglia 0xD, sottofoglia 0
+    x86_cpuid(0x0000000D, 0, eax, ebx, ecx, edx);
+
+    // ebx = dimensione richiesta per le feature abilitate in XCR0
+    gXsaveSize = ebx; 
+    
+    // Se per qualche motivo assurdo ebx è 0, usiamo un valore legacy sicuro
+    if (gXsaveSize == 0)
+        gXsaveSize = 512;
+
+    dprintf("BCRYPTO: La CPU richiede %u byte per l'area XSAVE (XCR0 Mask: 0x%" B_PRIx64 ")\n", 
+            gXsaveSize, gXsaveMask);
+}
+
 
 status_t
 BGetCPUCryptoInfo(crypto_device_info* info)
@@ -43,6 +65,7 @@ BGetCPUCryptoInfo(crypto_device_info* info)
         uint32 low, high;
         asm volatile("xgetbv" : "=a" (low), "=d" (high) : "c" (0));
         gXsaveMask = ((uint64)high << 32) | low;
+        detect_cpu_xsave_size();
     }
     // 1. AES-NI e RDRAND (Foglia 1, ECX -> FEATURE_EXT)
     if (x86_check_feature(IA32_FEATURE_EXT_AES, FEATURE_EXT)) {
