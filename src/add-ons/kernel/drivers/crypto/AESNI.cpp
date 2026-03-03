@@ -360,9 +360,11 @@ aesni_process(BCryptoRequest* request)
     
     /* ---- key expansion ---- */
     {
-    	B_PREPARE_CPU_STATE();
+    	cpu_status cpu_state = disable_interrupts();
+        bcrypto_save_regs(&ctx->fpu_save);
     	st = aesni_expand_key(*ctx, (const uint8*)request->key, request->keyLength);
-    	B_RESTORE_CPU_STATE();
+    	bcrypto_restore_regs(&ctx->fpu_save);
+        restore_interrupts(cpu_state);
     }
     if (st != B_OK)
         goto out;
@@ -379,7 +381,8 @@ aesni_process(BCryptoRequest* request)
             // Elaboriamo al massimo 32KB per volta prima di ridare respiro alla CPU
             size_t chunkSize = min_c(remaining, (size_t)32 * 1024);
             
-            B_PREPARE_CPU_STATE();
+            cpu_status cpu_state = disable_interrupts();
+            bcrypto_save_regs(&ctx->fpu_save);
     
             if (request->mode == B_CRYPTO_MODE_ECB) {
                 st = aesni_process_ecb(encrypt, ctx, srcBase, dstBase, chunkSize);
@@ -391,7 +394,8 @@ aesni_process(BCryptoRequest* request)
                 st = B_NOT_SUPPORTED;
             }
             
-            B_RESTORE_CPU_STATE();
+            bcrypto_restore_regs(&ctx->fpu_save);
+            restore_interrupts(cpu_state);
     
             if (st != B_OK) goto out;
     
