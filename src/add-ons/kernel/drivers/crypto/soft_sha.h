@@ -49,6 +49,8 @@ struct SoftSHA512Context {
 };
 typedef struct SoftSHA512Context SoftSHA384Context;
 
+void sha256_transform(SoftSHA256Context* ctx, const uint8* data);
+
 void soft_sha256_init(SoftSHA256Context* ctx);
 void soft_sha256_update(SoftSHA256Context* ctx, const uint8* input, size_t len);
 void soft_sha256_finalize(SoftSHA256Context* ctx, uint8 digest[32]);
