@@ -361,7 +361,11 @@ aesni_process(BCryptoRequest* request)
     /* ---- key expansion ---- */
     {
     	cpu_status cpu_state = disable_interrupts();
-        bcrypto_save_regs(&ctx->fpu_save);
+        //bcrypto_save_regs(&ctx->fpu_save);
+        if (!bcrypto_save_regs(&ctx->fpu_save)) {
+        	dprintf("AESNI: Cannot save fpu regs");
+        	return B_NO_MEMORY;
+        }
     	st = aesni_expand_key(*ctx, (const uint8*)request->key, request->keyLength);
     	bcrypto_restore_regs(&ctx->fpu_save);
         restore_interrupts(cpu_state);
@@ -382,7 +386,11 @@ aesni_process(BCryptoRequest* request)
             size_t chunkSize = min_c(remaining, (size_t)32 * 1024);
             
             cpu_status cpu_state = disable_interrupts();
-            bcrypto_save_regs(&ctx->fpu_save);
+            //bcrypto_save_regs(&ctx->fpu_save);
+            if (!bcrypto_save_regs(&ctx->fpu_save)) {
+            	dprintf("AESNI: Cannot save fpu regs");
+            	return B_NO_MEMORY;
+            }
     
             if (request->mode == B_CRYPTO_MODE_ECB) {
                 st = aesni_process_ecb(encrypt, ctx, srcBase, dstBase, chunkSize);
