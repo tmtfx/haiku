@@ -184,7 +184,8 @@ x86_sha256_process_finalmente(BCryptoRequest* request)
 status_t
 x86_sha256_process_test(BCryptoRequest* request)
 {
-    B_PREPARE_CPU_STATE();
+    cpu_status cpu_state = disable_interrupts();
+    bcrypto_save_regs(&ctx->fpu_save);
     /* test registri leggono a cazzo
     asm volatile (
         "pxor %%xmm0, %%xmm0 \n\t"
@@ -324,7 +325,8 @@ x86_sha256_process_test(BCryptoRequest* request)
     out[6] = __builtin_bswap32(res_efgh[2] + H[6]); // SOMMA G
     out[7] = __builtin_bswap32(res_efgh[3] + H[7]); // SOMMA H
 */
-    B_RESTORE_CPU_STATE();
+    bcrypto_restore_regs(&ctx->fpu_save);
+    restore_interrupts(cpu_state);
     return B_OK;
 }
 
@@ -895,7 +897,8 @@ status_t x86_sha256_update_bridge(void* ctx, const iovec* vecs, size_t count) {
     x86_sha256_context* s = (x86_sha256_context*)ctx;
     if (s == NULL) return B_BAD_VALUE;
 
-    B_PREPARE_CPU_STATE(); // SALVA REGISTRI PER UPDATE
+    cpu_status cpu_state = disable_interrupts();
+    bcrypto_save_regs(&ctx->fpu_save);
 
     for (size_t i = 0; i < count; i++) {
         const uint8* data = (const uint8*)vecs[i].iov_base;
@@ -914,7 +917,8 @@ status_t x86_sha256_update_bridge(void* ctx, const iovec* vecs, size_t count) {
         }
     }
 
-    B_RESTORE_CPU_STATE(); // RIPRISTINA REGISTRI
+    bcrypto_restore_regs(&ctx->fpu_save);
+    restore_interrupts(cpu_state); // RIPRISTINA REGISTRI
     return B_OK;
 }
 
@@ -973,8 +977,9 @@ out[7] = __builtin_bswap32(_mm_extract_epi32(st1, 3));
 status_t x86_sha256_final_bridge(void* ctx, uint8* out) {
     x86_sha256_context* s = (x86_sha256_context*)ctx;
     if (s == NULL || out == NULL) return B_BAD_VALUE;
-
-    B_PREPARE_CPU_STATE(); // SALVA REGISTRI PER FINAL
+    
+    cpu_status cpu_state = disable_interrupts();
+    bcrypto_save_regs(&ctx->fpu_save);
 
     alignas(16) uint8 pad[128];
     memcpy(pad, s->buffer, s->buffer_len);
@@ -990,7 +995,8 @@ status_t x86_sha256_final_bridge(void* ctx, uint8* out) {
     
     extract_digest(s->state0, s->state1, out);
 
-    B_RESTORE_CPU_STATE(); // RIPRISTINA REGISTRI
+    bcrypto_restore_regs(&ctx->fpu_save);
+    restore_interrupts(cpu_state); // RIPRISTINA REGISTRI
     
     free(ctx);
     return B_OK;
