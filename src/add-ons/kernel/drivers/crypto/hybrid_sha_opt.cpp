@@ -708,6 +708,11 @@ void hybrid_SHA256_update(SoftSHA256Context* ctx, const uint8* in, size_t inLen)
             
             ctx->count += 512;
             ctx->buflen = 0;
+            if (ctx->canary != 0xDEADC0DE) {
+                // Se il valore è cambiato, XSAVE è "uscito dai bordi" 
+                // e ha sporcato la memoria!
+                panic("BCRYPTO: Memory corruption detected! Canary is 0x%08x", ctx->canary);
+            }
         }
     }
 }
