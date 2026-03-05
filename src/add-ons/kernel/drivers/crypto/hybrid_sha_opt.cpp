@@ -806,7 +806,6 @@ void hybrid_SHA256_update(SoftSHA256Context* ctx, const uint8* in, size_t inLen)
     uint32 sCaps = BGetStoredCryptoCapabilities();
     const size_t SLICE_SIZE = 4096;
 
-    bigtime_t startResiduo = system_time();
     // 1. Gestione del residuo nel buffer interno
     if (ctx->buflen > 0) {
         size_t left = 64 - ctx->buflen;
@@ -835,28 +834,7 @@ void hybrid_SHA256_update(SoftSHA256Context* ctx, const uint8* in, size_t inLen)
             ctx->buflen = 0;
         }
     }
-    bigtime_t endResiduo = system_time();
-    /*
-    //gestione rapida del residuo:
-    if (ctx->buflen > 0) {
-        size_t left = 64 - ctx->buflen;
-        size_t fill = (inLen > left) ? left : inLen;
-        memcpy(ctx->buffer + ctx->buflen, in, fill);
-        ctx->buflen += fill;
-        in += fill;
-        inLen -= fill;
-
-        if (ctx->buflen == 64) {
-            // Qui usiamo la versione soft per il blocco singolo residuo
-            // per evitare un intero ciclo di save/restore FPU per soli 64 byte
-            sha256_transform(ctx, ctx->buffer);
-            ctx->count += 512;
-            ctx->buflen = 0;
-        }
-    }*/
-
     
-    bigtime_t startTrans = endResiduo;
     // 2. TRASFORMAZIONE MASSIVA (Bulk)
     while (inLen >= 64) {
         // Calcoliamo quanti blocchi processare in questa "fetta"
@@ -884,56 +862,12 @@ void hybrid_SHA256_update(SoftSHA256Context* ctx, const uint8* in, size_t inLen)
         in += bytesToProcess;
         inLen -= bytesToProcess;
     }
-    bigtime_t endTrans = system_time();
-    
-    /*
-    // 2. TRASFORMAZIONE MASSIVA A FETTE GRANDI
-    while (inLen >= 64) {
-        size_t bytesToProcess = (inLen > SLICE_SIZE) ? SLICE_SIZE : (inLen & ~63);
-        size_t blocksInSlice = bytesToProcess / 64;
-
-        cpu_status cpu_state = disable_interrupts();
-        if (bcrypto_save_regs(&ctx->fpu_save)) {
-            
-            // PRE-FETCH: Opzionale, aiuta la cache se il buffer è grande
-            // __builtin_prefetch(in + 64);
-
-            for (size_t i = 0; i < blocksInSlice; i++) {
-                if (sCaps & B_CRYPTO_HW_AVX2)
-                    hybrid_sha256_transform_avx2(ctx, in + (i * 64));
-                else
-                    hybrid_sha256_transform_sse(ctx, in + (i * 64));
-            }
-
-            bcrypto_restore_regs(&ctx->fpu_save);
-        } else {
-            for (size_t i = 0; i < blocksInSlice; i++)
-                sha256_transform(ctx, in + (i * 64));
-        }
-        restore_interrupts(cpu_state);
-
-        ctx->count += (uint64)blocksInSlice * 512;
-        in += bytesToProcess;
-        inLen -= bytesToProcess;
-    }*/
-    
-    bigtime_t startFinalcopy = endTrans;
-
     // 3. Salva l'avanzo finale nel buffer
     if (inLen > 0) {
         memcpy(ctx->buffer, in, inLen);
         ctx->buflen = inLen;
     }
-    bigtime_t endFinalcopy = system_time();
-    
-    if ((endFinalcopy - startResiduo) > 1000) {
-        dprintf("BCRYPTO: Update Performance - Residuo: %ld us, Transform: %ld us, Final Copy: %ld us, Total: %ld us\n",
-            endResiduo - startResiduo,
-            endTrans - startTrans,
-            endFinalcopy - startFinalcopy,
-            endFinalcopy - startResiduo);
-        }
-    
+  
     // Verifica finale canary
     //if (ctx->canary != 0xDEADC0DE) {
     //    panic("BCRYPTO: Memory corruption detected! Canary is 0x%08x", ctx->canary);
