@@ -150,6 +150,7 @@ hybrid_sha_process(BCryptoRequest* request)
     status_t st = B_OK;
 
     // 1. Init (Alloca tramite bridge)
+    
     switch (request->algorithm) {
         case B_CRYPTO_SHA1:   st = hybrid_SHA1_init_bridge(&ctx, &ctxSize); break;
         case B_CRYPTO_SHA224: st = hybrid_SHA224_init_bridge(&ctx, &ctxSize); break;
@@ -188,8 +189,9 @@ hybrid_sha_process(BCryptoRequest* request)
             memcpy(request->destination[0].iov_base, digest, outLen);
         }
         // Dato che i Final bridge hanno già fatto free(ctx), mettiamo a NULL per sicurezza
-        ctx = NULL;
+        //ctx = NULL;
     }
+    
 
     // Se qualcosa è fallito prima del Final, liberiamo qui
     if (ctx != NULL)
@@ -358,7 +360,7 @@ status_t hybrid_SHA1_init_bridge(void** context, size_t* contextSize)
     if (context == NULL || contextSize == NULL) return B_BAD_VALUE;
     *contextSize = sizeof(SoftSHA1Context);
     //*context = malloc(*contextSize);
-    *context = memalign(16, *contextSize);
+    *context = memalign(64, *contextSize);
     if (*context == NULL) return B_NO_MEMORY;
 
     hybrid_SHA1_init((SoftSHA1Context*)*context, 20);
@@ -391,7 +393,7 @@ status_t hybrid_SHA224_init_bridge(void** context, size_t* contextSize)
     if (context == NULL || contextSize == NULL) return B_BAD_VALUE;
     *contextSize = sizeof(SoftSHA256Context);
     //*context = malloc(*contextSize);
-    *context = memalign(16, *contextSize);
+    *context = memalign(64, *contextSize);
     if (*context == NULL) return B_NO_MEMORY;
 
     hybrid_SHA224_init((SoftSHA256Context*)*context, 28);
@@ -426,7 +428,7 @@ status_t hybrid_SHA256_init_bridge(void** context, size_t* contextSize)
     if (context == NULL || contextSize == NULL) return B_BAD_VALUE;
     *contextSize = sizeof(SoftSHA256Context);
     //*context = malloc(*contextSize);
-    *context = memalign(16, *contextSize);
+    *context = memalign(64, *contextSize);
     if (*context == NULL) return B_NO_MEMORY;
 
     hybrid_SHA256_init((SoftSHA256Context*)*context, 32);
@@ -458,7 +460,7 @@ status_t hybrid_SHA384_init_bridge(void** context, size_t* contextSize)
 {
     if (context == NULL || contextSize == NULL) return B_BAD_VALUE;
     *contextSize = sizeof(SoftSHA512Context);
-    *context = memalign(32, *contextSize);
+    *context = memalign(64, *contextSize);
     if (*context == NULL) return B_NO_MEMORY;
 
     hybrid_SHA384_init((SoftSHA512Context*)*context, 48);
@@ -495,7 +497,7 @@ status_t hybrid_SHA512_init_bridge(void** context, size_t* contextSize)
 {
     if (context == NULL || contextSize == NULL) return B_BAD_VALUE;
     *contextSize = sizeof(SoftSHA512Context);
-    *context = memalign(32, *contextSize);
+    *context = memalign(64, *contextSize);
     if (*context == NULL) return B_NO_MEMORY;
 
     hybrid_SHA512_init((SoftSHA512Context*)*context, 64);
