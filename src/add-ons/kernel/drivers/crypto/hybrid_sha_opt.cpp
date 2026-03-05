@@ -225,10 +225,10 @@ static inline __m128i SCHED_s1(__m128i x) {
     __m128i t3 = _mm_srli_epi32(x, 10);
     return _mm_xor_si128(_mm_xor_si128(t1, t2), t3);
 }
-
+/* funziona
 __attribute__((target("sse4.1")))
 void hybrid_sha256_transform_sse_full(SoftSHA256Context* ctx, const uint8* data) {
-    static uint32 W[64] __attribute__((aligned(16)));
+    uint32 W[64] __attribute__((aligned(16)));
     //uint32* W = sW_SSE;
     uint32 a, b, c, d, e, f, g, h;
 
@@ -281,6 +281,91 @@ void hybrid_sha256_transform_sse_full(SoftSHA256Context* ctx, const uint8* data)
         uint32 t2 = S0(a) + Maj(a, b, c);
         h = g; g = f; f = e; e = d + t1; d = c; c = b; b = a; a = t1 + t2;
     }
+
+    ctx->state[0] += a; ctx->state[1] += b; ctx->state[2] += c; ctx->state[3] += d;
+    ctx->state[4] += e; ctx->state[5] += f; ctx->state[6] += g; ctx->state[7] += h;
+}*/
+/* versione accelerata in compressione finale */
+__attribute__((target("sse4.1")))
+void hybrid_sha256_transform_sse_full(SoftSHA256Context* ctx, const uint8* data) {
+    uint32 W[64] __attribute__((aligned(16)));
+    uint32 WK[64] __attribute__((aligned(16)));
+    //uint32* W = sW_SSE;
+    uint32 a, b, c, d, e, f, g, h;
+
+    const __m128i mask = _mm_set_epi8(12,13,14,15, 8,9,10,11, 4,5,6,7, 0,1,2,3);
+
+    // 1. Caricamento prime 16 parole
+    for (int i = 0; i < 4; i++) {
+        __m128i raw = _mm_loadu_si128((const __m128i*)(data + i * 16));
+        _mm_storeu_si128((__m128i*)&W[i * 4], _mm_shuffle_epi8(raw, mask));
+    }
+
+    // 2. Scheduling SSE (16-63)
+    for (int i = 16; i < 64; i += 4) {
+        __m128i v0 = _mm_loadu_si128((__m128i*)&W[i - 16]);
+        __m128i v1 = _mm_loadu_si128((__m128i*)&W[i - 12]);
+        __m128i v2 = _mm_loadu_si128((__m128i*)&W[i - 8]);
+        __m128i v3 = _mm_loadu_si128((__m128i*)&W[i - 4]);
+
+        // s0 = sigma0(W[i-15...i-12])
+        __m128i w_i_15 = _mm_alignr_epi8(v1, v0, 4);
+        __m128i s0_v = SCHED_s0(w_i_15);
+
+        // w_i_7 = W[i-7...i-4]
+        __m128i w_i_7 = _mm_alignr_epi8(v3, v2, 4);
+
+        // Calcolo base: W[i-16] + sigma0(W[i-15]) + W[i-7]
+        __m128i res = _mm_add_epi32(_mm_add_epi32(v0, s0_v), w_i_7);
+
+        // --- GESTIONE RICORSIVA SIGMA1 ---
+        // I primi due elementi di res (W_i, W_i+1) hanno bisogno di sigma1(W_i-2, W_i-1)
+        __m128i s1_lo = SCHED_s1(_mm_alignr_epi8(res, v3, 8)); // Usa W[i-2], W[i-1] dal registro precedente
+        // Azzeriamo la parte alta perché s1_lo è valido solo per i primi due
+        s1_lo = _mm_and_si128(s1_lo, _mm_set_epi32(0, 0, -1, -1));
+        res = _mm_add_epi32(res, s1_lo);
+
+        // Ora che abbiamo calcolato W_i e W_i+1, possiamo calcolare W_i+2 e W_i+3
+        __m128i s1_hi = SCHED_s1(_mm_alignr_epi8(res, res, 8)); // Usa i W[i], W[i+1] appena calcolati
+        s1_hi = _mm_and_si128(s1_hi, _mm_set_epi32(-1, -1, 0, 0));
+        res = _mm_add_epi32(res, s1_hi);
+
+        _mm_storeu_si128((__m128i*)&W[i], res);
+    }
+
+    //	 --- NUOVA PARTE: PRE-CALCOLO VETTORIALE ---
+    for (int i = 0; i < 64; i += 4) {
+        __m128i wv = _mm_load_si128((__m128i*)&W[i]);
+        __m128i kv = _mm_load_si128((__m128i*)&K256[i]);
+        _mm_store_si128((__m128i*)&WK[i], _mm_add_epi32(wv, kv));
+    }
+
+    // 3. Round di compressione SROTOLATI
+    a = ctx->state[0]; b = ctx->state[1]; c = ctx->state[2]; d = ctx->state[3];
+    e = ctx->state[4]; f = ctx->state[5]; g = ctx->state[6]; h = ctx->state[7];
+
+    // Definiamo una macro interna per un singolo round per chiarezza
+    // Nota: usiamo WK[i] che contiene già K256[i] + W[i]
+    #define ROUND(a,b,c,d,e,f,g,h,i) \
+        { \
+            uint32 t1 = h + S1(e) + Ch(e,f,g) + WK[i]; \
+            uint32 t2 = S0(a) + Maj(a,b,c); \
+            d += t1; \
+            h = t1 + t2; \
+        }
+
+    // Srotolamento di 8 round alla volta (8 x 8 = 64)
+    for (int i = 0; i < 64; i += 8) {
+        ROUND(a, b, c, d, e, f, g, h, i + 0);
+        ROUND(h, a, b, c, d, e, f, g, i + 1);
+        ROUND(g, h, a, b, c, d, e, f, i + 2);
+        ROUND(f, g, h, a, b, c, d, e, i + 3);
+        ROUND(e, f, g, h, a, b, c, d, i + 4);
+        ROUND(d, e, f, g, h, a, b, c, i + 5);
+        ROUND(c, d, e, f, g, h, a, b, i + 6);
+        ROUND(b, c, d, e, f, g, h, a, i + 7);
+    }
+    #undef ROUND
 
     ctx->state[0] += a; ctx->state[1] += b; ctx->state[2] += c; ctx->state[3] += d;
     ctx->state[4] += e; ctx->state[5] += f; ctx->state[6] += g; ctx->state[7] += h;
@@ -648,7 +733,7 @@ void hybrid_SHA1_update(SoftSHA1Context* ctx, const uint8* in, size_t inLen) {
         }
     }
 }
-
+/*
 void hybrid_SHA256_update(SoftSHA256Context* ctx, const uint8* in, size_t inLen) {
 	sCaps = BGetStoredCryptoCapabilities();
     while (inLen > 0) {
@@ -715,8 +800,145 @@ void hybrid_SHA256_update(SoftSHA256Context* ctx, const uint8* in, size_t inLen)
             }
         }
     }
-}
+}*/
+void hybrid_SHA256_update(SoftSHA256Context* ctx, const uint8* in, size_t inLen) {
+	
+    uint32 sCaps = BGetStoredCryptoCapabilities();
+    const size_t SLICE_SIZE = 4096;
 
+    bigtime_t startResiduo = system_time();
+    // 1. Gestione del residuo nel buffer interno
+    if (ctx->buflen > 0) {
+        size_t left = 64 - ctx->buflen;
+        size_t fill = (inLen > left) ? left : inLen;
+        memcpy(ctx->buffer + ctx->buflen, in, fill);
+        ctx->buflen += fill;
+        in += fill;
+        inLen -= fill;
+
+        if (ctx->buflen == 64) {
+            // Trasformazione singola sicura
+            cpu_status cpu_state = disable_interrupts();
+            if (bcrypto_save_regs(&ctx->fpu_save)) {
+                if (sCaps & B_CRYPTO_HW_AVX2)
+                    hybrid_sha256_transform_avx2(ctx, ctx->buffer);
+                else 
+                    hybrid_sha256_transform_sse_full(ctx, ctx->buffer); //scalare
+                
+                bcrypto_restore_regs(&ctx->fpu_save);
+            } else {
+                sha256_transform(ctx, ctx->buffer);
+            }
+            restore_interrupts(cpu_state);
+
+            ctx->count += 512;
+            ctx->buflen = 0;
+        }
+    }
+    bigtime_t endResiduo = system_time();
+    /*
+    //gestione rapida del residuo:
+    if (ctx->buflen > 0) {
+        size_t left = 64 - ctx->buflen;
+        size_t fill = (inLen > left) ? left : inLen;
+        memcpy(ctx->buffer + ctx->buflen, in, fill);
+        ctx->buflen += fill;
+        in += fill;
+        inLen -= fill;
+
+        if (ctx->buflen == 64) {
+            // Qui usiamo la versione soft per il blocco singolo residuo
+            // per evitare un intero ciclo di save/restore FPU per soli 64 byte
+            sha256_transform(ctx, ctx->buffer);
+            ctx->count += 512;
+            ctx->buflen = 0;
+        }
+    }*/
+
+    
+    bigtime_t startTrans = endResiduo;
+    // 2. TRASFORMAZIONE MASSIVA (Bulk)
+    while (inLen >= 64) {
+        // Calcoliamo quanti blocchi processare in questa "fetta"
+        size_t bytesToProcess = (inLen > SLICE_SIZE) ? SLICE_SIZE : (inLen & ~63);
+        size_t blocksInSlice = bytesToProcess / 64;
+
+        cpu_status cpu_state = disable_interrupts();
+        if (bcrypto_save_regs(&ctx->fpu_save)) {
+            
+            for (size_t i = 0; i < blocksInSlice; i++) {
+                if (sCaps & B_CRYPTO_HW_AVX2)
+                    hybrid_sha256_transform_avx2(ctx, in + (i * 64));
+                else
+                    hybrid_sha256_transform_sse_full(ctx, in + (i * 64));
+            }
+
+            bcrypto_restore_regs(&ctx->fpu_save);
+        } else {
+            for (size_t i = 0; i < blocksInSlice; i++)
+                sha256_transform(ctx, in + (i * 64));
+        }
+        restore_interrupts(cpu_state); // <--- IL SISTEMA RESPIRA QUI
+
+        ctx->count += (uint64)blocksInSlice * 512;
+        in += bytesToProcess;
+        inLen -= bytesToProcess;
+    }
+    bigtime_t endTrans = system_time();
+    
+    /*
+    // 2. TRASFORMAZIONE MASSIVA A FETTE GRANDI
+    while (inLen >= 64) {
+        size_t bytesToProcess = (inLen > SLICE_SIZE) ? SLICE_SIZE : (inLen & ~63);
+        size_t blocksInSlice = bytesToProcess / 64;
+
+        cpu_status cpu_state = disable_interrupts();
+        if (bcrypto_save_regs(&ctx->fpu_save)) {
+            
+            // PRE-FETCH: Opzionale, aiuta la cache se il buffer è grande
+            // __builtin_prefetch(in + 64);
+
+            for (size_t i = 0; i < blocksInSlice; i++) {
+                if (sCaps & B_CRYPTO_HW_AVX2)
+                    hybrid_sha256_transform_avx2(ctx, in + (i * 64));
+                else
+                    hybrid_sha256_transform_sse(ctx, in + (i * 64));
+            }
+
+            bcrypto_restore_regs(&ctx->fpu_save);
+        } else {
+            for (size_t i = 0; i < blocksInSlice; i++)
+                sha256_transform(ctx, in + (i * 64));
+        }
+        restore_interrupts(cpu_state);
+
+        ctx->count += (uint64)blocksInSlice * 512;
+        in += bytesToProcess;
+        inLen -= bytesToProcess;
+    }*/
+    
+    bigtime_t startFinalcopy = endTrans;
+
+    // 3. Salva l'avanzo finale nel buffer
+    if (inLen > 0) {
+        memcpy(ctx->buffer, in, inLen);
+        ctx->buflen = inLen;
+    }
+    bigtime_t endFinalcopy = system_time();
+    
+    if ((endFinalcopy - startResiduo) > 1000) {
+        dprintf("BCRYPTO: Update Performance - Residuo: %ld us, Transform: %ld us, Final Copy: %ld us, Total: %ld us\n",
+            endResiduo - startResiduo,
+            endTrans - startTrans,
+            endFinalcopy - startFinalcopy,
+            endFinalcopy - startResiduo);
+        }
+    
+    // Verifica finale canary
+    //if (ctx->canary != 0xDEADC0DE) {
+    //    panic("BCRYPTO: Memory corruption detected! Canary is 0x%08x", ctx->canary);
+    //}
+}
 void hybrid_SHA512_update(SoftSHA512Context* ctx, const uint8* in, size_t inLen) {
 	sCaps = BGetStoredCryptoCapabilities();
     while (inLen > 0) {
