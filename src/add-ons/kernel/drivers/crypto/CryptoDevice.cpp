@@ -52,7 +52,7 @@ crypto_open_legacy(const char* name, uint32 flags, void** cookie)
 {
     return crypto_open_modern(NULL, name, (int)flags, cookie);
 }
-
+/*
 static status_t
 crypto_close(void* cookie)
 {
@@ -65,6 +65,28 @@ crypto_close(void* cookie)
         secure_memzero(session, sizeof(crypto_session));
         free(session);
     }
+    return B_OK;
+}*/
+static status_t
+crypto_close(void* cookie)
+{
+    crypto_session* session = (crypto_session*)cookie;
+    if (session == NULL)
+        return B_OK;
+
+    // Se l'utente chiude il file descriptor senza aver chiamato HASH_FINAL,
+    // lo stato dell'algoritmo sarebbe rimasto allocato e "lockato" in RAM.
+    if (session->algorithm_state != NULL) {
+        // Chiamiamo BHashFinal con NULL:
+        // Il Core capirà che vogliamo solo liberare la memoria (free + unlock)
+        // senza produrre alcun digest di output.
+        BHashFinal(session, NULL);
+    }
+
+    // Ora che lo stato interno è certamente pulito, cancelliamo la sessione.
+    secure_memzero(session, sizeof(crypto_session));
+    free(session);
+
     return B_OK;
 }
 
@@ -146,7 +168,7 @@ crypto_control(void* cookie, uint32 op, void* arg, size_t length)
 
             return status;
         }
-        
+        /*
         case B_CRYPTO_IOCTL_HASH_INIT: {
             BCryptoAlgorithmID algo;
             if (user_memcpy(&algo, arg, sizeof(BCryptoAlgorithmID)) != B_OK)
@@ -176,6 +198,24 @@ crypto_control(void* cookie, uint32 op, void* arg, size_t length)
                 session->algorithm_state = oldState;
             }
             return st;
+        }*/
+        case B_CRYPTO_IOCTL_HASH_INIT: {
+            BCryptoAlgorithmID algo;
+            if (user_memcpy(&algo, arg, sizeof(BCryptoAlgorithmID)) != B_OK)
+                return B_BAD_ADDRESS;
+
+            crypto_session* session = (crypto_session*)cookie;
+            
+            // Se c'era già uno stato attivo, lo chiudiamo formalmente tramite il Core
+            // prima di inizializzarne uno nuovo. Questo garantisce unlock + free.
+            if (session->algorithm_state != NULL) {
+                BHashFinal(session, NULL);
+            }
+    
+            session->algorithm = algo;
+            session->algorithm_state = NULL; 
+            
+            return BHashInit(session); // Il Core alloca e fa lock_memory
         }
         case B_CRYPTO_IOCTL_HASH_UPDATE: {
             BCryptoUserRequest userReq;
@@ -197,6 +237,7 @@ crypto_control(void* cookie, uint32 op, void* arg, size_t length)
 
             return BHashUpdate(session, &userReq);
         }
+        /*
         case B_CRYPTO_IOCTL_HASH_FINAL: {
             BCryptoUserRequest userReq;
             if (user_memcpy(&userReq, arg, sizeof(BCryptoUserRequest)) != B_OK)
@@ -227,6 +268,62 @@ crypto_control(void* cookie, uint32 op, void* arg, size_t length)
             session->is_active = false; 
             
             return st;
+        }*/
+        /*
+        case B_CRYPTO_IOCTL_HASH_FINAL: {
+            BCryptoUserRequest userReq;
+            if (user_memcpy(&userReq, arg, sizeof(BCryptoUserRequest)) != B_OK)
+                return B_BAD_ADDRESS;
+
+            crypto_session* session = (crypto_session*)cookie;
+            if (!session || !session->is_active) 
+                return B_BAD_VALUE;
+
+            iovec localDst[1]; 
+            if (user_memcpy(localDst, userReq.destination, sizeof(iovec)) != B_OK)
+                return B_BAD_ADDRESS;
+
+            if (localDst[0].iov_len < decode_hash_length(session->algorithm))
+                return B_BAD_VALUE;
+        
+            userReq.destination = localDst;
+            userReq.vectorCount = 1;
+
+            // BHashFinal ora farà: 1. Calcolo, 2. Unlock, 3. Free, 4. Nullify
+            return BHashFinal(session, &userReq);
+        }*/
+        case B_CRYPTO_IOCTL_HASH_FINAL: {
+            BCryptoUserRequest userReq;
+            // 1. Copiamo la richiesta dall'utente (contiene il puntatore alla destinazione)
+            if (user_memcpy(&userReq, arg, sizeof(BCryptoUserRequest)) != B_OK)
+                return B_BAD_ADDRESS;
+
+            crypto_session* session = (crypto_session*)cookie;
+            // 2. Controllo validità sessione
+            if (!session || !session->is_active) 
+                return B_BAD_VALUE;
+
+            // 3. Mappiamo l'iovec di destinazione nello spazio kernel
+            iovec localDst[1]; 
+            if (user_memcpy(localDst, userReq.destination, sizeof(iovec)) != B_OK)
+                return B_BAD_ADDRESS;
+
+            // 4. Verifica che il buffer sia sufficiente per l'hash richiesto
+            if (localDst[0].iov_len < decode_hash_length(session->algorithm))
+                return B_BAD_VALUE;
+        
+            // 5. Prepariamo la richiesta per il Core
+            userReq.destination = localDst;
+            userReq.vectorCount = 1;
+
+            // 6. CHIAMATA AL CORE
+            // BHashFinal ora si occupa di:
+            // - Calcolare l'hash finale
+            // - Copiarlo in localDst[0].iov_base (gestendo lock/unlock/SMAP)
+            // - Eseguire unlock_memory sullo stato della sessione
+            // - Eseguire la free() dello stato
+            // - Mettere a NULL session->algorithm_state
+            return BHashFinal(session, &userReq);
         }
         
         case B_CRYPTO_IOCTL_GET_RANDOM: {
