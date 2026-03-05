@@ -304,21 +304,52 @@ BCrypto::Process(BCryptoUserRequest& userReq)
 
         } else {
             // --- STRATEGIA: ZERO-COPY DIRETTO (VELOCE) ---
+            /*
             // Se il vettore è grande, ne mandiamo fino a 32 in un colpo solo.
             // Non stiamo a fare troppi controlli, il driver gestirà il resto.
             
-            int vInDirect = std::min(kMaxVects, (int)(userReq.vectorCount - vIndex));
+            */
+            // --- ORA CON CHUNKING ---
+            const size_t kMaxChunkSize = 1024 * 1024; // 1MB, multiplo di 16 e 64
+            if (userReq.source[vIndex].iov_len > kMaxChunkSize) {
+                size_t totalLen = userReq.source[vIndex].iov_len;
+                size_t processed = 0;
+                uint8* srcBase = (uint8*)userReq.source[vIndex].iov_base;
+                uint8* dstBase = (uint8*)userReq.destination[vIndex].iov_base;
+                while (processed < totalLen) {
+                        size_t toProcess = std::min(kMaxChunkSize, totalLen - processed);
+        
+                        iovec tempSrc = { srcBase + processed, toProcess };
+                        iovec tempDst = { dstBase + processed, toProcess };
+        
+                        BCryptoUserRequest chunkReq = userReq;
+                        chunkReq.source = &tempSrc;
+                        chunkReq.destination = &tempDst;
+                        chunkReq.vectorCount = 1;
 
-            BCryptoUserRequest directReq = userReq;
-            directReq.source = &userReq.source[vIndex];
-            directReq.destination = &userReq.destination[vIndex];
-            directReq.vectorCount = vInDirect;
+                        // Se è un digest, dobbiamo usare HASH_UPDATE, 
+                        // se è cifratura usiamo PROCESS (che nel driver deve gestire lo stato dell'IV)
+                        status_t err = ioctl(fFd, (userReq.operation == B_CRYPTO_DIGEST ? 
+                                             B_CRYPTO_IOCTL_HASH_UPDATE : B_CRYPTO_IOCTL_PROCESS), &chunkReq);
+        
+                        if (err < 0) return err;
+                        processed += toProcess;
+                }
+                vIndex++;
+            } else {
+            	int vInDirect = std::min(kMaxVects, (int)(userReq.vectorCount - vIndex));
 
-            status_t err = ioctl(fFd, B_CRYPTO_IOCTL_PROCESS, &directReq);
-            if (err < 0) return err;
+                BCryptoUserRequest directReq = userReq;
+                directReq.source = &userReq.source[vIndex];
+                directReq.destination = &userReq.destination[vIndex];
+                directReq.vectorCount = vInDirect;
 
-            vIndex += vInDirect;
-        }
+                status_t err = ioctl(fFd, B_CRYPTO_IOCTL_PROCESS, &directReq);
+                if (err < 0) return err;
+
+                vIndex += vInDirect;
+            }
+       }
     }
 
     return B_OK;
@@ -343,7 +374,7 @@ BCrypto::_FillRequest(BCryptoUserRequest& req, BCryptoOperation op, BCryptoAlgor
     req.destination = dst;
     req.vectorCount = vCount;
 }
-
+/*
 status_t
 BCrypto::Digest(BCryptoAlgorithmID algo, const void* data, size_t len, void* outHash)
 {
@@ -365,6 +396,50 @@ BCrypto::Digest(BCryptoAlgorithmID algo, const void* data, size_t len, void* out
     if (err == B_OK)
         memcpy(outHash, tempHash, hLen);
         
+    return err;
+}*/
+status_t
+BCrypto::Digest(BCryptoAlgorithmID algo, const void* data, size_t len, void* outHash)
+{
+    size_t hLen = GetHashLength(algo);
+    if (hLen == 0) return B_BAD_VALUE;
+
+    // 1. Inizializzazione
+    status_t err = ioctl(fFd, B_CRYPTO_IOCTL_HASH_INIT, &algo);
+    if (err != B_OK) return err;
+
+    // 2. Chunking manuale (proprio come nella versione BDataIO)
+    const size_t kMaxChunkSize = 1024 * 1024; // 1MB alla volta
+    const uint8* ptr = (const uint8*)data;
+    size_t processed = 0;
+
+    while (processed < len) {
+        size_t toProcess = std::min(kMaxChunkSize, len - processed);
+        iovec src = { (void*)(ptr + processed), toProcess };
+
+        BCryptoUserRequest req;
+        _FillRequest(req, B_CRYPTO_DIGEST, algo, B_CRYPTO_MODE_ANY,
+                     nullptr, 0, nullptr, 0, &src, nullptr, 1);
+
+        err = ioctl(fFd, B_CRYPTO_IOCTL_HASH_UPDATE, &req);
+        if (err != B_OK) break;
+
+        processed += toProcess;
+    }
+
+    // 3. Finalizzazione
+    if (err == B_OK) {
+        uint8 tempHash[64];
+        iovec dst = { tempHash, sizeof(tempHash) };
+        BCryptoUserRequest req;
+        _FillRequest(req, B_CRYPTO_DIGEST, algo, B_CRYPTO_MODE_ANY,
+                     nullptr, 0, nullptr, 0, nullptr, &dst, 1);
+
+        err = ioctl(fFd, B_CRYPTO_IOCTL_HASH_FINAL, &req);
+        if (err == B_OK)
+            memcpy(outHash, tempHash, hLen);
+    }
+
     return err;
 }
 status_t
