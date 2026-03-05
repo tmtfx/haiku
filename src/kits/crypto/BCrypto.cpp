@@ -203,7 +203,109 @@ BCrypto::Encrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
     if (tempBuffer) delete[] tempBuffer;
     return (st == B_OK) ? (ssize_t)processLen : st;
 }
+ssize_t
+BCrypto::Encrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
+                 BDataIO* source, BDataIO* destination)
+{
+    if (!source || !destination) return B_BAD_VALUE;
 
+    const size_t kBufferSize = 1024 * 1024; // 1MB
+    // +16 per sicurezza per contenere l'eventuale blocco di padding extra
+    uint8* inBuffer = new(std::nothrow) uint8[kBufferSize + 16];
+    uint8* outBuffer = new(std::nothrow) uint8[kBufferSize + 16];
+    
+    if (!inBuffer || !outBuffer) {
+        delete[] inBuffer; delete[] outBuffer;
+        return B_NO_MEMORY;
+    }
+
+    status_t err = B_OK;
+    ssize_t bytesRead;
+    size_t totalWritten = 0;
+    bool paddingApplied = false;
+    
+    while (true) {
+        bytesRead = source->Read(inBuffer, kBufferSize);
+        if (bytesRead < 0) { 
+            err = (status_t)bytesRead; 
+            break; 
+        }
+        
+        size_t currentLen = (size_t)bytesRead;
+        
+        // Se leggiamo meno della capacità del buffer, significa che il file è finito.
+        // Questo include il caso in cui bytesRead è 0 (file finito esattamente su 1MB).
+        if (currentLen < kBufferSize) {
+            if (fPaddingEnabled && fPaddingType != B_CRYPTO_PADDING_NONE) {
+                // Calcola la dimensione con padding (es. se 0 -> 16, se 10 -> 16)
+                size_t paddedLen = GetOutputSize(currentLen, B_CRYPTO_ENCRYPT);
+                _ApplyPadding(inBuffer, currentLen, paddedLen);
+                currentLen = paddedLen;
+            }
+            paddingApplied = true;
+        }
+
+        if (currentLen > 0) {
+            iovec src = { inBuffer, currentLen };
+            iovec dst = { outBuffer, currentLen };
+            BCryptoUserRequest req;
+            
+            // Importante: 'iv' punta al buffer che il driver aggiorna 
+            // automaticamente dopo ogni chiamata a Process().
+            _FillRequest(req, B_CRYPTO_ENCRYPT, fAlgorithm, fMode,
+                         key, keyLen, iv, ivLen, &src, &dst, 1);
+
+            err = Process(req);
+            if (err != B_OK) break;
+
+            ssize_t written = destination->Write(outBuffer, currentLen);
+            if (written < 0) { 
+                err = (status_t)written; 
+                break; 
+            }
+            totalWritten += (size_t)written;
+        }
+
+        // Se abbiamo applicato il padding, abbiamo finito il file.
+        if (paddingApplied) break; 
+    }
+/*
+    while ((bytesRead = source->Read(inBuffer, kBufferSize)) >= 0) {
+        size_t currentLen = (size_t)bytesRead;
+        
+        // Se leggiamo meno di kBufferSize, siamo all'ultimo blocco
+        if (currentLen < kBufferSize) {
+            if (fPaddingEnabled && fPaddingType != B_CRYPTO_PADDING_NONE) {
+                size_t paddedLen = GetOutputSize(currentLen, B_CRYPTO_ENCRYPT);
+                _ApplyPadding(inBuffer, currentLen, paddedLen);
+                currentLen = paddedLen;
+            }
+            paddingApplied = true;
+        }
+
+        if (currentLen > 0) {
+            iovec src = { inBuffer, currentLen };
+            iovec dst = { outBuffer, currentLen };
+            BCryptoUserRequest req;
+            _FillRequest(req, B_CRYPTO_ENCRYPT, fAlgorithm, fMode,
+                         key, keyLen, iv, ivLen, &src, &dst, 1);
+
+            err = Process(req);
+            if (err != B_OK) break;
+
+            ssize_t written = destination->Write(outBuffer, currentLen);
+            if (written < 0) { err = (status_t)written; break; }
+            totalWritten += (size_t)written;
+        }
+
+        if (paddingApplied) break; 
+    }*/
+
+    delete[] inBuffer;
+    delete[] outBuffer;
+    
+    return (err == B_OK) ? (ssize_t)totalWritten : (ssize_t)err;
+}
 ssize_t 
 BCrypto::Decrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
                  const void* in, size_t inLen, void* out, size_t outSize) 
@@ -231,7 +333,68 @@ BCrypto::Decrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
 
     return (ssize_t)finalLen;
 }
+ssize_t
+BCrypto::Decrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
+                 BDataIO* source, BDataIO* destination)
+{
+    if (!source || !destination) return B_BAD_VALUE;
 
+    const size_t kBufferSize = 1024 * 1024;
+    uint8* inBuffer = new(std::nothrow) uint8[kBufferSize];
+    uint8* outBuffer = new(std::nothrow) uint8[kBufferSize];
+    
+    if (!inBuffer || !outBuffer) {
+        delete[] inBuffer; delete[] outBuffer;
+        return B_NO_MEMORY;
+    }
+
+    status_t err = B_OK;
+    ssize_t bytesRead;
+    size_t totalWritten = 0;
+    
+    uint8 lastBlock[kBufferSize];
+    size_t lastBlockLen = 0;
+    bool firstChunk = true;
+
+    while ((bytesRead = source->Read(inBuffer, kBufferSize)) > 0) {
+        if (!firstChunk) {
+            ssize_t written = destination->Write(lastBlock, lastBlockLen);
+            if (written < 0) { err = (status_t)written; break; }
+            totalWritten += (size_t)written;
+        }
+
+        iovec src = { inBuffer, (size_t)bytesRead };
+        iovec dst = { lastBlock, (size_t)bytesRead };
+        BCryptoUserRequest req;
+        _FillRequest(req, B_CRYPTO_DECRYPT, fAlgorithm, fMode,
+                     key, keyLen, iv, ivLen, &src, &dst, 1);
+
+        err = Process(req);
+        if (err != B_OK) break;
+
+        lastBlockLen = (size_t)bytesRead;
+        firstChunk = false;
+    }
+
+    if (err == B_OK && lastBlockLen > 0) {
+        size_t finalLen = lastBlockLen;
+        if (fPaddingEnabled && fPaddingType != B_CRYPTO_PADDING_NONE) {
+            finalLen = _RemovePadding(lastBlock, lastBlockLen);
+            if (finalLen == (size_t)B_BAD_DATA) err = B_BAD_DATA;
+        }
+
+        if (err == B_OK && finalLen > 0) {
+            ssize_t written = destination->Write(lastBlock, finalLen);
+            if (written < 0) err = (status_t)written;
+            else totalWritten += (size_t)written;
+        }
+    }
+
+    delete[] inBuffer;
+    delete[] outBuffer;
+    
+    return (err == B_OK) ? (ssize_t)totalWritten : (ssize_t)err;
+}
 status_t 
 BCrypto::Process(BCryptoUserRequest& userReq) 
 {
@@ -350,14 +513,14 @@ BCrypto::Process(BCryptoUserRequest& userReq)
 
                         // Se è un digest, dobbiamo usare HASH_UPDATE, 
                         // se è cifratura usiamo PROCESS (che nel driver deve gestire lo stato dell'IV)
-                        status_t err = ioctl(fFd, (userReq.operation == B_CRYPTO_DIGEST ? 
-                                             B_CRYPTO_IOCTL_HASH_UPDATE : B_CRYPTO_IOCTL_PROCESS), &chunkReq);
+                        status_t err = ioctl(fFd, B_CRYPTO_IOCTL_PROCESS, &chunkReq);
         
                         if (err < 0) return err;
+                        
                         processed += toProcess;
                 }
                 vIndex++;
-            } else {
+            } else { // --- O SENZA CHUNKING
             	int vInDirect = std::min(kMaxVects, (int)(userReq.vectorCount - vIndex));
 
                 BCryptoUserRequest directReq = userReq;
