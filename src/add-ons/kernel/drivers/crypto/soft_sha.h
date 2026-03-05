@@ -28,12 +28,12 @@ struct SoftSHA1Context {
 
 // SHA-256 (e 224) Context
 struct SoftSHA256Context {
+	alignas(64) BCryptoFPUContext fpu_save; //16
     uint32 state[8] __attribute__((aligned(16)));
     uint64 count;
     uint8  buffer[64] __attribute__((aligned(16)));
     size_t buflen;
     size_t outlen;
-    alignas(64) BCryptoFPUContext fpu_save; //16
     uint32 canary; // Il nostro "canarino" nella miniera
 };
 typedef struct SoftSHA256Context SoftSHA224Context;
