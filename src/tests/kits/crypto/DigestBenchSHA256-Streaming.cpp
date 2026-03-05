@@ -1,0 +1,75 @@
+/*
+ * Copyright 2026, Fabio Tomat <f.t.public@gmail.com>
+ * All rights reserved. Distributed under the terms of the MIT license.
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <OS.h>
+#include <File.h>
+#include <DataIO.h>
+#include <crypto/BCrypto.h>
+
+void print_hash(const char* label, uint8* hash, size_t len, double ms, double mbps) {
+    printf("%-15s: ", label);
+    for (size_t i = 0; i < len; i++) printf("%02x", hash[i]);
+    if (ms > 0) {
+        printf(" | %7.2f ms | %7.2f MB/s", ms, mbps);
+    }
+    printf("\n");
+}
+
+int main(int argc, char** argv) {
+    if (argc < 2) {
+        fprintf(stderr, "Uso: %s <file>\n", argv[0]);
+        return 1;
+    }
+
+    const char* filename = argv[1];
+    BFile file(filename, B_READ_ONLY);
+    if (file.InitCheck() != B_OK) {
+        fprintf(stderr, "Errore: impossibile aprire %s\n", filename);
+        return 1;
+    }
+
+    off_t size;
+    file.GetSize(&size);
+    if (size <= 0) {
+        fprintf(stderr, "Errore: il file è vuoto o invalido.\n");
+        return 1;
+    }
+    double sizeMB = (double)size / (1024.0 * 1024.0);
+
+    BCrypto crypto;
+    uint8 digest[64];
+    memset(digest, 0, sizeof(digest));
+    
+    char engineName[64] = "Sconosciuto";
+    crypto.GetEngineName(B_CRYPTO_SHA256, engineName, sizeof(engineName));
+    
+    
+    //printf("DEBUG: Indirizzo buffer digest (userspace): %p\n", digest);
+    size_t hashLen = crypto.GetHashLength(B_CRYPTO_SHA256);
+    bigtime_t start, end;
+
+    printf("Benchmark SHA-256 su: %s (%.2f MB)\n", filename, sizeMB);
+    printf("Motore crittografico: %s\n", engineName);
+    printf("-------------------------------------------------------------------------------\n");
+
+    // --- TEST 1: STREAMING (BDataIO) ---
+    printf("Esecuzione Test Streaming...\n");
+    start = system_time();
+    status_t status = crypto.Digest(B_CRYPTO_SHA256, &file, digest);
+    end = system_time();
+
+    if (status == B_OK) {
+        double duration = (end - start) / 1000.0; // ms
+        double mbps = sizeMB / ((end - start) / 1000000.0);
+        print_hash("Streaming IO", digest, hashLen, duration, mbps);
+    } else {
+        fprintf(stderr, "Errore Streaming: %s\n", strerror(status));
+    }
+    printf("-------------------------------------------------------------------------------\n");
+    return 0;
+}
