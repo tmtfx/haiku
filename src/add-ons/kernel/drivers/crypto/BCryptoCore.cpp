@@ -50,17 +50,28 @@ bool bcrypto_save_regs(BCryptoFPUContext* ctx) {
         //    : [state] "m" (ctx->state), "a" (low), "d" (high)
         //    : "memory"
         //);
+        
+        //asm volatile (
+        //    "xsave %[state]"
+        //    : "=m" (*ctx) // Diciamo a GCC: "Guarda che scrivo nella memoria puntata da ctx"
+        //    : [state] "m" (*ctx), "a" (low), "d" (high)
+        //    : "memory"
+        //);
         asm volatile (
-            "xsave %[state]"
-            : "=m" (*ctx) // Diciamo a GCC: "Guarda che scrivo nella memoria puntata da ctx"
-            : [state] "m" (*ctx), "a" (low), "d" (high)
+            "xsave (%[ptr])"
+            : : [ptr] "r" (ctx), "a" (low), "d" (high)
             : "memory"
         );
     } else {
+        //asm volatile (
+        //    "fxsave %[state]"
+        //    : "=m" (ctx->state)
+        //    : [state] "m" (ctx->state)
+        //    : "memory"
+        //);
         asm volatile (
-            "fxsave %[state]"
-            : "=m" (ctx->state)
-            : [state] "m" (ctx->state)
+            "fxsave (%[ptr])"
+            : : [ptr] "r" (ctx)
             : "memory"
         );
     }
@@ -291,22 +302,23 @@ BHashInit(crypto_session* session)
 
     status_t st = node->algo->HashInit(&session->algorithm_state, &session->state_size);
     if (st == B_OK) {
-    	dprintf("BCRYPTO: Session Init - Algo: %d, StateSize: %ld, Ptr: %p\n", 
-                (int)session->algorithm, session->state_size, session->algorithm_state);
     	/* O blocco la memoria del contesto
     	 * o forzo in update la residenza in memoria del contesto */
     	// BLOCCO DELLA MEMORIA DEL CONTESTO
         
         // Se state_size è sospettosamente piccolo (es. < 1024), sospetta un errore nel driver
-        if (session->state_size < 1024) {
-             dprintf("BCRYPTO: ATTENZIONE! state_size molto piccolo, XSAVE potrebbe sforare!\n");
-        }
+        //if (session->state_size < 1024) {
+        //     dprintf("BCRYPTO: ATTENZIONE! state_size molto piccolo, XSAVE potrebbe sforare!\n");
+        //}
         
         st = lock_memory(session->algorithm_state, session->state_size, B_READ_DEVICE);
         
         if (st != B_OK) {
             // Se il lock fallisce, dobbiamo pulire lo stato appena creato dal driver
             // (Assumendo che tu abbia una funzione di cleanup o che il driver gestisca l'errore)
+            bcrypto_secure_memzero(session->algorithm_state, session->state_size);
+            free(session->algorithm_state);
+            session->algorithm_state = NULL;
             return st; 
         }
         // ---------------------------------- //
@@ -362,6 +374,65 @@ BHashUpdate(crypto_session* session, BCryptoUserRequest* request)
 status_t
 BHashFinal(crypto_session* session, BCryptoUserRequest* request)
 {
+    // 1. Controllo base: se non c'è la sessione, non possiamo fare nulla.
+    if (session == NULL)
+        return B_BAD_VALUE;
+
+    MutexLocker _(sCryptoLock);
+    status_t st = B_OK;
+
+    // 2. FASE DI CALCOLO (Solo se la sessione è attiva e abbiamo una richiesta)
+    // Se request è NULL, saltiamo questa parte e andiamo dritti al CLEANUP.
+    if (session->is_active && session->algorithm_state != NULL) {
+        AlgoNode* node = _FindAlgorithm(session->algorithm, B_CRYPTO_MODE_ANY);
+        
+        if (node && node->algo->HashFinal) {
+            uint8 tempDigest[64]; // Buffer sicuro sullo stack
+            st = node->algo->HashFinal(session->algorithm_state, tempDigest);
+
+            // Copiamo il digest all'utente solo se ci è stata passata una richiesta valida
+            if (st == B_OK && request != NULL && request->destination != NULL) {
+                size_t hashLen = decode_hash_length(session->algorithm);
+                
+                // Protezione SMAP e Lock per la memoria utente
+                if (lock_memory(request->destination[0].iov_base, hashLen, B_READ_DEVICE) == B_OK) {
+                    UserAccessExposer access;
+                    memcpy(request->destination[0].iov_base, tempDigest, hashLen);
+                    unlock_memory(request->destination[0].iov_base, hashLen, B_READ_DEVICE);
+                } else {
+                    st = B_BAD_ADDRESS;
+                }
+            }
+        } else {
+            st = B_NOT_SUPPORTED;
+        }
+    }
+
+    // --- 3. CLEANUP OBBLIGATORIO (Il cuore della stabilità) ---
+    // Gestiamo la memoria allocata in BHashInit indipendentemente dall'esito del calcolo.
+    
+    if (session->algorithm_state != NULL) {
+        // Sblocco simmetrico (toglie il 'wired' dalle pagine)
+        unlock_memory(session->algorithm_state, session->state_size, B_READ_DEVICE);
+        
+        // Pulizia dati sensibili
+        bcrypto_secure_memzero(session->algorithm_state, session->state_size);
+        
+        // Restituzione allo Slab Allocator del Kernel
+        free(session->algorithm_state);
+        
+        // Neutralizzazione dei puntatori per evitare Use-After-Free
+        session->algorithm_state = NULL;
+    }
+
+    session->is_active = false;
+
+    return st;
+}
+/*
+status_t
+BHashFinal(crypto_session* session, BCryptoUserRequest* request)
+{
 	if (session == NULL || !session->is_active)
         return B_BAD_VALUE;
         
@@ -369,6 +440,42 @@ BHashFinal(crypto_session* session, BCryptoUserRequest* request)
     AlgoNode* node = _FindAlgorithm(session->algorithm, B_CRYPTO_MODE_ANY);
     if (!node || !node->algo->HashFinal) return B_NOT_SUPPORTED;
     
+    status_t st = B_OK;
+    if (session->is_active && node && node->algo->HashFinal) {
+        uint8 tempDigest[64];
+        st = node->algo->HashFinal(session->algorithm_state, tempDigest);
+
+        if (st == B_OK && request && request->destination) {
+            size_t hashLen = decode_hash_length(session->algorithm);
+            // Lock del buffer utente solo per la copia
+            if (lock_memory(request->destination[0].iov_base, hashLen, B_READ_DEVICE) == B_OK) {
+                UserAccessExposer access;
+                memcpy(request->destination[0].iov_base, tempDigest, hashLen);
+                unlock_memory(request->destination[0].iov_base, hashLen, B_READ_DEVICE);
+            }
+        }
+    }
+
+    // --- CLEANUP OBBLIGATORIO ---
+    // Questo accade SEMPRE, anche se la sessione non era attiva o il calcolo fallisce
+    // per garantire che la memoria venga sbloccata e liberata correttamente.
+    
+    // 1. Sblocco (Simmetrico a BHashInit)
+    unlock_memory(session->algorithm_state, session->state_size, B_READ_DEVICE);
+    
+    // 2. Azzeramento sicurezza
+    secure_memzero(session->algorithm_state, session->state_size);
+    
+    // 3. Liberazione (Unico punto nel sistema)
+    free(session->algorithm_state);
+    
+    // 4. Reset puntatori
+    session->algorithm_state = NULL;
+    session->is_active = false;
+
+    return st;
+}*/
+    /*
     uint8 tempDigest[64]; // Massimo per SHA-512
     status_t st = node->algo->HashFinal(session->algorithm_state, tempDigest);
 
@@ -378,9 +485,6 @@ BHashFinal(crypto_session* session, BCryptoUserRequest* request)
         // Assumiamo che request->destination[0] sia valido
         st = lock_memory(request->destination[0].iov_base, hashLen, B_READ_DEVICE);
         if (st == B_OK) {
-            /*__asm__ __volatile__ ("stac" : : : "cc");//user_access_enable();
-            memcpy(request->destination[0].iov_base, tempDigest, hashLen);
-            __asm__ __volatile__ ("clac" : : : "cc");//user_access_disable();*/
             {
             	UserAccessExposer access;
             	memcpy(request->destination[0].iov_base, tempDigest, hashLen);
@@ -392,13 +496,16 @@ BHashFinal(crypto_session* session, BCryptoUserRequest* request)
     // Sblocchiamo la memoria del contesto che avevamo lockato in BHashInit
     if (session->algorithm_state != NULL) {
         unlock_memory(session->algorithm_state, session->state_size, B_READ_DEVICE);
+        // LIBERIAMO DEFINITIVAMENTE (perché la sessione finisce qui)
+        free(session->algorithm_state); // se crasha con gli altri algoritmi sappiamo che qua libera tutto!!! bisogna adattarli
+        session->algorithm_state = NULL;
     }
 
     // Segniamo la sessione come non più attiva
     session->is_active = false;
 
     return st;
-}
+}*/
 
 
 status_t
