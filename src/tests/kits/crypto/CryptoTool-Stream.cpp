@@ -56,90 +56,56 @@ int main(int argc, char** argv) {
 
     BCrypto crypto;
     if (crypto.InitCheck() != B_OK) return 1;
+    
+    // Configuriamo l'algoritmo e il padding una volta sola
+    crypto.SetAlgorithm(B_CRYPTO_AES);
+    crypto.SetMode(B_CRYPTO_MODE_CBC);
     crypto.SetPadding(paddingEnabled, pType);
 
-    BFile file(filePath, B_READ_ONLY);
-    if (file.InitCheck() != B_OK) { perror("Errore input"); return 1; }
-    off_t fileSize;
-    file.GetSize(&fileSize);
+    // Apriamo i file usando le classi Haiku (che ereditano da BDataIO)
+    BFile inputFile(filePath, B_READ_ONLY);
+    BFile outputFile(outPath, B_WRITE_ONLY | B_CREATE_FILE | B_ERASE_FILE);
+
+    if (inputFile.InitCheck() != B_OK || outputFile.InitCheck() != B_OK) {
+        fprintf(stderr, "Errore nell'apertura dei file\n");
+        return 1;
+    }
 
     uint8 key[32];
-    hex_to_bytes(keyHex, key, strlen(keyHex) / 2);
+    size_t keyLen = strlen(keyHex) / 2;
+    if (keyLen != 16 && keyLen != 24 && keyLen != 32) {
+        fprintf(stderr, "Errore: Lunghezza chiave non valida (%zu byte). Usare 16, 24 o 32.\n", keyLen);
+        return 1;
+    }
+    hex_to_bytes(keyHex, key, keyLen);
     uint8 iv[16] = {0};
     if (ivHex) hex_to_bytes(ivHex, iv, 16);
 
-    std::vector<iovec> vecs;
-    off_t remaining = fileSize;
+    // --- IL CUORE DEL PROGRAMMA ---
+    ssize_t result;
+    bigtime_t startTime = system_time();
+    if (op == B_CRYPTO_ENCRYPT) {
+        result = crypto.Encrypt(key, keyLen, iv, 16, &inputFile, &outputFile);
+    } else {
+        result = crypto.Decrypt(key, keyLen, iv, 16, &inputFile, &outputFile);
+    }
+    bigtime_t endTime = system_time();
+    double durationSeconds = (endTime - startTime) / 1000000.0;
 
-    // --- CARICAMENTO VETTORIALE ---
-    while (remaining > 0) {
-        size_t toRead = std::min((off_t)CHUNK_SIZE, remaining);
-        size_t allocSize = toRead;
-        
-        bool isLast = (remaining == (off_t)toRead);
-        
-        // Se stiamo cifrando e siamo all'ultimo blocco, allochiamo spazio extra per il padding
-        if (op == B_CRYPTO_ENCRYPT && isLast && paddingEnabled) {
-            allocSize = crypto.GetOutputSize(toRead, B_CRYPTO_ENCRYPT);
-        }
+    if (result >= 0) {
+    	double megabytes = (double)result / (1024.0 * 1024.0);
+        double speed = (durationSeconds > 0) ? (megabytes / durationSeconds) : 0;
 
-        uint8* buffer = (uint8*)malloc(allocSize);
-        if (!buffer) return 1;
-
-        file.Read(buffer, toRead);
-        
-        // Applichiamo il padding nell'ultimo buffer se necessario
-        if (op == B_CRYPTO_ENCRYPT && isLast && paddingEnabled) {
-            // Usiamo una funzione helper o logica interna
-            // Nota: BCrypto::_ApplyPadding è privata, ma qui simuliamo la logica
-            size_t padLen = allocSize - toRead;
-            if (pType == B_CRYPTO_PKCS7) {
-                memset(buffer + toRead, (uint8)padLen, padLen);
-            } else if (pType == B_CRYPTO_ISO7816) {
-                buffer[toRead] = 0x80;
-                if (padLen > 1) memset(buffer + toRead + 1, 0, padLen - 1);
-            }
-        }
-
-        iovec iov = { buffer, allocSize };
-        vecs.push_back(iov);
-        remaining -= toRead;
+        printf("\n--- Risultati Operazione ---\n");
+        printf("Dati processati: %zd byte (%.2f MB)\n", result, megabytes);
+        printf("Tempo impiegato: %.4f secondi\n", durationSeconds);
+        printf("Velocità media:  %.2f MB/s\n", speed);
+        printf("----------------------------\n");
+        printf("Successo! Processati %zd byte.\n", result);
+    } else {
+        fprintf(stderr, "Errore durante il processamento: %s\n", strerror(result));
+        return 1;
     }
 
-    // --- PROCESSAMENTO ---
-    BCryptoUserRequest req;
-    memset(&req, 0, sizeof(req));
-    req.operation = (BCryptoOperation)op;
-    req.algorithm = B_CRYPTO_AES; 
-    req.mode      = B_CRYPTO_MODE_CBC;
-    req.key = key; req.keyLength = 32;
-    req.iv = iv;   req.ivLength = 16;
-    req.source = vecs.data();
-    req.destination = vecs.data();
-    req.vectorCount = vecs.size();
-
-    status_t status = crypto.Process(req);
-
-    // --- SALVATAGGIO E RIMOZIONE PADDING ---
-    if (status == B_OK) {
-        BFile outFile(outPath, B_WRITE_ONLY | B_CREATE_FILE | B_ERASE_FILE);
-        for (size_t i = 0; i < vecs.size(); i++) {
-            size_t toWrite = vecs[i].iov_len;
-            
-            // Se decifriamo, l'ultimo blocco va pulito dal padding
-            if (op == B_CRYPTO_DECRYPT && i == vecs.size() - 1 && paddingEnabled) {
-                // Simuliamo _RemovePadding
-                uint8* lastBuf = (uint8*)vecs[i].iov_base;
-                if (pType == B_CRYPTO_PKCS7) {
-                    uint8 pVal = lastBuf[toWrite - 1];
-                    if (pVal <= 16) toWrite -= pVal;
-                } // ... altre logiche di strip ...
-            }
-            outFile.Write(vecs[i].iov_base, toWrite);
-        }
-        printf("Successo: %s\n", outPath);
-    }
-
-    for (auto& iov : vecs) free(iov.iov_base);
     return 0;
 }
