@@ -23,14 +23,14 @@ bool bcrypto_save_regs(BCryptoFPUContext* ctx) {
 	if (((uintptr_t)ctx & 63) != 0) {
         return false; 
     }
-    /* oppure così, ma è più lenta:
-    if (((uintptr_t)ctx % 64) != 0) {
-        return false; 
-    }*/
-    /* questo nel caso dovessi aggiungere altri campi prima
-    if (((uintptr_t)ctx->state & 63) != 0) {
-        return false; // O gestisci l'errore: XSAVE crasherebbe qui
-    }*/
+    // oppure così, ma è più lenta:
+    //if (((uintptr_t)ctx % 64) != 0) {
+    //    return false; 
+    //}
+    // questo nel caso dovessi aggiungere altri campi prima
+    //if (((uintptr_t)ctx->state & 63) != 0) {
+    //    return false; // O gestisci l'errore: XSAVE crasherebbe qui
+    //}
     if (gXsaveSize > B_MAX_XSAVE_SIZE) {
         dprintf("BCRYPTO: La CPU richiede %u byte, ma il buffer è di soli %d!", 
               gXsaveSize, B_MAX_XSAVE_SIZE);
@@ -42,19 +42,14 @@ bool bcrypto_save_regs(BCryptoFPUContext* ctx) {
         // edx:eax contiene la maschera dei registri da salvare
         uint32 low = (uint32)gXsaveMask;
         uint32 high = (uint32)(gXsaveMask >> 32);
-        
-        /*asm volatile (
-            "xsave %[state]"
-            : : [state] "m" (ctx->state), "a" (low), "d" (high)
-            : "memory"
-        );*/
-        /* valutare se è meglio:
-        asm volatile (
-            "xsave %[state]"
-            : "=m" (ctx->state)  // Diciamo a GCC che scriviamo in memoria
-            : [state] "m" (ctx->state), "a" (low), "d" (high)
-            : "memory"
-        );*/
+
+        // valutare se è meglio:
+        //asm volatile (
+        //    "xsave %[state]"
+        //    : "=m" (ctx->state)  // Diciamo a GCC che scriviamo in memoria
+        //    : [state] "m" (ctx->state), "a" (low), "d" (high)
+        //    : "memory"
+        //);
         asm volatile (
             "xsave %[state]"
             : "=m" (*ctx) // Diciamo a GCC: "Guarda che scrivo nella memoria puntata da ctx"
@@ -62,12 +57,6 @@ bool bcrypto_save_regs(BCryptoFPUContext* ctx) {
             : "memory"
         );
     } else {
-        /*asm volatile (
-            "fxsave %[state]"
-            : : [state] "m" (ctx->state)
-            : "memory"
-        );*/
-        /* valutare se è meglio:*/
         asm volatile (
             "fxsave %[state]"
             : "=m" (ctx->state)
@@ -351,6 +340,14 @@ BHashUpdate(crypto_session* session, BCryptoUserRequest* request)
         //fpu_ptr[0] = fpu_ptr[0]; 
         //fpu_ptr[sizeof(BCryptoFPUContext) - 1] = fpu_ptr[sizeof(BCryptoFPUContext) - 1];
         
+        //volatile uint8* fpu_ptr = (volatile uint8*)session->algorithm_state;
+        //size_t size = session->state_size;
+
+        // Tocchiamo l'inizio di ogni pagina coinvolta nel contesto
+        //for (size_t offset = 0; offset < size; offset += 4096) {
+        //    fpu_ptr[offset] = fpu_ptr[offset];
+        //}
+        
         UserAccessExposer access;
         st = node->algo->HashUpdate(session->algorithm_state, request->source, request->vectorCount);
     }
@@ -436,31 +433,33 @@ BSubmitCryptoRequest(BCryptoRequest* request)
     if (request->operation == B_CRYPTO_DIGEST) {
     	/*  HARD WAY */
         status_t st = B_OK;
-        size_t lockedCount = 0;
+        size_t lockedSrcCount = 0;
+        size_t lockedDstCount = 0;
 
         // Lock sorgenti
+        // 1. LOCK: Proteggiamo i buffer
         for (size_t i = 0; i < request->vectorCount; i++) {
             st = lock_memory(request->source[i].iov_base, request->source[i].iov_len, B_READ_DEVICE);
             if (st != B_OK) break;
-            lockedCount++;
-        }
-
-        if (st == B_OK) {
-            // Lock destinazione
-            st = lock_memory(request->destination[0].iov_base, request->destination[0].iov_len, B_READ_DEVICE);
-            if (st == B_OK) {
-            	{
-            		UserAccessExposer access;
-            		st = algo->Process(request); 
-                }
-                unlock_memory(request->destination[0].iov_base, request->destination[0].iov_len, B_READ_DEVICE);
+            lockedSrcCount++;
+    
+            if (request->source[i].iov_base != request->destination[i].iov_base) {
+                st = lock_memory(request->destination[i].iov_base, request->destination[i].iov_len, B_READ_DEVICE);
+                if (st != B_OK) break;
+                lockedDstCount++;
             }
         }
 
-        // Unlock sorgenti (solo quelli effettivamente lockati)
-        for (size_t i = 0; i < lockedCount; i++) {
-            unlock_memory(request->source[i].iov_base, request->source[i].iov_len, B_READ_DEVICE);
+        // 2. ESECUZIONE: Chiamiamo il driver ORA che la memoria è al sicuro
+        if (st == B_OK) {
+            UserAccessExposer access;
+            st = algo->Process(request);
         }
+        
+        for (size_t i = 0; i < lockedSrcCount; i++)
+             unlock_memory(request->source[i].iov_base, request->source[i].iov_len, B_READ_DEVICE);
+        for (size_t i = 0; i < lockedDstCount; i++)
+             unlock_memory(request->destination[i].iov_base, request->destination[i].iov_len, B_READ_DEVICE);
             
         return _FinalizeRequest(request, st);
         /* DEBUG WAY 
