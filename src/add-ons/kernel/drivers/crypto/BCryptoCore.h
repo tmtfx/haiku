@@ -10,7 +10,24 @@
 
 status_t crypto_init_core();
 void     crypto_uninit_core();
+#ifndef BCRYPTO_SECURE_MEMZERO
+#define BCRYPTO_SECURE_MEMZERO
 
+static inline void
+bcrypto_secure_memzero(void* p, size_t s)
+{
+    if (p == NULL)
+        return;
+    volatile uint8* cp = (volatile uint8*)p;
+    while (s--)
+        *cp++ = 0;
+    
+    // Aggiungiamo il barrier per essere sicuri al 100% 
+    // che il compilatore non ottimizzi via il loop
+    __asm__ volatile("" : : "r"(p) : "memory");
+}
+
+#endif
 uint32   BGetStoredCryptoCapabilities();
 
 status_t BRegisterCryptoAlgorithm(BCryptoAlgorithm* algorithm);
