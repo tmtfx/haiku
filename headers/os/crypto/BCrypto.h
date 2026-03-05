@@ -26,10 +26,16 @@ public:
 			                            uint8* iv, size_t ivLen,
                                         const void* in, size_t inLen,
                                         void* out, size_t outSize);
+            ssize_t             Decrypt(uint8* key, size_t keyLen, 
+                                        uint8* iv, size_t ivLen,
+                                        BDataIO* source, BDataIO* destination);
 			ssize_t             Encrypt(uint8* key, size_t keyLen,
                                         uint8* iv, size_t ivLen,
                                         const void* in, size_t inLen,
                                         void* out, size_t outSize);
+            ssize_t             Encrypt(uint8* key, size_t keyLen, 
+                                        uint8* iv, size_t ivLen,
+                                        BDataIO* source, BDataIO* destination);
 			status_t			Process(BCryptoUserRequest& userReq);
 			size_t              GetHashLength(BCryptoAlgorithmID algo) const;
 			status_t            Digest(BCryptoAlgorithmID algo, const void* data,
