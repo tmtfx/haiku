@@ -194,8 +194,14 @@ hybrid_sha_process(BCryptoRequest* request)
     
 
     // Se qualcosa è fallito prima del Final, liberiamo qui
-    if (ctx != NULL)
-        _free_context(ctx, ctxSize);
+    if (ctx != NULL) {
+        //_free_context(ctx, ctxSize);
+        //memset(ctx, 0, sizeof(SoftSHA256Context));
+        //free(ctx); 
+        bcrypto_secure_memzero(ctx, sizeof(SoftSHA256Context));
+        free(ctx);
+        ctx = NULL;
+    }
 
     if (request->completionCallback)
         request->completionCallback(request, st);
@@ -451,7 +457,9 @@ status_t hybrid_SHA256_final_bridge(void* context, uint8* outDigest)
     if (context == NULL || outDigest == NULL) return B_BAD_VALUE;
     SoftSHA256Context* ctx = (SoftSHA256Context*)context;
     hybrid_SHA256_finalize(ctx, outDigest);
-    _free_context(ctx, sizeof(SoftSHA256Context));
+    //_free_context(ctx, sizeof(SoftSHA256Context));
+    //memset(ctx, 0, sizeof(SoftSHA256Context));
+    bcrypto_secure_memzero(ctx, sizeof(SoftSHA256Context));
     return B_OK;
 }
 
