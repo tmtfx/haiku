@@ -269,42 +269,52 @@ BCrypto::Encrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
         // Se abbiamo applicato il padding, abbiamo finito il file.
         if (paddingApplied) break; 
     }
-/*
-    while ((bytesRead = source->Read(inBuffer, kBufferSize)) >= 0) {
-        size_t currentLen = (size_t)bytesRead;
-        
-        // Se leggiamo meno di kBufferSize, siamo all'ultimo blocco
-        if (currentLen < kBufferSize) {
-            if (fPaddingEnabled && fPaddingType != B_CRYPTO_PADDING_NONE) {
-                size_t paddedLen = GetOutputSize(currentLen, B_CRYPTO_ENCRYPT);
-                _ApplyPadding(inBuffer, currentLen, paddedLen);
-                currentLen = paddedLen;
-            }
-            paddingApplied = true;
-        }
-
-        if (currentLen > 0) {
-            iovec src = { inBuffer, currentLen };
-            iovec dst = { outBuffer, currentLen };
-            BCryptoUserRequest req;
-            _FillRequest(req, B_CRYPTO_ENCRYPT, fAlgorithm, fMode,
-                         key, keyLen, iv, ivLen, &src, &dst, 1);
-
-            err = Process(req);
-            if (err != B_OK) break;
-
-            ssize_t written = destination->Write(outBuffer, currentLen);
-            if (written < 0) { err = (status_t)written; break; }
-            totalWritten += (size_t)written;
-        }
-
-        if (paddingApplied) break; 
-    }*/
-
     delete[] inBuffer;
     delete[] outBuffer;
     
     return (err == B_OK) ? (ssize_t)totalWritten : (ssize_t)err;
+}
+// Versione speciale per Cifratura GCM
+ssize_t
+BCrypto::Encrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
+                 const void* in, size_t inLen, void* out, void* outTag)
+{
+    if (fMode != B_CRYPTO_MODE_GCM) return B_BAD_VALUE;
+    if (outTag == NULL) return B_BAD_VALUE;
+
+    // Preparazione vettori: 0 = Dati, 1 = Tag
+    iovec srcVecs[2] = { {(void*)in, inLen}, {outTag, 16} };
+    iovec dstVecs[2] = { {out, inLen}, {outTag, 16} };
+
+    BCryptoUserRequest req;
+    _FillRequest(req, B_CRYPTO_ENCRYPT, fAlgorithm, fMode,
+                 key, keyLen, iv, ivLen, srcVecs, dstVecs, 2);
+
+    status_t st = Process(req);
+    return (st == B_OK) ? (ssize_t)inLen : (ssize_t)st;
+}
+
+// Per la Decifratura GCM
+ssize_t
+BCrypto::Decrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
+                 const void* in, size_t inLen, void* out, const void* inTag)
+{
+    if (fMode != B_CRYPTO_MODE_GCM) return B_BAD_VALUE;
+    if (inTag == NULL || in == NULL || out == NULL) return B_BAD_VALUE;
+
+    // In decifratura il Tag è un INPUT (serve al driver per validare)
+    iovec srcVecs[2] = { {(void*)in, inLen}, {(void*)inTag, 16} };
+    iovec dstVecs[1] = { {out, inLen} }; // La destinazione ha solo i dati in chiaro
+
+    BCryptoUserRequest req;
+    _FillRequest(req, B_CRYPTO_DECRYPT, fAlgorithm, fMode,
+                 key, keyLen, iv, ivLen, srcVecs, dstVecs, 2);
+
+    status_t st = Process(req);
+    if (st == B_OK)
+        return (ssize_t)inLen;
+    
+    return (ssize_t)st;
 }
 ssize_t 
 BCrypto::Decrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
@@ -558,75 +568,6 @@ BCrypto::_FillRequest(BCryptoUserRequest& req, BCryptoOperation op, BCryptoAlgor
     req.destination = dst;
     req.vectorCount = vCount;
 }
-/*
-status_t
-BCrypto::Digest(BCryptoAlgorithmID algo, const void* data, size_t len, void* outHash)
-{
-	//printf("BCrypto: digest diretto\n");
-	//fflush(stdout);
-	size_t hLen = GetHashLength(algo);
-	if (hLen == 0) return B_BAD_VALUE;
-    iovec src = { (void*)data, len };
-    uint8 tempHash[64];
-    iovec dst = { tempHash, sizeof(tempHash) };
-
-    BCryptoUserRequest req;
-    _FillRequest(req, B_CRYPTO_DIGEST, algo, B_CRYPTO_MODE_ANY,
-                 nullptr, 0, nullptr, 0, &src, &dst, 1);
-
-    // Mandiamo direttamente al driver. Il Core userà algo->Process()
-    status_t err = ioctl(fFd, B_CRYPTO_IOCTL_PROCESS, &req);
-    
-    if (err == B_OK)
-        memcpy(outHash, tempHash, hLen);
-        
-    return err;
-}*/
-/* prima di spostare il chunking in Process
-status_t
-BCrypto::Digest(BCryptoAlgorithmID algo, const void* data, size_t len, void* outHash)
-{
-    size_t hLen = GetHashLength(algo);
-    if (hLen == 0) return B_BAD_VALUE;
-
-    // 1. Inizializzazione
-    status_t err = ioctl(fFd, B_CRYPTO_IOCTL_HASH_INIT, &algo);
-    if (err != B_OK) return err;
-
-    // 2. Chunking manuale (proprio come nella versione BDataIO)
-    const size_t kMaxChunkSize = 1024 * 1024; // 1MB alla volta
-    const uint8* ptr = (const uint8*)data;
-    size_t processed = 0;
-
-    while (processed < len) {
-        size_t toProcess = std::min(kMaxChunkSize, len - processed);
-        iovec src = { (void*)(ptr + processed), toProcess };
-
-        BCryptoUserRequest req;
-        _FillRequest(req, B_CRYPTO_DIGEST, algo, B_CRYPTO_MODE_ANY,
-                     nullptr, 0, nullptr, 0, &src, nullptr, 1);
-
-        err = ioctl(fFd, B_CRYPTO_IOCTL_HASH_UPDATE, &req);
-        if (err != B_OK) break;
-
-        processed += toProcess;
-    }
-
-    // 3. Finalizzazione
-    if (err == B_OK) {
-        uint8 tempHash[64];
-        iovec dst = { tempHash, sizeof(tempHash) };
-        BCryptoUserRequest req;
-        _FillRequest(req, B_CRYPTO_DIGEST, algo, B_CRYPTO_MODE_ANY,
-                     nullptr, 0, nullptr, 0, nullptr, &dst, 1);
-
-        err = ioctl(fFd, B_CRYPTO_IOCTL_HASH_FINAL, &req);
-        if (err == B_OK)
-            memcpy(outHash, tempHash, hLen);
-    }
-
-    return err;
-}*/
 status_t
 BCrypto::Digest(BCryptoAlgorithmID algo, const void* data, size_t len, void* outHash)
 {
