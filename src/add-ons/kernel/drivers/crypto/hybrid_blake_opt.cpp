@@ -208,17 +208,6 @@ static void blake2b_compress_avx2(SoftBlake2bContext* ctx, const uint8 block[128
  */
 __attribute__((target("ssse3,sse4.1")))
 static void blake2b_compress_sse(SoftBlake2bContext* ctx, const uint8 block[128]) {
-    // 1. Caricamento Messaggio (m0-m7 contengono i 128 byte del blocco)
-    // Carichiamo direttamente dalla RAM nei registri XMM
-    const __m128i* m_ptr = (const __m128i*)block;
-    __m128i m0 = _mm_loadu_si128(m_ptr + 0);
-    __m128i m1 = _mm_loadu_si128(m_ptr + 1);
-    __m128i m2 = _mm_loadu_si128(m_ptr + 2);
-    __m128i m3 = _mm_loadu_si128(m_ptr + 3);
-    __m128i m4 = _mm_loadu_si128(m_ptr + 4);
-    __m128i m5 = _mm_loadu_si128(m_ptr + 5);
-    __m128i m6 = _mm_loadu_si128(m_ptr + 6);
-    __m128i m7 = _mm_loadu_si128(m_ptr + 7);
 
     // 2. Inizializzazione Stato nei registri
     // r0,r1 = v0..v3 | r2,r3 = v4..v7 | r4,r5 = v8..v11 | r6,r7 = v12..v15
