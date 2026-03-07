@@ -30,6 +30,7 @@ status_t soft_aes_set_key(SoftAESContext* ctx, const uint8* key, size_t keyLengt
 void soft_aes_encrypt_block(SoftAESContext* ctx, const uint8* in, uint8* out);
 void soft_aes_decrypt_block(SoftAESContext* ctx, const uint8* in, uint8* out);
 
+void soft_aes_gcm_update_internal(SoftAESContext* ctx, const uint8* src, uint8* dst, size_t len);
 /* Securely zeroize context */
 void soft_aes_zero(SoftAESContext* ctx);
 void ghash_multiply(uint8* x, const uint8* h);
