@@ -26,7 +26,7 @@ aes_increment_counter(uint8* counter)
 /* AES GCM BRIDGES                                                  */
 /* ---------------------------------------------------------------- */
 static status_t
-soft_aes_gcm_stream_init(void** context, size_t* _contextSize, const uint8* key, size_t keyLen, 
+soft_aes_gcm_stream_init(void** context, size_t* _contextSize, BCryptoOperation op,const uint8* key, size_t keyLen, 
                          const uint8* iv, size_t ivLen)
 {
     if (!context || !key || !iv) return B_BAD_VALUE;
@@ -35,6 +35,13 @@ soft_aes_gcm_stream_init(void** context, size_t* _contextSize, const uint8* key,
     SoftAESContext* ctx = (SoftAESContext*)malloc(sizeof(SoftAESContext));
     if (!ctx) return B_NO_MEMORY;
     memset(ctx, 0, sizeof(SoftAESContext));
+    
+    dprintf("BCRYPTO: Init - Resetting total_len and GHASH accumulator\n");
+    
+    // Settiamo il flag in base all'operazione passata dal Core
+    ctx->is_encrypting = (op == B_CRYPTO_ENCRYPT);
+    // Pulizia esplicita dell'accumulatore (nel caso memset non bastasse o per chiarezza)
+    memset(ctx->tag_acc, 0, 16);
 
     // 2. Setup delle chiavi (AES-128/256)
     status_t status = soft_aes_set_key(ctx, key, keyLen);
@@ -92,6 +99,7 @@ static status_t
 soft_aes_gcm_stream_final(void* context, uint8* outTag)
 {
     SoftAESContext* ctx = (SoftAESContext*)context;
+    dprintf("BCRYPTO: Finalizing - Total Bytes processed: %lu\n", ctx->total_len);
     if (!ctx) return B_BAD_VALUE;
 
     // 1. Fase finale GHASH: lunghezza dati
@@ -118,6 +126,10 @@ soft_aes_gcm_stream_final(void* context, uint8* outTag)
     for (int i = 0; i < 16; i++) {
         outTag[i] = ctx->tag_acc[i] ^ encryptedJ0[i];
     }
+    
+    dprintf("BCRYPTO: Computed Tag: %02x%02x%02x%02x%02x%02x%02x%02x\n",
+        outTag[0], outTag[1], outTag[2], outTag[3], 
+        outTag[4], outTag[5], outTag[6], outTag[7]);
 
     return B_OK;
 }
