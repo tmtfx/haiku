@@ -50,6 +50,92 @@ soft_aes_process_internal(BCryptoRequest* request, bool encrypt)
 
     SoftAESContext ctx{};
     soft_aes_set_key(&ctx, (uint8*)request->key, request->keyLength);
+    
+    if (request->mode == B_CRYPTO_MODE_GCM) {
+        // 1. Derivazione chiave Hash H = AES_K(0)
+        uint8 h_key[16] = {0};
+        soft_aes_encrypt_block(&ctx, h_key, h_key);
+
+        // 2. Preparazione contatori (J0)
+        uint8 j0[16];
+        if (request->ivLength == 12) {
+            memcpy(j0, request->iv, 12);
+            memset(j0 + 12, 0, 3);
+            j0[15] = 1;
+        } else {
+            // Se IV != 96 bit servirebbe un pre-hash GHASH, 
+            // per ora limitiamoci allo standard 96-bit.
+            soft_aes_zero(&ctx);
+            return B_NOT_SUPPORTED; 
+        }
+
+        uint8 current_ctr[16];
+        memcpy(current_ctr, j0, 16);
+        aes_increment_counter(current_ctr);
+
+        uint8 tag_acc[16] = {0};
+        size_t total_len = 0;
+
+        // 3. Loop sui vettori
+        for (size_t i = 0; i < request->vectorCount; i++) {
+            // Logica di esclusione del vettore TAG (come abbiamo discusso)
+            if (!encrypt && i == request->vectorCount - 1) break;
+            if (encrypt && i == request->vectorCount - 1 && request->vectorCount > 1) break;
+
+            uint8* in = (uint8*)request->source[i].iov_base;
+            uint8* out = (uint8*)request->destination[i].iov_base;
+            size_t len = request->source[i].iov_len;
+            total_len += len;
+
+            for (size_t b = 0; b < len; b += 16) {
+                size_t chunk = (len - b < 16) ? len - b : 16;
+                uint8 block[16] = {0};
+                memcpy(block, in + b, chunk);
+
+                if (encrypt) {
+                    uint8 ks[16];
+                    soft_aes_encrypt_block(&ctx, current_ctr, ks);
+                    for (size_t j = 0; j < chunk; j++) out[b + j] = block[j] ^ ks[j];
+                    
+                    uint8 hash_in[16] = {0};
+                    memcpy(hash_in, out + b, chunk);
+                    for (int j = 0; j < 16; j++) tag_acc[j] ^= hash_in[j];
+                    ghash_multiply(tag_acc, h_key);
+                } else {
+                    for (size_t j = 0; j < chunk; j++) tag_acc[j] ^= block[j];
+                    ghash_multiply(tag_acc, h_key);
+
+                    uint8 ks[16];
+                    soft_aes_encrypt_block(&ctx, current_ctr, ks);
+                    for (size_t j = 0; j < chunk; j++) out[b + j] = block[j] ^ ks[j];
+                }
+                aes_increment_counter(current_ctr);
+            }
+        }
+
+        // 4. Finalizzazione (AAD length 0 + Data length)
+        uint8 len_block[16] = {0};
+        uint64 data_bits = (uint64)total_len * 8;
+        // Encode Big-Endian (ultimi 8 byte per i dati)
+        for (int i = 0; i < 8; i++) len_block[15-i] = (data_bits >> (i * 8)) & 0xFF;
+        
+        for (int j = 0; j < 16; j++) tag_acc[j] ^= len_block[j];
+        ghash_multiply(tag_acc, h_key);
+
+        uint8 s0[16];
+        soft_aes_encrypt_block(&ctx, j0, s0);
+        for (int j = 0; j < 16; j++) tag_acc[j] ^= s0[j];
+
+        soft_aes_zero(&ctx);
+
+        if (encrypt) {
+            memcpy(request->destination[request->vectorCount - 1].iov_base, tag_acc, 16);
+            return B_OK;
+        } else {
+            void* providedTag = request->source[request->vectorCount - 1].iov_base;
+            return (memcmp(tag_acc, providedTag, 16) == 0) ? B_OK : B_BAD_DATA;
+        }
+    }
 
     for (size_t i = 0; i < request->vectorCount; i++) {
         uint8* in_ptr = (uint8*)request->source[i].iov_base;
@@ -233,6 +319,18 @@ status_t BInitSoftCrypto()
         .Process   = soft_aes_process // punterà alla funzione aggiornata
     };
     status = BRegisterCryptoAlgorithm(&sSoftAES_CTR);
+    if (status != B_OK)
+        return status;
+    
+    static BCryptoAlgorithm sSoftAES_GCM = {
+        .algorithm = B_CRYPTO_AES,
+        .mode      = B_CRYPTO_MODE_GCM,
+        .flags     = B_CRYPTO_ALG_SOFTWARE,
+        .name      = "AES-GCM (Software)",
+        .priority  = 10,
+        .Process   = soft_aes_process
+    };
+    status = BRegisterCryptoAlgorithm(&sSoftAES_GCM);
     if (status != B_OK)
         return status;
     
