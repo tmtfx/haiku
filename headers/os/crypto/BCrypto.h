@@ -32,7 +32,11 @@ public:
             ssize_t             Decrypt(uint8* key, size_t keyLen, 
                                         uint8* iv, size_t ivLen, 
                                         const void* in, size_t inLen, 
-                                        void* out, const void* inTag);
+                                        void* out, const void* inTag); //GCM
+            ssize_t             Decrypt(uint8* key, size_t keyLen, 
+                                        uint8* iv, size_t ivLen, 
+                                        BDataIO* source, BDataIO* destination, 
+                                        const void* inTag); // GCM STREAMING TODO
 			ssize_t             Encrypt(uint8* key, size_t keyLen, 
                                         uint8* iv, size_t ivLen, 
                                         const void* in, size_t inLen, 
