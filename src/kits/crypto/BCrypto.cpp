@@ -274,6 +274,90 @@ BCrypto::Encrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
     
     return (err == B_OK) ? (ssize_t)totalWritten : (ssize_t)err;
 }
+ssize_t 
+BCrypto::Encrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
+                 BDataIO* source, BDataIO* destination, void* outTag)
+{
+    // Verifica parametri di base
+    if (fMode != B_CRYPTO_MODE_GCM) return B_BAD_VALUE;
+    if (!source || !destination || !outTag) return B_BAD_VALUE;
+
+    status_t err;
+    
+    // 1. GCM_INIT: Inizializziamo la sessione nel driver
+    BCryptoUserRequest initReq;
+    memset(&initReq, 0, sizeof(initReq));
+    initReq.algorithm = fAlgorithm;
+    initReq.mode = fMode;
+    initReq.key = key;
+    initReq.keyLength = keyLen;
+    initReq.iv = iv;
+    initReq.ivLength = ivLen;
+
+    err = ioctl(fFd, B_CRYPTO_IOCTL_STREAM_INIT, &initReq);
+    if (err != B_OK) return err;
+
+    // 2. LOOP DI CIFRATURA: Leggiamo a blocchi e cifriamo
+    const size_t kBufferSize = 1024 * 64; // Chunk da 64KB per bilanciare RAM e performance
+    uint8* bufferSrc = (uint8*)malloc(kBufferSize);
+    uint8* bufferDst = (uint8*)malloc(kBufferSize);
+    
+    if (!bufferSrc || !bufferDst) {
+        free(bufferSrc); free(bufferDst);
+        return B_NO_MEMORY;
+    }
+
+    ssize_t totalEncrypted = 0;
+    ssize_t bytesRead;
+    
+    // Leggiamo finché ci sono dati nel BDataIO sorgente
+    while ((bytesRead = source->Read(bufferSrc, kBufferSize)) > 0) {
+        iovec iovSrc = { bufferSrc, (size_t)bytesRead };
+        iovec iovDst = { bufferDst, (size_t)bytesRead };
+
+        BCryptoUserRequest updateReq;
+        memset(&updateReq, 0, sizeof(updateReq));
+        updateReq.source = &iovSrc;
+        updateReq.destination = &iovDst;
+        updateReq.vectorCount = 1;
+
+        // Il driver cifra il blocco e aggiorna l'accumulatore GHASH internamente
+        err = ioctl(fFd, B_CRYPTO_IOCTL_STREAM_UPDATE, &updateReq);
+        if (err != B_OK) break;
+
+        // Scriviamo il risultato cifrato nella destinazione
+        ssize_t bytesWritten = destination->Write(bufferDst, bytesRead);
+        if (bytesWritten != bytesRead) {
+            err = B_IO_ERROR;
+            break;
+        }
+        totalEncrypted += bytesWritten;
+    }
+
+    // Pulizia buffer temporanei
+    free(bufferSrc);
+    free(bufferDst);
+
+    // Se c'è stato un errore durante il loop, interrompiamo prima del Final
+    if (err != B_OK) return err;
+
+    // 3. GCM_FINAL: Recuperiamo il Tag di autenticazione finale
+    uint8 computedTag[16];
+    iovec tagIov = { computedTag, 16 };
+    
+    BCryptoUserRequest finalReq;
+    memset(&finalReq, 0, sizeof(finalReq));
+    finalReq.destination = &tagIov;
+    finalReq.vectorCount = 1;
+
+    err = ioctl(fFd, B_CRYPTO_IOCTL_STREAM_FINAL, &finalReq);
+    if (err != B_OK) return err;
+
+    // Copiamo il tag generato nel buffer di output dell'utente
+    memcpy(outTag, computedTag, 16);
+
+    return totalEncrypted;
+}
 // Versione speciale per Cifratura GCM
 ssize_t
 BCrypto::Encrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
@@ -293,7 +377,6 @@ BCrypto::Encrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
     status_t st = Process(req);
     return (st == B_OK) ? (ssize_t)inLen : (ssize_t)st;
 }
-// Versione cifratura GCM in streming TODO
 // Per la Decifratura GCM
 ssize_t
 BCrypto::Decrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
@@ -316,21 +399,88 @@ BCrypto::Decrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
     
     return (ssize_t)st;
 }
-// Decifratura GCM streaming  TODO!!
+// Decifratura GCM streaming
 ssize_t 
 BCrypto::Decrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
                  BDataIO* source, BDataIO* destination, const void* inTag)
 {
-    if (fMode == B_CRYPTO_MODE_GCM) {
-        // Qui andrà la logica Streaming-GCM (Init, Update, Final)
-        // 1. GCM_INIT(key, iv)
-        // 2. Loop Read/Write -> GCM_UPDATE(buffer)
-        // 3. GCM_FINAL(inTag) -> Ritorna B_OK se il tag coincide, B_BAD_DATA altrimenti.
-        return B_NOT_SUPPORTED; 
-    }
+    if (fMode != B_CRYPTO_MODE_GCM) return B_BAD_VALUE;
+    if (!source || !destination || !inTag) return B_BAD_VALUE;
+
+    status_t err;
     
-    if (!source || !destination) return B_BAD_VALUE;
-    return B_NOT_SUPPORTED;
+    // 1. GCM_INIT
+    BCryptoUserRequest initReq;
+    memset(&initReq, 0, sizeof(initReq));
+    initReq.algorithm = fAlgorithm;
+    initReq.mode = fMode;
+    initReq.key = key;
+    initReq.keyLength = keyLen;
+    initReq.iv = iv;
+    initReq.ivLength = ivLen;
+
+    err = ioctl(fFd, B_CRYPTO_IOCTL_STREAM_INIT, &initReq);
+    if (err != B_OK) return err;
+
+    // 2. LOOP READ -> UPDATE -> WRITE
+    const size_t kBufferSize = 1024 * 64; // 64KB chunk
+    uint8* bufferSrc = (uint8*)malloc(kBufferSize);
+    uint8* bufferDst = (uint8*)malloc(kBufferSize);
+    
+    if (!bufferSrc || !bufferDst) {
+        free(bufferSrc); free(bufferDst);
+        return B_NO_MEMORY;
+    }
+
+    ssize_t totalDecrypted = 0;
+    ssize_t bytesRead;
+    
+    while ((bytesRead = source->Read(bufferSrc, kBufferSize)) > 0) {
+        iovec iovSrc = { bufferSrc, (size_t)bytesRead };
+        iovec iovDst = { bufferDst, (size_t)bytesRead };
+
+        BCryptoUserRequest updateReq;
+        memset(&updateReq, 0, sizeof(updateReq));
+        updateReq.source = &iovSrc;
+        updateReq.destination = &iovDst;
+        updateReq.vectorCount = 1;
+
+        err = ioctl(fFd, B_CRYPTO_IOCTL_STREAM_UPDATE, &updateReq);
+        if (err != B_OK) break;
+
+        ssize_t bytesWritten = destination->Write(bufferDst, bytesRead);
+        if (bytesWritten != bytesRead) {
+            err = B_IO_ERROR;
+            break;
+        }
+        totalDecrypted += bytesWritten;
+    }
+
+    free(bufferSrc);
+    free(bufferDst);
+
+    if (err != B_OK) return err;
+
+    // 3. GCM_FINAL & VALIDATION
+    uint8 computedTag[16];
+    iovec tagIov = { computedTag, 16 };
+    
+    BCryptoUserRequest finalReq;
+    memset(&finalReq, 0, sizeof(finalReq));
+    finalReq.destination = &tagIov;
+    finalReq.vectorCount = 1;
+
+    err = ioctl(fFd, B_CRYPTO_IOCTL_STREAM_FINAL, &finalReq);
+    if (err != B_OK) return err;
+
+    // CONFRONTO TAG: Se non corrispondono, i dati sono compromessi!
+    if (memcmp(computedTag, inTag, 16) != 0) {
+        // Nota: In un'app reale, qui dovresti probabilmente cancellare 
+        // il file di destinazione perché i dati sono falsi.
+        return B_BAD_DATA; 
+    }
+
+    return totalDecrypted;
 }
 // Decifratura normale / no GCM
 ssize_t 
