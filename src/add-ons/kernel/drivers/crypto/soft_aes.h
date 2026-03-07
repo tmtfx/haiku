@@ -27,5 +27,6 @@ void soft_aes_decrypt_block(SoftAESContext* ctx, const uint8* in, uint8* out);
 
 /* Securely zeroize context */
 void soft_aes_zero(SoftAESContext* ctx);
+void ghash_multiply(uint8* x, const uint8* h);
 
 #endif // _SOFT_AES_H_
