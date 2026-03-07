@@ -36,7 +36,7 @@ public:
             ssize_t             Decrypt(uint8* key, size_t keyLen, 
                                         uint8* iv, size_t ivLen, 
                                         BDataIO* source, BDataIO* destination, 
-                                        const void* inTag); // GCM STREAMING TODO
+                                        const void* inTag); // GCM STREAMING
 			ssize_t             Encrypt(uint8* key, size_t keyLen, 
                                         uint8* iv, size_t ivLen, 
                                         const void* in, size_t inLen, 
@@ -48,6 +48,10 @@ public:
                                         uint8* iv, size_t ivLen,
                                         const void* in, size_t inLen, 
                                         void* out, void* outTag); // GCM
+            ssize_t             Encrypt(uint8* key, size_t keyLen, 
+                                        uint8* iv, size_t ivLen, 
+                                        BDataIO* source, BDataIO* destination, 
+                                        void* outTag); // GCM STREAMING
 			status_t			Process(BCryptoUserRequest& userReq);
 			size_t              GetHashLength(BCryptoAlgorithmID algo) const;
 			status_t            Digest(BCryptoAlgorithmID algo, const void* data,
