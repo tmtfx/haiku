@@ -182,6 +182,7 @@ crypto_control(void* cookie, uint32 op, void* arg, size_t length)
             }
     
             session->algorithm = algo;
+            session->mode = B_CRYPTO_MODE_ANY;
             session->algorithm_state = NULL; 
             
             return BHashInit(session); // Il Core alloca e fa lock_memory
