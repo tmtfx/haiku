@@ -274,6 +274,7 @@ BCrypto::Encrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
     
     return (err == B_OK) ? (ssize_t)totalWritten : (ssize_t)err;
 }
+// GCM STREAMING
 ssize_t 
 BCrypto::Encrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
                  BDataIO* source, BDataIO* destination, void* outTag)
@@ -287,6 +288,7 @@ BCrypto::Encrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
     // 1. GCM_INIT: Inizializziamo la sessione nel driver
     BCryptoUserRequest initReq;
     memset(&initReq, 0, sizeof(initReq));
+    initReq.operation = B_CRYPTO_ENCRYPT;
     initReq.algorithm = fAlgorithm;
     initReq.mode = fMode;
     initReq.key = key;
@@ -412,6 +414,7 @@ BCrypto::Decrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
     // 1. GCM_INIT
     BCryptoUserRequest initReq;
     memset(&initReq, 0, sizeof(initReq));
+    initReq.operation = B_CRYPTO_DECRYPT;
     initReq.algorithm = fAlgorithm;
     initReq.mode = fMode;
     initReq.key = key;
