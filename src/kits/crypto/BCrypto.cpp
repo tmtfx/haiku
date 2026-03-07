@@ -293,7 +293,7 @@ BCrypto::Encrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
     status_t st = Process(req);
     return (st == B_OK) ? (ssize_t)inLen : (ssize_t)st;
 }
-
+// Versione cifratura GCM in streming TODO
 // Per la Decifratura GCM
 ssize_t
 BCrypto::Decrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
@@ -316,6 +316,23 @@ BCrypto::Decrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
     
     return (ssize_t)st;
 }
+// Decifratura GCM streaming  TODO!!
+ssize_t 
+BCrypto::Decrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
+                 BDataIO* source, BDataIO* destination, const void* inTag)
+{
+    if (fMode == B_CRYPTO_MODE_GCM) {
+        // Qui andrà la logica Streaming-GCM (Init, Update, Final)
+        // 1. GCM_INIT(key, iv)
+        // 2. Loop Read/Write -> GCM_UPDATE(buffer)
+        // 3. GCM_FINAL(inTag) -> Ritorna B_OK se il tag coincide, B_BAD_DATA altrimenti.
+        return B_NOT_SUPPORTED; 
+    }
+    
+    if (!source || !destination) return B_BAD_VALUE;
+    return B_NOT_SUPPORTED;
+}
+// Decifratura normale / no GCM
 ssize_t 
 BCrypto::Decrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
                  const void* in, size_t inLen, void* out, size_t outSize) 
@@ -444,6 +461,20 @@ BCrypto::Process(BCryptoUserRequest& userReq)
         }
 
         return ioctl(fFd, B_CRYPTO_IOCTL_HASH_FINAL, &userReq);
+    }
+    
+    if (fMode == B_CRYPTO_MODE_GCM) {
+    	/* TODO: Supporto Streaming GCM (AEAD)
+         * Attualmente GCM è implementato come operazione atomica (One-Shot).
+         * Per supportare flussi BDataIO arbitrariamente grandi senza caricare tutto in RAM:
+         * 1. Implementare B_CRYPTO_IOCTL_GCM_INIT   (Setup H e J0)
+         * 2. Implementare B_CRYPTO_IOCTL_GCM_UPDATE (Cifratura blocchi e aggiornamento GHASH)
+         * 3. Implementare B_CRYPTO_IOCTL_GCM_FINAL  (XOR con J0 e calcolo Tag finale)
+         *
+         * Al momento, inviamo il vettore completo al driver.
+         */
+        // Inviamo tutti i vettori (Dati + Tag) in un'unica chiamata
+        return ioctl(fFd, B_CRYPTO_IOCTL_PROCESS, &userReq);
     }
 
     const size_t kMinZeroCopySize = 4096; 
