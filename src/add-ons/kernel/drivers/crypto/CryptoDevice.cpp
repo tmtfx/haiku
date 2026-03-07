@@ -168,37 +168,6 @@ crypto_control(void* cookie, uint32 op, void* arg, size_t length)
 
             return status;
         }
-        /*
-        case B_CRYPTO_IOCTL_HASH_INIT: {
-            BCryptoAlgorithmID algo;
-            if (user_memcpy(&algo, arg, sizeof(BCryptoAlgorithmID)) != B_OK)
-                return B_BAD_ADDRESS;
-
-            crypto_session* session = (crypto_session*)cookie;
-            
-            // 1. Salva temporaneamente il vecchio stato
-            void* oldState = session->algorithm_state;
-            size_t oldSize = session->state_size;
-            BCryptoAlgorithmID oldAlgo = session->algorithm;
-            
-            // 2. Tenta l'inizializzazione sul nuovo
-            session->algorithm = algo;
-            session->algorithm_state = NULL; // BHashInit allocherà il nuovo
-            
-            status_t st = BHashInit(session);
-            if (st == B_OK) {
-                // Successo: ora possiamo liberare il vecchio
-                if (oldState) {
-                    secure_memzero(oldState, oldSize);
-                    free(oldState);
-                }
-            } else {
-                // Fallimento: ripristina lo stato precedente
-                session->algorithm = oldAlgo;
-                session->algorithm_state = oldState;
-            }
-            return st;
-        }*/
         case B_CRYPTO_IOCTL_HASH_INIT: {
             BCryptoAlgorithmID algo;
             if (user_memcpy(&algo, arg, sizeof(BCryptoAlgorithmID)) != B_OK)
@@ -237,61 +206,6 @@ crypto_control(void* cookie, uint32 op, void* arg, size_t length)
 
             return BHashUpdate(session, &userReq);
         }
-        /*
-        case B_CRYPTO_IOCTL_HASH_FINAL: {
-            BCryptoUserRequest userReq;
-            if (user_memcpy(&userReq, arg, sizeof(BCryptoUserRequest)) != B_OK)
-                return B_BAD_ADDRESS;
-
-            crypto_session* session = (crypto_session*)cookie;
-            if (!session || !session->is_active) 
-                return B_BAD_VALUE;
-
-            // Per il Final, dobbiamo mappare il buffer di destinazione
-            // Di solito il digest sta in un singolo buffer, quindi prendiamo solo il primo iovec
-            iovec localDst[1]; 
-            if (user_memcpy(localDst, userReq.destination, sizeof(iovec)) != B_OK)
-                return B_BAD_ADDRESS;
-
-            // Verifichiamo che il buffer sia grande abbastanza per l'algoritmo corrente
-            if (localDst[0].iov_len < decode_hash_length(session->algorithm))
-                return B_BAD_VALUE;
-
-            // Passiamo la struct aggiornata al Core
-            userReq.destination = localDst;
-            userReq.vectorCount = 1; // Per la finalizzazione standard basta un vettore
-
-            status_t st = BHashFinal(session, &userReq);
-            
-            // La sessione è conclusa, ma NON liberiamo qui algorithm_state.
-            // Lo stato verrà liberato al prossimo HASH_INIT o alla crypto_close.
-            session->is_active = false; 
-            
-            return st;
-        }*/
-        /*
-        case B_CRYPTO_IOCTL_HASH_FINAL: {
-            BCryptoUserRequest userReq;
-            if (user_memcpy(&userReq, arg, sizeof(BCryptoUserRequest)) != B_OK)
-                return B_BAD_ADDRESS;
-
-            crypto_session* session = (crypto_session*)cookie;
-            if (!session || !session->is_active) 
-                return B_BAD_VALUE;
-
-            iovec localDst[1]; 
-            if (user_memcpy(localDst, userReq.destination, sizeof(iovec)) != B_OK)
-                return B_BAD_ADDRESS;
-
-            if (localDst[0].iov_len < decode_hash_length(session->algorithm))
-                return B_BAD_VALUE;
-        
-            userReq.destination = localDst;
-            userReq.vectorCount = 1;
-
-            // BHashFinal ora farà: 1. Calcolo, 2. Unlock, 3. Free, 4. Nullify
-            return BHashFinal(session, &userReq);
-        }*/
         case B_CRYPTO_IOCTL_HASH_FINAL: {
             BCryptoUserRequest userReq;
             // 1. Copiamo la richiesta dall'utente (contiene il puntatore alla destinazione)
