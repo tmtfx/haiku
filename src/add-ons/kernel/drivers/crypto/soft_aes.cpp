@@ -6,6 +6,45 @@
 
 #include "soft_aes.h"
 #include <string.h>
+/* ---------------------------------------------------------------- */
+/* AES GCM helperfuncs                                              */
+/* ---------------------------------------------------------------- */
+// Moltiplicazione per 'x' nel campo di Galois (Shift a destra con riduzione)
+static void
+gcm_shift_right(uint64 block[2])
+{
+    uint64 mask = (block[1] & 1) ? 0xE100000000000000ULL : 0;
+    block[1] = (block[1] >> 1) | (block[0] << 63);
+    block[0] = (block[0] >> 1) ^ mask;
+}
+// Implementazione GHASH (moltiplicazione X * H)
+// Questa versione è bit-a-bit. È la più sicura da implementare correttamente
+// prima di passare alle tabelle di accelerazione.
+void ghash_multiply(uint8* x, const uint8* h)
+{
+    uint64 V[2], Z[2] = {0, 0};
+    
+    // Carichiamo H e X come big-endian 64-bit
+    // In GCM i bit sono riflessi, quindi usiamo un approccio cauto
+    //V[0] = ((uint64*)h)[0]; // Nota: andrebbe gestito l'endianness se non su x86
+    //V[1] = ((uint64*)h)[1];
+    V[0] = __builtin_bswap64(((uint64*)h)[0]); 
+    V[1] = __builtin_bswap64(((uint64*)h)[1]);
+
+    for (int i = 0; i < 128; i++) {
+        // Se il bit i-esimo di X è 1 (partendo dal bit più significativo)
+        if ((x[i >> 3] >> (7 - (i & 7))) & 1) {
+            Z[0] ^= V[0];
+            Z[1] ^= V[1];
+        }
+        gcm_shift_right(V);
+    }
+    
+    //((uint64*)x)[0] = Z[0];
+    //((uint64*)x)[1] = Z[1];
+    ((uint64*)x)[0] = __builtin_bswap64(Z[0]);
+    ((uint64*)x)[1] = __builtin_bswap64(Z[1]);
+}
 
 /* ---------------------------------------------------------------- */
 /* AES tables (static const, kernel-safe)                           */
