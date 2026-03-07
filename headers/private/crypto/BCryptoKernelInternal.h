@@ -38,6 +38,7 @@ struct crypto_session {
 	BCryptoOperation    op;
     BCryptoAlgorithmID  algorithm;
     void*               algorithm_state; // Puntatore al contesto specifico (es: SHA256_CTX)
+    BCryptoMode         mode;
     size_t              state_size;
     bool                is_active;       // True se Init è stata chiamata
 };
