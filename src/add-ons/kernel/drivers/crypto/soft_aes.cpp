@@ -305,3 +305,55 @@ soft_aes_zero(SoftAESContext* ctx)
         return;
     secure_memzero(ctx, sizeof(*ctx));
 }
+void
+soft_aes_gcm_update_internal(SoftAESContext* ctx, const uint8* src, uint8* dst, size_t len)
+{
+    size_t offset = 0;
+    uint8 keystream[16];
+    uint8 block[16];
+
+    while (offset < len) {
+        // 1. Prepariamo il blocco di keystream per questo round CTR
+        // Incrementiamo il contatore (solo gli ultimi 32 bit come da standard GCM)
+        ctx->counter[15]++;
+        if (ctx->counter[15] == 0) {
+            ctx->counter[14]++;
+            if (ctx->counter[14] == 0) {
+                ctx->counter[13]++;
+                if (ctx->counter[13] == 0) ctx->counter[12]++;
+            }
+        }
+
+        // Cifriamo il contatore per ottenere il keystream
+        soft_aes_encrypt_block(ctx, ctx->counter, keystream);
+
+        // 2. Determiniamo quanti byte processare in questo blocco (max 16)
+        size_t chunk = (len - offset < 16) ? (len - offset) : 16;
+
+        if (ctx->is_encrypting) {
+            // --- ENCRYPTION ---
+            for (size_t i = 0; i < chunk; i++) {
+                dst[offset + i] = src[offset + i] ^ keystream[i];
+            }
+            // GHASH usa il ciphertext (dst)
+            memset(block, 0, 16);
+            memcpy(block, dst + offset, chunk);
+            for (int i = 0; i < 16; i++) ctx->tag_acc[i] ^= block[i];
+            ghash_multiply(ctx->tag_acc, ctx->h_key);
+        } else {
+            // --- DECRYPTION ---
+            // GHASH usa il ciphertext (src)
+            memset(block, 0, 16);
+            memcpy(block, src + offset, chunk);
+            for (int i = 0; i < 16; i++) ctx->tag_acc[i] ^= block[i];
+            ghash_multiply(ctx->tag_acc, ctx->h_key);
+
+            // Poi decifriamo per l'utente
+            for (size_t i = 0; i < chunk; i++) {
+                dst[offset + i] = src[offset + i] ^ keystream[i];
+            }
+        }
+
+        offset += chunk;
+    }
+}
