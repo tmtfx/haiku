@@ -398,6 +398,98 @@ crypto_control(void* cookie, uint32 op, void* arg, size_t length)
 
             return user_memcpy(arg, &info, sizeof(BCryptoAlgorithmInfo));
         }
+        /*--- STREAMING AEAD (GCM/CCM) ---*/
+        case B_CRYPTO_IOCTL_STREAM_INIT: {
+            BCryptoUserRequest userReq;
+            if (user_memcpy(&userReq, arg, sizeof(BCryptoUserRequest)) != B_OK)
+                return B_BAD_ADDRESS;
+
+            crypto_session* session = (crypto_session*)cookie;
+            
+            // Se c'è uno stato attivo (magari un hash o un altro stream), pulizia.
+            if (session->algorithm_state != NULL) {
+                BStreamFinal(session, NULL); 
+            }
+
+            if (userReq.keyLength > 64 || userReq.ivLength > 64)
+                return B_BAD_VALUE;
+
+            uint8 localKey[64];
+            uint8 localIV[64];
+
+            if (user_memcpy(localKey, userReq.key, userReq.keyLength) != B_OK) 
+                return B_BAD_ADDRESS;
+            if (user_memcpy(localIV, userReq.iv, userReq.ivLength) != B_OK) 
+                return B_BAD_ADDRESS;
+
+            session->algorithm = userReq.algorithm;
+            session->mode = userReq.mode;
+            session->algorithm_state = NULL; 
+
+            // Prepariamo la richiesta kernel-side per l'inizializzazione
+            BCryptoRequest req;
+            req.algorithm = userReq.algorithm;
+            req.mode = userReq.mode;
+            req.key = localKey;
+            req.keyLength = userReq.keyLength;
+            req.iv = localIV;
+            req.ivLength = userReq.ivLength;
+
+            status_t status = BStreamInit(session, &req);
+            
+            secure_memzero(localKey, sizeof(localKey));
+            secure_memzero(localIV, sizeof(localIV));
+            return status;
+        }
+
+        case B_CRYPTO_IOCTL_STREAM_UPDATE: {
+            BCryptoUserRequest userReq;
+            if (user_memcpy(&userReq, arg, sizeof(BCryptoUserRequest)) != B_OK)
+                return B_BAD_ADDRESS;
+
+            crypto_session* session = (crypto_session*)cookie;
+            if (!session->is_active || session->algorithm_state == NULL) 
+                return B_BAD_VALUE;
+
+            if (userReq.vectorCount > 32) return B_DEVICE_FULL;
+
+            iovec localSrc[32], localDst[32];
+            if (user_memcpy(localSrc, userReq.source, sizeof(iovec) * userReq.vectorCount) != B_OK)
+                return B_BAD_ADDRESS;
+            if (user_memcpy(localDst, userReq.destination, sizeof(iovec) * userReq.vectorCount) != B_OK)
+                return B_BAD_ADDRESS;
+
+            BCryptoRequest req;
+            req.source = localSrc;
+            req.destination = localDst;
+            req.vectorCount = userReq.vectorCount;
+
+            return BStreamUpdate(session, &req);
+        }
+
+        case B_CRYPTO_IOCTL_STREAM_FINAL: {
+            BCryptoUserRequest userReq;
+            if (user_memcpy(&userReq, arg, sizeof(BCryptoUserRequest)) != B_OK)
+                return B_BAD_ADDRESS;
+
+            crypto_session* session = (crypto_session*)cookie;
+            if (!session->is_active || session->algorithm_state == NULL) 
+                return B_BAD_VALUE;
+
+            // Il tag viene restituito tramite il primo vettore di destination
+            iovec localTagVec[1];
+            if (user_memcpy(localTagVec, userReq.destination, sizeof(iovec)) != B_OK)
+                return B_BAD_ADDRESS;
+
+            // Verifica spazio per il Tag (AES-GCM = 16 byte)
+            if (localTagVec[0].iov_len < 16) return B_BAD_VALUE;
+
+            BCryptoRequest req;
+            req.destination = localTagVec;
+            req.vectorCount = 1;
+
+            return BStreamFinal(session, &req);
+        }
     }
     return B_DEV_INVALID_IOCTL;
 }

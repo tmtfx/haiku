@@ -22,5 +22,9 @@ struct BCryptoAlgorithm : public DoublyLinkedListLinkImpl<BCryptoAlgorithm> {
     status_t            (*HashInit)(void** context, size_t* contextSize);
     status_t            (*HashUpdate)(void* context, const iovec* vecs, size_t count);
     status_t            (*HashFinal)(void* context, uint8* outDigest);
+    
+    status_t            (*StreamInit)(void** context, const uint8* key, size_t keyLen, const uint8* iv, size_t ivLen);
+    status_t            (*StreamUpdate)(void* context, const iovec* src, const iovec* dst, size_t count);
+    status_t            (*StreamFinal)(void* context, uint8* outTag);
 };
 #endif

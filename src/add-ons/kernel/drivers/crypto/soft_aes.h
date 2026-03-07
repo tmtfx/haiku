@@ -16,6 +16,11 @@ typedef struct SoftAESContext {
     uint8 encRoundKeys[240];   // max 14 rounds * 16 bytes
     uint8 decRoundKeys[240];
     int rounds;                // number of rounds (10/12/14)
+    uint8 h_key[16];      // Costante H per GHASH
+    uint8 tag_acc[16];    // Accumulatore parziale del Tag
+    uint8 counter[16];    // Stato attuale del contatore CTR
+    uint64 total_len;     // Bit totali processati (per il blocco finale)
+    bool is_encrypting;   // Stato per sapere se stiamo cifrando o decifrando
 } SoftAESContext;
 
 /* Key setup */
