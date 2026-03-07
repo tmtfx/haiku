@@ -24,7 +24,6 @@ struct AESNIContext {
     uint8 counter[16];    // Stato attuale del contatore CTR
     uint64 total_len;     // Bit totali processati (per il blocco finale)
     bool is_encrypting;   // Stato per sapere se stiamo cifrando o decifrando
-} SoftAESContext;
 } __attribute__((aligned(16))); // L'allineamento a 16 byte è vitale per SSE
 
 status_t BInitAESNICrypto();
