@@ -329,6 +329,16 @@ status_t BInitSoftCrypto()
         .name      = "AES-GCM (Software)",
         .priority  = 10,
         .Process   = soft_aes_process
+        
+        // Niente Hash per AES
+        .HashInit     = nullptr,
+        .HashUpdate   = nullptr,
+        .HashFinal    = nullptr,
+    
+        // Streaming AEAD
+        .StreamInit   = soft_aes_gcm_stream_init,
+        .StreamUpdate = soft_aes_gcm_stream_update,
+        .StreamFinal  = soft_aes_gcm_stream_final
     };
     status = BRegisterCryptoAlgorithm(&sSoftAES_GCM);
     if (status != B_OK)
