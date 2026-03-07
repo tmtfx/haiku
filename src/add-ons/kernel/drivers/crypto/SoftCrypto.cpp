@@ -22,6 +22,105 @@ aes_increment_counter(uint8* counter)
             break;
     }
 }
+/* ---------------------------------------------------------------- */
+/* AES GCM BRIDGES                                                  */
+/* ---------------------------------------------------------------- */
+static status_t
+soft_aes_gcm_stream_init(void** context, size_t* _contextSize, const uint8* key, size_t keyLen, 
+                         const uint8* iv, size_t ivLen)
+{
+    if (!context || !key || !iv) return B_BAD_VALUE;
+
+    // 1. Allochiamo il contesto specifico
+    SoftAESContext* ctx = (SoftAESContext*)malloc(sizeof(SoftAESContext));
+    if (!ctx) return B_NO_MEMORY;
+    memset(ctx, 0, sizeof(SoftAESContext));
+
+    // 2. Setup delle chiavi (AES-128/256)
+    status_t status = soft_aes_set_key(ctx, key, keyLen);
+    if (status != B_OK) {
+        free(ctx);
+        return status;
+    }
+
+    // 3. Calcolo H (Hash Key): E_k(0^128)
+    uint8 zeroBlock[16] = {0};
+    soft_aes_encrypt_block(ctx, zeroBlock, ctx->h_key);
+
+    // 4. Setup J0 (Counter iniziale)
+    // GCM standard prevede IV di 96 bit + contatore a 32 bit che parte da 1
+    if (ivLen == 12) {
+        memcpy(ctx->counter, iv, 12);
+        ctx->counter[15] = 1; 
+    } else {
+        // Se IV non è 96 bit, andrebbe calcolato via GHASH (complessità extra)
+        free(ctx);
+        return B_NOT_SUPPORTED; 
+    }
+
+    ctx->total_len = 0;
+    *context = ctx;
+    *_contextSize = sizeof(SoftAESContext);
+    return B_OK;
+}
+
+static status_t
+soft_aes_gcm_stream_update(void* context, const iovec* src, const iovec* dst, size_t count)
+{
+    SoftAESContext* ctx = (SoftAESContext*)context;
+    if (!ctx) return B_BAD_VALUE;
+
+    for (size_t i = 0; i < count; i++) {
+        uint8* s = (uint8*)src[i].iov_base;
+        uint8* d = (uint8*)dst[i].iov_base;
+        size_t len = src[i].iov_len;
+
+        // Qui dobbiamo processare i dati a blocchi di 16 byte
+        // 1. Cifratura/Decifratura CTR
+        // 2. Aggiornamento GHASH(tag_acc, ciphertext)
+        
+        // Per semplicità ora chiamiamo una funzione interna di soft_aes.cpp
+        // che gestisce il loop dei blocchi
+        soft_aes_gcm_update_internal(ctx, s, d, len);
+        
+        ctx->total_len += (uint64)len;
+    }
+
+    return B_OK;
+}
+static status_t
+soft_aes_gcm_stream_final(void* context, uint8* outTag)
+{
+    SoftAESContext* ctx = (SoftAESContext*)context;
+    if (!ctx) return B_BAD_VALUE;
+
+    // 1. Fase finale GHASH: lunghezza dati
+    // Si crea un blocco con: [len(AAD) in bits (64)][len(Ciphertext) in bits (64)]
+    uint8 lenBlock[16] = {0};
+    uint64 bits = ctx->total_len * 8;
+    // Encoding Big-endian delle lunghezze
+    for (int i = 0; i < 8; i++) {
+        lenBlock[15 - i] = (bits >> (i * 8)) & 0xFF;
+    }
+    
+    // Ultima moltiplicazione GHASH
+    ghash_multiply(ctx->tag_acc, lenBlock); // Qui usiamo la funzione che hai già!
+    ghash_multiply(ctx->tag_acc, ctx->h_key);
+
+    // 2. XOR finale con J0 cifrato per ottenere il Tag
+    uint8 encryptedJ0[16];
+    uint8 J0[16];
+    memcpy(J0, ctx->counter, 12); // Recuperiamo l'IV originale
+    J0[12] = J0[13] = J0[14] = 0; J0[15] = 1; // J0 ha contatore = 1
+    
+    soft_aes_encrypt_block(ctx, J0, encryptedJ0);
+    
+    for (int i = 0; i < 16; i++) {
+        outTag[i] = ctx->tag_acc[i] ^ encryptedJ0[i];
+    }
+
+    return B_OK;
+}
 
 /* ---------------------------------------------------------------- */
 /* Internal helper: AES CBC processing                               */
@@ -328,7 +427,7 @@ status_t BInitSoftCrypto()
         .flags     = B_CRYPTO_ALG_SOFTWARE,
         .name      = "AES-GCM (Software)",
         .priority  = 10,
-        .Process   = soft_aes_process
+        .Process   = soft_aes_process,
         
         // Niente Hash per AES
         .HashInit     = nullptr,
