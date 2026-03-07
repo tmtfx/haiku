@@ -429,7 +429,72 @@ BHashFinal(crypto_session* session, BCryptoUserRequest* request)
 
     return st;
 }
+status_t
+BStreamInit(crypto_session* session, BCryptoRequest* req)
+{
+    //BCryptoAlgorithm* algo = _FindAlgorithm(session->algorithm, session->mode);
+    AlgoNode* node = _FindAlgorithm(session->algorithm, session->mode);
+    //if (!node || !node->algo->StreamInit) return B_NOT_SUPPORTED;
+    if (!node) return B_NOT_SUPPORTED;
+    if (node->algo->StreamInit == nullptr) {
+        dprintf("CryptoCore: Errore - l'algoritmo %d non supporta lo streaming!\n", session->algorithm);
+        return B_NOT_SUPPORTED;
+    }
 
+    void* context = nullptr;
+    size_t actualSize = 0;
+
+    // Chiamiamo l'inizializzazione dell'algoritmo
+    // StreamInit allocherà la struct corretta (SoftAESContext o AESNIContext)
+    status_t status = node->algo->StreamInit(&context, &actualSize, (const uint8*)req->key, req->keyLength, (const uint8*)req->iv, req->ivLength);
+    if (status != B_OK) return status;
+
+    // Proteggiamo la memoria del contesto (contiene le chiavi!)
+    lock_memory(context, actualSize, B_READ_DEVICE);
+    session->algorithm_state = context;
+    session->state_size = actualSize;
+    session->is_active = true;
+    return B_OK;
+}
+status_t
+BStreamUpdate(crypto_session* session, BCryptoRequest* req)
+{
+    //BCryptoAlgorithm* algo = _FindAlgorithm(session->algorithm, session->mode);
+    AlgoNode* node = _FindAlgorithm(session->algorithm, session->mode);
+    if (!node || !node->algo->StreamUpdate) return B_NOT_SUPPORTED;
+
+    // Passiamo il contesto salvato nella sessione
+    return node->algo->StreamUpdate(session->algorithm_state, req->source, req->destination, req->vectorCount);
+    //return node->algo->StreamUpdate(session->algorithm_state, (const iovec*)req->source, (const iovec*)req->destination, req->vectorCount); se da problemi di cast
+}
+status_t
+BStreamFinal(crypto_session* session, BCryptoRequest* req)
+{
+    //BCryptoAlgorithm* algo = _FindAlgorithm(session->algorithm, session->mode);
+    AlgoNode* node = _FindAlgorithm(session->algorithm, session->mode);
+    if (!node || !node->algo->StreamFinal) return B_NOT_SUPPORTED;
+
+    uint8 tag[16];
+    status_t status = node->algo->StreamFinal(session->algorithm_state, tag);
+
+    if (status == B_OK && req != nullptr && req->destination != nullptr) {
+        // Copiamo il tag generato nel buffer di destinazione dell'utente
+        // Usiamo memcpy sicura perché req->destination è già stato validato nell'ioctl
+        memcpy((uint8*)req->destination[0].iov_base, tag, 16);
+    }
+
+    // Pulizia di sicurezza
+    bcrypto_secure_memzero(session->algorithm_state, session->state_size);
+    //secure_memzero(session->algorithm_state, get_context_size(session->algorithm));
+    unlock_memory(session->algorithm_state, session->state_size, B_READ_DEVICE);
+    free(session->algorithm_state);
+
+    session->algorithm_state = nullptr;
+    session->state_size = 0;
+    session->is_active = false;
+    
+    return status;
+}
 status_t
 BSubmitCryptoRequest(BCryptoRequest* request)
 {
