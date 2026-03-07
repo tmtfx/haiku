@@ -432,6 +432,7 @@ BHashFinal(crypto_session* session, BCryptoUserRequest* request)
 status_t
 BStreamInit(crypto_session* session, BCryptoRequest* req)
 {
+	MutexLocker _(sCryptoLock);
     //BCryptoAlgorithm* algo = _FindAlgorithm(session->algorithm, session->mode);
     AlgoNode* node = _FindAlgorithm(session->algorithm, session->mode);
     //if (!node || !node->algo->StreamInit) return B_NOT_SUPPORTED;
@@ -446,11 +447,27 @@ BStreamInit(crypto_session* session, BCryptoRequest* req)
 
     // Chiamiamo l'inizializzazione dell'algoritmo
     // StreamInit allocherà la struct corretta (SoftAESContext o AESNIContext)
-    status_t status = node->algo->StreamInit(&context, &actualSize, (const uint8*)req->key, req->keyLength, (const uint8*)req->iv, req->ivLength);
+    //status_t status = node->algo->StreamInit(&context, &actualSize, (const uint8*)req->key, req->keyLength, (const uint8*)req->iv, req->ivLength);
+    // 1. Abilitiamo l'accesso alla memoria utente per leggere Key e IV
+    status_t status;
+    {
+        UserAccessExposer access;
+        status = node->algo->StreamInit(&context, &actualSize, 
+            req->operation, 
+            (const uint8*)req->key, req->keyLength, 
+            (const uint8*)req->iv, req->ivLength);
+    }
     if (status != B_OK) return status;
 
     // Proteggiamo la memoria del contesto (contiene le chiavi!)
-    lock_memory(context, actualSize, B_READ_DEVICE);
+    status = lock_memory(context, actualSize, B_READ_DEVICE);
+    if (status != B_OK) {
+        dprintf("CryptoCore: lock_memory fallito (%s), abortisco.\n", strerror(status));
+        // Se il lock fallisce, puliamo e liberiamo subito per sicurezza
+        bcrypto_secure_memzero(context, actualSize);
+        free(context);
+        return status;
+    }
     session->algorithm_state = context;
     session->state_size = actualSize;
     session->is_active = true;
@@ -459,17 +476,58 @@ BStreamInit(crypto_session* session, BCryptoRequest* req)
 status_t
 BStreamUpdate(crypto_session* session, BCryptoRequest* req)
 {
+	MutexLocker _(sCryptoLock);
     //BCryptoAlgorithm* algo = _FindAlgorithm(session->algorithm, session->mode);
     AlgoNode* node = _FindAlgorithm(session->algorithm, session->mode);
     if (!node || !node->algo->StreamUpdate) return B_NOT_SUPPORTED;
+    
+    status_t st = B_OK;
+    size_t lockedSrcCount = 0;
+    size_t lockedDstCount = 0;
+
+    // 1. Blocco memoria SORGENTE (Lettura)
+    for (size_t i = 0; i < req->vectorCount; i++) {
+        st = lock_memory(req->source[i].iov_base, req->source[i].iov_len, B_READ_DEVICE);
+        if (st != B_OK) break;
+        lockedSrcCount++;
+    }
+    // 2. Blocco memoria DESTINAZIONE (Scrittura)
+    if (st == B_OK) {
+        for (size_t i = 0; i < req->vectorCount; i++) {
+            // Nota: per la destinazione usiamo 0 o B_WRITE se disponibile, 
+            // ma spesso B_READ_DEVICE è sufficiente per il lock fisico
+            st = lock_memory(req->destination[i].iov_base, req->destination[i].iov_len, 0);
+            if (st != B_OK) break;
+            lockedDstCount++;
+        }
+    }
+    
+    if (st == B_OK) {
+        UserAccessExposer access; // Disabilita SMAP tramite AC flag
+        st = node->algo->StreamUpdate(session->algorithm_state, 
+                                      req->source, 
+                                      req->destination, 
+                                      req->vectorCount);
+    }
+
+    // 4. Cleanup (Unlock) in ordine inverso o speculare
+    for (size_t i = 0; i < lockedDstCount; i++) {
+        unlock_memory(req->destination[i].iov_base, req->destination[i].iov_len, 0);
+    }
+    for (size_t i = 0; i < lockedSrcCount; i++) {
+        unlock_memory(req->source[i].iov_base, req->source[i].iov_len, B_READ_DEVICE);
+    }
+
+    return st;
 
     // Passiamo il contesto salvato nella sessione
-    return node->algo->StreamUpdate(session->algorithm_state, req->source, req->destination, req->vectorCount);
-    //return node->algo->StreamUpdate(session->algorithm_state, (const iovec*)req->source, (const iovec*)req->destination, req->vectorCount); se da problemi di cast
+    //return node->algo->StreamUpdate(session->algorithm_state, req->source, req->destination, req->vectorCount); fa SMAP
+    //return node->algo->StreamUpdate(session->algorithm_state, (const iovec*)req->source, (const iovec*)req->destination, req->vectorCount); se da problemi di cast, fa SMAP
 }
 status_t
 BStreamFinal(crypto_session* session, BCryptoRequest* req)
 {
+	MutexLocker _(sCryptoLock);
     //BCryptoAlgorithm* algo = _FindAlgorithm(session->algorithm, session->mode);
     AlgoNode* node = _FindAlgorithm(session->algorithm, session->mode);
     if (!node || !node->algo->StreamFinal) return B_NOT_SUPPORTED;
@@ -480,7 +538,18 @@ BStreamFinal(crypto_session* session, BCryptoRequest* req)
     if (status == B_OK && req != nullptr && req->destination != nullptr) {
         // Copiamo il tag generato nel buffer di destinazione dell'utente
         // Usiamo memcpy sicura perché req->destination è già stato validato nell'ioctl
-        memcpy((uint8*)req->destination[0].iov_base, tag, 16);
+        //memcpy((uint8*)req->destination[0].iov_base, tag, 16); SMAP/page fault
+        status_t lockStatus = lock_memory(req->destination[0].iov_base, 16, 0);
+        
+        if (lockStatus == B_OK) {
+            // 2. Apriamo la porta SMAP per la copia
+            UserAccessExposer access;
+            memcpy((uint8*)req->destination[0].iov_base, tag, 16);
+            
+            unlock_memory(req->destination[0].iov_base, 16, 0);
+        } else {
+            status = lockStatus;
+        }
     }
 
     // Pulizia di sicurezza
