@@ -424,12 +424,14 @@ crypto_control(void* cookie, uint32 op, void* arg, size_t length)
                 return B_BAD_ADDRESS;
 
             session->algorithm = userReq.algorithm;
+            session->op = userReq.operation;
             session->mode = userReq.mode;
             session->algorithm_state = NULL; 
 
             // Prepariamo la richiesta kernel-side per l'inizializzazione
             BCryptoRequest req;
             req.algorithm = userReq.algorithm;
+            req.operation = userReq.operation;
             req.mode = userReq.mode;
             req.key = localKey;
             req.keyLength = userReq.keyLength;
