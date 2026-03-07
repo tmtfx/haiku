@@ -39,4 +39,7 @@ status_t BCheckAlgorithmAvailability(BCryptoAlgorithmID id);
 extern status_t BHashInit(crypto_session* session);
 extern status_t BHashUpdate(crypto_session* session, BCryptoUserRequest* request);
 extern status_t BHashFinal(crypto_session* session, BCryptoUserRequest* request);
+extern status_t BStreamInit(crypto_session* session, BCryptoRequest* req);
+extern status_t BStreamUpdate(crypto_session* session, BCryptoRequest* req);
+extern status_t BStreamFinal(crypto_session* session, BCryptoRequest* req);
 #endif // _B_CRYPTO_CORE_H_
