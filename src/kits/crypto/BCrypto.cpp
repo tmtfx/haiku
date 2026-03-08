@@ -121,6 +121,29 @@ BCrypto::GetEngineName(BCryptoAlgorithmID algo, char* outName, size_t nameSize)
     return B_ENTRY_NOT_FOUND;
 }
 
+status_t
+BCrypto::GetEngineName(BCryptoAlgorithmID algo, BCryptoMode mode, char* outName, size_t nameSize)
+{
+    if (fFd < 0) return B_NO_INIT;
+    if (outName == NULL || nameSize == 0) return B_BAD_VALUE;
+
+    BCryptoAlgorithmInfo info;
+    uint32 cookie = 0;
+    
+    // Iteriamo sugli algoritmi registrati nel core
+    while (GetNextAlgorithm(&cookie, &info) == B_OK) {
+        if (info.id == algo && info.mode == mode) {
+            // Trovato! Essendo la lista ordinata per priorità nel Core,
+            // il primo che incontriamo è quello che verrà effettivamente usato.
+            strlcpy(outName, info.vendor, nameSize);
+            return B_OK;
+        }
+    }
+
+    return B_ENTRY_NOT_FOUND;
+}
+
+
 void
 BCrypto::SetPadding(bool enable,BCryptoPaddingType type){
 	fPaddingEnabled=enable;
