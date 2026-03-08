@@ -69,6 +69,11 @@ soft_aes_gcm_stream_init(void** context, size_t* _contextSize, BCryptoOperation 
         free(aead); free(aes); free(gcm);
         return B_NOT_SUPPORTED; 
     }
+    
+    for (int i = 15; i >= 12; i--) {
+            if (++gcm->counter[i] != 0)
+                break;
+    }
 
     // 5. Assemblaggio AEAD
     aead->cipher_ctx = aes;
@@ -77,7 +82,7 @@ soft_aes_gcm_stream_init(void** context, size_t* _contextSize, BCryptoOperation 
     aead->total_len = 0;
 
     *context = aead;
-    *_contextSize = sizeof(SoftAEADContext);
+    *_contextSize = sizeof(SoftAEADContext);	
     return B_OK;
 }
 
@@ -220,7 +225,17 @@ soft_aes_process_internal(BCryptoRequest* request, bool encrypt)
         uint8 len_block[16] = {0};
         uint64 data_bits = (uint64)total_len * 8;
         // Fix: Encoding Big-Endian corretto (GCM usa 64 bit per la lunghezza)
-        for (int i = 0; i < 8; i++) len_block[15-i] = (data_bits >> (i * 8)) & 0xFF;
+        //for (int i = 0; i < 8; i++) len_block[15-i] = (data_bits >> (i * 8)) & 0xFF;
+        uint64 aad_bits = 0; // Se non abbiamo AAD
+
+// Scriviamo AAD len nei primi 8 byte (Big-Endian)
+for (int i = 0; i < 8; i++) {
+    len_block[i] = (aad_bits >> (56 - i * 8)) & 0xFF;
+}
+// Scriviamo Ciphertext len negli ultimi 8 byte (Big-Endian)
+for (int i = 0; i < 8; i++) {
+    len_block[i + 8] = (data_bits >> (56 - i * 8)) & 0xFF;
+}
     
         soft_ghash_update(&gcm, len_block, 16);
 
