@@ -77,7 +77,7 @@ soft_aes_gcm_stream_init(void** context, size_t* _contextSize, BCryptoOperation 
     aead->total_len = 0;
 
     *context = aead;
-    *_contextSize = sizeof(SoftAEADContext) + sizeof(SoftAESContext) + sizeof(GCMState);
+    *_contextSize = sizeof(SoftAEADContext);
     return B_OK;
 }
 
