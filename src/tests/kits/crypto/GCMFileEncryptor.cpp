@@ -28,6 +28,10 @@ int main(int argc, char* argv[]) {
         fprintf(stderr, "Errore: Sottosistema BCrypto non disponibile.\n");
         return 1;
     }
+    
+    char engineName[64] = "Sconosciuto";
+    crypto.GetEngineName(B_CRYPTO_AES, B_CRYPTO_MODE_GCM, engineName, sizeof(engineName));
+    printf("Motore crittografico: %s\n", engineName);
 
     // 2. Chiavi e IV (In un'app reale verrebbero da una password/KDF)
     uint8 key[16] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 
