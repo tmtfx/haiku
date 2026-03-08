@@ -66,6 +66,9 @@ public:
                                                  BCryptoAlgorithmInfo* info);
             status_t            GetEngineName(BCryptoAlgorithmID algo, 
                                               char* outName, size_t nameSize);
+            status_t            GetEngineName(BCryptoAlgorithmID algo, 
+                                              BCryptoMode mode, 
+                                              char* outName, size_t nameSize);
 
 private:
 			int					fFd;
