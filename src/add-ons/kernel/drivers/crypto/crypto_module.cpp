@@ -39,7 +39,7 @@ crypto_std_ops(int op, ...)
 			BInitPadLockRNG();
 			BInitx86CPURNG();
 			BInitPadLockCrypto();
-			BInitAESNICrypto();
+			//BInitAESNICrypto();
 			BInitSoftCrypto();
 			BStartEntropyFeeder();
 			//BInitx86CPUDigest();

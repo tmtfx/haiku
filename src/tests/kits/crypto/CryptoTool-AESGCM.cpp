@@ -35,6 +35,9 @@ int main(int argc, char** argv) {
         printf("Errore: Device /dev/crypto non trovato!\n");
         return 1;
     }
+    char engineName[64] = "Sconosciuto";
+    crypto.GetEngineName(B_CRYPTO_AES, B_CRYPTO_MODE_GCM, engineName, sizeof(engineName));
+    printf("Motore crittografico: %s\n", engineName);
 
     // 2. CREAZIONE FILE DI TEST
     const char* sourcePath = "test_data.txt";

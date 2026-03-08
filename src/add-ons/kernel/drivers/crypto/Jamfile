@@ -30,6 +30,7 @@ KernelAddon crypto :
     #x86CPUDigest.cpp
     x86CPURNG.cpp
     SoftCrypto.cpp
+    soft_gcm.cpp
     soft_aes.cpp
     soft_chacha20.cpp
     SoftDigest.cpp

@@ -412,17 +412,17 @@ BCrypto::Decrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
 
     // In decifratura il Tag è un INPUT (serve al driver per validare)
     iovec srcVecs[2] = { {(void*)in, inLen}, {(void*)inTag, 16} };
-    iovec dstVecs[1] = { {out, inLen} }; // La destinazione ha solo i dati in chiaro
+    // dstVecs[1] deve esistere per non far andare il driver "fuori giri", 
+    // anche se non ci scriveremo nulla di utile.
+    uint8 dummyTag[16]; 
+    iovec dstVecs[2] = { {out, inLen}, {dummyTag, 16} };
 
     BCryptoUserRequest req;
     _FillRequest(req, B_CRYPTO_DECRYPT, fAlgorithm, fMode,
                  key, keyLen, iv, ivLen, srcVecs, dstVecs, 2);
 
     status_t st = Process(req);
-    if (st == B_OK)
-        return (ssize_t)inLen;
-    
-    return (ssize_t)st;
+    return (st == B_OK) ? (ssize_t)inLen : (ssize_t)st;
 }
 // Decifratura GCM streaming
 ssize_t 

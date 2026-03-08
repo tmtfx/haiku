@@ -5,11 +5,98 @@
  */
 
 #include "soft_aes.h"
+#include "SoftCryptoEngines.h"
+//#include "SoftCryptoPriv.h"
 #include <string.h>
 /* ---------------------------------------------------------------- */
 /* AES GCM helperfuncs                                              */
 /* ---------------------------------------------------------------- */
+/* versione proposta da testare per endianness 
+#include <ByteOrder.h> // Per B_BENDIAN_TO_HOST_INT64 su Haiku
+
+static void
+soft_gcm_shift_right(uint64 block[2])
+{
+    // La costante 0xE1 è applicata al primo byte se l'ultimo bit trasla fuori
+    uint64 mask = (block[1] & 1) ? 0xE100000000000000ULL : 0;
+    block[1] = (block[1] >> 1) | (block[0] << 63);
+    block[0] = (block[0] >> 1) ^ mask;
+}
+
+void
+soft_ghash_multiply(uint8* x, const uint8* h)
+{
+    uint64 V[2], Z[2] = {0, 0};
+    
+    // Usiamo memcpy per evitare problemi di allineamento (alignment fault)
+    // e convertiamo da Big Endian (formato GCM) all'endian della CPU
+    uint64 h_be[2], x_be[2];
+    memcpy(h_be, h, 16);
+    memcpy(x_be, x, 16);
+
+    V[0] = __builtin_bswap64(h_be[0]);
+    V[1] = __builtin_bswap64(h_be[1]);
+
+    for (int i = 0; i < 128; i++) {
+        // Controllo del bit i-esimo di X
+        // Nota: X viene letto byte per byte per coerenza con lo standard
+        if ((x[i >> 3] >> (7 - (i & 7))) & 1) {
+            Z[0] ^= V[0];
+            Z[1] ^= V[1];
+        }
+        soft_gcm_shift_right(V);
+    }
+    
+    // Riconvertiamo in Big Endian per l'output
+    Z[0] = __builtin_bswap64(Z[0]);
+    Z[1] = __builtin_bswap64(Z[1]);
+    memcpy(x, Z, 16);
+}*/
 // Moltiplicazione per 'x' nel campo di Galois (Shift a destra con riduzione)
+/* QUESTO FUNZIONA SPOSTATO DOPO CORRUZIONE FILE GCM
+
+#include <ByteOrder.h> // Per B_BENDIAN_TO_HOST_INT64 su Haiku
+
+static void
+soft_gcm_shift_right(uint64 block[2])
+{
+    // La costante 0xE1 è applicata al primo byte se l'ultimo bit trasla fuori
+    uint64 mask = (block[1] & 1) ? 0xE100000000000000ULL : 0;
+    block[1] = (block[1] >> 1) | (block[0] << 63);
+    block[0] = (block[0] >> 1) ^ mask;
+}
+
+void
+soft_ghash_multiply(uint8* x, const uint8* h)
+{
+    uint64 V[2], Z[2] = {0, 0};
+    
+    // Usiamo memcpy per evitare problemi di allineamento (alignment fault)
+    // e convertiamo da Big Endian (formato GCM) all'endian della CPU
+    uint64 h_be[2], x_be[2];
+    memcpy(h_be, h, 16);
+    memcpy(x_be, x, 16);
+
+    V[0] = __builtin_bswap64(h_be[0]);
+    V[1] = __builtin_bswap64(h_be[1]);
+
+    for (int i = 0; i < 128; i++) {
+        // Controllo del bit i-esimo di X
+        // Nota: X viene letto byte per byte per coerenza con lo standard
+        if ((x[i >> 3] >> (7 - (i & 7))) & 1) {
+            Z[0] ^= V[0];
+            Z[1] ^= V[1];
+        }
+        soft_gcm_shift_right(V);
+    }
+    
+    // Riconvertiamo in Big Endian per l'output
+    Z[0] = __builtin_bswap64(Z[0]);
+    Z[1] = __builtin_bswap64(Z[1]);
+    memcpy(x, Z, 16);
+}*/
+
+/* vesione per soft_aes_gcm_update_internal 
 static void
 gcm_shift_right(uint64 block[2])
 {
@@ -20,7 +107,7 @@ gcm_shift_right(uint64 block[2])
 // Implementazione GHASH (moltiplicazione X * H)
 // Questa versione è bit-a-bit. È la più sicura da implementare correttamente
 // prima di passare alle tabelle di accelerazione.
-void ghash_multiply(uint8* x, const uint8* h)
+void soft_ghash_multiply(uint8* x, const uint8* h)
 {
     uint64 V[2], Z[2] = {0, 0};
     
@@ -44,7 +131,7 @@ void ghash_multiply(uint8* x, const uint8* h)
     //((uint64*)x)[1] = Z[1];
     ((uint64*)x)[0] = __builtin_bswap64(Z[0]);
     ((uint64*)x)[1] = __builtin_bswap64(Z[1]);
-}
+}*/
 
 /* ---------------------------------------------------------------- */
 /* AES tables (static const, kernel-safe)                           */
@@ -305,6 +392,22 @@ soft_aes_zero(SoftAESContext* ctx)
         return;
     secure_memzero(ctx, sizeof(*ctx));
 }
+
+void 
+soft_aes_ctr_update(SoftAESContext* ctx, uint8* counter, const uint8* in, uint8* out, size_t len)
+{
+    uint8 keystream[16];
+    for (size_t i = 0; i < len; i += 16) {
+        soft_aes_encrypt_block(ctx, counter, keystream); // Cifra il counter
+        for (int j = 0; j < 16; j++) out[i+j] = in[i+j] ^ keystream[j]; // XOR
+        
+        // Incrementa solo gli ultimi 32 bit (standard GCM)
+        for (int j = 15; j >= 12; j--) {
+            if (++counter[j] != 0) break;
+        }
+    }
+}
+/*
 void
 soft_aes_gcm_update_internal(SoftAESContext* ctx, const uint8* src, uint8* dst, size_t len)
 {
@@ -356,4 +459,4 @@ soft_aes_gcm_update_internal(SoftAESContext* ctx, const uint8* src, uint8* dst, 
 
         offset += chunk;
     }
-}
+}*/

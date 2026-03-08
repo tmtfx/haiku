@@ -12,19 +12,20 @@
 #include "BCryptoCore.h"
 
 #include <immintrin.h> // Necessario per __m128i
-
+/*
 struct AESNIContext {
+	alignas(64) BCryptoFPUContext fpu_save;
     alignas(16) __m128i encRoundKeys[15]; // Massimo 14 round per AES-256 + 1
     alignas(16) __m128i decRoundKeys[15];
-    alignas(16) BCryptoFPUContext fpu_save;
     int     rounds;
     uint8   iv[16];
-    uint8 h_key[16];      // Costante H per GHASH
-    uint8 tag_acc[16];    // Accumulatore parziale del Tag
-    uint8 counter[16];    // Stato attuale del contatore CTR
-    uint64 total_len;     // Bit totali processati (per il blocco finale)
-    bool is_encrypting;   // Stato per sapere se stiamo cifrando o decifrando
-} __attribute__((aligned(16))); // L'allineamento a 16 byte è vitale per SSE
+    
+    //uint8 h_key[16];      // Costante H per GHASH
+    //uint8 tag_acc[16];    // Accumulatore parziale del Tag
+    //uint8 counter[16];    // Stato attuale del contatore CTR
+    //uint64 total_len;     // Bit totali processati (per il blocco finale)
+    //bool is_encrypting;   // Stato per sapere se stiamo cifrando o decifrando
+} __attribute__((aligned(64))); // L'allineamento a 16 byte è vitale per SSE*/
 
 status_t BInitAESNICrypto();
 

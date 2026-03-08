@@ -7,7 +7,8 @@
 #include "BCryptoCPU.h"
 #include <string.h>
 #include <crypto/BCryptoKernelInternal.h>
-#include "BCryptoDevice.h" 
+#include "BCryptoDevice.h"
+#include "SoftCryptoPriv.h" 
 
 #include <lock.h>
 #include <util/AutoLock.h>
@@ -529,9 +530,10 @@ status_t
 BStreamFinal(crypto_session* session, BCryptoRequest* req)
 {
 	MutexLocker _(sCryptoLock);
-    //BCryptoAlgorithm* algo = _FindAlgorithm(session->algorithm, session->mode);
     AlgoNode* node = _FindAlgorithm(session->algorithm, session->mode);
     if (!node || !node->algo->StreamFinal) return B_NOT_SUPPORTED;
+    
+    if (session->algorithm_state == nullptr) return B_BAD_VALUE;
 
     uint8 tag[16];
     status_t status = node->algo->StreamFinal(session->algorithm_state, tag);
@@ -552,18 +554,50 @@ BStreamFinal(crypto_session* session, BCryptoRequest* req)
             status = lockStatus;
         }
     }
+    /* NON QuI in UNINIT
+    if (session->algorithm_state != nullptr && session->state_size > 0) {
+        bcrypto_secure_memzero(session->algorithm_state, session->state_size);
+        unlock_memory(session->algorithm_state, session->state_size, B_READ_DEVICE);
+        
+        // Fondamentale: settiamo state_size a 0 per dire alla BStreamUninit 
+        // che la memoria fisica è già stata sbloccata.
+        session->state_size = 0;
+    }*/
 
     // Pulizia di sicurezza
-    bcrypto_secure_memzero(session->algorithm_state, session->state_size);
+    //bcrypto_secure_memzero(session->algorithm_state, session->state_size);
     //secure_memzero(session->algorithm_state, get_context_size(session->algorithm));
-    unlock_memory(session->algorithm_state, session->state_size, B_READ_DEVICE);
-    free(session->algorithm_state);
+    //unlock_memory(session->algorithm_state, session->state_size, B_READ_DEVICE);
+    //free(session->algorithm_state);
 
-    session->algorithm_state = nullptr;
-    session->state_size = 0;
-    session->is_active = false;
+    //session->algorithm_state = nullptr;
+    //session->state_size = 0;
+    //session->is_active = false;
     
     return status;
+}
+// LIBERA LA MEMORIA E BASTA
+status_t 
+BStreamUninit(crypto_session* session) {
+    if (session == NULL || session->algorithm_state == NULL)
+        return B_OK;
+    
+
+    SoftAEADContext* aead = (SoftAEADContext*)session->algorithm_state;
+    
+    if (session->state_size > 0) {
+        bcrypto_secure_memzero(session->algorithm_state, session->state_size);
+        unlock_memory(session->algorithm_state, session->state_size, B_READ_DEVICE);
+    }
+    
+    if (aead->cipher_ctx) free(aead->cipher_ctx);
+    if (aead->auth_ctx)   free(aead->auth_ctx);
+    free(aead);
+
+    session->algorithm_state = NULL;
+    session->state_size = 0;
+    session->is_active = false;
+    return B_OK;
 }
 status_t
 BSubmitCryptoRequest(BCryptoRequest* request)

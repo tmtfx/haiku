@@ -42,4 +42,5 @@ extern status_t BHashFinal(crypto_session* session, BCryptoUserRequest* request)
 extern status_t BStreamInit(crypto_session* session, BCryptoRequest* req);
 extern status_t BStreamUpdate(crypto_session* session, BCryptoRequest* req);
 extern status_t BStreamFinal(crypto_session* session, BCryptoRequest* req);
+extern status_t BStreamUninit(crypto_session* session);
 #endif // _B_CRYPTO_CORE_H_

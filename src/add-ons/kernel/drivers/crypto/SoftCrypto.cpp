@@ -9,10 +9,11 @@
 #include "soft_aes.h"
 #include "soft_chacha20.h"
 #include <debug.h>
+#include "SoftCryptoEngines.h"
 
 /*
  * funzione helper per aes CTR
- */
+
 static void
 aes_increment_counter(uint8* counter)
 {
@@ -21,115 +22,134 @@ aes_increment_counter(uint8* counter)
         if (++counter[i] != 0)
             break;
     }
-}
+} */
 /* ---------------------------------------------------------------- */
 /* AES GCM BRIDGES                                                  */
 /* ---------------------------------------------------------------- */
 static status_t
-soft_aes_gcm_stream_init(void** context, size_t* _contextSize, BCryptoOperation op,const uint8* key, size_t keyLen, 
+soft_aes_gcm_stream_init(void** context, size_t* _contextSize, BCryptoOperation op, const uint8* key, size_t keyLen, 
                          const uint8* iv, size_t ivLen)
 {
     if (!context || !key || !iv) return B_BAD_VALUE;
 
     // 1. Allochiamo il contesto specifico
-    SoftAESContext* ctx = (SoftAESContext*)malloc(sizeof(SoftAESContext));
-    if (!ctx) return B_NO_MEMORY;
-    memset(ctx, 0, sizeof(SoftAESContext));
-    
-    dprintf("BCRYPTO: Init - Resetting total_len and GHASH accumulator\n");
-    
-    // Settiamo il flag in base all'operazione passata dal Core
-    ctx->is_encrypting = (op == B_CRYPTO_ENCRYPT);
-    // Pulizia esplicita dell'accumulatore (nel caso memset non bastasse o per chiarezza)
-    memset(ctx->tag_acc, 0, 16);
+    //SoftAESContext* ctx = (SoftAESContext*)malloc(sizeof(SoftAESContext));
+    SoftAEADContext* aead = (SoftAEADContext*)malloc(sizeof(SoftAEADContext));
+    SoftAESContext* aes = (SoftAESContext*)malloc(sizeof(SoftAESContext));
+    GCMState* gcm = (GCMState*)malloc(sizeof(GCMState));
 
-    // 2. Setup delle chiavi (AES-128/256)
-    status_t status = soft_aes_set_key(ctx, key, keyLen);
-    if (status != B_OK) {
-        free(ctx);
-        return status;
+    if (!aead || !aes || !gcm) {
+        free(aead); free(aes); free(gcm);
+        return B_NO_MEMORY;
     }
 
-    // 3. Calcolo H (Hash Key): E_k(0^128)
+    memset(aead, 0, sizeof(SoftAEADContext));
+    memset(aes, 0, sizeof(SoftAESContext));
+    memset(gcm, 0, sizeof(GCMState));
+    
+    // 2. Setup AES (Chiavi)
+    status_t status = soft_aes_set_key(aes, key, keyLen);
+    if (status != B_OK) {
+        free(aead); free(aes); free(gcm);
+        return status;
+    }
+    
+    // 3. Setup GCM (Hash Key H)
     uint8 zeroBlock[16] = {0};
-    soft_aes_encrypt_block(ctx, zeroBlock, ctx->h_key);
+    // Usiamo ancora la funzione di blocco singola per l'inizializzazione
+    soft_aes_encrypt_block(aes, zeroBlock, gcm->h_key);
 
-    // 4. Setup J0 (Counter iniziale)
-    // GCM standard prevede IV di 96 bit + contatore a 32 bit che parte da 1
+    // 4. Setup IV / Counter
     if (ivLen == 12) {
-        memcpy(ctx->counter, iv, 12);
-        ctx->counter[15] = 1; 
+        memcpy(gcm->counter, iv, 12);
+        gcm->counter[15] = 1; 
+        // Salviamo J0 per il tag finale
+        memcpy(gcm->j0, gcm->counter, 16);
     } else {
-        // Se IV non è 96 bit, andrebbe calcolato via GHASH (complessità extra)
-        free(ctx);
+        free(aead); free(aes); free(gcm);
         return B_NOT_SUPPORTED; 
     }
 
-    ctx->total_len = 0;
-    *context = ctx;
-    *_contextSize = sizeof(SoftAESContext);
+    // 5. Assemblaggio AEAD
+    aead->cipher_ctx = aes;
+    aead->auth_ctx = gcm;
+    aead->is_encrypting = (op == B_CRYPTO_ENCRYPT);
+    aead->total_len = 0;
+
+    *context = aead;
+    *_contextSize = sizeof(SoftAEADContext) + sizeof(SoftAESContext) + sizeof(GCMState);
     return B_OK;
 }
 
 static status_t
-soft_aes_gcm_stream_update(void* context, const iovec* src, const iovec* dst, size_t count)
+soft_aes_gcm_stream_update(void* context, const iovec* inVec, const iovec* outVec, size_t vecCount)
 {
-    SoftAESContext* ctx = (SoftAESContext*)context;
-    if (!ctx) return B_BAD_VALUE;
+    SoftAEADContext* aead = (SoftAEADContext*)context;
+    SoftAESContext* aes = (SoftAESContext*)aead->cipher_ctx;
+    GCMState* gcm = (GCMState*)aead->auth_ctx;
 
-    for (size_t i = 0; i < count; i++) {
-        uint8* s = (uint8*)src[i].iov_base;
-        uint8* d = (uint8*)dst[i].iov_base;
-        size_t len = src[i].iov_len;
+    for (size_t i = 0; i < vecCount; i++) {
+        const uint8* src = (const uint8*)inVec[i].iov_base;
+        uint8* dst = (uint8*)outVec[i].iov_base;
+        size_t len = inVec[i].iov_len;
 
-        // Qui dobbiamo processare i dati a blocchi di 16 byte
-        // 1. Cifratura/Decifratura CTR
-        // 2. Aggiornamento GHASH(tag_acc, ciphertext)
-        
-        // Per semplicità ora chiamiamo una funzione interna di soft_aes.cpp
-        // che gestisce il loop dei blocchi
-        soft_aes_gcm_update_internal(ctx, s, d, len);
-        
-        ctx->total_len += (uint64)len;
+        if (aead->is_encrypting) {
+            // Cifra e poi aggiorna GHASH sul ciphertext (dst)
+            soft_aes_ctr_update(aes, gcm->counter, src, dst, len);
+            soft_ghash_update(gcm, dst, len);
+        } else {
+            // Aggiorna GHASH sul ciphertext (src) e poi decifra
+            soft_ghash_update(gcm, src, len);
+            soft_aes_ctr_update(aes, gcm->counter, src, dst, len);
+        }
+
+        aead->total_len += len;
     }
 
     return B_OK;
 }
 static status_t
-soft_aes_gcm_stream_final(void* context, uint8* outTag)
+soft_aes_gcm_stream_final(void* context, uint8* tag)
 {
-    SoftAESContext* ctx = (SoftAESContext*)context;
-    dprintf("BCRYPTO: Finalizing - Total Bytes processed: %lu\n", ctx->total_len);
-    if (!ctx) return B_BAD_VALUE;
+    if (!context || !tag) return B_BAD_VALUE;
 
-    // 1. Fase finale GHASH: lunghezza dati
-    // Si crea un blocco con: [len(AAD) in bits (64)][len(Ciphertext) in bits (64)]
-    uint8 lenBlock[16] = {0};
-    uint64 bits = ctx->total_len * 8;
-    // Encoding Big-endian delle lunghezze
+    SoftAEADContext* aead = (SoftAEADContext*)context;
+    SoftAESContext* aes = (SoftAESContext*)aead->cipher_ctx;
+    GCMState* gcm = (GCMState*)aead->auth_ctx;
+
+    // 1. Fase finale del GHASH: aggiungere le lunghezze
+    // GCM vuole un blocco di 16 byte: [64-bit AAD len in bits] [64-bit Ciphertext len in bits]
+    uint8 lenBlock[16];
+    uint64 aadLenBits = 0; // Per ora non supportiamo AAD, quindi 0
+    uint64 cipherLenBits = aead->total_len * 8; // Lunghezza in bit
+
+    // Convertiamo in Big Endian (come vuole lo standard GCM)
     for (int i = 0; i < 8; i++) {
-        lenBlock[15 - i] = (bits >> (i * 8)) & 0xFF;
+        lenBlock[i] = (aadLenBits >> (56 - i * 8)) & 0xFF;
+        lenBlock[i + 8] = (cipherLenBits >> (56 - i * 8)) & 0xFF;
     }
-    
-    // Ultima moltiplicazione GHASH
-    ghash_multiply(ctx->tag_acc, lenBlock); // Qui usiamo la funzione che hai già!
-    ghash_multiply(ctx->tag_acc, ctx->h_key);
 
-    // 2. XOR finale con J0 cifrato per ottenere il Tag
-    uint8 encryptedJ0[16];
-    uint8 J0[16];
-    memcpy(J0, ctx->counter, 12); // Recuperiamo l'IV originale
-    J0[12] = J0[13] = J0[14] = 0; J0[15] = 1; // J0 ha contatore = 1
-    
-    soft_aes_encrypt_block(ctx, J0, encryptedJ0);
-    
+    // Ultimo update del GHASH con il blocco lunghezze
+    soft_ghash_update(gcm, lenBlock, 16);
+
+    // 2. Calcolo finale del Tag: TAG = GHASH(H, A, C) XOR E_k(J0)
+    uint8 s[16];
+    soft_aes_encrypt_block(aes, gcm->j0, s); // Cifriamo il contatore iniziale J0
+
     for (int i = 0; i < 16; i++) {
-        outTag[i] = ctx->tag_acc[i] ^ encryptedJ0[i];
+        tag[i] = gcm->tag_acc[i] ^ s[i];
     }
     
-    dprintf("BCRYPTO: Computed Tag: %02x%02x%02x%02x%02x%02x%02x%02x\n",
-        outTag[0], outTag[1], outTag[2], outTag[3], 
-        outTag[4], outTag[5], outTag[6], outTag[7]);
+    aead->total_len = 0;
+    memset(gcm->tag_acc, 0, 16);
+    // Riportiamo il counter al valore iniziale (J0 + 1)
+    memcpy(gcm->counter, gcm->j0, 16);
+    for (int j = 15; j >= 12; j--) { if (++gcm->counter[j] != 0) break; }
+
+    /*// 3. Pulizia della memoria
+    free(aes);
+    free(gcm);
+    free(aead);*/
 
     return B_OK;
 }
@@ -163,91 +183,63 @@ soft_aes_process_internal(BCryptoRequest* request, bool encrypt)
     soft_aes_set_key(&ctx, (uint8*)request->key, request->keyLength);
     
     if (request->mode == B_CRYPTO_MODE_GCM) {
-        // 1. Derivazione chiave Hash H = AES_K(0)
-        uint8 h_key[16] = {0};
-        soft_aes_encrypt_block(&ctx, h_key, h_key);
+        GCMState gcm{};
+        uint8 zero[16] = {0};
+        soft_aes_encrypt_block(&ctx, zero, gcm.h_key);
 
-        // 2. Preparazione contatori (J0)
-        uint8 j0[16];
         if (request->ivLength == 12) {
-            memcpy(j0, request->iv, 12);
-            memset(j0 + 12, 0, 3);
-            j0[15] = 1;
-        } else {
-            // Se IV != 96 bit servirebbe un pre-hash GHASH, 
-            // per ora limitiamoci allo standard 96-bit.
-            soft_aes_zero(&ctx);
-            return B_NOT_SUPPORTED; 
-        }
+            memcpy(gcm.counter, request->iv, 12);
+            gcm.counter[15] = 1;
+            memcpy(gcm.j0, gcm.counter, 16);
+            for (int j = 15; j >= 12; j--) { if (++gcm.counter[j] != 0) break; }
+        } else return B_NOT_SUPPORTED;
 
-        uint8 current_ctr[16];
-        memcpy(current_ctr, j0, 16);
-        aes_increment_counter(current_ctr);
-
-        uint8 tag_acc[16] = {0};
         size_t total_len = 0;
+    
+        // Determiniamo quanti vettori di DATI ci sono. 
+        // In GCM, l'ultimo vettore è SEMPRE il Tag.
+        size_t dataVectorCount = request->vectorCount - 1;
 
-        // 3. Loop sui vettori
-        for (size_t i = 0; i < request->vectorCount; i++) {
-            // Logica di esclusione del vettore TAG (come abbiamo discusso)
-            if (!encrypt && i == request->vectorCount - 1) break;
-            if (encrypt && i == request->vectorCount - 1 && request->vectorCount > 1) break;
-
-            uint8* in = (uint8*)request->source[i].iov_base;
-            uint8* out = (uint8*)request->destination[i].iov_base;
+        for (size_t i = 0; i < dataVectorCount; i++) {
+            uint8* src = (uint8*)request->source[i].iov_base;
+            uint8* dst = (uint8*)request->destination[i].iov_base;
             size_t len = request->source[i].iov_len;
+            if (len == 0) continue;
             total_len += len;
 
-            for (size_t b = 0; b < len; b += 16) {
-                size_t chunk = (len - b < 16) ? len - b : 16;
-                uint8 block[16] = {0};
-                memcpy(block, in + b, chunk);
-
-                if (encrypt) {
-                    uint8 ks[16];
-                    soft_aes_encrypt_block(&ctx, current_ctr, ks);
-                    for (size_t j = 0; j < chunk; j++) out[b + j] = block[j] ^ ks[j];
-                    
-                    uint8 hash_in[16] = {0};
-                    memcpy(hash_in, out + b, chunk);
-                    for (int j = 0; j < 16; j++) tag_acc[j] ^= hash_in[j];
-                    ghash_multiply(tag_acc, h_key);
-                } else {
-                    for (size_t j = 0; j < chunk; j++) tag_acc[j] ^= block[j];
-                    ghash_multiply(tag_acc, h_key);
-
-                    uint8 ks[16];
-                    soft_aes_encrypt_block(&ctx, current_ctr, ks);
-                    for (size_t j = 0; j < chunk; j++) out[b + j] = block[j] ^ ks[j];
-                }
-                aes_increment_counter(current_ctr);
+            if (encrypt) {
+                soft_aes_ctr_update(&ctx, gcm.counter, src, dst, len);
+                soft_ghash_update(&gcm, dst, len);
+            } else {
+                soft_ghash_update(&gcm, src, len);
+                soft_aes_ctr_update(&ctx, gcm.counter, src, dst, len);
             }
         }
 
-        // 4. Finalizzazione (AAD length 0 + Data length)
+        // Finalizzazione Tag
         uint8 len_block[16] = {0};
         uint64 data_bits = (uint64)total_len * 8;
-        // Encode Big-Endian (ultimi 8 byte per i dati)
+        // Fix: Encoding Big-Endian corretto (GCM usa 64 bit per la lunghezza)
         for (int i = 0; i < 8; i++) len_block[15-i] = (data_bits >> (i * 8)) & 0xFF;
-        
-        for (int j = 0; j < 16; j++) tag_acc[j] ^= len_block[j];
-        ghash_multiply(tag_acc, h_key);
+    
+        soft_ghash_update(&gcm, len_block, 16);
 
         uint8 s0[16];
-        soft_aes_encrypt_block(&ctx, j0, s0);
-        for (int j = 0; j < 16; j++) tag_acc[j] ^= s0[j];
-
-        soft_aes_zero(&ctx);
+        soft_aes_encrypt_block(&ctx, gcm.j0, s0);
+        for (int j = 0; j < 16; j++) gcm.tag_acc[j] ^= s0[j];
 
         if (encrypt) {
-            memcpy(request->destination[request->vectorCount - 1].iov_base, tag_acc, 16);
+            // Scriviamo il tag nell'ultimo vettore di destinazione
+            uint8* outTag = (uint8*)request->destination[request->vectorCount - 1].iov_base;
+            memcpy(outTag, gcm.tag_acc, 16);
             return B_OK;
         } else {
-            void* providedTag = request->source[request->vectorCount - 1].iov_base;
-            return (memcmp(tag_acc, providedTag, 16) == 0) ? B_OK : B_BAD_DATA;
+            // Leggiamo il tag dall'ultimo vettore di sorgente
+            uint8* providedTag = (uint8*)request->source[request->vectorCount - 1].iov_base;
+            return (memcmp(gcm.tag_acc, providedTag, 16) == 0) ? B_OK : B_BAD_DATA;
         }
     }
-
+/*
     for (size_t i = 0; i < request->vectorCount; i++) {
         uint8* in_ptr = (uint8*)request->source[i].iov_base;
         uint8* out_ptr = (uint8*)request->destination[i].iov_base;
@@ -301,6 +293,51 @@ soft_aes_process_internal(BCryptoRequest* request, bool encrypt)
     if (useIV) {
         memcpy(request->iv, iv, 16);
     }
+    soft_aes_zero(&ctx);
+    return B_OK;*/
+    // --- LOGICA CBC / CTR / ECB ---
+    for (size_t i = 0; i < request->vectorCount; i++) {
+        uint8* in_ptr = (uint8*)request->source[i].iov_base;
+        uint8* out_ptr = (uint8*)request->destination[i].iov_base;
+        size_t len = request->source[i].iov_len;
+
+        if (request->mode == B_CRYPTO_MODE_CTR) {
+            soft_aes_ctr_update(&ctx, iv, in_ptr, out_ptr, len);
+        } else {
+            // CBC ed ECB richiedono blocchi da 16
+            if ((len % 16) != 0) {
+            	soft_aes_zero(&ctx);
+            	return B_BAD_VALUE;
+            }
+            
+            for (size_t b = 0; b < len; b += 16) {
+                uint8 block[16];
+                memcpy(block, in_ptr + b, 16);
+                if (request->mode == B_CRYPTO_MODE_ECB) {
+                    if (encrypt) soft_aes_encrypt_block(&ctx, block, block);
+                    else soft_aes_decrypt_block(&ctx, block, block);
+                } else if (request->mode == B_CRYPTO_MODE_CBC) {
+                    if (encrypt) {
+                        for (int j = 0; j < 16; j++) block[j] ^= iv[j];
+                        soft_aes_encrypt_block(&ctx, block, block);
+                        memcpy(iv, block, 16);
+                    } else {
+                        uint8 next_iv[16];
+                        memcpy(next_iv, block, 16);
+                        soft_aes_decrypt_block(&ctx, block, block);
+                        for (int j = 0; j < 16; j++) block[j] ^= iv[j];
+                        memcpy(iv, next_iv, 16);
+                    }
+                }
+                memcpy(out_ptr + b, block, 16);
+            }
+        }
+    }
+    
+    if (request->mode == B_CRYPTO_MODE_CBC || request->mode == B_CRYPTO_MODE_CTR) {
+        memcpy(request->iv, iv, 16);
+    }
+
     soft_aes_zero(&ctx);
     return B_OK;
 }

@@ -77,10 +77,10 @@ crypto_close(void* cookie)
     // Se l'utente chiude il file descriptor senza aver chiamato HASH_FINAL,
     // lo stato dell'algoritmo sarebbe rimasto allocato e "lockato" in RAM.
     if (session->algorithm_state != NULL) {
-        // Chiamiamo BHashFinal con NULL:
-        // Il Core capirà che vogliamo solo liberare la memoria (free + unlock)
-        // senza produrre alcun digest di output.
-        BHashFinal(session, NULL);
+        if (session->mode == B_CRYPTO_MODE_GCM) 
+            BStreamUninit(session);
+        else
+            BHashFinal(session, NULL);
     }
 
     // Ora che lo stato interno è certamente pulito, cancelliamo la sessione.
@@ -319,7 +319,8 @@ crypto_control(void* cookie, uint32 op, void* arg, size_t length)
             
             // Se c'è uno stato attivo (magari un hash o un altro stream), pulizia.
             if (session->algorithm_state != NULL) {
-                BStreamFinal(session, NULL); 
+                //BStreamFinal(session, NULL); 
+                BStreamUninit(session);
             }
 
             if (userReq.keyLength > 64 || userReq.ivLength > 64)
@@ -390,18 +391,38 @@ crypto_control(void* cookie, uint32 op, void* arg, size_t length)
                 return B_BAD_VALUE;
 
             // Il tag viene restituito tramite il primo vettore di destination
-            iovec localTagVec[1];
-            if (user_memcpy(localTagVec, userReq.destination, sizeof(iovec)) != B_OK)
+            //iovec localTagVec[1];
+            iovec localTagVec;
+            //if (user_memcpy(localTagVec, userReq.destination, sizeof(iovec)) != B_OK) return B_BAD_ADDRESS;
+            if (user_memcpy(&localTagVec, userReq.destination, sizeof(iovec)) != B_OK)
                 return B_BAD_ADDRESS;
 
-            // Verifica spazio per il Tag (AES-GCM = 16 byte)
-            if (localTagVec[0].iov_len < 16) return B_BAD_VALUE;
+            if (localTagVec.iov_len < 16) return B_BAD_VALUE;
 
-            BCryptoRequest req;
-            req.destination = localTagVec;
-            req.vectorCount = 1;
+            // 2. Buffer temporaneo KERNEL per il tag
+            uint8 kernelTag[16];
+            iovec tagIov = { kernelTag, 16 };
+            
+            BCryptoRequest kernelReq;
+            memset(&kernelReq, 0, sizeof(kernelReq));
+            kernelReq.destination = &tagIov;
+            kernelReq.vectorCount = 1;
 
-            return BStreamFinal(session, &req);
+            //return BStreamFinal(session, &req);
+            status_t status = BStreamFinal(session, &kernelReq);
+            if (status == B_OK) {
+                // 4. Copia finale verso l'utente
+                // Recuperiamo dove l'utente voleva il tag
+                iovec userTagIov;
+                if (user_memcpy(&userTagIov, userReq.destination, sizeof(iovec)) == B_OK) {
+                    user_memcpy(userTagIov.iov_base, kernelTag, 16);
+                }
+            }
+            
+            BStreamUninit(session);
+
+            return status;
+
         }
     }
     return B_DEV_INVALID_IOCTL;
