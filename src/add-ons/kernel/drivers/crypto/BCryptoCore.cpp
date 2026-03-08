@@ -209,6 +209,7 @@ BGetAlgorithmInfo(BCryptoAlgorithmInfo* info)
     while (AlgoNode* node = it.Next()) {
         if (current == target) {
             info->id = node->algo->algorithm;
+            info->mode = node->algo->mode;
             info->flags = node->algo->flags;
             strlcpy(info->vendor, node->algo->name, sizeof(info->vendor));
             
