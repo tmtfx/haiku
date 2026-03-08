@@ -6,7 +6,7 @@
 
 #include "AESNI.h"
 #include "SoftCryptoPriv.h"
-//#include "BCryptoDefs.h"
+#include "BCryptoCore.h"
 #include <crypto/BCryptoDefs.h>
 #include <string.h>
 #include "BCryptoAlgorithm.h"

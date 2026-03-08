@@ -7,11 +7,11 @@
 #define _AES_NI_H_
 
 #include <SupportDefs.h>
-#include <crypto/BCryptoDefs.h>
-#include <crypto/BCryptoKernelInternal.h>
-#include "BCryptoCore.h"
+//#include <crypto/BCryptoDefs.h>
+//#include <crypto/BCryptoKernelInternal.h>
+//#include "BCryptoCore.h"
 
-#include <immintrin.h> // Necessario per __m128i
+//#include <immintrin.h> // Necessario per __m128i
 /*
 struct AESNIContext {
 	alignas(64) BCryptoFPUContext fpu_save;
