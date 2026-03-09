@@ -132,7 +132,7 @@ BCrypto::GetEngineName(BCryptoAlgorithmID algo, BCryptoMode mode, char* outName,
     
     // Iteriamo sugli algoritmi registrati nel core
     while (GetNextAlgorithm(&cookie, &info) == B_OK) {
-        if (info.id == algo && info.mode == mode) {
+        if (info.id == algo && (info.mode & mode) != 0) {
             // Trovato! Essendo la lista ordinata per priorità nel Core,
             // il primo che incontriamo è quello che verrà effettivamente usato.
             strlcpy(outName, info.vendor, nameSize);
