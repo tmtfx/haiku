@@ -447,41 +447,15 @@ status_t soft_aes_process(BCryptoRequest* request)
 /* ---------------------------------------------------------------- */
 status_t BInitSoftCrypto()
 {
-    static BCryptoAlgorithm sSoftAES_CBC = {
-        .algorithm = B_CRYPTO_AES,
-        .mode      = B_CRYPTO_MODE_CBC,
-        .flags     = B_CRYPTO_ALG_SOFTWARE,
-        .name      = "AES-CBC (Software)",
+    static BCryptoAlgorithm sSoftAES = {
+    	.algorithm = B_CRYPTO_AES,
+    	.mode      = (BCryptoMode)(B_CRYPTO_MODE_CBC | B_CRYPTO_MODE_ECB | B_CRYPTO_MODE_CTR),
+    	.flags     = B_CRYPTO_ALG_SOFTWARE,
+        .name      = "AES CBC-ECB-CTR (Software)",
         .priority  = 10,
         .Process   = soft_aes_process
     };
-    status_t status = BRegisterCryptoAlgorithm(&sSoftAES_CBC);
-    if (status != B_OK)
-        return status;
-
-    static BCryptoAlgorithm sSoftAES_ECB = {
-        .algorithm = B_CRYPTO_AES,
-        .mode      = B_CRYPTO_MODE_ECB,
-        .flags     = B_CRYPTO_ALG_SOFTWARE,
-        .name      = "AES-ECB (Software)",
-        .priority  = 10,
-        .Process   = soft_aes_process // Nota: dovrai gestire il caso ECB nel process!
-    };
-    
-    //return BRegisterCryptoAlgorithm(&sSoftAES_ECB);
-    status = BRegisterCryptoAlgorithm(&sSoftAES_ECB);
-    if (status != B_OK)
-        return status;
-        
-    static BCryptoAlgorithm sSoftAES_CTR = {
-        .algorithm = B_CRYPTO_AES,
-        .mode      = B_CRYPTO_MODE_CTR,
-        .flags     = B_CRYPTO_ALG_SOFTWARE,
-        .name      = "AES-CTR (Software)",
-        .priority  = 10,
-        .Process   = soft_aes_process // punterà alla funzione aggiornata
-    };
-    status = BRegisterCryptoAlgorithm(&sSoftAES_CTR);
+    status_t status = BRegisterCryptoAlgorithm(&sSoftAES);
     if (status != B_OK)
         return status;
     
