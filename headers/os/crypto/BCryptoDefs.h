@@ -71,7 +71,8 @@ enum BCryptoHwCapability {
     B_CRYPTO_HW_PADLOCK_RNG   = 1 << 6,   // RNG di VIA PADLOCK
     B_CRYPTO_HW_SSE41         = 1 << 7,
     B_CRYPTO_HW_AVX2          = 1 << 8,
-    B_CRYPTO_HW_AVX512        = 1 << 9
+    B_CRYPTO_HW_AVX512        = 1 << 9,
+    B_CRYPTO_GHASH_PCLMULQDQ  = 1 << 10
 };
 
 enum BCryptoMode {

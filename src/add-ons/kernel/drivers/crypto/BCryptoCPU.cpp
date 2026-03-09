@@ -92,6 +92,10 @@ BGetCPUCryptoInfo(crypto_device_info* info)
         SET_ALGO(info, B_CRYPTO_SHA256);
         info->hw_type |= B_CRYPTO_HW_SHA_NI;
     }
+    
+    if (x86_check_feature(IA32_FEATURE_EXT_PCLMULQDQ, FEATURE_EXT)) {
+        info->hw_type |= B_CRYPTO_GHASH_PCLMULQDQ;
+    }
 
     // 3. VAES (Istruzioni AES vettoriali 256/512 bit - FEATURE_7_ECX)
     if (x86_check_feature(IA32_FEATURE_VAES, FEATURE_7_ECX)) {
