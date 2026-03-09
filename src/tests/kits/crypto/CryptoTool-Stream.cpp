@@ -61,6 +61,10 @@ int main(int argc, char** argv) {
     crypto.SetAlgorithm(B_CRYPTO_AES);
     crypto.SetMode(B_CRYPTO_MODE_CBC);
     crypto.SetPadding(paddingEnabled, pType);
+    
+    char engineName[64] = "Sconosciuto";
+    crypto.GetEngineName(B_CRYPTO_AES,  engineName, sizeof(engineName));//B_CRYPTO_MODE_CBC,
+    printf("Motore crittografico: %s\n", engineName);
 
     // Apriamo i file usando le classi Haiku (che ereditano da BDataIO)
     BFile inputFile(filePath, B_READ_ONLY);
