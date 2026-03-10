@@ -10,6 +10,7 @@
 #include <StorageDefs.h>
 #include <DataIO.h>
 #include <cstdio>
+#include <cerrno>
 #include <new>
 
 #include <vector>
@@ -650,7 +651,11 @@ BCrypto::Process(BCryptoUserRequest& userReq)
          * Al momento, inviamo il vettore completo al driver.
          */
         // Inviamo tutti i vettori (Dati + Tag) in un'unica chiamata
-        return ioctl(fFd, B_CRYPTO_IOCTL_PROCESS, &userReq);
+        if (ioctl(fFd, B_CRYPTO_IOCTL_PROCESS, &userReq) < 0) {
+            // Fondamentale: recupera il vero errore dal thread-local storage
+            return errno; 
+        }
+        return B_OK;
     }
 
     const size_t kMinZeroCopySize = 4096; 
