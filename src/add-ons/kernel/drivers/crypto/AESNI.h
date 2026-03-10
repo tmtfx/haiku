@@ -26,6 +26,7 @@ struct AESNIContext {
     //uint64 total_len;     // Bit totali processati (per il blocco finale)
     //bool is_encrypting;   // Stato per sapere se stiamo cifrando o decifrando
 } __attribute__((aligned(64))); // L'allineamento a 16 byte è vitale per SSE*/
+typedef void (*ghash_multiply_func)(uint8* x, const uint8* h);
 
 status_t BInitAESNICrypto();
 
