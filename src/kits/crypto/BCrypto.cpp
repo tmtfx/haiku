@@ -95,6 +95,8 @@ status_t BCrypto::GetNextAlgorithm(uint32* cookie,BCryptoAlgorithmInfo* info)
     if (status == B_OK) {
         // Aggiorniamo il valore del cookie per la prossima chiamata
         *cookie = info->cookie;
+    } else {
+    	status = errno;
     }
 
     return status;
@@ -162,7 +164,7 @@ BCrypto::GetRandomBytes(void* buffer, size_t len)
     req.length = len;
 
     if (ioctl(fFd, B_CRYPTO_IOCTL_GET_RANDOM, &req) < 0)
-        return B_ERROR;
+        return errno;//return B_ERROR;
 
     return req.result;
 }
@@ -321,7 +323,8 @@ BCrypto::Encrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
     initReq.ivLength = ivLen;
 
     err = ioctl(fFd, B_CRYPTO_IOCTL_STREAM_INIT, &initReq);
-    if (err != B_OK) return err;
+    //if (err != B_OK) return err;
+    if (err != B_OK) return errno;
 
     // 2. LOOP DI CIFRATURA: Leggiamo a blocchi e cifriamo
     const size_t kBufferSize = 1024 * 64; // Chunk da 64KB per bilanciare RAM e performance
@@ -349,7 +352,10 @@ BCrypto::Encrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
 
         // Il driver cifra il blocco e aggiorna l'accumulatore GHASH internamente
         err = ioctl(fFd, B_CRYPTO_IOCTL_STREAM_UPDATE, &updateReq);
-        if (err != B_OK) break;
+        if (err != B_OK) {
+        	err = errno;
+        	break;
+        }
 
         // Scriviamo il risultato cifrato nella destinazione
         ssize_t bytesWritten = destination->Write(bufferDst, bytesRead);
@@ -377,7 +383,8 @@ BCrypto::Encrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
     finalReq.vectorCount = 1;
 
     err = ioctl(fFd, B_CRYPTO_IOCTL_STREAM_FINAL, &finalReq);
-    if (err != B_OK) return err;
+    //if (err != B_OK) return err;
+    if (err != B_OK) return errno;
 
     // Copiamo il tag generato nel buffer di output dell'utente
     memcpy(outTag, computedTag, 16);
@@ -447,7 +454,8 @@ BCrypto::Decrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
     initReq.ivLength = ivLen;
 
     err = ioctl(fFd, B_CRYPTO_IOCTL_STREAM_INIT, &initReq);
-    if (err != B_OK) return err;
+    //if (err != B_OK) return err;
+    if (err != B_OK) return errno;
 
     // 2. LOOP READ -> UPDATE -> WRITE
     const size_t kBufferSize = 1024 * 64; // 64KB chunk
@@ -472,8 +480,12 @@ BCrypto::Decrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
         updateReq.destination = &iovDst;
         updateReq.vectorCount = 1;
 
-        err = ioctl(fFd, B_CRYPTO_IOCTL_STREAM_UPDATE, &updateReq);
-        if (err != B_OK) break;
+        //err = ioctl(fFd, B_CRYPTO_IOCTL_STREAM_UPDATE, &updateReq);
+        //if (err != B_OK) break;
+        if (ioctl(fFd, B_CRYPTO_IOCTL_STREAM_UPDATE, &updateReq) < 0) {
+            err = errno;
+            break;
+        }
 
         ssize_t bytesWritten = destination->Write(bufferDst, bytesRead);
         if (bytesWritten != bytesRead) {
@@ -498,7 +510,8 @@ BCrypto::Decrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
     finalReq.vectorCount = 1;
 
     err = ioctl(fFd, B_CRYPTO_IOCTL_STREAM_FINAL, &finalReq);
-    if (err != B_OK) return err;
+    //if (err != B_OK) return err;
+    if (err != B_OK) return errno;
 
     // CONFRONTO TAG: Se non corrispondono, i dati sono compromessi!
     if (memcmp(computedTag, inTag, 16) != 0) {
@@ -606,7 +619,8 @@ BCrypto::Process(BCryptoUserRequest& userReq)
     
     if (userReq.operation == B_CRYPTO_DIGEST) {
         status_t err = ioctl(fFd, B_CRYPTO_IOCTL_HASH_INIT, &userReq.algorithm);
-        if (err != B_OK) return err;
+        //if (err != B_OK) return err;
+        if (err != B_OK) return errno;
 
         /* senza chunking 
         for (size_t i = 0; i < userReq.vectorCount; i++) {
@@ -632,12 +646,17 @@ BCrypto::Process(BCryptoUserRequest& userReq)
                 updateReq.vectorCount = 1;
 
                 err = ioctl(fFd, B_CRYPTO_IOCTL_HASH_UPDATE, &updateReq);
-                if (err != B_OK) return err;
+                //if (err != B_OK) return err;
+                if (err < 0) return errno;
                 done += toProcess;
             }
         }
 
-        return ioctl(fFd, B_CRYPTO_IOCTL_HASH_FINAL, &userReq);
+        //return ioctl(fFd, B_CRYPTO_IOCTL_HASH_FINAL, &userReq);
+        if (ioctl(fFd, B_CRYPTO_IOCTL_HASH_FINAL, &userReq) < 0)
+            return errno;
+
+        return B_OK;
     }
     
     if (fMode == B_CRYPTO_MODE_GCM) {
@@ -705,7 +724,8 @@ BCrypto::Process(BCryptoUserRequest& userReq)
             }
 
             free(bounceBuffer);
-            if (err < 0) return err;
+            //if (err < 0) return err;
+            if (err < 0) return errno;
             vIndex += vInCoalesce;
 
         } else {
@@ -737,7 +757,8 @@ BCrypto::Process(BCryptoUserRequest& userReq)
                         // se è cifratura usiamo PROCESS (che nel driver deve gestire lo stato dell'IV)
                         status_t err = ioctl(fFd, B_CRYPTO_IOCTL_PROCESS, &chunkReq);
         
-                        if (err < 0) return err;
+                        //if (err < 0) return err;
+                        if (err < 0) return errno;
                         
                         processed += toProcess;
                 }
@@ -751,7 +772,8 @@ BCrypto::Process(BCryptoUserRequest& userReq)
                 directReq.vectorCount = vInDirect;
 
                 status_t err = ioctl(fFd, B_CRYPTO_IOCTL_PROCESS, &directReq);
-                if (err < 0) return err;
+                //if (err < 0) return err;
+                if (err < 0) return errno;
 
                 vIndex += vInDirect;
             }
@@ -809,7 +831,8 @@ BCrypto::Digest(BCryptoAlgorithmID algo, BDataIO* source, void* outHash)
 	//fflush(stdout);
     // A. Inizializzazione
     status_t err = ioctl(fFd, B_CRYPTO_IOCTL_HASH_INIT, &algo);
-    if (err != B_OK) return err;
+    //if (err != B_OK) return err;
+    if (err < 0) return errno;
 
     // B. Ciclo di Update (Leggiamo il file/socket a pezzi)
     uint8 buffer[65536]; // Pezzi da 64KB, amichevoli per la cache
@@ -821,8 +844,10 @@ BCrypto::Digest(BCryptoAlgorithmID algo, BDataIO* source, void* outHash)
         _FillRequest(req, B_CRYPTO_DIGEST, algo, B_CRYPTO_MODE_ANY,
                      nullptr, 0, nullptr, 0, &src, nullptr, 1);
         
-        err = ioctl(fFd, B_CRYPTO_IOCTL_HASH_UPDATE, &req);
-        if (err != B_OK) break;
+        if (ioctl(fFd, B_CRYPTO_IOCTL_HASH_UPDATE, &req) < 0) {
+            err = errno; // <--- CATTURA L'ERRORE QUI
+            break;
+        }
     }
 
     // C. Finalizzazione
@@ -833,7 +858,9 @@ BCrypto::Digest(BCryptoAlgorithmID algo, BDataIO* source, void* outHash)
         _FillRequest(req, B_CRYPTO_DIGEST, algo, B_CRYPTO_MODE_ANY,
                      nullptr, 0, nullptr, 0, nullptr, &dst, 1);
                      
-        err = ioctl(fFd, B_CRYPTO_IOCTL_HASH_FINAL, &req);
+        //err = ioctl(fFd, B_CRYPTO_IOCTL_HASH_FINAL, &req);
+        if (ioctl(fFd, B_CRYPTO_IOCTL_HASH_FINAL, &req) < 0)
+            return errno;
         if (err == B_OK)
             memcpy(outHash, tempHash, GetHashLength(algo));
     }
