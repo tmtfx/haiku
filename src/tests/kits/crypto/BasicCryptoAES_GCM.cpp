@@ -17,6 +17,9 @@ int main() {
         printf("Errore: Device /dev/crypto non trovato!\n");
         return 1;
     }
+    char engineName[64] = "Sconosciuto";
+    crypto.GetEngineName(B_CRYPTO_AES, B_CRYPTO_MODE_GCM,  engineName, sizeof(engineName));
+    printf("Motore crittografico: %s\n", engineName);
     // 1. Dati di test
     uint8 key[16] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 
                      0x09, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16};
