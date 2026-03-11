@@ -34,10 +34,10 @@ typedef struct {
 // --- GLI AUTENTICATORI (Specifici) ---
 
 typedef struct {
-    uint8 h_key[16];
-    uint8 tag_acc[16];
-    uint8 counter[16];
-    uint8 j0[16]; // Salviamo J0 qui per il Final
+    alignas(16) uint8 h_key[16];
+    alignas(16) uint8 tag_acc[16];
+    alignas(16) uint8 counter[16];
+    alignas(16) uint8 j0[16]; // Salviamo J0 qui per il Final
 } GCMState;
 
 // --- IL CONTENITORE UNIVERSALE (AEAD) ---
