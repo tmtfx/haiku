@@ -309,7 +309,7 @@ BCrypto::Encrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
     if (fMode != B_CRYPTO_MODE_GCM) return B_BAD_VALUE;
     if (!source || !destination || !outTag) return B_BAD_VALUE;
 
-    status_t err;
+    status_t err = B_OK;
     
     // 1. GCM_INIT: Inizializziamo la sessione nel driver
     BCryptoUserRequest initReq;
@@ -322,9 +322,8 @@ BCrypto::Encrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
     initReq.iv = iv;
     initReq.ivLength = ivLen;
 
-    err = ioctl(fFd, B_CRYPTO_IOCTL_STREAM_INIT, &initReq);
-    //if (err != B_OK) return err;
-    if (err != B_OK) return errno;
+    if (ioctl(fFd, B_CRYPTO_IOCTL_STREAM_INIT, &initReq) < 0)
+        return errno;
 
     // 2. LOOP DI CIFRATURA: Leggiamo a blocchi e cifriamo
     const size_t kBufferSize = 1024 * 64; // Chunk da 64KB per bilanciare RAM e performance
@@ -351,10 +350,9 @@ BCrypto::Encrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
         updateReq.vectorCount = 1;
 
         // Il driver cifra il blocco e aggiorna l'accumulatore GHASH internamente
-        err = ioctl(fFd, B_CRYPTO_IOCTL_STREAM_UPDATE, &updateReq);
-        if (err != B_OK) {
-        	err = errno;
-        	break;
+        if (ioctl(fFd, B_CRYPTO_IOCTL_STREAM_UPDATE, &updateReq) < 0) {
+            err = errno;
+            break;
         }
 
         // Scriviamo il risultato cifrato nella destinazione
@@ -382,9 +380,8 @@ BCrypto::Encrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
     finalReq.destination = &tagIov;
     finalReq.vectorCount = 1;
 
-    err = ioctl(fFd, B_CRYPTO_IOCTL_STREAM_FINAL, &finalReq);
-    //if (err != B_OK) return err;
-    if (err != B_OK) return errno;
+    if (ioctl(fFd, B_CRYPTO_IOCTL_STREAM_FINAL, &finalReq) < 0)
+        return errno;
 
     // Copiamo il tag generato nel buffer di output dell'utente
     memcpy(outTag, computedTag, 16);
@@ -513,10 +510,27 @@ BCrypto::Decrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
     //if (err != B_OK) return err;
     if (err != B_OK) return errno;
 
+    /* pericolo attacco temporale
     // CONFRONTO TAG: Se non corrispondono, i dati sono compromessi!
     if (memcmp(computedTag, inTag, 16) != 0) {
         // Nota: In un'app reale, qui dovresti probabilmente cancellare 
         // il file di destinazione perché i dati sono falsi.
+        return B_BAD_DATA; 
+    }*/
+    uint8 diff = 0;
+    const uint8* tagA = computedTag;
+    const uint8* tagB = (const uint8*)inTag;
+    
+    for (int i = 0; i < 16; i++) {
+        diff |= (tagA[i] ^ tagB[i]);
+    }
+
+    if (diff != 0) {
+        // I dati sono compromessi! 
+        // Tentiamo di avvisare il BDataIO se è un file, o semplicemente torniamo errore.
+        // Un'idea potrebbe essere quella di azzerare l'output se possibile, 
+        // ma essendo uno streaming, i dati sono già "usciti".
+        
         return B_BAD_DATA; 
     }
 
