@@ -18,9 +18,19 @@
 #include <tmmintrin.h> //temp
 #include <immintrin.h>
 #include <malloc.h>
+#include <stdlib.h> //per memalign
 #include <debug.h>
 #pragma GCC target("aes,sse4.2")
 
+/* ----- debug ----- */
+static void
+dump_block(const char* label, const void* block) {
+    const uint8* b = (const uint8*)block;
+    dprintf("AESNI: %s: %02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n",
+        label, b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
+        b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]);
+}
+/* ------------------ */
 static void
 secure_memzero(void* p, size_t s)
 {
@@ -35,92 +45,30 @@ static ghash_multiply_func sGCMHashFunc = NULL;
 static bool ghash_accel=false;
 // Helper per riflettere i bit di un registro __m128i 
 // (Necessario se la CPU non supporta istruzioni di riflessione rapida)
-static inline __m128i 
-ghash_reflect(__m128i x) {
-    // Swap dei byte per simulare la riflessione richiesta dal GCM
-    const __m128i mask = _mm_set_epi8(
-        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
-    return _mm_shuffle_epi8(x, mask);
-}
-/*
-__attribute__((target("pclmul,sse2")))
-static void
-aesni_ghash_multiply(uint8* x, const uint8* h)
-{
-    // Carichiamo l'accumulatore (x) e la Hash Key (h)
-    __m128i a = _mm_loadu_si128((const __m128i*)x);
-    __m128i b = _mm_loadu_si128((const __m128i*)h);
+//static inline __m128i 
+//ghash_reflect(__m128i x) {
+//    // Swap dei byte per simulare la riflessione richiesta dal GCM
+//    const __m128i mask = _mm_set_epi8(
+//        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
+//    return _mm_shuffle_epi8(x, mask);
+//}
 
-    // Lo standard GCM richiede uno swap dei byte perché PCLMULQDQ 
-    // lavora in modo opposto rispetto all'ordine dei bit NIST
-    const __m128i BSWAP_MASK = _mm_set_epi8(
-        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
-    
-    a = _mm_shuffle_epi8(a, BSWAP_MASK);
-    b = _mm_shuffle_epi8(b, BSWAP_MASK);
-
-    // Moltiplicazione Carry-less
-    __m128i tmp0 = _mm_clmulepi64_si128(a, b, 0x00);
-    __m128i tmp1 = _mm_clmulepi64_si128(a, b, 0x11);
-    __m128i tmp2 = _mm_clmulepi64_si128(a, b, 0x10);
-    __m128i tmp3 = _mm_clmulepi64_si128(a, b, 0x01);
-    
-    tmp2 = _mm_xor_si128(tmp2, tmp3);
-    tmp3 = _mm_slli_si128(tmp2, 8);
-    tmp2 = _mm_srli_si128(tmp2, 8);
-    tmp0 = _mm_xor_si128(tmp0, tmp3);
-    tmp1 = _mm_xor_si128(tmp1, tmp2);
-
-    // Riduzione modulare nel campo GF(2^128)
-    __m128i v0, v1, v2, v3;
-    v0 = _mm_slli_epi64(tmp0, 1);
-    v1 = _mm_slli_epi64(tmp0, 2);
-    v2 = _mm_slli_epi64(tmp0, 7);
-    v3 = _mm_xor_si128(_mm_xor_si128(v0, v1), v2);
-    
-    tmp1 = _mm_xor_si128(tmp1, _mm_srli_epi64(tmp0, 63));
-    tmp1 = _mm_xor_si128(tmp1, _mm_srli_epi64(tmp0, 62));
-    tmp1 = _mm_xor_si128(tmp1, _mm_srli_epi64(tmp0, 57));
-    
-    tmp0 = _mm_xor_si128(tmp0, _mm_xor_si128(_mm_xor_si128(v3, 
-        _mm_srli_si128(v3, 8)), _mm_slli_si128(v3, 8))); // Semplificato
-    
-    // Ripristiniamo l'ordine dei byte per la memoria
-    __m128i res = _mm_xor_si128(tmp0, tmp1); // Questo è uno schema concettuale
-    res = _mm_shuffle_epi8(res, BSWAP_MASK);
-    
-    _mm_storeu_si128((__m128i*)x, res);
-}*/
-
-/*
-static inline void
-aesni_increment_gcm_ctr(__m128i& ctr)
-{
-    // Carichiamo il blocco, isoliamo gli ultimi 4 byte (BE), incrementiamo e riscriviamo
-    alignas(16) uint32 val[4];
-    _mm_store_si128((__m128i*)val, ctr);
-    
-    // In x86 (LE), l'ultima parte del blocco IV è val[3]
-    val[3] = __builtin_bswap32(__builtin_bswap32(val[3]) + 1);
-    
-    ctr = _mm_load_si128((__m128i*)val);
-}*/
-static inline void
-aesni_increment_gcm_ctr(__m128i& ctr)
-{
-    // Il contatore GCM occupa i byte 12-15 del blocco IV
-    // Dobbiamo trattarli come un intero a 32-bit Big-Endian
-    alignas(16) uint8 bytes[16];
-    _mm_store_si128((__m128i*)bytes, ctr);
-
-    // Incremento manuale Big-Endian sui 4 byte finali
-    for (int i = 15; i >= 12; i--) {
-        if (++bytes[i] != 0)
-            break;
-    }
-
-    ctr = _mm_load_si128((__m128i*)bytes);
-}
+//static inline void
+//aesni_increment_gcm_ctr(__m128i& ctr)
+//{
+//    // Il contatore GCM occupa i byte 12-15 del blocco IV
+//    // Dobbiamo trattarli come un intero a 32-bit Big-Endian
+//    alignas(16) uint8 bytes[16];
+//    _mm_store_si128((__m128i*)bytes, ctr);
+//
+//    // Incremento manuale Big-Endian sui 4 byte finali
+//    for (int i = 15; i >= 12; i--) {
+//        if (++bytes[i] != 0)
+//            break;
+//    }
+//
+//    ctr = _mm_load_si128((__m128i*)bytes);
+//}
 
 static void
 aesni_expand_key_128(AESNIContext& ctx, const uint8* key)
@@ -426,123 +374,6 @@ aesni_process_ctr(AESNIContext* ctx,
     return B_OK;
 }
 
-/*
-__attribute__((target("pclmul,sse2,ssse3")))
-static void
-aesni_ghash_multiply(uint8* x, const uint8* h)
-{
-    const __m128i BSWAP_MASK = _mm_set_epi8(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
-
-    // 1. Caricamento e inversione byte (Big Endian -> Little Endian interno)
-    __m128i a = _mm_shuffle_epi8(_mm_loadu_si128((__m128i*)x), BSWAP_MASK);
-    __m128i b = _mm_shuffle_epi8(_mm_loadu_si128((__m128i*)h), BSWAP_MASK);
-
-    // 2. Moltiplicazione a 128-bit (Produce un risultato a 256-bit in [high:low])
-    __m128i tmp0 = _mm_clmulepi64_si128(a, b, 0x00);
-    __m128i tmp1 = _mm_clmulepi64_si128(a, b, 0x11);
-    __m128i tmp2 = _mm_clmulepi64_si128(a, b, 0x10);
-    __m128i tmp3 = _mm_clmulepi64_si128(a, b, 0x01);
-
-    tmp2 = _mm_xor_si128(tmp2, tmp3);
-    __m128i low = _mm_xor_si128(tmp0, _mm_slli_si128(tmp2, 8));
-    __m128i high = _mm_xor_si128(tmp1, _mm_srli_si128(tmp2, 8));
-
-    // 3. Riduzione NIST GF(2^128)
-    // Il polinomio di riduzione è x^128 + x^7 + x^2 + x^1 + 1
-    // In esadecimale (riflesso) è 0xc200000000000000
-    __m128i p = _mm_set_epi64x(0xc200000000000000ULL, 0); 
-    
-    // Primo stadio della riduzione
-    __m128i v0 = _mm_clmulepi64_si128(low, p, 0x00);
-    __m128i v1 = _mm_xor_si128(low, _mm_slli_si128(v0, 8));
-    
-    // Secondo stadio della riduzione (finalizzazione del carry verso high)
-    __m128i v2 = _mm_clmulepi64_si128(v1, p, 0x00);
-    __m128i v3 = _mm_clmulepi64_si128(v1, p, 0x10);
-    
-    __m128i res = _mm_xor_si128(_mm_xor_si128(high, v3), _mm_srli_si128(v2, 8));
-
-    // 4. Inversione finale dei byte per il salvataggio
-    _mm_storeu_si128((__m128i*)x, _mm_shuffle_epi8(res, BSWAP_MASK));
-}*/
-/*__attribute__((target("pclmul,sse2,ssse3")))
-static void
-aesni_ghash_multiply(uint8* x, const uint8* h)
-{
-    // Tabelle per il bit-reversal veloce di ogni byte
-    const __m128i REVERSE_LOW = _mm_setr_epi8(
-        0x0, 0x8, 0x4, 0xC, 0x2, 0xA, 0x6, 0xE,
-        0x1, 0x9, 0x5, 0xD, 0x3, 0xB, 0x7, 0xF);
-    const __m128i REVERSE_HIGH = _mm_setr_epi8(
-        0x00, 0x80, 0x40, 0xC0, 0x20, 0xA0, 0x60, 0xE0,
-        0x10, 0x90, 0x50, 0xD0, 0x30, 0xB0, 0x70, 0xF0);
-    const __m128i LOW_MASK = _mm_set1_epi8(0x0F);
-
-    // Funzione interna per riflettere i bit di ogni byte in un registro XMM
-    auto reflect_bits = [&](__m128i in) {
-        __m128i low = _mm_and_si128(in, LOW_MASK);
-        __m128i high = _mm_and_si128(_mm_srli_epi64(in, 4), LOW_MASK);
-        return _mm_xor_si128(_mm_shuffle_epi8(REVERSE_HIGH, low), 
-                             _mm_shuffle_epi8(REVERSE_LOW, high));
-    };
-
-    // 1. Carichiamo i dati (Senza BSWAP_MASK, perché riflettiamo i bit)
-    __m128i a = reflect_bits(_mm_loadu_si128((__m128i*)x));
-    __m128i b = reflect_bits(_mm_loadu_si128((__m128i*)h));
-
-    // 2. Moltiplicazione a 128-bit (Lineare)
-    __m128i tmp0 = _mm_clmulepi64_si128(a, b, 0x00);
-    __m128i tmp1 = _mm_clmulepi64_si128(a, b, 0x11);
-    __m128i tmp2 = _mm_clmulepi64_si128(a, b, 0x10);
-    __m128i tmp3 = _mm_clmulepi64_si128(a, b, 0x01);
-
-    tmp2 = _mm_xor_si128(tmp2, tmp3);
-    __m128i low_part = _mm_xor_si128(tmp0, _mm_slli_si128(tmp2, 8));
-    __m128i high_part = _mm_xor_si128(tmp1, _mm_srli_si128(tmp2, 8));
-
-    // 3. Riduzione GF(2^128) "Standard" (Polinomio x^128 + x^7 + x^2 + x^1 + 1)
-    // Usiamo il valore 0x87 (non riflesso) per la riduzione lineare
-    __m128i p = _mm_set_epi64x(0, 0x87); 
-    __m128i v0 = _mm_clmulepi64_si128(high_part, p, 0x01);
-    __m128i res = _mm_xor_si128(low_part, _mm_xor_si128(high_part, v0));
-
-    // 4. Riflettiamo i bit un'ultima volta per tornare al formato memoria
-    _mm_storeu_si128((__m128i*)x, reflect_bits(res));
-}*/
-/* lavoro su due blocchi da 64 separati
-__attribute__((target("pclmul,sse2,ssse3")))
-static void
-aesni_ghash_multiply(uint8* x, const uint8* h)
-{
-    // 1. Carichiamo i dati. Invece di BSWAP_MASK (128-bit), 
-    // usiamo una maschera che inverte i byte dentro i due 64-bit separatamente.
-    const __m128i BSWAP_64 = _mm_set_epi8(8,9,10,11,12,13,14,15, 0,1,2,3,4,5,6,7);
-    
-    __m128i a = _mm_shuffle_epi8(_mm_loadu_si128((__m128i*)x), BSWAP_64);
-    __m128i b = _mm_shuffle_epi8(_mm_loadu_si128((__m128i*)h), BSWAP_64);
-
-    // 2. Moltiplicazione (Standard)
-    __m128i tmp0 = _mm_clmulepi64_si128(a, b, 0x00);
-    __m128i tmp1 = _mm_clmulepi64_si128(a, b, 0x11);
-    __m128i tmp2 = _mm_clmulepi64_si128(a, b, 0x10);
-    __m128i tmp3 = _mm_clmulepi64_si128(a, b, 0x01);
-
-    tmp2 = _mm_xor_si128(tmp2, tmp3);
-    __m128i low = _mm_xor_si128(tmp0, _mm_slli_si128(tmp2, 8));
-    __m128i high = _mm_xor_si128(tmp1, _mm_srli_si128(tmp2, 8));
-
-    // 3. La Riduzione "Speciale"
-    // Dato che il tuo software lavora con bit MSB-first, proviamo la riduzione
-    // che Intel chiama "Karatsuba-based" per architetture Big-Endian.
-    __m128i p = _mm_set_epi64x(0, 0xc200000000000000ULL);
-    
-    __m128i t0 = _mm_clmulepi64_si128(low, p, 0x00);
-    __m128i t1 = _mm_xor_si128(high, _mm_srli_si128(low, 8));
-    __m128i res = _mm_xor_si128(t1, _mm_srli_si128(t0, 1));
-
-    // 4. Salvataggio con lo stesso swap dei 64-bit
-    _mm_storeu_si128((__m128i*)x, _mm_shuffle_epi8(res, BSWAP_64));
-}*/
 __attribute__((target("pclmul,sse2,ssse3")))
 static inline __m128i
 aesni_ghash_core_xmm(__m128i x, __m128i h)
@@ -825,6 +656,354 @@ aesni_process_gcm(BCryptoRequest* request)
     return st;
 }
 
+/* -------------- STREAMING ---------------- */
+
+static inline __m128i _mm_bswap_epi128(__m128i in) {
+    return _mm_shuffle_epi8(in, _mm_set_epi8(
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15));
+}
+
+// Riduzione nel campo di Galois GF(2^128) - Il "motore" del GHASH
+__attribute__((target("pclmul,aes,sse2")))
+static inline __m128i ghash_mul(__m128i a, __m128i b) {
+    __m128i tmp3, tmp4, tmp5, tmp6, tmp7, tmp8;
+
+    // Moltiplicazione 64x64 -> 128 (4 parti)
+    tmp3 = _mm_clmulepi64_si128(a, b, 0x00);
+    tmp4 = _mm_clmulepi64_si128(a, b, 0x11);
+    tmp5 = _mm_clmulepi64_si128(a, b, 0x01);
+    tmp6 = _mm_clmulepi64_si128(a, b, 0x10);
+
+    tmp5 = _mm_xor_si128(tmp5, tmp6);
+    tmp6 = _mm_slli_si128(tmp5, 8);
+    tmp5 = _mm_srli_si128(tmp5, 8);
+    tmp3 = _mm_xor_si128(tmp3, tmp6);
+    tmp4 = _mm_xor_si128(tmp4, tmp5);
+
+    // Riduzione GCM Polinomiale (Specifica per bit-reflected)
+    tmp7 = _mm_slli_epi64(tmp3, 1);
+    tmp8 = _mm_slli_epi64(tmp3, 2);
+    tmp7 = _mm_xor_si128(tmp7, tmp8);
+    tmp8 = _mm_slli_epi64(tmp3, 7);
+    tmp7 = _mm_xor_si128(tmp7, tmp8);
+    tmp8 = _mm_slli_si128(tmp7, 8);
+    tmp7 = _mm_srli_si128(tmp7, 8);
+    tmp3 = _mm_xor_si128(tmp3, tmp8);
+    tmp4 = _mm_xor_si128(tmp4, tmp7);
+
+    tmp7 = _mm_srli_epi64(tmp3, 63);
+    tmp8 = _mm_srli_epi64(tmp3, 62);
+    tmp7 = _mm_xor_si128(tmp7, tmp8);
+    tmp8 = _mm_srli_epi64(tmp3, 57);
+    tmp7 = _mm_xor_si128(tmp7, tmp8);
+
+    return _mm_xor_si128(tmp4, tmp7);
+}
+static void
+aesni_encrypt_block(AESNIContext* ctx, const uint8* src, uint8* dst)
+{
+    __m128i block = _mm_loadu_si128((const __m128i*)src);
+    block = _mm_xor_si128(block, ctx->encRoundKeys[0]);
+    
+    for (int i = 1; i < ctx->rounds; i++) {
+        block = _mm_aesenc_si128(block, ctx->encRoundKeys[i]);
+    }
+    block = _mm_aesenclast_si128(block, ctx->encRoundKeys[ctx->rounds]);
+    
+    _mm_storeu_si128((__m128i*)dst, block);
+}
+static void
+aesni_ghash_update_block(uint8* tag_acc, const uint8* h_key, const uint8* data)
+{
+    // Carichiamo l'accumulatore attuale, la chiave H e il nuovo blocco
+    __m128i acc = _mm_loadu_si128((__m128i*)tag_acc);
+    __m128i h = _mm_loadu_si128((__m128i*)h_key);
+    __m128i d = _mm_loadu_si128((__m128i*)data);
+
+    // GCM GHASH: acc = (acc ^ data) * h
+    // Ricordiamoci il bswap perché GCM è big-endian sui blocchi
+    acc = _mm_xor_si128(acc, _mm_bswap_epi128(d));
+    acc = ghash_mul(acc, h);
+
+    // Salviamo l'accumulatore aggiornato
+    _mm_storeu_si128((__m128i*)tag_acc, acc);
+}
+__attribute__((target("pclmul,aes")))
+static void
+_aesni_gcm_update_internal(SoftAEADContext* aead, const uint8* src, uint8* dst, size_t len)
+{
+	AESNIContext* aes = (AESNIContext*)aead->cipher_ctx;
+    GCMState* gcm = (GCMState*)aead->auth_ctx;
+    bool encrypt = aead->is_encrypting;
+    // Usiamo loadu (unaligned) per sicurezza sui puntatori esterni
+    __m128i h = _mm_loadu_si128((__m128i*)gcm->h_key);
+    __m128i acc = _mm_loadu_si128((__m128i*)gcm->tag_acc);
+    //__m128i ctr = _mm_bswap_epi128(_mm_loadu_si128((__m128i*)gcm->counter));
+
+    __m128i keys[15];
+    for (int i = 0; i <= aes->rounds; i++) keys[i] = aes->encRoundKeys[i];
+
+    uint32* ctrPtr = (uint32*)gcm->counter;
+    uint32 c = __builtin_bswap32(ctrPtr[3]); // Leggi gli ultimi 32 bit (BE)
+    
+    while (len >= 16) {
+        // 1. Genera Keystream
+        __m128i currentCtr = _mm_loadu_si128((__m128i*)gcm->counter);
+        __m128i ks = currentCtr;
+        
+        //__m128i ks = _mm_bswap_epi128(ctr);
+        ks = _mm_xor_si128(ks, keys[0]);
+        for (int j = 1; j < aes->rounds; j++) 
+            ks = _mm_aesenc_si128(ks, keys[j]);
+        ks = _mm_aesenclast_si128(ks, keys[aes->rounds]);
+
+        __m128i data = _mm_loadu_si128((__m128i*)src);
+        __m128i result = _mm_xor_si128(data, ks);
+        
+        // 2. Logica AEAD: GHASH deve "vedere" sempre il ciphertext
+        if (encrypt) {
+            // Se cifriamo, il ciphertext è il RISULTATO
+            _mm_storeu_si128((__m128i*)dst, result);
+            acc = _mm_xor_si128(acc, _mm_bswap_epi128(result));
+        } else {
+            // Se decifriamo, il ciphertext è l'INPUT
+            acc = _mm_xor_si128(acc, _mm_bswap_epi128(data));
+            _mm_storeu_si128((__m128i*)dst, result);
+        }
+        
+        if (aead->total_len == 0) { 
+            dump_block(encrypt ? "ENC-Input (Plain)" : "DEC-Input (Cipher)", src);
+            dump_block(encrypt ? "ENC-Output (Cipher)" : "DEC-Output (Plain)", dst);
+            // dump_block("Accumulatore GHASH", &acc); // Richiederebbe cast
+            alignas(16) uint8 tempAcc[16];
+            _mm_store_si128((__m128i*)tempAcc, acc);
+            dump_block("Accumulatore GHASH (corrente)", tempAcc);
+        }
+        
+        acc = ghash_mul(acc, h);
+
+        // 3. Incremento Counter (solo i 32 bit bassi/finali)
+        //ctr = _mm_add_epi32(ctr, _mm_set_epi32(1, 0, 0, 0));
+        c++;
+        ctrPtr[3] = __builtin_bswap32(c); // Scrivi indietro in Big-Endian
+
+        src += 16;
+        dst += 16;
+        len -= 16;
+    }
+
+    // Gestione Residuo
+    if (len > 0) {
+        alignas(16) uint8 partialBlock[16] = {0};
+        alignas(16) uint8 keystream[16];
+
+        //__m128i ks = _mm_bswap_epi128(ctr);
+        __m128i ks = _mm_loadu_si128((__m128i*)gcm->counter);
+        
+        ks = _mm_xor_si128(ks, keys[0]);
+        for (int j = 1; j < aes->rounds; j++) ks = _mm_aesenc_si128(ks, keys[j]);
+        ks = _mm_aesenclast_si128(ks, keys[aes->rounds]);
+        _mm_store_si128((__m128i*)keystream, ks);
+
+        for (size_t i = 0; i < len; i++) {
+            uint8 c;
+            if (encrypt) {
+                c = src[i] ^ keystream[i]; // Ciphertext = result
+                dst[i] = c;
+            } else {
+                c = src[i];               // Ciphertext = input
+                dst[i] = src[i] ^ keystream[i];
+            }
+            partialBlock[i] = c;
+        }
+
+        __m128i pData = _mm_load_si128((__m128i*)partialBlock);
+        acc = _mm_xor_si128(acc, _mm_bswap_epi128(pData));
+        acc = ghash_mul(acc, h);
+    }
+
+    // Salvataggio stato finale nel contesto
+    _mm_storeu_si128((__m128i*)gcm->tag_acc, acc);
+    //_mm_storeu_si128((__m128i*)gcm->counter, _mm_bswap_epi128(ctr));
+}
+
+static status_t
+aesni_aes_gcm_stream_init(void** context, size_t* _contextSize, BCryptoOperation op, 
+                          const uint8* key, size_t keyLen, const uint8* iv, size_t ivLen)
+{
+    if (!context || !key || !iv || ivLen != 12) return B_BAD_VALUE;
+
+    SoftAEADContext* aead = (SoftAEADContext*)malloc(sizeof(SoftAEADContext));
+    //AESNIContext* aes = (AESNIContext*)malloc(sizeof(AESNIContext));
+    AESNIContext* aes = (AESNIContext*)memalign(64, sizeof(AESNIContext));
+    //GCMState* gcm = (GCMState*)malloc(sizeof(GCMState));
+    GCMState* gcm = (GCMState*)memalign(16, sizeof(GCMState));
+
+    if (!aead || !aes || !gcm) {
+        free(aead); free(aes); free(gcm);
+        return B_NO_MEMORY;
+    }
+
+    memset(aead, 0, sizeof(SoftAEADContext));
+    memset(aes, 0, sizeof(AESNIContext));
+    memset(gcm, 0, sizeof(GCMState));
+    
+    cpu_status cpu_state = disable_interrupts();
+    if (!bcrypto_save_regs(&aes->fpu_save)) {
+        restore_interrupts(cpu_state);
+        dprintf("AESNI: Errore critico - Impossibile salvare i registri FPU\n");
+        return B_ERROR;
+    }
+
+    // Inizializza AES-NI (Espansione chiavi)
+    aesni_expand_key(*aes, key, keyLen);
+
+    // Entriamo in modalità FPU per calcolare H usando AES-NI
+    
+    
+    // H = AES_encrypt(0)
+    uint8 zero[16] = {0};
+    aesni_encrypt_block(aes, zero, gcm->h_key);
+    
+    __m128i h_val = _mm_loadu_si128((__m128i*)gcm->h_key);
+    
+    // Invertiamo l'ordine dei byte (GCM Big Endian -> Little Endian per la CPU)
+    h_val = _mm_shuffle_epi8(h_val, _mm_set_epi8(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15));
+
+    
+    // Shift a sinistra di 1 bit con gestione del carry tra i due qword da 64 bit
+    //__m128i h_hi = _mm_srli_epi64(h_val, 63);
+    //__m128i h_lo = _mm_slli_epi64(h_val, 1);
+    //h_hi = _mm_slli_si128(h_hi, 8);
+    //h_val = _mm_or_si128(h_lo, h_hi);
+    
+    // SHIFT A DESTRA (NIST GCM standard per moltiplicazione riflessa)
+__m128i shift = _mm_srli_epi64(h_val, 63);
+__m128i carry = _mm_slli_si128(shift, 8); // Sposta il bit dal low al high qword
+h_val = _mm_srli_epi64(h_val, 1);
+h_val = _mm_xor_si128(h_val, carry);
+    
+    _mm_storeu_si128((__m128i*)gcm->h_key, h_val);
+
+    bcrypto_restore_regs(&aes->fpu_save);
+    restore_interrupts(cpu_state);
+
+    // Setup J0 e Counter
+    memcpy(gcm->j0, iv, 12);
+    gcm->j0[15] = 1;
+    memcpy(gcm->counter, gcm->j0, 16);
+    // Incrementiamo il counter per il primo blocco dati (J0 + 1)
+    for (int i = 15; i >= 12; i--) { if (++gcm->counter[i] != 0) break; }
+
+    aead->cipher_ctx = aes;
+    aead->auth_ctx = gcm;
+    aead->is_encrypting = (op == B_CRYPTO_ENCRYPT);
+    aead->total_len = 0;
+
+    *context = aead;
+    *_contextSize = sizeof(SoftAEADContext);
+    
+    dprintf("AESNI: Init %s - IV: %02x%02x%02x%02x...\n", 
+    aead->is_encrypting ? "ENC" : "DEC", iv[0], iv[1], iv[2], iv[3]);
+    dump_block("H-Key Preparata", gcm->h_key);
+    dump_block("J0", gcm->j0);
+    dump_block("Primo Counter (J0+1)", gcm->counter);
+    
+    return B_OK;
+}
+static status_t
+aesni_aes_gcm_stream_update(void* context, const iovec* inVec, const iovec* outVec, size_t vecCount)
+{
+    SoftAEADContext* aead = (SoftAEADContext*)context;
+    AESNIContext* aes = (AESNIContext*)aead->cipher_ctx;
+    //GCMState* gcm = (GCMState*)aead->auth_ctx;
+
+    // 1. Disabilitiamo interrupt e salviamo i registri FPU/SSE/AVX
+    cpu_status cpu_state = disable_interrupts();
+    if (!bcrypto_save_regs(&aes->fpu_save)) {
+        restore_interrupts(cpu_state);
+        dprintf("AESNI: Errore critico - Impossibile salvare i registri FPU\n");
+        return B_ERROR;
+    }
+
+    // 2. Loop sui vettori di dati
+    for (size_t i = 0; i < vecCount; i++) {
+        const uint8* src = (const uint8*)inVec[i].iov_base;
+        uint8* dst = (uint8*)outVec[i].iov_base;
+        size_t len = inVec[i].iov_len;
+
+        // Questa è la funzione che scriveremo con gli intrinseci _mm_clmulepi64_si128
+        // e _mm_aesenc_si128
+        _aesni_gcm_update_internal(aead, src, dst, len);
+
+        aead->total_len += len;
+    }
+
+    // 3. Ripristiniamo tutto
+    bcrypto_restore_regs(&aes->fpu_save);
+    restore_interrupts(cpu_state);
+
+    return B_OK;
+}
+static status_t
+aesni_aes_gcm_stream_final(void* context, uint8* tag)
+{
+    SoftAEADContext* aead = (SoftAEADContext*)context;
+    AESNIContext* aes = (AESNIContext*)aead->cipher_ctx;
+    GCMState* gcm = (GCMState*)aead->auth_ctx;
+
+    cpu_status cpu_state = disable_interrupts();
+    if (!bcrypto_save_regs(&aes->fpu_save)) {
+        restore_interrupts(cpu_state);
+        dprintf("AESNI: Errore critico - Impossibile salvare i registri FPU\n");
+        return B_ERROR;
+    }
+
+    // 1. Preparazione Blocco lunghezze (AAD len | Cipher len) in bit
+    alignas(16) uint8 lenBlock[16];
+    uint64 aadLenBits = 0; // Se non usi AAD
+    uint64 cipherLenBits = aead->total_len * 8;
+    
+    // Formato Big-Endian come richiesto da NIST
+    for (int i = 0; i < 8; i++) {
+        lenBlock[i] = (aadLenBits >> (56 - i * 8)) & 0xFF;
+        lenBlock[i + 8] = (cipherLenBits >> (56 - i * 8)) & 0xFF;
+    }
+    
+    dump_block("Final-Acc-Before-Len", gcm->tag_acc);
+    dump_block("Length-Block", lenBlock);
+
+    // 2. Update finale GHASH con le lunghezze
+    // Fondamentale: bswap perché aesni_ghash_update_block lavora su dati "riflessi"
+    __m128i lb = _mm_loadu_si128((__m128i*)lenBlock);
+    lb = _mm_bswap_epi128(lb); 
+    aesni_ghash_update_block(gcm->tag_acc, gcm->h_key, (uint8*)&lb);
+    
+    dump_block("Final-Acc-After-Len", gcm->tag_acc);
+
+    // 3. Preparazione Tag Mask (Cifratura di J0)
+    alignas(16) uint8 s[16];
+    aesni_encrypt_block(aes, gcm->j0, s);
+    __m128i mask = _mm_loadu_si128((__m128i*)s);
+
+    // 4. Recupero accumulatore GHASH e riporto all'ordine naturale (bswap)
+    __m128i acc = _mm_loadu_si128((__m128i*)gcm->tag_acc);
+    acc = _mm_bswap_epi128(acc); 
+
+    // 5. XOR Finale tra GHASH e Tag Mask
+    __m128i finalTag = _mm_xor_si128(acc, mask);
+    
+    // Scrittura nel buffer di output (il kernelTag[16] dell'IOCTL)
+    _mm_storeu_si128((__m128i*)tag, finalTag);
+    
+    dump_block("Final-Tag-Generated", tag);
+
+    bcrypto_restore_regs(&aes->fpu_save);
+    restore_interrupts(cpu_state);
+    return B_OK;
+}
+
+/* --- AES Process one shot --- */
 static status_t
 aesni_process(BCryptoRequest* request)
 {
@@ -968,7 +1147,17 @@ BInitAESNICrypto()
         .flags = B_CRYPTO_ALG_HW_ACCEL,
         //.name = "AES-GCM (Hardware Accelerated)",
         .priority = ghash_accel ? 95 : 90,
-        .Process = aesni_process_gcm
+        .Process = aesni_process_gcm,
+        
+        // Niente Hash per AES
+        .HashInit     = nullptr,
+        .HashUpdate   = nullptr,
+        .HashFinal    = nullptr,
+    
+        // Streaming AEAD
+        .StreamInit   = aesni_aes_gcm_stream_init,
+        .StreamUpdate = aesni_aes_gcm_stream_update,
+        .StreamFinal  = aesni_aes_gcm_stream_final
     };
     strlcpy(sAESNI_GCM.name, gcm_name, sizeof(sAESNI_GCM.name));
     return BRegisterCryptoAlgorithm(&sAESNI_GCM);
