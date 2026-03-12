@@ -577,11 +577,24 @@ aesni_process_gcm(BCryptoRequest* request)
         
         // Preprocessing di H (come in stream_init)
         __m128i h_val = _mm_loadu_si128((__m128i*)h_key);
+        
+        // Debug H raw
+        dprintf("crypto: H_raw = %02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n",
+            h_key[0], h_key[1], h_key[2], h_key[3], h_key[4], h_key[5], h_key[6], h_key[7],
+            h_key[8], h_key[9], h_key[10], h_key[11], h_key[12], h_key[13], h_key[14], h_key[15]);
+        
         h_val = _mm_shuffle_epi8(h_val, _mm_set_epi8(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15));
         __m128i shift = _mm_srli_epi64(h_val, 63);
         __m128i carry = _mm_slli_si128(shift, 8);
         h_val = _mm_srli_epi64(h_val, 1);
         h_val = _mm_xor_si128(h_val, carry);
+        
+        // Debug H preprocessed
+        uint8 h_prep[16];
+        _mm_storeu_si128((__m128i*)h_prep, h_val);
+        dprintf("crypto: H_prep = %02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n",
+            h_prep[0], h_prep[1], h_prep[2], h_prep[3], h_prep[4], h_prep[5], h_prep[6], h_prep[7],
+            h_prep[8], h_prep[9], h_prep[10], h_prep[11], h_prep[12], h_prep[13], h_prep[14], h_prep[15]);
         
         __m128i acc = _mm_setzero_si128();
 
@@ -637,12 +650,29 @@ aesni_process_gcm(BCryptoRequest* request)
         // Riconverti da formato preprocessato a formato normale
         acc = _mm_shuffle_epi8(acc, _mm_set_epi8(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15));
         
+        // Debug accumulatore prima dell'XOR finale
+        uint8 acc_bytes[16];
+        _mm_storeu_si128((__m128i*)acc_bytes, acc);
+        dprintf("crypto: ACC_before_xor = %02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n",
+            acc_bytes[0], acc_bytes[1], acc_bytes[2], acc_bytes[3], acc_bytes[4], acc_bytes[5], acc_bytes[6], acc_bytes[7],
+            acc_bytes[8], acc_bytes[9], acc_bytes[10], acc_bytes[11], acc_bytes[12], acc_bytes[13], acc_bytes[14], acc_bytes[15]);
+        
         // XOR finale con E(K, J0) - facciamolo in XMM come nel streaming
         uint8 s0[16];
         aesni_encrypt_block_xmm(ctx, j0, s0);
+        
+        dprintf("crypto: S0_mask = %02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n",
+            s0[0], s0[1], s0[2], s0[3], s0[4], s0[5], s0[6], s0[7],
+            s0[8], s0[9], s0[10], s0[11], s0[12], s0[13], s0[14], s0[15]);
+        
         __m128i mask = _mm_loadu_si128((__m128i*)s0);
         acc = _mm_xor_si128(acc, mask);
         _mm_storeu_si128((__m128i*)tag_acc, acc);
+        
+        // Debug tag finale
+        dprintf("crypto: TAG_final = %02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n",
+            tag_acc[0], tag_acc[1], tag_acc[2], tag_acc[3], tag_acc[4], tag_acc[5], tag_acc[6], tag_acc[7],
+            tag_acc[8], tag_acc[9], tag_acc[10], tag_acc[11], tag_acc[12], tag_acc[13], tag_acc[14], tag_acc[15]);
 
     } else {
         // 5. Loop di Processing (Replica esatta della logica SoftCrypto)
