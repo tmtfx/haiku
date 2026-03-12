@@ -590,10 +590,12 @@ aesni_process_gcm(BCryptoRequest* request)
             h_key[8], h_key[9], h_key[10], h_key[11], h_key[12], h_key[13], h_key[14], h_key[15]);
         
         h_val = _mm_shuffle_epi8(h_val, _mm_set_epi8(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15));
-        __m128i shift = _mm_srli_epi64(h_val, 63);
-        __m128i carry = _mm_slli_si128(shift, 8);
-        h_val = _mm_srli_epi64(h_val, 1);
-        h_val = _mm_xor_si128(h_val, carry);
+        
+        // TEST: proviamo SENZA lo shift di H
+        // __m128i shift = _mm_srli_epi64(h_val, 63);
+        // __m128i carry = _mm_slli_si128(shift, 8);
+        // h_val = _mm_srli_epi64(h_val, 1);
+        // h_val = _mm_xor_si128(h_val, carry);
         
         // Debug H preprocessed
         uint8 h_prep[16];
