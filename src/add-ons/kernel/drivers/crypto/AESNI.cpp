@@ -403,14 +403,14 @@ __attribute__((target("pclmul,sse2,ssse3")))
 static void
 aesni_ghash_multiply(uint8* x, const uint8* h)
 {
-    // Maschera per byte-reverse (come __builtin_bswap64 applicato a entrambi i qword)
-    const __m128i BSWAP_MASK = _mm_set_epi8(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15);
+    // Maschera per simulare esattamente __builtin_bswap64 su due uint64
+    const __m128i BSWAP_64 = _mm_set_epi8(8,9,10,11,12,13,14,15, 0,1,2,3,4,5,6,7);
 
-    // Caricamento e byte-swap per convertire da Big-Endian a Little-Endian
-    __m128i a = _mm_shuffle_epi8(_mm_loadu_si128((__m128i*)x), BSWAP_MASK);
-    __m128i b = _mm_shuffle_epi8(_mm_loadu_si128((__m128i*)h), BSWAP_MASK);
+    // Caricamento con swap dei 64 bit (come il tuo software)
+    __m128i a = _mm_shuffle_epi8(_mm_loadu_si128((__m128i*)x), BSWAP_64);
+    __m128i b = _mm_shuffle_epi8(_mm_loadu_si128((__m128i*)h), BSWAP_64);
 
-    // Moltiplicazione PCLMUL (4 parti per 128-bit × 128-bit)
+    // Moltiplicazione
     __m128i tmp0 = _mm_clmulepi64_si128(a, b, 0x00);
     __m128i tmp1 = _mm_clmulepi64_si128(a, b, 0x11);
     __m128i tmp2 = _mm_clmulepi64_si128(a, b, 0x10);
@@ -420,18 +420,14 @@ aesni_ghash_multiply(uint8* x, const uint8* h)
     __m128i low = _mm_xor_si128(tmp0, _mm_slli_si128(mid, 8));
     __m128i high = _mm_xor_si128(tmp1, _mm_srli_si128(mid, 8));
 
-    // Riduzione GCM usando shift a DESTRA (come soft_gcm_shift_right)
-    // Primo passo: riduci low con il polinomio GCM
-    __m128i p = _mm_set_epi32(0xE1000000, 0, 0, 0);
-    __m128i t0 = _mm_clmulepi64_si128(low, p, 0x10);
-    __m128i v1 = _mm_xor_si128(low, _mm_slli_si128(t0, 8));
-    
-    // Secondo passo: riduzione finale
-    __m128i t1 = _mm_clmulepi64_si128(v1, p, 0x10);
-    __m128i res = _mm_xor_si128(_mm_xor_si128(high, t1), _mm_srli_si128(_mm_slli_si128(t0, 8), 8));
+    // Riduzione GCM standard (0xc2... riflette lo shift >> 1 del tuo software)
+    __m128i p = _mm_set_epi64x(0xc200000000000000ULL, 0);
+    __m128i t0 = _mm_clmulepi64_si128(low, p, 0x00);
+    __m128i t1 = _mm_xor_si128(high, _mm_srli_si128(low, 8));
+    __m128i res = _mm_xor_si128(t1, _mm_srli_si128(t0, 1));
 
-    // Salvataggio con byte-reverse finale per tornare a Big-Endian
-    _mm_storeu_si128((__m128i*)x, _mm_shuffle_epi8(res, BSWAP_MASK));
+    // Salvataggio con swap finale
+    _mm_storeu_si128((__m128i*)x, _mm_shuffle_epi8(res, BSWAP_64));
 }
 /* versione clone di softcrypto */
 static void
@@ -578,35 +574,23 @@ aesni_process_gcm(BCryptoRequest* request)
     memcpy(counter_sw, counter, 16);
     
 	if (ghash_accel) {
-        // --- PATH ACCELERATO: usa ghash_mul con H preprocessato ---
-        dprintf("crypto: Using PCLMULQDQ accelerated path\n");
+        // --- LOGICA ACCELERATA "COME DIO COMANDA" ---
+        const __m128i BSWAP_MASK = _mm_set_epi8(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
+        // 1. Pre-elaborazione H (Hash Key)
+        // Dobbiamo caricarla, invertirla (BSWAP) e applicare lo shift di riflessione
+        __m128i h_raw = _mm_loadu_si128((__m128i*)h_key);
+        __m128i h_xmm = _mm_shuffle_epi8(h_raw, BSWAP_MASK);
         
-        // Preprocessing di H (come in stream_init)
-        __m128i h_val = _mm_loadu_si128((__m128i*)h_key);
+        // Riflessione NIST: H = (H << 1) | (H >> 127) per compensare la PCLMULQDQ
+        __m128i h_shifted = _mm_or_si128(
+            _mm_slli_epi64(h_xmm, 1),
+            _mm_srli_epi64(_mm_srli_si128(h_xmm, 8), 63)
+        );
+        // Nota: la parte sopra è una semplificazione del bit-reflect standard
         
-        // Debug H raw
-        dprintf("crypto: H_raw = %02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n",
-            h_key[0], h_key[1], h_key[2], h_key[3], h_key[4], h_key[5], h_key[6], h_key[7],
-            h_key[8], h_key[9], h_key[10], h_key[11], h_key[12], h_key[13], h_key[14], h_key[15]);
-        
-        h_val = _mm_shuffle_epi8(h_val, _mm_set_epi8(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15));
-        
-        // TEST: proviamo SENZA lo shift di H
-        // __m128i shift = _mm_srli_epi64(h_val, 63);
-        // __m128i carry = _mm_slli_si128(shift, 8);
-        // h_val = _mm_srli_epi64(h_val, 1);
-        // h_val = _mm_xor_si128(h_val, carry);
-        
-        // Debug H preprocessed
-        uint8 h_prep[16];
-        _mm_storeu_si128((__m128i*)h_prep, h_val);
-        dprintf("crypto: H_prep = %02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n",
-            h_prep[0], h_prep[1], h_prep[2], h_prep[3], h_prep[4], h_prep[5], h_prep[6], h_prep[7],
-            h_prep[8], h_prep[9], h_prep[10], h_prep[11], h_prep[12], h_prep[13], h_prep[14], h_prep[15]);
-        
-        __m128i acc = _mm_setzero_si128();
+        __m128i x_xmm = _mm_setzero_si128(); // Accumulatore GHASH
 
-        // Loop di Processing
+        // 2. Loop di Processing sui vettori
         for (size_t i = 0; i < dataVectorCount; i++) {
             uint8* src = (uint8*)request->source[i].iov_base;
             uint8* dst = (uint8*)request->destination[i].iov_base;
@@ -614,96 +598,57 @@ aesni_process_gcm(BCryptoRequest* request)
             if (len == 0) continue;
             total_len += len;
 
-            // Cifratura CTR
+            // Cifratura CTR (AES-NI)
             aesni_ctr_update_xmm(ctx, counter, src, dst, len);
 
-            // GHASH Update sul ciphertext
+            // GHASH Update sul testo cifrato
             uint8* hash_src = encrypt ? dst : src;
             size_t pos = 0;
             while (pos < len) {
                 size_t chunk = (len - pos < 16) ? len - pos : 16;
                 __m128i data;
                 if (chunk < 16) {
-                    alignas(16) uint8 partial[16] = {0};
+                    uint8 partial[16] = {0};
                     memcpy(partial, hash_src + pos, chunk);
-                    data = _mm_load_si128((__m128i*)partial);
+                    data = _mm_loadu_si128((__m128i*)partial);
                 } else {
                     data = _mm_loadu_si128((__m128i*)(hash_src + pos));
                 }
                 
-                // XOR con accumulatore e moltiplica (come _aesni_gcm_update_internal)
-                acc = _mm_xor_si128(acc, _mm_shuffle_epi8(data, _mm_set_epi8(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15)));
-                acc = ghash_mul(acc, h_val);
+                // XOR e Moltiplicazione Core
+                x_xmm = _mm_xor_si128(x_xmm, _mm_shuffle_epi8(data, BSWAP_MASK));
+                x_xmm = aesni_ghash_core_xmm(x_xmm, h_shifted);
                 
                 pos += chunk;
             }
         }
 
-        // Finalizzazione con blocco lunghezze
-        alignas(16) uint8 lenBlock[16];
-        uint64 aadLenBits = 0;
-        uint64 cipherLenBits = total_len * 8;
+        // 3. Finalizzazione: Blocco lunghezze (AAD len | Data len)
+        // GCM vuole [64-bit AAD bits][64-bit Ciphertext bits] in Big Endian
+        uint8 len_block[16] = {0};
+        uint64 data_bits = (uint64)total_len * 8;
         
-        // Formato corretto Big-Endian (come software path)
-        for (int i = 0; i < 8; i++) {
-            lenBlock[i] = (aadLenBits >> (56 - i * 8)) & 0xFF;
-            lenBlock[i + 8] = (cipherLenBits >> (56 - i * 8)) & 0xFF;
-        }
-        
-        __m128i lb = _mm_load_si128((__m128i*)lenBlock);
-        lb = _mm_shuffle_epi8(lb, _mm_set_epi8(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15));
-        acc = _mm_xor_si128(acc, lb);
-        acc = ghash_mul(acc, h_val);
-        
-        // Riconverti da formato preprocessato a formato normale
-        acc = _mm_shuffle_epi8(acc, _mm_set_epi8(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15));
-        
-        // Debug accumulatore prima dell'XOR finale
-        uint8 acc_bytes[16];
-        _mm_storeu_si128((__m128i*)acc_bytes, acc);
-        dprintf("crypto: ACC_before_xor = %02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n",
-            acc_bytes[0], acc_bytes[1], acc_bytes[2], acc_bytes[3], acc_bytes[4], acc_bytes[5], acc_bytes[6], acc_bytes[7],
-            acc_bytes[8], acc_bytes[9], acc_bytes[10], acc_bytes[11], acc_bytes[12], acc_bytes[13], acc_bytes[14], acc_bytes[15]);
-        
-        // XOR finale con E(K, J0) - facciamolo in XMM come nel streaming
-        uint8 s0[16];
-        aesni_encrypt_block_xmm(ctx, j0, s0);
-        
-        dprintf("crypto: S0_mask = %02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n",
-            s0[0], s0[1], s0[2], s0[3], s0[4], s0[5], s0[6], s0[7],
-            s0[8], s0[9], s0[10], s0[11], s0[12], s0[13], s0[14], s0[15]);
-        
-        __m128i mask = _mm_loadu_si128((__m128i*)s0);
-        acc = _mm_xor_si128(acc, mask);
-        _mm_storeu_si128((__m128i*)tag_acc, acc);
-        
-        // Debug tag finale
-        dprintf("crypto: TAG_final = %02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n",
-            tag_acc[0], tag_acc[1], tag_acc[2], tag_acc[3], tag_acc[4], tag_acc[5], tag_acc[6], tag_acc[7],
-            tag_acc[8], tag_acc[9], tag_acc[10], tag_acc[11], tag_acc[12], tag_acc[13], tag_acc[14], tag_acc[15]);
-        
-        // DEBUG: calcola anche con software per confronto
-        for (size_t i = 0; i < dataVectorCount; i++) {
-            uint8* hash_src = encrypt ? (uint8*)request->destination[i].iov_base : (uint8*)request->source[i].iov_base;
-            size_t len = request->source[i].iov_len;
-            if (len > 0) {
-                ghash_update_internal(tag_acc_sw, h_key, hash_src, len);
-            }
-        }
-        uint8 sw_len_block[16] = {0};
-        uint64 sw_data_bits = (uint64)total_len * 8;
-        for (int i = 0; i < 8; i++) {
-            sw_len_block[i + 8] = (sw_data_bits >> (56 - i * 8)) & 0xFF;
-        }
-        ghash_update_internal(tag_acc_sw, h_key, sw_len_block, 16);
-        uint8 sw_s0[16];
-        aesni_encrypt_block_xmm(ctx, j0, sw_s0);
-        for (int j = 0; j < 16; j++) tag_acc_sw[j] ^= sw_s0[j];
-        
-        dprintf("crypto: TAG_software = %02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n",
-            tag_acc_sw[0], tag_acc_sw[1], tag_acc_sw[2], tag_acc_sw[3], tag_acc_sw[4], tag_acc_sw[5], tag_acc_sw[6], tag_acc_sw[7],
-            tag_acc_sw[8], tag_acc_sw[9], tag_acc_sw[10], tag_acc_sw[11], tag_acc_sw[12], tag_acc_sw[13], tag_acc_sw[14], tag_acc_sw[15]);
 
+//        // Formato corretto Big-Endian (come software path)
+//        for (int i = 0; i < 8; i++) {
+//            lenBlock[i] = (aadLenBits >> (56 - i * 8)) & 0xFF;
+//            lenBlock[i + 8] = (cipherLenBits >> (56 - i * 8)) & 0xFF;
+
+        // Lo scriviamo in modo che una volta caricato sia già pronto per la CPU
+        // Indice 0-7: AAD (0), Indice 8-15: Data len (BE)
+        for (int j = 0; j < 8; j++) {
+            len_block[15 - j] = (data_bits >> (j * 8)) & 0xFF;
+        }
+
+        // Carichiamo e applichiamo BSWAP per allinearlo alla logica del loop
+        __m128i lb = _mm_shuffle_epi8(_mm_loadu_si128((__m128i*)len_block), BSWAP_MASK);
+        
+        x_xmm = _mm_xor_si128(x_xmm, lb);
+        x_xmm = aesni_ghash_core_xmm(x_xmm, h_shifted);
+
+        // 4. Conversione finale per tornare in memoria
+        x_xmm = _mm_shuffle_epi8(x_xmm, BSWAP_MASK);
+        _mm_storeu_si128((__m128i*)tag_acc, x_xmm);
     } else {
         // 5. Loop di Processing (Replica esatta della logica SoftCrypto)
         dprintf("crypto: Using software GHASH path\n");
@@ -1177,7 +1122,13 @@ BInitAESNICrypto()
     if (!(caps & B_CRYPTO_HW_AES_NI))
         return B_UNSUPPORTED;
         
-    ghash_accel = caps & B_CRYPTO_GHASH_PCLMULQDQ;
+    //ghash_accel = caps & B_CRYPTO_GHASH_PCLMULQDQ;
+    /* per ora lasciamo ghash_accel a false
+     * visto che non caviamo un ragno dal buco
+     * quando troveremo la logica corretta o avremo
+     * funzioni che sputano quel che serve
+     * riattiveremo questa condizione
+     */
     const char* gcm_name = ghash_accel ? "AES-GCM (AES-NI/PCLMULQDQ)" : "AES-GCM (AES-NI/GHASH software)";
     
     if (ghash_accel) {
