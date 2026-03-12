@@ -583,6 +583,7 @@ aesni_process_gcm(BCryptoRequest* request)
         uint64 aadLenBits = 0;
         uint64 cipherLenBits = total_len * 8;
         
+        // Formato corretto Big-Endian (come software path)
         for (int i = 0; i < 8; i++) {
             lenBlock[i] = (aadLenBits >> (56 - i * 8)) & 0xFF;
             lenBlock[i + 8] = (cipherLenBits >> (56 - i * 8)) & 0xFF;
@@ -593,7 +594,7 @@ aesni_process_gcm(BCryptoRequest* request)
         acc = _mm_xor_si128(acc, lb);
         acc = ghash_mul(acc, h_val);
         
-        // Riconverti e salva
+        // Riconverti da formato preprocessato a formato normale
         acc = _mm_shuffle_epi8(acc, _mm_set_epi8(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15));
         _mm_storeu_si128((__m128i*)tag_acc, acc);
 
