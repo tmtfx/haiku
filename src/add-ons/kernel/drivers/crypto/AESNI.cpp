@@ -475,6 +475,44 @@ aesni_ctr_update_xmm(AESNIContext* ctx, uint8 counter[16], const uint8* src, uin
         pos += chunk;
     }
 }
+
+// Riduzione nel campo di Galois GF(2^128) - Il "motore" del GHASH
+__attribute__((target("pclmul,aes,sse2")))
+static inline __m128i ghash_mul(__m128i a, __m128i b) {
+    __m128i tmp3, tmp4, tmp5, tmp6, tmp7, tmp8;
+
+    // Moltiplicazione 64x64 -> 128 (4 parti)
+    tmp3 = _mm_clmulepi64_si128(a, b, 0x00);
+    tmp4 = _mm_clmulepi64_si128(a, b, 0x11);
+    tmp5 = _mm_clmulepi64_si128(a, b, 0x01);
+    tmp6 = _mm_clmulepi64_si128(a, b, 0x10);
+
+    tmp5 = _mm_xor_si128(tmp5, tmp6);
+    tmp6 = _mm_slli_si128(tmp5, 8);
+    tmp5 = _mm_srli_si128(tmp5, 8);
+    tmp3 = _mm_xor_si128(tmp3, tmp6);
+    tmp4 = _mm_xor_si128(tmp4, tmp5);
+
+    // Riduzione GCM Polinomiale (Specifica per bit-reflected)
+    tmp7 = _mm_slli_epi64(tmp3, 1);
+    tmp8 = _mm_slli_epi64(tmp3, 2);
+    tmp7 = _mm_xor_si128(tmp7, tmp8);
+    tmp8 = _mm_slli_epi64(tmp3, 7);
+    tmp7 = _mm_xor_si128(tmp7, tmp8);
+    tmp8 = _mm_slli_si128(tmp7, 8);
+    tmp7 = _mm_srli_si128(tmp7, 8);
+    tmp3 = _mm_xor_si128(tmp3, tmp8);
+    tmp4 = _mm_xor_si128(tmp4, tmp7);
+
+    tmp7 = _mm_srli_epi64(tmp3, 63);
+    tmp8 = _mm_srli_epi64(tmp3, 62);
+    tmp7 = _mm_xor_si128(tmp7, tmp8);
+    tmp8 = _mm_srli_epi64(tmp3, 57);
+    tmp7 = _mm_xor_si128(tmp7, tmp8);
+
+    return _mm_xor_si128(tmp4, tmp7);
+}
+
 static void
 ghash_update_internal(uint8 tag_acc[16], const uint8 h_key[16], const uint8* data, size_t len)
 {
@@ -596,6 +634,12 @@ aesni_process_gcm(BCryptoRequest* request)
         
         // Riconverti da formato preprocessato a formato normale
         acc = _mm_shuffle_epi8(acc, _mm_set_epi8(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15));
+        
+        // XOR finale con E(K, J0) - facciamolo in XMM come nel streaming
+        uint8 s0[16];
+        aesni_encrypt_block_xmm(ctx, j0, s0);
+        __m128i mask = _mm_loadu_si128((__m128i*)s0);
+        acc = _mm_xor_si128(acc, mask);
         _mm_storeu_si128((__m128i*)tag_acc, acc);
 
     } else {
@@ -630,14 +674,13 @@ aesni_process_gcm(BCryptoRequest* request)
         
         ghash_update_internal(tag_acc, h_key, len_block, 16);
 
-        
+        // XOR finale con E(K, J0)
+        uint8 s0[16];
+        aesni_encrypt_block_xmm(ctx, j0, s0);
+        for (int j = 0; j < 16; j++) tag_acc[j] ^= s0[j];
     }
-    // 7. XOR finale con E(K, J0)
-    uint8 s0[16];
-    aesni_encrypt_block_xmm(ctx, j0, s0);
-    for (int j = 0; j < 16; j++) tag_acc[j] ^= s0[j];
-
-    // 8. Output
+    
+    // 8. Output (comune per entrambi i path)
     status_t st = B_OK;
     if (encrypt) {
         uint8* outTag = (uint8*)request->destination[request->vectorCount - 1].iov_base;
@@ -660,42 +703,6 @@ static inline __m128i _mm_bswap_epi128(__m128i in) {
         0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15));
 }
 
-// Riduzione nel campo di Galois GF(2^128) - Il "motore" del GHASH
-__attribute__((target("pclmul,aes,sse2")))
-static inline __m128i ghash_mul(__m128i a, __m128i b) {
-    __m128i tmp3, tmp4, tmp5, tmp6, tmp7, tmp8;
-
-    // Moltiplicazione 64x64 -> 128 (4 parti)
-    tmp3 = _mm_clmulepi64_si128(a, b, 0x00);
-    tmp4 = _mm_clmulepi64_si128(a, b, 0x11);
-    tmp5 = _mm_clmulepi64_si128(a, b, 0x01);
-    tmp6 = _mm_clmulepi64_si128(a, b, 0x10);
-
-    tmp5 = _mm_xor_si128(tmp5, tmp6);
-    tmp6 = _mm_slli_si128(tmp5, 8);
-    tmp5 = _mm_srli_si128(tmp5, 8);
-    tmp3 = _mm_xor_si128(tmp3, tmp6);
-    tmp4 = _mm_xor_si128(tmp4, tmp5);
-
-    // Riduzione GCM Polinomiale (Specifica per bit-reflected)
-    tmp7 = _mm_slli_epi64(tmp3, 1);
-    tmp8 = _mm_slli_epi64(tmp3, 2);
-    tmp7 = _mm_xor_si128(tmp7, tmp8);
-    tmp8 = _mm_slli_epi64(tmp3, 7);
-    tmp7 = _mm_xor_si128(tmp7, tmp8);
-    tmp8 = _mm_slli_si128(tmp7, 8);
-    tmp7 = _mm_srli_si128(tmp7, 8);
-    tmp3 = _mm_xor_si128(tmp3, tmp8);
-    tmp4 = _mm_xor_si128(tmp4, tmp7);
-
-    tmp7 = _mm_srli_epi64(tmp3, 63);
-    tmp8 = _mm_srli_epi64(tmp3, 62);
-    tmp7 = _mm_xor_si128(tmp7, tmp8);
-    tmp8 = _mm_srli_epi64(tmp3, 57);
-    tmp7 = _mm_xor_si128(tmp7, tmp8);
-
-    return _mm_xor_si128(tmp4, tmp7);
-}
 static void
 aesni_encrypt_block(AESNIContext* ctx, const uint8* src, uint8* dst)
 {
