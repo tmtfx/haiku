@@ -403,14 +403,14 @@ __attribute__((target("pclmul,sse2,ssse3")))
 static void
 aesni_ghash_multiply(uint8* x, const uint8* h)
 {
-    // Maschera per simulare esattamente __builtin_bswap64 su due uint64
-    const __m128i BSWAP_64 = _mm_set_epi8(8,9,10,11,12,13,14,15, 0,1,2,3,4,5,6,7);
+    // Maschera per byte-reverse (come __builtin_bswap64 applicato a entrambi i qword)
+    const __m128i BSWAP_MASK = _mm_set_epi8(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15);
 
-    // Caricamento con swap dei 64 bit (come il tuo software)
-    __m128i a = _mm_shuffle_epi8(_mm_loadu_si128((__m128i*)x), BSWAP_64);
-    __m128i b = _mm_shuffle_epi8(_mm_loadu_si128((__m128i*)h), BSWAP_64);
+    // Caricamento e byte-swap per convertire da Big-Endian a Little-Endian
+    __m128i a = _mm_shuffle_epi8(_mm_loadu_si128((__m128i*)x), BSWAP_MASK);
+    __m128i b = _mm_shuffle_epi8(_mm_loadu_si128((__m128i*)h), BSWAP_MASK);
 
-    // Moltiplicazione
+    // Moltiplicazione PCLMUL (4 parti per 128-bit × 128-bit)
     __m128i tmp0 = _mm_clmulepi64_si128(a, b, 0x00);
     __m128i tmp1 = _mm_clmulepi64_si128(a, b, 0x11);
     __m128i tmp2 = _mm_clmulepi64_si128(a, b, 0x10);
@@ -420,14 +420,18 @@ aesni_ghash_multiply(uint8* x, const uint8* h)
     __m128i low = _mm_xor_si128(tmp0, _mm_slli_si128(mid, 8));
     __m128i high = _mm_xor_si128(tmp1, _mm_srli_si128(mid, 8));
 
-    // Riduzione GCM standard (0xc2... riflette lo shift >> 1 del tuo software)
-    __m128i p = _mm_set_epi64x(0xc200000000000000ULL, 0);
-    __m128i t0 = _mm_clmulepi64_si128(low, p, 0x00);
-    __m128i t1 = _mm_xor_si128(high, _mm_srli_si128(low, 8));
-    __m128i res = _mm_xor_si128(t1, _mm_srli_si128(t0, 1));
+    // Riduzione GCM usando shift a DESTRA (come soft_gcm_shift_right)
+    // Primo passo: riduci low con il polinomio GCM
+    __m128i p = _mm_set_epi32(0xE1000000, 0, 0, 0);
+    __m128i t0 = _mm_clmulepi64_si128(low, p, 0x10);
+    __m128i v1 = _mm_xor_si128(low, _mm_slli_si128(t0, 8));
+    
+    // Secondo passo: riduzione finale
+    __m128i t1 = _mm_clmulepi64_si128(v1, p, 0x10);
+    __m128i res = _mm_xor_si128(_mm_xor_si128(high, t1), _mm_srli_si128(_mm_slli_si128(t0, 8), 8));
 
-    // Salvataggio con swap finale
-    _mm_storeu_si128((__m128i*)x, _mm_shuffle_epi8(res, BSWAP_64));
+    // Salvataggio con byte-reverse finale per tornare a Big-Endian
+    _mm_storeu_si128((__m128i*)x, _mm_shuffle_epi8(res, BSWAP_MASK));
 }
 /* versione clone di softcrypto */
 static void
@@ -530,24 +534,18 @@ aesni_process_gcm(BCryptoRequest* request)
     size_t total_len = 0;
     size_t dataVectorCount = request->vectorCount - 1;
 	if (ghash_accel) {
-        // --- LOGICA ACCELERATA "COME DIO COMANDA" ---
-        const __m128i BSWAP_MASK = _mm_set_epi8(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
+        // --- PATH ACCELERATO: usa ghash_mul con H preprocessato ---
+        // Preprocessing di H (come in stream_init)
+        __m128i h_val = _mm_loadu_si128((__m128i*)h_key);
+        h_val = _mm_shuffle_epi8(h_val, _mm_set_epi8(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15));
+        __m128i shift = _mm_srli_epi64(h_val, 63);
+        __m128i carry = _mm_slli_si128(shift, 8);
+        h_val = _mm_srli_epi64(h_val, 1);
+        h_val = _mm_xor_si128(h_val, carry);
         
-        // 1. Pre-elaborazione H (Hash Key)
-        // Dobbiamo caricarla, invertirla (BSWAP) e applicare lo shift di riflessione
-        __m128i h_raw = _mm_loadu_si128((__m128i*)h_key);
-        __m128i h_xmm = _mm_shuffle_epi8(h_raw, BSWAP_MASK);
-        
-        // Riflessione NIST: H = (H << 1) | (H >> 127) per compensare la PCLMULQDQ
-        __m128i h_shifted = _mm_or_si128(
-            _mm_slli_epi64(h_xmm, 1),
-            _mm_srli_epi64(_mm_srli_si128(h_xmm, 8), 63)
-        );
-        // Nota: la parte sopra è una semplificazione del bit-reflect standard
-        
-        __m128i x_xmm = _mm_setzero_si128(); // Accumulatore GHASH
+        __m128i acc = _mm_setzero_si128();
 
-        // 2. Loop di Processing sui vettori
+        // Loop di Processing
         for (size_t i = 0; i < dataVectorCount; i++) {
             uint8* src = (uint8*)request->source[i].iov_base;
             uint8* dst = (uint8*)request->destination[i].iov_base;
@@ -555,51 +553,49 @@ aesni_process_gcm(BCryptoRequest* request)
             if (len == 0) continue;
             total_len += len;
 
-            // Cifratura CTR (AES-NI)
+            // Cifratura CTR
             aesni_ctr_update_xmm(ctx, counter, src, dst, len);
 
-            // GHASH Update sul testo cifrato
+            // GHASH Update sul ciphertext
             uint8* hash_src = encrypt ? dst : src;
             size_t pos = 0;
             while (pos < len) {
                 size_t chunk = (len - pos < 16) ? len - pos : 16;
                 __m128i data;
                 if (chunk < 16) {
-                    uint8 partial[16] = {0};
+                    alignas(16) uint8 partial[16] = {0};
                     memcpy(partial, hash_src + pos, chunk);
-                    data = _mm_loadu_si128((__m128i*)partial);
+                    data = _mm_load_si128((__m128i*)partial);
                 } else {
                     data = _mm_loadu_si128((__m128i*)(hash_src + pos));
                 }
                 
-                // XOR e Moltiplicazione Core
-                x_xmm = _mm_xor_si128(x_xmm, _mm_shuffle_epi8(data, BSWAP_MASK));
-                x_xmm = aesni_ghash_core_xmm(x_xmm, h_shifted);
+                // XOR con accumulatore e moltiplica (come _aesni_gcm_update_internal)
+                acc = _mm_xor_si128(acc, _mm_shuffle_epi8(data, _mm_set_epi8(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15)));
+                acc = ghash_mul(acc, h_val);
                 
                 pos += chunk;
             }
         }
 
-        // 3. Finalizzazione: Blocco lunghezze (AAD len | Data len)
-        // GCM vuole [64-bit AAD bits][64-bit Ciphertext bits] in Big Endian
-        uint8 len_block[16] = {0};
-        uint64 data_bits = (uint64)total_len * 8;
+        // Finalizzazione con blocco lunghezze
+        alignas(16) uint8 lenBlock[16];
+        uint64 aadLenBits = 0;
+        uint64 cipherLenBits = total_len * 8;
         
-        // Lo scriviamo in modo che una volta caricato sia già pronto per la CPU
-        // Indice 0-7: AAD (0), Indice 8-15: Data len (BE)
-        for (int j = 0; j < 8; j++) {
-            len_block[15 - j] = (data_bits >> (j * 8)) & 0xFF;
+        for (int i = 0; i < 8; i++) {
+            lenBlock[i] = (aadLenBits >> (56 - i * 8)) & 0xFF;
+            lenBlock[i + 8] = (cipherLenBits >> (56 - i * 8)) & 0xFF;
         }
-
-        // Carichiamo e applichiamo BSWAP per allinearlo alla logica del loop
-        __m128i lb = _mm_shuffle_epi8(_mm_loadu_si128((__m128i*)len_block), BSWAP_MASK);
         
-        x_xmm = _mm_xor_si128(x_xmm, lb);
-        x_xmm = aesni_ghash_core_xmm(x_xmm, h_shifted);
-
-        // 4. Conversione finale per tornare in memoria
-        x_xmm = _mm_shuffle_epi8(x_xmm, BSWAP_MASK);
-        _mm_storeu_si128((__m128i*)tag_acc, x_xmm);
+        __m128i lb = _mm_load_si128((__m128i*)lenBlock);
+        lb = _mm_shuffle_epi8(lb, _mm_set_epi8(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15));
+        acc = _mm_xor_si128(acc, lb);
+        acc = ghash_mul(acc, h_val);
+        
+        // Riconverti e salva
+        acc = _mm_shuffle_epi8(acc, _mm_set_epi8(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15));
+        _mm_storeu_si128((__m128i*)tag_acc, acc);
 
     } else {
         // 5. Loop di Processing (Replica esatta della logica SoftCrypto)
@@ -1110,13 +1106,7 @@ BInitAESNICrypto()
     if (!(caps & B_CRYPTO_HW_AES_NI))
         return B_UNSUPPORTED;
         
-    //ghash_accel = caps & B_CRYPTO_GHASH_PCLMULQDQ;
-    /* per ora lasciamo ghash_accel a false
-     * visto che non caviamo un ragno dal buco
-     * quando troveremo la logica corretta o avremo
-     * funzioni che sputano quel che serve
-     * riattiveremo questa condizione
-     */
+    ghash_accel = caps & B_CRYPTO_GHASH_PCLMULQDQ;
     const char* gcm_name = ghash_accel ? "AES-GCM (AES-NI/PCLMULQDQ)" : "AES-GCM (AES-NI/GHASH software)";
     
     if (ghash_accel) {
