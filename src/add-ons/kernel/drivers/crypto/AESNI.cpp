@@ -568,12 +568,8 @@ aesni_process_gcm(BCryptoRequest* request)
     size_t total_len = 0;
     size_t dataVectorCount = request->vectorCount - 1;
     
-    // DEBUG: eseguiamo ENTRAMBI i path per confrontare
-    uint8 tag_acc_sw[16] = {0};
-    uint8 counter_sw[16];
-    memcpy(counter_sw, counter, 16);
-    
 	if (ghash_accel) {
+        dprintf("crypto: Using PCLMULQDQ accelerated path\n");
         // --- LOGICA ACCELERATA "COME DIO COMANDA" ---
         const __m128i BSWAP_MASK = _mm_set_epi8(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
         // 1. Pre-elaborazione H (Hash Key)
