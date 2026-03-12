@@ -571,6 +571,12 @@ aesni_process_gcm(BCryptoRequest* request)
     uint8 tag_acc[16] = {0};
     size_t total_len = 0;
     size_t dataVectorCount = request->vectorCount - 1;
+    
+    // DEBUG: eseguiamo ENTRAMBI i path per confrontare
+    uint8 tag_acc_sw[16] = {0};
+    uint8 counter_sw[16];
+    memcpy(counter_sw, counter, 16);
+    
 	if (ghash_accel) {
         // --- PATH ACCELERATO: usa ghash_mul con H preprocessato ---
         dprintf("crypto: Using PCLMULQDQ accelerated path\n");
@@ -673,6 +679,28 @@ aesni_process_gcm(BCryptoRequest* request)
         dprintf("crypto: TAG_final = %02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n",
             tag_acc[0], tag_acc[1], tag_acc[2], tag_acc[3], tag_acc[4], tag_acc[5], tag_acc[6], tag_acc[7],
             tag_acc[8], tag_acc[9], tag_acc[10], tag_acc[11], tag_acc[12], tag_acc[13], tag_acc[14], tag_acc[15]);
+        
+        // DEBUG: calcola anche con software per confronto
+        for (size_t i = 0; i < dataVectorCount; i++) {
+            uint8* hash_src = encrypt ? (uint8*)request->destination[i].iov_base : (uint8*)request->source[i].iov_base;
+            size_t len = request->source[i].iov_len;
+            if (len > 0) {
+                ghash_update_internal(tag_acc_sw, h_key, hash_src, len);
+            }
+        }
+        uint8 sw_len_block[16] = {0};
+        uint64 sw_data_bits = (uint64)total_len * 8;
+        for (int i = 0; i < 8; i++) {
+            sw_len_block[i + 8] = (sw_data_bits >> (56 - i * 8)) & 0xFF;
+        }
+        ghash_update_internal(tag_acc_sw, h_key, sw_len_block, 16);
+        uint8 sw_s0[16];
+        aesni_encrypt_block_xmm(ctx, j0, sw_s0);
+        for (int j = 0; j < 16; j++) tag_acc_sw[j] ^= sw_s0[j];
+        
+        dprintf("crypto: TAG_software = %02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n",
+            tag_acc_sw[0], tag_acc_sw[1], tag_acc_sw[2], tag_acc_sw[3], tag_acc_sw[4], tag_acc_sw[5], tag_acc_sw[6], tag_acc_sw[7],
+            tag_acc_sw[8], tag_acc_sw[9], tag_acc_sw[10], tag_acc_sw[11], tag_acc_sw[12], tag_acc_sw[13], tag_acc_sw[14], tag_acc_sw[15]);
 
     } else {
         // 5. Loop di Processing (Replica esatta della logica SoftCrypto)
