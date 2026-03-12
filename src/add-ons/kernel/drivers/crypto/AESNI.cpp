@@ -573,6 +573,8 @@ aesni_process_gcm(BCryptoRequest* request)
     size_t dataVectorCount = request->vectorCount - 1;
 	if (ghash_accel) {
         // --- PATH ACCELERATO: usa ghash_mul con H preprocessato ---
+        dprintf("crypto: Using PCLMULQDQ accelerated path\n");
+        
         // Preprocessing di H (come in stream_init)
         __m128i h_val = _mm_loadu_si128((__m128i*)h_key);
         h_val = _mm_shuffle_epi8(h_val, _mm_set_epi8(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15));
@@ -644,6 +646,7 @@ aesni_process_gcm(BCryptoRequest* request)
 
     } else {
         // 5. Loop di Processing (Replica esatta della logica SoftCrypto)
+        dprintf("crypto: Using software GHASH path\n");
         for (size_t i = 0; i < dataVectorCount; i++) {
             uint8* src = (uint8*)request->source[i].iov_base;
             uint8* dst = (uint8*)request->destination[i].iov_base;
