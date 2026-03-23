@@ -663,6 +663,10 @@
 #define ENSEQX_PPLL2_N_OTH	0x4a
 #define ENSEQX_PPLL2_P_OTH	0x4b
 #define ENSEQX_PPLL2_M_OTH	0x4c
+#define ENSEQX_0x40			0x40
+#define ENSEQX_0x44			0x44
+#define ENSEQX_0x45			0x45
+#define ENSEQX_0x46			0x46
 
 /* VIA GRAPHICS indexed registers */
 /* VGA standard registers: */
