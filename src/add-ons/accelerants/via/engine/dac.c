@@ -15,6 +15,15 @@ static status_t k8m800_dac_pix_pll_find(
 /* see if an analog VGA monitor is connected to connector #1 */
 bool eng_dac_crt_connected(void)
 {
+	/* Se è un VX900, per ora saltiamo il test hardware e ritorniamo true.
+       Il test di carico (Load Sensing) sui nuovi chip VIA spesso richiede
+       sequenze diverse o il chip potrebbe essere in uno stato di sleep. */
+    if (si->ps.card_type == VT7122)
+    {
+        LOG(2,("DAC: VX900 detected, bypassing hardware CRT sensing (assuming connected)\n"));
+        return true; 
+    }
+    
 	uint32 output, dac;
 	bool present;
 
@@ -188,7 +197,17 @@ status_t eng_dac_set_pix_pll(display_mode target)
 	SEQW(PLL_RESET, ((SEQR(PLL_RESET)) & ~0x02));
 
 	/* program new frequency */
-	if (si->ps.card_arch != K8M800)
+	if (si->ps.card_type == VT7122) 
+    {
+        // VX900 utilizza SR44, SR45, SR46 per il Pixel PLL
+        // Nota: i nomi delle macro (PPLL_N_OTH etc) devono corrispondere a questi indici
+        SEQW(0x44, n);         // SR44: Divider N
+        SEQW(0x45, m);         // SR45: Divider M
+        SEQW(0x46, (p & 0x07)); // SR46: Post-scaler P (solitamente bit 0-2)
+        
+        LOG(2,("DAC: VX900 PLL programmed: M=%d, N=%d, P=%d\n", m, n, p));
+    }
+    else if (si->ps.card_arch != K8M800)
 	{
 		/* fixme: b7 is a lock-indicator or a filter select: to be determined! */
 		SEQW(PPLL_N_CLE, (n & 0x7f));
@@ -225,12 +244,38 @@ status_t eng_dac_set_pix_pll(display_mode target)
 		LOG(2,("DAC: PIX PLL frequency locked\n"));
 	DXIW(PIXCLKCTRL,DXIR(PIXCLKCTRL)&0x0B);         //enable the PIXPLL
 */
+	if (si->ps.card_type == VT7122) {
+		ENG_REG8(RG8_SEQIND) = 0x44; ENG_REG8(RG8_SEQDAT) = n;
+		ENG_REG8(RG8_SEQIND) = 0x45; ENG_REG8(RG8_SEQDAT) = m;
+		ENG_REG8(RG8_SEQIND) = 0x46; ENG_REG8(RG8_SEQDAT) = (p & 0x07);
+
+		LOG(2,("DAC: VX900 PLL programmed: M=%d, N=%d, P=%d\n", m, n, p));
+
+		// Per il ciclo di LOCK (SEQR 0x40)
+		int timeout = 2000;
+		while (timeout > 0) {
+			ENG_REG8(RG8_SEQIND) = 0x40; 
+			if (ENG_REG8(RG8_SEQDAT) & 0x40) break; // Lock bit trovato!
+			snooze(1);
+			timeout--;
+		}
+		
+		// Commenta prima e togli i commenti qua sotto dopo il 
+		// primo test (abbiamo aggiunto le definizioni di ENSEQX)
+		
+		//int timeout = 2000;
+		//while (!(SEQR(0x40) & 0x40) && timeout > 0) {
+		//	snooze(1);
+		//	timeout--;
+		//}
+		if (timeout == 0) LOG(8,("DAC: VX900 Pixel PLL failed to lock!\n"));
+	} else {
 
 //for now:
 	/* Give the PIXPLL frequency some time to lock... */
-	snooze(1000);
-	LOG(2,("DAC: PIX PLL frequency should be locked now...\n"));
-
+		snooze(1000);
+		LOG(2,("DAC: PIX PLL frequency should be locked now...\n"));
+	}
 	return B_OK;
 }
 
@@ -241,6 +286,7 @@ status_t eng_dac_pix_pll_find
 	//fixme: add K8M800 calcs if needed..
 	switch (si->ps.card_arch) {
 		case K8M800:
+		case VT7122:
 			return k8m800_dac_pix_pll_find(target, calc_pclk, m_result, n_result, p_result, test);
 		default:
 			return cle266_km400_dac_pix_pll_find(target, calc_pclk, m_result, n_result, p_result, test);
