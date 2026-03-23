@@ -11,6 +11,7 @@
 static void detect_panels(void);
 static void setup_output_matrix(void);
 static void pins_cle266_fake(void);
+static void pins_vx900_fake(void);
 static void pinsnv5_nv5m64_fake(void);
 static void pinsnv6_fake(void);
 static void pinsnv10_arch_fake(void);
@@ -631,6 +632,10 @@ static void setup_output_matrix()
 //temporary (VIA)
 	si->ps.tmds1_active = false;
 	si->ps.tmds2_active = false;
+	
+	if (si->ps.card_type == VT7122) {
+		LOG(2,("INFO: VX900 output setup (forcing VGA/Analog for now)\n"));
+	}
 
 
 		/* presetup by the card's BIOS, we can't change this (lack of info) */
@@ -641,6 +646,7 @@ static void setup_output_matrix()
 		if (1/*eng_dac_crt_connected()*/) si->ps.monitors |= 0x02;
 
 		//fixme? add TVout (only, so no CRT connected) support...
+		LOG(2,("INFO: Singlehead/VIA monitor matrix: $%02x\n", si->ps.monitors));
 	}
 }
 
@@ -678,7 +684,8 @@ void get_panel_modes(display_mode *p1, display_mode *p2, bool *pan1, bool *pan2)
 	else
 		*pan2 = false;
 }
-static void pins_vx900_fake(void) {
+static void pins_vx900_fake(void)
+{
 	si->ps.f_ref = 14.31818;
 	si->ps.ext_pll = false;
 	si->ps.max_pixel_vco = 600; // Alzato per VX900
