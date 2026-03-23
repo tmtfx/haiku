@@ -80,6 +80,9 @@ void set_specs(void)
 	/* set failsave speeds */
 	switch (si->ps.card_arch)
 	{
+	case VX900:
+		pins_vx900_fake(); // Dobbiamo scriverla, vedi sotto
+		break;
 	case CLE266:
 	default:
 		pins_cle266_fake();
@@ -675,7 +678,15 @@ void get_panel_modes(display_mode *p1, display_mode *p2, bool *pan1, bool *pan2)
 	else
 		*pan2 = false;
 }
-
+static void pins_vx900_fake(void) {
+	si->ps.f_ref = 14.31818;
+	si->ps.ext_pll = false;
+	si->ps.max_pixel_vco = 600; // Alzato per VX900
+	si->ps.min_pixel_vco = 40; 
+	si->ps.max_dac1_clock = 350; // VX900 supporta clock molto più alti
+	si->ps.max_dac1_clock_32 = 300;
+	si->ps.memory_size = 128 * 1024 * 1024; // Fallback più dignitoso (128MB)
+}
 static void pins_cle266_fake(void)
 {
 	si->ps.f_ref = 14.31818;
@@ -929,6 +940,13 @@ static void getRAMsize(void)
 	{
 		ram_size = SEQR(MSIZE_OTHER);
 	}
+	if (si->ps.card_type == VT7122)
+    {
+        /* VX900: blocchi da 16MB (0x01=16MB, 0x10=256MB, ecc.) */
+        si->ps.memory_size = (uint32)(ram_size & 0x1F) * 16 * 1024 * 1024;
+        LOG(2,("INFO: VX900 RAM detected: %d MB\n", si->ps.memory_size / (1024 * 1024)));
+        return;
+    }
 
 	if ((ram_size > 16) && (ram_size <= 128))
 	{

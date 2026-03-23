@@ -21,6 +21,9 @@ status_t GET_ACCELERANT_DEVICE_INFO(accelerant_device_info * adi)
 	case VT3022:
 		sprintf(adi->chipset, "CLE266 Unichrome Pro (VT3022)");
 		break;
+	case VT7122:
+		sprintf(adi->chipset, "VX900 Chrome9 HD (VT7122)");
+		break;
 	case VT3108:
 		sprintf(adi->chipset, "K8M800 Unichrome Pro (VT3108)");
 		break;
