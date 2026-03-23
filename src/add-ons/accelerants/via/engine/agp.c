@@ -11,6 +11,10 @@
 status_t
 eng_agp_setup(void)
 {
+	if (si->ps.card_type == VT7122) {
+        LOG(2,("AGP: VX900 is PCIe, skipping AGP setup.\n"));
+        return B_OK; // Restituiamo OK perché per noi va bene così
+    }
 	eng_nth_agp_info nai;
 	eng_cmd_agp nca;
 	uint8 index;
