@@ -31,7 +31,12 @@ status_t eng_crtc_validate_timing(
 	if (*hd_e < 640) *hd_e = 640;
 	/* assuming all VIA unichrome cards to have same max. constraint.. */
 	//fixme: checkout correct max...
-	if (*hd_e > 1600) *hd_e = 1600;
+	if (si->ps.card_type == VT7122) {
+		if (*hd_e > 2048) *hd_e = 2048;
+	} else {
+		if (*hd_e > 1600) *hd_e = 1600;
+	}
+	//if (*hd_e > 1600) *hd_e = 1600;
 
 	/* if hor. total does not leave room for a sensible sync pulse, increase it! */
 	if (*ht < (*hd_e + 80)) *ht = (*hd_e + 80);
@@ -58,7 +63,12 @@ status_t eng_crtc_validate_timing(
 	if (*vd_e < 480) *vd_e = 480;
 	/* assuming all VIA unichrome cards to have same max. constraint.. */
 	//fixme: checkout correct max...
-	if (*vd_e > 1200) *vd_e = 1200;
+	if (si->ps.card_type == VT7122) {
+		if (*vd_e > 1536) *vd_e = 1536;
+	} else {
+		if (*vd_e > 1200) *vd_e = 1200;
+	}
+	//if (*vd_e > 1200) *vd_e = 1200;
 
 	/*if vertical total does not leave room for a sync pulse, increase it!*/
 	if (*vt < (*vd_e + 3)) *vt = (*vd_e + 3);
