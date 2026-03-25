@@ -353,9 +353,17 @@ static status_t map_device(device_info *di)
 	area_id rom_area;
 
 	/* Nvidia cards have registers in [0] and framebuffer in [1] */
-	int registers = 1;
-	int frame_buffer = 0;
+	int registers;
+	int frame_buffer;
+	if (si->ps.card_type == VT7122) {
+		registers = 0; // BAR 0 for VX900, there's an additional set of registers in BAR 1
+		frame_buffer = 2; // VX900 use BAR 2
+	} else {
+		registers = 1; //for Nvidia
+		frame_buffer = 0;
+	}
 //	int pseudo_dma = 2;
+	dprintf("VIA: Mapping Regs dal BAR %d, FB dal BAR %d\n", registers, frame_buffer);
 
 	/* enable memory mapped IO, disable VGA I/O - this is defined in the PCI standard */
 	tmpUlong = get_pci(PCI_command, 2);
@@ -364,7 +372,11 @@ static status_t map_device(device_info *di)
 	/* enable busmastering */
 	tmpUlong |= PCI_command_master;
 	/* disable ISA I/O access */
-	tmpUlong &= ~PCI_command_io;
+	if (si->ps.card_type == VT7122) {
+		tmpUlong |= PCI_command_io;
+	} else {
+		tmpUlong &= ~PCI_command_io;
+	}
 	set_pci(PCI_command, 2, tmpUlong);
 
  	/*work out which version of BeOS is running*/
@@ -392,6 +404,11 @@ static status_t map_device(device_info *di)
 		B_ANY_KERNEL_ADDRESS,
 		B_CLONEABLE_AREA | (si->use_clone_bugfix ? B_READ_AREA|B_WRITE_AREA : 0),
 		(void **)&(di->regs));
+
+    dprintf("VIA: REGS mapped: phys %p, size %" B_PRIx32 ", area_id %" B_PRId32 ", vaddr %p\n", 
+        (void *)(addr_t)di->pcii.u.h0.base_registers_pci[registers], 
+        di->pcii.u.h0.base_register_sizes[registers], 
+        (int32)si->regs_area, di->regs);
  	si->clone_bugfix_regs = (uint32 *) di->regs;
 
 	/* if mapping registers to vmem failed then pass on error */
@@ -484,6 +501,10 @@ static status_t map_device(device_info *di)
 		B_ANY_KERNEL_BLOCK_ADDRESS | B_WRITE_COMBINING_MEMORY,
 		B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA,
 		&(si->framebuffer));
+	dprintf("VIA: FB mapped: phys %p, size %" B_PRIx32 ", area_id %" B_PRId32 ", vaddr %p\n", 
+        (void *)(addr_t)di->pcii.u.h0.base_registers_pci[frame_buffer], 
+        di->pcii.u.h0.base_register_sizes[frame_buffer], 
+        (int32)si->fb_area, si->framebuffer);
 
 	/*if failed with write combining try again without*/
 	if (si->fb_area < 0) {
