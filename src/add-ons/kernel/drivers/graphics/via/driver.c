@@ -395,6 +395,7 @@ static status_t map_device(device_info *di)
 		di->pcii.vendor_id, di->pcii.device_id,
 		di->pcii.bus, di->pcii.device, di->pcii.function);
 
+	uint32 map_flags = B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA | B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA;
 	/* get a virtual memory address for the registers*/
 	si->regs_area = map_physical_memory(
 		buffer,
@@ -402,7 +403,8 @@ static status_t map_device(device_info *di)
 		di->pcii.u.h0.base_registers_pci[registers],
 		di->pcii.u.h0.base_register_sizes[registers],
 		B_ANY_KERNEL_ADDRESS,
-		B_CLONEABLE_AREA | (si->use_clone_bugfix ? B_READ_AREA|B_WRITE_AREA : 0),
+		//B_CLONEABLE_AREA | (si->use_clone_bugfix ? B_READ_AREA|B_WRITE_AREA : 0),
+		map_flags,
 		(void **)&(di->regs));
 
     dprintf("VIA: REGS mapped: phys %p, size %" B_PRIx32 ", area_id %" B_PRId32 ", vaddr %p\n", 
@@ -499,12 +501,10 @@ static status_t map_device(device_info *di)
 		di->pcii.u.h0.base_registers_pci[frame_buffer],
 		di->pcii.u.h0.base_register_sizes[frame_buffer],
 		B_ANY_KERNEL_BLOCK_ADDRESS | B_WRITE_COMBINING_MEMORY,
-		B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA,
+		//B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA,
+		map_flags,
 		&(si->framebuffer));
-	dprintf("VIA: FB mapped: phys %p, size %" B_PRIx32 ", area_id %" B_PRId32 ", vaddr %p\n", 
-        (void *)(addr_t)di->pcii.u.h0.base_registers_pci[frame_buffer], 
-        di->pcii.u.h0.base_register_sizes[frame_buffer], 
-        (int32)si->fb_area, si->framebuffer);
+	
 
 	/*if failed with write combining try again without*/
 	if (si->fb_area < 0) {
@@ -514,9 +514,15 @@ static status_t map_device(device_info *di)
 			di->pcii.u.h0.base_registers_pci[frame_buffer],
 			di->pcii.u.h0.base_register_sizes[frame_buffer],
 			B_ANY_KERNEL_BLOCK_ADDRESS,
-			B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA,
+			//B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA,
+			map_flags,
 			&(si->framebuffer));
 	}
+	
+	dprintf("VIA: FB mapped: phys %p, size %" B_PRIx32 ", area_id %" B_PRId32 ", vaddr %p\n", 
+        (void *)(addr_t)di->pcii.u.h0.base_registers_pci[frame_buffer], 
+        di->pcii.u.h0.base_register_sizes[frame_buffer], 
+        (int32)si->fb_area, si->framebuffer);
 
 	/* if there was an error, delete our other areas and pass on error*/
 	if (si->fb_area < 0)
