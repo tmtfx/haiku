@@ -355,13 +355,14 @@ static status_t map_device(device_info *di)
 	/* Nvidia cards have registers in [0] and framebuffer in [1] */
 	int registers;
 	int frame_buffer;
-	if (si->ps.card_type == VT7122) {
-		registers = 0; // BAR 0 for VX900, there's an additional set of registers in BAR 1
-		frame_buffer = 2; // VX900 use BAR 2
+	if (di->pcii.vendor_id == 0x1106 && di->pcii.device_id == 0x7122) {
+		registers = 0;
+		frame_buffer = 2;
 	} else {
-		registers = 1; //for Nvidia
+		registers = 1;
 		frame_buffer = 0;
 	}
+
 //	int pseudo_dma = 2;
 	dprintf("VIA: Mapping Regs dal BAR %d, FB dal BAR %d\n", registers, frame_buffer);
 
@@ -372,7 +373,7 @@ static status_t map_device(device_info *di)
 	/* enable busmastering */
 	tmpUlong |= PCI_command_master;
 	/* disable ISA I/O access */
-	if (si->ps.card_type == VT7122) {
+	if (di->pcii.vendor_id == 0x1106 && di->pcii.device_id == 0x7122) {
 		tmpUlong |= PCI_command_io;
 	} else {
 		tmpUlong &= ~PCI_command_io;
