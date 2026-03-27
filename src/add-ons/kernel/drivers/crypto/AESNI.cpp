@@ -442,6 +442,7 @@ static inline __m128i mm_bit_reverse(__m128i in) {
 }
 
 // Inversione totale dei bit di un registro a 128 bit (Specchio completo)
+/* solo byte pari
 static inline __m128i GCM_REVERSE(__m128i in) {
     // 1. Invertiamo l'ordine dei byte (BSWAP)
     const __m128i bswap_mask = _mm_set_epi8(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
@@ -458,6 +459,10 @@ static inline __m128i GCM_REVERSE(__m128i in) {
     
     // Ricostruiamo: il nibble basso va a sinistra (shift 4) e l'alto a destra
     return _mm_or_si128(_mm_slli_epi16(low, 4), _mm_srli_epi16(high, 4));
+}*/
+static inline __m128i GCM_REVERSE(__m128i in) {
+    // Inverte solo l'ordine dei byte (0->15, 1->14, etc)
+    return _mm_shuffle_epi8(in, _mm_set_epi8(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15));
 }
 
 static inline __m128i 
@@ -560,15 +565,16 @@ aesni_process_gcm(BCryptoRequest* request)
         h_temp = GCM_REVERSE(h_temp);
         
         // Shift a sinistra di 1 bit (fondamentale per allineamento GF128)
-        /*h_ref = _mm_or_si128(
+        h_ref = _mm_or_si128(
             _mm_slli_epi64(h_temp, 1), 
             _mm_srli_epi64(_mm_slli_si128(h_temp, 8), 63)
-        );*/
+        );
         //h_ref = GCM_REVERSE(_mm_loadu_si128((__m128i*)h_raw)); uno sì uno no
+        /* questo per byte pari corretti
         h_ref = _mm_or_si128(
     _mm_srli_epi64(h_temp, 1),
     _mm_slli_epi64(_mm_srli_si128(h_temp, 8), 63)
-);
+);*/
         acc = _mm_setzero_si128();
 
         for (i = 0; i < dataVectorCount; i++) {
