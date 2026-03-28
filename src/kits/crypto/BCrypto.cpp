@@ -15,6 +15,7 @@
 
 #include <vector>
 #include <algorithm>
+
 #define MAX_KERNEL_VECTORS 32
 #define COALESCE_THRESHOLD (128 * 1024) // 128 KB
 
@@ -391,7 +392,8 @@ BCrypto::Encrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
 // Versione speciale per Cifratura GCM
 ssize_t
 BCrypto::Encrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
-                 const void* in, size_t inLen, void* out, void* outTag)
+                 const void* in, size_t inLen, void* out, void* outTag,
+                 const void* aad, size_t aadLen)
 {
     if (fMode != B_CRYPTO_MODE_GCM) return B_BAD_VALUE;
     if (outTag == NULL) return B_BAD_VALUE;
@@ -403,7 +405,16 @@ BCrypto::Encrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
     BCryptoUserRequest req;
     _FillRequest(req, B_CRYPTO_ENCRYPT, fAlgorithm, fMode,
                  key, keyLen, iv, ivLen, srcVecs, dstVecs, 2);
-
+	
+	req.aad = (uint8*)aad;
+    req.aadLength = aadLen;
+    /*
+    printf("--- DEBUG API (USER) ---\n");
+	printf("Sizeof: %zu\n", sizeof(BCryptoUserRequest));
+	printf("Offset IV: %zu\n", offsetof(BCryptoUserRequest, iv));
+	printf("Offset AAD: %zu\n", offsetof(BCryptoUserRequest, aad));
+	printf("Offset Source: %zu\n", offsetof(BCryptoUserRequest, source));
+	printf("------------------------\n");*/
     status_t st = Process(req);
     return (st == B_OK) ? (ssize_t)inLen : (ssize_t)st;
 }
@@ -427,6 +438,29 @@ BCrypto::Decrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
                  key, keyLen, iv, ivLen, srcVecs, dstVecs, 2);
 
     status_t st = Process(req);
+    
+    // --- BLOCCO DI DEBUG ---
+    printf("\n[DEBUG Decrypt]\n");
+    
+    // 1. Tag Atteso (quello che hai passato tu come argomento)
+    const uint8* tExpected = (const uint8*)inTag;
+    printf("  Tag Atteso (inTag):    ");
+    for (int i = 0; i < 16; i++) printf("%02x", tExpected[i]);
+    printf("\n");
+
+    // 2. Tag Calcolato (quello che il driver ha generato e messo in dummyTag)
+    printf("  Tag Calcolato (driver): ");
+    for (int i = 0; i < 16; i++) printf("%02x", dummyTag[i]);
+    printf("\n");
+    
+    if (st != B_OK) {
+        printf("  Risultato Process: FALLITO (%s)\n", strerror(st));
+    } else {
+        printf("  Risultato Process: OK\n");
+    }
+    fflush(stdout);
+    // --- FINE DEBUG ---
+    
     return (st == B_OK) ? (ssize_t)inLen : (ssize_t)st;
 }
 // Decifratura GCM streaming
@@ -520,7 +554,23 @@ BCrypto::Decrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
     uint8 diff = 0;
     const uint8* tagA = computedTag;
     const uint8* tagB = (const uint8*)inTag;
-    
+    // --- DEBUG TEMPORANEO ---
+    printf("BCrypto GCM Debug:\n");
+
+    printf("  Tag A (Calcolato): ");
+    for (int k = 0; k < 16; k++) {
+        printf("%02x", tagA[k]);
+    }
+    printf("\n");
+
+    printf("  Tag B (Atteso):    ");
+    for (int k = 0; k < 16; k++) {
+        printf("%02x", tagB[k]);
+    }
+    printf("\n");
+
+    fflush(stdout);
+    // ------------------------
     for (int i = 0; i < 16; i++) {
         diff |= (tagA[i] ^ tagB[i]);
     }
@@ -815,6 +865,8 @@ BCrypto::_FillRequest(BCryptoUserRequest& req, BCryptoOperation op, BCryptoAlgor
     req.source      = src;
     req.destination = dst;
     req.vectorCount = vCount;
+    req.aad         = NULL;
+    req.aadLength   = 0;
 }
 status_t
 BCrypto::Digest(BCryptoAlgorithmID algo, const void* data, size_t len, void* outHash)
