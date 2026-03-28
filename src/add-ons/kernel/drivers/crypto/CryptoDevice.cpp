@@ -129,6 +129,17 @@ crypto_control(void* cookie, uint32 op, void* arg, size_t length)
             req.keyLength = userReq.keyLength;
             req.iv = localIV;
             req.ivLength = userReq.ivLength;
+            
+            req.aadLength = userReq.aadLength;
+            if (userReq.aad != NULL && userReq.aadLength > 0) {
+                // Se vuoi essere super sicuro (SMAP-safe), potresti copiare 
+                // l'AAD in un buffer locale come fai per la chiave, 
+                // ma se è grande conviene passare il puntatore e usare user_memcpy nel driver.
+                req.aad = userReq.aad; 
+            } else {
+                req.aad = NULL;
+                req.aadLength = 0;
+            }
 
             if (userReq.vectorCount > 32) 
                 return B_DEVICE_FULL;
