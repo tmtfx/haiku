@@ -355,7 +355,7 @@ static status_t map_device(device_info *di)
 	/* Nvidia cards have registers in [0] and framebuffer in [1] */
 	int registers;
 	int frame_buffer;
-	if (di->pcii.vendor_id == 0x1106 && di->pcii.device_id == 0x7122) {
+	if (di->pcii.vendor_id == VENDOR_ID_VIA && di->pcii.device_id == 0x7122) {
 		registers = 0;
 		frame_buffer = 2;
 	} else {
@@ -373,12 +373,14 @@ static status_t map_device(device_info *di)
 	/* enable busmastering */
 	tmpUlong |= PCI_command_master;
 	/* disable ISA I/O access */
-	if (di->pcii.vendor_id == 0x1106 && di->pcii.device_id == 0x7122) {
-		tmpUlong |= PCI_command_io;
+	if (di->pcii.vendor_id == VENDOR_ID_VIA && di->pcii.device_id == 0x7122) {
+		//tmpUlong |= PCI_command_io;
+		tmpUlong &= ~PCI_command_io;
 	} else {
 		tmpUlong &= ~PCI_command_io;
 	}
 	set_pci(PCI_command, 2, tmpUlong);
+	dprintf("VIA: PCI command set to: 0x%04" B_PRIx32 " (I/O DISABLED)\n", tmpUlong);
 
  	/*work out which version of BeOS is running*/
  	get_system_info(&sysinfo);
@@ -756,6 +758,10 @@ static status_t open_hook (const char* name, uint32 flags, void** cookie) {
 	}
 	else
 	{
+		/* DISABILITATO TEMPORANEAMENTE PER DEBUG VX900 */
+        //dprintf("VIA: Interrupt handler skip per test freeze (IRQ %d)\n", di->pcii.u.h0.interrupt_line);
+        //result = B_OK; // Fingiamo che sia andato tutto bene
+        
 		/* otherwise install our interrupt handler */
 		result = install_io_interrupt_handler(di->pcii.u.h0.interrupt_line, eng_interrupt, (void *)di, 0);
 		/* bail if we couldn't install the handler */
