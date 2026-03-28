@@ -47,7 +47,9 @@ public:
             ssize_t             Encrypt(uint8* key, size_t keyLen, 
                                         uint8* iv, size_t ivLen,
                                         const void* in, size_t inLen, 
-                                        void* out, void* outTag); // GCM
+                                        void* out, void* outTag,
+                                        const void* aad = NULL, 
+                                        size_t aadLen = 0); // GCM
             ssize_t             Encrypt(uint8* key, size_t keyLen, 
                                         uint8* iv, size_t ivLen, 
                                         BDataIO* source, BDataIO* destination, 
