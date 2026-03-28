@@ -30,6 +30,8 @@ struct BCryptoRequest {
     const iovec*			source;
     iovec*					destination;
     size_t					vectorCount;
+    const uint8*            aad;
+    size_t                  aadLength;
     status_t				(*completionCallback)(BCryptoRequest*, status_t);
     void*					userCookie;
 };
