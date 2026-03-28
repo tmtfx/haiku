@@ -111,18 +111,22 @@ typedef struct {
     BCryptoMode         mode;
     uint32              flags;
 
-    void* key;
+    void*               key;
     size_t              keyLength;
-    void* iv;
+    void*               iv;
     size_t              ivLength;
-
+    
     const iovec*        source;
     iovec*              destination;
     size_t              vectorCount;
+    
+    const uint8*        aad;      // Puntatore ai dati associati (opzionale)
+    size_t              aadLength;
 
     // Sostituiamo il puntatore a funzione con un semaforo
     sem_id              completionSem; 
     status_t            result;
+    //uint64    _reserved;
 } BCryptoUserRequest;
 
 struct BCryptoRandomRequest {
