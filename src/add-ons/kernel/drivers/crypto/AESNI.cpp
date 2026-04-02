@@ -464,36 +464,7 @@ static inline __m128i GCM_REVERSE(__m128i in) {
     // Inverte solo l'ordine dei byte (0->15, 1->14, etc)
     return _mm_shuffle_epi8(in, _mm_set_epi8(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15));
 }
-/* funzionante per input vuoto
-static inline __m128i 
-internal_ghash_mul_only_xmm(__m128i a, __m128i b) 
-{
-    __m128i tmp3, tmp4, tmp5, tmp6, tmp7, tmp8;
-    __m128i pol = _mm_set_epi64x(0x0000000000000001ULL, 0xc200000000000000ULL);
 
-    // 1. Moltiplicazione (Karatsuba)
-    tmp3 = _mm_clmulepi64_si128(a, b, 0x00);
-    tmp6 = _mm_clmulepi64_si128(a, b, 0x11);
-    tmp4 = _mm_clmulepi64_si128(a, b, 0x10);
-    tmp5 = _mm_clmulepi64_si128(a, b, 0x01);
-    tmp4 = _mm_xor_si128(tmp4, tmp5);
-    
-    tmp3 = _mm_xor_si128(tmp3, _mm_slli_si128(tmp4, 8));
-    tmp6 = _mm_xor_si128(tmp6, _mm_srli_si128(tmp4, 8));
-
-    // 2. Riduzione Barrett ottimizzata per Bit-Reflected GCM
-    // Primo stadio
-    tmp7 = _mm_clmulepi64_si128(tmp3, pol, 0x10);
-    tmp3 = _mm_xor_si128(tmp3, _mm_slli_si128(tmp7, 8));
-    tmp6 = _mm_xor_si128(tmp6, _mm_srli_si128(tmp7, 8));
-    
-    // Secondo stadio
-    tmp8 = _mm_clmulepi64_si128(tmp3, pol, 0x00);
-    tmp3 = _mm_xor_si128(tmp3, tmp8);
-    // Nota: qui non c'è shift perché lavoriamo sui 64 bit bassi
-
-    return _mm_xor_si128(tmp3, tmp6);
-}*/
 static inline __m128i 
 internal_ghash_mul_only_xmm(__m128i a, __m128i b) 
 {
@@ -669,8 +640,7 @@ aesni_process_gcm(BCryptoRequest* request)
             }
             total_len += vector_len;
         }
-        dprintf("AESNI DEBUG: aad_ptr=%p, aad_len=%zu, total_len=%zu\n", 
-         aad_ptr, aad_len, total_len);
+        //dprintf("AESNI DEBUG: aad_ptr=%p, aad_len=%zu, total_len=%zu\n", aad_ptr, aad_len, total_len);
 
         /*senza aad
         // Finalizzazione Lunghezze
@@ -687,7 +657,6 @@ aesni_process_gcm(BCryptoRequest* request)
         tag_res = _mm_xor_si128(final_ghash, _mm_loadu_si128((__m128i*)s0));
         _mm_storeu_si128((__m128i*)tag_acc, tag_res);*/
         uint64 aad_bits = (uint64)aad_len * 8;
-        //uint64 data_bits = (uint64)total_data_len * 8;
         uint64 data_bits = (uint64)total_len * 8;
 
         // GCM vuole [AAD_bits (64) | DATA_bits (64)]
@@ -697,11 +666,11 @@ aesni_process_gcm(BCryptoRequest* request)
 
         //acc = _mm_xor_si128(acc, GCM_REVERSE(len_v));
         alignas(16) uint64 len_buffer[2];
-len_buffer[0] = __builtin_bswap64(aad_bits);  // AAD nei primi 8 byte (BE)
-len_buffer[1] = __builtin_bswap64(data_bits); // DATA nei secondi 8 byte (BE)
+        len_buffer[0] = __builtin_bswap64(aad_bits);  // AAD nei primi 8 byte (BE)
+        len_buffer[1] = __builtin_bswap64(data_bits); // DATA nei secondi 8 byte (BE)
 
-__m128i len_v_be = _mm_loadu_si128((__m128i*)len_buffer);
-acc = _mm_xor_si128(acc, len_v_be);
+        __m128i len_v_be = _mm_loadu_si128((__m128i*)len_buffer);
+        acc = _mm_xor_si128(acc, len_v_be);
         acc = internal_ghash_mul_only_xmm(acc, h_ref);
 
         // --- FASE 4: Tag finale ---
@@ -741,6 +710,21 @@ acc = _mm_xor_si128(acc, len_v_be);
         }
     } else {
         // --- RAMO SOFTWARE (Fallback) ---
+        
+        if (aad_ptr && aad_len > 0) {
+        	//dprintf("AESNI: Rilevato AAD fasullo? len: %zu\n", request->aadLength);
+            
+            pos = 0;
+            while (pos < aad_len) {
+                chunk = (aad_len - pos < 16) ? aad_len - pos : 16;
+                alignas(16) uint8 tmp_aad[16] = {0};
+                memcpy(tmp_aad, aad_ptr + pos, chunk);
+                
+                ghash_update_internal(tag_acc, h_raw, tmp_aad, 16); // Sempre 16 byte (padding a zero)
+                pos += chunk;
+            }
+        }
+        
         for (i = 0; i < dataVectorCount; i++) {
             src = (uint8*)request->source[i].iov_base;
             dst = (uint8*)request->destination[i].iov_base;
@@ -758,10 +742,21 @@ acc = _mm_xor_si128(acc, len_v_be);
         }
 
         memset(len_blk, 0, 16);
+        
+        uint64 aad_bits = (uint64)aad_len * 8;
+        uint64 data_bits = (uint64)total_len * 8;
+        // GCM vuole [AAD_bits (64 bit BE) | DATA_bits (64 bit BE)]
+        for (j = 0; j < 8; j++) {
+            len_blk[7 - j] = (aad_bits >> (j * 8)) & 0xFF;
+            len_blk[15 - j] = (data_bits >> (j * 8)) & 0xFF;
+        }
+        
+        /* senza AAD
         total_bits = (uint64)total_len * 8;
         for (j = 0; j < 8; j++) {
             len_blk[15 - j] = (total_bits >> (j * 8)) & 0xFF;
         }
+        */
         
         ghash_update_internal(tag_acc, h_raw, len_blk, 16);
         
@@ -897,7 +892,7 @@ BInitAESNICrypto()
     if (!(caps & B_CRYPTO_HW_AES_NI))
         return B_UNSUPPORTED;
         
-    ghash_accel = caps & B_CRYPTO_GHASH_PCLMULQDQ;
+    //ghash_accel = caps & B_CRYPTO_GHASH_PCLMULQDQ;
     /* per ora lasciamo ghash_accel a false
      * visto che non caviamo un ragno dal buco
      * quando troveremo la logica corretta o avremo
