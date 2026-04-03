@@ -1,0 +1,41 @@
+# Settings file for the Silicon Motion SM750 driver and accelerant
+#
+# This file should be moved to the directory
+# ~/config/settings/kernel/drivers/
+#
+
+# sm750.driver parameters:
+#accelerant "sm750.accelerant"    # selects accelerant filename to be used
+dumprom     false                # dump bios rom to ~/sm750.rom
+
+# sm750.accelerant parameters:
+usebios     false                # if true rely on bios to coldstart (not recommended for SM750)
+#memory     16                   # in MB, override builtin memory size detection (es. 16, 32, 64)
+hardcursor  true                 # if true use on-chip hardware cursor
+#logmask    0x00000000           # nothing logged (default)
+#logmask    0xffffffff           # log everything to file
+
+# SM750 specific tweaks:
+dualhead    true                 # enable support for both CRT and Panel
+force_pci   true                 # SM750 is native PCI/PCIe, keep true
+
+#--------- that's all.
+
+# logmask setup info:
+# log level select:
+# logmask   0x0000000x    # lowest digit: bitmask to select logging level.
+# log modules select:
+# logmask   0xxxxxxxx0    # highest 7 digits: bitmask to select individual modules to log.
+
+# log modules:
+# logmask   0x00000400    # overlay
+# logmask   0x00002000    # engine: info
+# logmask   0x00004000    # engine: i2c (DDC/EDID)
+# logmask   0x00008000    # engine: general
+# logmask   0x00010000    # dac1 (CRT)
+# logmask   0x00020000    # crtc2 (Panel)
+# logmask   0x00040000    # crtc1 (CRT)
+# logmask   0x00080000    # engine: acceleration (2D)
+# logmask   0x00200000    # set displaymode
+# logmask   0x00800000    # init accelerant
+# logmask   0x20000000    # cursor
