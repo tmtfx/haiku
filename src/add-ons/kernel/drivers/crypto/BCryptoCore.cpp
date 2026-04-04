@@ -705,7 +705,10 @@ BSubmitCryptoRequest(BCryptoRequest* request)
     		// NB: i vettori solitamente non superano qualche megabyte totali per singola chiamata ioctl
     		//     pertanto questa pratica è per lo più pratica e sicura tuttavia, se avessimo gigabyte
     		//     di dati, malloc nel kernel potrebbe fallire o frammentare la memoria!
+    		// GCM deve essere processato in un colpo solo
+    		
     		if (request->vectorCount > 32) {
+    			dprintf("using BounceBuffer");
     		    size_t totalLen = 0;
     		    for (size_t i = 0; i < request->vectorCount; i++) totalLen += request->source[i].iov_len;
     		
@@ -748,9 +751,18 @@ BSubmitCryptoRequest(BCryptoRequest* request)
     		    free(bounceBuffer);
     		    return _FinalizeRequest(request, st);
     		}
-            // GCM deve essere processato in un colpo solo
+            
             // 1. Lock memory per TUTTI i vettori (Dati + Tag)
             // --- GESTIONE ZERO-COPY CON ROLLBACK SICURO ---
+            bool aadLocked = false;
+    
+            // 1. Blocca l'AAD se presente
+            if (request->aad != NULL && request->aadLength > 0) {
+                st = lock_memory(request->aad, request->aadLength, B_READ_DEVICE);
+                if (st != B_OK) return st;
+                aadLocked = true;
+            }
+            
             size_t lockedCount = 0;
             bool lockedDest[32] = { false };
             for (size_t i = 0; i < request->vectorCount; i++) {
@@ -777,6 +789,9 @@ rollback:
                 if (lockedDest[i]) {
                     unlock_memory(request->destination[i].iov_base, request->destination[i].iov_len, B_READ_DEVICE);
                 }
+            }
+            if (aadLocked) {
+                unlock_memory(request->aad, request->aadLength, B_READ_DEVICE);
             }
 
             if (st != B_OK) return st;
