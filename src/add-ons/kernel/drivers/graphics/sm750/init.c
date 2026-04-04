@@ -2,8 +2,13 @@
  * Copyright 2026, Fabio Tomat <f.t.public@gmail.com>
  * All rights reserved. Distributed under the terms of the MIT license.
  */
+#include <KernelExport.h>
+#include <SupportDefs.h>
 #include "DriverInterface.h"
-#include "macros.h"
+#include "sm750_macros.h"
+
+void sm750_get_clocks(shared_info *si);
+void sm750_pixel_test(shared_info *si);
 
 /* Frequenza del cristallo di riferimento (Standard SM750) */
 #define DEFAULT_INPUT_CLOCK 24000000
@@ -13,20 +18,21 @@
 void 
 sm750_get_clocks(shared_info *si)
 {
+	uint32 *regs = si->regs;
 	uint32 reg;
 	
 	/* MCLK - Memory Clock (Registro 0x00000048) */
-	reg = SYS_R(SM750_SYS_MCLK_CTRL);
+	reg = SYS_R(MCLK_CTRL);
 	// Qui andrebbe la formula: (Input * M) / (N * D)
 	// Per ora leggiamo il valore grezzo per il debug
 	dprintf("SM750: MCLK Control Reg: 0x%08" B_PRIx32 "\n", reg);
 
 	/* SCLK - System Clock (Registro 0x0000004C) */
-	reg = SYS_R(SM750_SYS_SCLK_CTRL);
+	reg = SYS_R(SCLK_CTRL);
 	dprintf("SM750: SCLK Control Reg: 0x%08" B_PRIx32 "\n", reg);
 	
 	/* Salviamo la frequenza di riferimento nella shared_info */
-	si->si.f_ref = DEFAULT_INPUT_CLOCK / 1000000.0f; // 24.0 MHz
+	si->card_info.f_ref = DEFAULT_INPUT_CLOCK / 1000000.0f; // 24.0 MHz
 }
 
 void 
@@ -52,7 +58,8 @@ sm750_pixel_test(shared_info *si)
 	dprintf("SM750: Pixel Test completato.\n");
 }
 
-status_t sm750_init_chip(shared_info *si) {
+void sm750_init_chip(shared_info *si) {
+	uint32 *regs = si->regs;
     uint32 val;
 
     /* Sblocco dei registri (SMI specific) */
@@ -73,7 +80,9 @@ status_t sm750_init_chip(shared_info *si) {
 	/* SM750 ha diverse Power Mode (0, 1, Sleep). 
 	   Impostiamo la Power Mode 0 (Full Power) */
 	// Registro 0x0000000C: Power Mode Control
-	SYS_W(0x0000000C, 0x00000000);
+	//SYS_W(0x0000000C, 0x00000000);
+	SYS_W(BOOTSTRAP, 0x00000000);
+	//SM750_REG32(0x0000000C) = 0x00000000;
 
     /* 3. Reset dei motori grafici (Senza toccare il display)
 	 * Bit 16: GE (Graphic Engine) Reset
@@ -91,5 +100,5 @@ status_t sm750_init_chip(shared_info *si) {
 	
 	sm750_pixel_test(si);
 
-    return B_OK;
+//    return B_OK;
 }

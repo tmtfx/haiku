@@ -95,7 +95,7 @@ typedef struct {
     
     uint32  *regs;        /* Puntatore virtuale ai registri (MMIO) */
     uint8   *framebuffer; /* Puntatore virtuale alla video RAM */
-    phys_addr_t    *framebuffer_pci; /* Indirizzo fisico (bus) per DMA */
+    phys_addr_t    framebuffer_pci; /* Indirizzo fisico (bus) per DMA */
 
     /* Gestore Memoria Video (Heap) */
     void    *mem_mgr;     /* Puntatore al gestore memoria (importante!) */
