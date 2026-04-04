@@ -509,7 +509,7 @@ aesni_process_gcm(BCryptoRequest* request)
     alignas(16) uint8 j0[16] = {0};
     alignas(16) uint8 ctr_curr[16] = {0};
     alignas(16) uint8 s0[16] = {0};
-    alignas(16) uint8 final_tag[16] = {0};
+    //alignas(16) uint8 final_tag[16] = {0};
     alignas(16) uint8 len_blk[16] = {0};
     uint8 tag_acc[16] = {0};//{0xFF, 0xFF, 0xFF,0xFF, 0xFF, 0xFF,0xFF, 0xFF, 0xFF,0xFF, 0xFF, 0xFF,0xFF, 0xFF, 0xFF, 0xFF};//
     
@@ -524,7 +524,7 @@ aesni_process_gcm(BCryptoRequest* request)
     size_t i, pos, j;
     uint8 *src, *dst;
     size_t vector_len, chunk;
-    uint64 total_bits;
+    //uint64 total_bits;
     
     dprintf("AESNI: VectorCount = %llu\n", (unsigned long long)request->vectorCount);
     dprintf("AESNI: Tag Destination Ptr = %p\n", request->destination[request->vectorCount - 1].iov_base);
@@ -572,14 +572,18 @@ aesni_process_gcm(BCryptoRequest* request)
         h_temp = GCM_REVERSE(h_temp);
         
         // Shift a sinistra di 1 bit (fondamentale per allineamento GF128)
-        /*h_ref = _mm_or_si128(
+        h_ref = _mm_or_si128(
             _mm_slli_epi64(h_temp, 1), 
             _mm_srli_epi64(_mm_slli_si128(h_temp, 8), 63)
-        );*/
+        );
+        /*
         h_ref = _mm_or_si128(
             _mm_srli_epi64(h_temp, 1), 
             _mm_slli_epi64(_mm_srli_si128(h_temp, 8), 63)
-        );
+        );*/
+        //secondo claude:
+        // CORRETTO: h_ref è semplicemente H byte-reversed
+        //h_ref = h_temp;   // = GCM_REVERSE(h_raw), senza nessuno shift
         
         acc = _mm_setzero_si128();
         
@@ -642,35 +646,17 @@ aesni_process_gcm(BCryptoRequest* request)
         }
         //dprintf("AESNI DEBUG: aad_ptr=%p, aad_len=%zu, total_len=%zu\n", aad_ptr, aad_len, total_len);
 
-        /*senza aad
-        // Finalizzazione Lunghezze
-        total_bits = (uint64)total_len * 8;
-        //__m128i len_v = _mm_set_epi64x(total_bits, 0); 
-        __m128i len_v = _mm_set_epi64x(0, total_bits);
-
-        acc = _mm_xor_si128(acc, GCM_REVERSE(len_v));
-        //acc = _mm_xor_si128(acc, len_v);
-        acc = internal_ghash_mul_only_xmm(acc, h_ref);
-
-        final_ghash = GCM_REVERSE(acc);
-        aesni_encrypt_block_xmm(ctx, j0, s0);
-        tag_res = _mm_xor_si128(final_ghash, _mm_loadu_si128((__m128i*)s0));
-        _mm_storeu_si128((__m128i*)tag_acc, tag_res);*/
         uint64 aad_bits = (uint64)aad_len * 8;
         uint64 data_bits = (uint64)total_len * 8;
 
-        // GCM vuole [AAD_bits (64) | DATA_bits (64)]
-        // epi64x mette il primo argomento nei 64 bit alti, il secondo nei bassi
-        //__m128i len_v = _mm_set_epi64x(data_bits, aad_bits); 
-        //__m128i len_v = _mm_set_epi64x(aad_bits, data_bits);
-
-        //acc = _mm_xor_si128(acc, GCM_REVERSE(len_v));
         alignas(16) uint64 len_buffer[2];
         len_buffer[0] = __builtin_bswap64(aad_bits);  // AAD nei primi 8 byte (BE)
         len_buffer[1] = __builtin_bswap64(data_bits); // DATA nei secondi 8 byte (BE)
 
         __m128i len_v_be = _mm_loadu_si128((__m128i*)len_buffer);
-        acc = _mm_xor_si128(acc, len_v_be);
+        //acc = _mm_xor_si128(acc, len_v_be);
+        // secondo claude:
+        acc = _mm_xor_si128(acc, GCM_REVERSE(len_v_be));
         acc = internal_ghash_mul_only_xmm(acc, h_ref);
 
         // --- FASE 4: Tag finale ---
@@ -689,8 +675,6 @@ aesni_process_gcm(BCryptoRequest* request)
             uint8* tag_out = (uint8*)tag_vec->iov_base;
             
             if (tag_out != NULL) {
-                // Forza un valore di test: se nel test vedi "AA", il driver comunica!
-                // tag_out[0] = 0xAA; 
                 _mm_storeu_si128((__m128i*)tag_out, tag_res);
                 //memcpy(tag_out, temp_tag, 16);
                 if (!encrypt) {
@@ -892,7 +876,7 @@ BInitAESNICrypto()
     if (!(caps & B_CRYPTO_HW_AES_NI))
         return B_UNSUPPORTED;
         
-    //ghash_accel = caps & B_CRYPTO_GHASH_PCLMULQDQ;
+    ghash_accel = caps & B_CRYPTO_GHASH_PCLMULQDQ;
     /* per ora lasciamo ghash_accel a false
      * visto che non caviamo un ragno dal buco
      * quando troveremo la logica corretta o avremo
