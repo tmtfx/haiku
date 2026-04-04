@@ -699,58 +699,103 @@ BSubmitCryptoRequest(BCryptoRequest* request)
         free(kSrc);
         return _FinalizeRequest(request, st);*/
     } else {
-    	status_t st = B_OK;
-    	if (request->mode == B_CRYPTO_MODE_GCM) {
-    		// --- GESTIONE COALESCING (Se troppi vettori o frammentazione eccessiva) ---
-    		// NB: i vettori solitamente non superano qualche megabyte totali per singola chiamata ioctl
-    		//     pertanto questa pratica è per lo più pratica e sicura tuttavia, se avessimo gigabyte
-    		//     di dati, malloc nel kernel potrebbe fallire o frammentare la memoria!
-    		// GCM deve essere processato in un colpo solo
-    		
-    		if (request->vectorCount > 32) {
-    			dprintf("using BounceBuffer");
-    		    size_t totalLen = 0;
-    		    for (size_t i = 0; i < request->vectorCount; i++) totalLen += request->source[i].iov_len;
-    		
-    		    void* bounceBuffer = malloc(totalLen);
-    		    if (!bounceBuffer) return B_NO_MEMORY;
-    		
-    		    // Pack dei dati
-    		    size_t offset = 0;
-    		    for (size_t i = 0; i < request->vectorCount; i++) {
-    		        if (user_memcpy((uint8*)bounceBuffer + offset, request->source[i].iov_base, request->source[i].iov_len) != B_OK) {
-    		            free(bounceBuffer);
-    		            return B_BAD_ADDRESS;
-    		        }
-    		        offset += request->source[i].iov_len;
-    		    }
-    		
-    		    // Prepariamo richiesta singola per il driver
-    		    iovec kVec = { bounceBuffer, totalLen };
-    		    BCryptoRequest kReq = *request;
-    		    kReq.source = &kVec;
-    		    kReq.destination = &kVec;
-    		    kReq.vectorCount = 1;
+        status_t st = B_OK;
+        if (request->mode == B_CRYPTO_MODE_GCM) {
+            // --- GESTIONE COALESCING (Se troppi vettori o frammentazione eccessiva) ---
+            // NB: i vettori solitamente non superano qualche megabyte totali per singola chiamata ioctl
+            //     pertanto questa pratica è per lo più pratica e sicura tuttavia, se avessimo gigabyte
+            //     di dati, malloc nel kernel potrebbe fallire o frammentare la memoria!
+            // GCM deve essere processato in un colpo solo
+            
+            if (request->vectorCount > 32) {
+                dprintf("using BounceBuffer");
+                //size_t totalLen = 0;
+                //for (size_t i = 0; i < request->vectorCount; i++) totalLen += request->source[i].iov_len;
+                size_t dataLen = 0;
+                for (size_t i = 0; i < request->vectorCount - 1; i++) 
+                    dataLen += request->source[i].iov_len;
+    
+                size_t tagLen = request->source[request->vectorCount - 1].iov_len; // Dovrebbe essere 16
+                
+                // 2. Allocazione (Dati + Tag)
+                void* bounceData = malloc(dataLen);
+                void* bounceTag = malloc(tagLen);
+                if (!bounceData || !bounceTag) {
+                    free(bounceData); free(bounceTag);
+                    return B_NO_MEMORY;
+                }
+                
+                
+                // 1. Allochiamo spazio anche per l'AAD se presente
+                void* aadBuffer = NULL;
+                if (request->aad && request->aadLength > 0) {
+                    aadBuffer = malloc(request->aadLength);
+                    if (!aadBuffer) {
+                        free(bounceData);
+                        free(bounceTag);
+                        return B_NO_MEMORY;
+                    }
+        
+                    // Copiamo l'AAD dallo spazio utente al kernel
+                    if (user_memcpy(aadBuffer, request->aad, request->aadLength) != B_OK) {
+                        free(bounceData);
+                        free(bounceTag);
+                        free(aadBuffer);
+                        return B_BAD_ADDRESS;
+                    }
+                }
+                
+              
+                size_t offset = 0;
+                for (size_t i = 0; i < request->vectorCount - 1; i++) {
+                    if (user_memcpy((uint8*)bounceData + offset, request->source[i].iov_base, request->source[i].iov_len) != B_OK) {
+                        free(bounceData);
+                        free(bounceTag);
+                        free(aadBuffer);
+                        return B_BAD_ADDRESS;
+                    }
+                    offset += request->source[i].iov_len;
+                }
+                
+                if (user_memcpy(bounceTag, request->source[request->vectorCount - 1].iov_base, tagLen) != B_OK){
+                    free(bounceData); free(bounceTag); free(aadBuffer);
+                    return B_BAD_ADDRESS;
+                }
+                
+                iovec kVecs[2] = {
+                    { bounceData, dataLen }, // Vettore 0: DATI
+                    { bounceTag,  tagLen  }  // Vettore 1: TAG
+                };
+            
+                // Prepariamo richiesta singola per il driver
+                BCryptoRequest kReq = *request;
+                kReq.source = kVecs;
+                kReq.destination = kVecs;
+                kReq.vectorCount = 2;
+                kReq.aad = (uint8*)aadBuffer;
+                kReq.aadLength = request->aadLength;
 
-    		    {
-    		        UserAccessExposer access;
-    		        st = algo->Process(&kReq);
-    		    }
+                {
+                    UserAccessExposer access;
+                    st = algo->Process(&kReq);
+                }
 
-    		    // Unpack dei dati (solo se operazione riuscita)
-    		    if (st == B_OK) {
-    		        offset = 0;
-    		        for (size_t i = 0; i < request->vectorCount; i++) {
-    		            if (user_memcpy(request->destination[i].iov_base, (uint8*)bounceBuffer + offset, request->destination[i].iov_len) != B_OK) {
-    		                st = B_BAD_ADDRESS;
-    		                break;
-    		            }
-    		            offset += request->destination[i].iov_len;
-    		        }
-    		    }
-    		    free(bounceBuffer);
-    		    return _FinalizeRequest(request, st);
-    		}
+                // Unpack dei dati (solo se operazione riuscita)
+                if (st == B_OK) {
+                    // Copia i DATI (vettori 0 a N-1)
+                    offset = 0;
+                    for (size_t i = 0; i < request->vectorCount - 1; i++) {
+                        user_memcpy(request->destination[i].iov_base, (uint8*)bounceData + offset, request->destination[i].iov_len);
+                        offset += request->destination[i].iov_len;
+                    }
+                    // Copia il TAG (ultimo vettore)
+                    user_memcpy(request->destination[request->vectorCount - 1].iov_base, bounceTag, tagLen);
+                }
+                free(bounceData);
+                free(bounceTag);
+                free(aadBuffer);
+                return _FinalizeRequest(request, st);
+            }
             
             // 1. Lock memory per TUTTI i vettori (Dati + Tag)
             // --- GESTIONE ZERO-COPY CON ROLLBACK SICURO ---
@@ -758,7 +803,7 @@ BSubmitCryptoRequest(BCryptoRequest* request)
     
             // 1. Blocca l'AAD se presente
             if (request->aad != NULL && request->aadLength > 0) {
-                st = lock_memory(request->aad, request->aadLength, B_READ_DEVICE);
+                st = lock_memory((void*)request->aad, request->aadLength, B_READ_DEVICE);
                 if (st != B_OK) return st;
                 aadLocked = true;
             }
@@ -791,7 +836,7 @@ rollback:
                 }
             }
             if (aadLocked) {
-                unlock_memory(request->aad, request->aadLength, B_READ_DEVICE);
+                unlock_memory((void*)request->aad, request->aadLength, B_READ_DEVICE);
             }
 
             if (st != B_OK) return st;
