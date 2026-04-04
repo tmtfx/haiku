@@ -32,7 +32,9 @@ public:
             ssize_t             Decrypt(uint8* key, size_t keyLen, 
                                         uint8* iv, size_t ivLen, 
                                         const void* in, size_t inLen, 
-                                        void* out, const void* inTag); //GCM
+                                        void* out, const void* inTag,
+                                        const void* aad = NULL, 
+                                        size_t aadLen = 0); //GCM
             ssize_t             Decrypt(uint8* key, size_t keyLen, 
                                         uint8* iv, size_t ivLen, 
                                         BDataIO* source, BDataIO* destination, 

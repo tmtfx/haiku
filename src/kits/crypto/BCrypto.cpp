@@ -6,6 +6,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <string.h>
+#include <malloc.h>
 #include "BCryptoDefs.h"
 #include <StorageDefs.h>
 #include <DataIO.h>
@@ -421,7 +422,8 @@ BCrypto::Encrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
 // Per la Decifratura GCM
 ssize_t
 BCrypto::Decrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
-                 const void* in, size_t inLen, void* out, const void* inTag)
+                 const void* in, size_t inLen, void* out, const void* inTag,
+                 const void* aad, size_t aadLen)
 {
     if (fMode != B_CRYPTO_MODE_GCM) return B_BAD_VALUE;
     if (inTag == NULL || in == NULL || out == NULL) return B_BAD_VALUE;
@@ -430,14 +432,45 @@ BCrypto::Decrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
     iovec srcVecs[2] = { {(void*)in, inLen}, {(void*)inTag, 16} };
     // dstVecs[1] deve esistere per non far andare il driver "fuori giri", 
     // anche se non ci scriveremo nulla di utile.
-    uint8 dummyTag[16]; 
+    // --- SETUP CANARINI ---
+    uint8 guard1[16];
+    memset(guard1, 0xAA, 16); // Riempie di 0xAA
+// PROVARE A DICHIARARE volatile uint8 dummyTag[16];
+    uint8* dummyTag = (uint8*)memalign(16, 16); 
+    memset(dummyTag, 0, 16);
+
+    uint8 guard2[16];
+    memset(guard2, 0xBB, 16); // Riempie di 0xBB
+    // -----------------------
+    
     iovec dstVecs[2] = { {out, inLen}, {dummyTag, 16} };
 
     BCryptoUserRequest req;
     _FillRequest(req, B_CRYPTO_DECRYPT, fAlgorithm, fMode,
                  key, keyLen, iv, ivLen, srcVecs, dstVecs, 2);
 
+    req.aad = (uint8*)aad;
+    req.aadLength = aadLen;
+    
     status_t st = Process(req);
+    
+    bool stackCorrupted = false;
+    
+    for (int i = 0; i < 16; i++) {
+        if (guard1[i] != 0xAA) stackCorrupted = true;
+        if (guard2[i] != 0xBB) stackCorrupted = true;
+    }
+
+    if (stackCorrupted) {
+        printf("\n[!!! ALARME !!!] STACK CORRUPTION RILEVATA!\n");
+        printf("Guard1 (Pre): ");
+        for(int i=0; i<16; i++) printf("%02x ", guard1[i]);
+        printf("\nGuard2 (Post): ");
+        for(int i=0; i<16; i++) printf("%02x ", guard2[i]);
+        printf("\n----------------------------------------\n");
+    } else {
+        printf("\n[OK] Lo stack sembra integro.\n");
+    }
     
     // --- BLOCCO DI DEBUG ---
     printf("\n[DEBUG Decrypt]\n");
@@ -458,8 +491,10 @@ BCrypto::Decrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
     } else {
         printf("  Risultato Process: OK\n");
     }
-    fflush(stdout);
+    free(dummyTag);
+    //fflush(stdout);
     // --- FINE DEBUG ---
+    //if (st == B_OK) printf("DECRYPT OK SENZA DEBUG\n");
     
     return (st == B_OK) ? (ssize_t)inLen : (ssize_t)st;
 }
