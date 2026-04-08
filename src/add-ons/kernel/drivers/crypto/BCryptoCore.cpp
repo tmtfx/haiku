@@ -789,13 +789,15 @@ BSubmitCryptoRequest(BCryptoRequest* request)
                         offset += request->destination[i].iov_len;
                     }
                     // Copia il TAG (ultimo vettore)
-                    user_memcpy(request->destination[request->vectorCount - 1].iov_base, bounceTag, tagLen);
+                    if (request->operation == B_CRYPTO_ENCRYPT) {
+                        user_memcpy(request->destination[request->vectorCount - 1].iov_base, bounceTag, tagLen);
+                    }
                 }
                 free(bounceData);
                 free(bounceTag);
                 free(aadBuffer);
                 return _FinalizeRequest(request, st);
-            }
+            } // ---------- end coalescing case ------------
             
             // 1. Lock memory per TUTTI i vettori (Dati + Tag)
             // --- GESTIONE ZERO-COPY CON ROLLBACK SICURO ---
