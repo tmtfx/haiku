@@ -79,6 +79,14 @@ typedef struct {
     bool   force_pci;
 } sm750_settings;
 
+
+typedef struct ChipInfo {
+    uint16        chipID;
+    uint16        chipType;
+    const char* chipName;
+} ChipInfo;
+
+
 /* Informazioni condivise tra Driver e Accelerante */
 typedef struct {
     /* Identificazione PCI */
@@ -93,7 +101,7 @@ typedef struct {
     area_id regs_area;    /* BAR0: Registri MMIO */
     area_id fb_area;      /* BAR1: Framebuffer */
     
-    uint32  *regs;        /* Puntatore virtuale ai registri (MMIO) */
+    vuint32  *regs;        /* Puntatore virtuale ai registri (MMIO) */
     uint8   *framebuffer; /* Puntatore virtuale alla video RAM */
     phys_addr_t    framebuffer_pci; /* Indirizzo fisico (bus) per DMA */
 
@@ -162,6 +170,21 @@ typedef struct {
     sm750_settings settings;
 } shared_info;
 
+/* Stato globale del driver */
+typedef struct {
+    uint32          openCount;
+    int32           flags;
+    pci_info        pci;            /* Nota: si chiama 'pci' ora */
+    const ChipInfo* pChipInfo;
+    area_id         shared_area;
+    shared_info* si;
+    area_id         regs_area;
+    vuint32* regs;           /* Deve essere vuint32* */
+    area_id         fb_area;
+    uint8* framebuffer;
+    char            name[B_OS_NAME_LENGTH];
+} DeviceInfo;
+
 void sm750_init_chip(shared_info *si);
 
 /* Strutture per IOCTL */
@@ -173,14 +196,25 @@ typedef struct {
 } sm750_get_set_pci;
 
 typedef struct {
-    uint32  magic;
+    //uint32  magic;
+    /*
+     * magic è una firma. L'accelerante scrive 0x12345678 nel campo 
+     * magic e il driver, prima di rispondere, controlla se quel numero 
+     * è corretto. Serve a evitare che un programma sbagliato chiami 
+     * l'IOCTL del tuo driver mandandolo in crash.
+     */
     area_id shared_info_area;
 } sm750_get_private_data;
-
+/* per ora non usiamo, può tornare utile se vogliamo supportare 
+ * contemporaneamente più schede
+ *
 typedef struct {
-    uint32  magic;
+    uint32  magic; 
     char    *name;
-} sm750_device_name;
+} sm750_device_name; */
+
+//extern status_t control_device(void *cookie, uint32 op, void *arg, size_t len);
+
 
 #if defined(__cplusplus)
 }
