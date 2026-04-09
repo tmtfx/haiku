@@ -170,6 +170,15 @@ typedef struct {
     sm750_settings settings;
 } shared_info;
 
+typedef struct {
+    int         fd;                 /* File descriptor del driver /dev/graphics/... */
+    shared_info *si;                /* Puntatore alla shared info clonata */
+    area_id     shared_info_area;   /* ID area shared info */
+    uint32      *regs;              /* Puntatore ai registri MMIO clonati */
+    area_id     regs_area;          /* ID area registri */
+    bool        is_clone;           /* Vero se è un clone */
+} accelerant_info;
+
 /* Stato globale del driver */
 typedef struct {
     uint32          openCount;

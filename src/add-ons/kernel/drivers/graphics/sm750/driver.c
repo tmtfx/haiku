@@ -266,9 +266,24 @@ open_device(const char *name, uint32 flags, void **cookie)
     si->regs_area = di->regs_area;
     si->regs = (vuint32*)(uintptr_t)di->regs;
     
+    // 2. CALCOLO MEMORIA (Sposta qui la logica prima di mappare il BAR1)
+    dprintf("SM750: Settings - Memory: %u MB, PCI reports: %u bytes\n", 
+            si->settings.memory, (uint32)di->pci.u.h0.base_register_sizes[1]);
     
+    uint32 mem_size = di->pci.u.h0.base_register_sizes[1];
     
+    if (mem_size == 0) {
+        dprintf("SM750: ATTENZIONE - PCI reports 0MB VRAM, forcing 16MB...\n");
+        mem_size = 16 * 1024 * 1024; 
+    } else if (mem_size < (2 * 1024 * 1024)) {
+        dprintf("SM750: PCI reports too little memory (%u), forcing 8MB\n", mem_size);
+        mem_size = 8 * 1024 * 1024;
+    }
     
+    if (si->settings.memory > 0) 
+        mem_size = si->settings.memory * 1024 * 1024;
+    
+    si->card_info.mem_size = mem_size;
     
     si->framebuffer_pci = (phys_addr_t)di->pci.u.h0.base_registers[1];
     //uint32 fb_size = di->pci.u.h0.base_register_sizes[1];
@@ -294,27 +309,6 @@ open_device(const char *name, uint32 flags, void **cookie)
         status = B_ERROR;
         goto error;
     }
-                          
-
-    //si->framebuffer_pci = (phys_addr_t)di->info.u.h0.base_registers[1];
-    
-    
-    //si->framebuffer_pci = (phys_addr_t)di->pci.u.h0.base_registers[1];
-
-    /* 1. Inizializzazione del Gestore Memoria Video */
-    /* Assumiamo per ora che la memoria sia quella riportata dal PCI o forzata nei settings */
-    dprintf("SM750: Settings - Memory: %u MB, PCI reports: %u bytes\n", 
-            si->settings.memory, (uint32)di->pci.u.h0.base_register_sizes[1]);
-    uint32 mem_size = di->pci.u.h0.base_register_sizes[1];
-    if (mem_size == 0) {
-        dprintf("SM750: ATTENZIONE - PCI reports 0MB VRAM, forcing 16MB...\n");
-        mem_size = 16 * 1024 * 1024; 
-    } else if (mem_size < (2 * 1024 * 1024)) {
-        dprintf("SM750: PCI reports too little memory (%u), forcing 8MB\n", mem_size);
-        mem_size = 8 * 1024 * 1024;
-    }
-    if (si->settings.memory > 0) mem_size = si->settings.memory * 1024 * 1024;
-    si->card_info.mem_size = mem_size;
 
     /* Inizializziamo l'heap: 
        - start: 0 (offset relativo all'inizio del BAR1)

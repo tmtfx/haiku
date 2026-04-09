@@ -149,6 +149,9 @@ sm750_pixel_test(shared_info *si)
             color += 0x00000100; // Cambia leggermente il verde
         }
     }*/
+    uint32 max_pixels = si->card_info.mem_size / 4;
+    dprintf("SM750: Inizio Pixel Test su %" B_PRIu32 " MB (%u pixel)...\n", 
+            si->card_info.mem_size / (1024 * 1024), max_pixels);
     for (uint32 i = 0; i < max_pixels; i++) {
         fb[i] = 0xFF00FF; // Fucsia
     }
