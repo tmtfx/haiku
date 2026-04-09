@@ -18,7 +18,7 @@ void sm750_pixel_test(shared_info *si);
 void 
 sm750_get_clocks(shared_info *si)
 {
-	uint32 *regs = si->regs;
+	vuint32 *regs = si->regs;
 	uint32 reg;
 	
 	/* MCLK - Memory Clock (Registro 0x00000048) */
@@ -35,31 +35,50 @@ sm750_get_clocks(shared_info *si)
 	si->card_info.f_ref = DEFAULT_INPUT_CLOCK / 1000000.0f; // 24.0 MHz
 }
 
-void 
-sm750_pixel_test(shared_info *si)
-{
-	if (!si->framebuffer) return;
-
-	/* Supponiamo di essere in una modalità a 32 bit (4 byte per pixel) 
-	   e una larghezza di almeno 800 pixel. 
-	   Scriviamo i primi 100.000 pixel per vedere se appare qualcosa. */
-	
-	uint32 *fb = (uint32 *)si->framebuffer;
-	uint32 color = 0x00FF00FF; // Un bel fucsia/magenta acceso
-
-	dprintf("SM750: Inizio Pixel Test sul BAR1 (Virtual Addr: %p)...\n", fb);
-
-	for (int i = 0; i < 500000; i++) {
-		fb[i] = color;
-		/* Cambiamo colore ogni tanto per creare delle strisce */
-		if (i % 1000 == 0) color += 0x00010100; 
-	}
-
-	dprintf("SM750: Pixel Test completato.\n");
-}
-
 void sm750_init_chip(shared_info *si) {
-	uint32 *regs = si->regs;
+	vuint32 *regs = (vuint32 *)si->regs;
+	dprintf("SM750: --- Sveglia Chip ---\n");
+
+    /* 1. Forza la Power Mode 0 (Full Power) */
+    /* Il registro 0x00000C gestisce il risparmio energetico */
+    uint32 pwrMode = SYS_R(BOOTSTRAP);//0x00000C
+    pwrMode &= ~0x00000003; // Pulisce i bit di modalità (00 = Mode 0)
+    SYS_W(BOOTSTRAP, pwrMode);//0x00000C
+    
+    /* 2. Abilita i Clock (Gate Control) */
+    /* Molti SM750 richiedono che i moduli siano abilitati esplicitamente */
+    /* Registro 0x000004: System Control */
+    uint32 sysCtrl = SYS_R(MISC_CTRL);//0x000004
+    sysCtrl |= (1 << 4); // Spesso usato per abilitare il motore 2D
+    SYS_W(MISC_CTRL, sysCtrl);//0x000004
+
+    /* 3. Un piccolo trucco: Reset del motore grafico */
+    SM750_REG32(0x00) = SM750_REG32(0x00) | 0x00010000;
+    snooze(1000);
+    SM750_REG32(0x00) = SM750_REG32(0x00) & ~0x00010000;
+    
+    dprintf("SM750: Identificazione hardware (0x08): 0x%08x\n", SM750_REG32(0x08));
+    
+    dprintf("SM750: Power Mode impostata. Controllo clock...\n");
+	
+	if (regs == NULL) {
+        dprintf("SM750 ERROR: regs pointer is NULL! Aborting init_chip.\n");
+        return;
+    }
+	dprintf("SM750: --- Initializing Hardware ---\n");
+	dprintf("SM750: Testing MMIO access at %p...\n", regs);
+
+    /* Invece di usare subito la macro complessa, facciamo un test manuale */
+    /* Leggiamo l'offset 0 direttamente */
+    uint32 test = regs[0]; 
+    dprintf("SM750: Manual read offset 0: 0x%08x\n", test);
+
+    /* Se arriviamo qui, le macro SYS_R sono sicure da usare */
+    uint32 misc = SYS_R(MISC_CTRL); 
+    dprintf("SM750: MISC_CTRL via macro: 0x%08x\n", misc);
+    
+    dprintf("SM750: Vendor ID: 0x%04x, Device ID: 0x%04x\n", si->vendor_id, si->device_id);
+    
     uint32 val;
 
     /* Sblocco dei registri (SMI specific) */
@@ -95,10 +114,44 @@ void sm750_init_chip(shared_info *si) {
     
     /* 4. Lettura clock attuali per conferma */
 	sm750_get_clocks(si);
-	
+	//dprintf("SM750: Mapped %" B_PRIu32 " MB of VRAM at %p\n", si->card_info.mem_size / (1024 * 1024), si->framebuffer);
+    dprintf("SM750: Mapped %" B_PRIu32 " MB of VRAM\n", si->card_info.mem_size / (1024 * 1024));
 	dprintf("SM750: Chip initialized and clocked.\n");
-	
-	sm750_pixel_test(si);
 
 //    return B_OK;
+}
+void 
+sm750_pixel_test(shared_info *si)
+{
+    /* Usiamo il puntatore della shared_info che è già mappato */
+    if (si == NULL || si->framebuffer == NULL) {
+        dprintf("SM750: Pixel Test abortito, framebuffer non mappato.\n");
+        return;
+    }
+
+    /* Usiamo volatile per assicurarci che ogni scrittura avvenga davvero sulla scheda */
+    volatile uint32 *fb = (volatile uint32 *)si->framebuffer;
+    dprintf("SM750: Test singolo pixel...\n");
+    fb[0] = 0xFFFFFFFF; // Scrivi un pixel bianco all'inizio
+    dprintf("SM750: Pixel scritto con successo!\n");
+
+    //uint32 color = 0x00FF00FF; // Magenta/Fucsia
+
+    dprintf("SM750: Inizio Pixel Test sul BAR1 (Virtual Addr: %p)...\n", (void*)fb);
+
+    /* Scriviamo mezzo milione di pixel. 
+       A 32bpp, sono circa 2MB di dati. 
+    for (int32 i = 0; i < 500000; i++) {
+        fb[i] = color;
+        
+        // Creiamo delle bande di colore sfumate
+        if (i % 2000 == 0) {
+            color += 0x00000100; // Cambia leggermente il verde
+        }
+    }*/
+    for (uint32 i = 0; i < max_pixels; i++) {
+        fb[i] = 0xFF00FF; // Fucsia
+    }
+
+    dprintf("SM750: Pixel Test completato.\n");
 }
