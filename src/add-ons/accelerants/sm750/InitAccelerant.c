@@ -10,6 +10,9 @@
 #include <string.h>
 #include <unistd.h>
 
+status_t sm750_init_accelerant(int fd);
+void sm750_uninit_accelerant(void);
+
 typedef struct {
     int         fd;                 /* File descriptor del driver /dev/graphics/... */
     shared_info *si;                /* Puntatore alla shared info clonata */
@@ -21,11 +24,12 @@ typedef struct {
 
 static accelerant_info gInfo;
 
+
 static status_t init_common(int fd) {
     gInfo.fd = fd;
 
     sm750_get_private_data gpd;
-    gpd.magic = SM750_PRIVATE_DATA_MAGIC;
+    //gpd.magic = SM750_PRIVATE_DATA_MAGIC; tolto dalla struct per ora
 
     /* 1. Ottieni ID aree dal driver */
     if (ioctl(fd, ENG_GET_PRIVATE_DATA, &gpd, sizeof(gpd)) != B_OK)
@@ -49,36 +53,54 @@ static status_t init_common(int fd) {
     return B_OK;
 }
 
-/* Entry point principale */
-status_t init_accelerant(int fd) {
-    gInfo.is_clone = false;
+
+status_t 
+sm750_init_accelerant(int fd) 
+{
+	gInfo.is_clone = false;
     status_t result = init_common(fd);
     
     if (result == B_OK) {
-        /* Se l'accelerante è già in uso da un'altra istanza primaria, ritorna errore */
+        /* Impediamo aperture multiple dell'accelerante primario */
         if (gInfo.si->accelerant_in_use) {
-            uninit_accelerant();
+            sm750_uninit_accelerant();
             return B_NOT_ALLOWED;
         }
-        
-        /* Inizializza il lock dell'engine (Benaphore) */
-        // result = INIT_BEN(gInfo.si->engine_lock);
         
         gInfo.si->accelerant_in_use = true;
     }
     return result;
 }
 
-void uninit_accelerant(void) {
-    /* Rilascia le aree */
-    delete_area(gInfo.regs_area);
+void 
+sm750_uninit_accelerant(void) {
+    /* 1. Segna che l'accelerante è libero (solo se siamo il primario) */
+    if (!gInfo.is_clone && gInfo.si != NULL) {
+        gInfo.si->accelerant_in_use = false;
+    }
+
+    /* 2. Rilascia le aree (l'ordine non è critico qui, ma facciamolo pulito) */
+    //if (gInfo.shared_info_area >= 0)
     delete_area(gInfo.shared_info_area);
+    //if (gInfo.regs_area >= 0)
+    delete_area(gInfo.regs_area);
     
     gInfo.regs = NULL;
     gInfo.si = NULL;
+    gInfo.regs_area = -1;
+    gInfo.shared_info_area = -1;
+}
 
-    /* Se non è un clone, segna che l'accelerante è libero */
-    if (!gInfo.is_clone && gInfo.si) {
-        gInfo.si->accelerant_in_use = false;
+/* Entry point richiesto da Haiku */
+void*
+get_accelerant_hook(uint32 feature, void* data)
+{
+    switch (feature) {
+        case B_INIT_ACCELERANT:
+            return (void*)sm750_init_accelerant;
+        case B_UNINIT_ACCELERANT:
+            return (void*)sm750_uninit_accelerant;
+        default:
+            return NULL;
     }
 }
