@@ -5,44 +5,74 @@
 
 #include <Accelerant.h>
 #include <stdlib.h>
+#include <Debug.h>
 #include "DriverInterface.h"
 #include <errno.h>
 #include <string.h>
 #include <unistd.h>
 #include "protos.h"
+#include "sm750_macros.h"
 
 status_t sm750_init_accelerant(int fd);
 void sm750_uninit_accelerant(void);
 
 //static accelerant_info gInfo;
-accelerant_info g_info; // Rimuovi static per renderla globale
+accelerant_info g_info = { .shared_info_area = -1, .regs_area = -1, .fb_area = -1 }; // Rimuovi static per renderla globale
 accelerant_info *gInfo = &g_info;
 
 
 static status_t init_common(int fd) {
+	debug_printf("SM750_ACC: Inizio init_common\n");
+	//memset(gInfo, 0, sizeof(accelerant_info));
     gInfo->fd = fd;
 
     sm750_get_private_data gpd;
     //gpd.magic = SM750_PRIVATE_DATA_MAGIC; tolto dalla struct per ora
 
-    /* 1. Ottieni ID aree dal driver */
-    if (ioctl(fd, ENG_GET_PRIVATE_DATA, &gpd, sizeof(gpd)) != B_OK)
+    if (ioctl(fd, ENG_GET_PRIVATE_DATA, &gpd, sizeof(gpd)) != B_OK) {
+        debug_printf("SM750_ACC: ERRORE ioctl fallita!\n");
         return B_ERROR;
+    }
+    
+    debug_printf("SM750_ACC: Area ID ricevuta dal driver: %d\n", (int)gpd.shared_info_area);
 
-    /* 2. Clona la Shared Info */
     gInfo->shared_info_area = clone_area("sm750 shared info", (void **)&(gInfo->si),
         B_ANY_ADDRESS, B_READ_AREA | B_WRITE_AREA, gpd.shared_info_area);
-    if (gInfo->shared_info_area < 0) return gInfo->shared_info_area;
+    if (gInfo->shared_info_area < 0) {
+        debug_printf("SM750_ACC: ERRORE clone_area fallito: 0x%08x\n", (int)gInfo->shared_info_area);
+        return gInfo->shared_info_area;
+    }
+    debug_printf("SM750_ACC: Shared Info clonato a %p\n", gInfo->si);
 
-    /* 3. Clona i Registri MMIO (BAR0) */
-    /* Usiamo l'ID salvato nella shared_info dal driver kernel */
+    if (gInfo->si->regs_area < 0) {
+        debug_printf("SM750_ACC: ERRORE - ID area registri non valido nel driver!\n");
+        return B_ERROR;
+    }
     gInfo->regs_area = clone_area("sm750 regs area", (void **)&(gInfo->regs),
         B_ANY_ADDRESS, B_READ_AREA | B_WRITE_AREA, gInfo->si->regs_area);
+    debug_printf("SM750_ACC: Registri clonati a %p (ID: %d)\n", gInfo->regs, (int)gInfo->regs_area);
     
     if (gInfo->regs_area < 0) {
+    	debug_printf("SM750_ACC: ERRORE clone registri fallito!\n");
         delete_area(gInfo->shared_info_area);
         return gInfo->regs_area;
     }
+    vuint32* regs = gInfo->regs;
+    debug_printf("SM750_ACC: MMIO ID letto dall'accelerante: 0x%08x\n", SM750_REG32(0x000000));
+
+    //gInfo->fb_area = clone_area("sm750 fb user", (void **)&(gInfo->si->framebuffer),
+    //    B_ANY_ADDRESS, B_READ_AREA | B_WRITE_AREA, gInfo->si->fb_area);
+    void* user_fb_ptr = NULL;
+    gInfo->fb_area = clone_area("sm750 fb user", &user_fb_ptr,
+        B_ANY_ADDRESS, B_READ_AREA | B_WRITE_AREA, gInfo->si->fb_area);
+    debug_printf("SM750_ACC: Framebuffer clonato a %p\n", gInfo->si->framebuffer);
+
+    if (gInfo->fb_area < 0) {
+        delete_area(gInfo->regs_area);
+        delete_area(gInfo->shared_info_area);
+        return gInfo->fb_area;
+    }
+    gInfo->si->framebuffer = (uint8*)user_fb_ptr;
 
     return B_OK;
 }
@@ -121,8 +151,11 @@ get_accelerant_hook(uint32 feature, void* data)
 			return (void*)sm750_screen_to_screen_blit;*/
 
         case B_SET_CURSOR_SHAPE:
+            return (void*)sm750_set_cursor_shape;
         case B_MOVE_CURSOR:
+            return (void*)sm750_move_cursor;
         case B_SHOW_CURSOR:
+            return (void*)sm750_show_cursor;
         case B_FILL_RECTANGLE:
         case B_SCREEN_TO_SCREEN_BLIT:
             return NULL;
