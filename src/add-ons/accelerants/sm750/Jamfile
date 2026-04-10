@@ -5,8 +5,8 @@ UsePrivateHeaders [ FDirName graphics sm750 ] ;
 UsePrivateHeaders [ FDirName graphics common ] ;
 
 Addon sm750.accelerant :
-	Engine.c
 	Mode.c
+	Cursor.c
 	InitAccelerant.c
 	
 	: be libaccelerantscommon.a
