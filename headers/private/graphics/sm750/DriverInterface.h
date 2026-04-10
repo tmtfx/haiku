@@ -35,8 +35,6 @@ typedef struct {
 #define RELEASE_BEN(x)   if((atomic_add(&(x.ben), -1)) > 1) release_sem(x.sem);
 #define DELETE_BEN(x)    delete_sem(x.sem);
 
-#define SM750_PRIVATE_DATA_MAGIC    0x750A /* SM750 revision A */
-
 /* Dualhead & Output Flags */
 #define DUALHEAD_OFF      (0<<6)
 #define DUALHEAD_CLONE    (1<<6)
@@ -50,6 +48,8 @@ typedef struct {
 #define SKD_SET_START_ADDR   0x00000004
 #define SKD_SET_CURSOR       0x00000008
 #define SKD_HANDLER_INSTALLED 0x80000000
+
+#define CRT_CURSOR_VRAM_OFFSET (si->card_info.mem_size - 1024)
 
 enum {
     ENG_GET_PRIVATE_DATA = B_DEVICE_OP_CODES_END + 1,
@@ -113,6 +113,7 @@ typedef struct {
     uint32  mode_count;
 
     uint32  flags;
+    uint32  bits_per_pixel; // TODO, remove if unused (used for initial tests)
     sem_id  vblank;       /* Semaforo sincronizzazione verticale */
 
     /* Cursore Hardware */
@@ -176,6 +177,7 @@ typedef struct {
     area_id     shared_info_area;   /* ID area shared info */
     uint32      *regs;              /* Puntatore ai registri MMIO clonati */
     area_id     regs_area;          /* ID area registri */
+    area_id     fb_area;            /* ID area framebuffer clonato */
     bool        is_clone;           /* Vero se è un clone */
 } accelerant_info;
 
@@ -194,7 +196,7 @@ typedef struct {
     char            name[B_OS_NAME_LENGTH];
 } DeviceInfo;
 
-void sm750_init_chip(shared_info *si);
+void sm750_init_chip(DeviceInfo *di);
 
 /* Strutture per IOCTL */
 typedef struct {
@@ -205,7 +207,7 @@ typedef struct {
 } sm750_get_set_pci;
 
 typedef struct {
-    //uint32  magic;
+    uint32  magic;
     /*
      * magic è una firma. L'accelerante scrive 0x12345678 nel campo 
      * magic e il driver, prima di rispondere, controlla se quel numero 
