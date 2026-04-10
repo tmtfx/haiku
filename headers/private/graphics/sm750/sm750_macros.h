@@ -1,5 +1,6 @@
 /* registers definitions and macros for access to them */
 
+#define SM750_PRIVATE_DATA_MAGIC 0x750DA7A1
 /* Standard PCI Configuration Registers */
 #define SM750_PCI_DEVID        0x00 // Vendor & Device ID
 #define SM750_PCI_CMD_STAT     0x04 // Command & Status Register
@@ -118,6 +119,9 @@
 #define SM750_DISP_CRT_FB_WIDTH   0x00080010 // Larghezza riga (Pitch)
 #define SM750_DISP_CRT_CUR_ADDR   0x000800F0 // Indirizzo Cursore (sostituisce CURADD)
 #define SM750_DISP_CRT_CUR_CTRL   0x000800F4 // Configurazione Cursore
+#define SM750_DISP_CRT_CUR_POS       0x000800F8 // Posizione X, Y
+#define SM750_DISP_CRT_CUR_COLOR12   0x000800FC // Colore 1 e 2 (RGB565)
+#define SM750_DISP_CRT_CUR_COLOR3    0x00080100 // Colore 3
 
 /* --- Secondary Display (Panel) --- */
 #define SM750_DISP_PANEL_CTRL     0x00080200 // Controllo e timing
