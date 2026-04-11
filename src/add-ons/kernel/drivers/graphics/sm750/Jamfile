@@ -9,5 +9,4 @@ UsePrivateHeaders [ FDirName graphics sm750 ] ;
 KernelAddon sm750 :
 	driver.c
 	init.c
-	memory_manager.c
 ;
