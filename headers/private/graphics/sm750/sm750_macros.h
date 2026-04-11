@@ -99,6 +99,9 @@
 #define SM750_SYS_SCLK_CTRL       0x0000003C // System Clock
 #define SM750_SYS_M2XCLK_CTRL     0x00000040 // Master Display Clock
 
+
+#define SM750_SYS_VGA_CONFIG    0x00000088
+
 /* VGA Legacy (Mappati in MMIO) */
 #define VG_MISC_W                 0x000C03C2
 #define VG_MISC_R                 0x000C03CC
