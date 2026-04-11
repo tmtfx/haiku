@@ -46,11 +46,13 @@ sm750_get_clocks(vuint32 *regs, shared_info *si)
     uint32 reg;
     
     /* MCLK - Memory Clock */
-    reg = SYS_R(MCLK_CTRL);
+    //reg = SYS_R(MCLK_CTRL);
+    reg = regs[0x38 >> 2];
     dprintf("SM750: MCLK Control Reg: 0x%08" B_PRIx32 "\n", reg);
 
     /* SCLK - System Clock */
-    reg = SYS_R(SCLK_CTRL);
+    //reg = SYS_R(SCLK_CTRL);
+    reg = regs[0x3C >> 2];
     dprintf("SM750: SCLK Control Reg: 0x%08" B_PRIx32 "\n", reg);
     
     /* Salviamo la frequenza di riferimento */
@@ -63,42 +65,106 @@ void sm750_init_chip(DeviceInfo *di) {
 		return;
 	}
     vuint32 *regs = di->regs;
-    shared_info *si = di->si;
-    //extern pci_module_info *pci;
     
-    uint32 val;
-
-    dprintf("SM750: --- Sveglia Chip ---\n");
-
     if (regs == NULL) {
         dprintf("SM750 ERROR: regs pointer is NULL! Aborting.\n");
         return;
     }
+    
+    shared_info *si = di->si;
+    
+    uint32 val, check;
+    dprintf("SM750: --- [DEBUG-VERO] Sveglia Chip (Forza Bruta) ---\n");
 
-    // --- 2. POWER & SYSTEM CLOCK ---
-    // Impostiamo Full Power (Mode 0)
-    uint32 pwrMode = SYS_R(BOOTSTRAP); // 0x00000C
-    pwrMode &= ~0x00000003; 
-    SYS_W(BOOTSTRAP, pwrMode);
+    // 1. SBLOCCO POWER GATE (Offset 0x0C)
+    // Forziamo Mode 0 (Full Power) e apriamo i gate
+    regs[0x0C >> 2] = 0x00000000; 
+    snooze(10000);
 
-    // Abilitiamo il gate dei clock e il motore 2D
-    val = SYS_R(MISC_CTRL); // 0x000004
-    val |= 0x00000001;      // Clock selection enable
-    val |= (1 << 4);        // 2D Engine enable
-    SYS_W(MISC_CTRL, val);
+    // 2. FORZA IL CLOCK DELLA MEMORIA (DRAM Control - Offset 0x10)
+    // Senza questo, il BAR1 non scrive nella VRAM fisica.
+    val = regs[0x10 >> 2];
+    val |= (1 << 31); // Enable DRAM controller
+    regs[0x10 >> 2] = val;
+    snooze(10000);
+
+    // 3. ABILITAZIONE CLOCK E DAC (MISC_CTRL - Offset 0x04)
+    val = regs[0x04 >> 2];
+    val |= (1 << 0) | (1 << 1); // Clocks
+    val |= (1 << 2) | (1 << 3); // DAC Enable + Route to Secondary (VGA)
+    val |= (1 << 4);            // 2D Engine
+    val |= (1 << 7) | (1 << 12);// MMIO Esteso e BAR Force
+    regs[0x04 >> 2] = val;
+    snooze(5000);
+
+    // 4. USCITA DA MODALITÀ VGA (VGA_CONFIG - Offset 0x88)
+    regs[0x88 >> 2] = 0x00000006; // Linear + Graphic Mode
+    
+    // Spegni il "VGA Decode" nel registro MISC_CTRL (0x04)
+    val = regs[0x04 >> 2];
+    val |= (1 << 12); // BAR Force (usa BAR1, non indirizzi VGA)
+    val &= ~(1 << 5); // Disabilita VGA Buffer (se presente in questo modello)
+    regs[0x04 >> 2] = val;
+    
+    regs[0x80000 >> 2] |= (1 << 8) | (1 << 0); // Primary: VGA Bypass + Enable
+    regs[0x80200 >> 2] |= (1 << 8) | (1 << 0); // Secondary: VGA Bypass + Enable
+    
+    dprintf("SM750: Log Post-Sveglia -> DRAM_CTRL: 0x%08x, VGA_CONF: 0x%08x\n", 
+            regs[0x10 >> 2], regs[0x88 >> 2]);
+
+
+// --- CONFIGURAZIONE PIPE SECONDARIA (VGA 2) ---
+    regs[0x80204 >> 2] = 0x00000000; // FB Addr
+    uint32 rowWidth = (800 * 4);
+    regs[0x80208 >> 2] = (rowWidth << 16) | rowWidth; // Fetch Width
+
+    uint32 pwr = regs[0x80218 >> 2];
+    pwr |= (1 << 0) | (1 << 1); // VDE e HDE
+    regs[0x80218 >> 2] = pwr; 
+
+    uint32 ctrl = regs[0x80200 >> 2];
+    ctrl |= (1 << 31) | (1 << 8) | (1 << 0); // Timing + Bypass + Enable
+    regs[0x80200 >> 2] = ctrl;
+    
+// --- CONFIGURAZIONE PIPE PRIMARIA (VGA 1) ---
+    regs[0x80004 >> 2] = 0x00000000; // FB Addr
+    regs[0x80008 >> 2] = (rowWidth << 16) | rowWidth; 
+    uint32 ctrl1 = regs[0x80000 >> 2];
+    ctrl1 |= (1 << 31) | (1 << 8) | (1 << 0);
+    regs[0x80000 >> 2] = ctrl1;
+
+    // --- RESET MOTORE GRAFICO ---
+    val = regs[0x04 >> 2];
+    regs[0x04 >> 2] = val | 0x00010000;
     snooze(2000);
+    regs[0x04 >> 2] = val & ~0x00010000;
+    snooze(2000);
+    
+    // --- SBLOCCO ACCESSO MEMORIA (Forza l'interfaccia PCI) ---
+    // Registro 0x000004 (System Control)
+    // Proviamo ad abilitare esplicitamente il motore 2D e il Master PCI
+    val = regs[0x04 >> 2];
+    val |= (1 << 12); // Force PCI Master
+    val |= (1 << 7);  // MMIO Access Enable
+    val |= (1 << 31);
+    regs[0x04 >> 2] = val;
+    // --------------------------------------------------
+    // --- TEST DI "VISIBILITÀ" (Color Fill Hardware) ---
+    // Se non vediamo il fucsia scrivendo noi, proviamo a chiedere al chip
+    // di colorare lo schermo usando il suo motore interno (se possibile).
+    // Ma prima, assicuriamoci che il bit 8 (VGA Bypass) sia attivo ovunque.
+    //regs[0x80000 >> 2] |= (1 << 8); // Primary Pipe
+    //regs[0x80200 >> 2] |= (1 << 8); // Secondary Pipe
+    // --------------------------------------------------
 
-    // --- 3. RESET MOTORI GRAFICI ---
-    // Resettiamo il Graphic Engine (GE) per partire da uno stato pulito
-    val = SYS_R(MISC_CTRL);
-    SYS_W(MISC_CTRL, val | 0x00010000); // Bit 16: GE Reset
-    snooze(500);
-    SYS_W(MISC_CTRL, val & ~0x00010000);
-    snooze(500);
+    // --- DIAGNOSTICA FINALE ---
+    dprintf("SM750: Revision ID (0x30): 0x%08" B_PRIx32 "\n", regs[0x30 >> 2]);
+    dprintf("SM750: ID via MMIO (0x00): 0x%08" B_PRIx32 "\n", regs[0]);
 
+    // Rilevamento memoria reale dal controller DRAM
+    uint32 dram_ctrl = regs[0x10 >> 2];
+   
     // --- 4. RILEVAMENTO MEMORIA REALE ---
-    // Ora che il chip è sveglio, interroghiamo il controller DRAM
-    uint32 dram_ctrl = SYS_R(DRAM_CTRL);
     uint32 mem_size_code = (dram_ctrl >> 13) & 0x07; 
     uint32 detected_mem;
 
@@ -109,29 +175,25 @@ void sm750_init_chip(DeviceInfo *di) {
         case 3: detected_mem = 64 * 1024 * 1024; break;
         default: detected_mem = 2 * 1024 * 1024; break;
     }
-    if (detected_mem > si->card_info.mem_size && si->card_info.mem_size != 0) {
-        dprintf("SM750: WARNING - Chip says %" B_PRIu32 "MB, but PCI BAR1 is %" B_PRIu32 "MB. Using PCI limit.\n", 
-            detected_mem / (1024*1024), si->card_info.mem_size / (1024*1024));
-    } else {
-        si->card_info.mem_size = detected_mem;
-    }
+    si->card_info.mem_size = (detected_mem > si->card_info.mem_size && si->card_info.mem_size != 0) 
+                             ? si->card_info.mem_size : detected_mem;
 
     // --- 5. LOG E DIAGNOSTICA ---
     sm750_get_clocks(di->regs, di->si);
-    snooze(1000);
-    
-    dprintf("SM750: Vendor ID: 0x%04x, Device ID: 0x%04x\n", si->vendor_id, si->device_id);
-    
-    uint32 mmio_id = SM750_REG32(0x000000);
-    dprintf("SM750: ID via MMIO: 0x%08x (Atteso: 0x0750126f)\n", mmio_id);
+    dprintf("SM750: ID (0x00): 0x%08x, Rev (0x30): 0x%08x\n", regs[0x00 >> 2], regs[0x30 >> 2]);
     
     SM750_REG32(0x000010) = 0xDEADBEEF;
     uint32 test_scratch = SM750_REG32(0x000010);
+    //regs[0x10 >> 2] = 0xDEADBEEF; // Scratch test su 0x10
+    //dprintf("SM750: Scratch (0x10): 0x%08x, Mem: %u MB\n", regs[0x10 >> 2], (uint32)(si->card_info.mem_size / (1024*1024)));
     dprintf("SM750: Scratch test (0x000010): 0x%08x (atteso 0xdeadbeef)\n", test_scratch);
-    
+    regs[0x10 >> 2] = dram_ctrl;
     dprintf("SM750: DRAM_CTRL: 0x%08" B_PRIx32 ", Detected Memory: %" B_PRIu32 " MB\n", 
             dram_ctrl, si->card_info.mem_size / (1024 * 1024));
     dprintf("SM750: Chip initialized and clocked.\n");
+    // Tentativo di forzare un colore solido tramite il registro di sfondo (0x80264)
+    // Se i motori sono accesi, questo dovrebbe colorare lo schermo indipendentemente dal FB
+    regs[0x80264 >> 2] = 0x00FF00FF; // Colore fucsia nel registro di "Back Ground"
 }
 
 void 
