@@ -7,6 +7,11 @@
 #include "DriverInterface.h"
 #include "sm750_macros.h"
 
+#include <boot_item.h>
+#include <frame_buffer_console.h>
+
+extern pci_module_info *pci;
+
 void sm750_get_clocks(vuint32 *regs, shared_info *si);
 void sm750_pixel_test(shared_info *si);
 
@@ -73,6 +78,27 @@ void sm750_init_chip(DeviceInfo *di) {
     
     shared_info *si = di->si;
     
+    struct frame_buffer_boot_info* bufferInfo = (struct frame_buffer_boot_info*)get_boot_item(FRAME_BUFFER_BOOT_INFO, NULL);
+    
+    dprintf("SM750: --- DIAGNOSTICA DI BOOT ---\n");
+if (bufferInfo != NULL) {
+    // Usiamo %p o cast a uint64 per l'indirizzo fisico
+    dprintf("SM750: [BOOT] FB Fisico VESA: 0x%" B_PRIx64 "\n", (uint64)bufferInfo->physical_frame_buffer);
+    dprintf("SM750: [BOOT] Risoluzione: %" B_PRId32 "x%" B_PRId32 " (%" B_PRId32 " bpp)\n", 
+            bufferInfo->width, bufferInfo->height, bufferInfo->depth);
+    dprintf("SM750: [BOOT] Pitch: %" B_PRId32 "\n", bufferInfo->bytes_per_row);
+} else {
+    dprintf("SM750: [BOOT] Errore: bufferInfo è NULL\n");
+}
+
+// Stampa la BAR1 corretta usando la struttura pci_info standard di Haiku
+// base_registers[0] è BAR0 (Regs), base_registers[1] è BAR1 (FrameBuffer)
+// Usiamo la stessa interfaccia pci che abbiamo usato per il command register
+uint32 bar1 = pci->read_pci_config(di->pci.bus, di->pci.device, di->pci.function, PCI_base_registers + 4, 4);
+// Nota: PCI_base_registers + 4 perché ogni BAR è 4 byte. BAR0 è +0, BAR1 è +4.
+
+dprintf("SM750: [BOOT] La nostra BAR1 Fisica (da PCI): 0x%08" B_PRIx32 "\n", bar1 & 0xFFFFFFF0);
+    
     uint32 val, check;
     dprintf("SM750: --- [DEBUG-VERO] Sveglia Chip (Forza Bruta) ---\n");
 
@@ -84,8 +110,12 @@ void sm750_init_chip(DeviceInfo *di) {
     // 2. FORZA IL CLOCK DELLA MEMORIA (DRAM Control - Offset 0x10)
     // Senza questo, il BAR1 non scrive nella VRAM fisica.
     val = regs[0x10 >> 2];
+    val &= ~(0x7 << 13); // Pulisce i bit 13, 14, 15
+    val |= (1 << 13);    // Imposta il codice per 16MB
     val |= (1 << 31); // Enable DRAM controller
     regs[0x10 >> 2] = val;
+    si->card_info.mem_size = 16 * 1024 * 1024; // Diciamo a Haiku che sono 16MB
+    dprintf("SM750: Forza geometria RAM a 16MB (DRAM_CTRL: 0x%08x)\n", val);
     snooze(10000);
 
     // 3. ABILITAZIONE CLOCK E DAC (MISC_CTRL - Offset 0x04)
@@ -112,6 +142,10 @@ void sm750_init_chip(DeviceInfo *di) {
     dprintf("SM750: Log Post-Sveglia -> DRAM_CTRL: 0x%08x, VGA_CONF: 0x%08x\n", 
             regs[0x10 >> 2], regs[0x88 >> 2]);
 
+    // --- FORZA PRIORITÀ MEMORIA ---
+    // Registro 0x14 (DRAM Priority Control)
+    // Diamo la priorità massima al Display Engine (CRT/Panel) rispetto alla CPU
+    regs[0x14 >> 2] |= 0x0000000F;
 
 // --- CONFIGURAZIONE PIPE SECONDARIA (VGA 2) ---
     regs[0x80204 >> 2] = 0x00000000; // FB Addr
@@ -193,7 +227,7 @@ void sm750_init_chip(DeviceInfo *di) {
     dprintf("SM750: Chip initialized and clocked.\n");
     // Tentativo di forzare un colore solido tramite il registro di sfondo (0x80264)
     // Se i motori sono accesi, questo dovrebbe colorare lo schermo indipendentemente dal FB
-    regs[0x80264 >> 2] = 0x00FF00FF; // Colore fucsia nel registro di "Back Ground"
+    //regs[0x80264 >> 2] = 0x00FF00FF; // Colore fucsia nel registro di "Back Ground"
 }
 
 void 

@@ -237,20 +237,26 @@ open_device(const char *name, uint32 flags, void **cookie)
     if (!di) return B_BAD_VALUE;
     
     // --- ABILITAZIONE PCI ---
+    // 1. Lettura e abilitazione Command Register
     uint16 pcicmd = pci->read_pci_config(di->pci.bus, di->pci.device, di->pci.function, PCI_command, 2);
     dprintf("SM750: PCI Command iniziale: 0x%04x\n", pcicmd);
-    
-    // Abilitiamo Memory Space (0x02) e Bus Mastering (0x04)
+
     pcicmd |= PCI_command_memory | PCI_command_master | PCI_command_io;
     pci->write_pci_config(di->pci.bus, di->pci.device, di->pci.function, PCI_command, 2, pcicmd);
-    
-    // Verifica
+
     pcicmd = pci->read_pci_config(di->pci.bus, di->pci.device, di->pci.function, PCI_command, 2);
     dprintf("SM750: PCI Command aggiornato: 0x%04x\n", pcicmd);
-    
+
+    // 2. Gestione VGA Control (Sblocco MMIO/VGA)
+    // Nota: Assicurati che SM750_PCI_VGA_CTRL sia l'offset corretto (di solito 0x88 nello spazio PCI per SM750)
     uint32 vga_ctrl = pci->read_pci_config(di->pci.bus, di->pci.device, di->pci.function, SM750_PCI_VGA_CTRL, 4);
-    vga_ctrl |= (1 << 7); 
+    dprintf("SM750: PCI VGA_CTRL iniziale: 0x%08" B_PRIx32 "\n", vga_ctrl);
+
+    vga_ctrl |= (1 << 7); // Spesso usato per sbloccare il Decode o MMIO
     pci->write_pci_config(di->pci.bus, di->pci.device, di->pci.function, SM750_PCI_VGA_CTRL, 4, vga_ctrl);
+
+    vga_ctrl = pci->read_pci_config(di->pci.bus, di->pci.device, di->pci.function, SM750_PCI_VGA_CTRL, 4);
+    dprintf("SM750: PCI VGA_CTRL aggiornato: 0x%08" B_PRIx32 "\n", vga_ctrl);
 
     
     /* TODO:
@@ -259,10 +265,10 @@ open_device(const char *name, uint32 flags, void **cookie)
     di->openCount++;
 
     /* Alloca la shared_info (che sarà condivisa con l'accelerante) */
-    
+    dprintf("ora creo di->shared_area");
     di->shared_area = create_area("sm750 shared info", (void **)&(di->si), 
           B_ANY_KERNEL_ADDRESS, B_PAGE_SIZE, B_FULL_LOCK, B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA | B_CLONEABLE_AREA);
-    
+    dprintf("di->shared_area creata");
     if (di->shared_area < 0) {
         di->openCount--;
         return di->shared_area;
@@ -283,8 +289,10 @@ open_device(const char *name, uint32 flags, void **cookie)
     /* Mappatura Registri (BAR 0) */
     //si->regs_area = map_mem((void **)&si->regs, di->info.u.h0.base_registers[0], 
     //                        di->info.u.h0.base_register_sizes[0], "sm750_regs");
+    dprintf("ora mappo la memoria per di->regs_area");
     di->regs_area = map_mem((void **)&di->regs, di->pci.u.h0.base_registers[0], 
                             di->pci.u.h0.base_register_sizes[0], "sm750_regs_k");
+    dprintf("memoria mappata per di->regs_area");
     di->si->regs_area = di->regs_area;
     
     // ORA che di->regs è valido, puoi usare le macro o SM750_REG32
@@ -342,13 +350,25 @@ open_device(const char *name, uint32 flags, void **cookie)
     di->si->card_info.mem_size = final_mem_size;
     
     di->si->framebuffer_pci = (phys_addr_t)di->pci.u.h0.base_registers[1];
-    //uint32 fb_size = di->pci.u.h0.base_register_sizes[1];
+    /* quella che dovrebbe andare ma non va
     di->fb_area = map_mem((void **)&di->framebuffer, di->pci.u.h0.base_registers[1], 
                           final_mem_size, "sm750_fb_k");
-    di->si->fb_area = di->fb_area;
-    //si->framebuffer = di->framebuffer; // NO! area kernel non area utente
+    di->si->fb_area = di->fb_area;*/
+    
+    // --- FORZATURA INDIRIZZO VESA ---
+addr_t phys_fb = 0xf4000000; // L'indirizzo che abbiamo letto dal BOOT_INFO
+final_mem_size = 16 * 1024 * 1024; // 16MB per stare sicuri
+dprintf("ora mappo la memoria per di->fb_area");
+di->fb_area = map_mem((void **)&di->framebuffer, 
+                      phys_fb, 
+                      final_mem_size, 
+                      "sm750_fb_k");
+dprintf("memoria mappata per di->fb_area");
+di->si->fb_area = di->fb_area;
+//di->si->framebuffer = (uint32*)di->framebuffer; // Passiamo l'indirizzo virtuale all'accelerante
+di->si->card_info.mem_size = final_mem_size;
+    
     di->si->framebuffer = NULL;
-    //dprintf("SM750: BAR0 mappato a %p (Area: %d)\n", di->regs, di->regs_area);
     dprintf("SM750: BAR0 (Kernel) mappato a %p (Area: %d)\n", di->regs, di->regs_area);
 
     /* Mappatura Framebuffer (BAR 1) */

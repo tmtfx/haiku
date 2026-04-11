@@ -76,10 +76,14 @@ static status_t init_common(int fd) {
     
     debug_printf("SM750_ACC: Framebuffer clonato con successo all'indirizzo %p\n", gInfo->si->framebuffer);
     debug_printf("SM750_ACC: Avvio test pixel fucsia da inviare al framebuffer!\n");
+
     uint32 *fb = (uint32*)gInfo->si->framebuffer;
-    for (int i = 0; i < 500000; i++) {
-        fb[i] = 0x00FF00FF; // Fucsia/Magenta
+    for (int i = 0; i < (1280 * 1024); i++) {
+        fb[i] = 0x00FF00FF; // Fucsia (XRGB)
     }
+//    for (int i = 0; i < (4 * 1024 * 1024 / 4); i++) {
+//    fb[i] = 0x00FF00FF; 
+//}
     debug_printf("SM750_ACC: Framebuffer riempito. Attesa 2 secondi...\n");
     snooze(2000000); 
     debug_printf("SM750_ACC: Fine attesa.\n");

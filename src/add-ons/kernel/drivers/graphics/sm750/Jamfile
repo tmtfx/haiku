@@ -4,6 +4,7 @@ UsePrivateHeaders graphics ;
 UsePrivateSystemHeaders ;
 UsePrivateHeaders [ FDirName graphics common ] ;
 UsePrivateHeaders [ FDirName graphics sm750 ] ;
+UsePrivateKernelHeaders ;
 
 
 KernelAddon sm750 :
