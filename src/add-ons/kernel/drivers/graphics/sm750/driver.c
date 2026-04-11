@@ -241,7 +241,7 @@ open_device(const char *name, uint32 flags, void **cookie)
     dprintf("SM750: PCI Command iniziale: 0x%04x\n", pcicmd);
     
     // Abilitiamo Memory Space (0x02) e Bus Mastering (0x04)
-    pcicmd |= PCI_command_memory | PCI_command_master;
+    pcicmd |= PCI_command_memory | PCI_command_master | PCI_command_io;
     pci->write_pci_config(di->pci.bus, di->pci.device, di->pci.function, PCI_command, 2, pcicmd);
     
     // Verifica
@@ -374,16 +374,23 @@ open_device(const char *name, uint32 flags, void **cookie)
        - blockSize: 4KB (allineamento standard pagine)
        - heapEntries: 128 (bastano per gestire i vari buffer)
     */
-    di->si->mem_mgr = mem_init("sm750_vram", 0, final_mem_size, 4096, 128);
+    //di->si->mem_mgr = mem_init("sm750_vram", 0, final_mem_size, 4096, 128); roba vecchia da radeon agp...
+    di->si->cursor.pci_address = di->si->framebuffer_pci + (di->si->card_info.mem_size - 16384);
+    di->si->cursor.v_address = (void*)((uint8*)di->framebuffer + (di->si->card_info.mem_size - 16384));
+    //uint32 cursor_offset = (2 * 1024 * 1024) - 16384; // Es: a 2MB meno 16KB
+    //di->si->cursor.pci_address = di->si->framebuffer_pci + cursor_offset;
+    //di->si->cursor.v_address = (void*)((uint8*)di->framebuffer + cursor_offset);
+    di->si->mem_mgr = NULL; // Opzionale, se vuoi tenere il campo nella struct per ora
+    // TODO: scrivere un gestore della memoria per assegnare memoria a cursore, framebuffer, overlay ecc..
     
-    if (!di->si->mem_mgr) {
+    /*if (!di->si->mem_mgr) {
         //delete_area(si->regs_area);
         //delete_area(si->fb_area);
         //delete_area(shared_area);
         //return B_NO_MEMORY;
         status = B_NO_MEMORY;
         goto error;
-    }
+    }*/
 
     /* 2. ESECUZIONE COLDSTART (Ora il chip è sveglio) */
     dprintf("SM750: Test lettura registro 0...\n");
@@ -401,18 +408,23 @@ open_device(const char *name, uint32 flags, void **cookie)
     
     /* 3. Allocazione spazio per il Cursore Hardware (64x64 pixel @ 32bpp = 16KB) */
     /* Lo mettiamo in fondo alla memoria per non dare fastidio al frontbuffer */
-    uint32 cursor_block;
-    uint32 cursor_offset;
-    if (mem_alloc(di->si->mem_mgr, 16384, (void*)"cursor", &cursor_block, &cursor_offset) == B_OK) {
+    //uint32 cursor_block;
+    //uint32 cursor_offset;
+    
+
+    
+    /*if (mem_alloc(di->si->mem_mgr, 16384, (void*)"cursor", &cursor_block, &cursor_offset) == B_OK) {
         di->si->cursor.pci_address = di->si->framebuffer_pci + cursor_offset;
         
         // USA di->framebuffer per il kernel!
         di->si->cursor.v_address = (void*)((uint8*)di->framebuffer + cursor_offset);
-    }
+    }*/
 
     /* Passiamo il puntatore alla shared_info come cookie per le altre chiamate */
     //*cookie = si;
     *cookie = di;
+    dprintf("SM750: DEBUG - Area IDs to clone: Shared=%d, Regs=%d, FB=%d\n", 
+        di->shared_area, di->regs_area, di->fb_area);
     dprintf("SM750: Device %s opened successfully.\n", di->name);
     
     //dprintf("SM750: open_device() - Avvio Pixel Test...\n");
@@ -421,7 +433,7 @@ open_device(const char *name, uint32 flags, void **cookie)
     return B_OK;
 error:
     /* Pulizia in caso di fallimento */
-    if (di->si && di->si->mem_mgr) mem_destroy(di->si->mem_mgr);
+    //if (di->si && di->si->mem_mgr) mem_destroy(di->si->mem_mgr);
     delete_area(di->regs_area);
     delete_area(di->fb_area);
     delete_area(di->shared_area);
@@ -478,8 +490,8 @@ control_device(void *cookie, uint32 op, void *arg, size_t len)
             if (user_memcpy(&gpd, arg, sizeof(gpd)) != B_OK)
                 return B_BAD_ADDRESS;
             if (gpd.magic != SM750_PRIVATE_DATA_MAGIC) {
-                dprintf("SM750: Errore Magic Number! Atteso %p, ricevuto %p\n", 
-                        (void*)SM750_PRIVATE_DATA_MAGIC, (void*)gpd.magic);
+                dprintf("SM750: Errore Magic Number! Atteso 0x%" B_PRIx32 ", ricevuto 0x%" B_PRIx32 "\n", 
+                        (uint32)SM750_PRIVATE_DATA_MAGIC, gpd.magic);
                 return B_BAD_VALUE;
             }
             //memset(&gpd, 0, sizeof(gpd));
@@ -518,8 +530,11 @@ free_device(void *cookie)
         if (di->si != NULL) {
             /* 1. Distruggi il gestore memoria video */
             if (di->si->mem_mgr != NULL) {
-                mem_destroy(di->si->mem_mgr);
+                //mem_destroy(di->si->mem_mgr);
                 //di->si->mem_mgr = NULL;
+                area_id area_to_delete = di->shared_area;
+                di->si = NULL;
+                delete_area(area_to_delete);
             }
             
             /* 2. Cancella l'area della shared_info tramite il suo ID salvato */
