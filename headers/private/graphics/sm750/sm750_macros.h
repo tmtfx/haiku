@@ -181,6 +181,7 @@
 #define SM750_REG8(r_)  ((vuint8  *)regs)[(r_)]
 #define SM750_REG16(r_) ((vuint16 *)regs)[(r_) >> 1]
 #define SM750_REG32(r_) ((vuint32 *)regs)[(r_) >> 2]
+#define SM750_WREG32(r_, v_) (((vuint32 *)regs)[(r_) >> 2] = (v_))
 
 /* --- PCI Config Space (via ioctl) --- */
 #define CFGR(A)   (eng_pci_access.offset=SM750_PCI_##A, ioctl(fd,ENG_GET_PCI, &eng_pci_access,sizeof(eng_pci_access)), eng_pci_access.value)

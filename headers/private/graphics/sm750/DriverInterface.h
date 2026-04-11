@@ -178,6 +178,7 @@ typedef struct {
     uint32      *regs;              /* Puntatore ai registri MMIO clonati */
     area_id     regs_area;          /* ID area registri */
     area_id     fb_area;            /* ID area framebuffer clonato */
+    uint8 *framebuffer;
     bool        is_clone;           /* Vero se è un clone */
 } accelerant_info;
 
@@ -226,6 +227,9 @@ typedef struct {
 
 //extern status_t control_device(void *cookie, uint32 op, void *arg, size_t len);
 
+
+void sm750_get_clocks(vuint32 *regs, shared_info *si);
+void sm750_init_chip(DeviceInfo *di);
 
 #if defined(__cplusplus)
 }
