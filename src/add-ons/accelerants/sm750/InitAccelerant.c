@@ -27,7 +27,7 @@ static status_t init_common(int fd) {
     gInfo->fd = fd;
 
     sm750_get_private_data gpd;
-    //gpd.magic = SM750_PRIVATE_DATA_MAGIC; tolto dalla struct per ora
+    gpd.magic = SM750_PRIVATE_DATA_MAGIC;
 
     if (ioctl(fd, ENG_GET_PRIVATE_DATA, &gpd, sizeof(gpd)) != B_OK) {
         debug_printf("SM750_ACC: ERRORE ioctl fallita!\n");
@@ -65,15 +65,24 @@ static status_t init_common(int fd) {
     void* user_fb_ptr = NULL;
     gInfo->fb_area = clone_area("sm750 fb user", &user_fb_ptr,
         B_ANY_ADDRESS, B_READ_AREA | B_WRITE_AREA, gInfo->si->fb_area);
-    debug_printf("SM750_ACC: Framebuffer clonato a %p\n", gInfo->si->framebuffer);
-
     if (gInfo->fb_area < 0) {
+        debug_printf("SM750_ACC: ERRORE clone framebuffer fallito: %d\n", gInfo->fb_area);
         delete_area(gInfo->regs_area);
         delete_area(gInfo->shared_info_area);
         return gInfo->fb_area;
     }
-    gInfo->si->framebuffer = (uint8*)user_fb_ptr;
 
+    gInfo->si->framebuffer = (uint8*)user_fb_ptr;
+    
+    debug_printf("SM750_ACC: Framebuffer clonato con successo all'indirizzo %p\n", gInfo->si->framebuffer);
+    debug_printf("SM750_ACC: Avvio test pixel fucsia da inviare al framebuffer!\n");
+    uint32 *fb = (uint32*)gInfo->si->framebuffer;
+    for (int i = 0; i < 500000; i++) {
+        fb[i] = 0x00FF00FF; // Fucsia/Magenta
+    }
+    debug_printf("SM750_ACC: Framebuffer riempito. Attesa 2 secondi...\n");
+    snooze(2000000); 
+    debug_printf("SM750_ACC: Fine attesa.\n");
     return B_OK;
 }
 
