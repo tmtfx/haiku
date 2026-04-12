@@ -161,11 +161,11 @@ open_device(const char *name, uint32 flags, void **cookie)
         
         // 5. Mappatura FRAMEBUFFER (BAR 0 - 64MB)
         // Usiamo la dimensione riportata dal PCI o forziamo 16MB per sicurezza iniziale
-        uint32 mem_size = di->pci.u.h0.base_register_sizes[0];
-        if (mem_size > 64*1024*1024) mem_size = 64*1024*1024; 
+        //uint32 mem_size = di->pci.u.h0.base_register_sizes[0];
+        //if (mem_size > 64*1024*1024) mem_size = 64*1024*1024; 
 
         di->fb_area = map_mem((void **)&di->framebuffer, di->pci.u.h0.base_registers[0], 
-                             mem_size, "sm750_fb_k");
+                             di->pci.u.h0.base_register_sizes[0], "sm750_fb_k");
 
         if (di->regs_area < 0 || di->fb_area < 0) {
             delete_area(di->shared_area);
@@ -174,20 +174,11 @@ open_device(const char *name, uint32 flags, void **cookie)
 
         // 6. Inizializzazione Chip (Wake up)
         di->si->regs = NULL; // L'accelerante mapperà la sua versione
-        di->si->framebuffer = NULL;
+        di->si->framebuffer = NULL; // idem
+        di->si->regs_area = di->regs_area; // Passa l'ID         
+        di->si->fb_area = di->fb_area;     // Passa l'ID numerico
         di->si->framebuffer_pci = (phys_addr_t)di->pci.u.h0.base_registers[0];
-        di->si->card_info.mem_size = mem_size;
-        
-        vuint32* regs = di->regs;
-
-        // Verifica ID via MMIO (Offset 0x54)
-        uint32 dev_id = SM750_REG32(0x54);
-        dprintf("SM750: MMIO ID Check: 0x%08" B_PRIx32 "\n", dev_id);
-
-        // Forza Power Mode 0 (Sveglia)
-        uint32 pm_ctrl = SM750_REG32(0x4C);
-        SM750_WREG32(0x4C, (pm_ctrl & ~0x3)); 
-
+       
         sm750_init_chip(di);
     }
 
