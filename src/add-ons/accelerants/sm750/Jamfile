@@ -5,7 +5,6 @@ UsePrivateHeaders [ FDirName graphics sm750 ] ;
 UsePrivateHeaders [ FDirName graphics common ] ;
 
 Addon sm750.accelerant :
-    Timing.c
 	DisplayModes.c
 	Engine.c
 	I2C.c
