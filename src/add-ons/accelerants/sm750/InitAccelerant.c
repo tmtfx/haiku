@@ -39,20 +39,28 @@ static status_t init_common(int fd) {
         B_ANY_ADDRESS, B_READ_AREA | B_WRITE_AREA, gpd.shared_info_area);
     
     if (gInfo->shared_info_area < 0) return gInfo->shared_info_area;
-
+    if (gInfo->si->regs_area <= 0) {
+        debug_printf("SM750_ACC: ERRORE! regs_area invalida nella shared_info!\n");
+        return B_ERROR;
+    }
     /* 3. Clona i registri MMIO (BAR1) */
     gInfo->regs_area = clone_area("sm750 regs user", (void **)&(gInfo->regs),
         B_ANY_ADDRESS, B_READ_AREA | B_WRITE_AREA, gInfo->si->regs_area);
     
     if (gInfo->regs_area < 0) {
+    	debug_printf("SM750_ACC: Errore fatale clone_area: %s\n", strerror(gInfo->regs_area));
         delete_area(gInfo->shared_info_area);
         return gInfo->regs_area;
     }
 
     /* Test lettura ID per conferma MMIO */
-    vuint32* regs = gInfo->regs;
-    debug_printf("SM750_ACC: MMIO ID Check: 0x%08" B_PRIx32 "\n", SM750_REG32(0x54));
-
+    //vuint32* regs = gInfo->regs;
+    if (gInfo->regs == NULL) {
+        debug_printf("SM750_ACC: ERRORE CRITICO! gInfo->regs è NULL dopo il clone!\n");
+        return B_ERROR;
+    }
+    // fin qui funziona tutto da syslog rimosso i vari debug_prinft
+    
     /* 4. Clona il Framebuffer (BAR0) */
     void* fb_ptr = NULL;
     gInfo->fb_area = clone_area("sm750 fb user", &fb_ptr,
@@ -68,12 +76,29 @@ static status_t init_common(int fd) {
     gInfo->framebuffer = (uint8*)fb_ptr;
     
     /* --- TEST PIXEL (OPZIONALE) --- */
-    debug_printf("SM750_ACC: Test Framebuffer...\n");
+    /*debug_printf("SM750_ACC: Test Framebuffer...\n");
     uint32 *fb = (uint32*)gInfo->framebuffer;
     // Riempiamo i primi 2MB (circa) per non eccedere se la memoria è poca
     for (int i = 0; i < (512 * 1024); i++) {
         fb[i] = 0x00FF00FF; 
     }
+    debug_printf("SM750_ACC: Fine Test Framebuffer...\n");*/
+    
+    shared_info *si = gInfo->si;
+    bool is_panel = si->card_info.is_panel;
+
+    // Scegliamo il buffer corretto dove salvare i dati
+    uint8* edid_buffer = is_panel ? si->edid_panel : si->edid_crt;
+	debug_printf("Inizio lettura EDID...");
+    if (sm750_read_edid(is_panel, edid_buffer) == B_OK) {
+        // Segnamo che abbiamo trovato i dati
+        if (is_panel) si->card_info.has_edid_panel = true;
+        else si->card_info.has_edid_crt = true;
+        debug_printf("SM750: EDID letto con successo su %s\n", is_panel ? "PANEL" : "CRT");
+    } else {
+        debug_printf("SM750: Errore lettura EDID su %s\n", is_panel ? "PANEL" : "CRT");
+    }
+    
 
     return B_OK;
 }
@@ -116,6 +141,10 @@ void* get_accelerant_hook(uint32 feature, void* data) {
         case B_GET_DISPLAY_MODE:    return (void*)sm750_get_display_mode;
         case B_PROPOSE_DISPLAY_MODE: return (void*)sm750_propose_display_mode;
         case B_GET_FRAME_BUFFER_CONFIG: return (void*)sm750_get_frame_buffer_config;
+        case B_ACCELERANT_MODE_COUNT: return (void*)sm750_accelerant_mode_count;
+        case B_GET_MODE_LIST: return (void*)sm750_get_mode_list;
+        case B_GET_EDID_INFO: return (void*)sm750_get_edid_info;
+        case B_MOVE_DISPLAY: return (void*)sm750_move_display_area;
 
         /* Cursor */
         case B_SET_CURSOR_SHAPE:    return (void*)sm750_set_cursor_shape;
