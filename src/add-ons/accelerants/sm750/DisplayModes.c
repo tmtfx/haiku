@@ -87,6 +87,14 @@ sm750_set_display_mode(display_mode *mode)
     }
 
     si->dm = *mode;
+    
+    uint32 *fb = (uint32 *)si->framebuffer;
+    for (int i = 0; i < (1024 * 768); i++) {
+        fb[i] = 0xFF0000; // Un bel rosso acceso (RGB32)
+    }
+    debug_printf("SM750_ACC: Framebuffer riempito di rosso per test.\n");
+    snooze(2000000);
+    
     return B_OK;
 }
 /* vecchia
@@ -182,7 +190,7 @@ sm750_get_display_mode(display_mode *current_mode)
     *current_mode = si->dm; // Restituiamo l'ultima modalità salvata
     return B_OK;
 }
-
+/*
 status_t
 sm750_propose_display_mode(display_mode *target, const display_mode *low, const display_mode *high)
 {
@@ -212,41 +220,51 @@ sm750_propose_display_mode(display_mode *target, const display_mode *low, const 
     target->timing.h_display = (target->timing.h_display + 7) & ~7;
     
     return B_OK;
-}
-/*{
-    shared_info *si = gInfo->si;
-    
-    // 1. Calcolo BPP richiesto
-    uint32 bpp = 8;
-    if (target->space == B_RGB32) bpp = 32;
-    else if (target->space == B_RGB16) bpp = 16;
-    
-    // 2. Verifica memoria necessaria
-    uint32 required_mem = target->timing.h_display * target->timing.v_display * (bpp / 8);
-    if (required_mem > si->card_info.mem_size) {
-        return B_BAD_VALUE; // Risoluzione troppo alta per questa scheda
-    }
+}*/
 
-    // 3. Limiti Pixel Clock (SM750 arriva a circa 200MHz)
-    if (target->timing.pixel_clock > 200000) {
+status_t
+sm750_propose_display_mode(display_mode *target, const display_mode *low, const display_mode *high)
+{
+    shared_info *si = gInfo->si;
+
+    // 1. Forza i valori virtuali se non impostati
+    if (target->virtual_width < target->timing.h_display)
+        target->virtual_width = target->timing.h_display;
+    if (target->virtual_height < target->timing.v_display)
+        target->virtual_height = target->timing.v_display;
+
+    // 2. Controllo Memoria
+    uint32 bpp = (target->space == B_RGB32) ? 4 : 2;
+    uint32 mem_needed = target->virtual_width * target->virtual_height * bpp;
+    
+    if (mem_needed > si->card_info.mem_size)
         return B_BAD_VALUE;
-    }
+
+    // 3. Allineamento (Molto importante per SM750)
+    // Il pitch deve essere multiplo di 16 byte per il motore 2D/Display
+    target->virtual_width = (target->virtual_width + 15) & ~15;
 
     return B_OK;
-}*/
+}
 
 uint32 sm750_accelerant_mode_count(void) {
     // In produzione qui contiamo i modi validati dall'EDID
     return 1; // Proviamo con 1 solo modo per testare la stabilità
 }
 
-status_t sm750_get_mode_list(display_mode* dm) {
-    // Definiamo un modo standard: 1024x768 @ 60Hz
+status_t 
+sm750_get_mode_list(display_mode* dm) {
     display_mode mode = {
-        { 65000, 1024, 1048, 1184, 1344, 768, 771, 777, 806, 0 }, // Timing VESA
-        B_RGB32,
-        1024, 768, 0, 0
+        { 65000, 1024, 1048, 1184, 1344, 768, 771, 777, 806, 0 }, // Timing
+        B_RGB32,     // space
+        1024, 768,   // virtual_width, virtual_height
+        0, 0         // h_display_start, v_display_start
     };
+    
+    // Aggiungiamo i flag di polarità se necessari (Sync Positivo/Negativo)
+    // Molti monitor moderni vogliono B_POSITIVE_HSYNC | B_POSITIVE_VSYNC
+    mode.timing.flags = B_POSITIVE_HSYNC | B_POSITIVE_VSYNC;
+
     dm[0] = mode;
     return B_OK;
 }
