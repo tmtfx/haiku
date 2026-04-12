@@ -96,6 +96,8 @@ typedef struct {
     uint8   bus;
     uint8   device;
     uint8   function;
+    uint8 edid_panel[128];   // Dati monitor su LCD/Panel
+    uint8 edid_crt[128]; // Dati monitor su VGA/CRT
 
     /* Mappature Memoria */
     area_id regs_area;    /* BAR0: Registri MMIO */
@@ -147,7 +149,10 @@ typedef struct {
     /* SM750 Specific Card Info (Sostituisce PINS NVIDIA) */
     struct {
         uint32 chip_id;       /* 0x750 o varianti */
-        bool   is_mobile;     /* Se stiamo guidando un pannello interno */
+        bool is_panel;        // true se usiamo LCD (0x80200), false se CRT (0x80000)
+        bool   has_edid_panel;    // Trovato EDID su canale Panel
+        bool   has_edid_crt;      // Trovato EDID su canale CRT
+        uint32 active_outputs;    // Bitmask: 1=Panel, 2=CRT, 3=Entrambi
         uint32 mem_size;      /* Totale memoria rilevata */
         uint32 mem_type;      /* DDR, SDRAM, ecc. */
         
