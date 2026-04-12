@@ -14,7 +14,6 @@ status_t sm750_propose_display_mode(display_mode *target,
                                     const display_mode *high);
 uint32 sm750_accelerant_mode_count(void);
 status_t sm750_get_mode_list(display_mode* dm);
-void program_crt_pll(uint32 target_khz, vuint32 *regs);
 status_t sm750_get_frame_buffer_config(frame_buffer_config *config);
 status_t sm750_set_cursor_shape(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y, const uint8 *and_mask, const uint8 *xor_mask);
 void sm750_move_cursor(uint16 x, uint16 y);
