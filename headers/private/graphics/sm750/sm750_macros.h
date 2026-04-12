@@ -110,43 +110,84 @@
 #define VG_GRPH_IND               0x000C03CE
 #define VG_GRPH_DAT               0x000C03CF
 
-/* Palette RAM (Primary & Secondary) */
-#define SM750_DISP_PALETTE_RAM    0x00080400 // Palette primaria (CRT)
-#define SM750_DISP_PALETTE_RAM2   0x00080800 // Palette secondaria (Panel)
+/* Palette RAM */
+#define SM750_DISP_PALETTE_RAM       0x00080400 // Primary (PANEL)
+#define SM750_DISP_PALETTE_RAM2      0x00080C00 // Secondary (CRT)
 
-/* --- Primary Display (CRT) --- 
- * Sostituisce CRTC1/2, CURSOR, PWR
- */
-#define SM750_DISP_CRT_CTRL       0x00080000 // Controllo e timing (sostituisce FUNCSEL)
-#define SM750_DISP_CRT_FB_ADDR    0x0008000C // Indirizzo inizio schermo (sostituisce FBSTADD)
-#define SM750_DISP_CRT_FB_WIDTH   0x00080010 // Larghezza riga (Pitch)
-#define SM750_DISP_CRT_CUR_ADDR   0x000800F0 // Indirizzo Cursore (sostituisce CURADD)
-#define SM750_DISP_CRT_CUR_CTRL   0x000800F4 // Configurazione Cursore
-#define SM750_DISP_CRT_CUR_POS       0x000800F8 // Posizione X, Y
-#define SM750_DISP_CRT_CUR_COLOR12   0x000800FC // Colore 1 e 2 (RGB565)
-#define SM750_DISP_CRT_CUR_COLOR3    0x00080100 // Colore 3
+/* Display PLL */
+#define SM750_DISP_PANEL_PLL         0x0000005C // Primary Display PLL
+#define SM750_DISP_CRT_PLL           0x00000060 // Secondary Display PLL
 
-/* --- Secondary Display (Panel) --- */
-#define SM750_DISP_PANEL_CTRL     0x00080200 // Controllo e timing
-#define SM750_DISP_PANEL_FB_ADDR  0x00080204 // Indirizzo inizio schermo 2
-#define SM750_DISP_PANEL_FB_WIDTH 0x00080208
-#define SM750_DISP_PANEL_PWR      0x00080218 // Accensione LCD (sostituisce PANEL_PWR)
-#define SM750_DISP_PANEL_CUR_ADDR 0x00080230 // Indirizzo Cursore 2
-#define SM750_DISP_PANEL_CUR_CTRL 0x00080234
+/* --- PANEL (Primary) --- */
+#define SM750_DISP_PANEL_FB_ADDR     0x0008000C // Primary Display FB Address
+#define SM750_DISP_PANEL_FB_WIDTH    0x00080010 // Primary Display FB Offset/Window Width
 
-/* --- CRT Display Timings (Primary) --- */
-#define SM750_CRT_H_TOTAL_ACTIVE      0x00080000 // Total (31:16) | Active (15:0)
-#define SM750_CRT_H_SYNC              0x00080004 // Width (31:16) | Start (15:0)
-#define SM750_CRT_V_TOTAL_ACTIVE      0x00080008 // Total (31:16) | Active (15:0)
-#define SM750_CRT_V_SYNC              0x0008000C // Height (31:16) | Start (15:0)
-#define SM750_CRT_CONTROL             0x00080010 // Polarità Sync, Abilitazione, ecc.
+/* --- PANEL Display Timings (Primary) --- */
+#define SM750_PANEL_H_TOTAL_ACTIVE   0x00080024 // Pag 143: Primary Horizontal Total
+#define SM750_PANEL_H_SYNC           0x00080028 // Pag 143: Primary Horizontal Sync
+#define SM750_PANEL_V_TOTAL_ACTIVE   0x0008002C // Pag 143: Primary Vertical Total
+#define SM750_PANEL_V_SYNC           0x00080030 // Pag 143: Primary Vertical Sync
+#define SM750_PANEL_CONTROL          0x00080000 // Pag 143: Primary Display Control
+#define SM750_PANEL_CURRENT_LINE          0x00080034 // Pag 143: Primary Display Control
 
-/* --- Panel Display Timings (Secondary) --- */
-#define SM750_PANEL_H_TOTAL_ACTIVE    0x00080200
-#define SM750_PANEL_H_SYNC            0x00080204
-#define SM750_PANEL_V_TOTAL_ACTIVE    0x00080208
-#define SM750_PANEL_V_SYNC            0x0008020C
-#define SM750_PANEL_CONTROL           0x00080210
+
+/* Video Control */
+#define SM750_DISP_PANEL_VIDEO_DISP_CTRL      0x00080040
+#define SM750_DISP_PANEL_VIDEO_FB0_ADDR       0x00080044
+#define SM750_DISP_PANEL_VIDEO_FB_WIDTH       0x00080048
+#define SM750_DISP_PANEL_VIDEO_FB0_LAST_ADDR  0x0008004C
+#define SM750_DISP_PANEL_VIDEO_PL_TL_POS      0x00080050
+#define SM750_DISP_PANEL_VIDEO_PL_BR_POS      0x00080054
+#define SM750_DISP_PANEL_VIDEO_SCALE          0x00080058
+#define SM750_DISP_PANEL_VIDEO_INIT_SCALE     0x0008005C
+#define SM750_DISP_PANEL_VIDEO_YUV_CONST      0x00080060
+#define SM750_DISP_PANEL_VIDEO_FB1_ADDR       0x00080064
+#define SM750_DISP_PANEL_VIDEO_FB1_LAST_ADDR  0x00080068
+
+/* Video Alpha Control */
+#define SM750_DISP_PANEL_ALPHA_CTRL          0x00080080
+#define SM750_DISP_PANEL_ALPHA_FB_ADDR       0x00080084
+#define SM750_DISP_PANEL_ALPHA_FB_WIDTH      0x00080088
+#define SM750_DISP_PANEL_ALPHA_FB_LAST_ADDR  0x0008008C
+#define SM750_DISP_PANEL_ALPHA_PL_TL_POS     0x00080090
+#define SM750_DISP_PANEL_ALPHA_PL_BR_POS     0x00080094
+#define SM750_DISP_PANEL_ALPHA_SCALE         0x00080098
+#define SM750_DISP_PANEL_ALPHA_INIT_SCALE    0x0008009C
+#define SM750_DISP_PANEL_ALPHA_CHROMA_KEY    0x000800A0
+// 0x000800A4 - 0x000800C0 VIDEO ALPHA COLOR LOOKUP
+ 
+
+/* Cursor PANEL (Primary) */
+#define SM750_DISP_PANEL_CUR_ADDR             0x000800F0 
+#define SM750_DISP_PANEL_CUR_POS              0x000800F4 // Location
+#define SM750_DISP_PANEL_CUR_COLOR12          0x000800F8
+#define SM750_DISP_PANEL_CUR_COLOR3           0x000800FC
+#define SM750_DISP_PANEL_CUR_ALPHA_CTRL       0x00080100
+#define SM750_DISP_PANEL_CUR_ALPHA_FB_ADDR    0x00080104
+#define SM750_DISP_PANEL_CUR_ALPHA_FB_WIDTH   0x00080108
+#define SM750_DISP_PANEL_CUR_ALPHA_PL_TL_POS  0x0008010C
+#define SM750_DISP_PANEL_CUR_ALPHA_PL_BR_POS  0x00080110
+#define SM750_DISP_PANEL_CUR_ALPHA_CHROMA_KEY 0x00080114
+// 0x00080118 - 0x00080134 ALPHA COLOR LOOKUP
+
+/* --- CRT (Secondary) --- */
+#define SM750_DISP_CRT_FB_ADDR       0x00080204 // Secondary Display FB Address
+#define SM750_DISP_CRT_FB_WIDTH      0x00080208 // Secondary Display FB Offset/Window Width
+
+/* --- CRT Display Timings (Secondary) --- */
+#define SM750_CRT_H_TOTAL_ACTIVE     0x0008020C // Pag 143: Secondary Horizontal Total
+#define SM750_CRT_H_SYNC             0x00080210 // Pag 143: Secondary Horizontal Sync
+#define SM750_CRT_V_TOTAL_ACTIVE     0x00080214 // Pag 143: Secondary Vertical Total
+#define SM750_CRT_V_SYNC             0x00080218 // Pag 143: Secondary Vertical Sync
+#define SM750_CRT_CONTROL            0x00080200 // Pag 143: Secondary Display Control
+#define SM750_CRT_CURRENT_LINE       0x00080220
+#define SM750_CRT_MONITOR_DETECT     0x00080224
+
+/* Cursor CRT (Secondary) */
+#define SM750_DISP_CRT_CUR_ADDR      0x00080230 // Indirizzo Cursore 2
+#define SM750_DISP_CRT_CUR_POS       0x00080234 // Location
+#define SM750_DISP_CRT_CUR_COLOR12   0x00080238 // Colore 1 e 2
+#define SM750_DISP_CRT_CUR_COLOR3    0x0008023C // Colore 3
 
 /* CRTC Indices (SM750_CRTCX_...) */
 #define SM750_CRTCX_HTOTAL      0x00
@@ -175,6 +216,44 @@
 /* Attribute Indices (SM750_ATBX_...) */
 #define SM750_ATBX_MODECTL      0x10
 #define SM750_ATBX_COLSEL       0x14
+
+#define SM750_GPIO_DATA_LOW  0x010000
+#define SM750_GPIO_DIR_LOW   0x010008
+
+#define SM750_MIN_VCO  240000  // 240 MHz
+#define SM750_MAX_VCO  480000  // 480 MHz (più sicuro per evitare jitter) (potrebbe arrivare fino a 1GHz)
+
+
+/* --- 2D Graphics Engine Registers --- */
+#define SM750_2D_SOURCE              0x00100000 // X, Y source
+#define SM750_2D_DESTINATION         0x00100004 // X, Y destination
+#define SM750_2D_DIMENSION           0x00100008 // Width, Height
+#define SM750_2D_CONTROL             0x0010000C // ROP, Command, Direction
+#define SM750_2D_PITCH               0x00100010 // Source & Dest Pitch
+#define SM750_2D_FOREGROUND          0x00100014
+#define SM750_2D_BACKGROUND          0x00100018
+#define SM750_2D_STRETCH             0x0010001C // Stretch & Format
+#define SM750_2D_COLOR_COMPARE       0x00100020
+#define SM750_2D_COLOR_COMPARE_MASK  0x00100024
+#define SM750_2D_MASK                0x00100028
+#define SM750_2D_CLIP_TL             0x0010002C // Clip Top Left
+#define SM750_2D_CLIP_BR             0x00100030 // Clip Bottom Right
+#define SM750_2D_MONO_PATTERN_LOW    0x00100034
+#define SM750_2D_MONO_PATTERN_HIGH   0x00100038
+#define SM750_2D_WINDOW_WIDTH        0x0010003C
+#define SM750_2D_SOURCE_BASE         0x00100040
+#define SM750_2D_DEST_BASE           0x00100044
+#define SM750_2D_ALPHA               0x00100048
+#define SM750_2D_WRAP                0x0010004C
+#define SM750_2D_STATUS              0x00100050 // Bit 31: Busy, Bit 30: Empty
+
+/* --- CSC (Color Space Conversion) Registers --- */
+#define SM750_CSC_SOURCE_BASE        0x001000C8
+#define SM750_CSC_CONTROL            0x001000FC
+// ... aggiungi gli altri se ti servono per il video, ma questi sono i principali
+
+#define WAIT_2D_IDLE() \
+    while (SM750_REG32(SM750_2D_STATUS) & (1 << 31)) { snooze(1); }
 
 
 /* --- Core Access Macros (Memory Mapped IO) --- */
