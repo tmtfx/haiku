@@ -153,6 +153,7 @@ open_device(const char *name, uint32 flags, void **cookie)
             B_ANY_KERNEL_ADDRESS, B_PAGE_SIZE, B_FULL_LOCK, B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA | B_CLONEABLE_AREA);
         if (di->shared_area < 0) return di->shared_area;
         memset(di->si, 0, B_PAGE_SIZE);
+        strncpy(di->si->device_path, name, B_PATH_NAME_LENGTH);
         memcpy(&di->si->settings, &current_settings, sizeof(sm750_settings));
 
         // 4. Mappatura REGISTRI (BAR 1 - 2MB)
