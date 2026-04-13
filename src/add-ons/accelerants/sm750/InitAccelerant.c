@@ -14,9 +14,6 @@
 #include "protos.h"
 #include "sm750_macros.h"
 
-status_t sm750_init_accelerant(int fd);
-void sm750_uninit_accelerant(void);
-
 /* gInfo globale per l'accelerante */
 accelerant_info g_info = { .shared_info_area = -1, .regs_area = -1, .fb_area = -1 };
 accelerant_info *gInfo = &g_info;
@@ -73,7 +70,8 @@ static status_t init_common(int fd) {
     }
 
     /* IMPORTANTE: salviamo il puntatore virtuale LOCALMENTE */
-    gInfo->framebuffer = (uint8*)fb_ptr;
+    //gInfo->framebuffer = (uint8*)fb_ptr; TOLTO, ci deve essere solo un framebuffer in shared_info e basta
+    gInfo->si->framebuffer = (uint8*)fb_ptr;
     
     /* --- TEST PIXEL (OPZIONALE) --- */
     /*debug_printf("SM750_ACC: Test Framebuffer...\n");
@@ -89,7 +87,7 @@ static status_t init_common(int fd) {
 
     // Scegliamo il buffer corretto dove salvare i dati
     uint8* edid_buffer = is_panel ? si->edid_panel : si->edid_crt;
-	debug_printf("Inizio lettura EDID...");
+	debug_printf("Inizio lettura EDID...\n");
     if (sm750_read_edid(is_panel, edid_buffer) == B_OK) {
         // Segnamo che abbiamo trovato i dati
         if (is_panel) si->card_info.has_edid_panel = true;
@@ -127,29 +125,43 @@ void sm750_uninit_accelerant(void) {
     if (gInfo->shared_info_area >= 0) delete_area(gInfo->shared_info_area);
     
     gInfo->regs = NULL;
-    gInfo->framebuffer = NULL;
+    gInfo->si->framebuffer = NULL;
     gInfo->si = NULL;
 }
 
 void* get_accelerant_hook(uint32 feature, void* data) {
     switch (feature) {
-        case B_INIT_ACCELERANT:     return (void*)sm750_init_accelerant;
-        case B_UNINIT_ACCELERANT:   return (void*)sm750_uninit_accelerant;
+        case B_INIT_ACCELERANT:             return (void*)sm750_init_accelerant;
+        case B_UNINIT_ACCELERANT:           return (void*)sm750_uninit_accelerant;
+        case B_ACCELERANT_CLONE_INFO_SIZE:  return (void*)sm750_accelerant_clone_info_size;
+        case B_GET_ACCELERANT_CLONE_INFO:   return (void*)sm750_get_accelerant_clone_info;
+        case B_CLONE_ACCELERANT:            return (void*)sm750_clone_accelerant;
+        case B_GET_ACCELERANT_DEVICE_INFO:  return (void*)sm750_get_accelerant_device_info;
         
         /* Display Modes */
-        case B_SET_DISPLAY_MODE:    return (void*)sm750_set_display_mode;
-        case B_GET_DISPLAY_MODE:    return (void*)sm750_get_display_mode;
-        case B_PROPOSE_DISPLAY_MODE: return (void*)sm750_propose_display_mode;
-        case B_GET_FRAME_BUFFER_CONFIG: return (void*)sm750_get_frame_buffer_config;
-        case B_ACCELERANT_MODE_COUNT: return (void*)sm750_accelerant_mode_count;
-        case B_GET_MODE_LIST: return (void*)sm750_get_mode_list;
-        case B_GET_EDID_INFO: return (void*)sm750_get_edid_info;
-        case B_MOVE_DISPLAY: return (void*)sm750_move_display_area;
-
+        case B_ACCELERANT_MODE_COUNT:       return (void*)sm750_accelerant_mode_count;
+        case B_GET_MODE_LIST:               return (void*)sm750_get_mode_list;
+        case B_PROPOSE_DISPLAY_MODE:        return (void*)sm750_propose_display_mode;
+        case B_SET_DISPLAY_MODE:            return (void*)sm750_set_display_mode;
+        case B_GET_DISPLAY_MODE:            return (void*)sm750_get_display_mode;
+        case B_GET_FRAME_BUFFER_CONFIG:     return (void*)sm750_get_frame_buffer_config;
+        case B_GET_PIXEL_CLOCK_LIMITS:      return (void*)sm750_get_pixel_clock_limits;
+        case B_GET_EDID_INFO:               return (void*)sm750_get_edid_info;
+        
         /* Cursor */
-        case B_SET_CURSOR_SHAPE:    return (void*)sm750_set_cursor_shape;
-        case B_MOVE_CURSOR:         return (void*)sm750_move_cursor;
-        case B_SHOW_CURSOR:         return (void*)sm750_show_cursor;
+        case B_SET_CURSOR_SHAPE:            return (void*)sm750_set_cursor_shape;
+        case B_MOVE_CURSOR:                 return (void*)sm750_move_cursor;
+        case B_SHOW_CURSOR:                 return (void*)sm750_show_cursor;
+        
+        /* Engine */
+        case B_MOVE_DISPLAY:                return (void*)sm750_move_display_area;
+
+        case B_ACCELERANT_ENGINE_COUNT:     return (void*)sm750_accelerant_engine_count;
+        case B_ACQUIRE_ENGINE:              return (void*)sm750_acquire_engine;
+        case B_RELEASE_ENGINE:              return (void*)sm750_release_engine;
+        case B_WAIT_ENGINE_IDLE:            return (void*)sm750_wait_engine_idle;
+        case B_GET_SYNC_TOKEN:              return (void*)sm750_get_sync_token;
+        case B_SYNC_TO_TOKEN:               return (void*)sm750_sync_to_token;
         /* Hook per l'engine 2D (accelerazione hardware) */
         /*case B_FILL_RECTANGLE:
 			return (void*)sm750_fill_rectangle;
