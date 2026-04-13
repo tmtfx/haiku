@@ -98,6 +98,7 @@ typedef struct {
     uint8   function;
     uint8 edid_panel[128];   // Dati monitor su LCD/Panel
     uint8 edid_crt[128]; // Dati monitor su VGA/CRT
+    char device_path[B_PATH_NAME_LENGTH];
 
     /* Mappature Memoria */
     area_id regs_area;    /* BAR0: Registri MMIO */
@@ -183,7 +184,7 @@ typedef struct {
     uint32      *regs;              /* Puntatore ai registri MMIO clonati */
     area_id     regs_area;          /* ID area registri */
     area_id     fb_area;            /* ID area framebuffer clonato */
-    uint8 *framebuffer;
+    //uint8 *framebuffer; NO DEVE STARE Solo in shared_info, scemo!
     bool        is_clone;           /* Vero se è un clone */
 } accelerant_info;
 
