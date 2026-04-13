@@ -7,6 +7,9 @@
 
 #include <Accelerant.h> // Serve per il tipo display_mode e status_t
 
+status_t sm750_init_accelerant(int fd);
+void sm750_uninit_accelerant(void);
+
 status_t sm750_set_display_mode(display_mode *mode);
 status_t sm750_get_display_mode(display_mode *mode);
 status_t sm750_propose_display_mode(display_mode *target, 
@@ -22,5 +25,24 @@ status_t sm750_get_edid_info(void* info, size_t size, uint32* _version);
 status_t sm750_read_edid(bool is_panel, uint8* buffer);
 void sm750_program_pll(uint32 target_khz, bool is_panel);
 status_t sm750_move_display_area(uint16 h_display_start, uint16 v_display_start);
+
+uint32 sm750_accelerant_clone_info_size(void);
+void sm750_get_accelerant_clone_info(void *data);
+status_t sm750_clone_accelerant(void* info);
+status_t sm750_get_accelerant_device_info(accelerant_device_info *adi);
+status_t sm750_get_pixel_clock_limits(display_mode *dm, uint32 *low, uint32 *high);
+uint32 sm750_accelerant_engine_count(void);
+status_t sm750_acquire_engine(uint32 capabilities, uint32 max_priority, sync_token *st, engine_token **et);
+void sm750_release_engine(engine_token *et, sync_token *st);
+void sm750_wait_engine_idle(void);
+status_t sm750_get_sync_token(engine_token *et, sync_token *st);
+status_t sm750_sync_to_token(sync_token *st);
+
+status_t sm750_set_crt_fb_addr(uint32 offset);
+void     sm750_set_crt_pitch(uint32 pitch);
+void     sm750_set_crt_h_timing(uint32 total, uint32 active);
+void     sm750_set_crt_h_sync(uint32 start, uint32 end);
+void     sm750_set_crt_v_timing(uint32 total, uint32 active);
+void     sm750_set_crt_v_sync(uint32 start, uint32 end);
 
 #endif // SM750_PROTOS_H
