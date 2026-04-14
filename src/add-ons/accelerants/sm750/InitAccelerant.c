@@ -88,7 +88,7 @@ static status_t init_common(int fd) {
     // Scegliamo il buffer corretto dove salvare i dati
     uint8* edid_buffer = is_panel ? si->edid_panel : si->edid_crt;
 	debug_printf("Inizio lettura EDID...\n");
-    if (sm750_read_edid(is_panel, edid_buffer) == B_OK) {
+    if (sm750_read_edid(edid_buffer) == B_OK) {
         // Segnamo che abbiamo trovato i dati
         if (is_panel) si->card_info.has_edid_panel = true;
         else si->card_info.has_edid_crt = true;

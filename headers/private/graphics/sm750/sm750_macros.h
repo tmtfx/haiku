@@ -226,6 +226,17 @@
 #define SM750_GPIO_INT_STATUS  0x010014 // READ
 #define SM750_GPIO_INT_RESET   0x010014 // WRITE (DATASHEET use same address)
 
+#define SM750_I2C_BYTE_COUNT   0x010040
+#define SM750_I2C_CONTROL      0x010041
+#define SM750_I2C_STATUS       0x010042 // Status if read
+#define SM750_I2C_RESET        0x010042 // Same address as status, but write access for bit 2 (third)
+#define SM750_I2C_SLAVE_ADDR   0x010043
+// From  0x010044 to 0x010053 I2C DATA
+/* There are 16 I2C Data registers that hold the data to be written 
+ * to or read from the I2C Slave. These registers can be accessed in
+ * 8-bit, 16-bit, or 32-bit mode for very fast FIFO transfer.
+ */
+
 #define SM750_MIN_VCO  240000  // 240 MHz
 #define SM750_MAX_VCO  480000  // 480 MHz (più sicuro per evitare jitter) (potrebbe arrivare fino a 1GHz)
 
