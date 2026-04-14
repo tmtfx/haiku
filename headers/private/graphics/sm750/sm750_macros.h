@@ -28,9 +28,9 @@
 #define SM750_PCI_INTERRUPT    0x3c // Interrupt Line & Pin
 
 /* SM750 Specific PCI Config (Scratch / Power) */
-#define SM750_PCI_VGA_CTRL     0x54 // Controllo abilitazione VGA
-#define SM750_PCI_SCRATCH      0x58 // Registro scratch per uso del driver
-#define SM750_PCI_PM_CTRL      0x60 // Power Management Control (se presente)
+//#define SM750_PCI_VGA_CTRL     0x54 // Controllo abilitazione VGA  ACT sbagliato non esiste!!!!!
+#define SM750_PCI_SCRATCH      0x58 // Registro scratch per uso del driver /// TODO verificare su datasheet
+#define SM750_PCI_PM_CTRL      0x60 // Power Management Control (se presente) /// TODO verificare su datasheet
 
 /* Interrupt Control (SM750 System Control Module) 
  * Per leggere lo stato: SYS_R(INT_STATUS)
@@ -258,7 +258,11 @@
 
 /* --- Core Access Macros (Memory Mapped IO) --- */
 #define SM750_REG8(r_)  ((vuint8  *)regs)[(r_)]
+#define SM750_WREG8(r_, v_)  (((vuint8  *)regs)[(r_)] = (v_))
+
 #define SM750_REG16(r_) ((vuint16 *)regs)[(r_) >> 1]
+#define SM750_WREG16(r_, v_) (((vuint16 *)regs)[(r_) >> 1] = (v_))
+
 #define SM750_REG32(r_) ((vuint32 *)regs)[(r_) >> 2]
 #define SM750_WREG32(r_, v_) (((vuint32 *)regs)[(r_) >> 2] = (v_))
 

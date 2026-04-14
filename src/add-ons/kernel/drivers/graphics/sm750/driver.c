@@ -139,14 +139,29 @@ open_device(const char *name, uint32 flags, void **cookie)
 
     if (di->openCount == 0) {
         // 1. Abilitazione Bus Master e Memoria PCI
-        uint16 pcicmd = pci->read_pci_config(di->pci.bus, di->pci.device, di->pci.function, PCI_command, 2);
-        pcicmd |= PCI_command_memory | PCI_command_master;
-        pci->write_pci_config(di->pci.bus, di->pci.device, di->pci.function, PCI_command, 2, pcicmd);
+        // vecchio
+        //uint16 pcicmd = pci->read_pci_config(di->pci.bus, di->pci.device, di->pci.function, PCI_command, 2);
+        //pcicmd |= PCI_command_memory | PCI_command_master;
+        //pci->write_pci_config(di->pci.bus, di->pci.device, di->pci.function, PCI_command, 2, pcicmd);
+        
+        // nuovo
+        // 1. Leggiamo il Command Register (CSR04) all'indirizzo 0x04
+        uint32 pci_cmd = pci->read_pci_config(di->pci.bus, di->pci.device, di->pci.function, PCI_command, 4); //PCI_command = 0x04 da PCI.h
+        // 2. Abilitiamo quello che serve veramente:
+        // Bit 0: I/O Space (per le porte VGA legacy se servissero)
+        // Bit 1: Memory Space (FONDAMENTALE per BAR0 e BAR1)
+        // Bit 2: Bus Master (FONDAMENTALE per l'accelerazione 2D e DMA)
+        // Bit 6: Parity Error Response (Buona pratica)
+        // Bit 8: SERR# Enable (Buona pratica)
+        pci_cmd |= (PCI_command_memory | PCI_command_master | PCI_command_io);
+        pci_cmd |= (1 << 6) | (1 << 8); 
+        pci->write_pci_config(di->pci.bus, di->pci.device, di->pci.function, 0x04, 4, pci_cmd);
 
         // 2. Sblocco MMIO (VGA Control)
-        uint32 vga_ctrl = pci->read_pci_config(di->pci.bus, di->pci.device, di->pci.function, SM750_PCI_VGA_CTRL, 4);
-        vga_ctrl |= (1 << 7); 
-        pci->write_pci_config(di->pci.bus, di->pci.device, di->pci.function, SM750_PCI_VGA_CTRL, 4, vga_ctrl);
+        // vecchio dannoso non esiste 0x54
+        //uint32 vga_ctrl = pci->read_pci_config(di->pci.bus, di->pci.device, di->pci.function, SM750_PCI_VGA_CTRL, 4);
+        //vga_ctrl |= (1 << 7); 
+        //pci->write_pci_config(di->pci.bus, di->pci.device, di->pci.function, SM750_PCI_VGA_CTRL, 4, vga_ctrl);
 
         // 3. Allocazione Shared Info
         di->shared_area = create_area("sm750 shared info", (void **)&(di->si), 

@@ -275,19 +275,6 @@ sm750_set_display_mode(display_mode *mode)
     }
 
     si->dm = *mode;
-    debug_printf("SM750_ACC: Inizio test riempimento di rosso.\n");
-    uint32 *fb = (uint32 *)gInfo->si->framebuffer;
-    if (fb != NULL) {
-        // Coloriamo solo una parte per sicurezza
-        //for (int i = 0; i < (mode->timing.h_display * mode->timing.v_display); i++) {
-        //    fb[i] = 0xFF0000; 
-        //}
-        for (int i = 0; i < (mode->timing.h_display * 100); i++) {
-            fb[i] = 0xFF0000;
-        }
-    }
-    debug_printf("SM750_ACC: Framebuffer riempito di rosso per test.\n");
-    snooze(2000000);
     
     return B_OK;
 }

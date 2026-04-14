@@ -9,7 +9,7 @@
 #include "protos.h"
 
 extern accelerant_info *gInfo;
-
+/* per gpio ma noi abbiamo i2c integrato
 static void 
 set_gpio_pin(uint32 pin, bool high) 
 {
@@ -37,8 +37,8 @@ set_sda_direction(uint32 sda, bool output)
     if (output) dir |= (1 << sda);
     else dir &= ~(1 << sda);
     SM750_WREG32(SM750_GPIO_DIR_LOW, dir);
-}
-
+}*/
+/* bit-banging... ma noi abbiamo un controller i2c integrato cribbio!
 static void i2c_start(uint32 scl, uint32 sda) {
     set_gpio_pin(sda, true);  set_gpio_pin(scl, true);
     snooze(5);
@@ -51,6 +51,7 @@ static void i2c_stop(uint32 scl, uint32 sda) {
     set_gpio_pin(scl, true);  snooze(5);
     set_gpio_pin(sda, true);  snooze(5);
 }
+
 static bool 
 i2c_write_byte(uint32 scl, uint32 sda, uint8 byte) 
 {
@@ -106,8 +107,8 @@ i2c_read_byte(uint32 scl, uint32 sda, bool send_ack)
     set_gpio_pin(sda, true); // Rilascia SDA
     
     return byte;
-}
-
+}*/
+/* da riscrivere perché non usa il controller i2c integrato
 status_t 
 sm750_read_edid(bool is_panel, uint8* buffer) 
 {
@@ -151,5 +152,54 @@ sm750_read_edid(bool is_panel, uint8* buffer)
     }
     
     i2c_stop(scl, sda);
+    return B_OK;
+}
+*/
+status_t 
+sm750_read_edid(bool is_panel, uint8* buffer) 
+{
+    vuint32 *regs = gInfo->regs;
+    uint32 i, j;
+    uint8 slave_addr_write = 0xA0;
+    uint8 slave_addr_read  = 0xA1;
+
+    // --- 1. SET OFFSET (Diciamo al monitor: "Parti dal byte 0") ---
+    
+    // Aspetta che il bus sia libero (Busy bit 0)
+    while (SM750_REG8(0x10042) & 0x01);
+
+    SM750_WREG8(0x10043, slave_addr_write); // Indirizzo Slave + Write
+    SM750_WREG8(0x10044, 0x00);             // Offset 0x00 nella FIFO dati
+    SM750_WREG8(0x10040, 0x00);             // Byte count = 1 (0 significa 1 byte)
+    
+    // Control: Enable(0) | Start(2) = 0x05 (Standard Speed 100kbps)
+    SM750_WREG8(0x10041, 0x05); 
+
+    // Aspetta il completamento (Complete bit 3)
+    while (!(SM750_REG8(0x10042) & 0x08));
+    
+    // Controllo Errori (bit 2)
+    if (SM750_REG8(0x10042) & 0x04) return B_DEVICE_NOT_FOUND;
+
+    // --- 2. LETTURA MASSIVA (128 byte in blocchi da 16) ---
+    
+    for (i = 0; i < 8; i++) { // 8 blocchi * 16 byte = 128 byte
+        while (SM750_REG8(0x10042) & 0x01); // Aspetta bus libero
+
+        SM750_WREG8(0x10043, slave_addr_read); // Indirizzo Slave + Read
+        SM750_WREG8(0x10040, 15);              // Count = 15 (significa 16 byte)
+        
+        // Se è l'ultimo blocco, non vogliamo il Repeated Start, ma lo Stop normale
+        SM750_WREG8(0x10041, 0x05); 
+
+        // Aspetta che i 16 byte siano pronti nella FIFO
+        while (!(SM750_REG8(0x10042) & 0x08));
+
+        // Preleva i 16 byte dalla FIFO (offset 0x10044-0x10053)
+        for (j = 0; j < 16; j++) {
+            buffer[(i * 16) + j] = SM750_REG8(0x10044 + j);
+        }
+    }
+
     return B_OK;
 }
