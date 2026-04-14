@@ -92,9 +92,26 @@ static status_t init_common(int fd) {
         // Segnamo che abbiamo trovato i dati
         if (is_panel) si->card_info.has_edid_panel = true;
         else si->card_info.has_edid_crt = true;
-        debug_printf("SM750: EDID letto con successo su %s\n", is_panel ? "PANEL" : "CRT");
+        debug_printf("SM750_ACC: EDID letto con successo su %s\n", is_panel ? "PANEL" : "CRT");
+        if (create_mode_list_from_edid(edid_buffer) == B_OK) {
+            debug_printf("SM750_ACC: Lista modi generata (%d modi trovati)\n", si->mode_count);
+        } else {
+            debug_printf("SM750_ACC: EDID presente ma nessun Detailed Timing valido trovato.\n");
+            goto fallback;
+        }
     } else {
-        debug_printf("SM750: Errore lettura EDID su %s\n", is_panel ? "PANEL" : "CRT");
+fallback:
+        debug_printf("SM750: EDID non disponibile, uso modalità provvisoria 1024x768 su %s\n", is_panel ? "PANEL" : "CRT");
+        display_mode safe_mode = {
+            { 65000, 1024, 1048, 1184, 1344, 768, 771, 777, 806, 0 },
+            B_RGB32, 1024, 768, 0, 0
+        };
+        safe_mode.timing.flags = B_POSITIVE_HSYNC | B_POSITIVE_VSYNC;
+        si->mode_list[0] = safe_mode;
+        si->preferred_mode = safe_mode;
+        si->mode_count = 1; 
+        si->card_info.has_edid_panel = false;
+        si->card_info.has_edid_crt = false;
     }
     
 
@@ -141,6 +158,7 @@ void* get_accelerant_hook(uint32 feature, void* data) {
         /* Display Modes */
         case B_ACCELERANT_MODE_COUNT:       return (void*)sm750_accelerant_mode_count;
         case B_GET_MODE_LIST:               return (void*)sm750_get_mode_list;
+        case B_GET_PREFERRED_DISPLAY_MODE:  return (void*)sm750_get_preferred_mode;
         case B_PROPOSE_DISPLAY_MODE:        return (void*)sm750_propose_display_mode;
         case B_SET_DISPLAY_MODE:            return (void*)sm750_set_display_mode;
         case B_GET_DISPLAY_MODE:            return (void*)sm750_get_display_mode;
