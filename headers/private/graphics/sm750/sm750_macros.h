@@ -5,32 +5,32 @@
 #define SM750_PCI_DEVID        0x00 // Vendor & Device ID
 #define SM750_PCI_CMD_STAT     0x04 // Command & Status Register
 #define SM750_PCI_CLASS        0x08 // Revision ID & Class Code
-#define SM750_PCI_HEADER       0x0c // Cache Line Size, Latency Timer, Header Type
+#define SM750_PCI_LT           0x0D // Latency Timer
+#define SM750_LINEAR_FB_BAR    0x10 // Linear Frame Buffer Base Address Register
+#define SM750_BAR_MMA          0x14 // Base Address Register for Memory Map Address
+
+#define SM750_64_VGA_BA           0x18 // 64K VGA 0xA0000/0xB0000 Base Address
+#define SM750_32_VGA_BA           0x1C // 32K VGA 0xB8000 Base Address
+#define SM750_VGA_IO_3CX_BA       0x20 // VGA I/O Ports 0x3Cx Base Address
+#define SM750_VGA_IO_3DX_3BX_BA   0x24 // VGA I/O Ports 0x3Dx/0x3Bx Base Address
+#define SM750_PCI_SUBSYSID     0x2C
+/* Expansion ROM */
+#define SM750_PCI_ROMBASE      0x30
+/* Capability Pointer */
+#define SM750_PCI_CAPPTR       0x34 // Capabilities Pointer (es. per Power Management)
+/* Interrupts */
+#define SM750_PCI_INTERRUPT    0x3C // Interrupt Line & Pin
+#define SM750_PWR_DWN_CAP_REG  0x40
+#define SM750_PWR_DWN_CAP_DATA 0x44
 
 /* Base Address Registers (BARs) */
+/* NOPE
 #define SM750_PCI_BAR0_REGS    0x10 // MMIO Registers (Standard SM750: 2MB)
 #define SM750_PCI_BAR1_FB      0x14 // Frame Buffer (Video Memory)
 #define SM750_PCI_BAR2         0x18 // Generalmente non usato su SM750
 #define SM750_PCI_BAR3         0x1c 
 #define SM750_PCI_BAR4         0x20 
-#define SM750_PCI_BAR5         0x24 
-
-/* Subsystem Identifiers */
-#define SM750_PCI_SUBSYSID     0x2c // Subsystem Vendor & ID
-
-/* Expansion ROM */
-#define SM750_PCI_ROMBASE      0x30 // Video BIOS ROM Base Address
-
-/* Capability Pointer */
-#define SM750_PCI_CAPPTR       0x34 // Capabilities Pointer (es. per Power Management)
-
-/* Interrupts */
-#define SM750_PCI_INTERRUPT    0x3c // Interrupt Line & Pin
-
-/* SM750 Specific PCI Config (Scratch / Power) */
-//#define SM750_PCI_VGA_CTRL     0x54 // Controllo abilitazione VGA  ACT sbagliato non esiste!!!!!
-#define SM750_PCI_SCRATCH      0x58 // Registro scratch per uso del driver /// TODO verificare su datasheet
-#define SM750_PCI_PM_CTRL      0x60 // Power Management Control (se presente) /// TODO verificare su datasheet
+#define SM750_PCI_BAR5         0x24 */
 
 /* Interrupt Control (SM750 System Control Module) 
  * Per leggere lo stato: SYS_R(INT_STATUS)
@@ -58,7 +58,7 @@
 #define SM750_GE_MONO_PATTERN_L  0x1002C // Pattern Monocromatico (Low)
 #define SM750_GE_MONO_PATTERN_H  0x10030 // Pattern Monocromatico (High)
 #define SM750_GE_STATUS          0x10034 // Stato del motore (Busy/Idle)
-
+// --------------------------------- DA VERIFICARE -------------------------*/
 /* --- ROP (Raster Operations) --- */
 /* SM750 usa un codice ROP a 8 bit (es. 0xCC per copia, 0xF0 per pattern) */
 #define SM750_GE_ROP_CODE         0x1000C // Parte del registro di controllo
@@ -80,27 +80,28 @@
 #define SM750_GE_DIMENSION        0x10008 // Dimensione (Width in 31:16, Height in 15:0)
 #define SM750_GE_SRC_XY           0x10040 // Coordinate X,Y sorgente (se usate)
 #define SM750_GE_DST_XY           0x10044 // Coordinate X,Y destinazione
-
-/* --- Status & FIFO --- */
-#define SM750_GE_STATUS           0x10034 // Sostituisce i vari FIFOFREE
-
+/* -------------------------------- FINO QUI ----------------------------------*/
 /* System Control Registers (SM750) 
  * Sostituisce PWRUP/Coldstart
  */
+#define SM750_SYS_CTRL            0x00000000 // SYSTEM CONTROL
 #define SM750_SYS_MISC_CTRL       0x00000004 // Controllo generale e Power up
+#define SM750_SYS_GPIO_CTRL       0x00000008 // Controllo per GPIO
 #define SM750_SYS_BOOTSTRAP       0x0000000C // Info dai jumper/strap (sostituisce STRAPINFO)
 #define SM750_SYS_PLL_CTRL        0x00000010 // Controllo principale PLL
 #define SM750_SYS_DRAM_CTRL       0x00000030 // Configurazione memoria (sostituisce PFB_CONFIG)
+#define SM750_SYS_DEVID           0x00000054 // Device Id
+#define SM750_SYS_PLL_CLKC        0x00000058 // PLL Clock Count ONLY FOR TEST PURPOSES
 
-/* Clock Control 
- * Sostituisce COREPLL/MEMPLL
- */
-#define SM750_SYS_MCLK_CTRL       0x00000038 // Memory Clock
-#define SM750_SYS_SCLK_CTRL       0x0000003C // System Clock
-#define SM750_SYS_M2XCLK_CTRL     0x00000040 // Master Display Clock
+/* Clock Control */
+#define SM750_SYS_CUR_CLK_STATUS  0x00000040 // Power management current clock status
+#define SM750_SYS_PWR_MODE_0_CLKC 0x00000044 // Power Mode 0 Clock Control
+#define SM750_SYS_PWR_MODE_1_CLKC 0x00000048 // Power Mode 0 Clock Control
+#define SM750_SYS_PWR_MODE_CTRL   0x0000004C // Power Mode Control
+/* Scratch data */
+#define SM750_SYS_SCRATCH_DATA    0x0000006C // Scratch Data
 
-
-#define SM750_SYS_VGA_CONFIG    0x00000088
+#define SM750_SYS_VGA_CONFIG      0x00000088 // VGA Configuration register
 
 /* VGA Legacy (Mappati in MMIO) */
 #define VG_MISC_W                 0x000C03C2
@@ -108,7 +109,7 @@
 #define VG_SEQ_IND                0x000C03C4
 #define VG_SEQ_DAT                0x000C03C5
 #define VG_GRPH_IND               0x000C03CE
-#define VG_GRPH_DAT               0x000C03CF
+//#define VG_GRPH_DAT               0x000C03CF
 
 /* Palette RAM */
 #define SM750_DISP_PALETTE_RAM       0x00080400 // Primary (PANEL)
@@ -128,7 +129,7 @@
 #define SM750_PANEL_V_TOTAL_ACTIVE   0x0008002C // Pag 143: Primary Vertical Total
 #define SM750_PANEL_V_SYNC           0x00080030 // Pag 143: Primary Vertical Sync
 #define SM750_PANEL_CONTROL          0x00080000 // Pag 143: Primary Display Control
-#define SM750_PANEL_CURRENT_LINE          0x00080034 // Pag 143: Primary Display Control
+#define SM750_PANEL_CURRENT_LINE     0x00080034 // Pag 143: Primary Display Control
 
 
 /* Video Control */
@@ -189,6 +190,7 @@
 #define SM750_DISP_CRT_CUR_COLOR12   0x00080238 // Colore 1 e 2
 #define SM750_DISP_CRT_CUR_COLOR3    0x0008023C // Colore 3
 
+/* ---------------------------- DA VERIFICARE ------------------------- */
 /* CRTC Indices (SM750_CRTCX_...) */
 #define SM750_CRTCX_HTOTAL      0x00
 #define SM750_CRTCX_HDISPE      0x01
@@ -216,9 +218,13 @@
 /* Attribute Indices (SM750_ATBX_...) */
 #define SM750_ATBX_MODECTL      0x10
 #define SM750_ATBX_COLSEL       0x14
+/* ---------------------------- FINO QUI ------------------------- */
 
-#define SM750_GPIO_DATA_LOW  0x010000
-#define SM750_GPIO_DIR_LOW   0x010008
+#define SM750_GPIO_DATA  0x010000
+#define SM750_GPIO_DIRECTION   0x010008
+#define SM750_GPIO_INT_SETUP   0x010010
+#define SM750_GPIO_INT_STATUS  0x010014 // READ
+#define SM750_GPIO_INT_RESET   0x010014 // WRITE (DATASHEET use same address)
 
 #define SM750_MIN_VCO  240000  // 240 MHz
 #define SM750_MAX_VCO  480000  // 480 MHz (più sicuro per evitare jitter) (potrebbe arrivare fino a 1GHz)
@@ -249,6 +255,18 @@
 
 /* --- CSC (Color Space Conversion) Registers --- */
 #define SM750_CSC_SOURCE_BASE        0x001000C8
+#define SM750_CSC_CONST              0x001000CC
+#define SM750_CSC_SOURCE_X           0x001000D0
+#define SM750_CSC_SOURCE_Y           0x001000D4
+#define SM750_CSC_U_SOURCE_BASE_YUV420  0x001000D8
+#define SM750_CSC_V_SOURCE_BASE_YUV420  0x001000DC
+#define SM750_CSC_SOURCE_DIMENSION   0x001000E0
+#define SM750_CSC_SOURCE_PITCH       0x001000E4
+#define SM750_CSC_DESTINATION        0x001000E8
+#define SM750_CSC_DEST_DIMENSION     0x001000EC
+#define SM750_CSC_DEST_PITCH         0x001000F0
+#define SM750_CSC_SCALE_FACTOR       0x001000F4
+#define SM750_CSC_DESTINATION_BASE   0x001000F8
 #define SM750_CSC_CONTROL            0x001000FC
 // ... aggiungi gli altri se ti servono per il video, ma questi sono i principali
 
