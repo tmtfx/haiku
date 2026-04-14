@@ -51,6 +51,8 @@ typedef struct {
 
 #define CRT_CURSOR_VRAM_OFFSET (si->card_info.mem_size - 1024)
 
+#define MAX_EDID_MODES 8 // Di solito 4 detailed + eventuali standard
+
 enum {
     ENG_GET_PRIVATE_DATA = B_DEVICE_OP_CODES_END + 1,
     ENG_GET_PCI,
@@ -112,8 +114,9 @@ typedef struct {
     void    *mem_mgr;     /* Puntatore al gestore memoria (importante!) */
     
     /* Modalità Schermo */
-    area_id mode_area;    /* Lista dei display_mode supportati */
+    area_id mode_area;    /* Lista dei display_mode supportati da implementare in futuro*/
     uint32  mode_count;
+    display_mode mode_list[MAX_EDID_MODES]; //in caso aumentare a 20
 
     uint32  flags;
     uint32  bits_per_pixel; // TODO, remove if unused (used for initial tests)
@@ -138,6 +141,8 @@ typedef struct {
     /* Stato Schermi */
     display_mode dm;      /* Timing testa primaria (CRT/Panel) */
     display_mode dm2;     /* Timing testa secondaria */
+    display_mode preferred_mode;  /* <--- La modalità nativa/preferita del monitor 1 */
+    display_mode preferred_mode2; /* <--- La modalità nativa/preferita del monitor 2 */
     frame_buffer_config fbc;
     frame_buffer_config fbc2;
 
