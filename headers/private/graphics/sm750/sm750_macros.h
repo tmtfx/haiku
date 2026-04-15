@@ -220,7 +220,7 @@
 #define SM750_ATBX_COLSEL       0x14
 /* ---------------------------- FINO QUI ------------------------- */
 
-#define SM750_GPIO_DATA  0x010000
+#define SM750_GPIO_DATA        0x010000
 #define SM750_GPIO_DIRECTION   0x010008
 #define SM750_GPIO_INT_SETUP   0x010010
 #define SM750_GPIO_INT_STATUS  0x010014 // READ
