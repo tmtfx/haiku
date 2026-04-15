@@ -44,13 +44,15 @@ sm750_get_clocks(vuint32 *regs, shared_info *si)
     	// --- 1. SETTAGGIO POWER MODE 0 ---
         dprintf("SM750: I2C Clock spento! Lo abilito nei Power Mode 0 e 1...\n");
         uint32 mode0 = SM750_REG32(SM750_SYS_PWR_MODE_0_CLKC);
-        mode0 |= (1 << 8); // I2C Clock
+        //mode0 |= (1 << 8); // I2C Clock // BUGGATO
+        mode0 &= ~(1 << 8); // I2C Clock OFF
         mode0 |= (1 << 6); // GPIO Clock
         SM750_WREG32(SM750_SYS_PWR_MODE_0_CLKC, mode0);
 
         // --- 2. SETTAGGIO POWER MODE 1 ---
         uint32 mode1 = SM750_REG32(SM750_SYS_PWR_MODE_1_CLKC);
-        mode1 |= (1 << 8); // I2C Clock (Sempre acceso anche qui!)
+        //mode1 |= (1 << 8); // I2C Clock (Sempre acceso anche qui!) // BUGGATO
+        mode1 &= ~(1 << 8); // I2C Clock OFF
         mode1 |= (1 << 6); // GPIO Clock
         SM750_WREG32(SM750_SYS_PWR_MODE_1_CLKC, mode1);
     }
@@ -80,10 +82,10 @@ void sm750_init_chip(DeviceInfo *di) {
     // --- 1. SVEGLIA IL CHIP (Power Mode 0) ---
     // --- SBLOCCO CLOCK (Power Mode 0) ---
     uint32 mode0_gate = SM750_REG32(SM750_SYS_PWR_MODE_0_CLKC); // 0x000044
-    // Abilitiamo I2C (8), GPIO (6), 2D (3), Display (2), Memory (1) e DMA (0)
-    mode0_gate |= (1 << 8) | (1 << 6) | (1 << 3) | (1 << 2) | (1 << 1) | (1 << 0);
-    // Assicuriamoci che il VGA Clock (10) sia attivo se usiamo il CRT
-    mode0_gate |= (1 << 10); 
+    // Abilitiamo GPIO (6), 2D (3), Display (2), Memory (1) e DMA (0)
+    mode0_gate |= (1 << 6) | (1 << 3) | (1 << 2) | (1 << 1) | (1 << 0);
+    mode0_gate &= ~(1 << 8); // Forza a 0 il clock I2C hardware visto che è rotto
+    mode0_gate |= (1 << 10); // Assicuriamoci che il VGA Clock (10) sia attivo se usiamo il CRT
     SM750_WREG32(SM750_SYS_PWR_MODE_0_CLKC, mode0_gate); // 0x000044
     dprintf("SM750: Power Mode 0 Clock Gate impostato: 0x%08x\n", mode0_gate);
 
@@ -181,6 +183,59 @@ void sm750_init_chip(DeviceInfo *di) {
     si->card_info.max_mclk = 150000; // 150MHz
     si->card_info.max_pclk = 300000; // 300MHz (Limite DAC)
     
+    
+// --- INIZIO RUBERIA RISOLUZIONE BIOS ---
+    
+    uint32 h_ta_reg = SM750_REG32(SM750_CRT_H_TOTAL_ACTIVE);
+    uint32 h_s_reg  = SM750_REG32(SM750_CRT_H_SYNC);
+    uint32 v_ta_reg = SM750_REG32(SM750_CRT_V_TOTAL_ACTIVE);
+    uint32 v_s_reg  = SM750_REG32(SM750_CRT_V_SYNC);
+
+    // Estrai i valori secondo il datasheet
+    uint16 h_active = (uint16)((h_ta_reg & 0xFFF) + 1);
+    uint16 h_total  = (uint16)(((h_ta_reg >> 16) & 0xFFF) + 1);
+    uint16 h_sync_start = (uint16)((h_s_reg & 0xFFF) + 1);
+    uint8  h_sync_width = (uint8)((h_s_reg >> 16) & 0xFF);
+
+    uint16 v_active = (uint16)((v_ta_reg & 0x7FF) + 1);
+    uint16 v_total  = (uint16)(((v_ta_reg >> 16) & 0x7FF) + 1);
+    uint16 v_sync_start = (uint16)((v_s_reg & 0x7FF) + 1);
+    uint8  v_sync_height = (uint8)((v_s_reg >> 16) & 0x3F);
+    
+    display_mode *dm = si->card_info.is_panel ? &si->preferred_mode : &si->preferred_mode2;
+
+    // Popola la struttura display_mode di Haiku
+    dm->timing.h_display    = h_active;
+    dm->timing.h_sync_start = h_sync_start;
+    dm->timing.h_sync_end   = (uint16)(h_sync_start + h_sync_width);
+    dm->timing.h_total      = h_total;
+
+    dm->timing.v_display    = v_active;
+    dm->timing.v_sync_start = v_sync_start;
+    dm->timing.v_sync_end   = (uint16)(v_sync_start + v_sync_height);
+    dm->timing.v_total      = v_total;
+
+    // 60Hz standard in kHz
+    dm->timing.pixel_clock = (uint32)((h_total * v_total * 60) / 1000);
+    dm->timing.flags = B_POSITIVE_HSYNC | B_POSITIVE_VSYNC;
+
+    dm->space = B_RGB32;
+    dm->virtual_width  = h_active;
+    dm->virtual_height = v_active;
+    dm->h_display_start = 0;
+    dm->v_display_start = 0;
+    dm->flags = B_POSITIVE_HSYNC | B_POSITIVE_VSYNC;
+
+    dprintf("SM750: BIOS Mode Rilevata: %ux%u @ 60Hz\n", h_active, v_active);
+    dprintf("SM750: Timing -> H: %u/%u/%u/%u V: %u/%u/%u/%u\n",
+        h_active, h_sync_start, dm->timing.h_sync_end, h_total,
+        v_active, v_sync_start, dm->timing.v_sync_end, v_total);
+
+// ---- fine ruberia risoluzione BIOS -----
+
+
+    
+    
     // F. VGA BYPASS (Necessario per usare il Framebuffer lineare in modo nativo)
     // Abilitiamo il bypass VGA su entrambe le pipe (Primary e Secondary)
     uint32 display_reg = si->card_info.is_panel ? SM750_PANEL_CONTROL : SM750_CRT_CONTROL; // 0x080000 : 0x080200
@@ -214,16 +269,38 @@ void sm750_init_chip(DeviceInfo *di) {
     dprintf("SM750: Init  completato. Mem: %d MB, Mode: %s\n", 
             detected_mem / (1024*1024), si->card_info.is_panel ? "PANEL" : "CRT");
     
-    // --- CONFIGURAZIONE GPIO PER EDID/I2C ---
+    // --- INIZIO CONFIGURAZIONE GPIO PER EDID/I2C ---
     // 1. Leggiamo il registro corretto: 0x08
     uint32 gpio_ctrl = SM750_REG32(SM750_SYS_GPIO_CTRL); //0x000008
     // 2. Impostiamo i pin 30 e 31 come I2C (funzione speciale)
     // Invece di azzerarli, li mettiamo a 1.
-    gpio_ctrl |= (1 << 31); // Pin 31 = I2C Data
-    gpio_ctrl |= (1 << 30); // Pin 30 = I2C Clock
-    // 3. Scriviamo il risultato per abilitare i2c
+    //gpio_ctrl |= (1 << 31); // Pin 31 = I2C Data
+    //gpio_ctrl |= (1 << 30); // Pin 30 = I2C Clock
+    // ANZI NO!!!! I2C BROKEN
+    // Mettiamo a 0 i bit 31 e 30 per usare i pin come GPIO normali
+    gpio_ctrl &= ~(1U << 31); // SDA
+    gpio_ctrl &= ~(1U << 30); // SCL
+    // 3. Scriviamo il risultato per DISabilitare i2c visto che è buggato facciamo a mano
     SM750_WREG32(SM750_SYS_GPIO_CTRL, gpio_ctrl); //0x000008
     dprintf("SM750: GPIO Control (0x08) impostato per I2C: 0x%08x\n", gpio_ctrl);
+    
+    // Poi disabilita anche gli interrupt sui pin GPIO 30 e 31 (Registro 0x010010)
+    // Il registro gestisce i pin 25-31 nei primi bit
+    uint32 gpio_int = SM750_REG32(SM750_GPIO_INT_SETUP);
+    gpio_int &= ~(1U << 6); // Corrisponde al pin 31 (Enable31) -> 0: Regular GPIO
+    gpio_int &= ~(1U << 5); // Corrisponde al pin 30 (Enable30) -> 0: Regular GPIO
+    SM750_WREG32(SM750_GPIO_INT_SETUP, gpio_int);
+    
+    // Configura Direzione Iniziale (Entrambi Output per ora)
+    uint32 gpio_dir = SM750_REG32(SM750_GPIO_DIRECTION);
+    gpio_dir |= (1U << 31) | (1U << 30); 
+    SM750_WREG32(SM750_GPIO_DIRECTION, gpio_dir);
+
+    // 5. Stato di IDLE (Bus High)
+    uint32 gpio_data = SM750_REG32(SM750_GPIO_DATA);
+    gpio_data |= (1U << 31) | (1U << 30);
+    SM750_WREG32(SM750_GPIO_DATA, gpio_data);
+    // TERMINE configurazione iniziale GPIO per nostro bit-banging
    
    
     uint32 detect = SM750_REG32(SM750_CRT_MONITOR_DETECT);
