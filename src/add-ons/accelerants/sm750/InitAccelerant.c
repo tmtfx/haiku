@@ -36,7 +36,10 @@ static status_t init_common(int fd) {
         B_ANY_ADDRESS, B_READ_AREA | B_WRITE_AREA, gpd.shared_info_area);
     
     if (gInfo->shared_info_area < 0) return gInfo->shared_info_area;
-    if (gInfo->si->regs_area <= 0) {
+    
+    shared_info *si = gInfo->si;
+    
+    if (si->regs_area <= 0) {
         debug_printf("SM750_ACC: ERRORE! regs_area invalida nella shared_info!\n");
         return B_ERROR;
     }
@@ -71,7 +74,7 @@ static status_t init_common(int fd) {
 
     /* IMPORTANTE: salviamo il puntatore virtuale LOCALMENTE */
     //gInfo->framebuffer = (uint8*)fb_ptr; TOLTO, ci deve essere solo un framebuffer in shared_info e basta
-    gInfo->si->framebuffer = (uint8*)fb_ptr;
+    si->framebuffer = (uint8*)fb_ptr;
     
     /* --- TEST PIXEL (OPZIONALE) --- */
     /*debug_printf("SM750_ACC: Test Framebuffer...\n");
@@ -82,7 +85,7 @@ static status_t init_common(int fd) {
     }
     debug_printf("SM750_ACC: Fine Test Framebuffer...\n");*/
     
-    shared_info *si = gInfo->si;
+    
     bool is_panel = si->card_info.is_panel;
 
     // Scegliamo il buffer corretto dove salvare i dati
@@ -95,12 +98,12 @@ static status_t init_common(int fd) {
         debug_printf("SM750_ACC: EDID letto con successo su %s\n", is_panel ? "PANEL" : "CRT");
         if (create_mode_list_from_edid(edid_buffer) == B_OK) {
             debug_printf("SM750_ACC: Lista modi generata (%d modi trovati)\n", si->mode_count);
-        } else {
-            debug_printf("SM750_ACC: EDID presente ma nessun Detailed Timing valido trovato.\n");
-            goto fallback;
+            return B_OK;
         }
-    } else {
-fallback:
+        debug_printf("SM750_ACC: EDID presente ma nessun Detailed Timing valido trovato.\n");
+    }
+//fallback:
+/*
         debug_printf("SM750: EDID non disponibile, uso modalità provvisoria 1024x768 su %s\n", is_panel ? "PANEL" : "CRT");
         display_mode safe_mode = {
             { 65000, 1024, 1048, 1184, 1344, 768, 771, 777, 806, 0 },
@@ -114,6 +117,37 @@ fallback:
         si->card_info.has_edid_crt = false;
     }
     
+*/
+/* --- IL GRANDE FALLBACK LEGACY (LADRO DI TIMING) --- */
+    
+    // Verifichiamo se abbiamo catturato qualcosa di sensato dal BIOS
+    display_mode *pm = is_panel ? &si->preferred_mode : &si->preferred_mode2;
+
+    // Verifichiamo se abbiamo catturato qualcosa dal BIOS per l'uscita attiva
+    if (pm->timing.h_display > 0 && pm->timing.v_display > 0) {
+        debug_printf("SM750_ACC: EDID KO. Uso Timing BIOS da %s: %dx%d\n", 
+                     is_panel ? "PANEL" : "CRT",
+                     pm->timing.h_display, pm->timing.v_display);
+        
+        si->mode_list[0] = *pm;
+        // Se siamo su CRT, assicuriamoci che anche preferred_mode (principale) sia popolata
+        si->preferred_mode = *pm; 
+    } else {
+        // Estrema ratio: tabula rasa, mettiamo il 1024 fisso
+        debug_printf("SM750_ACC: EDID KO e registri BIOS vuoti su %s! Fallback 1024x768\n",
+                     is_panel ? "PANEL" : "CRT");
+        display_mode safe_mode = {
+            { 65000, 1024, 1048, 1184, 1344, 768, 771, 777, 806, 0 },
+            B_RGB32, 1024, 768, 0, 0
+        };
+        safe_mode.timing.flags = B_POSITIVE_HSYNC | B_POSITIVE_VSYNC;
+        si->mode_list[0] = safe_mode;
+        si->preferred_mode = safe_mode;
+    }
+
+    si->mode_count = 1;
+    si->card_info.has_edid_panel = false;
+    si->card_info.has_edid_crt = false;
 
     return B_OK;
 }
