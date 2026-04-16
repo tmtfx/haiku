@@ -39,12 +39,6 @@ void sm750_release_engine(engine_token *et, sync_token *st);
 void sm750_wait_engine_idle(void);
 status_t sm750_get_sync_token(engine_token *et, sync_token *st);
 status_t sm750_sync_to_token(sync_token *st);
-
-status_t sm750_set_crt_fb_addr(uint32 offset);
-void     sm750_set_crt_pitch(uint32 pitch);
-void     sm750_set_crt_h_timing(uint32 total, uint32 active);
-void     sm750_set_crt_h_sync(uint32 start, uint32 end);
-void     sm750_set_crt_v_timing(uint32 total, uint32 active);
-void     sm750_set_crt_v_sync(uint32 start, uint32 end);
+status_t sm750_set_fb_addr(uint32 offset, bool is_panel);
 
 #endif // SM750_PROTOS_H
