@@ -10,6 +10,7 @@
 
 #include "DriverInterface.h"
 #include "sm750_macros.h"
+#include "common_modes.h"
 
 extern pci_module_info *pci;
 
@@ -38,11 +39,11 @@ sm750_get_clocks(vuint32 *regs, shared_info *si)
     SM750_WREG32(SM750_SYS_PWR_MODE_CTRL, pwrCtrl);
     snooze(500);
     uint32 clkStatus = SM750_REG32(SM750_SYS_CUR_CLK_STATUS);
-    dprintf("SM750: Clock Status iniziale: 0x%08" B_PRIx32 "\n", clkStatus);
+    dprintf("SM750: Clock Status: 0x%08" B_PRIx32 "\n", clkStatus);
 
     if (!(clkStatus & (1 << 8))) {
     	// --- 1. SETTAGGIO POWER MODE 0 ---
-        dprintf("SM750: I2C Clock spento! Lo abilito nei Power Mode 0 e 1...\n");
+        dprintf("SM750: Spengo I2C Clock perché buggato! Abilito GPIO nei Power Mode 0 e 1...\n");
         uint32 mode0 = SM750_REG32(SM750_SYS_PWR_MODE_0_CLKC);
         //mode0 |= (1 << 8); // I2C Clock // BUGGATO
         mode0 &= ~(1 << 8); // I2C Clock OFF
@@ -57,14 +58,43 @@ sm750_get_clocks(vuint32 *regs, shared_info *si)
         SM750_WREG32(SM750_SYS_PWR_MODE_1_CLKC, mode1);
     }
     snooze(1000);
-
-    clkStatus = SM750_REG32(SM750_SYS_CUR_CLK_STATUS);
-    dprintf("SM750: Verifica valore Clock Status finale: 0x%08" B_PRIx32 "\n", clkStatus);
-
     // Salviamo la frequenza di riferimento (24MHz)
-    si->card_info.f_ref = 24.0f; 
+    //si->card_info.f_ref = 24.0f; 
+    // sembra che la frequenza di riferimento sia 14.31818f
+    //si->card_info.f_ref = 14.31818f; // già impostato prima...
 }
 
+static void populate_default_modes(shared_info* si) {
+    uint32 count = 0;
+    
+    // Usiamo la nostra tabella vesa_dmt_table creata prima
+    for (int i = 0; vesa_dmt_table[i].width != 0 && count < MAX_EDID_MODES; i++) {
+        display_mode* dm = &si->mode_list[count];
+        const vesa_timing_t* vesa = &vesa_dmt_table[i];
+
+        dm->timing.pixel_clock = vesa->pixel_clock;
+        dm->timing.h_display    = vesa->width;
+        dm->timing.h_sync_start = vesa->h_sync_start;
+        dm->timing.h_sync_end   = vesa->h_sync_end;
+        dm->timing.h_total      = vesa->h_total;
+        
+        dm->timing.v_display    = vesa->height;
+        dm->timing.v_sync_start = vesa->v_sync_start;
+        dm->timing.v_sync_end   = vesa->v_sync_end;
+        dm->timing.v_total      = vesa->v_total;
+        dm->timing.flags        = vesa->flags;
+        
+        dm->space = B_RGB32;
+        dm->virtual_width  = vesa->width;
+        dm->virtual_height = vesa->height;
+        dm->h_display_start = 0;
+        dm->v_display_start = 0;
+        dm->flags = 0;
+
+        count++;
+    }
+    si->mode_count = count;
+}
 /* --- sm750_init_chip --- */
 void sm750_init_chip(DeviceInfo *di) {
     if (!di || !di->regs) return;
@@ -127,8 +157,14 @@ void sm750_init_chip(DeviceInfo *di) {
     // Assicuriamoci che:
     // 1. Il bit 6 (Rst) sia a 1 (Normal Operation)
     // 2. Il bit 0 (E) sia a 0 (Enable local memory)
+    // 3. Forza RA (bit 5) a 0 per tenere le pagine attive (Performance UP)
+    misc_ctrl &= ~(1 << 5);
     misc_ctrl |= (1 << 6);  // Forza Normal Mode
     misc_ctrl &= ~(1 << 0); // Forza Enable Memory
+    // 2. Prova a allentare il refresh (bit 26:25) da 00 a 01 
+    // (Refresh ogni 16x100 invece di 8x100)
+    misc_ctrl &= ~(3 << 25);
+    misc_ctrl |= (1 << 25);
     SM750_WREG32(SM750_SYS_MISC_CTRL, misc_ctrl); // 0x000004
     dprintf("SM750: Miscellaneous Control (0x04) stabilizzato a: 0x%08x\n", misc_ctrl);
     
@@ -178,63 +214,71 @@ void sm750_init_chip(DeviceInfo *di) {
     */
     
     si->card_info.chip_id = di->pci.device_id;
-    si->card_info.f_ref = 24.0f;
+    si->card_info.f_ref = 14.31818f; //24.0f; sembra sia 14.318 da datasheet vecchio valore NTSC
     si->card_info.max_sclk = 130000; // Valori tipici SM750 (130MHz)
     si->card_info.max_mclk = 150000; // 150MHz
     si->card_info.max_pclk = 300000; // 300MHz (Limite DAC)
     
     
-// --- INIZIO RUBERIA RISOLUZIONE BIOS ---
+    // 1. DIAGNOSTICA PCI/BOOT (Solo log)
     
-    uint32 h_ta_reg = SM750_REG32(SM750_CRT_H_TOTAL_ACTIVE);
-    uint32 h_s_reg  = SM750_REG32(SM750_CRT_H_SYNC);
-    uint32 v_ta_reg = SM750_REG32(SM750_CRT_V_TOTAL_ACTIVE);
-    uint32 v_s_reg  = SM750_REG32(SM750_CRT_V_SYNC);
+    struct frame_buffer_boot_info* bi = (struct frame_buffer_boot_info*)get_boot_item(FRAME_BUFFER_BOOT_INFO, NULL);
+    if (bi) {
+        //dprintf("SM750: VESA FB a 0x%" B_PRIx64 ", %" B_PRId32 "x%" B_PRId32 "\n", 
+        //        (uint64)bi->physical_frame_buffer, bi->width, bi->height);
+        dprintf("SM750: Bootloader indica %ux%u\n", bi->width, bi->height);
+        display_mode *dm = si->card_info.is_panel ? &si->preferred_mode : &si->preferred_mode2;
+        bool found = false;
 
-    // Estrai i valori secondo il datasheet
-    uint16 h_active = (uint16)((h_ta_reg & 0xFFF) + 1);
-    uint16 h_total  = (uint16)(((h_ta_reg >> 16) & 0xFFF) + 1);
-    uint16 h_sync_start = (uint16)((h_s_reg & 0xFFF) + 1);
-    uint8  h_sync_width = (uint8)((h_s_reg >> 16) & 0xFF);
-
-    uint16 v_active = (uint16)((v_ta_reg & 0x7FF) + 1);
-    uint16 v_total  = (uint16)(((v_ta_reg >> 16) & 0x7FF) + 1);
-    uint16 v_sync_start = (uint16)((v_s_reg & 0x7FF) + 1);
-    uint8  v_sync_height = (uint8)((v_s_reg >> 16) & 0x3F);
+        for (int i = 0; vesa_dmt_table[i].width != 0; i++) {
+            if (vesa_dmt_table[i].width == bi->width && vesa_dmt_table[i].height == bi->height) {
+                dprintf("SM750: Trovato timing VESA DMT per %ux%u\n", bi->width, bi->height);
+            
+                dm->timing.pixel_clock = vesa_dmt_table[i].pixel_clock;
+                dm->timing.h_display    = vesa_dmt_table[i].width;
+                dm->timing.h_sync_start = vesa_dmt_table[i].h_sync_start;
+                dm->timing.h_sync_end   = vesa_dmt_table[i].h_sync_end;
+                dm->timing.h_total      = vesa_dmt_table[i].h_total;
+            
+                dm->timing.v_display    = vesa_dmt_table[i].height;
+                dm->timing.v_sync_start = vesa_dmt_table[i].v_sync_start;
+                dm->timing.v_sync_end   = vesa_dmt_table[i].v_sync_end;
+                dm->timing.v_total      = vesa_dmt_table[i].v_total;
+                dm->timing.flags        = vesa_dmt_table[i].flags;
+            
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            dprintf("SM750: ATTENZIONE! Risoluzione boot non in tabella. Uso fallback 1024x768\n");
+            // Qui puoi mettere il codice per la 1024x768 come visto prima
+            dm->timing.pixel_clock = 65000;
+            dm->timing.h_display    = 1024;
+            dm->timing.h_sync_start = 1048;
+            dm->timing.h_sync_end   = 1184;
+            dm->timing.h_total      = 1344;
     
-    display_mode *dm = si->card_info.is_panel ? &si->preferred_mode : &si->preferred_mode2;
-
-    // Popola la struttura display_mode di Haiku
-    dm->timing.h_display    = h_active;
-    dm->timing.h_sync_start = h_sync_start;
-    dm->timing.h_sync_end   = (uint16)(h_sync_start + h_sync_width);
-    dm->timing.h_total      = h_total;
-
-    dm->timing.v_display    = v_active;
-    dm->timing.v_sync_start = v_sync_start;
-    dm->timing.v_sync_end   = (uint16)(v_sync_start + v_sync_height);
-    dm->timing.v_total      = v_total;
-
-    // 60Hz standard in kHz
-    dm->timing.pixel_clock = (uint32)((h_total * v_total * 60) / 1000);
-    dm->timing.flags = B_POSITIVE_HSYNC | B_POSITIVE_VSYNC;
-
-    dm->space = B_RGB32;
-    dm->virtual_width  = h_active;
-    dm->virtual_height = v_active;
-    dm->h_display_start = 0;
-    dm->v_display_start = 0;
-    dm->flags = B_POSITIVE_HSYNC | B_POSITIVE_VSYNC;
-
-    dprintf("SM750: BIOS Mode Rilevata: %ux%u @ 60Hz\n", h_active, v_active);
-    dprintf("SM750: Timing -> H: %u/%u/%u/%u V: %u/%u/%u/%u\n",
-        h_active, h_sync_start, dm->timing.h_sync_end, h_total,
-        v_active, v_sync_start, dm->timing.v_sync_end, v_total);
-
-// ---- fine ruberia risoluzione BIOS -----
-
-
+            dm->timing.v_display    = 768;
+            dm->timing.v_sync_start = 771;
+            dm->timing.v_sync_end   = 777;
+            dm->timing.v_total      = 806;
+            dm->timing.flags        = 0; // Standard 1024x768 usa sync negativi di solito
     
+            dm->virtual_width = 1024;
+            dm->virtual_height = 768;
+            dm->h_display_start = 0;
+            dm->v_display_start = 0;
+        }
+    
+        // Altri parametri obbligatori
+        dm->space = B_RGB32;
+        dm->virtual_width = dm->timing.h_display;
+        dm->virtual_height = dm->timing.v_display;
+    }
+    
+    populate_default_modes(si);
+
     
     // F. VGA BYPASS (Necessario per usare il Framebuffer lineare in modo nativo)
     // Abilitiamo il bypass VGA su entrambe le pipe (Primary e Secondary)
@@ -317,13 +361,6 @@ void sm750_init_chip(DeviceInfo *di) {
         kfb[i] = 0xFFFF0000;
     }
     snooze(1500000); // 1.5 secondi di gloria
-
-    // 1. DIAGNOSTICA PCI/BOOT (Solo log)
-    struct frame_buffer_boot_info* bi = (struct frame_buffer_boot_info*)get_boot_item(FRAME_BUFFER_BOOT_INFO, NULL);
-    if (bi) {
-        dprintf("SM750: VESA FB a 0x%" B_PRIx64 ", %" B_PRId32 "x%" B_PRId32 "\n", 
-                (uint64)bi->physical_frame_buffer, bi->width, bi->height);
-    }
 
     //dprintf("SM750: Inizializzazione completata.\n");
 }
