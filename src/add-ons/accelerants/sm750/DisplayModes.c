@@ -142,8 +142,8 @@ create_mode_list_from_edid(uint8* raw_buffer)
     return B_OK;
 }
 
-void
-sm750_set_crt_pitch(uint32 pitch)
+static void
+sm750_set_pitch(uint32 pitch, bool is_panel)
 {
 	vuint32 *regs = gInfo->regs;
     // pitch è in BYTES (es. 4096 per 1024x768x32)
@@ -155,15 +155,15 @@ sm750_set_crt_pitch(uint32 pitch)
     // I bit 19:16 e 3:0 sono Hardwired a 0, quindi lo shift deve essere preciso.
     
     uint32 reg_val = (aligned_val << 20) | (aligned_val << 4);
-    
-    SM750_WREG32(SM750_DISP_CRT_FB_WIDTH, reg_val);
+    uint32 reg_offset = is_panel ? SM750_DISP_PANEL_FB_WIDTH : SM750_DISP_CRT_FB_WIDTH ;
+    SM750_WREG32(reg_offset, reg_val);
     
     debug_printf("SM750_ACC: Pitch Bytes %u -> Valore Allineato 0x%X\n", pitch, aligned_val);
     debug_printf("SM750_ACC: Scrittura Registro 0x80208: 0x%08X\n", reg_val);
 }
 
 status_t
-sm750_set_crt_fb_addr(uint32 offset)
+sm750_set_fb_addr(uint32 offset, bool is_panel)
 {
 	vuint32 *regs = gInfo->regs;
 	
@@ -195,14 +195,13 @@ sm750_set_crt_fb_addr(uint32 offset)
     // - Bit 3:0 = 0 (Hardwired)
     uint32 reg_val = (offset & 0x03FFFFF0);
 
-    SM750_WREG32(SM750_DISP_CRT_FB_ADDR, reg_val);
+    uint32 reg_offset = is_panel ? SM750_DISP_PANEL_FB_ADDR : SM750_DISP_CRT_FB_ADDR ;
+    SM750_WREG32(reg_offset, reg_val);
     
-    debug_printf("SM750_ACC: CRT FB Address impostato a: 0x%08x (Reg: 0x%08x)\n", offset, reg_val);
+    debug_printf("SM750_ACC: %s FB Address impostato a: 0x%08x (Reg: 0x%08x)\n", is_panel ? "PANEL": "CRT" ,offset, reg_val);
     return B_OK;
 }
-
-void
-sm750_set_crt_h_timing(uint32 total, uint32 active)
+static void sm750_set_h_timing(uint32 total, uint32 active, bool is_panel)
 {
 	vuint32 *regs = gInfo->regs;
 	// Struttura registro:
@@ -211,11 +210,11 @@ sm750_set_crt_h_timing(uint32 total, uint32 active)
     // I bit 31:28 e 15:12 devono rimanere 0 (Reserved)
     uint32 val = (( (total - 1)  & 0x0FFF) << 16) | 
                  (( (active - 1) & 0x0FFF));
-    SM750_WREG32(SM750_CRT_H_TOTAL_ACTIVE, val);
+    uint32 reg_offset = is_panel ? SM750_PANEL_H_TOTAL_ACTIVE : SM750_CRT_H_TOTAL_ACTIVE ;
+    SM750_WREG32(reg_offset, val);
 }
 
-void
-sm750_set_crt_h_sync(uint32 start, uint32 end)
+static void sm750_set_h_sync(uint32 start, uint32 end, bool is_panel)
 {
 	vuint32 *regs = gInfo->regs;
 	// Struttura registro:
@@ -224,11 +223,12 @@ sm750_set_crt_h_sync(uint32 start, uint32 end)
     // Bit 31:24 e 15:12 devono rimanere 0 (Reserved)
     uint32 width = (end - start) & 0x00FF;
     uint32 val = (width << 16) | ((start - 1) & 0x0FFF);
-    SM750_WREG32(SM750_CRT_H_SYNC, val);
+    uint32 reg_offset = is_panel ? SM750_PANEL_H_SYNC : SM750_CRT_H_SYNC ;
+    SM750_WREG32(reg_offset, val);
 }
 
-void
-sm750_set_crt_v_timing(uint32 total, uint32 active)
+
+static void sm750_set_v_timing(uint32 total, uint32 active, bool is_panel)
 {
 	vuint32 *regs = gInfo->regs;
 	// Struttura registro
@@ -237,11 +237,11 @@ sm750_set_crt_v_timing(uint32 total, uint32 active)
     // Bit 31:27 e 15:11 devono rimanere 0 (Reserved)
     uint32 val = (( (total - 1)  & 0x07FF) << 16) | 
                  (( (active - 1) & 0x07FF));
-    SM750_WREG32(SM750_CRT_V_TOTAL_ACTIVE, val);
+    uint32 reg_offset = is_panel ? SM750_PANEL_V_TOTAL_ACTIVE : SM750_CRT_V_TOTAL_ACTIVE ;
+    SM750_WREG32(reg_offset, val);
 }
 
-void
-sm750_set_crt_v_sync(uint32 start, uint32 end)
+static void sm750_set_v_sync(uint32 start, uint32 end, bool is_panel)
 {
 	vuint32 *regs = gInfo->regs;
 	// Struttura registro
@@ -250,8 +250,10 @@ sm750_set_crt_v_sync(uint32 start, uint32 end)
     // Bit 31:22 e 15:11 devono rimanere 0 (Reserved)
     uint32 height = (end - start) & 0x003F;
     uint32 val = (height << 16) | ((start - 1) & 0x07FF);
-    SM750_WREG32(SM750_CRT_V_SYNC, val);
+    uint32 reg_offset = is_panel ? SM750_PANEL_V_SYNC : SM750_CRT_V_SYNC ;
+    SM750_WREG32(reg_offset, val);
 }
+
 // In sm750_accelerant.c (o dove hai i puntatori alle funzioni)
 status_t
 sm750_get_preferred_mode(display_mode* mode)
@@ -292,7 +294,7 @@ sm750_set_display_mode(display_mode *mode)
         pm->timing.h_display, pm->timing.v_display);
     
     uint32 bpp = (mode->space == B_RGB32) ? 32 : 16;
-    uint32 color_fmt = (mode->space == B_RGB32) ? 2 : 1; // 2=32bpp, 1=16bpp
+    //uint32 color_fmt = (mode->space == B_RGB32) ? 2 : 1; // 2=32bpp, 1=16bpp
     //uint32 pitch = mode->timing.h_display * (bpp / 8);
     // 2. Usiamo virtual_width per il Pitch (la memoria reale)
     // Se h_display è 1024 ma virtual_width è 1024, il risultato non cambia.
@@ -307,112 +309,77 @@ sm750_set_display_mode(display_mode *mode)
     debug_printf("SM750_ACC: programmazione pll...\n");
     debug_printf("SM750_ACC: preferred mode pixel clock is %u:\n",pm->timing.pixel_clock);
     debug_printf("SM750_ACC: preferred mode richiesto a sm750_set_display_mode %u:\n",mode->timing.pixel_clock);
-    uint32 target_clock = mode->timing.pixel_clock;
+    //uint32 target_clock = mode->timing.pixel_clock;
 
+    // Non è questo a generare rumore ma i 2 pll impostati diversamente e il ramo inusato di panel/crt attivo
     // 2. Se è il valore "GTF" per la 1280x1024, riportalo alla "Verità" VESA
-    if (target_clock == 107964 || (target_clock > 107900 && target_clock < 108100)) {
-    	debug_printf("SM750_ACC: Rilevato clock GTF (%u), forzo a 108000 VESA DMT\n", target_clock);
-        mode->timing.pixel_clock = 108000;
-    }
+    //if (target_clock == 107964 || (target_clock > 107900 && target_clock < 108100)) {
+    //	debug_printf("SM750_ACC: Rilevato clock GTF (%u), forzo a 108000 VESA DMT\n", target_clock);
+    //    mode->timing.pixel_clock = 108000;
+    //}
     
     sm750_program_pll(mode->timing.pixel_clock, si->card_info.is_panel);
     debug_printf("SM750_ACC: programmazione pll effettuata\n");
-
-    if (si->card_info.is_panel) {
-    	// da rivedere in toto, vedi crt, maschere varie
-        // --- PRIMARY (PANEL) ---
-        debug_printf("SM750_ACC: impostazione timings per PANEL...\n");
-        SM750_WREG32(SM750_PANEL_H_TOTAL_ACTIVE, ((mode->timing.h_total - 1) << 16) | (mode->timing.h_display - 1));
-        SM750_WREG32(SM750_PANEL_H_SYNC, ((mode->timing.h_sync_end - mode->timing.h_sync_start) << 16) | (mode->timing.h_sync_start - 1));
-        SM750_WREG32(SM750_PANEL_V_TOTAL_ACTIVE, ((mode->timing.v_total - 1) << 16) | (mode->timing.v_display - 1));
-        SM750_WREG32(SM750_PANEL_V_SYNC, ((mode->timing.v_sync_end - mode->timing.v_sync_start) << 16) | (mode->timing.v_sync_start - 1));
-
-        debug_printf("SM750_ACC: impostazione PANEL_FB_ADDR a 0...\n");
-        SM750_WREG32(SM750_DISP_PANEL_FB_ADDR, 0); 
-        debug_printf("SM750_ACC: impostazione larghezza FB PANEL...\n");
-        SM750_WREG32(SM750_DISP_PANEL_FB_WIDTH, (pitch << 16) | pitch);
-
-        // Controllo: Enable + Timing Enable + Format
-        uint32 ctrl = (1 << 0) | (1 << 2) | (color_fmt << 13);
-        if (!(mode->timing.flags & B_POSITIVE_HSYNC)) ctrl |= (1 << 3);
-        if (!(mode->timing.flags & B_POSITIVE_VSYNC)) ctrl |= (1 << 4);
-
-        debug_printf("SM750_ACC: Scrittura sul registro di controllo di PANEL...\n");
-        SM750_WREG32(SM750_PANEL_CONTROL, ctrl);
-        debug_printf("SM750_ACC: Scrittura completata su registro di controllo di PANEL...\n");
-    } else {
-    	// logorroic mode
-    	// Calcolo polarità
-    	// --- CRT (Secondary Display) ---
-        bool h_pos = (mode->timing.flags & B_POSITIVE_HSYNC);
-        bool v_pos = (mode->timing.flags & B_POSITIVE_VSYNC);
-
-        debug_printf("SM750_ACC: Setup CRT %dx%d (%d bpp)\n", mode->timing.h_display, mode->timing.v_display, bpp);
-
-        // 1. Timings Orizzontali
-        debug_printf("SM750_DEBUG: H_Total: %d, H_Disp: %d, H_SyncStart: %d, H_SyncEnd: %d\n",
+    bool isPanel = si->card_info.is_panel;
+    
+    bool h_pos = (mode->timing.flags & B_POSITIVE_HSYNC);
+    bool v_pos = (mode->timing.flags & B_POSITIVE_VSYNC);
+    
+    sm750_set_h_timing(mode->timing.h_total, mode->timing.h_display, isPanel);
+    sm750_set_h_sync(mode->timing.h_sync_start, mode->timing.h_sync_end, isPanel);
+    sm750_set_v_timing(mode->timing.v_total, mode->timing.v_display, isPanel);
+    sm750_set_v_sync(mode->timing.v_sync_start, mode->timing.v_sync_end, isPanel);
+    debug_printf("SM750_ACC: Setup %s %dx%d (%d bpp)\n", isPanel ? "PANEL" : "CRT", mode->timing.h_display, mode->timing.v_display, bpp);
+    debug_printf("SM750_DEBUG: H_Total: %d, H_Disp: %d, H_SyncStart: %d, H_SyncEnd: %d\n",
             mode->timing.h_total, mode->timing.h_display, 
             mode->timing.h_sync_start, mode->timing.h_sync_end);
-        
-        sm750_set_crt_h_timing(mode->timing.h_total, mode->timing.h_display);
-        
-        sm750_set_crt_h_sync(mode->timing.h_sync_start, mode->timing.h_sync_end);
-
-        // 2. Timings Verticali
-        debug_printf("SM750_DEBUG: V_Total: %d, V_Disp: %d, V_SyncStart: %d, V_SyncEnd: %d\n",
+    debug_printf("SM750_DEBUG: V_Total: %d, V_Disp: %d, V_SyncStart: %d, V_SyncEnd: %d\n",
             mode->timing.v_total, mode->timing.v_display, 
             mode->timing.v_sync_start, mode->timing.v_sync_end);
-        
-        sm750_set_crt_v_timing(mode->timing.v_total, mode->timing.v_display);
-        
-        sm750_set_crt_v_sync(mode->timing.v_sync_start, mode->timing.v_sync_end);
+    // Puntiamo allo 0 fisico (inizio memoria video)
+    // S (Bit 31): Read-only status (Flip pending). Lo scriviamo a 0.
+    // Ext (Bit 27): Memory Selection. Deve essere 0 per Local Memory.
+    // Address (Bit 25:4): Indirizzo fisico allineato a 128-bit.
+    // Bit 3:0: Hardwired a 0.
+    // usiamo la funzione helper
+    sm750_set_fb_addr(0, isPanel);
+    // Pitch e Window Width (Registro 0x080208) - USA L'HELPER!
+    sm750_set_pitch(pitch, isPanel);
+    
+    uint32 ctrl = 0;
+    // Formato (Bit 1:0) -> 10 per 32bpp, 01 per 16bpp
+    if (mode->space == B_RGB32) 
+        ctrl |= 0x2; 
+    else 
+        ctrl |= 0x1;
+    //Abilita il piano grafico (Bit 2)
+    ctrl |= (1 << 2);
+    //Abilita i Timings (Bit 8) -> FONDAMENTALE per non avere schermo nero
+    ctrl |= (1 << 8);
+    // 4. Blanking (Bit 10) -> Deve essere 0 per mostrare i pixel. Lo è già.
+    // 5. Polarità Sync (Bit 12 HSP, Bit 13 VSP)
+    // Nota: Il datasheet dice 0=High, 1=Low. 
+    // Haiku B_POSITIVE_HSYNC significa che vogliamo High (quindi bit a 0).
+    if (!h_pos) ctrl |= (1 << 12);
+    if (!v_pos) ctrl |= (1 << 13);
 
-        // 3. Framebuffer Address (Registro 0x080204)
-        // Puntiamo allo 0 fisico (inizio memoria video)
-        // S (Bit 31): Read-only status (Flip pending). Lo scriviamo a 0.
-        // Ext (Bit 27): Memory Selection. Deve essere 0 per Local Memory.
-        // Address (Bit 25:4): Indirizzo fisico allineato a 128-bit.
-        // Bit 3:0: Hardwired a 0.
-        // Se vogliamo l'inizio della memoria (offset 0), il calcolo è semplice.
-        // Se volessimo un offset, dovremmo assicurarci che sia multiplo di 16.
-        //uint32 fb_offset = 0; // Inizio della VRAM locale
-        // Puliamo l'indirizzo per sicurezza (anche se 0 è già pulito)
-        // Mascheriamo per assicurarci di non toccare i bit Reserved o il bit Ext
-        //uint32 fb_addr_val = (fb_offset & 0x03FFFFF0); 
-        //SM750_WREG32(SM750_DISP_CRT_FB_ADDR, fb_addr_val);
-        // usiamo la funzione helper
-        sm750_set_crt_fb_addr(0);
-
-        // 4. Pitch e Window Width (Registro 0x080208) - USA L'HELPER!
-        sm750_set_crt_pitch(pitch);
-
-        // 5. Registro di Controllo CRT (0x080200)
-        uint32 ctrl = 0;
-        // 1. Formato (Bit 1:0) -> 10 per 32bpp, 01 per 16bpp
-        if (mode->space == B_RGB32) 
-            ctrl |= 0x2; 
-        else 
-            ctrl |= 0x1;
-        // 2. Abilita il piano grafico (Bit 2)
-        ctrl |= (1 << 2); 
-        // 3. Abilita i Timings (Bit 8) -> FONDAMENTALE per non avere schermo nero
-        ctrl |= (1 << 8);
-        // 4. Blanking (Bit 10) -> Deve essere 0 per mostrare i pixel. Lo è già.
-        // 5. Polarità Sync (Bit 12 HSP, Bit 13 VSP)
-        // Nota: Il datasheet dice 0=High, 1=Low. 
-        // Haiku B_POSITIVE_HSYNC significa che vogliamo High (quindi bit a 0).
-        if (!h_pos) ctrl |= (1 << 12);
-        if (!v_pos) ctrl |= (1 << 13);
-        // 6. Data Select (Bit 19:18) -> Vogliamo CRT Data (10)
+    if (isPanel) {
+    	// Registro di Controllo PANEL (0x080000)
+        // Bit di alimentazione LCD
+        ctrl |= (1 << 24) | (1 << 25) | (1 << 26) | (1 << 27); 
+        debug_printf("SM750_ACC: Scrittura sul registro di controllo di PANEL: 0x%08x\n", ctrl);
+        SM750_WREG32(SM750_PANEL_CONTROL, ctrl);
+        debug_printf("SM750_ACC: --- FINE SETUP PANEL ---\n");
+    } else {
+        // Registro di Controllo CRT (0x080200)
+        // Data Select (Bit 19:18) -> Vogliamo CRT Data (10)
         ctrl |= (2 << 18);
         // 7. VGA Data Shift (Bit 26) -> Di solito 0 (Enable)
         // ctrl |= (0 << 26);
-
-        debug_printf("SM750_ACC: Writing CRT_CONTROL: 0x%08x\n", ctrl);
+        debug_printf("SM750_ACC: Scrittura sul registro di controllo del CRT: 0x%08x\n", ctrl);
         SM750_WREG32(SM750_CRT_CONTROL, ctrl);
     	debug_printf("SM750_ACC: --- FINE SETUP CRT ---\n");
     }
-    
 
     si->dm = *mode;
     
