@@ -118,6 +118,8 @@
 /* Display PLL */
 #define SM750_DISP_PANEL_PLL         0x0000005C // Primary Display PLL
 #define SM750_DISP_CRT_PLL           0x00000060 // Secondary Display PLL
+#define SM750_DISP_VGA_PLL_0         0x00000064 // Secondary Display PLL
+#define SM750_DISP_VGA_PLL_1         0x00000068 // Secondary Display PLL
 
 /* --- PANEL (Primary) --- */
 #define SM750_DISP_PANEL_FB_ADDR     0x0008000C // Primary Display FB Address
