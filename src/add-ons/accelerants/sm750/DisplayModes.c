@@ -96,57 +96,50 @@ create_mode_list_from_edid(uint8* raw_buffer)
 {
     shared_info *si = gInfo->si;
     edid1_info info;
-    
-    debug_printf("SM750_ACC: EDID Raw Header: %02x %02x %02x %02x %02x %02x %02x %02x\n",
-        raw_buffer[0], raw_buffer[1], raw_buffer[2], raw_buffer[3],
-        raw_buffer[4], raw_buffer[5], raw_buffer[6], raw_buffer[7]);
+    display_mode edid_modes[MAX_EDID_MODES];
+    uint32 edid_count = 0;
     
     edid_decode(&info, (edid1_raw*)raw_buffer);
-    si->mode_count = 0;
 
-    // 1. Cerchiamo i Detailed Timings
+    // 1. Estraiamo i timing in una lista temporanea
     for (int i = 0; i < EDID1_NUM_DETAILED_MONITOR_DESC; i++) {
-    	debug_printf("SM750_ACC: Descriptor %d type: 0x%02x\n", i, info.detailed_monitor[i].monitor_desc_type);
         if (info.detailed_monitor[i].monitor_desc_type == EDID1_IS_DETAILED_TIMING) {
+            display_mode *m = &edid_modes[edid_count];
+            decode_detailed_timing(&info.detailed_monitor[i].data.detailed_timing, m);
             
-            display_mode *current_mode = &si->mode_list[si->mode_count];
-            
-            decode_detailed_timing(&info.detailed_monitor[i].data.detailed_timing, current_mode);
-            debug_printf("SM750_ACC: Trovato Detailed: %dx%d @ %d kHz\n", 
-                current_mode->timing.h_display, current_mode->timing.v_display, current_mode->timing.pixel_clock);
-            
-            // CHICCA: Se è il primo timing dettagliato ed è indicato come preferito
-            if (si->mode_count == 0 && info.display.preferred_timing_mode) {
-                // Salviamo questa come nostra "stella polare"
-                si->preferred_mode = *current_mode; 
-                debug_printf("SM750_ACC: Monitor nativo rilevato: %dx%d\n", 
-                             si->preferred_mode.timing.h_display, si->preferred_mode.timing.v_display);
-            }
+            // Impostiamo i parametri base Haiku
+            m->space = B_RGB32;
+            m->virtual_width = m->timing.h_display;
+            m->virtual_height = m->timing.v_display;
 
-            si->mode_count++;
-            if (si->mode_count >= MAX_EDID_MODES) break;
+            // Se è il primo ed è indicato come preferred, aggiorniamo la stella polare corretta
+            if (edid_count == 0 && info.display.preferred_timing_mode) {
+                if (si->card_info.is_panel) {
+                    si->preferred_mode = *m;
+                    debug_printf("SM750_ACC: Preferred Panel aggiornata da EDID\n");
+                } else {
+                    si->preferred_mode2 = *m;
+                    debug_printf("SM750_ACC: Preferred CRT aggiornata da EDID\n");
+                }
+            }
+            edid_count++;
+            if (edid_count >= MAX_EDID_MODES) break;
         }
     }
 
-    // 2. Se non abbiamo trovato nulla di "Detailed", aggiungiamo 
-    // i classici Established Timings (640x480, 800x600, 1024x768) come fallback
-    // (opzionale, ma consigliato per monitor molto vecchi)
-    if (si->mode_count == 0) {
-        debug_printf("SM750_ACC: EDID vuoto/invalido. Iniezione fallback 1024x768...\n");
-        
-        display_mode safe_mode = {
-            { 65000, 1024, 1048, 1184, 1344, 768, 771, 777, 806, 0 },
-            B_RGB32, 1024, 768, 0, 0
-        };
-        safe_mode.timing.flags = B_POSITIVE_HSYNC | B_POSITIVE_VSYNC;
-        
-        si->mode_list[0] = safe_mode;
-        si->preferred_mode = safe_mode;
-        si->mode_count = 1;
+    // 2. AZZERAMENTO E SOSTITUZIONE: Solo se abbiamo trovato effettivamente dei modi validi
+    if (edid_count > 0) {
+        debug_printf("SM750_ACC: EDID ha prodotto %d modi. Sostituisco i default.\n", edid_count);
+        si->mode_count = edid_count;
+        for (uint32 j = 0; j < edid_count; j++) {
+            si->mode_list[j] = edid_modes[j];
+        }
+    } else {
+        debug_printf("SM750_ACC: EDID letto ma nessun timing dettagliato. Mantengo i default.\n");
+        return B_ERROR; // Così InitAccelerant sa che non ha aggiornato la lista
     }
 
-    return B_OK; // Ritorniamo sempre OK perché abbiamo almeno il fallback
-    //return (si->mode_count > 0) ? B_OK : B_ERROR;
+    return B_OK;
 }
 
 void
@@ -264,10 +257,11 @@ status_t
 sm750_get_preferred_mode(display_mode* mode)
 {
     shared_info *si = gInfo->si;
+    display_mode *preferred = si->card_info.is_panel ? &si->preferred_mode : &si->preferred_mode2;
 
     // Se abbiamo una modalità preferita valida dall'EDID
-    if (si->preferred_mode.timing.pixel_clock > 0) {
-        *mode = si->preferred_mode;
+    if (preferred->timing.pixel_clock > 0 && preferred->timing.h_display > 10) {
+        *mode = *preferred;
         return B_OK;
     }
 
@@ -292,9 +286,10 @@ sm750_set_display_mode(display_mode *mode)
     debug_printf("SM750_ACC:  - Target Timing: %dx%d\n", mode->timing.h_display, mode->timing.v_display);
     debug_printf("SM750_ACC:  - Target Virtual: %dx%d\n", mode->virtual_width, mode->virtual_height);
     
+    display_mode *pm = si->card_info.is_panel ? &si->preferred_mode : &si->preferred_mode2;
     // Vediamo cosa abbiamo in memoria come fallback/preferito
     debug_printf("SM750_ACC:  - In shared_info preferred: %dx%d\n", 
-        si->preferred_mode.timing.h_display, si->preferred_mode.timing.v_display);
+        pm->timing.h_display, pm->timing.v_display);
     
     uint32 bpp = (mode->space == B_RGB32) ? 32 : 16;
     uint32 color_fmt = (mode->space == B_RGB32) ? 2 : 1; // 2=32bpp, 1=16bpp
@@ -310,10 +305,21 @@ sm750_set_display_mode(display_mode *mode)
     
     // 1. Programmiamo il Clock (PLL)
     debug_printf("SM750_ACC: programmazione pll...\n");
+    debug_printf("SM750_ACC: preferred mode pixel clock is %u:\n",pm->timing.pixel_clock);
+    debug_printf("SM750_ACC: preferred mode richiesto a sm750_set_display_mode %u:\n",mode->timing.pixel_clock);
+    uint32 target_clock = mode->timing.pixel_clock;
+
+    // 2. Se è il valore "GTF" per la 1280x1024, riportalo alla "Verità" VESA
+    if (target_clock == 107964 || (target_clock > 107900 && target_clock < 108100)) {
+    	debug_printf("SM750_ACC: Rilevato clock GTF (%u), forzo a 108000 VESA DMT\n", target_clock);
+        mode->timing.pixel_clock = 108000;
+    }
+    
     sm750_program_pll(mode->timing.pixel_clock, si->card_info.is_panel);
     debug_printf("SM750_ACC: programmazione pll effettuata\n");
 
     if (si->card_info.is_panel) {
+    	// da rivedere in toto, vedi crt, maschere varie
         // --- PRIMARY (PANEL) ---
         debug_printf("SM750_ACC: impostazione timings per PANEL...\n");
         SM750_WREG32(SM750_PANEL_H_TOTAL_ACTIVE, ((mode->timing.h_total - 1) << 16) | (mode->timing.h_display - 1));
@@ -335,7 +341,7 @@ sm750_set_display_mode(display_mode *mode)
         SM750_WREG32(SM750_PANEL_CONTROL, ctrl);
         debug_printf("SM750_ACC: Scrittura completata su registro di controllo di PANEL...\n");
     } else {
-    	/* logorroic mode */
+    	// logorroic mode
     	// Calcolo polarità
     	// --- CRT (Secondary Display) ---
         bool h_pos = (mode->timing.flags & B_POSITIVE_HSYNC);
@@ -406,6 +412,7 @@ sm750_set_display_mode(display_mode *mode)
         SM750_WREG32(SM750_CRT_CONTROL, ctrl);
     	debug_printf("SM750_ACC: --- FINE SETUP CRT ---\n");
     }
+    
 
     si->dm = *mode;
     
@@ -470,8 +477,6 @@ sm750_propose_display_mode(display_mode *target, const display_mode *low, const 
 }*/
 
 uint32 sm750_accelerant_mode_count(void) {
-    // In produzione qui contiamo i modi validati dall'EDID
-    //return 1; // Proviamo con 1 solo modo per testare la stabilità
     return gInfo->si->mode_count;
 }
 /* for test
@@ -496,10 +501,26 @@ sm750_get_mode_list(display_mode* dm) {
 status_t 
 sm750_get_mode_list(display_mode* dm) 
 {
-    if (gInfo->si->mode_count == 0) return B_ERROR;
+    //if (gInfo->si->mode_count == 0) return B_ERROR;
+    shared_info *si = gInfo->si;
+    
+    debug_printf("SM750_ACC: get_mode_list chiamata. mode_count = %u\n", si->mode_count);
+    
+    if (si->mode_count == 0) {
+        debug_printf("SM750_ACC: ERROR - Nessun modo trovato in shared_info!\n");
+        return B_ERROR;
+    }
+    // Vediamo cosa c'è nel primo modo prima di copiare
+    debug_printf("SM750_ACC: Modo[0] prima di memcpy: %ux%u @ %.2f Hz, Clock: %u\n", 
+        si->mode_list[0].timing.h_display, 
+        si->mode_list[0].timing.v_display,
+        (float)si->mode_list[0].timing.pixel_clock * 1000 / 
+        ((uint32)si->mode_list[0].timing.h_total * si->mode_list[0].timing.v_total),
+        si->mode_list[0].timing.pixel_clock);
     
     // Copiamo la nostra lista precostruita nell'array passato da Haiku
     memcpy(dm, gInfo->si->mode_list, gInfo->si->mode_count * sizeof(display_mode));
+    debug_printf("SM750_ACC: Memcpy effettuata con successo.\n");
     return B_OK;
 }
 
