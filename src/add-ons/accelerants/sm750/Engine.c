@@ -16,12 +16,13 @@
 #define CALLED() debug_printf("SM750_ACC: %s\n", __FUNCTION__)
 
 extern accelerant_info *gInfo;
-
+/* weeeee
 static status_t sm750_calc_pll(uint32 target_khz, uint32* out_M, uint32* out_N, uint32* out_OD)
 {
     uint32 M, N, OD_idx;
     uint32 best_M = 0, best_N = 0, best_OD_idx = 0;
-    float f_ref = 24.0f; // MHz
+    //float f_ref = 24.0f; // MHz //non dovresti inventarti tu la frequenza, leggi dalle shared info
+    float f_ref = gInfo->si->card_info.f_ref;
     float target = (float)target_khz / 1000.0f; // Convertiamo in MHz
     float min_diff = 1000.0f;
 
@@ -63,7 +64,109 @@ static status_t sm750_calc_pll(uint32 target_khz, uint32* out_M, uint32* out_N, 
     *out_OD = best_OD_idx; 
     
     return B_OK;
+}*/
+static status_t 
+sm750_calc_pll(uint32 target_khz, uint32* out_M, uint32* out_N, uint32* out_DIV)
+{
+    uint32 M, N, DIV_idx;
+    uint32 best_M = 0, best_N = 0, best_DIV = 1;
+    
+    // Usiamo il f_ref salvato (14.31818)
+    float f_ref = gInfo->si->card_info.f_ref; 
+    float target = (float)target_khz / 1000.0f; // MHz
+    float min_diff = 1000.0f;
+
+    // Divisori totali possibili (combinazioni di OD e POD)
+    uint32 possible_divisors[] = {1, 2, 4, 8, 16, 32, 64};
+    
+    for (DIV_idx = 0; DIV_idx < 7; DIV_idx++) {
+        uint32 div = possible_divisors[DIV_idx];
+        
+        for (N = 2; N <= 15; N++) {
+            // M = (Target * Div * N) / F_ref
+            M = (uint32)((target * (float)div * (float)N) / f_ref + 0.5f);
+            
+            if (M < 2 || M > 255) continue;
+
+            // VCO = F_ref * M / N
+            // Il range del VCO per SM750 è tipicamente 240-480 MHz
+            float vco = f_ref * ((float)M / (float)N);
+            if (vco < 240.0f || vco > 480.0f) continue;
+
+            float actual = vco / (float)div;
+            float diff = (actual > target) ? (actual - target) : (target - actual);
+
+            if (diff < min_diff) {
+                min_diff = diff;
+                best_M = M;
+                best_N = N;
+                best_DIV = div; // Restituiamo il divisore reale (es. 4, 8, 16...)
+            }
+            
+            if (diff < 0.001f) goto found; // Quasi perfetto
+        }
+    }
+
+found:
+    if (best_M == 0) return B_ERROR;
+
+    *out_M = best_M;
+    *out_N = best_N;
+    *out_DIV = best_DIV; 
+    
+    return B_OK;
 }
+
+
+/* versione pure integer:
+static status_t 
+sm750_calc_pll(uint32 target_khz, uint32* out_M, uint32* out_N, uint32* out_DIV)
+{
+    uint32 M, N, DIV;
+    uint32 best_M = 0, best_N = 0, best_DIV = 0;
+    NO ZIO BELLLO LEGGI LE INFO DI SHARED INFO uint32 f_ref = 24000; // 24 MHz in kHz
+    uint32 min_diff = 0xFFFFFFFF;
+
+    // Proviamo i divisori ammessi (1, 2, 4, 8, 16, 32, 64)
+    uint32 dividers[] = {1, 2, 4, 8, 16, 32, 64};
+
+    for (int d = 0; d < 7; d++) {
+        DIV = dividers[d];
+        for (N = 2; N <= 15; N++) {
+            // Calcolo M: (Target * N * DIV) / F_ref
+            M = (target_khz * N * DIV) / f_ref;
+
+            if (M < 2 || M > 255) continue;
+
+            // Controllo VCO (240MHz - 480MHz)
+            uint32 vco = (f_ref * M) / N;
+            if (vco < 240000 || vco > 480000) continue;
+
+            uint32 actual = vco / DIV;
+            uint32 diff = (actual > target_khz) ? (actual - target_khz) : (target_khz - actual);
+
+            if (diff < min_diff) {
+                min_diff = diff;
+                best_M = M;
+                best_N = N;
+                best_DIV = DIV;
+                if (diff == 0) break;
+            }
+        }
+        if (min_diff == 0) break;
+    }
+
+    if (best_M == 0) return B_ERROR;
+
+    *out_M = best_M;
+    *out_N = best_N;
+    *out_DIV = best_DIV; 
+    debug_printf("SM750_PLL: calc_pll produced M %u, N %u, DIV %u", best_M,best_N,best_DIV);
+    return B_OK;
+}*/
+
+
+
 /* versione sbagliata!!!
 void
 sm750_program_pll(uint32 target_khz, bool is_panel)
@@ -110,6 +213,8 @@ sm750_program_pll(uint32 target_khz, bool is_panel)
     debug_printf("SM750: PLL %s programmato a %" B_PRIu32 " kHz (Reg 0x%" B_PRIx32 ": 0x%08" B_PRIx32 ")\n", 
                  is_panel ? "PRI" : "SEC", target_khz, reg_offset, pll_reg);
 }*/
+
+/* wrong OD ?
 void
 sm750_program_pll(uint32 target_khz, bool is_panel)
 {
@@ -120,7 +225,7 @@ sm750_program_pll(uint32 target_khz, bool is_panel)
     
     // 1. Calcolo i parametri M, N e il divisore totale
     if (sm750_calc_pll(target_khz, &m, &n, &od_idx) != B_OK) {
-        debug_printf("SM750: Errore calcolo PLL per %u kHz\n", target_khz);
+        debug_printf("SM750: Errore calcolo PLL per %u kHz, m %u, n %u, od_idx %u\n", target_khz, m, n, od_idx);
         return;
     }
 
@@ -162,25 +267,68 @@ sm750_program_pll(uint32 target_khz, bool is_panel)
     debug_printf("SM750: Reg 0x%x = 0x%08x (M:%u N:%u Div:%u)\n", 
                  reg_offset, pll_reg, m, n, od_idx);
 }
-/* vecchia usa l'helper che allinea a 16byte
-status_t
-sm750_move_display_area(uint16 h_display_start, uint16 v_display_start)
+*/
+
+void sm750_program_pll(uint32 target_khz, bool is_panel)
 {
-    shared_info *si = gInfo->si;
-    vuint32 *regs = gInfo->regs;
+	vuint32 *regs = gInfo->regs;
+    uint32 m, n, div_val;
     
-    // Calcoliamo l'offset in byte basandoci sulla profondità di colore attuale
-    // Nota: dobbiamo sapere quanti byte per pixel stiamo usando.
-    // Per ora facciamo un calcolo generico, poi lo affineremo.
-    uint32 bytes_per_pixel = (si->dm.space == B_RGB32) ? 4 : 2;
-    uint32 start_addr = (v_display_start * si->dm.virtual_width + h_display_start) * bytes_per_pixel;
+    // Cerchiamo i valori ottimali. 
+    // m (1-255), n (2-15), div_val (1, 2, 4, 8, 16, 32, 64)
+    if (sm750_calc_pll(target_khz, &m, &n, &div_val) != B_OK) return;
+    debug_printf("SM750_PLL: target kH %u, m %u, n %u\n",target_khz,m,n);
 
-    // Registro: CRT Display Start Address (Pagina 52 del datasheet)
-    // Offset 0x8001C per il CRT
-    SM750_WREG32(SM750_DISP_CRT_FB_ADDR, start_addr & 0x07FFFFFF); 
+    uint32 pod_bits = 0;
+    uint32 od_bits = 0;
 
-    return B_OK;
-}*/
+    // Mappatura logica del divisore totale ai campi POD e OD
+    if (div_val <= 8) {
+        pod_bits = 0; // Dividi per 1
+        // Mappatura OD: 1->0, 2->1, 4->2, 8->3
+        if (div_val == 2) od_bits = 1; // dividi per 2
+        else if (div_val == 4) od_bits = 2; // dividi per 4
+        else if (div_val == 8) od_bits = 3; // dividi per 8
+    } else {
+        // Per divisori > 8, usiamo OD al massimo (/8) e aumentiamo POD
+        od_bits = 3; // base di divisione: 8
+        if (div_val == 16) pod_bits = 1;      // 2 * 8
+        else if (div_val == 32) pod_bits = 2; // 4 * 8
+        else if (div_val == 64) pod_bits = 3; // 8 * 8
+    }
+
+    uint32 pll_reg = 0;
+    debug_printf("SM750_PLL: pod_bits %u, od_bits %u, n %u, m %u\n",pod_bits,od_bits,n,m);
+    pll_reg |= (1 << 17);               // PD: PLL Power On
+    pll_reg |= (pod_bits << 14);        // POD
+    pll_reg |= (od_bits << 12);         // OD
+    pll_reg |= ((n & 0x0F) << 8);       // N (bit 11:8)
+    pll_reg |= (m & 0xFF);              // M (bit 7:0)
+    // cancellare da qui appena finito test //
+    /*uint32 test_pll = 0;
+    test_pll |= 0x78;         // M = 121 (bit 7:0)
+    test_pll |= (0x0F << 8);  // N = 16 (bit 11:8)
+    test_pll |= (0 << 12);    // OD = 1 (bit 13:12)
+    test_pll |= (0 << 14);    // POD = 1 (bit 15:14)
+    test_pll |= (2 << 16);    // Input Select = 14.318MHz (Bit 17:16 = 10)
+    test_pll |= (0 << 18);    // Bypass = 0 (Bit 18)
+    //     f i n o   q u i      //
+    uint32 reg_offset = is_panel ? SM750_DISP_PANEL_PLL : SM750_DISP_CRT_PLL;*/
+    
+    // Scrittura hardware
+    //debug_printf("utilizzo pll di test %u\n",test_pll);
+    //SM750_WREG32(reg_offset,test_pll); // pll_reg);
+    // impostiamo entrambi i pll alla stessa frequenza giusto per vedere se cambia qualcosa
+    SM750_WREG32(SM750_DISP_PANEL_PLL,pll_reg);
+    SM750_WREG32(SM750_DISP_CRT_PLL,pll_reg);
+    SM750_WREG32(SM750_PANEL_CONTROL,0x0); // disattiva tutto nel panel
+    snooze(1500); 
+    uint32 ctr_val = SM750_REG32(SM750_CRT_CONTROL);
+	debug_printf("SM75a_PLL: Con SM750_CRT_CONTROL a %u\n",ctr_val);
+    debug_printf("SM750_PLL: Programmazione %s a %u kHz\n", is_panel ? "PANEL" : "CRT", target_khz);
+    debug_printf("SM750_PLL: M:%u N:%u Div:%u -> Reg 0x%08x\n", m, n, div_val, pll_reg);
+}
+
 status_t
 sm750_move_display_area(uint16 h_display_start, uint16 v_display_start)
 {
