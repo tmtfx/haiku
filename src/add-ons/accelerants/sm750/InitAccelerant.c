@@ -97,7 +97,7 @@ static status_t init_common(int fd) {
         else si->card_info.has_edid_crt = true;
         debug_printf("SM750_ACC: EDID letto con successo su %s\n", is_panel ? "PANEL" : "CRT");
         if (create_mode_list_from_edid(edid_buffer) == B_OK) {
-            debug_printf("SM750_ACC: Lista modi generata (%d modi trovati)\n", si->mode_count);
+            debug_printf("SM750_ACC: Lista modi aggiornata con dati monitor reali.\n");
             return B_OK;
         }
         debug_printf("SM750_ACC: EDID presente ma nessun Detailed Timing valido trovato.\n");
