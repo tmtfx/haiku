@@ -124,11 +124,308 @@ i2c_read_byte(uint32 scl, uint32 sda, bool send_ack)
     return byte;
 }
 
+static void clean_i2c_bus_error() {
+	vuint32 *regs = gInfo->regs;
+    uint8 status = SM750_REG8(SM750_I2C_STATUS);
+    if (status & 0x04) { // Se il Bit 2 (Err) è 1
+        debug_printf("SM750_ACC: Rilevato Bus Error (Bit 2), reset in corso...\n");
+        SM750_WREG8(SM750_I2C_RESET, 0x00); // Scriviamo 0 per fare Clear
+        snooze(10);
+    }
+}
+/*
+static status_t 
+sm750_old_read_edid(uint8* buffer) 
+{
+    vuint32 *regs = gInfo->regs;
+    uint32 i, j;
+    uint8 slave_addr_write = 0xA0;
+    uint8 slave_addr_read  = 0xA1;
+
+    // --- 1. SET OFFSET (Diciamo al monitor: "Parti dal byte 0") ---
+    
+    // Aspetta che il bus sia libero (Busy bit 0)
+    while (SM750_REG8(0x10042) & 0x01);
+
+    SM750_WREG8(0x10043, slave_addr_write); // Indirizzo Slave + Write
+    SM750_WREG8(0x10044, 0x00);             // Offset 0x00 nella FIFO dati
+    SM750_WREG8(0x10040, 0x00);             // Byte count = 1 (0 significa 1 byte)
+    
+    // Control: Enable(0) | Start(2) = 0x05 (Standard Speed 100kbps)
+    SM750_WREG8(0x10041, 0x05); 
+
+    // Aspetta il completamento (Complete bit 3)
+    while (!(SM750_REG8(0x10042) & 0x08));
+    
+    // Controllo Errori (bit 2)
+    if (SM750_REG8(0x10042) & 0x04) return B_DEVICE_NOT_FOUND;
+
+    // --- 2. LETTURA MASSIVA (128 byte in blocchi da 16) ---
+    
+    for (i = 0; i < 8; i++) { // 8 blocchi * 16 byte = 128 byte
+        while (SM750_REG8(0x10042) & 0x01); // Aspetta bus libero
+
+        SM750_WREG8(0x10043, slave_addr_read); // Indirizzo Slave + Read
+        SM750_WREG8(0x10040, 15);              // Count = 15 (significa 16 byte)
+        
+        // Se è l'ultimo blocco, non vogliamo il Repeated Start, ma lo Stop normale
+        SM750_WREG8(0x10041, 0x05); 
+
+        // Aspetta che i 16 byte siano pronti nella FIFO
+        while (!(SM750_REG8(0x10042) & 0x08));
+
+        // Preleva i 16 byte dalla FIFO (offset 0x10044-0x10053)
+        for (j = 0; j < 16; j++) {
+            buffer[(i * 16) + j] = SM750_REG8(0x10044 + j);
+        }
+    }
+
+    return B_OK;
+}*/
+
+
 status_t 
 sm750_read_edid(uint8* buffer) 
 {
+	vuint32 *regs = gInfo->regs;
+    // Reset e Pulizia del controller I2C
+    //bool is_panel = gInfo->si->card_info.is_panel;
+    status_t ret = B_OK;
+    
+    //LETTURA E BACKUP STATO DELLA GPU
+    //uint32 CURC_stat = SM750_REG32(SM750_SYS_CUR_CLK_STATUS); // THIS IS READONLY
+    uint32 PM0_state = SM750_REG32(SM750_SYS_PWR_MODE_0_CLKC);
+    uint32 PM1_state = SM750_REG32(SM750_SYS_PWR_MODE_1_CLKC);
+    uint32 PMC_state = SM750_REG32(SM750_SYS_PWR_MODE_CTRL);
+    uint32 P_control = SM750_REG32(SM750_PANEL_CONTROL);
+    uint32 C_control = SM750_REG32(SM750_CRT_CONTROL);
+    uint32 GPIO_ctrl = SM750_REG32(SM750_SYS_GPIO_CTRL);
+    uint32 PPLL_ctrl = SM750_REG32(SM750_DISP_PANEL_PLL);
+    uint32 CPLL_ctrl = SM750_REG32(SM750_DISP_CRT_PLL);
+    uint32 MXCC_PLL_ctrl = SM750_REG32(SM750_DISP_MXCLKC_PLL); //I2C clock is connected to MXCLK PLL Control
+    uint32 I2C_ctrl  = SM750_REG32(SM750_I2C_CONTROL); // this should be 0x0 as default
+    // Questi non ci interessano
+    //SM750_SYS_MISC_CTRL
+    //SM750_SYS_CTRL
+    
+    // IMPOSTAZIONE MINIMALE
+    
+    // TEST VITA I2C
+    // Ripetuti test su quali funzionalità sono necessarie al funzionamento
+    // Risultato:
+    
+    // ok quindi occorre che
+    // 1) i power mode siano (0x00005147)
+    //    in particolare impostare a 1 i bit:
+    //    1 - DMA
+    //    2 - Display Controller Clock Control
+    //    3 - Local Memory Controller Clock Control
+    //    6 - GPIO clock
+    //   12 - con 13 a 0: M2XCLK Divided by 2 (default)
+    //   15 - con 15 a 0: MCLK Divided by 2 (default)
+    // 2) I pll di pannello e crt possono essere spenti
+    // 3) registro di controllio GPIO impostato ovviamente per I2C 0xC0000000
+    // 4) ovviamente il master clock mxclk pll control deve essere attivo
+    //    e non byassato visto che il clock i2c dipende direttamente da esso
+    
+    
+    
+    
+    // Master Clock PLL
+    // assicuriamoci che il clock principale sia attivo e non bypassato,
+    // manteniamo la configurazione attiva, il clock I2C tramite divisore 7
+    // dipende esclusivamente da questo PLL
+    uint32 mxclk = SM750_REG32(SM750_DISP_MXCLKC_PLL);
+    mxclk |= (1 << 17);  // Power On
+    mxclk &= ~(1 << 18); // No Bypass
+    mxclk |= (3 << 12); // Rallentiamo per far girare ancora più piano il I2C per evitare il clock stretching
+    debug_printf("SM750_ACC: Rallento MXCLK. Valore registro 0x70: 0x%08x\n", mxclk);
+    SM750_WREG32(SM750_DISP_MXCLKC_PLL, mxclk);
+    snooze (10000);
+    
+    // PLLs
+    // proviamo in 3 modalità, la prima che proviamo è disattivando il pll 
+    // non usato (attualmente dovrebbe essere alla stessa frequenza)
+    //SM750_WREG32(SM750_DISP_PANEL_PLL, is_panel ? PPLL_ctrl : 0 );
+    //SM750_WREG32(SM750_DISP_CRT_PLL, is_panel ? 0 : CPLL_ctrl );
+    SM750_WREG32(SM750_DISP_PANEL_PLL, 0);
+    SM750_WREG32(SM750_DISP_CRT_PLL, 0);
+    //snooze (2000);
+    // i prossimi tentativi saranno: 
+    // - disattivare entrambi i pll
+    // - lasciarli entrambi alla stessa frequenza
+    
+    
+    // GPIO/I2C
+    SM750_WREG32(SM750_SYS_GPIO_CTRL,0xC0000000); //Bit 30 e 31 a 1 per attivare I2C
+    
+    // PANEL/CRT CONTROL
+    //SM750_WREG32(SM750_PANEL_CONTROL,0);// gInfo->si->card_info.is_panel ? P_control : 0 );
+    //SM750_WREG32(SM750_CRT_CONTROL,0);// gInfo->si->card_info.is_panel ? 0 : C_control );
+    
+    // POWER MODES
+    // test tolto dma per vedere se è lui che blocca i dati verso i registri
+    SM750_WREG32(SM750_SYS_PWR_MODE_0_CLKC,0x00005146); // solo il bit 8 per il clock I2C, bit 1 2 e 3 per Local Memory Controller Clock Control, Display Controller Clock Control e DMA, 6 GPIO clock 147
+    SM750_WREG32(SM750_SYS_PWR_MODE_1_CLKC,0x00005146); // solo il bit 8 per il clock I2C, bit 1 2 e 3 per Local Memory Controller Clock Control, Display Controller Clock Control e DMA
+    SM750_WREG32(SM750_SYS_PWR_MODE_CTRL,0x00000008); // bit 3 Oscillator input control abilitato, ACPI off, selezione power mode 0
+    snooze (100);
+    
+    // I2C
+    SM750_WREG8(SM750_I2C_CONTROL, 0x00); // Disable controller
+    snooze(100);
+    clean_i2c_bus_error();
+    snooze(1000); 
+    SM750_WREG8(SM750_I2C_CONTROL, 0x01); // Enable controller
+    snooze(1000); 
+    //FINE IMPOSTAZIONE MINIMALE
+    
+    //uint8 info = SM750_REG8(SM750_I2C_STATUS);
+    //debug_printf("Stato dell'i2c all'inizio dopo il reset: 0x%02x\n",info);
+
+    // --- FASE 1: SET OFFSET (Indirizziamo il byte 0 dell'EDID) ---
+    // Aspettiamo che il bus non sia occupato
+    int timeout = 1000;
+    while ((SM750_REG8(SM750_I2C_STATUS) & 0x01) && --timeout > 0) snooze(10);
+    if ((SM750_REG8(SM750_I2C_STATUS) & 0x01)) {
+        debug_printf("SM750_ACC: ERROR - Timeout scaduto ma il bus è ancora bloccato.\n");
+        ret = B_BUSY;
+        goto finalize;
+    }
+
+    SM750_WREG8(SM750_I2C_BYTE_COUNT, 0x00); // Byte Count: 0 (significa 1 byte)
+    SM750_WREG8(SM750_I2C_SLAVE_ADDR, 0xA0); // Slave Addr 0x50 + Write (Bit 0 = 0)
+    SM750_WREG8(0x10044, 0x00); // Scriviamo 0x00 nel primo registro dati (offset EDID)
+    //SM750_WREG8(SM750_I2C_CONTROL, 0x45); // Control: Enable=1, Start=1 (0x05) // 0x45 per Repeated Start Enabled=1, Start=1, Enable=1
+    SM750_WREG8(SM750_I2C_CONTROL, 0x01); // STOP (Bit 2 = 0)    -------------*
+    SM750_WREG8(SM750_I2C_CONTROL, 0x05); // START               -------------*
+
+    // Attesa completamento (Bit 3: Comp) // Transfer: 0 in progress 1 completed
+    timeout = 1000;
+    while (!(SM750_REG8(SM750_I2C_STATUS) & 0x08) && --timeout > 0) snooze(10);
+    uint8 info = SM750_REG8(SM750_I2C_STATUS);
+    if (!(info & 0x08)) {
+        debug_printf("SM750_ACC: ERROR - Timeout scaduto senza bit COMP! Bus bloccato.\nSM750_ACC: Valore del registro di stato del I2C: 0x%02x\n", info);
+        // Qui dovresti resettare o uscire, non continuare!
+        ret = B_TIMED_OUT;
+        goto finalize;
+    }
+    SM750_WREG8(SM750_I2C_CONTROL, 0x01); // Forza STOP          --------------*
+    snooze(1000); // Aspetta un millisecondo intero              --------------*
+
+    // CONTROLLO CRITICO: Abbiamo ricevuto l'ACK dal monitor?
+    info = SM750_REG8(SM750_I2C_STATUS);
+    //debug_printf("Stato dell'i2c per vedere se l'ACK è arrivato: 0x%02x\n",status);
+    if (!(info & 0x02)) { // Bit 1: Ack
+        debug_printf("SM750_ACC: Monitor non ha risposto (No ACK) al Set Offset. Status: 0x%02x\n", info);
+        ret = B_DEVICE_NOT_FOUND;
+        goto finalize;
+    }
+    if (info & 0x04) clean_i2c_bus_error();
+    // --- FASE 2: LETTURA MASSIVA (128 byte in blocchi da 16) ---
+    for (int i = 0; i < 8; i++) {
+        SM750_WREG8(SM750_I2C_BYTE_COUNT, 0x0F); // 16 byte
+        SM750_WREG8(SM750_I2C_SLAVE_ADDR, 0xA1); // Read
+        SM750_WREG8(SM750_I2C_CONTROL, 0x05);    // Start
+
+        // Attesa COMP
+        timeout = 1000;
+        while (!(SM750_REG8(SM750_I2C_STATUS) & 0x08) && --timeout > 0) snooze(10);
+        info = SM750_REG8(SM750_I2C_STATUS);
+        debug_printf("SM750_ACC: Stato I2C dopo l'invio di 0xA1 0x%02x\n", info);
+        if (!(info & 0x08)) {
+            debug_printf("SM750_ACC: ERROR - Timeout scaduto senza bit COMP nella lettura 0xA1! \nSM750_ACC: Bus bloccato: Valore del registro di stato del I2C: 0x%02x\n", info);
+            // Qui dovresti resettare o uscire, non continuare!
+            ret = B_TIMED_OUT;
+            goto finalize;
+        } else {
+        	debug_printf("SM750_ACC: operazione di lettura su 0xA1 completata\n");
+        	if (info & 0x01) {
+        		debug_printf("SM750_ACC: ma i2c è ancora BUSY, invio STOP\n");
+        		SM750_WREG8(SM750_I2C_CONTROL, 0x01); // Riportiamo il Bit 2 a 0 (Stop) ma teniamo Enable=1
+        		snooze(500);
+        		info = SM750_REG8(SM750_I2C_STATUS);
+                debug_printf("SM750_ACC: Stato I2C dopo l'eventuale stop 0x%02x\n", info);
+        	}
+        }
+        
+
+        // UN PICCOLO RESPIRO (fondamentale per alcuni bridge PCI)
+        snooze(500);
+        
+        uint32 test44 = SM750_REG32(0x10044);
+        uint32 test48 = SM750_REG32(0x10048);
+        uint8  testByte44 = SM750_REG8(0x10044);
+
+        debug_printf("DEBUG: REG32(44)=0x%08x, REG32(48)=0x%08x, REG8(44)=0x%02x\n", 
+              test44, test48, testByte44);
+
+        // LETTURA A 32-BIT (REG32)
+        // Se il chip mappa i dati come una riga di memoria, 
+        // l'accesso a 32-bit è più "stabile".
+        /*
+        for (int j = 0; j < 4; j++) {
+            uint32 val32 = SM750_REG32(0x10044 + (j * 4));
+        
+            if (val32 != 0) {
+                debug_printf("SM750_ACC: BINGO! Dati trovati: 0x%08x\n", val32);
+            }
+
+            buffer[(i * 16) + (j * 4) + 0] = (uint8)(val32 & 0xFF);
+            buffer[(i * 16) + (j * 4) + 1] = (uint8)((val32 >> 8) & 0xFF);
+            buffer[(i * 16) + (j * 4) + 2] = (uint8)((val32 >> 16) & 0xFF);
+            buffer[(i * 16) + (j * 4) + 3] = (uint8)((val32 >> 24) & 0xFF);
+        }*/
+        // LETTURA A 8-BIT (REG8)
+        /*
+        for (int j = 0; j < 16; j++) {
+            uint8 val8 = SM750_REG8(0x10044 + j);
+            // Se vedi qualcosa di diverso da 00 o FF, festeggiamo
+            if (val8 != 0x00 && val8 != 0xFF) {
+                debug_printf("SM750_ACC: TROVATO! Byte %d = 0x%02x\n", (i*16)+j, val8);
+            }
+            buffer[(i * 16) + j] = val8;
+        }*/
+        // LETTURA A 8-BIT FIFO (REG8) (ripetuta sullo stesso registro)
+        for (int j = 0; j < 16; j++) {
+            uint8 val8 = SM750_REG8(0x10044); // NIENTE + j
+            buffer[(i * 16) + j] = val8;
+        }
+    
+        // STOP
+        SM750_WREG8(SM750_I2C_CONTROL, 0x01);
+        snooze(50);
+    }
+   
+
+    // --- VERIFICA FINALE ---
+    // L'EDID standard inizia sempre con 00 FF FF FF FF FF FF 00
+    if (buffer[0] == 0x00 && buffer[1] == 0xFF && buffer[2] == 0xFF) {
+        debug_printf("SM750_ACC: EDID letto con successo! Header valido.\n");
+        goto finalize;
+    }
+    
+    debug_printf("SM750_ACC: EDID Raw Header errato:\n           %02x %02x %02x %02x\n           %02x %02x %02x %02x\n           %02x %02x %02x %02x\n           %02x %02x %02x %02x\n", buffer[0], buffer[1], buffer[2], buffer[3], buffer[4], buffer[5], buffer[6], buffer[7], buffer[8],buffer[9], buffer[10], buffer[11],buffer[12], buffer[13], buffer[14], buffer[15]);
+    ret = B_ERROR;
+finalize:
+    SM750_WREG32(SM750_DISP_MXCLKC_PLL,MXCC_PLL_ctrl);
+    SM750_WREG32(SM750_DISP_PANEL_PLL,PPLL_ctrl);
+    SM750_WREG32(SM750_DISP_CRT_PLL,CPLL_ctrl);
+    SM750_WREG32(SM750_SYS_GPIO_CTRL,GPIO_ctrl);
+    SM750_WREG32(SM750_PANEL_CONTROL,P_control);
+    SM750_WREG32(SM750_CRT_CONTROL,C_control);
+    SM750_WREG32(SM750_SYS_PWR_MODE_0_CLKC, PM0_state);
+    SM750_WREG32(SM750_SYS_PWR_MODE_1_CLKC, PM1_state);
+    SM750_WREG32(SM750_SYS_PWR_MODE_CTRL, PMC_state);
+    SM750_WREG8(SM750_I2C_CONTROL, I2C_ctrl); // Disable controller, alternatively set to 0x0
+    return ret;
+}
+
+
+
+status_t 
+sm750_read_edid_gpio(uint8* buffer)
+{
     // 1. Definiamo i pin in base a quanto visto (Pin 30=SCL, 31=SDA)
-    // Se is_panel è vero, potrebbero essere diversi, ma per ora restiamo sui CRT standard
     uint32 scl = 30;
     uint32 sda = 31;
 
@@ -192,184 +489,3 @@ sm750_read_edid(uint8* buffer)
 
     return B_ERROR;
 }
-/*
-static void clean_i2c_bus_error() {
-	vuint32 *regs = gInfo->regs;
-    uint8 status = SM750_REG8(SM750_I2C_STATUS);
-    if (status & 0x04) { // Se il Bit 2 (Err) è 1
-        debug_printf("SM750_ACC: Rilevato Bus Error (Bit 2), reset in corso...\n");
-        SM750_WREG8(SM750_I2C_RESET, 0x00); // Scriviamo 0 per fare Clear
-        snooze(10);
-    }
-}
-
-status_t 
-sm750_read_edid(uint8* buffer) 
-{
-	vuint32 *regs = gInfo->regs;
-    // 1. Reset e Pulizia del controller I2C
-    SM750_WREG8(SM750_I2C_CONTROL, 0x00); // Disable controller
-    snooze(10);
-    clean_i2c_bus_error();
-    snooze(1000); 
-    SM750_WREG8(SM750_I2C_CONTROL, 0x01); // Enable controller
-    
-    uint8 info = SM750_REG8(SM750_I2C_STATUS);
-    debug_printf("Stato dell'i2c all'inizio dopo il reset: 0x%02x\n",info);
-
-    // --- FASE 1: SET OFFSET (Indirizziamo il byte 0 dell'EDID) ---
-    // Aspettiamo che il bus non sia occupato
-    int timeout = 1000;
-    while ((SM750_REG8(SM750_I2C_STATUS) & 0x01) && --timeout > 0) snooze(10);
-    if ((SM750_REG8(SM750_I2C_STATUS) & 0x01)) {
-        debug_printf("SM750_ACC: ERROR - Timeout scaduto ma il bus è ancora bloccato.\n");
-        //return B_ BUSY
-    }
-
-    SM750_WREG8(SM750_I2C_SLAVE_ADDR, 0xA0); // Slave Addr 0x50 + Write (Bit 0 = 0)
-    SM750_WREG8(0x10044, 0x00); // Scriviamo 0x00 nel primo registro dati (offset EDID)
-    SM750_WREG8(SM750_I2C_BYTE_COUNT, 0x00); // Byte Count: 0 (significa 1 byte)
-    SM750_WREG8(SM750_I2C_CONTROL, 0x05); // Control: Enable=1, Start=1 (0x05)
-
-    // Attesa completamento (Bit 3: Comp)
-    timeout = 1000;
-    while (!(SM750_REG8(SM750_I2C_STATUS) & 0x08) && --timeout > 0) snooze(10);
-    if (!(SM750_REG8(SM750_I2C_STATUS) & 0x08)) {
-        debug_printf("SM750_ACC: ERROR - Timeout scaduto senza bit COMP! Bus bloccato.\n");
-        // Qui dovresti resettare o uscire, non continuare!
-        //return B_TIMED_OUT;
-    }
-
-    // CONTROLLO CRITICO: Abbiamo ricevuto l'ACK dal monitor?
-    uint8 status = SM750_REG8(SM750_I2C_STATUS);
-    debug_printf("Stato dell'i2c per vedere se l'ACK è arrivato: 0x%02x\n",status);
-    if (!(status & 0x02)) { // Bit 1: Ack
-        debug_printf("SM750_ACC: Monitor non ha risposto (No ACK) al Set Offset. Status: 0x%02x\n", status);
-        return B_DEVICE_NOT_FOUND;
-    }
-    
-    clean_i2c_bus_error();
-    // --- FASE 2: LETTURA MASSIVA (128 byte in blocchi da 16) ---
-    for (int i = 0; i < 8; i++) {
-        SM750_WREG8(SM750_I2C_BYTE_COUNT, 0x0F); // 16 byte
-        SM750_WREG8(SM750_I2C_SLAVE_ADDR, 0xA1); // Read
-        SM750_WREG8(SM750_I2C_CONTROL, 0x05);    // Start
-
-        // Attesa COMP
-        timeout = 1000;
-        while (!(SM750_REG8(SM750_I2C_STATUS) & 0x08) && --timeout > 0) snooze(10);
-
-        // UN PICCOLO RESPIRO (fondamentale per alcuni bridge PCI)
-        snooze(100);
-
-        // LETTURA A 32-BIT (REG32)
-        // Se il chip mappa i dati come una riga di memoria, 
-        // l'accesso a 32-bit è più "stabile".
-        for (int j = 0; j < 4; j++) {
-            uint32 val32 = SM750_REG32(0x10044 + (j * 4));
-        
-            if (val32 != 0) {
-                debug_printf("SM750_ACC: BINGO! Dati trovati: 0x%08x\n", val32);
-            }
-
-            buffer[(i * 16) + (j * 4) + 0] = (uint8)(val32 & 0xFF);
-            buffer[(i * 16) + (j * 4) + 1] = (uint8)((val32 >> 8) & 0xFF);
-            buffer[(i * 16) + (j * 4) + 2] = (uint8)((val32 >> 16) & 0xFF);
-            buffer[(i * 16) + (j * 4) + 3] = (uint8)((val32 >> 24) & 0xFF);
-        }
-    
-        // STOP
-        SM750_WREG8(SM750_I2C_CONTROL, 0x11);
-        snooze(50);
-    }*/
-    /*for (int i = 0; i < 8; i++) {
-        // 1. Pulizia stato precedente
-        SM750_WREG8(SM750_I2C_BYTE_COUNT, 0x0F); 
-        SM750_WREG8(SM750_I2C_SLAVE_ADDR, 0xA1); 
-        SM750_WREG8(SM750_I2C_CONTROL, 0x05); // START
-        
-        uint8 pre_read_status = SM750_REG8(SM750_I2C_STATUS);
-        debug_printf("SM750_ACC: Blocco %d, Stato Pre-Lettura: 0x%02x\n", i, pre_read_status);
-
-        // 2. Configurazione "inversa" (Byte Count prima)
-        SM750_WREG8(SM750_I2C_BYTE_COUNT, 0x0F); 
-        SM750_WREG8(SM750_I2C_SLAVE_ADDR, 0xA1); 
-    
-        // 3. Start (Proviamo 0x05 standard, se fallisce useremo 0x45)
-        // SM750_WREG8(SM750_I2C_CONTROL, 0x05);
-
-        // 4. Attesa COMP con debug reale
-        timeout = 1000;
-        while (!(SM750_REG8(SM750_I2C_STATUS) & 0x08) && --timeout > 0) snooze(10);
-    
-        uint8 post_read_status = SM750_REG8(SM750_I2C_STATUS);
-        debug_printf("SM750_ACC: Blocco %d, Stato Post-Lettura: 0x%02x\n", i, post_read_status);
-*/
-        // 5. Lettura dei dati one-shot
-        /*
-        for (int j = 0; j < 16; j++) {
-            buffer[(i * 16) + j] = SM750_REG8(0x10044 + j);
-        }
-        */
-        // 5. Lettura dei dati con "doppio colpo"
-        /*
-        for (int j = 0; j < 16; j++) {
-            // Lettura a vuoto: forza il controller a presentare il dato
-            (void)SM750_REG8(0x10044 + j); 
-            
-            // Lettura reale: salviamo questo valore
-            uint8 val = SM750_REG8(0x10044 + j);
-            buffer[(i * 16) + j] = val;
-            
-            // Debug per il primo blocco: se leggiamo qualcosa di diverso da 00, lo vogliamo sapere!
-            if (i == 0 && val != 0) {
-                debug_printf("SM750_ACC: Miracolo! Byte %d = 0x%02x\n", j, val);
-            }
-        }*/
-        // 5. Lettura dati a 32-bit
-        /*
-        for (int j = 0; j < 4; j++) {
-            uint32 val32 = SM750_REG32(0x10044 + (j * 4));
-        
-            if (val32 != 0) {
-                debug_printf("SM750_ACC: BINGO! Dati trovati: 0x%08x\n", val32);
-            }
-
-            // Distribuiamo i byte nel buffer
-            buffer[(i * 16) + (j * 4) + 0] = (uint8)(val32 & 0xFF);
-            buffer[(i * 16) + (j * 4) + 1] = (uint8)((val32 >> 8) & 0xFF);
-            buffer[(i * 16) + (j * 4) + 2] = (uint8)((val32 >> 16) & 0xFF);
-            buffer[(i * 16) + (j * 4) + 3] = (uint8)((val32 >> 24) & 0xFF);
-        }*/
-        // 5. svuotamento FIFO
-        /*
-        for (int j = 0; j < 16; j++) {
-            // Aspettiamo che il bit 0 (Busy/Empty) si calmi
-            int retry = 100;
-            while ((SM750_REG8(SM750_I2C_STATUS) & 0x01) && --retry > 0) snooze(1);
-
-            uint8 val = SM750_REG8(0x10044); // LEGGIAMO SEMPRE 0x10044
-            buffer[(i * 16) + j] = val;
-
-            if (val != 0) {
-                 debug_printf("SM750_ACC: DATO TROVATO a 0x10044! Byte %d = 0x%02x\n", (i*16)+j, val);
-            }
-        }*/
-        // Diciamo al controller: "Ho finito il blocco, chiudi la comunicazione"
-/*
-        SM750_WREG8(SM750_I2C_CONTROL, 0x11); // 0x10 (STOP) + 0x01 (ENABLE)
-        timeout = 100;
-        while ((SM750_REG8(SM750_I2C_STATUS) & 0x01) && --timeout > 0) snooze(1);
-    }*/
-/* ripristinare se i2c funziona
-    // --- VERIFICA FINALE ---
-    // L'EDID standard inizia sempre con 00 FF FF FF FF FF FF 00
-    if (buffer[0] == 0x00 && buffer[1] == 0xFF && buffer[2] == 0xFF) {
-        debug_printf("SM750_ACC: EDID letto con successo! Header valido.\n");
-        return B_OK;
-    }
-    
-    debug_printf("SM750_ACC: EDID Raw Header errato: %02x %02x %02x...\n", buffer[0], buffer[1], buffer[2]);
-    //return B_ERROR;
-    return B_OK;
-}*/
