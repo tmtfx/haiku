@@ -32,12 +32,7 @@
 #define SM750_PCI_BAR4         0x20 
 #define SM750_PCI_BAR5         0x24 */
 
-/* Interrupt Control (SM750 System Control Module) 
- * Per leggere lo stato: SYS_R(INT_STATUS)
- * Per abilitare il VBlank: SYS_W(INT_MASK, SM750_INT_VBLANK_CRT1)
- */
-#define SM750_SYS_INT_STATUS     0x00000020 // Registro di stato (quali interrupt sono scattati)
-#define SM750_SYS_INT_MASK       0x00000024 // Registro di maschera (quali interrupt abilitare)
+
 
 /* Definizioni dei bit per VBlank (da usare con le macro SYS_R / SYS_W) */
 #define SM750_INT_VBLANK_CRT1    (1 << 0)   // Bit per il VBlank del Canale primario (CRT)
@@ -87,17 +82,32 @@
 #define SM750_SYS_CTRL            0x00000000 // SYSTEM CONTROL
 #define SM750_SYS_MISC_CTRL       0x00000004 // Controllo generale e Power up
 #define SM750_SYS_GPIO_CTRL       0x00000008 // Controllo per GPIO
-#define SM750_SYS_BOOTSTRAP       0x0000000C // Info dai jumper/strap (sostituisce STRAPINFO)
-#define SM750_SYS_PLL_CTRL        0x00000010 // Controllo principale PLL
-#define SM750_SYS_DRAM_CTRL       0x00000030 // Configurazione memoria (sostituisce PFB_CONFIG)
-#define SM750_SYS_DEVID           0x00000054 // Device Id
-#define SM750_SYS_PLL_CLKC        0x00000058 // PLL Clock Count ONLY FOR TEST PURPOSES
-
+#define SM750_SYS_LOCAL_ARB       0x0000000C // Local Memory Arbitration Control
+#define SM750_SYS_PCI_BM_ARB      0x00000010 // PCI Bus Master Memory Arbitration Control
+#define SM750_SYS_ARB_CTRL        0x00000014 // Arbitration Control
+#define SM750_SYS_RAW_INT_STATUS  0x00000020 // Raw Interrupt status (Read)
+#define SM750_SYS_RAW_INT_CLEAR   0x00000020 // Raw Interrupt clear (Write)
+/* Interrupt Control (SM750 System Control Module) 
+ * Per leggere lo stato: SYS_R(INT_STATUS)
+ * Per abilitare il VBlank: SYS_W(INT_MASK, SM750_INT_VBLANK_CRT1)
+ */
+#define SM750_SYS_INT_STATUS      0x00000024 // Interrupt status (Read)
+#define SM750_SYS_INT_MASK        0x00000028 // Interrupt mask (Read)
+#define SM750_SYS_DEBUG_CTRL      0x0000002C // Debug control
 /* Clock Control */
 #define SM750_SYS_CUR_CLK_STATUS  0x00000040 // Power management current clock status
 #define SM750_SYS_PWR_MODE_0_CLKC 0x00000044 // Power Mode 0 Clock Control
 #define SM750_SYS_PWR_MODE_1_CLKC 0x00000048 // Power Mode 0 Clock Control
 #define SM750_SYS_PWR_MODE_CTRL   0x0000004C // Power Mode Control
+#define SM750_SYS_DEVID           0x00000054 // Device Id
+/* Display PLL */
+#define SM750_SYS_PLL_CLKC        0x00000058 // PLL Clock Count ONLY FOR TEST PURPOSES
+#define SM750_DISP_PANEL_PLL      0x0000005C // Primary Display PLL
+#define SM750_DISP_CRT_PLL        0x00000060 // Secondary Display PLL
+#define SM750_DISP_VGA_PLL_0      0x00000064 // VGA PLL 0
+#define SM750_DISP_VGA_PLL_1      0x00000068 // VGA PLL 1
+#define SM750_DISP_MXCLKC_PLL     0x00000070 // MXCLK PLL Control
+
 /* Scratch data */
 #define SM750_SYS_SCRATCH_DATA    0x0000006C // Scratch Data
 
@@ -115,11 +125,7 @@
 #define SM750_DISP_PALETTE_RAM       0x00080400 // Primary (PANEL)
 #define SM750_DISP_PALETTE_RAM2      0x00080C00 // Secondary (CRT)
 
-/* Display PLL */
-#define SM750_DISP_PANEL_PLL         0x0000005C // Primary Display PLL
-#define SM750_DISP_CRT_PLL           0x00000060 // Secondary Display PLL
-#define SM750_DISP_VGA_PLL_0         0x00000064 // Secondary Display PLL
-#define SM750_DISP_VGA_PLL_1         0x00000068 // Secondary Display PLL
+
 
 /* --- PANEL (Primary) --- */
 #define SM750_DISP_PANEL_FB_ADDR     0x0008000C // Primary Display FB Address
@@ -228,11 +234,11 @@
 #define SM750_GPIO_INT_STATUS  0x010014 // READ
 #define SM750_GPIO_INT_RESET   0x010014 // WRITE (DATASHEET use same address)
 
-#define SM750_I2C_BYTE_COUNT   0x010040
-#define SM750_I2C_CONTROL      0x010041
-#define SM750_I2C_STATUS       0x010042 // Status if read
-#define SM750_I2C_RESET        0x010042 // Same address as status, but write access for bit 2 (third)
-#define SM750_I2C_SLAVE_ADDR   0x010043
+#define SM750_I2C_BYTE_COUNT   0x00010040
+#define SM750_I2C_CONTROL      0x00010041
+#define SM750_I2C_STATUS       0x00010042 // Status if read
+#define SM750_I2C_RESET        0x00010042 // Same address as status, but write access for bit 2 (third)
+#define SM750_I2C_SLAVE_ADDR   0x00010043
 // From  0x010044 to 0x010053 I2C DATA
 /* There are 16 I2C Data registers that hold the data to be written 
  * to or read from the I2C Slave. These registers can be accessed in
