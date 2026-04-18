@@ -17,208 +17,145 @@ static bool
 get_gpio_pin(uint32 pin) 
 {
 	vuint32 *regs = gInfo->regs;
-	// pin deve essere tra 0 e 31
 	return (SM750_REG32(SM750_GPIO_DATA) & (1 << pin)) != 0;
 }
 
+// Funzione critica: segue la logica del driver Linux
+// HIGH = INPUT (pull-up resistor alza il segnale)
+// LOW = OUTPUT con valore 0
 static void 
 set_gpio_pin(uint32 pin, bool high) 
 {
 	vuint32 *regs = gInfo->regs;
-	uint32 val = SM750_REG32(SM750_GPIO_DATA); 
-	if (high) val |= (1U << pin);
-	else val &= ~(1U << pin);
-	SM750_WREG32(SM750_GPIO_DATA, val);
-	// Un piccolissimo delay hardware per far propagare il segnale nel chip
-	(void)SM750_REG32(SM750_GPIO_DATA); 
-}
-
-// Questa è la chiave per i monitor lenti
-static void 
-secure_set_scl_high(uint32 scl) 
-{
-	set_gpio_pin(scl, true);
-	// Clock Stretching: aspetta che il pin sia effettivamente alto
-	int timeout = 1000;
-	while (!get_gpio_pin(scl) && --timeout > 0) snooze(1);
-}
-
-static void 
-set_sda_direction(uint32 sda, bool output) 
-{
-	vuint32 *regs = gInfo->regs;
-	uint32 dir = SM750_REG32(SM750_GPIO_DIRECTION);
-	if (output) dir |= (1 << sda);
-	else dir &= ~(1 << sda);
-	SM750_WREG32(SM750_GPIO_DIRECTION, dir);
+	uint32 gpio_dir = SM750_REG32(SM750_GPIO_DIRECTION);
+	uint32 gpio_data = SM750_REG32(SM750_GPIO_DATA);
+	
+	if (high) {
+		// HIGH: Imposta come INPUT, il pull-up resistor tira su
+		gpio_dir &= ~(1 << pin);
+		SM750_WREG32(SM750_GPIO_DIRECTION, gpio_dir);
+	} else {
+		// LOW: Prima abbassa il segnale, poi imposta come OUTPUT
+		gpio_data &= ~(1 << pin);
+		SM750_WREG32(SM750_GPIO_DATA, gpio_data);
+		gpio_dir |= (1 << pin);
+		SM750_WREG32(SM750_GPIO_DIRECTION, gpio_dir);
+	}
 }
 
 static void i2c_start(uint32 scl, uint32 sda) {
-    set_sda_direction(sda, true);
-    // Sezione 1-2: SCL e SDA alti (stato di riposo)
-    set_gpio_pin(sda, true);
-	snooze(10);
-    secure_set_scl_high(scl);
-    snooze(10); 
-    
-    // Sezione 4: SDA cade mentre SCL è ancora alto (Lo START vero)
-    set_gpio_pin(sda, false);
-    snooze(10);
-    
-    // Fine: Portiamo SCL giù per preparare il primo bit
-    set_gpio_pin(scl, false);
-    snooze(10);
+	// Start I2C: SDA scende mentre SCL è alto
+	set_gpio_pin(sda, true);
+	set_gpio_pin(scl, true);
+	set_gpio_pin(sda, false);
 }
 
 static void i2c_stop(uint32 scl, uint32 sda) {
-    set_sda_direction(sda, true);
-    
-    // 1. Assicuriamoci che SCL sia basso prima di muovere SDA
-    // (Prevenzione START accidentale)
-    set_gpio_pin(scl, false); 
-    set_gpio_pin(sda, false); 
-    snooze(10);
-    
-    // 2. Portiamo SCL alto (Sezione 3 della tabella)
-    secure_set_scl_high(scl);
-    snooze(10);
-    
-    // 3. Ora facciamo salire SDA mentre SCL è stabilmente alto (STOP vero)
-    set_gpio_pin(sda, true);  
-    snooze(10);
-    
-    // 4. Opzionale: rimetti SDA in input per sicurezza
-    set_sda_direction(sda, false);
+	// Stop I2C: SCL sale, poi SDA sale mentre SCL è alto
+	set_gpio_pin(scl, true);
+	set_gpio_pin(sda, false);
+	set_gpio_pin(sda, true);
 }
 
-/* old one
-static void i2c_stop(uint32 scl, uint32 sda) {
-	set_sda_direction(sda, true);
-	set_gpio_pin(sda, false); 
-	snooze(10);
-	set_gpio_pin(scl, true);  
-	snooze(10);
-	set_gpio_pin(sda, true);  // SDA sale mentre SCL è alto: STOP
-	snooze(10);
-}
-
-static bool 
-i2c_write_byte(uint32 scl, uint32 sda, uint8 byte) 
+static void sw_i2c_wait(void)
 {
-	set_sda_direction(sda, true);
-	for (int i = 7; i >= 0; i--) {
-		set_gpio_pin(sda, (byte >> i) & 1);
-		snooze(10);
-		secure_set_scl_high(scl); // Usiamo la versione sicura
-		snooze(10);
-		set_gpio_pin(scl, false);
-		snooze(10);
+	int i, tmp;
+	for (i = 0; i < 600; i++) {
+		tmp = i;
+		tmp += i;
 	}
+}
 
-	// Leggi ACK
-	set_sda_direction(sda, false);
-	snooze(10);
-	secure_set_scl_high(scl);
-	snooze(10);
-	bool ack = !get_gpio_pin(sda); // Il monitor tira SDA a zero
-	set_gpio_pin(scl, false);
-	snooze(10);
-	return ack;
-}*/
 static bool i2c_write_byte(uint32 scl, uint32 sda, uint8 byte) 
 {
-    for (int i = 7; i >= 0; i--) {
-        set_gpio_pin(scl, false); // Inizio Sezione 1
-        snooze(5);
-        
-        set_sda_direction(sda, true);
-        set_gpio_pin(sda, (byte >> i) & 1); // Sezione 2
-        snooze(5);
-        
-        secure_set_scl_high(scl); // Sezione 3 (Il monitor legge qui)
-        snooze(10); // Sezione 4
-    }
-
-    // --- Lettura ACK (Cruciale) ---
-    set_gpio_pin(scl, false);
-    set_sda_direction(sda, false); // Lascia che il pull-up alzi SDA
-    snooze(10); // Aspetta che il monitor "morda" la linea SDA tirandola a 0
-    
-    secure_set_scl_high(scl);
-    snooze(5); // Dai tempo al segnale di stabilizzarsi
-    bool ack = !get_gpio_pin(sda); 
-    
-    set_gpio_pin(scl, false);
-    snooze(10);
-    
-    return ack;
+	int i;
+	
+	// Invia i bit dal più significativo al meno significativo
+	for (i = 0; i < 8; i++) {
+		// SCL basso
+		set_gpio_pin(scl, false);
+		
+		// Imposta il bit su SDA
+		if ((byte & 0x80) != 0)
+			set_gpio_pin(sda, true);
+		else
+			set_gpio_pin(sda, false);
+		
+		sw_i2c_wait();
+		
+		// SCL alto (il dispositivo legge il bit)
+		set_gpio_pin(scl, true);
+		sw_i2c_wait();
+		
+		// Shifta il byte per il prossimo bit
+		byte = byte << 1;
+	}
+	
+	// Preparazione per l'ACK
+	set_gpio_pin(scl, false);
+	set_gpio_pin(sda, true); // SDA alto (INPUT) per ricevere l'ACK
+	
+	// Leggi l'ACK
+	sw_i2c_wait();
+	set_gpio_pin(scl, true);
+	sw_i2c_wait();
+	
+	// Verifica ACK (attendi che SDA sia basso)
+	bool ack = false;
+	for (i = 0; i < 255; i++) {
+		if (!get_gpio_pin(sda)) {
+			ack = true;
+			break;
+		}
+		set_gpio_pin(scl, false);
+		sw_i2c_wait();
+		set_gpio_pin(scl, true);
+		sw_i2c_wait();
+	}
+	
+	// Pulisci
+	set_gpio_pin(scl, false);
+	set_gpio_pin(sda, true);
+	
+	return ack;
 }
 
 static uint8 i2c_read_byte(uint32 scl, uint32 sda, bool send_ack) 
 {
-    uint8 byte = 0;
-    set_sda_direction(sda, false); // Lascia SDA libero per il monitor
-    
-    for (int i = 7; i >= 0; i--) {
-        // Sezione 1: SCL LOW
-        set_gpio_pin(scl, false);
-        snooze(10); 
-
-        // Sezione 2: Il monitor prepara il dato su SDA. Noi aspettiamo.
-        
-        // Sezione 3: Portiamo SCL HIGH. Il monitor "blocca" il dato.
-        secure_set_scl_high(scl);
-        snooze(5); // Piccolo "cuscinetto" per la stabilità elettrica
-        
-        // Sezione 4: CAMPIONAMENTO (SCL è alto e stabile)
-        if (get_gpio_pin(sda)) 
-            byte |= (1 << i);
-        
-        snooze(5);
-    }
-
-    // --- Invio ACK/NACK (Il Master risponde allo Slave) ---
-    set_gpio_pin(scl, false);
-    set_sda_direction(sda, true);
-    set_gpio_pin(sda, !send_ack); // ACK = 0 (SDA basso), NACK = 1 (SDA alto)
-    snooze(10);
-    
-    secure_set_scl_high(scl); // Il monitor legge il nostro ACK qui
-    snooze(10);
-    
-    set_gpio_pin(scl, false); // Chiudi il ciclo dell'ACK
-    set_sda_direction(sda, false); // Rilascia sempre SDA alla fine
-    snooze(10);
-    
-    return byte;
-}
-/* old one
-static uint8 
-i2c_read_byte(uint32 scl, uint32 sda, bool send_ack) 
-{
-	uint8 byte = 0;
-	set_sda_direction(sda, false); 
-	for (int i = 7; i >= 0; i--) {
-		snooze(10);
-		secure_set_scl_high(scl);
-		snooze(10);
-		if (get_gpio_pin(sda)) byte |= (1 << i);
-		set_gpio_pin(scl, false);
-		snooze(10);
-	}
-
-	// Invia ACK/NACK
-	set_sda_direction(sda, true);
-	set_gpio_pin(sda, !send_ack); 
-	snooze(10);
-	secure_set_scl_high(scl);
-	snooze(10);
-	set_gpio_pin(scl, false);
-	set_gpio_pin(sda, true); // Rilascia SDA
-	snooze(10);
+	int i;
+	uint8 data = 0;
 	
-	return byte;
-}*/
+	for (i = 7; i >= 0; i--) {
+		// SCL basso, SDA alto (INPUT per ricevere)
+		set_gpio_pin(scl, false);
+		set_gpio_pin(sda, true);
+		sw_i2c_wait();
+		
+		// SCL alto
+		set_gpio_pin(scl, true);
+		sw_i2c_wait();
+		
+		// Leggi il bit da SDA
+		if (get_gpio_pin(sda))
+			data |= (1 << i);
+	}
+	
+	// Invia ACK se richiesto
+	if (send_ack) {
+		// ACK: tirare SDA basso
+		set_gpio_pin(scl, false);
+		set_gpio_pin(sda, false);
+		sw_i2c_wait();
+		set_gpio_pin(scl, true);
+		sw_i2c_wait();
+	}
+	
+	// SCL basso e SDA alto
+	set_gpio_pin(scl, false);
+	set_gpio_pin(sda, true);
+	
+	return data;
+}
 
 static void clean_i2c_bus_error() {
 	vuint32 *regs = gInfo->regs;
@@ -477,80 +414,40 @@ finalize:
 status_t sm750_read_edid(uint8* buffer)
 {
 	// READ EDID with software simulated I2C via GPIO
-	// BACKUP stati
+	// Segue l'implementazione del driver Linux staging
 	vuint32 *regs = gInfo->regs;
 	status_t ret = B_OK;
 	uint32 PM0_state = SM750_REG32(SM750_SYS_PWR_MODE_0_CLKC);
 	uint32 PM1_state = SM750_REG32(SM750_SYS_PWR_MODE_1_CLKC);
 	uint32 PMC_state = SM750_REG32(SM750_SYS_PWR_MODE_CTRL);
 	uint32 GPIO_ctrl = SM750_REG32(SM750_SYS_GPIO_CTRL);
+	uint32 GPIO_dir = SM750_REG32(SM750_GPIO_DIRECTION);
 	uint32 PPLL_ctrl = SM750_REG32(SM750_DISP_PANEL_PLL);
 	uint32 CPLL_ctrl = SM750_REG32(SM750_DISP_CRT_PLL);
 	
-	// CONFIGURAZIONE SCHEDA
-	// disattiva pll (tacitazione pll)
-	//SM750_WREG32(SM750_DISP_PANEL_PLL, 0);
-	//SM750_WREG32(SM750_DISP_CRT_PLL, 0);
+	// Definisci i pin GPIO (Pin 30=SCL, 31=SDA)
+	uint32 scl = PIN_SCL;
+	uint32 sda = PIN_SDA;
 	
-	//uint32 int_setup = SM750_REG32(SM750_GPIO_INT_SETUP); //i bit da 0 a 6 devono essere a 0 altrimenti è attivo l'interrupt
-	//debug_printf("SM750_ACC: Verifica che gli interrupt siano disattivi: %02x\n", int_setup);
-	// GPIO/I2C
-	//uint32 dbg_ctrl = SM750_REG32(SM750_SYS_DEBUG_CTRL);
-	//debug_printf("SM750_ACC: Verifica lo stato del registro di controllo di debug: %02x\n", dbg_ctrl);
+	// Abilita GPIO MUX disattivando I2C hardware sui pin 30 e 31
+	uint32 gpio_mux = SM750_REG32(SM750_SYS_GPIO_CTRL);
+	gpio_mux &= ~(1 << scl);
+	gpio_mux &= ~(1 << sda);
+	SM750_WREG32(SM750_SYS_GPIO_CTRL, gpio_mux);
 	
-	SM750_WREG32(SM750_SYS_GPIO_CTRL,0); //Bit 30 e 31 a 0 li usiamo come GPIO
-	SM750_WREG32(SM750_GPIO_DIRECTION,0); //Bit 30 e 31 a 0 li usiamo come GPIO
+	// Abilita il clock GPIO
+	SM750_WREG32(SM750_SYS_PWR_MODE_0_CLKC, 0x00005046);
+	SM750_WREG32(SM750_SYS_PWR_MODE_1_CLKC, 0x00005046);
+	SM750_WREG32(SM750_SYS_PWR_MODE_CTRL, 0x00000008);
+	snooze(100);
 	
+	// Pulisci le linee I2C con 9 cicli di stop
+	for (int i = 0; i < 9; i++)
+		i2c_stop(scl, sda);
 	
-	// POWER MODES
-	// test tolto dma per vedere se è lui che blocca i dati verso i registri
-	SM750_WREG32(SM750_SYS_PWR_MODE_0_CLKC,0x00005046); // solo i bit: 6 per il clock GPIO, bit 1 e 2 per Local Memory Controller Clock Control, Display Controller Clock Control
-	SM750_WREG32(SM750_SYS_PWR_MODE_1_CLKC,0x00005046); // solo il bit 8 per il clock I2C, bit 1 e 2 per Local Memory Controller Clock Control, Display Controller Clock Control
-	SM750_WREG32(SM750_SYS_PWR_MODE_CTRL,0x00000008); // bit 3 Oscillator input control abilitato, ACPI off, selezione power mode 0
-	snooze (100);
-	
-	uint32 cur_clock = SM750_REG32(SM750_SYS_CUR_CLK_STATUS);
-	debug_printf("SM750_ACC: Il clock GPIO è acceso? %s\n", (cur_clock&0x40) ? "Sì" : "No");
-	// 1. Definiamo i pin in base a quanto visto (Pin 30=SCL, 31=SDA)
-	uint32 scl = 30;
-	uint32 sda = 31;
-	
-	
-	
-	debug_printf("SM750_ACC: Test manuale SCL (Pin 30) con Direzione...\n");
-
-	// 1. Leggi lo stato attuale dei registri
-	uint32 dir_orig = SM750_REG32(SM750_GPIO_DIRECTION);
-	uint32 data_orig = SM750_REG32(SM750_GPIO_DATA);
-
-	// 2. Imposta Pin 30 come OUTPUT (Bit 30 a 1 nel registro Direction)
-	SM750_WREG32(SM750_GPIO_DIRECTION, dir_orig | (1 << 30));
-
-	// 3. Scrivi 0 nel registro DATA per il Pin 30
-	SM750_WREG32(SM750_GPIO_DATA, data_orig & ~(1 << 30));
-
-	snooze(100); // Un po' di respiro
-
-	// 4. Leggi se è sceso a zero
-	if (!(SM750_REG32(SM750_GPIO_DATA) & (1 << 30))) {
-		debug_printf("SM750_ACC: FUNZIONA! Pin 30 è BASSO. Avevamo solo dimenticato la direzione.\n");
-	} else {
-		debug_printf("SM750_ACC: Ancora ALTO. C'è un blocco a monte (Mux 0x68 o Power Gate).\n");
-	}
-
-	// 5. Ripristina per non fare danni
-	SM750_WREG32(SM750_GPIO_DIRECTION, dir_orig);
-	SM750_WREG32(SM750_GPIO_DATA, data_orig);
-	
-	
+	snooze(1000);
 
 	debug_printf("SM750_ACC: Inizio Bit-Banging EDID su SCL:%d SDA:%d\n", scl, sda);
-
-	// Inizializziamo lo stato dei GPIO (già fatto in init_chip, ma meglio essere sicuri)
-	set_sda_direction(sda, true);
-	set_gpio_pin(scl, true);
-	set_gpio_pin(sda, true);
-	snooze(1000); // Un piccolo respiro prima di iniziare
 
 	// --- FASE 1: SET OFFSET 0 ---
 	i2c_start(scl, sda);
@@ -570,10 +467,6 @@ status_t sm750_read_edid(uint8* buffer)
 		ret = B_ERROR;
 		goto finalize;
 	}
-	
-	// Molti dispositivi DDC preferiscono uno Stop/Start invece di un Repeated Start
-	i2c_stop(scl, sda);
-	snooze(100);
 
 	// --- FASE 2: LETTURA DATI ---
 	i2c_start(scl, sda);
@@ -588,7 +481,7 @@ status_t sm750_read_edid(uint8* buffer)
 
 	// Leggiamo 128 byte
 	for (int i = 0; i < 128; i++) {
-		// L'ultimo byte deve inviare un NACK (false) per dire al monitor di fermarsi
+		// L'ultimo byte invia NACK (false) per terminare la lettura
 		buffer[i] = i2c_read_byte(scl, sda, (i < 127));
 	}
 
@@ -608,9 +501,10 @@ status_t sm750_read_edid(uint8* buffer)
 
 	ret = B_ERROR;
 finalize:
-	SM750_WREG32(SM750_DISP_PANEL_PLL,PPLL_ctrl);
-	SM750_WREG32(SM750_DISP_CRT_PLL,CPLL_ctrl);
-	SM750_WREG32(SM750_SYS_GPIO_CTRL,GPIO_ctrl);
+	SM750_WREG32(SM750_DISP_PANEL_PLL, PPLL_ctrl);
+	SM750_WREG32(SM750_DISP_CRT_PLL, CPLL_ctrl);
+	SM750_WREG32(SM750_SYS_GPIO_CTRL, GPIO_ctrl);
+	SM750_WREG32(SM750_GPIO_DIRECTION, GPIO_dir);
 	SM750_WREG32(SM750_SYS_PWR_MODE_0_CLKC, PM0_state);
 	SM750_WREG32(SM750_SYS_PWR_MODE_1_CLKC, PM1_state);
 	SM750_WREG32(SM750_SYS_PWR_MODE_CTRL, PMC_state);
