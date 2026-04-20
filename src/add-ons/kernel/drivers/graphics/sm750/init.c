@@ -7,30 +7,45 @@
 #include <SupportDefs.h>
 #include <boot_item.h>
 #include <frame_buffer_console.h>
+#include <PCI.h>
 
 #include "DriverInterface.h"
 #include "sm750_macros.h"
 #include "common_modes.h"
+#include "sm750_logo.h"
+
 
 extern pci_module_info *pci;
 
-/* Frequenza del cristallo di riferimento (Standard SM750) */
-//#define DEFAULT_INPUT_CLOCK 24000000
+
+/* cannot handle gpio direction tried unlocking vga registers */
+/* didn't work
+static void sm750_unlock_vga_registers()
+{
+    // 1. Leggiamo SR21 (Display Control)
+    pci->write_io_8(0x3C4, 0x21); // Seleziona indice 0x21
+    uint8 sr21 = pci->read_io_8(0x3C5);
+    dprintf("SM750: SR21 prima: 0x%02x\n", sr21);
+
+    // 2. Sblocchiamo i pin (Azzera i bit 0-3 che spesso forzano il DDC hardware)
+    pci->write_io_8(0x3C4, 0x21);
+    pci->write_io_8(0x3C5, sr21 & ~0x0F); 
+
+    // 3. Leggiamo SR6B (GPIO Selection)
+    pci->write_io_8(0x3C4, 0x6B);
+    uint8 sr6b = pci->read_io_8(0x3C5);
+    dprintf("SM750: SR6B prima: 0x%02x\n", sr6b);
+    
+    // In alcuni chip SM, scrivere 0 in SR6B abilita il controllo GPIO MMIO
+    pci->write_io_8(0x3C4, 0x6B);
+    pci->write_io_8(0x3C5, 0x00); 
+}*/
 
 /* --- sm750_get_clocks --- */
+/*
 void 
 sm750_get_clocks(vuint32 *regs, shared_info *si)
 {
-	/* vecchio
-    // Offset corretti dal datasheet pag. 38
-    uint32 sclk_reg = regs[0x44 >> 2]; // System PLL ma è questo? SM750_SYS_PWR_MODE_0_CLKC
-    uint32 mclk_reg = regs[0x48 >> 2]; // Master (Memory) PLL ma è questo? SM750_SYS_PWR_MODE_1_CLKC
-    uint32 vclk_reg = regs[0x4C >> 2]; // Display PLL 
-    
-    dprintf("SM750: SCLK Reg (0x44): 0x%08" B_PRIx32 "\n", sclk_reg);
-    dprintf("SM750: MCLK Reg (0x48): 0x%08" B_PRIx32 "\n", mclk_reg);
-    dprintf("SM750: VCLK Reg (0x4C): 0x%08" B_PRIx32 "\n", vclk_reg);
-    */
     // 1. Configurazione del selettore Power Mode
     uint32 pwrCtrl = SM750_REG32(SM750_SYS_PWR_MODE_CTRL);
     pwrCtrl &= ~0x00000003; // Forza i bit 1:0 a 00 (Power Mode 0)
@@ -62,7 +77,7 @@ sm750_get_clocks(vuint32 *regs, shared_info *si)
     //si->card_info.f_ref = 24.0f; 
     // sembra che la frequenza di riferimento sia 14.31818f
     //si->card_info.f_ref = 14.31818f; // già impostato prima...
-}
+}*/
 
 static void populate_default_modes(shared_info* si) {
     uint32 count = 0;
@@ -95,11 +110,58 @@ static void populate_default_modes(shared_info* si) {
     }
     si->mode_count = count;
 }
+static void draw_logo(DeviceInfo *di, display_mode* dm) {
+    if (!di || !di->framebuffer || !dm) return;
+
+    shared_info *si = di->si;
+    uint32* fb = (uint32*)di->framebuffer;
+    
+    uint32 screenWidth = dm->virtual_width;
+    uint32 screenHeight = dm->virtual_height;
+    
+    uint32 bytesPerRow = si->fbc.bytes_per_row;
+    if (bytesPerRow == 0)
+        bytesPerRow = screenWidth * 4; 
+
+    uint32 fbPitch = bytesPerRow / 4; 
+
+    // Usiamo uint32 anche per le dimensioni del logo
+    uint32 logoW = 640;
+    uint32 logoH = 183;
+
+    int32 startX = (int32)((screenWidth - logoW) / 2);
+    int32 startY = (int32)((screenHeight - logoH) / 2);
+
+    if (startX < 0) startX = 0;
+    if (startY < 0) startY = 0;
+
+    dprintf("SM750: Disegno logo su %ux%u (Pitch: %u)\n", screenWidth, screenHeight, fbPitch);
+
+    // Cambiato int in uint32 per i cicli
+    for (uint32 y = 0; y < logoH && (startY + (int32)y) < (int32)screenHeight; y++) {
+        for (uint32 x = 0; x < logoW && (startX + (int32)x) < (int32)screenWidth; x++) {
+            uint32 fbIndex = (uint32)((startY + (int32)y) * (int32)fbPitch + (startX + (int32)x));
+            fb[fbIndex] = sm750_logo[y * logoW + x];
+        }
+    }
+}
 /* --- sm750_init_chip --- */
 void sm750_init_chip(DeviceInfo *di) {
     if (!di || !di->regs) return;
     
     dprintf("SM750: --- Inizializzazione Hardware ---\n");
+    
+    //dprintf("SM750: --- DUMP SEQUENCER ESTESO ---\n");
+    //// Array degli indici "sospetti" che non compaiono nel datasheet ufficiale
+    //uint8 indices[] = {0x00, 0x01, 0x21, 0x30, 0x62, 0x6A, 0x6B, 0x6C};
+    //for (uint32 i = 0; i < sizeof(indices); i++) {
+    //    // Scriviamo l'indice sulla porta 0x3C4
+    //    pci->write_io_8(0x3C4, indices[i]);
+    //    // Leggiamo il valore corrispondente dalla porta 0x3C5
+    //    uint8 val = pci->read_io_8(0x3C5);
+    //    dprintf("SM750: SEQ Index 0x%02x = 0x%02x\n", indices[i], val);
+    //}
+    //sm750_unlock_vga_registers();
 
     vuint32 *regs = di->regs;
     shared_info *si = di->si;
@@ -113,7 +175,8 @@ void sm750_init_chip(DeviceInfo *di) {
     // --- SBLOCCO CLOCK (Power Mode 0) ---
     uint32 mode0_gate = SM750_REG32(SM750_SYS_PWR_MODE_0_CLKC); // 0x000044
     // Abilitiamo GPIO (6), 2D (3), Display (2), Memory (1) e DMA (0)
-    mode0_gate |= (1 << 6) | (1 << 3) | (1 << 2) | (1 << 1) | (1 << 0);
+    mode0_gate |= (1 << 3) | (1 << 2) | (1 << 1) | (1 << 0); //(1 << 6) | 
+    mode0_gate &= ~(1 << 6); // Forza a 0 il clock GPIO visto che non riusciamo a usare il registro di direzione
     mode0_gate &= ~(1 << 8); // Forza a 0 il clock I2C hardware visto che è rotto
     mode0_gate |= (1 << 10); // Assicuriamoci che il VGA Clock (10) sia attivo se usiamo il CRT
     SM750_WREG32(SM750_SYS_PWR_MODE_0_CLKC, mode0_gate); // 0x000044
@@ -130,13 +193,10 @@ void sm750_init_chip(DeviceInfo *di) {
     
     // --- 2. ABILITAZIONE BUS E MEMORIA (Registro 0x00) ---
     uint32 sys_ctrl = SM750_REG32(SM750_SYS_CTRL); // 0x00
-    
     // Togliamo l'isolamento (bit 0,1,2,3) per collegare RAM e uscite video
     sys_ctrl &= ~0x0000000F; 
-    
     // Assicuriamoci che i sincronismi siano attivi (DPMS on, bit 31:30 = 00)
     sys_ctrl &= ~(3U << 30);
-    
     SM750_WREG32(SM750_SYS_CTRL, sys_ctrl); //0x000000
     dprintf("SM750: System Control (0x00) configurato: 0x%08x\n", sys_ctrl);
     
@@ -216,12 +276,12 @@ void sm750_init_chip(DeviceInfo *di) {
     si->card_info.chip_id = di->pci.device_id;
     si->card_info.f_ref = 14.31818f; //24.0f; sembra sia 14.318 da datasheet vecchio valore NTSC
     si->card_info.max_sclk = 130000; // Valori tipici SM750 (130MHz)
-    si->card_info.max_mclk = 150000; // 150MHz
+    si->card_info.max_mclk = 145000; // 145MHz da datasheet
     si->card_info.max_pclk = 300000; // 300MHz (Limite DAC)
     
     
     // 1. DIAGNOSTICA PCI/BOOT (Solo log)
-    
+    bool showLogo = false;
     struct frame_buffer_boot_info* bi = (struct frame_buffer_boot_info*)get_boot_item(FRAME_BUFFER_BOOT_INFO, NULL);
     if (bi) {
         //dprintf("SM750: VESA FB a 0x%" B_PRIx64 ", %" B_PRId32 "x%" B_PRId32 "\n", 
@@ -247,6 +307,7 @@ void sm750_init_chip(DeviceInfo *di) {
                 dm->timing.flags        = vesa_dmt_table[i].flags;
             
                 found = true;
+                showLogo = true;
                 break;
             }
         }
@@ -302,7 +363,7 @@ void sm750_init_chip(DeviceInfo *di) {
     } else {
         // Registro 0x80200: Bit 19:18. Vogliamo "CRT Data" (10)
         ctrl &= ~(3U << 18);
-        ctrl |= (2U << 18);
+        ctrl |= (2U << 18);  // CRT Data
     
         // No Blank per CRT (Bit 10)
         ctrl &= ~(1 << 10);
@@ -314,6 +375,7 @@ void sm750_init_chip(DeviceInfo *di) {
             detected_mem / (1024*1024), si->card_info.is_panel ? "PANEL" : "CRT");
     
     // --- INIZIO CONFIGURAZIONE GPIO PER EDID/I2C ---
+    /*
     // 1. Leggiamo il registro corretto: 0x08
     uint32 gpio_ctrl = SM750_REG32(SM750_SYS_GPIO_CTRL); //0x000008
     // 2. Impostiamo i pin 30 e 31 come I2C (funzione speciale)
@@ -326,7 +388,7 @@ void sm750_init_chip(DeviceInfo *di) {
     gpio_ctrl &= ~(1U << 30); // SCL
     // 3. Scriviamo il risultato per DISabilitare i2c visto che è buggato facciamo a mano
     SM750_WREG32(SM750_SYS_GPIO_CTRL, gpio_ctrl); //0x000008
-    dprintf("SM750: GPIO Control (0x08) impostato per I2C: 0x%08x\n", gpio_ctrl);
+    dprintf("SM750: GPIO Control (0x08) impostato per GPIO: 0x%08x\n", gpio_ctrl);
     
     // Poi disabilita anche gli interrupt sui pin GPIO 30 e 31 (Registro 0x010010)
     // Il registro gestisce i pin 25-31 nei primi bit
@@ -336,31 +398,43 @@ void sm750_init_chip(DeviceInfo *di) {
     SM750_WREG32(SM750_GPIO_INT_SETUP, gpio_int);
     
     // Configura Direzione Iniziale (Entrambi Output per ora)
-    uint32 gpio_dir = SM750_REG32(SM750_GPIO_DIRECTION);
-    gpio_dir |= (1U << 31) | (1U << 30); 
-    SM750_WREG32(SM750_GPIO_DIRECTION, gpio_dir);
+    //uint32 gpio_dir = SM750_REG32(SM750_GPIO_DIRECTION);
+    uint32 gpio_dir_high = SM750_REG32(SM750_GPIO_DIR_HIGH);
+    //gpio_dir |= (1U << 31) | (1U << 30); 
+    gpio_dir_high |= (1U << 15) | (1U << 14); 
+    //SM750_WREG32(SM750_GPIO_DIRECTION, gpio_dir);
+    SM750_WREG32(SM750_GPIO_DIR_HIGH, gpio_dir_high);
 
     // 5. Stato di IDLE (Bus High)
-    uint32 gpio_data = SM750_REG32(SM750_GPIO_DATA);
-    gpio_data |= (1U << 31) | (1U << 30);
-    SM750_WREG32(SM750_GPIO_DATA, gpio_data);
+    //uint32 gpio_data = SM750_REG32(SM750_GPIO_DATA);
+    //gpio_data |= (1U << 31) | (1U << 30);
+    //SM750_WREG32(SM750_GPIO_DATA, gpio_data);
+    uint32 gpio_data_high = SM750_REG32(SM750_GPIO_DATA_HIGH);
+    gpio_data_high |= (1U << 15) | (1U << 14);
+    SM750_WREG32(SM750_GPIO_DATA_HIGH, gpio_data_high);
     // TERMINE configurazione iniziale GPIO per nostro bit-banging
-   
+    dprintf("SM750: GPIO High Configurati - Dir: 0x%08x, Data: 0x%08x\n", 
+        SM750_REG32(SM750_GPIO_DIR_HIGH), SM750_REG32(SM750_GPIO_DATA_HIGH));
+    */
    
     uint32 detect = SM750_REG32(SM750_CRT_MONITOR_DETECT);
     dprintf("SM750: Monitor Detect Status: 0x%08" B_PRIx32 "\n", detect);
     
     // 7. DIAGNOSTICA FINALE MMIO
-    sm750_get_clocks(regs, si);
+    //sm750_get_clocks(regs, si);
     
     // SPLASH SCREEN che non funziona per ora
-    uint32* kfb = (uint32*)di->framebuffer;
-    uint32 size = detected_mem / 4; // in pixel a 32bpp
-    // Riempimento brutale ma efficace - metteremo logo se possibile
-    for (uint32 i = 0; i < size; i++) {
-        kfb[i] = 0xFFFF0000;
+    //uint32* kfb = (uint32*)di->framebuffer;
+    //uint32 size = detected_mem / 4; // in pixel a 32bpp
+    //// Riempimento brutale ma efficace - metteremo logo se possibile
+    //for (uint32 i = 0; i < size; i++) {
+    //    kfb[i] = 0xFFFF0000;
+    //}
+    if (showLogo) {
+    	display_mode *dm = si->card_info.is_panel ? &si->preferred_mode : &si->preferred_mode2;
+    	draw_logo(di, dm);
     }
-    snooze(1500000); // 1.5 secondi di gloria
+    snooze(2000000); // 2 secondi di gloria
 
     //dprintf("SM750: Inizializzazione completata.\n");
 }
