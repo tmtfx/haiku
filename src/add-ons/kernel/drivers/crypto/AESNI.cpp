@@ -493,7 +493,18 @@ internal_ghash_mul_only_xmm(__m128i a, __m128i b)
     // Il risultato finale è solo lo XOR tra la parte alta originale e la riduzione
     return _mm_xor_si128(tmp6, tmp8); 
 }
-/////////////////////////////
+///////////////////////////////
+// Macro temporanea di debug //
+///////////////////////////////
+#define DPRINTF_XMM(label, reg) do { \
+    alignas(16) uint8 _b[16]; \
+    _mm_storeu_si128((__m128i*)_b, reg); \
+    dprintf("AESNI DEBUG: %s = %02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n", \
+        label, _b[0], _b[1], _b[2], _b[3], _b[4], _b[5], _b[6], _b[7], \
+        _b[8], _b[9], _b[10], _b[11], _b[12], _b[13], _b[14], _b[15]); \
+} while(0)
+
+///////////////////////////////
 static status_t
 aesni_process_gcm(BCryptoRequest* request)
 {
@@ -552,6 +563,10 @@ aesni_process_gcm(BCryptoRequest* request)
 
     // 1. Setup Chiave H e J0
     aesni_encrypt_block_xmm(ctx, h_raw, h_raw);
+    dprintf("AESNI DEBUG: H = %02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n",
+    h_raw[0], h_raw[1], h_raw[2], h_raw[3], h_raw[4], h_raw[5], h_raw[6], h_raw[7],
+    h_raw[8], h_raw[9], h_raw[10], h_raw[11], h_raw[12], h_raw[13], h_raw[14], h_raw[15]);
+    dprintf("AESNI DEBUG: H dovrebbe essere 66e94bd4ef8a2c3b884cfa59ca342b2e");
     
     if (request->ivLength == 12) {
         memcpy(j0, request->iv, 12);
@@ -560,6 +575,11 @@ aesni_process_gcm(BCryptoRequest* request)
         st = B_NOT_SUPPORTED;
         goto cleanup;
     }
+    
+    dprintf("AESNI DEBUG: J0 = %02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n",
+    j0[0], j0[1], j0[2], j0[3], j0[4], j0[5], j0[6], j0[7],
+    j0[8], j0[9], j0[10], j0[11], j0[12], j0[13], j0[14], j0[15]);
+    dprintf("AESNI DEBUG: J0 atteso: 00000000000000000000000000000001\n");
 
     memcpy(ctr_curr, j0, 16);
     aesni_increment_gcm_ctr(ctr_curr);
@@ -570,12 +590,26 @@ aesni_process_gcm(BCryptoRequest* request)
         // --- RAMO ACCELERATO (PCLMULQDQ) ---
         __m128i h_temp = _mm_loadu_si128((__m128i*)h_raw);
         h_temp = GCM_REVERSE(h_temp);
-        
+        /* questo shift è rotto produce 5c566994b3f49910765915dfa897d2cd 
         // Shift a sinistra di 1 bit (fondamentale per allineamento GF128)
         h_ref = _mm_or_si128(
             _mm_slli_epi64(h_temp, 1), 
             _mm_srli_epi64(_mm_slli_si128(h_temp, 8), 63)
-        );
+        );*/
+        __m128i shifted = _mm_srli_epi64(h_temp, 1);
+        __m128i carry = _mm_slli_epi64(h_temp, 63);
+        carry = _mm_srli_si128(carry, 8);
+        h_ref = _mm_or_si128(shifted, carry);
+        //DPRINTF_XMM("h_ref (shiftato)", h_ref);
+        //dprintf("AESNI DEBUG: h_ref atteso: 5c566994b3f49910765915dfa897d2cc\n");
+        alignas(16) uint8 h_debug[16];
+        _mm_storeu_si128((__m128i*)h_debug, h_ref);
+        dprintf("AESNI DEBUG: h_ref = %02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n",
+            h_debug[0], h_debug[1], h_debug[2], h_debug[3], h_debug[4], h_debug[5],
+            h_debug[6], h_debug[7], h_debug[8], h_debug[9], h_debug[10], h_debug[11],
+            h_debug[12], h_debug[13], h_debug[14], h_debug[15]);
+        dprintf("AESNI DEBUG: h_ref atteso: 5c566994b3f49910765915dfa897d2cc\n");
+        
         /*
         h_ref = _mm_or_si128(
             _mm_srli_epi64(h_temp, 1), 
@@ -584,8 +618,15 @@ aesni_process_gcm(BCryptoRequest* request)
         //secondo claude:
         // CORRETTO: h_ref è semplicemente H byte-reversed
         //h_ref = h_temp;   // = GCM_REVERSE(h_raw), senza nessuno shift
+        //alignas(16) uint8 debug_href[16];
+        //_mm_storeu_si128((__m128i*)debug_href, h_ref);
+        //dprintf("AESNI DEBUG: h_ref = %02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n",
+        //    debug_href[0], debug_href[1], debug_href[2], debug_href[3], debug_href[4], debug_href[5],
+        //    debug_href[6], debug_href[7], debug_href[8], debug_href[9], debug_href[10], debug_href[11],
+        //    debug_href[12], debug_href[13], debug_href[14], debug_href[15]);
         
         acc = _mm_setzero_si128();
+        
         
         if (aad_ptr && aad_len > 0) {
             dprintf("AESNI: AAD ptr %p, len %zu\n", aad_ptr, aad_len);
@@ -619,6 +660,8 @@ aesni_process_gcm(BCryptoRequest* request)
 
                 if (encrypt) {
                     aesni_encrypt_block_xmm(ctx, ctr_curr, tmp_out); 
+                    dprintf("AESNI DEBUG: CTR[%zu] Keystream = %02x%02x...\n", pos/16, tmp_out[0], tmp_out[1]);
+                    dprintf("AESNI DEBUG: Keystream atteso (CTR 2): 0b4793b4...\n");
                     for(j = 0; j < chunk; j++) tmp_out[j] ^= tmp_in[j];
                     memcpy(dst + pos, tmp_out, chunk);
                     
@@ -638,8 +681,12 @@ aesni_process_gcm(BCryptoRequest* request)
                 //b_ref = _mm_loadu_si128((__m128i*)block_to_hash);
                 acc = _mm_xor_si128(acc, b_ref);
                 acc = internal_ghash_mul_only_xmm(acc, h_ref);
+                DPRINTF_XMM("acc (post-data)", acc);
+                dprintf("AESNI DEBUG: acc (post-data) atteso: 18db2620718617f6943b17904838f36c\n");
 
                 aesni_increment_gcm_ctr(ctr_curr);
+                dprintf("AESNI DEBUG: next ctr_curr last byte = %02x\n", ctr_curr[15]);
+                dprintf("AESNI DEBUG: next ctr_curr last byte = %02x (atteso: 03)\n", ctr_curr[15]);
                 pos += chunk;
             }
             total_len += vector_len;
@@ -658,12 +705,19 @@ aesni_process_gcm(BCryptoRequest* request)
         // secondo claude:
         acc = _mm_xor_si128(acc, GCM_REVERSE(len_v_be));
         acc = internal_ghash_mul_only_xmm(acc, h_ref);
+        DPRINTF_XMM("acc (post-lengths)", acc);
+        dprintf("AESNI DEBUG: acc (post-lengths) atteso: 606132049e37e937d54907a974246820\n");
 
         // --- FASE 4: Tag finale ---
         final_ghash = GCM_REVERSE(acc);
+        DPRINTF_XMM("final_ghash (reversed)", final_ghash);
+        dprintf("AESNI DEBUG: final_ghash atteso: 20682474a90749d537e9379e04326160\n");
         aesni_encrypt_block_xmm(ctx, j0, s0);
+        dprintf("AESNI DEBUG: s0 (E[K, J0]) = %02x%02x%02x...\n", s0[0], s0[1], s0[2]);
+        dprintf("AESNI DEBUG: s0 atteso: 58e2fcce...\n");
         tag_res = _mm_xor_si128(final_ghash, _mm_loadu_si128((__m128i*)s0));
-        
+        DPRINTF_XMM("TAG RISULTANTE", tag_res);
+        dprintf("AESNI DEBUG: TAG atteso: 788ad8ba537979b401962ae9a0d5243a\n");
         alignas(16) uint8 temp_tag[16];
         _mm_storeu_si128((__m128i*)temp_tag, tag_res);
     
