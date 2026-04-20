@@ -49,7 +49,11 @@ typedef struct {
 #define SKD_SET_CURSOR		0x00000008
 #define SKD_HANDLER_INSTALLED 0x80000000
 
-#define CRT_CURSOR_VRAM_OFFSET (si->card_info.mem_size - 1024)
+// bianco e nero
+#define CRT_CURSOR_VRAM_OFFSET	(si->card_info.mem_size - 1024)
+#define CURSOR_VRAM_SIZE		1024
+//#define CURSOR_VRAM_SIZE (16 * 1024)
+//#define CRT_CURSOR_VRAM_OFFSET (si->card_info.mem_size - CURSOR_VRAM_SIZE)
 
 #define MAX_EDID_MODES 8 // Di solito 4 detailed + eventuali standard
 
@@ -239,7 +243,7 @@ typedef struct {
 //extern status_t control_device(void *cookie, uint32 op, void *arg, size_t len);
 
 
-void sm750_get_clocks(vuint32 *regs, shared_info *si);
+//void sm750_get_clocks(vuint32 *regs, shared_info *si);
 void sm750_init_chip(DeviceInfo *di);
 
 #if defined(__cplusplus)
