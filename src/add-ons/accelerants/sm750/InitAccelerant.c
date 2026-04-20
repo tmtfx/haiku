@@ -76,16 +76,6 @@ static status_t init_common(int fd) {
     //gInfo->framebuffer = (uint8*)fb_ptr; TOLTO, ci deve essere solo un framebuffer in shared_info e basta
     si->framebuffer = (uint8*)fb_ptr;
     
-    /* --- TEST PIXEL (OPZIONALE) --- */
-    /*debug_printf("SM750_ACC: Test Framebuffer...\n");
-    uint32 *fb = (uint32*)gInfo->framebuffer;
-    // Riempiamo i primi 2MB (circa) per non eccedere se la memoria è poca
-    for (int i = 0; i < (512 * 1024); i++) {
-        fb[i] = 0x00FF00FF; 
-    }
-    debug_printf("SM750_ACC: Fine Test Framebuffer...\n");*/
-    
-    
     bool is_panel = si->card_info.is_panel;
 
     // Scegliamo il buffer corretto dove salvare i dati
@@ -102,23 +92,7 @@ static status_t init_common(int fd) {
         }
         debug_printf("SM750_ACC: EDID presente ma nessun Detailed Timing valido trovato.\n");
     }
-//fallback:
-/*
-        debug_printf("SM750: EDID non disponibile, uso modalità provvisoria 1024x768 su %s\n", is_panel ? "PANEL" : "CRT");
-        display_mode safe_mode = {
-            { 65000, 1024, 1048, 1184, 1344, 768, 771, 777, 806, 0 },
-            B_RGB32, 1024, 768, 0, 0
-        };
-        safe_mode.timing.flags = B_POSITIVE_HSYNC | B_POSITIVE_VSYNC;
-        si->mode_list[0] = safe_mode;
-        si->preferred_mode = safe_mode;
-        si->mode_count = 1; 
-        si->card_info.has_edid_panel = false;
-        si->card_info.has_edid_crt = false;
-    }
-    
-*/
-/* --- IL GRANDE FALLBACK LEGACY (LADRO DI TIMING) --- */
+    /* --- IL GRANDE FALLBACK LEGACY (LADRO DI TIMING) --- */
     
     // Verifichiamo se abbiamo catturato qualcosa di sensato dal BIOS
     display_mode *pm = is_panel ? &si->preferred_mode : &si->preferred_mode2;
@@ -148,6 +122,7 @@ static status_t init_common(int fd) {
     si->mode_count = 1;
     si->card_info.has_edid_panel = false;
     si->card_info.has_edid_crt = false;
+    si->cursor.v_address = (void *)((uint8 *)si->framebuffer + CRT_CURSOR_VRAM_OFFSET);
 
     return B_OK;
 }
@@ -204,6 +179,7 @@ void* get_accelerant_hook(uint32 feature, void* data) {
         case B_SET_CURSOR_SHAPE:            return (void*)sm750_set_cursor_shape;
         case B_MOVE_CURSOR:                 return (void*)sm750_move_cursor;
         case B_SHOW_CURSOR:                 return (void*)sm750_show_cursor;
+        case B_SET_CURSOR_BITMAP:           return (void*)sm750_set_cursor_bitmap;
         
         /* Engine */
         case B_MOVE_DISPLAY:                return (void*)sm750_move_display_area;
