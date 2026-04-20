@@ -3,7 +3,7 @@
 #include <crypto/BCrypto.h>
 
 int main() {
-    printf("BCrypto AES-GCM Test\n");
+    printf("BCrypto AES-GCM Test - Single char\n");
 
     BCrypto crypto;
     
@@ -21,11 +21,11 @@ int main() {
     crypto.GetEngineName(B_CRYPTO_AES, B_CRYPTO_MODE_GCM,  engineName, sizeof(engineName));
     printf("Motore crittografico: %s\n", engineName);
     // 1. Dati di test
-    uint8 key[16] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 
-                     0x09, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16};
-    uint8 iv[12]  = {0x99, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, 0x00, 0xAA, 0xBB};
+    uint8 key[16] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
+                     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+    uint8 iv[12]  = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
     
-    const char* plaintext = "Haiku OS - GCM Test Message";
+    const char* plaintext = "A";
     size_t dataLen = strlen(plaintext);
     
     uint8 ciphertext[64] = {0};
@@ -59,6 +59,7 @@ int main() {
     if (decResult < 0) {
         if (decResult == B_BAD_DATA) {
             printf("FALLITO: Tag non valido (Integrità compromessa)!\n");
+        	printf("Decifratura ottenuta: %s\n", decrypted);
         } else {
             printf("Errore in Decrypt: %ld\n", decResult);
         }
