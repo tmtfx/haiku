@@ -115,8 +115,7 @@ void sm750_program_pll(uint32 target_khz, bool is_panel)
     debug_printf("SM750_PLL: M:%u N:%u Div:%u -> Reg 0x%08x\n", m, n, div_val, pll_reg);
 }
 
-status_t
-sm750_move_display_area(uint16 h_display_start, uint16 v_display_start)
+status_t sm750_move_display_area(uint16 h_display_start, uint16 v_display_start)
 {
     shared_info *si = gInfo->si;
     
