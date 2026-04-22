@@ -135,7 +135,7 @@ static void draw_logo(DeviceInfo *di, display_mode* dm) {
     if (startX < 0) startX = 0;
     if (startY < 0) startY = 0;
 
-    dprintf("SM750: Disegno logo su %ux%u (Pitch: %u)\n", screenWidth, screenHeight, fbPitch);
+    //dprintf("SM750: Disegno logo su %ux%u (Pitch: %u)\n", screenWidth, screenHeight, fbPitch);
 
     // Cambiato int in uint32 per i cicli
     for (uint32 y = 0; y < logoH && (startY + (int32)y) < (int32)screenHeight; y++) {
@@ -149,7 +149,7 @@ static void draw_logo(DeviceInfo *di, display_mode* dm) {
 void sm750_init_chip(DeviceInfo *di) {
     if (!di || !di->regs) return;
     
-    dprintf("SM750: --- Inizializzazione Hardware ---\n");
+    //dprintf("SM750: --- Inizializzazione Hardware ---\n");
     
     //dprintf("SM750: --- DUMP SEQUENCER ESTESO ---\n");
     //// Array degli indici "sospetti" che non compaiono nel datasheet ufficiale
@@ -169,7 +169,7 @@ void sm750_init_chip(DeviceInfo *di) {
     uint32 device_info = SM750_REG32(SM750_SYS_DEVID); // 0x000054
     uint16 device_id = (uint16)(device_info >> 16);
     uint8 revision = (uint8)(device_info & 0xFF);
-    dprintf("SM750: Chip rilevato. ID: 0x%04X, Revisione: 0x%02X\n", device_id, revision);
+    dprintf("SM750: Chip detected. ID: 0x%04X, Revision: 0x%02X\n", device_id, revision);
     
     // --- 1. SVEGLIA IL CHIP (Power Mode 0) ---
     // --- SBLOCCO CLOCK (Power Mode 0) ---
@@ -180,7 +180,7 @@ void sm750_init_chip(DeviceInfo *di) {
     mode0_gate &= ~(1 << 8); // Forza a 0 il clock I2C hardware visto che è rotto
     mode0_gate |= (1 << 10); // Assicuriamoci che il VGA Clock (10) sia attivo se usiamo il CRT
     SM750_WREG32(SM750_SYS_PWR_MODE_0_CLKC, mode0_gate); // 0x000044
-    dprintf("SM750: Power Mode 0 Clock Gate impostato: 0x%08x\n", mode0_gate);
+    //dprintf("SM750: Power Mode 0 Clock Gate set to: 0x%08x\n", mode0_gate);
 
     // --- 2. SELEZIONA IL POWER MODE E ACCENDI L'OSCILLATORE ---
     //Power Mode Control
@@ -198,18 +198,18 @@ void sm750_init_chip(DeviceInfo *di) {
     // Assicuriamoci che i sincronismi siano attivi (DPMS on, bit 31:30 = 00)
     sys_ctrl &= ~(3U << 30);
     SM750_WREG32(SM750_SYS_CTRL, sys_ctrl); //0x000000
-    dprintf("SM750: System Control (0x00) configurato: 0x%08x\n", sys_ctrl);
+    //dprintf("SM750: System Control (0x00) configurato: 0x%08x\n", sys_ctrl);
     
     // --- 3. ORA FACCIAMO LA RILEVAZIONE (Dopo aver attivato i bus) ---
     // Usiamo la tua logica basata sul bit 3 (CRT is Normal)
     if (!(sys_ctrl & (1 << 3))) { 
         si->card_info.is_panel = false;
         si->card_info.active_outputs = 2; // CRT
-        dprintf("SM750: CRT rilevato come attivo.\n");
+        dprintf("SM750: CRT detected as active.\n");
     } else {
         si->card_info.is_panel = true;
         si->card_info.active_outputs = 1; // Panel
-        dprintf("SM750: Panel rilevato come attivo.\n");
+        dprintf("SM750: Panel detected as active.\n");
     }
     
 
@@ -226,7 +226,7 @@ void sm750_init_chip(DeviceInfo *di) {
     misc_ctrl &= ~(3 << 25);
     misc_ctrl |= (1 << 25);
     SM750_WREG32(SM750_SYS_MISC_CTRL, misc_ctrl); // 0x000004
-    dprintf("SM750: Miscellaneous Control (0x04) stabilizzato a: 0x%08x\n", misc_ctrl);
+    //dprintf("SM750: Miscellaneous Control (0x04) stabilizzato a: 0x%08x\n", misc_ctrl);
     
     
     // C. Rilevazione Memoria (LOGICA UNICA)
@@ -243,7 +243,7 @@ void sm750_init_chip(DeviceInfo *di) {
 
     // Aggiorniamo la shared info
     si->card_info.mem_size = detected_mem;
-    dprintf("SM750: Memoria VRAM rilevata (da 0x04): %u MB\n", detected_mem / (1024*1024));
+    dprintf("SM750: Detected VRAM memory (from Reg 0x000004): %u MB\n", detected_mem / (1024*1024));
     
     // D. Rilevazione Uscita Attiva (LOGICA UNICA)
     /*
@@ -286,13 +286,13 @@ void sm750_init_chip(DeviceInfo *di) {
     if (bi) {
         //dprintf("SM750: VESA FB a 0x%" B_PRIx64 ", %" B_PRId32 "x%" B_PRId32 "\n", 
         //        (uint64)bi->physical_frame_buffer, bi->width, bi->height);
-        dprintf("SM750: Bootloader indica %ux%u\n", bi->width, bi->height);
+        dprintf("SM750: Bootloader says %ux%u\n", bi->width, bi->height);
         display_mode *dm = si->card_info.is_panel ? &si->preferred_mode : &si->preferred_mode2;
         bool found = false;
 
         for (int i = 0; vesa_dmt_table[i].width != 0; i++) {
             if (vesa_dmt_table[i].width == bi->width && vesa_dmt_table[i].height == bi->height) {
-                dprintf("SM750: Trovato timing VESA DMT per %ux%u\n", bi->width, bi->height);
+                //dprintf("SM750: Trovato timing VESA DMT per %ux%u\n", bi->width, bi->height);
             
                 dm->timing.pixel_clock = vesa_dmt_table[i].pixel_clock;
                 dm->timing.h_display    = vesa_dmt_table[i].width;
@@ -312,7 +312,7 @@ void sm750_init_chip(DeviceInfo *di) {
             }
         }
         if (!found) {
-            dprintf("SM750: ATTENZIONE! Risoluzione boot non in tabella. Uso fallback 1024x768\n");
+            dprintf("SM750: WARNING! Boot resolution not in our table. Using 1024x768 fallback\n");
             // Qui puoi mettere il codice per la 1024x768 come visto prima
             dm->timing.pixel_clock = 65000;
             dm->timing.h_display    = 1024;
@@ -371,8 +371,7 @@ void sm750_init_chip(DeviceInfo *di) {
     SM750_WREG32(display_reg, ctrl);
     
 
-    dprintf("SM750: Init  completato. Mem: %d MB, Mode: %s\n", 
-            detected_mem / (1024*1024), si->card_info.is_panel ? "PANEL" : "CRT");
+    //dprintf("SM750: Init  completato. Mem: %d MB, Mode: %s\n", detected_mem / (1024*1024), si->card_info.is_panel ? "PANEL" : "CRT");
     
     // --- INIZIO CONFIGURAZIONE GPIO PER EDID/I2C ---
     /*
@@ -434,7 +433,7 @@ void sm750_init_chip(DeviceInfo *di) {
     	display_mode *dm = si->card_info.is_panel ? &si->preferred_mode : &si->preferred_mode2;
     	draw_logo(di, dm);
     }
-    snooze(2000000); // 2 secondi di gloria
+    snooze(3000000); // 3 seconds of glory
 
     //dprintf("SM750: Inizializzazione completata.\n");
 }
