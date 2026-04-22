@@ -98,7 +98,7 @@ status_t init_driver(void) {
             devices[count]->pChipInfo = (info.device_id == 0x0751) ? &sm750_chips[1] : &sm750_chips[0];
             sprintf(devices[count]->name, "graphics/sm750_%02x%02x%02x", info.bus, info.device, info.function);
             
-            dprintf("SM750: Trovato %s a PCI %d:%d:%d\n", 
+            dprintf("SM750: Found %s at PCI %d:%d:%d\n", 
                 devices[count]->pChipInfo->chipName, info.bus, info.device, info.function);
             count++;
         }
