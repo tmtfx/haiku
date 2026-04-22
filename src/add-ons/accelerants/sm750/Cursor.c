@@ -23,7 +23,6 @@ sm750_move_cursor(uint16 x, uint16 y)
 
     uint32 reg_val = 0;
 
-    // Gestione X (Orizzontale)
     if (x_pos < 0) {
         // Bit 11 = 1 (Fuori a sinistra), il valore diventa positivo (distanza dal bordo)
         reg_val |= (1 << 11) | (uint32)((-x_pos) & 0x3F); 
@@ -31,7 +30,6 @@ sm750_move_cursor(uint16 x, uint16 y)
         reg_val |= (uint32)(x_pos & 0x07FF);
     }
 
-    // Gestione Y (Verticale)
     if (y_pos < 0) {
         // Bit 27 = 1 (Fuori in alto)
         reg_val |= (1 << 27) | (uint32)(((-y_pos) & 0x3F) << 16);
@@ -119,6 +117,8 @@ sm750_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
         return B_BAD_VALUE;
 
     shared_info *si = gInfo->si;
+    vuint32 *regs = gInfo->regs;
+    
     uint8* dest = (uint8*)si->cursor.v_address;
 
     if (dest == NULL)
@@ -127,23 +127,22 @@ sm750_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
     si->cursor.hot_x = hotX;
     si->cursor.hot_y = hotY;
 
-    // 1. Pulizia Totale: 0x00 è trasparente nel nostro nuovo mondo
+    // 1. Clear: 0x00 is transparent
     memset(dest, 0x00, 1024);
 
-    // 2. Traduzione maschere BeOS -> Formato SM750 2-bit
-    // Ogni riga hardware è 16 byte (64 pixel * 2 bit)
-    uint32 byteWidth = (width + 7) / 8; // Larghezza in byte della maschera sorgente
+    // 2. BeOS mask traduction -> SM750 2-bit Format
+    // Every hardware row is 16 byte (64 pixels * 2 bit)
+    uint32 byteWidth = (width + 7) / 8; // Width in byte of the original mask
 
     for (uint32 y = 0; y < height; y++) {
         for (uint32 x = 0; x < width; x++) {
-            // Estraiamo i singoli bit dalle maschere di Haiku
+            // bit extraction of Haiku's masks
             uint32 srcByteIdx = (y * byteWidth) + (x / 8);
             uint8 bitPos = 7 - (x % 8);
             
             bool andBit = (andMask[srcByteIdx] >> bitPos) & 0x01;
             bool xorBit = (xorMask[srcByteIdx] >> bitPos) & 0x01;
 
-            // Applichiamo la "Tabella della Verità" dello Zio:
             // AND=0, XOR=0 -> Nero (10 binario = 2)
             // AND=0, XOR=1 -> Bianco (01 binario = 1)
             // AND=1, XOR=0 -> Trasparente (00 binario = 0)
@@ -158,14 +157,13 @@ sm750_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
                 else val = 0;            // Trasparente
             }
 
-            // Scriviamo nel buffer interallacciato (16 byte per riga)
+            // writing to the interlaced buffer (16 bytes per row)
             uint32 destByteIdx = (y * 16) + (x / 4);
             uint8 shift = (x % 4) * 2;
             dest[destByteIdx] |= (val << shift);
         }
     }
 
-    // 3. Registri e Attivazione (Identico a set_cursor_bitmap)
     uint32 addr_val = (1 << 31) | ((si->card_info.mem_size - 1024) & 0x03FFFFF0);
     uint32 color12 = 0x0000FFFF;
 
@@ -182,7 +180,6 @@ sm750_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
     return B_OK;
 }
 
-// macro per gestire colore cursore: Color16=((R>>3)<<11)|((G>>2)<<5)|(B>>3)
 status_t
 sm750_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
     color_space colorSpace, uint16 bytesPerRow, const uint8* bitmapData)
@@ -211,14 +208,13 @@ sm750_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 
     for (uint32 y = 0; y < height && y < 64; y++) {
         for (uint32 x = 0; x < width && x < 64; x++) {
-            // Puntatore al pixel RGBA (4 byte)
             const uint8* pixel = src + (y * bytesPerRow) + (x * 4);
             uint8 a = pixel[3]; // Alpha
             uint8 r = pixel[2];
             uint8 g = pixel[1];
             uint8 b = pixel[0];
 
-            uint8 val = 0; // Default: 00 (Trasparente)
+            uint8 val = 0; // Default: 00 (Transparent)
 
             if (a > 128) {
                 // Calcoliamo la luminosità per decidere tra Bianco e Nero
