@@ -19,7 +19,7 @@ accelerant_info g_info = { .shared_info_area = -1, .regs_area = -1, .fb_area = -
 accelerant_info *gInfo = &g_info;
 
 static status_t init_common(int fd) {
-    debug_printf("SM750_ACC: Inizio init_common\n");
+    //debug_printf("SM750_ACC: Inizio init_common\n");
     gInfo->fd = fd;
 
     /* 1. Recupera l'area shared_info dal driver tramite IOCTL */
@@ -27,7 +27,7 @@ static status_t init_common(int fd) {
     gpd.magic = SM750_PRIVATE_DATA_MAGIC;
 
     if (ioctl(fd, ENG_GET_PRIVATE_DATA, &gpd, sizeof(gpd)) != B_OK) {
-        debug_printf("SM750_ACC: ERRORE ioctl ENG_GET_PRIVATE_DATA fallita!\n");
+        debug_printf("SM750_ACC: ERROR ioctl ENG_GET_PRIVATE_DATA failed!\n");
         return B_ERROR;
     }
     
@@ -40,7 +40,7 @@ static status_t init_common(int fd) {
     shared_info *si = gInfo->si;
     
     if (si->regs_area <= 0) {
-        debug_printf("SM750_ACC: ERRORE! regs_area invalida nella shared_info!\n");
+        debug_printf("SM750_ACC: ERROR! Invalid regs_area in shared_info!\n");
         return B_ERROR;
     }
     /* 3. Clona i registri MMIO (BAR1) */
@@ -48,7 +48,7 @@ static status_t init_common(int fd) {
         B_ANY_ADDRESS, B_READ_AREA | B_WRITE_AREA, gInfo->si->regs_area);
     
     if (gInfo->regs_area < 0) {
-    	debug_printf("SM750_ACC: Errore fatale clone_area: %s\n", strerror(gInfo->regs_area));
+    	debug_printf("SM750_ACC: clone_area fatal error: %s\n", strerror(gInfo->regs_area));
         delete_area(gInfo->shared_info_area);
         return gInfo->regs_area;
     }
@@ -56,7 +56,7 @@ static status_t init_common(int fd) {
     /* Test lettura ID per conferma MMIO */
     //vuint32* regs = gInfo->regs;
     if (gInfo->regs == NULL) {
-        debug_printf("SM750_ACC: ERRORE CRITICO! gInfo->regs è NULL dopo il clone!\n");
+        debug_printf("SM750_ACC: CRITIC ERROR! gInfo->regs is NULL after clone!\n");
         return B_ERROR;
     }
     // fin qui funziona tutto da syslog rimosso i vari debug_prinft
@@ -80,17 +80,17 @@ static status_t init_common(int fd) {
 
     // Scegliamo il buffer corretto dove salvare i dati
     uint8* edid_buffer = is_panel ? si->edid_panel : si->edid_crt;
-	debug_printf("Inizio lettura EDID...\n");
+	debug_printf("Beginning EDID reading...\n");
     if (sm750_read_edid(edid_buffer) == B_OK) {
         // Segnamo che abbiamo trovato i dati
         if (is_panel) si->card_info.has_edid_panel = true;
         else si->card_info.has_edid_crt = true;
-        debug_printf("SM750_ACC: EDID letto con successo su %s\n", is_panel ? "PANEL" : "CRT");
+        debug_printf("SM750_ACC: Succesfully read EDID from %s\n", is_panel ? "PANEL" : "CRT");
         if (create_mode_list_from_edid(edid_buffer) == B_OK) {
-            debug_printf("SM750_ACC: Lista modi aggiornata con dati monitor reali.\n");
+            debug_printf("SM750_ACC: Modes list updated with monitor data.\n");
             return B_OK;
         }
-        debug_printf("SM750_ACC: EDID presente ma nessun Detailed Timing valido trovato.\n");
+        debug_printf("SM750_ACC: EDID present but no valid Detailed Timings found.\n");
     }
     /* --- IL GRANDE FALLBACK LEGACY (LADRO DI TIMING) --- */
     
@@ -99,7 +99,7 @@ static status_t init_common(int fd) {
 
     // Verifichiamo se abbiamo catturato qualcosa dal BIOS per l'uscita attiva
     if (pm->timing.h_display > 0 && pm->timing.v_display > 0) {
-        debug_printf("SM750_ACC: EDID KO. Uso Timing BIOS da %s: %dx%d\n", 
+        debug_printf("SM750_ACC: EDID KO. Using BIOS Timings from %s: %dx%d\n", 
                      is_panel ? "PANEL" : "CRT",
                      pm->timing.h_display, pm->timing.v_display);
         
@@ -108,7 +108,7 @@ static status_t init_common(int fd) {
         si->preferred_mode = *pm; 
     } else {
         // Estrema ratio: tabula rasa, mettiamo il 1024 fisso
-        debug_printf("SM750_ACC: EDID KO e registri BIOS vuoti su %s! Fallback 1024x768\n",
+        debug_printf("SM750_ACC: EDID KO and BIOS registers empty for %s! Fallback 1024x768\n",
                      is_panel ? "PANEL" : "CRT");
         display_mode safe_mode = {
             { 65000, 1024, 1048, 1184, 1344, 768, 771, 777, 806, 0 },
