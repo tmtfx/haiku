@@ -588,6 +588,8 @@ aesni_process_gcm(BCryptoRequest* request)
 
     if (ghash_accel) {
         // --- RAMO ACCELERATO (PCLMULQDQ) ---
+        /*Il log h_ref = 5c566894... (invece di 5c566994...) ci dice che lo shift che stai facendo non è un vero shift a 128 bit, ma due shift a 64 bit indipendenti. Quando fai _mm_slli_epi64, il bit 63 della QWORD bassa viene perso invece di finire nel bit 0 della QWORD alta.
+        Ma c'è una notizia ancora più importante: la funzione internal_ghash_mul_only_xmm che hai postato (quella con la riduzione Barrett basata sul polinomio 0xc2...) in realtà non vuole affatto che tu faccia lo shift manuale.*/
         __m128i h_temp = _mm_loadu_si128((__m128i*)h_raw);
         h_temp = GCM_REVERSE(h_temp);
         /* questo shift è rotto produce 5c566994b3f49910765915dfa897d2cd 
@@ -596,10 +598,17 @@ aesni_process_gcm(BCryptoRequest* request)
             _mm_slli_epi64(h_temp, 1), 
             _mm_srli_epi64(_mm_slli_si128(h_temp, 8), 63)
         );*/
+        /*
         __m128i shifted = _mm_srli_epi64(h_temp, 1);
         __m128i carry = _mm_slli_epi64(h_temp, 63);
         carry = _mm_srli_si128(carry, 8);
         h_ref = _mm_or_si128(shifted, carry);
+        */
+        /*__m128i shifted = _mm_slli_epi64(h_temp, 1);
+        __m128i carry = _mm_srli_epi64(h_temp, 63);
+        // Il bit che esce dalla QWORD bassa (indice 0) deve entrare nella QWORD alta (indice 1)
+        carry = _mm_slli_si128(carry, 8); 
+        h_ref = _mm_or_si128(shifted, carry);*/
         //DPRINTF_XMM("h_ref (shiftato)", h_ref);
         //dprintf("AESNI DEBUG: h_ref atteso: 5c566994b3f49910765915dfa897d2cc\n");
         alignas(16) uint8 h_debug[16];
@@ -703,7 +712,9 @@ aesni_process_gcm(BCryptoRequest* request)
         __m128i len_v_be = _mm_loadu_si128((__m128i*)len_buffer);
         //acc = _mm_xor_si128(acc, len_v_be);
         // secondo claude:
-        acc = _mm_xor_si128(acc, GCM_REVERSE(len_v_be));
+        //acc = _mm_xor_si128(acc, GCM_REVERSE(len_v_be));
+        
+        acc = _mm_xor_si128(acc, len_v_be);
         acc = internal_ghash_mul_only_xmm(acc, h_ref);
         DPRINTF_XMM("acc (post-lengths)", acc);
         dprintf("AESNI DEBUG: acc (post-lengths) atteso: 606132049e37e937d54907a974246820\n");

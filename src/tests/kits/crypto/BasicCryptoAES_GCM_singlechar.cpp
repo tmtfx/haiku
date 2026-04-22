@@ -43,6 +43,12 @@ int main() {
         printf("Errore in Encrypt: %s\n", strerror(encResult));
         return 1;
     }
+    
+    printf("Ciphertext (hex): ");
+    for(int i = 0; i < dataLen; i++) {
+        printf("%02x", ciphertext[i]);
+    }
+    printf("\n");
 
     printf("Cifratura completata. Tag: ");
     for(int i=0; i<16; i++) printf("%02x", tag[i]);
