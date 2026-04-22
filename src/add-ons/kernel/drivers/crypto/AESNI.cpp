@@ -563,10 +563,10 @@ aesni_process_gcm(BCryptoRequest* request)
 
     // 1. Setup Chiave H e J0
     aesni_encrypt_block_xmm(ctx, h_raw, h_raw);
-    dprintf("AESNI DEBUG: H = %02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n",
-    h_raw[0], h_raw[1], h_raw[2], h_raw[3], h_raw[4], h_raw[5], h_raw[6], h_raw[7],
-    h_raw[8], h_raw[9], h_raw[10], h_raw[11], h_raw[12], h_raw[13], h_raw[14], h_raw[15]);
-    dprintf("AESNI DEBUG: H dovrebbe essere 66e94bd4ef8a2c3b884cfa59ca342b2e");
+    //dprintf("AESNI DEBUG: H = %02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n",
+    //h_raw[0], h_raw[1], h_raw[2], h_raw[3], h_raw[4], h_raw[5], h_raw[6], h_raw[7],
+    //h_raw[8], h_raw[9], h_raw[10], h_raw[11], h_raw[12], h_raw[13], h_raw[14], h_raw[15]);
+    //dprintf("AESNI DEBUG: H dovrebbe essere 66e94bd4ef8a2c3b884cfa59ca342b2e\n");
     
     if (request->ivLength == 12) {
         memcpy(j0, request->iv, 12);
@@ -576,10 +576,10 @@ aesni_process_gcm(BCryptoRequest* request)
         goto cleanup;
     }
     
-    dprintf("AESNI DEBUG: J0 = %02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n",
-    j0[0], j0[1], j0[2], j0[3], j0[4], j0[5], j0[6], j0[7],
-    j0[8], j0[9], j0[10], j0[11], j0[12], j0[13], j0[14], j0[15]);
-    dprintf("AESNI DEBUG: J0 atteso: 00000000000000000000000000000001\n");
+    //dprintf("AESNI DEBUG: J0 = %02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n",
+    //j0[0], j0[1], j0[2], j0[3], j0[4], j0[5], j0[6], j0[7],
+    //j0[8], j0[9], j0[10], j0[11], j0[12], j0[13], j0[14], j0[15]);
+    //dprintf("AESNI DEBUG: J0 atteso: 00000000000000000000000000000001\n");
 
     memcpy(ctr_curr, j0, 16);
     aesni_increment_gcm_ctr(ctr_curr);
@@ -591,7 +591,88 @@ aesni_process_gcm(BCryptoRequest* request)
         /*Il log h_ref = 5c566894... (invece di 5c566994...) ci dice che lo shift che stai facendo non è un vero shift a 128 bit, ma due shift a 64 bit indipendenti. Quando fai _mm_slli_epi64, il bit 63 della QWORD bassa viene perso invece di finire nel bit 0 della QWORD alta.
         Ma c'è una notizia ancora più importante: la funzione internal_ghash_mul_only_xmm che hai postato (quella con la riduzione Barrett basata sul polinomio 0xc2...) in realtà non vuole affatto che tu faccia lo shift manuale.*/
         __m128i h_temp = _mm_loadu_si128((__m128i*)h_raw);
+
+        // 2. Applicazione del REVERSE
         h_temp = GCM_REVERSE(h_temp);
+
+        h_ref = _mm_set_epi64x(0xDEADBEEFDEADBEEF, 0xCAFEBABECAFEBABE);
+        
+        // --- SHIFT A 128 BIT (SINISTRA) ---
+        // h_temp = [ ParteAlta (64 bit) | ParteBassa (64 bit) ]
+        // Esempio: [ 2e2b34ca59fa4c88 | 3b2c8aefd44be966 ]
+
+        // 1. Shifta entrambe le metà (i bit 63 "cadono" per ora)
+        //__m128i sll = _mm_slli_epi64(h_temp, 1); 
+        // 2. Recupera il bit che cade dalla parte BASSA per metterlo in quella ALTA
+        // Shifto a DESTRA di 63 per isolare il bit 63 della parte bassa
+        //__m128i carry = _mm_srli_epi64(h_temp, 63); 
+        // 3. Sposta il carry in modo che il bit della parte bassa si allinei con la parte alta
+        // __mm_slli_si128 sposta i BYTE. Spostiamo di 8 byte (64 bit) verso sinistra.
+        //carry = _mm_srli_si128(carry, 8); 
+        // 4. Unisci: ora il bit 63 della parte bassa è diventato il bit 0 della parte alta
+        //h_ref = _mm_or_si128(sll, carry);
+
+uint64_t parte_alta; // Corrisponde ai primi 8 byte di h_raw (0-7)
+uint64_t parte_bassa; // Corrisponde agli ultimi 8 byte di h_raw (8-15)
+
+// 2. Carichiamo i dati da h_raw (Assumendo h_raw sia l'array con 66e9...)
+// Usiamo __builtin_bswap64 perché la memoria è Big Endian (stringa), 
+// ma la CPU lavora meglio in Native Endian per gli shift.
+memcpy(&parte_alta,  h_raw,     8);
+memcpy(&parte_bassa, h_raw + 8, 8);
+//__m128i alta_shifted  = _mm_slli_epi64(parte_alta, 1);  // Diventa 5c566994b3f49910
+//__m128i bassa_shifted = _mm_slli_epi64(parte_bassa, 1); // Diventa 765915dfa897d2cc
+// 1. Facciamo lo shift direttamente sulle variabili uint64_t
+// Qui non serve XMM, usiamo il C puro
+uint64_t s_alta  = parte_alta << 1;
+uint64_t s_bassa = parte_bassa << 1;
+// 2. Estraiamo il carry che deve passare dalla bassa alla alta
+// Prendiamo il bit 63 di 'bassa' e lo portiamo al bit 0
+//__m128i carry = _mm_srli_epi64(parte_bassa, 63); 
+// 2. Estraiamo il carry dalla parte BASSA (bit 63)
+uint64_t carry = parte_bassa >> 63;
+
+// 3. Applichiamo il carry alla parte alta (OR logico)
+//__m128i alta_finale = _mm_or_si128(alta_shifted, carry);
+uint64_t finale_alta = s_alta | carry;
+
+// 4. Uniamo i due pezzi nel registro h_ref
+// (Nota: l'ordine nel set dipende da come la tua funzione MUL legge i 128 bit)
+//h_ref = _mm_set_epi64x(
+//    _mm_extract_epi64(alta_finale, 0), 
+//    _mm_extract_epi64(bassa_shifted, 0)
+//);
+h_ref = _mm_set_epi64x(s_bassa,finale_alta);
+h_ref = GCM_REVERSE(h_ref);
+
+/*
+        uint8_t finale[16];
+uint8_t c = 0;
+
+// Shift 128-bit Big Endian (Esattamente come sulla carta)
+for (int i = 15; i >= 0; i--) {
+    uint8_t b = h_raw[i];
+    finale[i] = (b << 1) | c;
+    c = (b & 0x80) ? 1 : 0;
+}
+
+// Ora 'finale' DEVE essere 5c566994b3f49910765915dfa897d2cc
+// Lo carichiamo in h_ref (con reverse per la MUL)
+h_ref = GCM_REVERSE(_mm_loadu_si128((__m128i*)finale));
+*/
+
+        /* questo è fatto a mano non accelerato e produce uguale a quello sopra
+        uint64 part_low  = _mm_extract_epi64(h_temp, 0); 
+        uint64 part_high = _mm_extract_epi64(h_temp, 1);
+        // 2. Calcoliamo lo shift a mano
+        // Il bit 63 di part_low deve diventare il bit 0 di part_high
+        uint64 carry = part_low >> 63; 
+        uint64 new_low  = part_low << 1;
+        uint64 new_high = (part_high << 1) | carry;
+        // 3. Ricomponiamo il registro h_ref
+        h_ref = _mm_set_epi64x(new_high, new_low);
+        */
+        
         /* questo shift è rotto produce 5c566994b3f49910765915dfa897d2cd 
         // Shift a sinistra di 1 bit (fondamentale per allineamento GF128)
         h_ref = _mm_or_si128(
@@ -618,21 +699,12 @@ aesni_process_gcm(BCryptoRequest* request)
             h_debug[6], h_debug[7], h_debug[8], h_debug[9], h_debug[10], h_debug[11],
             h_debug[12], h_debug[13], h_debug[14], h_debug[15]);
         dprintf("AESNI DEBUG: h_ref atteso: 5c566994b3f49910765915dfa897d2cc\n");
-        
-        /*
-        h_ref = _mm_or_si128(
-            _mm_srli_epi64(h_temp, 1), 
-            _mm_slli_epi64(_mm_srli_si128(h_temp, 8), 63)
-        );*/
-        //secondo claude:
-        // CORRETTO: h_ref è semplicemente H byte-reversed
-        //h_ref = h_temp;   // = GCM_REVERSE(h_raw), senza nessuno shift
-        //alignas(16) uint8 debug_href[16];
-        //_mm_storeu_si128((__m128i*)debug_href, h_ref);
-        //dprintf("AESNI DEBUG: h_ref = %02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n",
-        //    debug_href[0], debug_href[1], debug_href[2], debug_href[3], debug_href[4], debug_href[5],
-        //    debug_href[6], debug_href[7], debug_href[8], debug_href[9], debug_href[10], debug_href[11],
-        //    debug_href[12], debug_href[13], debug_href[14], debug_href[15]);
+        /* href fissato per input A
+        alignas(16) uint8 h_fixed[16] = {
+    0x5c, 0x56, 0x69, 0x94, 0xb3, 0xf4, 0x99, 0x10, 
+    0x76, 0x59, 0x15, 0xdf, 0xa8, 0x97, 0xd2, 0xcc
+};
+h_ref = _mm_loadu_si128((__m128i*)h_fixed);*/
         
         acc = _mm_setzero_si128();
         
@@ -686,8 +758,8 @@ aesni_process_gcm(BCryptoRequest* request)
                 }
 
                 // Inversione e Accumulo (lavoriamo sempre su 16 byte puliti)
-                b_ref = GCM_REVERSE(_mm_loadu_si128((__m128i*)block_to_hash));
-                //b_ref = _mm_loadu_si128((__m128i*)block_to_hash);
+                //b_ref = GCM_REVERSE(_mm_loadu_si128((__m128i*)block_to_hash));
+                b_ref = _mm_loadu_si128((__m128i*)block_to_hash);
                 acc = _mm_xor_si128(acc, b_ref);
                 acc = internal_ghash_mul_only_xmm(acc, h_ref);
                 DPRINTF_XMM("acc (post-data)", acc);
