@@ -216,6 +216,7 @@ sm750_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 
             uint8 val = 0; // Default: 00 (Transparent)
 
+            /* a due colori bianco e nero
             if (a > 128) {
                 // Calcoliamo la luminosità per decidere tra Bianco e Nero
                 uint32 luma = (r + g + b) / 3;
@@ -223,6 +224,15 @@ sm750_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
                     val = 1; // 01 (Colore 1: Bianco)
                 else
                     val = 2; // 10 (Colore 2: Nero)
+            }*/
+            if (a < 100) {
+                val = 0; // Trasparente
+            } else if (a < 200) {
+                val = 3; // COLOR 3 (Grigio per l'ombra!)
+            } else {
+                // Pixel solido: Bianco o Nero
+                uint32 luma = (r + g + b) / 3;
+                val = (luma > 128) ? 1 : 2; 
             }
 
             // Inseriamo i 2 bit nel byte corretto
@@ -242,14 +252,15 @@ sm750_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
     // Color 1 (0,0) = Bianco
     // Color 2 (0,1) = Nero
     uint32 color12 = 0x0000FFFF; // Nero nei bit alti, Bianco nei bassi
+    uint32 color3 = 0x00888888; // Grigio medio (R=88, G=88, B=88)
 
     if (si->card_info.is_panel) {
         SM750_WREG32(SM750_DISP_PANEL_CUR_COLOR12, color12);
-        //SM750_WREG32(SM750_DISP_PANEL_CUR_COLOR3, 0x00000000);
+        SM750_WREG32(SM750_DISP_PANEL_CUR_COLOR3, color3);
         SM750_WREG32(SM750_DISP_PANEL_CUR_ADDR, addr_val);
     } else {
         SM750_WREG32(SM750_DISP_CRT_CUR_COLOR12, color12);
-        //SM750_WREG32(SM750_DISP_CRT_CUR_COLOR3, 0x00000000);
+        SM750_WREG32(SM750_DISP_CRT_CUR_COLOR3, color3);
         SM750_WREG32(SM750_DISP_CRT_CUR_ADDR, addr_val);
     }
 
