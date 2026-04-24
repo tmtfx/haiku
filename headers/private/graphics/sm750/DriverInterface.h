@@ -20,11 +20,50 @@
 
 #define DRIVER_PREFIX "sm750"
 
+/* --- Benaphore per la sincronizzazione --- */
+#ifdef __cplusplus
+/* Se stiamo compilando un file .cpp (Accelerante), usiamo i metodi */
+struct Benaphore {
+    sem_id  sem;
+    int32   count;
+
+    status_t Init(const char* name) {
+        count = 0;
+        sem = create_sem(0, name);
+        return sem < 0 ? sem : B_OK;
+    }
+
+    status_t Acquire() {
+        if (atomic_add(&count, 1) > 0)
+            return acquire_sem(sem);
+        return B_OK;
+    }
+
+    status_t Release() {
+        if (atomic_add(&count, -1) > 1)
+            return release_sem(sem);
+        return B_OK;
+    }
+
+    void Delete() {
+        delete_sem(sem);
+    }
+};
+#else
+/* Se stiamo compilando un file .c (Driver Kernel), definiamo solo i dati */
+typedef struct {
+    sem_id  sem;
+    int32   count;
+} Benaphore;
+#endif
+
+
 #if defined(__cplusplus)
 extern "C" {
 #endif
 
-/* --- Benaphore per la sincronizzazione --- */
+
+/*
 typedef struct {
 	sem_id	sem;
 	int32	ben;
@@ -33,7 +72,7 @@ typedef struct {
 #define INIT_BEN(x)		x.sem = create_sem(0, "SM750 "#x" benaphore");	x.ben = 0;
 #define AQUIRE_BEN(x)	if((atomic_add(&(x.ben), 1)) >= 1) acquire_sem(x.sem);
 #define RELEASE_BEN(x)	if((atomic_add(&(x.ben), -1)) > 1) release_sem(x.sem);
-#define DELETE_BEN(x)	delete_sem(x.sem);
+#define DELETE_BEN(x)	delete_sem(x.sem);*/
 
 /* Dualhead & Output Flags */
 #define DUALHEAD_OFF		(0<<6)
@@ -118,9 +157,9 @@ typedef struct {
 	void	*mem_mgr;	 /* Puntatore al gestore memoria (importante!) */
 	
 	/* Modalità Schermo */
-	area_id	mode_area;	/* Lista dei display_mode supportati da implementare in futuro*/
-	uint32	mode_count;
-	display_mode	mode_list[MAX_EDID_MODES]; //in caso aumentare a 20
+	area_id	mode_list_area;	/* Lista dei display_mode supportati da implementare in futuro*/
+	uint32	mode_count;     /* Numero di modi nell'area */
+	display_mode	*mode_list; /* Puntatore alla lista (valido nell'accelerante) */
 
 	uint32	flags;
 	uint32	bits_per_pixel; // TODO, remove if unused (used for initial tests)
@@ -152,8 +191,9 @@ typedef struct {
 
 	/* Acceleration Engine Status */
 	struct {
-		benaphore lock;
-		uint32	fifo_slots; /* Slot liberi stimati */
+		Benaphore lock;
+		uint32	fifo_slots; /* Slot liberi stimati */ // TODO lo usiamo?
+		uint32 count;
 	} engine;
 
 	/* SM750 Specific Card Info (Sostituisce PINS NVIDIA) */
@@ -178,7 +218,7 @@ typedef struct {
 		overlay_buffer myBuffer[MAXBUFFERS];
 		int_buf_info	myBufInfo[MAXBUFFERS];
 		overlay_token	myToken;
-		benaphore		lock;
+		Benaphore		lock;
 		bool			active;
 	} overlay;
 
@@ -193,8 +233,11 @@ typedef struct {
 	uint32		*regs;				/* Puntatore ai registri MMIO clonati */
 	area_id	 regs_area;			/* ID area registri */
 	area_id	 fb_area;			/* ID area framebuffer clonato */
-	//uint8 *framebuffer; NO DEVE STARE Solo in shared_info, scemo!
+	uint8 *framebuffer; /* Puntatore locale */
+	display_mode*	mode_list;		// cloned list of standard display modes
+	area_id			mode_list_area;
 	bool		is_clone;			/* Vero se è un clone */
+	engine_token sm750_engine_token; /* 2D engine token */
 } accelerant_info;
 
 /* Stato globale del driver */
