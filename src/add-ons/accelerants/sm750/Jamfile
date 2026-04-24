@@ -5,12 +5,12 @@ UsePrivateHeaders [ FDirName graphics sm750 ] ;
 UsePrivateHeaders [ FDirName graphics common ] ;
 
 Addon sm750.accelerant :
-	DisplayModes.c
-	Engine.c
-	I2C.c
-	Cursor.c
-	InitAccelerant.c
-	Power.c
+	DisplayModes.cpp
+	Engine.cpp
+	I2C.cpp
+	Cursor.cpp
+	InitAccelerant.cpp
+	Power.cpp
 	
 	: be libaccelerantscommon.a
 ;
