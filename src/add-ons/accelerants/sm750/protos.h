@@ -6,7 +6,9 @@
 #define SM750_PROTOS_H
 
 #include <Accelerant.h> // Serve per il tipo display_mode e status_t
-
+#ifdef __cplusplus
+extern "C" {
+#endif
 status_t sm750_init_accelerant(int fd);
 void sm750_uninit_accelerant(void);
 
@@ -44,4 +46,10 @@ status_t sm750_get_sync_token(engine_token *et, sync_token *st);
 status_t sm750_sync_to_token(sync_token *st);
 status_t sm750_set_fb_addr(uint32 offset, bool is_panel);
 
+void sm750_screen_to_screen_blit(engine_token *et, blit_params *p, uint32 count);
+void sm750_fill_rectangle(engine_token *et, uint32 color, fill_rect_params *params, uint32 count);
+void sm750_init_2d_engine(display_mode *mode);
+#ifdef __cplusplus
+}
+#endif
 #endif // SM750_PROTOS_H
