@@ -78,11 +78,15 @@ sm750_get_clocks(vuint32 *regs, shared_info *si)
     // sembra che la frequenza di riferimento sia 14.31818f
     //si->card_info.f_ref = 14.31818f; // già impostato prima...
 }*/
+static status_t create_mode_list(shared_info* si) {
+    size_t size = (MAX_EDID_MODES * sizeof(display_mode) + B_PAGE_SIZE - 1) & ~(B_PAGE_SIZE - 1);
 
-static void populate_default_modes(shared_info* si) {
+    si->mode_list_area = create_area("sm750 modes", (void **)&si->mode_list,
+        B_ANY_KERNEL_ADDRESS, size, B_FULL_LOCK, B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA);
+
+    if (si->mode_list_area < 0) return si->mode_list_area;
+
     uint32 count = 0;
-    
-    // Usiamo la nostra tabella vesa_dmt_table creata prima
     for (int i = 0; vesa_dmt_table[i].width != 0 && count < MAX_EDID_MODES; i++) {
         display_mode* dm = &si->mode_list[count];
         const vesa_timing_t* vesa = &vesa_dmt_table[i];
@@ -105,11 +109,13 @@ static void populate_default_modes(shared_info* si) {
         dm->h_display_start = 0;
         dm->v_display_start = 0;
         dm->flags = 0;
-
+        
         count++;
     }
     si->mode_count = count;
+    return B_OK;
 }
+
 static void draw_logo(DeviceInfo *di, display_mode* dm) {
     if (!di || !di->framebuffer || !dm) return;
 
@@ -282,12 +288,12 @@ void sm750_init_chip(DeviceInfo *di) {
     
     // 1. DIAGNOSTICA PCI/BOOT (Solo log)
     bool showLogo = false;
+    display_mode *dm = si->card_info.is_panel ? &si->preferred_mode : &si->preferred_mode2;
     struct frame_buffer_boot_info* bi = (struct frame_buffer_boot_info*)get_boot_item(FRAME_BUFFER_BOOT_INFO, NULL);
     if (bi) {
         //dprintf("SM750: VESA FB a 0x%" B_PRIx64 ", %" B_PRId32 "x%" B_PRId32 "\n", 
         //        (uint64)bi->physical_frame_buffer, bi->width, bi->height);
         dprintf("SM750: Bootloader says %ux%u\n", bi->width, bi->height);
-        display_mode *dm = si->card_info.is_panel ? &si->preferred_mode : &si->preferred_mode2;
         bool found = false;
 
         for (int i = 0; vesa_dmt_table[i].width != 0; i++) {
@@ -338,7 +344,26 @@ void sm750_init_chip(DeviceInfo *di) {
         dm->virtual_height = dm->timing.v_display;
     }
     
-    populate_default_modes(si);
+    create_mode_list(si);
+    
+    uint32 bpp = 0;
+    switch (dm->space) {
+        case B_RGB32: case B_RGBA32: bpp = 32; break;
+        case B_RGB16: bpp = 16; break;
+        default: bpp = 8; break;
+    }
+    
+    si->fbc.frame_buffer = NULL;
+    si->fbc.frame_buffer_dma = (void *)(addr_t)di->pci.u.h0.base_registers[0];
+    si->fbc.bytes_per_row = dm->timing.h_display * (bpp / 8);
+    si->fbc2 = si->fbc; // per sicurezza copiamo la configurazione anche nell'altra uscita
+    
+    
+    // Initialize 2D engine Benaphore 
+    // NO LO FACCIAMO in init_common con is_clone false
+    //si->engine.lock.sem = create_sem(0, "sm750 engine benaphore");
+    //si->engine.lock.ben = 0;
+    //set_sem_owner(si->engine.lock.sem, B_SYSTEM_TEAM);
 
     
     // F. VGA BYPASS (Necessario per usare il Framebuffer lineare in modo nativo)
