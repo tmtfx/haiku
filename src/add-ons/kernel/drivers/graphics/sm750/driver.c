@@ -10,6 +10,9 @@
 #include <OS.h>
 #include <stdlib.h>
 #include <string.h>
+#include <boot_item.h>
+typedef enum bios_type_enum bios_type_enum;
+#include <vesa_info.h>
 #include <stdio.h>
 #include <driver_settings.h>
 
@@ -138,7 +141,8 @@ open_device(const char *name, uint32 flags, void **cookie)
     if (!di) return B_BAD_VALUE;
 
     if (di->openCount == 0) {
-        // 1. Abilitazione Bus Master e Memoria PCI
+    	edid1_info* edidInfo = (edid1_info*)get_boot_item(VESA_EDID_BOOT_INFO, NULL);
+    	// 1. Abilitazione Bus Master e Memoria PCI
         // Leggiamo il Command Register (CSR04) all'indirizzo 0x04
         uint32 pci_cmd = pci->read_pci_config(di->pci.bus, di->pci.device, di->pci.function, PCI_command, 4); //PCI_command = 0x04 da PCI.h
         // 2. Abilitiamo quello che serve veramente:
@@ -151,14 +155,25 @@ open_device(const char *name, uint32 flags, void **cookie)
         pci_cmd |= (1 << 6) | (1 << 8); 
         pci->write_pci_config(di->pci.bus, di->pci.device, di->pci.function, 0x04, 4, pci_cmd);
 
-         // 3. Allocazione Shared Info
+        // 3. Allocazione Shared Info
         di->shared_area = create_area("sm750 shared info", (void **)&(di->si), 
-            B_ANY_KERNEL_ADDRESS, B_PAGE_SIZE, B_FULL_LOCK, B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA | B_CLONEABLE_AREA);
+            B_ANY_KERNEL_ADDRESS, B_PAGE_SIZE * 2 , B_FULL_LOCK, B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA | B_CLONEABLE_AREA);
+        // aggiungendo l'edid vesa la shared info ingrassa pertanto usiamo B_PAGE_SIZE * 2
         if (di->shared_area < 0) return di->shared_area;
-        memset(di->si, 0, B_PAGE_SIZE);
+        memset(di->si, 0, B_PAGE_SIZE * 2);
         strncpy(di->si->device_path, name, B_PATH_NAME_LENGTH);
         memcpy(&di->si->settings, &current_settings, sizeof(sm750_settings));
-
+        
+        
+		if (edidInfo != NULL) {
+			di->si->card_info.has_vesa_edid_info = true;
+			memcpy(&di->si->vesa_edid_info, edidInfo, sizeof(edid1_info));
+			dprintf("SM750: EDID recuperato dal bootloader.\n");
+		} else {
+			di->si->card_info.has_vesa_edid_info = false;
+			dprintf("SM750: Impossibile recuperare l'EDID dal bootloader.\n");
+		}
+        
         // 4. Mappatura REGISTRI (BAR 1 - 2MB)
         di->regs_area = map_mem((void **)&di->regs, di->pci.u.h0.base_registers[1], 
                                di->pci.u.h0.base_register_sizes[1], "sm750_regs_k");
@@ -178,7 +193,7 @@ open_device(const char *name, uint32 flags, void **cookie)
         di->si->regs_area = di->regs_area; // Passa l'ID         
         di->si->fb_area = di->fb_area;     // Passa l'ID numerico
         di->si->framebuffer_pci = (phys_addr_t)di->pci.u.h0.base_registers[0];
-       
+        
         sm750_init_chip(di);
     }
 
