@@ -106,19 +106,32 @@ static status_t init_common(int fd) {
     bool is_panel = si->card_info.is_panel;
 
     // Scegliamo il buffer corretto dove salvare i dati
-    uint8* edid_buffer = is_panel ? si->edid_panel : si->edid_crt;
-	debug_printf("Beginning EDID reading...\n");
-    if (sm750_read_edid(edid_buffer) == B_OK) {
+    //uint8* edid_buffer = is_panel ? si->edid_panel : si->edid_crt;
+    uint8 temp_edid_raw[128]; // Buffer temporaneo per i dati grezzi dell'I2C
+    
+    debug_printf("SM750_ACC: Beginning EDID reading...\n");
+    if (sm750_read_edid(temp_edid_raw) == B_OK) {
         // Segnamo che abbiamo trovato i dati
-        if (is_panel) si->card_info.has_edid_panel = true;
-        else si->card_info.has_edid_crt = true;
+        if (is_panel) gInfo->has_edid_panel = true;
+        else gInfo->has_edid_crt = true;
         debug_printf("SM750_ACC: Succesfully read EDID from %s\n", is_panel ? "PANEL" : "CRT");
-        if (create_mode_list_from_edid(edid_buffer) == B_OK) {
+        if (create_mode_list_from_edid(temp_edid_raw) == B_OK) {
             debug_printf("SM750_ACC: Modes list updated with monitor data.\n");
             return B_OK;
         }
-        debug_printf("SM750_ACC: EDID present but no valid Detailed Timings found.\n");
+        //debug_printf("SM750_ACC: EDID present but no valid Detailed Timings found.\n");
+    } else {
+        debug_printf("SM750_ACC: I2C EDID read failed. Trying VESA fallback...\n");
+        
+        // 3. FALLBACK: Se l'I2C fallisce, proviamo a usare i dati VESA passati dal kernel
+        // Passiamo NULL per dire alla funzione: "usa si->vesa_edid_info"
+        if (create_mode_list_from_edid(NULL) == B_OK) {
+            debug_printf("SM750_ACC: Modes list updated with VESA fallback data.\n");
+            return B_OK;
+        }
     }
+    
+    debug_printf("SM750_ACC: CRITICAL - No EDID data available at all!\n");
     /* --- IL GRANDE FALLBACK LEGACY (LADRO DI TIMING) --- */
     
     // Verifichiamo se abbiamo catturato qualcosa di sensato dal BIOS
@@ -148,9 +161,9 @@ static status_t init_common(int fd) {
         si->mode_count = 1;
     }
 
-    si->card_info.has_edid_panel = false;
-    si->card_info.has_edid_crt = false;
-    si->cursor.v_address = (void *)((uint8 *)si->framebuffer + CRT_CURSOR_VRAM_OFFSET);
+    gInfo->has_edid_panel = false;
+    gInfo->has_edid_crt = false;
+    si->cursor.v_address = (void *)((uint8 *)gInfo->framebuffer + CRT_CURSOR_VRAM_OFFSET);
     
     // 2D engine token init
     gInfo->sm750_engine_token.engine_id = 1; 
