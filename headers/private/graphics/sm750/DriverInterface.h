@@ -16,6 +16,9 @@
 #include <Drivers.h>
 #include <PCI.h>
 #include <OS.h>
+//#include <boot_item.h>
+//#include <vesa_info.h>
+#include <edid.h>
 #include "video_overlay.h"
 
 #define DRIVER_PREFIX "sm750"
@@ -141,8 +144,9 @@ typedef struct {
 	uint8	bus;
 	uint8	device;
 	uint8	function;
-	uint8	edid_panel[128];	// Dati monitor su LCD/Panel
-	uint8	edid_crt[128]; // Dati monitor su VGA/CRT
+	//uint8	edid_panel[128];	// Dati monitor su LCD/Panel
+	//uint8	edid_crt[128]; // Dati monitor su VGA/CRT
+	edid1_info vesa_edid_info;
 	char	device_path[B_PATH_NAME_LENGTH];
 
 	/* Mappature Memoria */
@@ -198,13 +202,14 @@ typedef struct {
 
 	/* SM750 Specific Card Info (Sostituisce PINS NVIDIA) */
 	struct {
-		uint32 chip_id;		/* 0x750 o varianti */
-		bool is_panel;		// true se usiamo LCD (0x80200), false se CRT (0x80000)
-		bool	has_edid_panel;	// Trovato EDID su canale Panel
-		bool	has_edid_crt;		// Trovato EDID su canale CRT
-		uint32 active_outputs;	// Bitmask: 1=Panel, 2=CRT, 3=Entrambi
-		uint32 mem_size;		/* Totale memoria rilevata */
-		uint32 mem_type;		/* DDR, SDRAM, ecc. */
+		uint32	chip_id;		/* 0x750 o varianti */
+		bool 	is_panel;		// true se usiamo LCD (0x80200), false se CRT (0x80000)
+		//bool	has_edid_panel;	// Trovato EDID su canale Panel
+		//bool	has_edid_crt;		// Trovato EDID su canale CRT
+		bool	has_vesa_edid_info;
+		uint32	active_outputs;	// Bitmask: 1=Panel, 2=CRT, 3=Entrambi
+		uint32	mem_size;		/* Totale memoria rilevata */
+		uint32	mem_type;		/* DDR, SDRAM, ecc. */
 		
 		/* Clock / PLL Limits */
 		float	f_ref;		 /* Cristallo di riferimento (solitamente 24MHz) */
@@ -236,6 +241,10 @@ typedef struct {
 	uint8 *framebuffer; /* Puntatore locale */
 	display_mode*	mode_list;		// cloned list of standard display modes
 	area_id			mode_list_area;
+	edid1_info		edid_panel_info;
+	edid1_info		edid_crt_info;
+	bool	has_edid_panel;	// Trovato EDID su canale Panel
+	bool	has_edid_crt;		// Trovato EDID su canale CRT
 	bool		is_clone;			/* Vero se è un clone */
 	engine_token sm750_engine_token; /* 2D engine token */
 } accelerant_info;
