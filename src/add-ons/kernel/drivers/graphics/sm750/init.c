@@ -80,15 +80,25 @@ sm750_get_clocks(vuint32 *regs, shared_info *si)
 }*/
 static status_t create_mode_list(shared_info* si) {
     size_t size = (MAX_EDID_MODES * sizeof(display_mode) + B_PAGE_SIZE - 1) & ~(B_PAGE_SIZE - 1);
+    display_mode* local_list = NULL;
 
-    si->mode_list_area = create_area("sm750 modes", (void **)&si->mode_list,
-        B_ANY_KERNEL_ADDRESS, size, B_FULL_LOCK, B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA);
+    area_id m_area = create_area("sm750 modes", (void **)&local_list,
+        B_ANY_KERNEL_ADDRESS, size, B_FULL_LOCK, 
+        B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA | B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA);
 
-    if (si->mode_list_area < 0) return si->mode_list_area;
+    if (m_area < 0) return m_area;
 
     uint32 count = 0;
+    
+    // TODO: Qui potresti analizzare si->vesa_edid_info per filtrare i modi!
+    if (si->card_info.has_vesa_edid_info) {
+    	// TODO
+        dprintf("SM750: EDID presente, potrei filtrare i modi...\n");
+    }
+
     for (int i = 0; vesa_dmt_table[i].width != 0 && count < MAX_EDID_MODES; i++) {
-        display_mode* dm = &si->mode_list[count];
+        // USA local_list, NON si->mode_list!
+        display_mode* dm = &local_list[count]; 
         const vesa_timing_t* vesa = &vesa_dmt_table[i];
 
         dm->timing.pixel_clock = vesa->pixel_clock;
@@ -112,7 +122,12 @@ static status_t create_mode_list(shared_info* si) {
         
         count++;
     }
+
     si->mode_count = count;
+    si->mode_list_area = m_area;
+    si->mode_list = local_list; // Ora l'assegnazione è sicura dopo il ciclo!
+
+    dprintf("SM750: create_mode_list finito. Modi: %u\n", count);
     return B_OK;
 }
 
@@ -343,6 +358,21 @@ void sm750_init_chip(DeviceInfo *di) {
         dm->virtual_width = dm->timing.h_display;
         dm->virtual_height = dm->timing.v_display;
     }
+    /*
+    edid1_info* edidInfo = (edid1_info*)get_boot_item(VESA_EDID_BOOT_INFO, NULL);
+	if (edidInfo != NULL) {
+		si->card_info.has_vesa_edid_info = true;
+		memcpy(&si->vesa_edid_info, edidInfo, sizeof(edid1_info));
+		dprintf("SM750: EDID recuperato dal bootloader.\n");
+	} else {
+		si->card_info.has_vesa_edid_info = false;
+		dprintf("SM750: Impossibile recuperare l'EDID dal bootloader.\n");
+	}*/
+	//if (gInfo->si->card_info.has_vesa_edid_info) {
+	//	dprintf("SM750_ACC: EDID VESA trovato! Lo usiamo come fallback.\n");
+		// Se la tua lettura I2C fallisce, copia questa info 
+		// nella struct edid locale dell'accelerante
+	//}
     
     create_mode_list(si);
     
