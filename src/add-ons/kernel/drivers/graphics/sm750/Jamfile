@@ -3,6 +3,7 @@ SubDir HAIKU_TOP src add-ons kernel drivers graphics sm750 ;
 UsePrivateHeaders graphics ;
 UsePrivateSystemHeaders ;
 UsePrivateHeaders [ FDirName graphics common ] ;
+UsePrivateHeaders [ FDirName graphics vesa ] ;
 UsePrivateHeaders [ FDirName graphics sm750 ] ;
 UsePrivateKernelHeaders ;
 
