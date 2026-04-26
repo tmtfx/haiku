@@ -7,13 +7,12 @@
 #include <Drivers.h>
 #include <graphic_driver.h>
 #include <PCI.h>
+
 #include <OS.h>
 #include <stdlib.h>
 #include <string.h>
-#include <boot_item.h>
-typedef enum bios_type_enum bios_type_enum;
-#include <vesa_info.h>
 #include <stdio.h>
+
 #include <driver_settings.h>
 
 #include "DriverInterface.h"
@@ -141,7 +140,6 @@ open_device(const char *name, uint32 flags, void **cookie)
     if (!di) return B_BAD_VALUE;
 
     if (di->openCount == 0) {
-    	edid1_info* edidInfo = (edid1_info*)get_boot_item(VESA_EDID_BOOT_INFO, NULL);
     	// 1. Abilitazione Bus Master e Memoria PCI
         // Leggiamo il Command Register (CSR04) all'indirizzo 0x04
         uint32 pci_cmd = pci->read_pci_config(di->pci.bus, di->pci.device, di->pci.function, PCI_command, 4); //PCI_command = 0x04 da PCI.h
@@ -163,17 +161,7 @@ open_device(const char *name, uint32 flags, void **cookie)
         memset(di->si, 0, B_PAGE_SIZE * 2);
         strncpy(di->si->device_path, name, B_PATH_NAME_LENGTH);
         memcpy(&di->si->settings, &current_settings, sizeof(sm750_settings));
-        
-        
-		if (edidInfo != NULL) {
-			di->si->card_info.has_vesa_edid_info = true;
-			memcpy(&di->si->vesa_edid_info, edidInfo, sizeof(edid1_info));
-			dprintf("SM750: EDID recuperato dal bootloader.\n");
-		} else {
-			di->si->card_info.has_vesa_edid_info = false;
-			dprintf("SM750: Impossibile recuperare l'EDID dal bootloader.\n");
-		}
-        
+                
         // 4. Mappatura REGISTRI (BAR 1 - 2MB)
         di->regs_area = map_mem((void **)&di->regs, di->pci.u.h0.base_registers[1], 
                                di->pci.u.h0.base_register_sizes[1], "sm750_regs_k");
