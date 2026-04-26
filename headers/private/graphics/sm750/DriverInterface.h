@@ -146,7 +146,7 @@ typedef struct {
 	uint8	function;
 	//uint8	edid_panel[128];	// Dati monitor su LCD/Panel
 	//uint8	edid_crt[128]; // Dati monitor su VGA/CRT
-	edid1_info vesa_edid_info;
+	edid1_raw vesa_edid_raw;
 	char	device_path[B_PATH_NAME_LENGTH];
 
 	/* Mappature Memoria */
@@ -163,7 +163,7 @@ typedef struct {
 	/* Modalità Schermo */
 	area_id	mode_list_area;	/* Lista dei display_mode supportati da implementare in futuro*/
 	uint32	mode_count;     /* Numero di modi nell'area */
-	display_mode	*mode_list; /* Puntatore alla lista (valido nell'accelerante) */
+	//display_mode	*mode_list; /* Puntatore alla lista (valido nell'accelerante) */
 
 	uint32	flags;
 	uint32	bits_per_pixel; // TODO, remove if unused (used for initial tests)
@@ -206,7 +206,7 @@ typedef struct {
 		bool 	is_panel;		// true se usiamo LCD (0x80200), false se CRT (0x80000)
 		//bool	has_edid_panel;	// Trovato EDID su canale Panel
 		//bool	has_edid_crt;		// Trovato EDID su canale CRT
-		bool	has_vesa_edid_info;
+		bool	has_edid_vesa;
 		uint32	active_outputs;	// Bitmask: 1=Panel, 2=CRT, 3=Entrambi
 		uint32	mem_size;		/* Totale memoria rilevata */
 		uint32	mem_type;		/* DDR, SDRAM, ecc. */
@@ -243,6 +243,7 @@ typedef struct {
 	area_id			mode_list_area;
 	edid1_info		edid_panel_info;
 	edid1_info		edid_crt_info;
+	edid1_info		edid_vesa_info;
 	bool	has_edid_panel;	// Trovato EDID su canale Panel
 	bool	has_edid_crt;		// Trovato EDID su canale CRT
 	bool		is_clone;			/* Vero se è un clone */
