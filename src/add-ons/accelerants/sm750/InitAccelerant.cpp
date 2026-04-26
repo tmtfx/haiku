@@ -9,18 +9,110 @@
 #include <errno.h>
 #include <string.h>
 #include <unistd.h>
+#include <edid.h>
+#include <create_display_modes.h>
 
 #include "DriverInterface.h"
 #include "protos.h"
 #include "sm750_macros.h"
 
+#define CALLED() debug_printf("SM750_ACC: %s\n", __FUNCTION__)
+
 /* gInfo globale per l'accelerante */
 accelerant_info g_info = { .shared_info_area = -1, .regs_area = -1, .fb_area = -1 };
 accelerant_info *gInfo = &g_info;
 
-static status_t init_common(int fd) {
+static status_t 
+create_mode_list() 
+{
+    display_mode* list = NULL;
+    uint32 count = 0;
+    area_id new_area = -1;
+    edid1_info info;
+    bool edid_valid = false;
+    uint8 temp_edid_raw[128];
+    gInfo->has_edid_panel = false;
+    gInfo->has_edid_crt = false;
+    bool is_panel = gInfo->si->card_info.is_panel;
+
+    // 1. TENTA IL RILEVAMENTO HARDWARE (I2C)
+    if (sm750_read_edid(temp_edid_raw) == B_OK) {
+        // Segnamo che abbiamo trovato i dati
+        // lo facciamo in create_mode_list_from_edid
+        //if (is_panel) gInfo->has_edid_panel = true;
+        //else gInfo->has_edid_crt = true;
+        debug_printf("SM750_ACC: Succesfully read EDID from %s\n", is_panel ? "PANEL" : "CRT");
+        if (create_mode_list_from_edid(temp_edid_raw) == B_OK) {
+            debug_printf("SM750_ACC: Modes list updated with monitor data.\n");
+            edid_valid = true;
+        }
+    }
+    if (!edid_valid && gInfo->si->card_info.has_edid_vesa) {
+        debug_printf("SM750_ACC: I2C EDID read failed. Trying VESA fallback...\n");
+        if (create_mode_list_from_edid(NULL) == B_OK) {
+            debug_printf("SM750_ACC: Modes list updated with VESA fallback data.\n");
+            edid_valid = true;
+        }
+    }
+
+    // 3. GENERAZIONE DELLA LISTA
+    if (edid_valid) {
+        // Funzione magica di libkernel_graphics.a: crea un'area con tutti i modi 
+        // supportati dal monitor basandosi sui timing EDID.
+        new_area = create_display_modes("sm750 modes", &info, 
+            NULL, 0, NULL, 0, NULL, &list, &count);
+    } 
+    
+    // 4. FALLBACK ESTREMO: BIOS O 1024x768
+    if (new_area < 0) {
+        debug_printf("SM750_ACC: Nessun EDID valido. Uso fallback BIOS/VesaTable.\n");
+        
+        // Creiamo un'area manualmente per contenere i nostri modi di fallback
+        size_t area_size = (MAX_EDID_MODES * sizeof(display_mode) + B_PAGE_SIZE - 1) 
+            & ~(B_PAGE_SIZE - 1);
+        
+        new_area = create_area("sm750 modes fallback", (void**)&list, 
+            B_ANY_ADDRESS, area_size, B_NO_LOCK, B_READ_AREA | B_WRITE_AREA);
+        
+        if (new_area < 0) return new_area;
+
+        display_mode *pm = gInfo->si->card_info.is_panel ? 
+            &gInfo->si->preferred_mode : &gInfo->si->preferred_mode2;
+
+        if (pm->timing.h_display > 0 && pm->timing.v_display > 0) {
+            // Usiamo il timing che il driver ha salvato dal bootloader/BIOS
+            list[0] = *pm;
+            count = 1;
+            debug_printf("SM750_ACC: Fallback su BIOS timing: %dx%d\n", 
+                pm->timing.h_display, pm->timing.v_display);
+        } else {
+            // Ultima spiaggia: 1024x768 Standard
+            display_mode safe_mode = {
+                { 65000, 1024, 1048, 1184, 1344, 768, 771, 777, 806, 0 },
+                B_RGB32, 1024, 768, 0, 0
+            };
+            list[0] = safe_mode;
+            count = 1;
+            debug_printf("SM750_ACC: Fallback su 1024x768 Safe Mode\n");
+        }
+    }
+
+    // 5. PUBBLICAZIONE NELLA SHARED INFO
+    // Se c'era una vecchia area del kernel, non cancelliamola (gestita dal driver),
+    // ma sovrascriviamo l'ID ufficiale per i cloni.
+    gInfo->si->mode_list_area = new_area;
+    gInfo->si->mode_count = count;
+    
+    // Nota: gInfo->mode_list e gInfo->mode_list_area locali verranno 
+    // aggiornati in init_common subito dopo la chiamata a questa funzione.
+    
+    return B_OK;
+}
+
+static status_t init_common(int fd,bool isClone) {
     //debug_printf("SM750_ACC: Inizio init_common\n");
     gInfo->fd = fd;
+    gInfo->is_clone = isClone;
 
     /* 1. Recupera l'area shared_info dal driver tramite IOCTL */
     sm750_get_private_data gpd;
@@ -74,98 +166,37 @@ static status_t init_common(int fd) {
     /* salviamo il puntatore virtuale LOCALMENTE */
     gInfo->framebuffer = (uint8*)fb_ptr; 
     
-    /* 3. NON scrivere in si->framebuffer se non sei l'istanza primaria */
-    if (!gInfo->is_clone) {
+    if (!isClone) {
         si->framebuffer = (uint8*)fb_ptr;
         // qui benaphore per engine 2d
-        status_t result = gInfo->si->engine.lock.Init("SM750 2D engine lock");
+        status_t result = si->engine.lock.Init("SM750 2D engine lock");
 		if (result == B_OK) {
 			//result = si.overlayLock.Init("3DFX overlay lock");
 			// abilitiamo l'overlay
 		}
-    }
-    
-    // Agganciamo l'area per i display_modes
-    void* userAddr = NULL;
-    gInfo->mode_list_area = clone_area("sm750 modes user", &userAddr,
-        B_ANY_ADDRESS, B_READ_AREA | B_WRITE_AREA, si->mode_list_area);
-
-    if (gInfo->mode_list_area < 0) {
-        debug_printf("SM750_ACC: Error cloning mode_list_area\n");
-        return gInfo->mode_list_area;
-    }
-    gInfo->mode_list = (display_mode*)userAddr;
-    si->mode_list = (display_mode *)userAddr;
-    
-    if (si->mode_list == NULL) {
-        debug_printf("SM750_ACC: ERROR! mode_list pointer is NULL during fallback!\n");
-        return B_ERROR;
-    }
-    
-    
-    bool is_panel = si->card_info.is_panel;
-
-    // Scegliamo il buffer corretto dove salvare i dati
-    //uint8* edid_buffer = is_panel ? si->edid_panel : si->edid_crt;
-    uint8 temp_edid_raw[128]; // Buffer temporaneo per i dati grezzi dell'I2C
-    
-    debug_printf("SM750_ACC: Beginning EDID reading...\n");
-    if (sm750_read_edid(temp_edid_raw) == B_OK) {
-        // Segnamo che abbiamo trovato i dati
-        if (is_panel) gInfo->has_edid_panel = true;
-        else gInfo->has_edid_crt = true;
-        debug_printf("SM750_ACC: Succesfully read EDID from %s\n", is_panel ? "PANEL" : "CRT");
-        if (create_mode_list_from_edid(temp_edid_raw) == B_OK) {
-            debug_printf("SM750_ACC: Modes list updated with monitor data.\n");
-            return B_OK;
+		if (si->card_info.has_edid_vesa) {
+            edid_decode(&gInfo->edid_vesa_info, &si->vesa_edid_raw);
+            debug_printf("SM750 Accelerante: EDID VESA decodificato\n");
         }
-        //debug_printf("SM750_ACC: EDID present but no valid Detailed Timings found.\n");
-    } else {
-        debug_printf("SM750_ACC: I2C EDID read failed. Trying VESA fallback...\n");
+        create_mode_list();
         
-        // 3. FALLBACK: Se l'I2C fallisce, proviamo a usare i dati VESA passati dal kernel
-        // Passiamo NULL per dire alla funzione: "usa si->vesa_edid_info"
-        if (create_mode_list_from_edid(NULL) == B_OK) {
-            debug_printf("SM750_ACC: Modes list updated with VESA fallback data.\n");
-            return B_OK;
+        gInfo->mode_list_area = clone_area("sm750 modes user", (void**)&gInfo->mode_list,
+            B_ANY_ADDRESS, B_READ_AREA | B_WRITE_AREA, si->mode_list_area);
+        if (gInfo->mode_list_area < 0) return gInfo->mode_list_area;
+    } else {
+        // ISTANZA CLONE: si limita a mappare l'area decisa dal primario
+        gInfo->mode_list_area = clone_area("sm750 modes clone", (void**)&gInfo->mode_list,
+            B_ANY_ADDRESS, B_READ_AREA, si->mode_list_area);
+        
+        if (gInfo->mode_list_area < 0) {
+        	debug_printf("SM750_ACC: Error cloning mode_list_area\n");
+        	return gInfo->mode_list_area;
         }
     }
     
-    debug_printf("SM750_ACC: CRITICAL - No EDID data available at all!\n");
-    /* --- IL GRANDE FALLBACK LEGACY (LADRO DI TIMING) --- */
+    si->cursor.v_address = (void *)(gInfo->framebuffer + CRT_CURSOR_VRAM_OFFSET);
     
-    // Verifichiamo se abbiamo catturato qualcosa di sensato dal BIOS
-    display_mode *pm = is_panel ? &si->preferred_mode : &si->preferred_mode2;
-
-    // Verifichiamo se abbiamo catturato qualcosa dal BIOS per l'uscita attiva
-    if (pm->timing.h_display > 0 && pm->timing.v_display > 0) {
-        debug_printf("SM750_ACC: EDID KO. Using BIOS Timings from %s: %dx%d\n", 
-                     is_panel ? "PANEL" : "CRT",
-                     pm->timing.h_display, pm->timing.v_display);
-        
-        si->mode_list[0] = *pm;
-        // Se siamo su CRT, assicuriamoci che anche preferred_mode (principale) sia popolata
-        si->preferred_mode = *pm;
-        si->mode_count = 1;
-    } else {
-        // Estrema ratio: tabula rasa, mettiamo il 1024 fisso
-        debug_printf("SM750_ACC: EDID KO and BIOS registers empty for %s! Fallback 1024x768\n",
-                     is_panel ? "PANEL" : "CRT");
-        display_mode safe_mode = {
-            { 65000, 1024, 1048, 1184, 1344, 768, 771, 777, 806, 0 },
-            B_RGB32, 1024, 768, 0, 0
-        };
-        safe_mode.timing.flags = B_POSITIVE_HSYNC | B_POSITIVE_VSYNC;
-        si->mode_list[0] = safe_mode;
-        si->preferred_mode = safe_mode;
-        si->mode_count = 1;
-    }
-
-    gInfo->has_edid_panel = false;
-    gInfo->has_edid_crt = false;
-    si->cursor.v_address = (void *)((uint8 *)gInfo->framebuffer + CRT_CURSOR_VRAM_OFFSET);
-    
-    // 2D engine token init
+    // 7. Token per il motore 2D (necessario per Haiku)
     gInfo->sm750_engine_token.engine_id = 1; 
     gInfo->sm750_engine_token.capability_mask = 0;
     gInfo->sm750_engine_token.opaque = NULL;
@@ -177,7 +208,7 @@ static status_t init_common(int fd) {
 
 status_t sm750_init_accelerant(int fd) {
     gInfo->is_clone = false;
-    status_t result = init_common(fd);
+    status_t result = init_common(fd,false);
     
     if (result == B_OK) {
         if (gInfo->si->accelerant_in_use) {
@@ -188,6 +219,53 @@ status_t sm750_init_accelerant(int fd) {
     }
     return result;
 }
+
+
+/* Info sul clone (Haiku le usa per condividere l'accelerante tra app) */
+uint32 sm750_accelerant_clone_info_size(void) {
+	CALLED();
+    // clone info is device name, so return its maximum size
+	return B_PATH_NAME_LENGTH;
+}
+
+void sm750_get_accelerant_clone_info(void *data) {
+	CALLED();
+    strcpy((char *)data, gInfo->si->device_path);
+}
+
+status_t sm750_clone_accelerant(void* info)
+{
+    CALLED();
+    char path[B_PATH_NAME_LENGTH];
+    
+    // Costruiamo il path completo
+    strcpy(path, "/dev/");
+    strlcat(path, (const char*)info, sizeof(path));
+
+    int fd = open(path, O_RDWR);
+    if (fd < 0) return errno;
+
+    // Inizializziamo l'accelerante clone
+    status_t status = init_common(fd, true);
+    if (status != B_OK) {
+        close(fd);
+        return status;
+    }
+
+    return B_OK;
+}
+
+status_t sm750_get_accelerant_device_info(accelerant_device_info *adi) {
+	CALLED();
+    adi->version = 1;
+    strcpy(adi->name, "Silicon Motion SM750");
+    strcpy(adi->chipset, "SM750");
+    strcpy(adi->serial_no, "Rev A");
+    adi->memory = gInfo->si->card_info.mem_size;
+    adi->dac_speed = 300000; // 300MHz
+    return B_OK;
+}
+
 
 void sm750_uninit_accelerant(void) {
     if (gInfo->si != NULL && !gInfo->is_clone) {
