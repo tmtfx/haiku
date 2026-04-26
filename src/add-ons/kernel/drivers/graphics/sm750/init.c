@@ -4,10 +4,17 @@
  */
 
 #include <KernelExport.h>
-#include <SupportDefs.h>
-#include <boot_item.h>
-#include <frame_buffer_console.h>
 #include <PCI.h>
+//#include <drivers/bios.h>
+#include <string.h>  // Per memcpy
+#include <SupportDefs.h>
+//typedef struct bios_regs bios_regs;
+#include <boot_item.h>
+//#include <edid.h>
+//typedef enum bios_type_enum bios_type_enum;
+//#include <vesa_info.h>
+
+#include <frame_buffer_console.h>
 
 #include "DriverInterface.h"
 #include "sm750_macros.h"
@@ -17,6 +24,91 @@
 
 extern pci_module_info *pci;
 
+#define VESA_EDID_BOOT_INFO "vesa_edid/v1"
+#define VESA_MODES_BOOT_INFO "vesa_modes/v1"
+
+
+typedef struct BIOSState bios_state;
+
+struct bios_regs {
+    uint32 eax; uint32 ebx; uint32 ecx; uint32 edx;
+    uint32 edi; uint32 esi; uint32 ebp; uint32 eflags;
+    uint32 ds;  uint32 es;  uint32 fs;  uint32 gs;
+};
+typedef struct bios_regs bios_regs;
+
+typedef struct {
+    module_info info;
+    status_t  (*prepare)(bios_state** _state);
+    status_t  (*interrupt)(bios_state* state, uint8 vector, bios_regs* regs);
+    void      (*finish)(bios_state* state);
+    void* (*allocate_mem)(bios_state* state, size_t size);
+    uint32    (*physical_address)(bios_state* state, void* virtualAddress);
+    void* (*virtual_address)(bios_state* state, uint32 physicalAddress);
+} sm750_bios_module_info; 
+
+#define B_BIOS_MODULE_NAME "generic/bios/v1"
+
+static status_t
+GetEdidFromBIOS(edid1_raw* edidRaw)
+{
+    sm750_bios_module_info* biosModule;
+    status_t status = get_module(B_BIOS_MODULE_NAME, (module_info**)&biosModule);
+    if (status != B_OK) {
+        dprintf("SM750: Impossibile caricare il modulo BIOS: 0x%" B_PRIx32 "\n", status);
+        return status;
+    }
+
+    bios_state* state;
+    status = biosModule->prepare(&state);
+    if (status != B_OK) {
+        dprintf("SM750: bios_prepare() fallito\n");
+        put_module(B_BIOS_MODULE_NAME);
+        return status;
+    }
+
+    bios_regs regs = {};
+    regs.eax = 0x4f15; // VBE Function: Report DDC Capabilities
+    regs.ebx = 0;
+    dprintf("SM750: Check DDC Capabilities EAX=0x%x, EBX=0x%x\n", regs.eax, regs.ebx);
+    
+    status = biosModule->interrupt(state, 0x10, &regs);
+    
+    // Verifichiamo se il BIOS supporta la funzione (0x4f = Successo)
+    if (status == B_OK && (regs.eax & 0xffff) == 0x4f) {
+        // Allociamo memoria "bassa" accessibile dal BIOS per l'EDID
+        edid1_raw* edid = (edid1_raw*)biosModule->allocate_mem(state, sizeof(edid1_raw));
+        if (edid == NULL) {
+            status = B_NO_MEMORY;
+        } else {
+            regs.eax = 0x4f15;
+            regs.ebx = 1;  // Sottofunzione: Read EDID
+            regs.ecx = 0;
+            regs.edx = 0;
+            // Calcoliamo segmento e offset per l'indirizzo reale
+            regs.es  = (uint16)((addr_t)edid >> 4);
+            regs.edi = (uint16)((addr_t)edid & 0x0f);
+
+            status = biosModule->interrupt(state, 0x10, &regs);
+            
+            if (status == B_OK && (regs.eax & 0xffff) == 0x4f) {
+                // Copiamo l'EDID nella nostra struttura finale
+                memcpy(edidRaw, edid, sizeof(edid1_raw));
+                dprintf("SM750: EDID letto correttamente via BIOS Interrupt!\n");
+            } else {
+                dprintf("SM750: BIOS fallito nel leggere l'EDID (EAX=0x%x)\n", regs.eax);
+                status = B_NOT_SUPPORTED;
+            }
+        }
+    } else {
+        dprintf("SM750: DDC non supportato dal BIOS Video\n");
+        status = B_NOT_SUPPORTED;
+    }
+
+    biosModule->finish(state);
+    put_module(B_BIOS_MODULE_NAME);
+    return status;
+}
 
 /* cannot handle gpio direction tried unlocking vga registers */
 /* didn't work
@@ -91,9 +183,9 @@ static status_t create_mode_list(shared_info* si) {
     uint32 count = 0;
     
     // TODO: Qui potresti analizzare si->vesa_edid_info per filtrare i modi!
-    if (si->card_info.has_vesa_edid_info) {
+    if (si->card_info.has_edid_vesa) {
     	// TODO
-        dprintf("SM750: EDID presente, potrei filtrare i modi...\n");
+        dprintf("SM750: EDID presente, potrei filtrare i modi ma non ancora implementato...\n");
     }
 
     for (int i = 0; vesa_dmt_table[i].width != 0 && count < MAX_EDID_MODES; i++) {
@@ -125,7 +217,7 @@ static status_t create_mode_list(shared_info* si) {
 
     si->mode_count = count;
     si->mode_list_area = m_area;
-    si->mode_list = local_list; // Ora l'assegnazione è sicura dopo il ciclo!
+    //si->mode_list = local_list; // Ora l'assegnazione è sicura dopo il ciclo!
 
     dprintf("SM750: create_mode_list finito. Modi: %u\n", count);
     return B_OK;
@@ -188,9 +280,37 @@ void sm750_init_chip(DeviceInfo *di) {
     shared_info *si = di->si;
     // Verifica ID via MMIO (Offset 0x54)
     uint32 device_info = SM750_REG32(SM750_SYS_DEVID); // 0x000054
+    si->card_info.chip_id = (uint16)(device_info >> 16);
     uint16 device_id = (uint16)(device_info >> 16);
     uint8 revision = (uint8)(device_info & 0xFF);
     dprintf("SM750: Chip detected. ID: 0x%04X, Revision: 0x%02X\n", device_id, revision);
+    
+    
+    edid1_raw* boot_edid = (edid1_raw*)get_boot_item(VESA_EDID_BOOT_INFO, NULL);
+
+    // versione senza debug
+    //if (boot_edid) {
+    //    memcpy(&si->vesa_edid_raw, boot_edid, sizeof(edid1_raw));
+    //    si->card_info.has_edid_vesa = true;
+    //} else if (GetEdidFromBIOS(&si->vesa_edid_raw) == B_OK) {
+    //    si->card_info.has_edid_vesa = true;
+    //} else {
+    //    si->card_info.has_edid_vesa = false;
+    //}
+    if (boot_edid != NULL) {
+        memcpy(&si->vesa_edid_raw, boot_edid, sizeof(edid1_raw));
+        si->card_info.has_edid_vesa = true;
+        dprintf("SM750: EDID recuperato dal Bootloader\n");
+    } else {
+        dprintf("SM750: Bootloader vuoto, provo GetEdidFromBIOS...\n");
+        if (GetEdidFromBIOS(&si->vesa_edid_raw) == B_OK) {
+            si->card_info.has_edid_vesa = true;
+            dprintf("SM750: EDID recuperato correttamente dal BIOS\n");
+        } else {
+            si->card_info.has_edid_vesa = false;
+            dprintf("SM750: Nessun EDID trovato via BIOS\n");
+        }
+    }
     
     // --- 1. SVEGLIA IL CHIP (Power Mode 0) ---
     // --- SBLOCCO CLOCK (Power Mode 0) ---
@@ -223,6 +343,10 @@ void sm750_init_chip(DeviceInfo *di) {
     
     // --- 3. ORA FACCIAMO LA RILEVAZIONE (Dopo aver attivato i bus) ---
     // Usiamo la tua logica basata sul bit 3 (CRT is Normal)
+    // Rilevazione uscita (Semplificata: CRT se bit 3 è 0)
+    // versione senza debug:
+    //si->card_info.is_panel = (sys_ctrl & (1 << 3)) ? true : false;
+    //si->card_info.active_outputs = si->card_info.is_panel ? 1 : 2;
     if (!(sys_ctrl & (1 << 3))) { 
         si->card_info.is_panel = false;
         si->card_info.active_outputs = 2; // CRT
@@ -252,6 +376,9 @@ void sm750_init_chip(DeviceInfo *di) {
     
     // C. Rilevazione Memoria (LOGICA UNICA)
     uint32 mem_size_code = (misc_ctrl >> 12) & 0x03; // Bit 13:12
+    // versione senza debug
+    //uint32 sizes[] = { 16, 32, 64, 8 };
+    //si->card_info.mem_size = sizes[mem_size_code] * 1024 * 1024;
     uint32 detected_mem;
 
     switch (mem_size_code) {
@@ -294,13 +421,6 @@ void sm750_init_chip(DeviceInfo *di) {
         }
     */
     
-    si->card_info.chip_id = di->pci.device_id;
-    si->card_info.f_ref = 14.31818f; //24.0f; sembra sia 14.318 da datasheet vecchio valore NTSC
-    si->card_info.max_sclk = 130000; // Valori tipici SM750 (130MHz)
-    si->card_info.max_mclk = 145000; // 145MHz da datasheet
-    si->card_info.max_pclk = 300000; // 300MHz (Limite DAC)
-    
-    
     // 1. DIAGNOSTICA PCI/BOOT (Solo log)
     bool showLogo = false;
     display_mode *dm = si->card_info.is_panel ? &si->preferred_mode : &si->preferred_mode2;
@@ -308,7 +428,7 @@ void sm750_init_chip(DeviceInfo *di) {
     if (bi) {
         //dprintf("SM750: VESA FB a 0x%" B_PRIx64 ", %" B_PRId32 "x%" B_PRId32 "\n", 
         //        (uint64)bi->physical_frame_buffer, bi->width, bi->height);
-        dprintf("SM750: Bootloader says %ux%u\n", bi->width, bi->height);
+        dprintf("SM750: FrameBuffer says %ux%u\n", bi->width, bi->height);
         bool found = false;
 
         for (int i = 0; vesa_dmt_table[i].width != 0; i++) {
@@ -374,21 +494,7 @@ void sm750_init_chip(DeviceInfo *di) {
 		// nella struct edid locale dell'accelerante
 	//}
     
-    create_mode_list(si);
-    
-    uint32 bpp = 0;
-    switch (dm->space) {
-        case B_RGB32: case B_RGBA32: bpp = 32; break;
-        case B_RGB16: bpp = 16; break;
-        default: bpp = 8; break;
-    }
-    
-    si->fbc.frame_buffer = NULL;
-    si->fbc.frame_buffer_dma = (void *)(addr_t)di->pci.u.h0.base_registers[0];
-    si->fbc.bytes_per_row = dm->timing.h_display * (bpp / 8);
-    si->fbc2 = si->fbc; // per sicurezza copiamo la configurazione anche nell'altra uscita
-    
-    
+      
     // Initialize 2D engine Benaphore 
     // NO LO FACCIAMO in init_common con is_clone false
     //si->engine.lock.sem = create_sem(0, "sm750 engine benaphore");
@@ -424,6 +530,27 @@ void sm750_init_chip(DeviceInfo *di) {
         ctrl &= ~(1 << 10);
     }
     SM750_WREG32(display_reg, ctrl);
+    
+    //si->card_info.chip_id = di->pci.device_id; fatto con registro sopra
+    si->card_info.f_ref = 14.31818f; //24.0f; sembra sia 14.318 da datasheet vecchio valore NTSC
+    si->card_info.max_sclk = 130000; // Valori tipici SM750 (130MHz)
+    si->card_info.max_mclk = 145000; // 145MHz da datasheet
+    si->card_info.max_pclk = 300000; // 300MHz (Limite DAC)
+    
+    create_mode_list(si);
+    
+    uint32 bpp = 0;
+    switch (dm->space) {
+        case B_RGB32: case B_RGBA32: bpp = 32; break;
+        case B_RGB16: bpp = 16; break;
+        default: bpp = 8; break;
+    }
+    
+    si->fbc.frame_buffer = NULL;
+    si->fbc.frame_buffer_dma = (void *)(addr_t)di->pci.u.h0.base_registers[0];
+    si->fbc.bytes_per_row = dm->timing.h_display * (bpp / 8);
+    si->fbc2 = si->fbc; // per sicurezza copiamo la configurazione anche nell'altra uscita
+    
     
 
     //dprintf("SM750: Init  completato. Mem: %d MB, Mode: %s\n", detected_mem / (1024*1024), si->card_info.is_panel ? "PANEL" : "CRT");
