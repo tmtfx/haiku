@@ -131,50 +131,6 @@ status_t sm750_move_display_area(uint16 h_display_start, uint16 v_display_start)
 
 
 
-/* Info sul clone (Haiku le usa per condividere l'accelerante tra app) */
-uint32 sm750_accelerant_clone_info_size(void) {
-	CALLED();
-    // clone info is device name, so return its maximum size
-	return B_PATH_NAME_LENGTH;
-}
-
-void sm750_get_accelerant_clone_info(void *data) {
-	CALLED();
-    strcpy((char *)data, gInfo->si->device_path);
-}
-
-status_t sm750_clone_accelerant(void* info)
-{
-    CALLED();
-    char path[B_PATH_NAME_LENGTH];
-    
-    // Costruiamo il path completo
-    strcpy(path, "/dev/");
-    strlcat(path, (const char*)info, sizeof(path));
-
-    int fd = open(path, O_RDWR);
-    if (fd < 0) return errno;
-
-    // Inizializziamo l'accelerante clone
-    status_t status = sm750_init_accelerant(fd);
-    if (status != B_OK) {
-        close(fd);
-        return status;
-    }
-
-    return B_OK;
-}
-
-status_t sm750_get_accelerant_device_info(accelerant_device_info *adi) {
-	CALLED();
-    adi->version = 1;
-    strcpy(adi->name, "Silicon Motion SM750");
-    strcpy(adi->chipset, "SM750");
-    strcpy(adi->serial_no, "Rev A");
-    adi->memory = gInfo->si->card_info.mem_size;
-    adi->dac_speed = 300000; // 300MHz
-    return B_OK;
-}
 
 /* Limiti del Pixel Clock (Richiesto!) */
 status_t sm750_get_pixel_clock_limits(display_mode *dm, uint32 *low, uint32 *high) {
