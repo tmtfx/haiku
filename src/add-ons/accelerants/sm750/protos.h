@@ -49,6 +49,8 @@ status_t sm750_set_fb_addr(uint32 offset, bool is_panel);
 void sm750_screen_to_screen_blit(engine_token *et, blit_params *p, uint32 count);
 void sm750_fill_rectangle(engine_token *et, uint32 color, fill_rect_params *params, uint32 count);
 void sm750_init_2d_engine(display_mode *mode);
+void sm750_fill_span(engine_token *et, uint32 color, uint16 *spans, uint32 count);
+void sm750_invert_rectangle(engine_token *et, fill_rect_params *list, uint32 count);
 #ifdef __cplusplus
 }
 #endif
