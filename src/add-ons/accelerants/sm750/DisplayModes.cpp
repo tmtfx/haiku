@@ -518,6 +518,7 @@ sm750_set_display_mode(display_mode *mode)
         ctrl |= (1 << 24) | (1 << 25) | (1 << 26) | (1 << 27); 
         debug_printf("SM750_ACC: Scrittura sul registro di controllo di PANEL: 0x%08x\n", ctrl);
         SM750_WREG32(SM750_PANEL_CONTROL, ctrl);
+        si->fbc.bytes_per_row = pitch;
         debug_printf("SM750_ACC: --- FINE SETUP PANEL ---\n");
     } else {
         // Registro di Controllo CRT (0x080200)
@@ -527,6 +528,7 @@ sm750_set_display_mode(display_mode *mode)
         // ctrl |= (0 << 26);
         debug_printf("SM750_ACC: Scrittura sul registro di controllo del CRT: 0x%08x\n", ctrl);
         SM750_WREG32(SM750_CRT_CONTROL, ctrl);
+        si->fbc2.bytes_per_row = pitch;
     	debug_printf("SM750_ACC: --- FINE SETUP CRT ---\n");
     }
 
