@@ -15,6 +15,8 @@
 //#include "benaphore.h"
 
 #define CALLED() debug_printf("SM750_ACC: %s\n", __FUNCTION__)
+// Per il registro 2D Destination e Dimension: Impacchetta X e Y rispettando il bit 31 (Wrap) e 30-29 (Res)
+// #define PACK_XY(x, y) ((((uint32)(x) & 0x1FFF) << 16) | ((uint32)(y) & 0xFFFF))
 
 extern accelerant_info *gInfo;
 
@@ -301,9 +303,10 @@ void sm750_init_2d_engine(display_mode *mode) {
     SM750_WREG32(SM750_2D_CLIP_TL, clipTL);
 
     // 2D Clip BR (0x100030)
-    // Bit 31:16 = Bottom (height - 1)
-    // Bit 12:0  = Right (width - 1)
-    uint32 clipBR = ((height - 1) << 16) | (width - 1);
+    // Bit 31:16 = Bottom (height - 1) -> Maschera 0xFFFF
+    // Bit 15:13 = Reserved (devono rimanere a 0)
+    // Bit 12:0  = Right (width - 1)  -> Maschera 0x1FFF (13 bit) max 8191
+    uint32 clipBR = (((height - 1) & 0xFFFF) << 16) | ((width - 1) & 0x1FFF);
     SM750_WREG32(SM750_2D_CLIP_BR, clipBR);
     debug_printf("SM750_ACC: 2D engine succesfully initializated\n");
 }
@@ -312,6 +315,10 @@ void sm750_fill_rectangle(engine_token *et, uint32 color,
     fill_rect_params *params, uint32 count)
 {
 	CALLED();
+	if (et == NULL) return;
+	// 1. ACQUISIAMO IL LOCK (Essenziale per Haiku)
+    gInfo->si->engine.lock.Lock();
+    
     vuint32 *regs = gInfo->regs;
 
     for (uint32 i = 0; i < count; i++) {
@@ -340,10 +347,16 @@ void sm750_fill_rectangle(engine_token *et, uint32 color,
         uint32 cmd = (1U << 31) | (1U << 30) | (1 << 15) | (0x00001 << 16) | 0x0C;
         SM750_WREG32(SM750_2D_CONTROL, cmd);
     }
+    // 2. RILASCIAMO IL LOCK
+    gInfo->si->engine.lock.Release();
 }
 
 void sm750_screen_to_screen_blit(engine_token *et, blit_params *p, uint32 count) {
 	CALLED();
+	if (et == NULL) return;
+	// 1. ACQUISIAMO IL LOCK (Essenziale per Haiku)
+    gInfo->si->engine.lock.Lock();
+    
     vuint32 *regs = gInfo->regs;
 
     for (uint32 i = 0; i < count; i++) {
@@ -370,4 +383,70 @@ void sm750_screen_to_screen_blit(engine_token *et, blit_params *p, uint32 count)
         sm750_wait_engine_idle();
         SM750_WREG32(SM750_2D_CONTROL, cmd);
     }
+    // 2. RILASCIAMO IL LOCK
+    gInfo->si->engine.lock.Release();
+}
+void sm750_invert_rectangle(engine_token *et, fill_rect_params *list, uint32 count) {
+    if (et == NULL) return;
+    
+    // Protezione col Benaphore
+    gInfo->si->engine.lock.Lock();
+    
+    vuint32 *regs = gInfo->regs;
+
+    for (uint32 i = 0; i < count; i++) {
+        
+        uint32 x = list[i].left & 0x1FFF;
+        uint32 y = list[i].top & 0xFFFF;
+        uint32 width = (list[i].right - list[i].left + 1) & 0x1FFF;
+        uint32 height = (list[i].bottom - list[i].top + 1) & 0xFFFF;
+
+        // Coordinate e Dimensioni (Registro 0x100000 e 0x100008)
+        SM750_WREG32(SM750_2D_DESTINATION, (x << 16) | y);
+        SM750_WREG32(SM750_2D_DIMENSION, (width << 16) | height);
+        
+        // Aspetta che l'engine sia libero
+        sm750_wait_engine_idle();
+        
+        // Control (0x10000C):
+        // Bit 31: Start (1)
+        // Bit 20:16: Command BitBlt (00000)
+        // Bit 15: ROP2 Select (1)
+        // Bit 7:0: ROP2 NOT DEST (0x55)
+        uint32 cmd = (1U << 31) | (1U << 15) | 0x55;
+        
+        SM750_WREG32(SM750_2D_CONTROL, cmd);
+    }
+
+    gInfo->si->engine.lock.Release();
+}
+void sm750_fill_span(engine_token *et, uint32 color, uint16 *spans, uint32 count) {
+    if (et == NULL) return;
+
+    gInfo->si->engine.lock.Lock();
+    vuint32 *regs = gInfo->regs;
+    
+    SM750_WREG32(SM750_2D_FOREGROUND, color);
+
+    for (uint32 i = 0; i < count; i++) {
+        uint16 y = spans[i * 3];
+        uint16 x = spans[i * 3 + 1];
+        uint16 width = spans[i * 3 + 2];
+
+        // Dest (0x100004): X(28:16), Y(15:0)
+        SM750_WREG32(SM750_2D_DESTINATION, (uint32(x & 0x1FFF) << 16) | (y & 0xFFFF));
+        // Dim (0x100008): W(28:16), H(15:0) = 1
+        SM750_WREG32(SM750_2D_DIMENSION, (uint32(width & 0x1FFF) << 16) | 1);
+
+        sm750_wait_engine_idle();
+        // Bit 31: Start
+        // Bit 30: Color Pattern (1)
+        // Bit 20:16: Cmd 00001 (Rect Fill)
+        // Bit 15: ROP2 Select (1)
+        // Bit 7:0: ROP2 Pattern Copy (0x0C)
+        uint32 cmd = (1U << 31) | (1U << 30) | (1U << 16) | (1U << 15) | 0x0C;
+        SM750_WREG32(SM750_2D_CONTROL, cmd);
+    }
+
+    gInfo->si->engine.lock.Release();
 }
