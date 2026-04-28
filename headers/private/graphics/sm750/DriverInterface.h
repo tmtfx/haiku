@@ -41,6 +41,16 @@ struct Benaphore {
             return acquire_sem(sem);
         return B_OK;
     }
+    status_t Lock() {
+        status_t status;
+        if (atomic_add(&count, 1) > 0) {
+            do {
+                status = acquire_sem(sem);
+            } while (status == B_INTERRUPTED);
+            return status;
+        }
+        return B_OK;
+    }
 
     status_t Release() {
         if (atomic_add(&count, -1) > 1)
