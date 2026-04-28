@@ -15,6 +15,7 @@
 #include "DriverInterface.h"
 #include "protos.h"
 #include "sm750_macros.h"
+#include "common_modes.h"
 
 #define CALLED() debug_printf("SM750_ACC: %s\n", __FUNCTION__)
 
@@ -78,12 +79,11 @@ create_mode_list()
 
         display_mode *pm = gInfo->si->card_info.is_panel ? 
             &gInfo->si->preferred_mode : &gInfo->si->preferred_mode2;
-
+            
         if (pm->timing.h_display > 0 && pm->timing.v_display > 0) {
-            // Usiamo il timing che il driver ha salvato dal bootloader/BIOS
             list[0] = *pm;
             count = 1;
-            debug_printf("SM750_ACC: Fallback su BIOS timing: %dx%d\n", 
+            debug_printf("SM750_ACC: Modo preferito (Boot) impostato in list[0]: %dx%d\n", 
                 pm->timing.h_display, pm->timing.v_display);
         } else {
             // Ultima spiaggia: 1024x768 Standard
@@ -94,6 +94,38 @@ create_mode_list()
             list[0] = safe_mode;
             count = 1;
             debug_printf("SM750_ACC: Fallback su 1024x768 Safe Mode\n");
+        }
+
+        // Secondo passaggio: aggiungiamo gli altri modi dalla tabella VESA (evitando duplicati)
+        for (int i = 0; vesa_dmt_table[i].width != 0 && count < MAX_EDID_MODES; i++) {
+            const vesa_timing_t* vesa = &vesa_dmt_table[i];
+
+            // Salta se è lo stesso del modo preferito già inserito
+            if (count > 0 && vesa->width == list[0].timing.h_display && 
+                vesa->height == list[0].timing.v_display) {
+                continue;
+            }
+
+            display_mode* dm = &list[count];
+            dm->timing.pixel_clock = vesa->pixel_clock;
+            dm->timing.h_display    = vesa->width;
+            dm->timing.h_sync_start = vesa->h_sync_start;
+            dm->timing.h_sync_end   = vesa->h_sync_end;
+            dm->timing.h_total      = vesa->h_total;
+            dm->timing.v_display    = vesa->height;
+            dm->timing.v_sync_start = vesa->v_sync_start;
+            dm->timing.v_sync_end   = vesa->v_sync_end;
+            dm->timing.v_total      = vesa->v_total;
+            dm->timing.flags        = vesa->flags;
+
+            dm->space = B_RGB32;
+            dm->virtual_width  = vesa->width;
+            dm->virtual_height = vesa->height;
+            dm->h_display_start = 0;
+            dm->v_display_start = 0;
+            dm->flags = 0;
+
+            count++;
         }
     }
 
@@ -320,6 +352,8 @@ void* get_accelerant_hook(uint32 feature, void* data) {
         /* Hook per l'engine 2D (accelerazione hardware) */
         case B_FILL_RECTANGLE:				return (void*)sm750_fill_rectangle;
 		case B_SCREEN_TO_SCREEN_BLIT:		return (void*)sm750_screen_to_screen_blit;
+		case B_INVERT_RECTANGLE:			return (void*)(sm750_invert_rectangle);
+		case B_FILL_SPAN:					return (void*)(sm750_fill_span);
 				
         default: return NULL;
     }
