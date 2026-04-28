@@ -421,7 +421,6 @@ void sm750_init_chip(DeviceInfo *di) {
         }
     */
     
-    // 1. DIAGNOSTICA PCI/BOOT (Solo log)
     bool showLogo = false;
     display_mode *dm = si->card_info.is_panel ? &si->preferred_mode : &si->preferred_mode2;
     struct frame_buffer_boot_info* bi = (struct frame_buffer_boot_info*)get_boot_item(FRAME_BUFFER_BOOT_INFO, NULL);
