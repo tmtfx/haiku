@@ -519,6 +519,7 @@ sm750_set_display_mode(display_mode *mode)
         debug_printf("SM750_ACC: Scrittura sul registro di controllo di PANEL: 0x%08x\n", ctrl);
         SM750_WREG32(SM750_PANEL_CONTROL, ctrl);
         si->fbc.bytes_per_row = pitch;
+        si->fbc.frame_buffer_dma = (void *)si->framebuffer_pci;
         debug_printf("SM750_ACC: --- FINE SETUP PANEL ---\n");
     } else {
         // Registro di Controllo CRT (0x080200)
@@ -529,8 +530,10 @@ sm750_set_display_mode(display_mode *mode)
         debug_printf("SM750_ACC: Scrittura sul registro di controllo del CRT: 0x%08x\n", ctrl);
         SM750_WREG32(SM750_CRT_CONTROL, ctrl);
         si->fbc2.bytes_per_row = pitch;
+        si->fbc2.frame_buffer_dma = (void *)si->framebuffer_pci;
     	debug_printf("SM750_ACC: --- FINE SETUP CRT ---\n");
     }
+    
 
     si->dm = *mode;
     sm750_init_2d_engine(&(si->dm));
@@ -686,6 +689,39 @@ sm750_propose_display_mode(display_mode *target, const display_mode *low, const 
 
     // TODO: Qui potresti iterare la tua mode_list per trovare il "match" più vicino
     // se i parametri non sono esattamente uguali a quelli richiesti.
+
+    return B_OK;
+}
+
+status_t sm750_set_indexed_colors(uint32 count, uint8 first, uint8 *colors, uint32 flags) {
+    // Non supportiamo gli 8-bit per ora, ma rispondiamo OK per far felice Haiku
+    return B_OK;
+}
+// da rivedere questi valori
+status_t
+sm750_get_timing_constraints(display_timing_constraints *dtc)
+{
+    // Allineamento orizzontale: SMI richiede multipli di 8 pixel
+    dtc->h_res = 8;
+    
+    // Sync orizzontale (in pixel)
+    dtc->h_sync_min = 8;
+    dtc->h_sync_max = 4096; // Valore arbitrario alto
+    
+    // Blanking orizzontale (in pixel)
+    dtc->h_blank_min = 8;
+    dtc->h_blank_max = 4096;
+    
+    // Allineamento verticale: di riga in riga
+    dtc->v_res = 1;
+    
+    // Sync verticale (in linee)
+    dtc->v_sync_min = 1;
+    dtc->v_sync_max = 2048;
+    
+    // Blanking verticale (in linee)
+    dtc->v_blank_min = 1;
+    dtc->v_blank_max = 2048;
 
     return B_OK;
 }

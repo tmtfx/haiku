@@ -120,6 +120,7 @@ void sm750_program_pll(uint32 target_khz, bool is_panel)
 
 status_t sm750_move_display_area(uint16 h_display_start, uint16 v_display_start)
 {
+	CALLED();
     shared_info *si = gInfo->si;
     
     uint32 bytes_per_pixel = (si->dm.space == B_RGB32) ? 4 : 2;
@@ -387,6 +388,7 @@ void sm750_screen_to_screen_blit(engine_token *et, blit_params *p, uint32 count)
     gInfo->si->engine.lock.Release();
 }
 void sm750_invert_rectangle(engine_token *et, fill_rect_params *list, uint32 count) {
+	CALLED();
     if (et == NULL) return;
     
     // Protezione col Benaphore
@@ -421,6 +423,7 @@ void sm750_invert_rectangle(engine_token *et, fill_rect_params *list, uint32 cou
     gInfo->si->engine.lock.Release();
 }
 void sm750_fill_span(engine_token *et, uint32 color, uint16 *spans, uint32 count) {
+	CALLED();
     if (et == NULL) return;
 
     gInfo->si->engine.lock.Lock();

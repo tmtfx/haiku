@@ -45,12 +45,18 @@ void sm750_wait_engine_idle(void);
 status_t sm750_get_sync_token(engine_token *et, sync_token *st);
 status_t sm750_sync_to_token(sync_token *st);
 status_t sm750_set_fb_addr(uint32 offset, bool is_panel);
+status_t sm750_set_indexed_colors(uint32 count, uint8 first, uint8 *colors, uint32 flags);
+status_t sm750_get_timing_constraints(display_timing_constraints *dtc);
+uint32 sm750_dpms_mode(void);
+uint32 sm750_dpms_capabilities(void);
+status_t sm750_set_dpms_mode(uint32 mode);
 
 void sm750_screen_to_screen_blit(engine_token *et, blit_params *p, uint32 count);
 void sm750_fill_rectangle(engine_token *et, uint32 color, fill_rect_params *params, uint32 count);
 void sm750_init_2d_engine(display_mode *mode);
 void sm750_fill_span(engine_token *et, uint32 color, uint16 *spans, uint32 count);
 void sm750_invert_rectangle(engine_token *et, fill_rect_params *list, uint32 count);
+
 #ifdef __cplusplus
 }
 #endif

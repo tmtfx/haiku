@@ -200,6 +200,8 @@ static status_t init_common(int fd,bool isClone) {
     
     if (!isClone) {
         si->framebuffer = (uint8*)fb_ptr;
+        si->fbc.frame_buffer=si->framebuffer;
+        si->fbc2.frame_buffer=si->framebuffer;
         // qui benaphore per engine 2d
         status_t result = si->engine.lock.Init("SM750 2D engine lock");
 		if (result == B_OK) {
@@ -317,26 +319,37 @@ void* get_accelerant_hook(uint32 feature, void* data) {
 	debug_printf("SM750_ACC: Request 0x%x\n", feature);
     switch (feature) {
         case B_INIT_ACCELERANT:             return (void*)sm750_init_accelerant;
-        case B_UNINIT_ACCELERANT:           return (void*)sm750_uninit_accelerant;
         case B_ACCELERANT_CLONE_INFO_SIZE:  return (void*)sm750_accelerant_clone_info_size;
         case B_GET_ACCELERANT_CLONE_INFO:   return (void*)sm750_get_accelerant_clone_info;
         case B_CLONE_ACCELERANT:            return (void*)sm750_clone_accelerant;
+        case B_UNINIT_ACCELERANT:           return (void*)sm750_uninit_accelerant;
         case B_GET_ACCELERANT_DEVICE_INFO:  return (void*)sm750_get_accelerant_device_info;
+        //B_ACCELERANT_RETRACE_SEMAPHORE
+        
         
         /* Display Modes */
-        case B_ACCELERANT_MODE_COUNT:       return (void*)sm750_accelerant_mode_count;
-        case B_GET_MODE_LIST:               return (void*)sm750_get_mode_list;
+        case B_ACCELERANT_MODE_COUNT:       return (void*)sm750_accelerant_mode_count;	//0x100
+        case B_GET_MODE_LIST:               return (void*)sm750_get_mode_list;			//0x101
+        case B_PROPOSE_DISPLAY_MODE:        return (void*)sm750_propose_display_mode;	//0x102
+        case B_SET_DISPLAY_MODE:            return (void*)sm750_set_display_mode;		//0x103
+        case B_GET_DISPLAY_MODE:            return (void*)sm750_get_display_mode;		//0x104
+        case B_GET_FRAME_BUFFER_CONFIG:     return (void*)sm750_get_frame_buffer_config;//0x105
+        case B_GET_PIXEL_CLOCK_LIMITS:      return (void*)sm750_get_pixel_clock_limits;	//0x106
+        case B_GET_TIMING_CONSTRAINTS:		return (void*)sm750_get_timing_constraints;	//0x107
+        //B_MOVE_DISPLAY
+        case B_SET_INDEXED_COLORS:			return (void*)sm750_set_indexed_colors;
+        case B_DPMS_CAPABILITIES:			return (void*)sm750_dpms_capabilities;
+        case B_DPMS_MODE:					return (void*)sm750_dpms_mode;
+        case B_SET_DPMS_MODE:				return (void*)sm750_set_dpms_mode;
         case B_GET_PREFERRED_DISPLAY_MODE:  return (void*)sm750_get_preferred_mode;
-        case B_PROPOSE_DISPLAY_MODE:        return (void*)sm750_propose_display_mode;
-        case B_SET_DISPLAY_MODE:            return (void*)sm750_set_display_mode;
-        case B_GET_DISPLAY_MODE:            return (void*)sm750_get_display_mode;
-        case B_GET_FRAME_BUFFER_CONFIG:     return (void*)sm750_get_frame_buffer_config;
-        case B_GET_PIXEL_CLOCK_LIMITS:      return (void*)sm750_get_pixel_clock_limits;
+        //B_GET_MONITOR_INFO
         case B_GET_EDID_INFO:               return (void*)sm750_get_edid_info;
+        //B_SET_BRIGHTNESS
+        //B_GET_BRIGHTNESS
         
         /* Cursor */
+        case B_MOVE_CURSOR:                 return (void*)sm750_move_cursor;			//0x200
         case B_SET_CURSOR_SHAPE:            return (void*)sm750_set_cursor_shape;
-        case B_MOVE_CURSOR:                 return (void*)sm750_move_cursor;
         case B_SHOW_CURSOR:                 return (void*)sm750_show_cursor;
         case B_SET_CURSOR_BITMAP:           return (void*)sm750_set_cursor_bitmap;
         
