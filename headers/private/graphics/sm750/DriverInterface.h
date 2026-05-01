@@ -19,7 +19,7 @@
 //#include <boot_item.h>
 //#include <vesa_info.h>
 #include <edid.h>
-#include "video_overlay.h"
+#include <video_overlay.h>
 
 #define DRIVER_PREFIX "sm750"
 
@@ -228,13 +228,13 @@ typedef struct {
 		uint32 max_pclk;		/* Max Pixel Clock */
 	} card_info; /* SM750 Info */
 
-	/* Overlay (Scaler) */
+	/* Overlay (Scaler - Layer #2 SM750) */
 	struct {
-		overlay_buffer myBuffer[MAXBUFFERS];
-		int_buf_info	myBufInfo[MAXBUFFERS];
-		overlay_token	myToken;
-		Benaphore		lock;
-		bool			active;
+		Benaphore   lock;            /* Protegge l'accesso all'unico Layer Video */
+		overlay_token myToken;       /* Identificativo dell'overlay attivo */
+		// Usiamo MAXBUFFERS per il Double/Triple buffering video
+		overlay_buffer myBuffer[MAXBUFFERS]; 
+		bool        active;          /* Layer #2 è acceso? */
 	} overlay;
 
 	bool accelerant_in_use;
@@ -258,6 +258,10 @@ typedef struct {
 	bool	has_edid_crt;		// Trovato EDID su canale CRT
 	bool		is_clone;			/* Vero se è un clone */
 	engine_token sm750_engine_token; /* 2D engine token */
+	// Stato locale Overlay
+    overlay_token   current_ot;      /* Token dell'overlay se allocato */
+    const overlay_buffer *current_ob; /* Buffer attualmente visualizzato */
+    bool            overlay_active;
 } accelerant_info;
 
 /* Stato globale del driver */
