@@ -66,6 +66,22 @@ map_mem(void **out_virt, phys_addr_t phys, uint32 size, const char *name)
     }
     return area;
 }
+static area_id
+map_videomem(void **out_virt, phys_addr_t phys, uint32 size, const char *name)
+{
+    void *virt = NULL;
+    size = (size + B_PAGE_SIZE - 1) & ~(B_PAGE_SIZE - 1);
+    area_id area = map_physical_memory(name, phys, size, B_ANY_KERNEL_ADDRESS | B_WRITE_COMBINING_MEMORY, 
+        B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA | B_CLONEABLE_AREA, &virt);
+
+    if (area < B_OK) {
+        dprintf("SM750 ERROR: map_physical_memory(%s) failed\n", name);
+        *out_virt = NULL;
+    } else {
+        *out_virt = virt;
+    }
+    return area;
+}
 
 /* --- Hooks di sistema --- */
 status_t init_hardware(void) {
@@ -167,7 +183,7 @@ open_device(const char *name, uint32 flags, void **cookie)
                                di->pci.u.h0.base_register_sizes[1], "sm750_regs_k");
         
         // 5. Mappatura FRAMEBUFFER (BAR 0 - 64MB)
-        di->fb_area = map_mem((void **)&di->framebuffer, di->pci.u.h0.base_registers[0], 
+        di->fb_area = map_videomem((void **)&di->framebuffer, di->pci.u.h0.base_registers[0], 
                              di->pci.u.h0.base_register_sizes[0], "sm750_fb_k");
 
         if (di->regs_area < 0 || di->fb_area < 0) {
