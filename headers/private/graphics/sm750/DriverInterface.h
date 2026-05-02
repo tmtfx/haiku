@@ -16,8 +16,6 @@
 #include <Drivers.h>
 #include <PCI.h>
 #include <OS.h>
-//#include <boot_item.h>
-//#include <vesa_info.h>
 #include <edid.h>
 #include <video_overlay.h>
 
@@ -74,18 +72,6 @@ typedef struct {
 #if defined(__cplusplus)
 extern "C" {
 #endif
-
-
-/*
-typedef struct {
-	sem_id	sem;
-	int32	ben;
-} benaphore;
-
-#define INIT_BEN(x)		x.sem = create_sem(0, "SM750 "#x" benaphore");	x.ben = 0;
-#define AQUIRE_BEN(x)	if((atomic_add(&(x.ben), 1)) >= 1) acquire_sem(x.sem);
-#define RELEASE_BEN(x)	if((atomic_add(&(x.ben), -1)) > 1) release_sem(x.sem);
-#define DELETE_BEN(x)	delete_sem(x.sem);*/
 
 /* Dualhead & Output Flags */
 #define DUALHEAD_OFF		(0<<6)
@@ -154,8 +140,6 @@ typedef struct {
 	uint8	bus;
 	uint8	device;
 	uint8	function;
-	//uint8	edid_panel[128];	// Dati monitor su LCD/Panel
-	//uint8	edid_crt[128]; // Dati monitor su VGA/CRT
 	edid1_raw vesa_edid_raw;
 	char	device_path[B_PATH_NAME_LENGTH];
 
@@ -190,6 +174,7 @@ typedef struct {
 		bool	is_visible;
 		phys_addr_t	pci_address; 
 		void	*v_address;
+		uint32          block_id;
 	} cursor;
 
 	/* DAC Palette (CLUT) */
@@ -214,8 +199,6 @@ typedef struct {
 	struct {
 		uint32	chip_id;		/* 0x750 o varianti */
 		bool 	is_panel;		// true se usiamo LCD (0x80200), false se CRT (0x80000)
-		//bool	has_edid_panel;	// Trovato EDID su canale Panel
-		//bool	has_edid_crt;		// Trovato EDID su canale CRT
 		bool	has_edid_vesa;
 		uint32	active_outputs;	// Bitmask: 1=Panel, 2=CRT, 3=Entrambi
 		uint32	mem_size;		/* Totale memoria rilevata */
@@ -307,10 +290,7 @@ typedef struct {
 	char	*name;
 } sm750_device_name; */
 
-//extern status_t control_device(void *cookie, uint32 op, void *arg, size_t len);
 
-
-//void sm750_get_clocks(vuint32 *regs, shared_info *si);
 void sm750_init_chip(DeviceInfo *di);
 
 #if defined(__cplusplus)

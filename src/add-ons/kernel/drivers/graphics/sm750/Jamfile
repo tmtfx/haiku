@@ -10,4 +10,6 @@ UsePrivateKernelHeaders ;
 KernelAddon sm750 :
 	driver.c
 	init.c
+	:
+	libgraphicscommon.a
 ;

@@ -20,7 +20,7 @@
 #include "sm750_macros.h"
 #include "common_modes.h"
 #include "sm750_logo.h"
-
+#include "memory_manager.h"
 
 extern pci_module_info *pci;
 
@@ -48,6 +48,41 @@ typedef struct {
 } sm750_bios_module_info; 
 
 #define B_BIOS_MODULE_NAME "generic/bios/v1"
+
+static status_t init_vram_manager(shared_info* si) 
+{
+    // Con 16MB totali, riserviamo i primi 8MB al Desktop.
+    // È sufficiente per 1280x1024 @ 32bpp (circa 5MB) con margine per cambi risoluzione.
+    uint32 desktopReserve = 8 * 1024 * 1024; 
+    
+    if (si->card_info.mem_size <= desktopReserve)
+        desktopReserve = si->card_info.mem_size / 2; 
+
+    uint32 heapStart = desktopReserve;
+    uint32 heapSize = si->card_info.mem_size - desktopReserve;
+
+    // Inizializziamo l'heap sulla seconda metà della RAM
+    si->mem_mgr = (void*)mem_init("sm750_vram_heap", heapStart, heapSize, 8, 128);
+    
+    if (si->mem_mgr == NULL) return B_ERROR;
+
+    // --- ALLOCAZIONE CURSORE ---
+    // Il cursore della SM750 in modalità "3-color + transparency" occupa 16KB.
+    uint32 cursorBlockID;
+    uint32 cursorOffset;
+    status_t status = mem_alloc((mem_info*)si->mem_mgr, 16384, (void*)0x43555253, // Tag 'CURS'
+                                &cursorBlockID, &cursorOffset);
+    
+    if (status == B_OK) {
+        si->cursor.pci_address = cursorOffset; 
+        si->cursor.block_id = cursorBlockID;
+        dprintf("SM750: Cursore allocato dinamicamente a offset 0x%x\n", cursorOffset);
+    } else {
+        dprintf("SM750 ERROR: Impossibile allocare memoria per il cursore!\n");
+    }
+
+    return B_OK;
+}
 
 static status_t
 GetEdidFromBIOS(edid1_raw* edidRaw)
@@ -392,6 +427,13 @@ void sm750_init_chip(DeviceInfo *di) {
     // Aggiorniamo la shared info
     si->card_info.mem_size = detected_mem;
     dprintf("SM750: Detected VRAM memory (from Reg 0x000004): %u MB\n", detected_mem / (1024*1024));
+    
+    
+    // --- INIZIALIZZAZIONE MEMORY MANAGER ---
+    // Ora che sappiamo quanta RAM c'è, attiviamo il gestore
+    if (init_vram_manager(si) != B_OK) {
+        dprintf("SM750: WARNING - Memory Manager initialization failed!\n");
+    }
     
     // D. Rilevazione Uscita Attiva (LOGICA UNICA)
     /*
