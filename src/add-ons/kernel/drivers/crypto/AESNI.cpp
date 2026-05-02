@@ -351,7 +351,7 @@ aesni_process_ctr(AESNIContext* ctx,
     _mm_storeu_si128((__m128i*)ctx->iv, ctr);
     return B_OK;
 }
-
+/* FUNzionante per input ""
 static inline void
 aesni_encrypt_block_xmm(const AESNIContext* ctx, const uint8* in, uint8* out)
 {
@@ -361,21 +361,119 @@ aesni_encrypt_block_xmm(const AESNIContext* ctx, const uint8* in, uint8* out)
         block = _mm_aesenc_si128(block, ctx->encRoundKeys[i]);
     block = _mm_aesenclast_si128(block, ctx->encRoundKeys[ctx->rounds]);
     _mm_storeu_si128((__m128i*)out, block);
+}*/
+static inline void
+aesni_encrypt_block_xmm(const AESNIContext* ctx, const uint8* in, uint8* out)
+{
+    auto dprint_xmm = [](const char* label, __m128i reg) {
+        alignas(16) uint8_t b[16];
+        _mm_storeu_si128((__m128i*)b, reg);
+        dprintf("[AES_BLOCK] %-15s: %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x\n",
+            label, b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], 
+            b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]);
+    };
+    auto log_reg = [](const char* label, __m128i reg) {
+        alignas(16) uint64_t v[2];
+        _mm_storeu_si128((__m128i*)v, reg);
+        dprintf("[AES_BLOCK]: %-15s | High: %016lx | Low: %016lx\n", label, v[1], v[0]);
+    };
+
+    // 1. Caricamento
+    __m128i block = _mm_loadu_si128((const __m128i*)in);
+    //dprint_xmm("Input Load", block);
+    log_reg("Input Load", block);
+
+    // 2. Round 0 (XOR con la prima chiave)
+    block = _mm_xor_si128(block, ctx->encRoundKeys[0]);
+    //dprint_xmm("Post-Round0", block);
+    log_reg("Post-Round0", block);
+
+    // 3. Rounds intermedi
+    for (int i = 1; i < ctx->rounds; i++) {
+        block = _mm_aesenc_si128(block, ctx->encRoundKeys[i]);
+        // Stampiamo solo il primo round intermedio per non intasare il buffer
+        if (i == 1) log_reg("Post-Round1", block);//dprint_xmm("Post-Round1", block);
+    }
+
+    // 4. Round finale
+    block = _mm_aesenclast_si128(block, ctx->encRoundKeys[ctx->rounds]);
+    //dprint_xmm("Output Final", block);
+    log_reg("Output Final", block);
+
+    _mm_storeu_si128((__m128i*)out, block);
+}
+// Crea questa versione specifica per il debug nel ramo GCM
+/*
+static inline void
+aesni_encrypt_block_gcm_task(const AESNIContext* ctx, const uint8* in, uint8* out)
+{
+	auto dprint_xmm = [](const char* label, __m128i reg) {
+        alignas(16) uint8_t b[16];
+        _mm_storeu_si128((__m128i*)b, reg);
+        dprintf("AES_TRACE: %-20s: %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x\n",
+            label, b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], 
+            b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]);
+    };
+    dprintf("AES_TRACE: --- INIZIO CIFRATURA BLOCCO ---\n");
+    dprintf("AES_TRACE: Input Memoria (in)  : %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x\n",
+        in[0], in[1], in[2], in[3], in[4], in[5], in[6], in[7],
+        in[8], in[9], in[10], in[11], in[12], in[13], in[14], in[15]);
+    // Proviamo a forzare l'ordine BE esplicito prima della cifratura
+    __m128i bswap_mask = _mm_set_epi8(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
+    __m128i block = _mm_loadu_si128((const __m128i*)in);
+    dprint_xmm("Block (post-load)", block);
+    
+    // Se s0 era giusto SENZA shuffle, allora 'block' NON deve essere girato.
+    // Ma se il keystream esce 0388..., allora qualcosa lo sta girando.
+    dprint_xmm("RoundKey[0]", ctx->encRoundKeys[0]);
+    block = _mm_xor_si128(block, ctx->encRoundKeys[0]);
+    dprint_xmm("Block (post-XOR 0)", block);
+    for (int i = 1; i < ctx->rounds; i++) {
+        block = _mm_aesenc_si128(block, ctx->encRoundKeys[i]);
+        if (i == 1) dprint_xmm("Block (post-AESENC 1)", block);
+    }
+    block = _mm_aesenclast_si128(block, ctx->encRoundKeys[ctx->rounds]);
+    dprint_xmm("Block (FINAL)", block);
+    
+    _mm_storeu_si128((__m128i*)out, block);
+    dprintf("AES_TRACE: --- FINE CIFRATURA BLOCCO ---\n");
+}*/
+static inline void
+aesni_encrypt_block_gcm_task(const AESNIContext* ctx, const uint8* in, uint8* out)
+{
+    // Maschera per invertire l'ordine dei byte (0-15 -> 15-0)
+    __m128i bswap_mask = _mm_set_epi8(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
+
+    // 1. Carichiamo dal buffer (es: 00...02)
+    __m128i block = _mm_loadu_si128((const __m128i*)in);
+    
+    // 2. SHUFFLE IN: Portiamo il byte significativo dall'indice 15 all'indice 0 del registro
+    // Prima: [00 00 ... 02] -> Dopo: [02 ... 00 00]
+    block = _mm_shuffle_epi8(block, bswap_mask);
+
+    // 3. Cifratura standard AES-NI
+    block = _mm_xor_si128(block, ctx->encRoundKeys[0]);
+    for (int i = 1; i < ctx->rounds; i++)
+        block = _mm_aesenc_si128(block, ctx->encRoundKeys[i]);
+    block = _mm_aesenclast_si128(block, ctx->encRoundKeys[ctx->rounds]);
+
+    // 4. SHUFFLE OUT: Rigiriamo il risultato per rimetterlo nell'ordine di memoria atteso
+    block = _mm_shuffle_epi8(block, bswap_mask);
+    
+    _mm_storeu_si128((__m128i*)out, block);
 }
 
 /* Update CTR: cifra un chunk (max 16 byte) e incrementa il contatore */
-static void
-aesni_ctr_process_chunk(AESNIContext* ctx, uint8 counter[16], const uint8* src, uint8* dst, size_t len)
-{
-    alignas(16) uint8 keystream[16];
-    aesni_encrypt_block_xmm(ctx, counter, keystream);
-
-    for (size_t i = 0; i < len; i++) {
-        dst[i] = src[i] ^ keystream[i];
-    }
-    
-    aesni_increment_gcm_ctr(counter);
-}
+//static void
+//aesni_ctr_process_chunk(AESNIContext* ctx, uint8 counter[16], const uint8* src, uint8* dst, size_t len)
+//{
+//    alignas(16) uint8 keystream[16];
+//    aesni_encrypt_block_xmm(ctx, counter, keystream);
+//    for (size_t i = 0; i < len; i++) {
+//        dst[i] = src[i] ^ keystream[i];
+//    }
+//    aesni_increment_gcm_ctr(counter);
+//}
 
 /* --- GCM Logic --- */
 static void
@@ -464,7 +562,7 @@ static inline __m128i GCM_REVERSE(__m128i in) {
     // Inverte solo l'ordine dei byte (0->15, 1->14, etc)
     return _mm_shuffle_epi8(in, _mm_set_epi8(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15));
 }
-
+/* ORIGINALE
 static inline __m128i 
 internal_ghash_mul_only_xmm(__m128i a, __m128i b) 
 {
@@ -492,6 +590,338 @@ internal_ghash_mul_only_xmm(__m128i a, __m128i b)
     
     // Il risultato finale è solo lo XOR tra la parte alta originale e la riduzione
     return _mm_xor_si128(tmp6, tmp8); 
+}*/
+/* con maschera pol */
+// NOTA la cifratura è corretta è il calcolo del ghash che non funziona, guardando
+// i log si nota che il valore cifrato è nel most significative byte e non in fondo
+// proseguire con debug
+/*
+static inline __m128i 
+internal_ghash_mul_only_xmm(__m128i a, __m128i b) 
+{
+    __m128i tmp3, tmp4, tmp5, tmp6;
+    __m128i pol = _mm_set_epi64x(0x0000000000000001ULL, 0xc200000000000000ULL);
+
+    auto log128 = [](const char* label, __m128i reg) {
+        alignas(16) uint64_t val[2];
+        _mm_storeu_si128((__m128i*)val, reg);
+        dprintf("GHASH_DEBUG: %-15s: %016lx %016lx\n", label, val[1], val[0]);
+    };
+
+    dprintf("--- GHASH MUL START ---\n");
+    log128("Input A (acc)", a);
+    log128("Input B (H)", b);
+
+    // 1. Moltiplicazione Karatsuba
+    tmp3 = _mm_clmulepi64_si128(a, b, 0x00);
+    tmp6 = _mm_clmulepi64_si128(a, b, 0x11);
+    tmp4 = _mm_clmulepi64_si128(a, b, 0x10);
+    tmp5 = _mm_clmulepi64_si128(a, b, 0x01);
+    
+    log128("Prod_Low (tmp3)", tmp3);
+    log128("Prod_High(tmp6)", tmp6);
+
+    tmp4 = _mm_xor_si128(tmp4, tmp5);
+    __m128i mid_l = _mm_slli_si128(tmp4, 8);
+    __m128i mid_h = _mm_srli_si128(tmp4, 8);
+    
+    tmp3 = _mm_xor_si128(tmp3, mid_l);
+    tmp6 = _mm_xor_si128(tmp6, mid_h);
+    
+    log128("Full_L_After_K", tmp3);
+    log128("Full_H_After_K", tmp6);
+
+    // 2. Riduzione Barrett
+    __m128i t0, t1;
+    
+    t0 = _mm_clmulepi64_si128(tmp3, pol, 0x10);
+    t1 = _mm_shuffle_epi32(t0, 0x4e); 
+    log128("Red_Stage1_t1", t1);
+
+    tmp3 = _mm_xor_si128(tmp3, t1);
+    log128("Red_Stage1_tmp3", tmp3);
+    
+    t0 = _mm_clmulepi64_si128(tmp3, pol, 0x00);
+    t1 = _mm_shuffle_epi32(t0, 0x4e);
+    log128("Red_Stage2_t1", t1);
+    
+    __m128i res = _mm_xor_si128(tmp6, t1);
+    log128("FINAL_RESULT", res);
+    dprintf("--- GHASH MUL END ---\n");
+
+    return res;
+}*/
+/* again and again
+static inline __m128i 
+internal_ghash_mul_only_xmm(__m128i a, __m128i b) 
+{
+    __m128i tmp3, tmp4, tmp5, tmp6, tmp7, tmp8, tmp9;
+    
+    auto log128 = [](const char* label, __m128i reg) {
+        alignas(16) uint64_t val[2];
+        _mm_storeu_si128((__m128i*)val, reg);
+        dprintf("GHASH_DEBUG: %-15s: %016lx %016lx\n", label, val[1], val[0]);
+    };
+    dprintf("--- GHASH MUL START ---\n");
+    
+    log128("Input A (acc)", a);
+    log128("Input B (H)", b);
+
+    // 1. Moltiplicazione Karatsuba (rimane simile, ma più ordinata)
+    tmp3 = _mm_clmulepi64_si128(a, b, 0x00); // Low
+    tmp6 = _mm_clmulepi64_si128(a, b, 0x11); // High
+    tmp4 = _mm_clmulepi64_si128(a, b, 0x10);
+    tmp5 = _mm_clmulepi64_si128(a, b, 0x01);
+    log128("Prod_Low (tmp3)", tmp3);
+    log128("Prod_High(tmp6)", tmp6);
+    
+    tmp4 = _mm_xor_si128(tmp4, tmp5);
+
+    tmp5 = _mm_slli_si128(tmp4, 8);
+    tmp4 = _mm_srli_si128(tmp4, 8);
+    tmp3 = _mm_xor_si128(tmp3, tmp5);
+    tmp6 = _mm_xor_si128(tmp6, tmp4);
+    
+    log128("Full_L_After_K", tmp3);
+    log128("Full_H_After_K", tmp6);
+
+    // 2. Riduzione Barrett per GCM (Polinomio 0xE1)
+    // Questa parte sostituisce i tuoi shuffle e il vecchio 'pol'
+    tmp7 = _mm_srli_epi64(tmp3, 63);
+    tmp8 = _mm_srli_epi64(tmp3, 62);
+    tmp9 = _mm_srli_epi64(tmp3, 57);
+
+    // XOR dei vari shift per la riduzione
+    tmp7 = _mm_xor_si128(_mm_xor_si128(tmp7, tmp8), tmp9);
+    
+    tmp8 = _mm_slli_si128(tmp7, 8);
+    tmp7 = _mm_srli_si128(tmp7, 8);
+    tmp3 = _mm_xor_si128(tmp3, tmp8);
+    tmp6 = _mm_xor_si128(tmp6, tmp7);
+    log128("xor x riduzione tmp3", tmp3);
+    log128("xor x riduzione tmp3", tmp6);
+
+    tmp7 = _mm_slli_epi64(tmp3, 1);
+    tmp8 = _mm_slli_epi64(tmp3, 2);
+    tmp9 = _mm_slli_epi64(tmp3, 7);
+    
+    tmp3 = _mm_xor_si128(_mm_xor_si128(tmp3, tmp7), _mm_xor_si128(tmp8, tmp9));
+    
+    __m128i res = _mm_xor_si128(tmp3, tmp6);
+    log128("FINAL_RESULT", res);
+    dprintf("--- GHASH MUL END ---\n");
+
+    return res;
+}*/
+/* again and again and again
+static inline __m128i 
+internal_ghash_mul_only_xmm(__m128i a, __m128i b) 
+{
+    __m128i tmp3, tmp4, tmp5, tmp6;
+    
+    auto log128 = [](const char* label, __m128i reg) {
+        alignas(16) uint64_t val[2];
+        _mm_storeu_si128((__m128i*)val, reg);
+        dprintf("GHASH_DEBUG: %-15s: %016lx %016lx\n", label, val[1], val[0]);
+    };
+
+    dprintf("--- GHASH MUL START ---\n");
+    log128("Input A (acc)", a);
+    log128("Input B (H)", b);
+
+    // 1. Moltiplicazione Karatsuba
+    tmp3 = _mm_clmulepi64_si128(a, b, 0x00); // Low (L)
+    tmp6 = _mm_clmulepi64_si128(a, b, 0x11); // High (H)
+    tmp4 = _mm_clmulepi64_si128(a, b, 0x10);
+    tmp5 = _mm_clmulepi64_si128(a, b, 0x01);
+    
+    tmp4 = _mm_xor_si128(tmp4, tmp5);
+    tmp5 = _mm_slli_si128(tmp4, 8);
+    tmp4 = _mm_srli_si128(tmp4, 8);
+    
+    // Prodotto completo a 256 bit (distribuito in due registri a 128)
+    __m128i L = _mm_xor_si128(tmp3, tmp5);
+    __m128i H = _mm_xor_si128(tmp6, tmp4);
+    
+    log128("Full_L_After_K", L);
+    log128("Full_H_After_K", H);
+
+    // 2. Riduzione Barrett NIST-compliant per bit riflessi
+    // Costante pol: 0xc200000000000000 (polinomio GCM shiftato per PCLMUL)
+    __m128i poly = _mm_set_epi64x(0xc200000000000000ULL, 0x0000000000000000ULL); 
+
+    // Primo step: riduciamo la parte bassa (L)
+    __m128i t1 = _mm_clmulepi64_si128(L, poly, 0x01);
+    __m128i t2 = _mm_shuffle_epi32(t1, 0x4e); // Swap high/low 64-bit
+    __m128i L_reduced = _mm_xor_si128(L, t2);
+
+    // Secondo step: calcoliamo il resto finale
+    __m128i t3 = _mm_clmulepi64_si128(L_reduced, poly, 0x11);
+    __m128i t4 = _mm_shuffle_epi32(t3, 0x4e);
+    
+    // Risultato = Parte Alta (H) XOR Resti della riduzione
+    __m128i res = _mm_xor_si128(_mm_xor_si128(H, t4), L_reduced);
+
+    log128("FINAL_RESULT", res);
+    dprintf("--- GHASH MUL END ---\n");
+
+    return res;
+}*/
+/* ce cojons
+static inline __m128i 
+internal_ghash_mul_only_xmm(__m128i a, __m128i b) 
+{
+    __m128i tmp3, tmp4, tmp5, tmp6, t0, t1;
+    
+    auto log_step = [](const char* label, __m128i reg) {
+        alignas(16) uint64_t v[2];
+        _mm_storeu_si128((__m128i*)v, reg);
+        dprintf("GHASH_TRACE: %-15s | High: %016lx | Low: %016lx\n", label, v[1], v[0]);
+    };
+
+    dprintf("--- GHASH TRACE START ---\n");
+    log_step("Input A (acc)", a);
+    log_step("Input B (H)", b);
+
+    // 1. Moltiplicazione Karatsuba
+    tmp3 = _mm_clmulepi64_si128(a, b, 0x00);
+    tmp6 = _mm_clmulepi64_si128(a, b, 0x11);
+    tmp4 = _mm_clmulepi64_si128(a, b, 0x10);
+    tmp5 = _mm_clmulepi64_si128(a, b, 0x01);
+    
+    log_step("PCLMUL_00", tmp3);
+    log_step("PCLMUL_11", tmp6);
+    log_step("PCLMUL_10", tmp4);
+    log_step("PCLMUL_01", tmp5);
+
+    tmp4 = _mm_xor_si128(tmp4, tmp5);
+    tmp5 = _mm_slli_si128(tmp4, 8);
+    tmp4 = _mm_srli_si128(tmp4, 8);
+    
+    // Prodotto a 256-bit (tmp6:tmp3)
+    tmp3 = _mm_xor_si128(tmp3, tmp5);
+    tmp6 = _mm_xor_si128(tmp6, tmp4);
+    
+    //log_step("Prod_Full_Low", tmp3);
+    //log_step("Prod_Full_High", tmp6);
+    
+    // 1. Moltiplicazione Karatsuba (Invariata)
+    // ... calcolo di tmp3 (Low) e tmp6 (High) ...
+
+    log_step("Prod_Full_Low_PRE", tmp3);
+    log_step("Prod_Full_High_PRE", tmp6);
+
+    // --- SHIFT CORRETTIVO PER GCM ---
+    // Spostiamo tutto a sinistra di 1 bit per compensare la riflessione NIST
+    __m128i carry = _mm_srli_epi64(tmp3, 63); // Prendi i bit che "escono" dai 64 bit bassi
+    __m128i shift_high = _mm_slli_epi64(tmp6, 1); // Shifta i 64 bit alti
+    __m128i shift_low = _mm_slli_epi64(tmp3, 1);  // Shifta i 64 bit bassi
+    
+    // Sposta il bit uscito dal Low (bit 63) nel Low del High (bit 64)
+    // Usiamo uno shuffle per spostare il carry dal lato basso al lato alto
+    __m128i carry_moved = _mm_slli_si128(carry, 8); 
+    
+    tmp6 = _mm_or_si128(shift_high, carry_moved);
+    tmp3 = shift_low;
+
+    log_step("Prod_Full_Low_POST", tmp3);
+    log_step("Prod_Full_High_POST", tmp6);
+
+    // 2. Riduzione Barrett
+    __m128i poly = _mm_set_epi64x(0xc200000000000000ULL, 0xc200000000000000ULL);
+
+    //t0 = _mm_clmulepi64_si128(tmp3, poly, 0x01);
+    // Step A: Moltiplica la parte bassa del prodotto per il polinomio
+    // Usiamo 0x00: Low di tmp3 * Low di poly
+    t0 = _mm_clmulepi64_si128(tmp3, poly, 0x00);
+    log_step("Red_StepA_Mul", t0);
+    
+    t1 = _mm_shuffle_epi32(t0, 0x4e);
+    log_step("Red_StepA_Shuf", t1);
+    
+    t0 = _mm_xor_si128(tmp3, t1);
+    log_step("Red_StepA_Xor", t0);
+    
+    //t1 = _mm_clmulepi64_si128(t0, poly, 0x11);
+    // Step B: Seconda riduzione per pulire i 64 bit residui
+    // Usiamo 0x10: High di t0 * Low di poly
+    t1 = _mm_clmulepi64_si128(t0, poly, 0x10);
+    log_step("Red_StepB_Mul", t1);
+    
+    t0 = _mm_shuffle_epi32(t1, 0x4e);
+    log_step("Red_StepB_Shuf", t0);
+    
+    __m128i res = _mm_xor_si128(tmp6, t0);
+    log_step("FINAL_RESULT", res);
+    dprintf("--- GHASH TRACE END ---\n");
+
+    return res;
+}*/
+static inline __m128i 
+internal_ghash_mul_only_xmm(__m128i a, __m128i b) 
+{
+	auto log_step = [](const char* label, __m128i reg) {
+        alignas(16) uint64_t v[2];
+        _mm_storeu_si128((__m128i*)v, reg);
+        dprintf("GHASH_TRACE: %-15s | High: %016lx | Low: %016lx\n", label, v[1], v[0]);
+    };
+    __m128i tmp3, tmp4, tmp5, tmp6, t0, t1;
+    __m128i mask = _mm_set_epi8(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
+    dprintf("--- GHASH TRACE START ---\n");
+    log_step("Input A (acc)", a);
+    log_step("Input B (H)", b);
+    //a = _mm_shuffle_epi8(a, mask);
+    log_step("Input A dopo shuffle (acc)", a);
+    //log_step("Input B dopo shuffle (H)", b);
+    // Costante di riduzione GCM (0xE1 riflesso)
+    // Posizionata nel Low per facilitare i selettori
+    const __m128i poly = _mm_set_epi64x(0xc200000000000000ULL, 0xc200000000000000ULL);
+
+    // 1. Moltiplicazione Karatsuba (Prodotto a 256 bit: tmp6:tmp3)
+    tmp3 = _mm_clmulepi64_si128(a, b, 0x00);
+    tmp6 = _mm_clmulepi64_si128(a, b, 0x11);
+    tmp4 = _mm_clmulepi64_si128(a, b, 0x10);
+    tmp5 = _mm_clmulepi64_si128(a, b, 0x01);
+    log_step("PCLMUL_00", tmp3);
+    log_step("PCLMUL_11", tmp6);
+    log_step("PCLMUL_10", tmp4);
+    log_step("PCLMUL_01", tmp5);
+    
+    tmp4 = _mm_xor_si128(tmp4, tmp5);
+    tmp5 = _mm_slli_si128(tmp4, 8);
+    tmp4 = _mm_srli_si128(tmp4, 8);
+    
+    tmp3 = _mm_xor_si128(tmp3, tmp5);
+    tmp6 = _mm_xor_si128(tmp6, tmp4);
+    
+    log_step("Prod_Full_Low", tmp3);
+    log_step("Prod_Full_High", tmp6);
+
+    // 2. Riduzione Barrett (Metodo Intel per Bit-Reflected GCM)
+    // Step A: Moltiplica la parte bassa del prodotto per il polinomio
+    // Selettore 0x00: Low(tmp3) * Low(poly)
+    t0 = _mm_clmulepi64_si128(tmp3, poly, 0x01); 
+    log_step("Red_StepA_Mul", t0);
+    t1 = _mm_shuffle_epi32(t0, 0x4e);
+    log_step("Red_StepA_Shuf", t1);
+    t0 = _mm_xor_si128(tmp3, t1);
+    log_step("Red_StepA_Xor", t0);
+    
+    // Step B: Seconda fase di riduzione
+    // Selettore 0x10: High(t0) * Low(poly)
+    t1 = _mm_clmulepi64_si128(t0, poly, 0x11);
+    log_step("Red_StepB_Mul", t1);
+    
+    t0 = _mm_shuffle_epi32(t1, 0x4e);
+    log_step("Red_StepB_Shuf", t0);
+    
+    __m128i res = _mm_xor_si128(tmp6, t0);
+    log_step("FINAL_RESULT", res);
+    
+    //res = _mm_shuffle_epi8(res, mask);
+    //log_step("FINAL_RESULT dopo shuffle", res);
+    // XOR finale con la parte alta del prodotto originale
+    return res;
 }
 ///////////////////////////////
 // Macro temporanea di debug //
@@ -505,13 +935,20 @@ internal_ghash_mul_only_xmm(__m128i a, __m128i b)
 } while(0)
 
 ///////////////////////////////
+
+// ho le palle piene
 static status_t
 aesni_process_gcm(BCryptoRequest* request)
 {
+	auto log_reg = [](const char* label, __m128i reg) {
+        alignas(16) uint64_t v[2];
+        _mm_storeu_si128((__m128i*)v, reg);
+        dprintf("GHASH_TRACE: %-15s | High: %016lx | Low: %016lx\n", label, v[1], v[0]);
+    };
     AESNIContext* ctx = NULL;
     cpu_status cpu_state;
     status_t st = B_OK;
-    bool encrypt;
+    bool encrypt = (request->operation == B_CRYPTO_ENCRYPT);
     size_t dataVectorCount;
     size_t total_len = 0;
     
@@ -520,7 +957,6 @@ aesni_process_gcm(BCryptoRequest* request)
     alignas(16) uint8 j0[16] = {0};
     alignas(16) uint8 ctr_curr[16] = {0};
     alignas(16) uint8 s0[16] = {0};
-    //alignas(16) uint8 final_tag[16] = {0};
     alignas(16) uint8 len_blk[16] = {0};
     uint8 tag_acc[16] = {0};//{0xFF, 0xFF, 0xFF,0xFF, 0xFF, 0xFF,0xFF, 0xFF, 0xFF,0xFF, 0xFF, 0xFF,0xFF, 0xFF, 0xFF, 0xFF};//
     
@@ -528,14 +964,11 @@ aesni_process_gcm(BCryptoRequest* request)
     __m128i h_ref;
     __m128i acc;
     __m128i b_ref;
-    __m128i final_ghash;
-    __m128i tag_res;
     
     // Variabili di loop
     size_t i, pos, j;
     uint8 *src, *dst;
     size_t vector_len, chunk;
-    //uint64 total_bits;
     
     dprintf("AESNI: VectorCount = %llu\n", (unsigned long long)request->vectorCount);
     dprintf("AESNI: Tag Destination Ptr = %p\n", request->destination[request->vectorCount - 1].iov_base);
@@ -543,8 +976,6 @@ aesni_process_gcm(BCryptoRequest* request)
     // AAD
     size_t aad_len = request->aadLength;
     uint8* aad_ptr = (uint8*)request->aad;
-    //size_t total_data_len = 0;
-    
 
     ctx = (AESNIContext*)memalign(16, sizeof(AESNIContext));
     if (!ctx) return B_NO_MEMORY;
@@ -557,16 +988,11 @@ aesni_process_gcm(BCryptoRequest* request)
         return B_ERROR;
     }
 
-    encrypt = (request->operation == B_CRYPTO_ENCRYPT);
     st = aesni_expand_key(*ctx, (const uint8*)request->key, request->keyLength);
     if (st != B_OK) goto cleanup;
-
-    // 1. Setup Chiave H e J0
+    
     aesni_encrypt_block_xmm(ctx, h_raw, h_raw);
-    //dprintf("AESNI DEBUG: H = %02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n",
-    //h_raw[0], h_raw[1], h_raw[2], h_raw[3], h_raw[4], h_raw[5], h_raw[6], h_raw[7],
-    //h_raw[8], h_raw[9], h_raw[10], h_raw[11], h_raw[12], h_raw[13], h_raw[14], h_raw[15]);
-    //dprintf("AESNI DEBUG: H dovrebbe essere 66e94bd4ef8a2c3b884cfa59ca342b2e\n");
+    log_reg("H_raw dopo cifratura blocco xmm", _mm_loadu_si128((const __m128i*)h_raw));
     
     if (request->ivLength == 12) {
         memcpy(j0, request->iv, 12);
@@ -576,138 +1002,42 @@ aesni_process_gcm(BCryptoRequest* request)
         goto cleanup;
     }
     
-    //dprintf("AESNI DEBUG: J0 = %02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n",
-    //j0[0], j0[1], j0[2], j0[3], j0[4], j0[5], j0[6], j0[7],
-    //j0[8], j0[9], j0[10], j0[11], j0[12], j0[13], j0[14], j0[15]);
-    //dprintf("AESNI DEBUG: J0 atteso: 00000000000000000000000000000001\n");
-
+    aesni_encrypt_block_xmm(ctx, j0, s0);
+    
     memcpy(ctr_curr, j0, 16);
+    
     aesni_increment_gcm_ctr(ctr_curr);
     
     dataVectorCount = request->vectorCount - 1;
 
     if (ghash_accel) {
         // --- RAMO ACCELERATO (PCLMULQDQ) ---
-        /*Il log h_ref = 5c566894... (invece di 5c566994...) ci dice che lo shift che stai facendo non è un vero shift a 128 bit, ma due shift a 64 bit indipendenti. Quando fai _mm_slli_epi64, il bit 63 della QWORD bassa viene perso invece di finire nel bit 0 della QWORD alta.
-        Ma c'è una notizia ancora più importante: la funzione internal_ghash_mul_only_xmm che hai postato (quella con la riduzione Barrett basata sul polinomio 0xc2...) in realtà non vuole affatto che tu faccia lo shift manuale.*/
-        __m128i h_temp = _mm_loadu_si128((__m128i*)h_raw);
-
-        // 2. Applicazione del REVERSE
-        h_temp = GCM_REVERSE(h_temp);
-
-        h_ref = _mm_set_epi64x(0xDEADBEEFDEADBEEF, 0xCAFEBABECAFEBABE);
-        
-        // --- SHIFT A 128 BIT (SINISTRA) ---
-        // h_temp = [ ParteAlta (64 bit) | ParteBassa (64 bit) ]
-        // Esempio: [ 2e2b34ca59fa4c88 | 3b2c8aefd44be966 ]
-
-        // 1. Shifta entrambe le metà (i bit 63 "cadono" per ora)
-        //__m128i sll = _mm_slli_epi64(h_temp, 1); 
-        // 2. Recupera il bit che cade dalla parte BASSA per metterlo in quella ALTA
-        // Shifto a DESTRA di 63 per isolare il bit 63 della parte bassa
-        //__m128i carry = _mm_srli_epi64(h_temp, 63); 
-        // 3. Sposta il carry in modo che il bit della parte bassa si allinei con la parte alta
-        // __mm_slli_si128 sposta i BYTE. Spostiamo di 8 byte (64 bit) verso sinistra.
-        //carry = _mm_srli_si128(carry, 8); 
-        // 4. Unisci: ora il bit 63 della parte bassa è diventato il bit 0 della parte alta
-        //h_ref = _mm_or_si128(sll, carry);
-
-uint64_t parte_alta; // Corrisponde ai primi 8 byte di h_raw (0-7)
-uint64_t parte_bassa; // Corrisponde agli ultimi 8 byte di h_raw (8-15)
-
-// 2. Carichiamo i dati da h_raw (Assumendo h_raw sia l'array con 66e9...)
-// Usiamo __builtin_bswap64 perché la memoria è Big Endian (stringa), 
-// ma la CPU lavora meglio in Native Endian per gli shift.
-memcpy(&parte_alta,  h_raw,     8);
-memcpy(&parte_bassa, h_raw + 8, 8);
-//__m128i alta_shifted  = _mm_slli_epi64(parte_alta, 1);  // Diventa 5c566994b3f49910
-//__m128i bassa_shifted = _mm_slli_epi64(parte_bassa, 1); // Diventa 765915dfa897d2cc
-// 1. Facciamo lo shift direttamente sulle variabili uint64_t
-// Qui non serve XMM, usiamo il C puro
-uint64_t s_alta  = parte_alta << 1;
-uint64_t s_bassa = parte_bassa << 1;
-// 2. Estraiamo il carry che deve passare dalla bassa alla alta
-// Prendiamo il bit 63 di 'bassa' e lo portiamo al bit 0
-//__m128i carry = _mm_srli_epi64(parte_bassa, 63); 
-// 2. Estraiamo il carry dalla parte BASSA (bit 63)
-uint64_t carry = parte_bassa >> 63;
-
-// 3. Applichiamo il carry alla parte alta (OR logico)
-//__m128i alta_finale = _mm_or_si128(alta_shifted, carry);
-uint64_t finale_alta = s_alta | carry;
-
-// 4. Uniamo i due pezzi nel registro h_ref
-// (Nota: l'ordine nel set dipende da come la tua funzione MUL legge i 128 bit)
-//h_ref = _mm_set_epi64x(
-//    _mm_extract_epi64(alta_finale, 0), 
-//    _mm_extract_epi64(bassa_shifted, 0)
-//);
-h_ref = _mm_set_epi64x(s_bassa,finale_alta);
-h_ref = GCM_REVERSE(h_ref);
-
-/*
-        uint8_t finale[16];
-uint8_t c = 0;
-
-// Shift 128-bit Big Endian (Esattamente come sulla carta)
-for (int i = 15; i >= 0; i--) {
-    uint8_t b = h_raw[i];
-    finale[i] = (b << 1) | c;
-    c = (b & 0x80) ? 1 : 0;
-}
-
-// Ora 'finale' DEVE essere 5c566994b3f49910765915dfa897d2cc
-// Lo carichiamo in h_ref (con reverse per la MUL)
-h_ref = GCM_REVERSE(_mm_loadu_si128((__m128i*)finale));
-*/
-
-        /* questo è fatto a mano non accelerato e produce uguale a quello sopra
-        uint64 part_low  = _mm_extract_epi64(h_temp, 0); 
-        uint64 part_high = _mm_extract_epi64(h_temp, 1);
-        // 2. Calcoliamo lo shift a mano
-        // Il bit 63 di part_low deve diventare il bit 0 di part_high
-        uint64 carry = part_low >> 63; 
-        uint64 new_low  = part_low << 1;
-        uint64 new_high = (part_high << 1) | carry;
-        // 3. Ricomponiamo il registro h_ref
-        h_ref = _mm_set_epi64x(new_high, new_low);
+        /* questo è equivalente a quello sotto
+        // questo funziona con input "" shift come voglio io
+        uint64_t parte_alta; // Corrisponde ai primi 8 byte di h_raw (0-7)
+        uint64_t parte_bassa; // Corrisponde agli ultimi 8 byte di h_raw (8-15)
+        //Carichiamo i dati da h_raw
+        memcpy(&parte_alta,  h_raw,     8);
+        memcpy(&parte_bassa, h_raw + 8, 8);
+        // 1. Facciamo lo shift direttamente sulle variabili uint64_t
+        // Qui non serve XMM, usiamo il C puro
+        uint64_t s_alta  = parte_alta << 1;
+        uint64_t s_bassa = parte_bassa << 1;
+        uint64_t carry = parte_bassa >> 63;
+        uint64_t finale_alta = s_alta | carry;
+        // 4. Uniamo i due pezzi nel registro h_ref
+        h_ref = _mm_set_epi64x(s_bassa,finale_alta);
         */
         
-        /* questo shift è rotto produce 5c566994b3f49910765915dfa897d2cd 
-        // Shift a sinistra di 1 bit (fondamentale per allineamento GF128)
-        h_ref = _mm_or_si128(
-            _mm_slli_epi64(h_temp, 1), 
-            _mm_srli_epi64(_mm_slli_si128(h_temp, 8), 63)
-        );*/
-        /*
-        __m128i shifted = _mm_srli_epi64(h_temp, 1);
-        __m128i carry = _mm_slli_epi64(h_temp, 63);
-        carry = _mm_srli_si128(carry, 8);
-        h_ref = _mm_or_si128(shifted, carry);
-        */
-        /*__m128i shifted = _mm_slli_epi64(h_temp, 1);
-        __m128i carry = _mm_srli_epi64(h_temp, 63);
-        // Il bit che esce dalla QWORD bassa (indice 0) deve entrare nella QWORD alta (indice 1)
-        carry = _mm_slli_si128(carry, 8); 
-        h_ref = _mm_or_si128(shifted, carry);*/
-        //DPRINTF_XMM("h_ref (shiftato)", h_ref);
-        //dprintf("AESNI DEBUG: h_ref atteso: 5c566994b3f49910765915dfa897d2cc\n");
-        alignas(16) uint8 h_debug[16];
-        _mm_storeu_si128((__m128i*)h_debug, h_ref);
-        dprintf("AESNI DEBUG: h_ref = %02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n",
-            h_debug[0], h_debug[1], h_debug[2], h_debug[3], h_debug[4], h_debug[5],
-            h_debug[6], h_debug[7], h_debug[8], h_debug[9], h_debug[10], h_debug[11],
-            h_debug[12], h_debug[13], h_debug[14], h_debug[15]);
-        dprintf("AESNI DEBUG: h_ref atteso: 5c566994b3f49910765915dfa897d2cc\n");
-        /* href fissato per input A
-        alignas(16) uint8 h_fixed[16] = {
-    0x5c, 0x56, 0x69, 0x94, 0xb3, 0xf4, 0x99, 0x10, 
-    0x76, 0x59, 0x15, 0xdf, 0xa8, 0x97, 0xd2, 0xcc
-};
-h_ref = _mm_loadu_si128((__m128i*)h_fixed);*/
+        __m128i h_v = _mm_loadu_si128((const __m128i*)h_raw);
+        __m128i h_shifted = _mm_srli_epi64(h_v, 1);
+        __m128i scarry = _mm_slli_epi64(_mm_srli_si128(h_v, 8), 63);
+        h_ref = _mm_or_si128(h_shifted, scarry);
+        log_reg("H_raw dopo shif a dx blocco xmm", h_ref);
+        
         
         acc = _mm_setzero_si128();
-        
+        dprintf("INIZIO BLOCCO AAD\n");
         
         if (aad_ptr && aad_len > 0) {
             dprintf("AESNI: AAD ptr %p, len %zu\n", aad_ptr, aad_len);
@@ -717,116 +1047,97 @@ h_ref = _mm_loadu_si128((__m128i*)h_fixed);*/
                 alignas(16) uint8 tmp_aad[16] = {0};
                 memcpy(tmp_aad, aad_ptr + pos, chunk);
 
-                b_ref = GCM_REVERSE(_mm_loadu_si128((__m128i*)tmp_aad));
+                b_ref = _mm_loadu_si128((__m128i*)tmp_aad);
                 acc = _mm_xor_si128(acc, b_ref);
                 acc = internal_ghash_mul_only_xmm(acc, h_ref);
                 pos += chunk;
             }
         }
+        dprintf("FINE BLOCCO AAD\n");
+        dprintf("INIZIO BLOCCO DATI\n");
 
-        for (i = 0; i < dataVectorCount; i++) {
-            src = (uint8*)request->source[i].iov_base;
-            dst = (uint8*)request->destination[i].iov_base;
-            vector_len = request->source[i].iov_len;
+        for (size_t i = 0; i < dataVectorCount; i++) {
+            uint8* src = (uint8*)request->source[i].iov_base;
+            uint8* dst = (uint8*)request->destination[i].iov_base;
+            size_t vector_len = request->source[i].iov_len;
             if (vector_len == 0) continue;
 
             pos = 0;
             while (pos < vector_len) {
-                chunk = (vector_len - pos < 16) ? vector_len - pos : 16;
+                size_t chunk = (vector_len - pos < 16) ? vector_len - pos : 16;
                 alignas(16) uint8 tmp_in[16] = {0};
-                alignas(16) uint8 tmp_out[16] = {0};
+                alignas(16) uint8 ks[16] = {0};
                 alignas(16) uint8 block_to_hash[16] = {0};
 
                 memcpy(tmp_in, src + pos, chunk);
 
+                aesni_encrypt_block_xmm(ctx, ctr_curr, ks);
+                
                 if (encrypt) {
-                    aesni_encrypt_block_xmm(ctx, ctr_curr, tmp_out); 
-                    dprintf("AESNI DEBUG: CTR[%zu] Keystream = %02x%02x...\n", pos/16, tmp_out[0], tmp_out[1]);
-                    dprintf("AESNI DEBUG: Keystream atteso (CTR 2): 0b4793b4...\n");
-                    for(j = 0; j < chunk; j++) tmp_out[j] ^= tmp_in[j];
-                    memcpy(dst + pos, tmp_out, chunk);
-                    
-                    // GHASH vuole il ciphertext completato a zero
-                    memcpy(block_to_hash, tmp_out, chunk);
+                    for(size_t j = 0; j < chunk; j++) dst[pos + j] = tmp_in[j] ^ ks[j];
+                    memcpy(block_to_hash, dst + pos, chunk);
                 } else {
-                    // Decifratura: GHASH vuole il ciphertext in ingresso
                     memcpy(block_to_hash, tmp_in, chunk);
-
-                    aesni_encrypt_block_xmm(ctx, ctr_curr, tmp_out);
-                    for(j = 0; j < chunk; j++) tmp_out[j] ^= tmp_in[j];
-                    memcpy(dst + pos, tmp_out, chunk);
+                    for(size_t j = 0; j < chunk; j++) dst[pos + j] = tmp_in[j] ^ ks[j];
                 }
 
-                // Inversione e Accumulo (lavoriamo sempre su 16 byte puliti)
-                //b_ref = GCM_REVERSE(_mm_loadu_si128((__m128i*)block_to_hash));
-                b_ref = _mm_loadu_si128((__m128i*)block_to_hash);
-                acc = _mm_xor_si128(acc, b_ref);
+                // GHASH
+                //acc = _mm_xor_si128(acc, GCM_REVERSE(_mm_loadu_si128((__m128i*)block_to_hash)));
+                __m128i data_block = _mm_loadu_si128((__m128i*)block_to_hash);
+                acc = _mm_xor_si128(acc, data_block);
+                alignas(16) uint8 acc_dump[16];
+                _mm_storeu_si128((__m128i*)acc_dump, acc);
+                dprintf("DEBUG: acc post-xor: %02x%02x%02x%02x\n", acc_dump[0], acc_dump[1], acc_dump[2], acc_dump[3]);
+                
                 acc = internal_ghash_mul_only_xmm(acc, h_ref);
-                DPRINTF_XMM("acc (post-data)", acc);
-                dprintf("AESNI DEBUG: acc (post-data) atteso: 18db2620718617f6943b17904838f36c\n");
+                
+                //alignas(16) uint8 acc_dump[16];
+                _mm_storeu_si128((__m128i*)acc_dump, acc);
+                dprintf("DEBUG: acc post-data: %02x%02x%02x%02x\n", acc_dump[0], acc_dump[1], acc_dump[2], acc_dump[3]);
 
                 aesni_increment_gcm_ctr(ctr_curr);
-                dprintf("AESNI DEBUG: next ctr_curr last byte = %02x\n", ctr_curr[15]);
-                dprintf("AESNI DEBUG: next ctr_curr last byte = %02x (atteso: 03)\n", ctr_curr[15]);
                 pos += chunk;
             }
             total_len += vector_len;
         }
-        //dprintf("AESNI DEBUG: aad_ptr=%p, aad_len=%zu, total_len=%zu\n", aad_ptr, aad_len, total_len);
+        dprintf("FINE BLOCCO DATI\n");
 
-        uint64 aad_bits = (uint64)aad_len * 8;
-        uint64 data_bits = (uint64)total_len * 8;
-
-        alignas(16) uint64 len_buffer[2];
-        len_buffer[0] = __builtin_bswap64(aad_bits);  // AAD nei primi 8 byte (BE)
-        len_buffer[1] = __builtin_bswap64(data_bits); // DATA nei secondi 8 byte (BE)
-
-        __m128i len_v_be = _mm_loadu_si128((__m128i*)len_buffer);
-        //acc = _mm_xor_si128(acc, len_v_be);
-        // secondo claude:
-        //acc = _mm_xor_si128(acc, GCM_REVERSE(len_v_be));
         
-        acc = _mm_xor_si128(acc, len_v_be);
+        //uint64 aad_bits = (uint64)aad_len * 8;
+        //uint64 data_bits = (uint64)total_len * 8;
+        
+        alignas(16) uint64_t len_flat[2];
+        //len_flat[1] = (uint64_t)aad_len * 8;
+        //len_flat[0] = (uint64_t)total_len * 8;
+        len_flat[1] = __builtin_bswap64((uint64_t)aad_len * 8);
+        len_flat[0] = __builtin_bswap64((uint64_t)total_len * 8);
+
+        __m128i len_v = _mm_loadu_si128((__m128i*)len_flat);
+        acc = _mm_xor_si128(acc, len_v);
+		// fin qui sembra ok 
+        
         acc = internal_ghash_mul_only_xmm(acc, h_ref);
         DPRINTF_XMM("acc (post-lengths)", acc);
         dprintf("AESNI DEBUG: acc (post-lengths) atteso: 606132049e37e937d54907a974246820\n");
 
         // --- FASE 4: Tag finale ---
-        final_ghash = GCM_REVERSE(acc);
-        DPRINTF_XMM("final_ghash (reversed)", final_ghash);
-        dprintf("AESNI DEBUG: final_ghash atteso: 20682474a90749d537e9379e04326160\n");
-        aesni_encrypt_block_xmm(ctx, j0, s0);
-        dprintf("AESNI DEBUG: s0 (E[K, J0]) = %02x%02x%02x...\n", s0[0], s0[1], s0[2]);
-        dprintf("AESNI DEBUG: s0 atteso: 58e2fcce...\n");
-        tag_res = _mm_xor_si128(final_ghash, _mm_loadu_si128((__m128i*)s0));
-        DPRINTF_XMM("TAG RISULTANTE", tag_res);
-        dprintf("AESNI DEBUG: TAG atteso: 788ad8ba537979b401962ae9a0d5243a\n");
-        alignas(16) uint8 temp_tag[16];
-        _mm_storeu_si128((__m128i*)temp_tag, tag_res);
-    
-        // Scrittura nel buffer del tag (l'ultimo vettore della richiesta)
-        //uint8* tag_out = (uint8*)request->destination[request->vectorCount - 1].iov_base;
-        //_mm_storeu_si128((__m128i*)tag_out, tag_res);
-        if (request->vectorCount > 0) {
-            iovec* tag_vec = &request->destination[request->vectorCount - 1];
-            uint8* tag_out = (uint8*)tag_vec->iov_base;
-            
-            if (tag_out != NULL) {
-                _mm_storeu_si128((__m128i*)tag_out, tag_res);
-                //memcpy(tag_out, temp_tag, 16);
-                if (!encrypt) {
-                    uint8* tag_expected = (uint8*)request->source[request->vectorCount - 1].iov_base;
-                    alignas(16) uint8 tag_calc[16];
-                    _mm_storeu_si128((__m128i*)tag_calc, tag_res);
-                    
-                    if (memcmp(tag_calc, tag_expected, 16) != 0) {
-                        st = B_BAD_DATA; // Tag non corrispondente!
-                    }
-                } else {
-                    dprintf("AESNI: Tag copiato a %p, primo byte: %02x\n", tag_out, tag_out[0]);
-                }
-            } else {
-                dprintf("AESNI: ERRORE! tag_out è NULL\n");
+        //__m128i final_ghash = GCM_REVERSE(acc);
+        alignas(16) uint8 s0_final[16];
+        aesni_encrypt_block_xmm(ctx, j0, s0_final);
+        dprintf("DEBUG: s0 final (E[K,J0]): %02x%02x%02x%02x\n", s0_final[0], s0_final[1], s0_final[2], s0_final[3]);
+        //__m128i tag_res = _mm_xor_si128(final_ghash, _mm_loadu_si128((__m128i*)s0_final));
+        __m128i tag_res = _mm_xor_si128(acc, _mm_loadu_si128((__m128i*)s0_final));
+        
+        alignas(16) uint8 tag_dump[16];
+        _mm_storeu_si128((__m128i*)tag_dump, tag_res);
+        dprintf("DEBUG: TAG RISULTANTE: %02x%02x%02x%02x...\n", tag_dump[0], tag_dump[1], tag_dump[2], tag_dump[3]);
+        
+        uint8* tag_out = (uint8*)request->destination[request->vectorCount - 1].iov_base;
+        if (tag_out) {
+            _mm_storeu_si128((__m128i*)tag_out, tag_res);
+            if (!encrypt) {
+                uint8* tag_expected = (uint8*)request->source[request->vectorCount - 1].iov_base;
+                if (memcmp(tag_out, tag_expected, 16) != 0) st = B_BAD_DATA;
             }
         }
     } else {
@@ -871,13 +1182,6 @@ h_ref = _mm_loadu_si128((__m128i*)h_fixed);*/
             len_blk[7 - j] = (aad_bits >> (j * 8)) & 0xFF;
             len_blk[15 - j] = (data_bits >> (j * 8)) & 0xFF;
         }
-        
-        /* senza AAD
-        total_bits = (uint64)total_len * 8;
-        for (j = 0; j < 8; j++) {
-            len_blk[15 - j] = (total_bits >> (j * 8)) & 0xFF;
-        }
-        */
         
         ghash_update_internal(tag_acc, h_raw, len_blk, 16);
         
