@@ -51,6 +51,11 @@ uint32 sm750_dpms_mode(void);
 uint32 sm750_dpms_capabilities(void);
 status_t sm750_set_dpms_mode(uint32 mode);
 
+uint32 sm750_overlay_count(const display_mode *dm);
+const uint32 *sm750_overlay_supported_spaces(const display_mode *dm);
+void sm750_get_overlay_constraints(const display_mode *dm, const overlay_buffer *ob, overlay_constraints *oc);
+overlay_buffer *sm750_allocate_overlay_buffer(color_space cs, uint16 width, uint16 height);
+
 void sm750_screen_to_screen_blit(engine_token *et, blit_params *p, uint32 count);
 void sm750_fill_rectangle(engine_token *et, uint32 color, fill_rect_params *params, uint32 count);
 void sm750_init_2d_engine(display_mode *mode);
