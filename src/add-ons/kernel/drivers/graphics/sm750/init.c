@@ -51,22 +51,22 @@ typedef struct {
 
 static status_t init_vram_manager(shared_info* si) 
 {
-    // Con 16MB totali, riserviamo i primi 12MB al Desktop.
-    // È sufficiente per garantire la risoluzione massima del chip 1920x1440 @ 32bpp (circa 11MB).
-    uint32 desktopReserve = 12 * 1024 * 1024; 
-    
-    if (si->card_info.mem_size <= desktopReserve) {
-        // Se la scheda ha meno di 12MB (rare varianti da 8MB), ci adattiamo
-        desktopReserve = si->card_info.mem_size - (2 * 1024 * 1024); 
-    }
+    // Usiamo il valore calcolato in init_chip
+    uint32 desktopReserve = si->card_info.max_desktop_mem; 
 
+    // L'heap per l'overlay e il cursore parte subito dopo la riserva desktop
     uint32 heapStart = desktopReserve;
     uint32 heapSize = si->card_info.mem_size - desktopReserve;
+
+    dprintf("SM750: Heap VRAM allocato a 0x%x (Size: %u KB)\n", heapStart, heapSize / 1024);
 
     // Inizializziamo l'heap sulla seconda metà della RAM
     si->mem_mgr = (void*)mem_init("sm750_vram_heap", heapStart, heapSize, 8, 128);
     
-    if (si->mem_mgr == NULL) return B_ERROR;
+    if (si->mem_mgr == NULL) {
+    	dprintf("SM750 ERROR: mem_init fallito!\n");
+    	return B_ERROR;
+    }
 
     // --- ALLOCAZIONE CURSORE ---
     // Il cursore della SM750 in modalità "3-color + transparency" occupa 16KB.
@@ -428,6 +428,10 @@ void sm750_init_chip(DeviceInfo *di) {
 
     // Aggiorniamo la shared info
     si->card_info.mem_size = detected_mem;
+    if (si->card_info.mem_size > 12 * 1024 * 1024)
+        si->card_info.max_desktop_mem = 12 * 1024 * 1024;
+    else
+        si->card_info.max_desktop_mem = si->card_info.mem_size - (2 * 1024 * 1024);
     dprintf("SM750: Detected VRAM memory (from Reg 0x000004): %u MB\n", detected_mem / (1024*1024));
     
     
@@ -548,31 +552,44 @@ void sm750_init_chip(DeviceInfo *di) {
     // F. VGA BYPASS (Necessario per usare il Framebuffer lineare in modo nativo)
     // Abilitiamo il bypass VGA su entrambe le pipe (Primary e Secondary)
     uint32 display_reg = si->card_info.is_panel ? SM750_PANEL_CONTROL : SM750_CRT_CONTROL; // 0x080000 : 0x080200
+    uint32 notdisplay_reg = si->card_info.is_panel ? SM750_CRT_CONTROL : SM750_PANEL_CONTROL; // 0x080200 : 0x080000
     uint32 ctrl = SM750_REG32(display_reg);
+    uint32 nctrl = SM750_REG32(notdisplay_reg);
+    
 
     // 1. Formato 32-bit (Bit 1:0 = 10) - Uguale per entrambi
     ctrl &= ~0x00000003;
     ctrl |= 0x00000002;
+    nctrl &= ~0x00000003;
+    nctrl |= 0x00000002;
+
 
     // 2. Abilitazione Piano e Timing (Bit 2 e 8) - Uguale per entrambi
     ctrl |= (1 << 2) | (1 << 8);
+    nctrl |= (1 << 2) | (1 << 8);
 
     // 3. Selezione Sorgente Dati (QUI CAMBIA!)
     if (si->card_info.is_panel) {
         // Registro 0x80000: Bit 29:28. Vogliamo "Panel Data" (00)
-        ctrl &= ~(3U << 28);
+        ctrl &= ~(3U << 28); // Panel Data for Primary Display
+        nctrl &= ~(3U << 18); // Panel Data for Secondary Display
     
         // Extra per LCD: Abilitiamo i segnali di controllo (Bit 27, 26, 25, 24)
         ctrl |= (1 << 27) | (1 << 26) | (1 << 25) | (1 << 24);
+        
     } else {
         // Registro 0x80200: Bit 19:18. Vogliamo "CRT Data" (10)
         ctrl &= ~(3U << 18);
-        ctrl |= (2U << 18);  // CRT Data
+        ctrl |= (2U << 18);  // CRT Data for Secondary Display
+        nctrl &= ~(3U << 28); 
+        nctrl |= (2U << 28); // Secondary Display Data for Primary Disaply
+        nctrl &= ~(1 << 2); // disattiva il piano grafico primario, ma siamo sicuri che funziona poi? TODO, provare a rimuovere
     
         // No Blank per CRT (Bit 10)
         ctrl &= ~(1 << 10);
     }
     SM750_WREG32(display_reg, ctrl);
+    SM750_WREG32(notdisplay_reg, nctrl);
     
     //si->card_info.chip_id = di->pci.device_id; fatto con registro sopra
     si->card_info.f_ref = 14.31818f; //24.0f; sembra sia 14.318 da datasheet vecchio valore NTSC
