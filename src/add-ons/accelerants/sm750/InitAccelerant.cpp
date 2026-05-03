@@ -368,6 +368,18 @@ void* get_accelerant_hook(uint32 feature, void* data) {
 		case B_SCREEN_TO_SCREEN_BLIT:		return (void*)sm750_screen_to_screen_blit;
 		case B_INVERT_RECTANGLE:			return (void*)(sm750_invert_rectangle);
 		case B_FILL_SPAN:					return (void*)(sm750_fill_span);
+		
+		/* Overlay */
+		case B_OVERLAY_COUNT:				return (void*)(sm750_overlay_count);
+		case B_OVERLAY_SUPPORTED_SPACES:	return (void*)(sm750_overlay_supported_spaces);
+		//B_OVERLAY_SUPPORTED_FEATURES
+		case B_ALLOCATE_OVERLAY_BUFFER:		return (void*)(sm750_allocate_overlay_buffer);
+		//B_RELEASE_OVERLAY_BUFFER
+		case B_GET_OVERLAY_CONSTRAINTS:		return (void*)(sm750_get_overlay_constraints);
+		//B_ALLOCATE_OVERLAY
+		//B_RELEASE_OVERLAY
+		//B_CONFIGURE_OVERLAY
+		
 				
         default: return NULL;
     }
