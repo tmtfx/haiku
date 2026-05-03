@@ -203,6 +203,7 @@ typedef struct {
 		uint32	active_outputs;	// Bitmask: 1=Panel, 2=CRT, 3=Entrambi
 		uint32	mem_size;		/* Totale memoria rilevata */
 		uint32	mem_type;		/* DDR, SDRAM, ecc. */
+		uint32 max_desktop_mem; // Max memory for desktop resolution supported by sm750
 		
 		/* Clock / PLL Limits */
 		float	f_ref;		 /* Cristallo di riferimento (solitamente 24MHz) */
