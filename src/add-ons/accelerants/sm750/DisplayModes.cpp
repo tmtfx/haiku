@@ -433,14 +433,16 @@ sm750_set_display_mode(display_mode *mode)
     vuint32 *regs = gInfo->regs;
     
     // --- LOG DI DEBUG PER IL PITCH ---
-    debug_printf("SM750_ACC: Richiesta SET_DISPLAY_MODE:\n");
+    /*debug_printf("SM750_ACC: Richiesta SET_DISPLAY_MODE:\n");
     debug_printf("SM750_ACC:  - Target Timing: %dx%d\n", mode->timing.h_display, mode->timing.v_display);
     debug_printf("SM750_ACC:  - Target Virtual: %dx%d\n", mode->virtual_width, mode->virtual_height);
-    
-    display_mode *pm = si->card_info.is_panel ? &si->preferred_mode : &si->preferred_mode2;
+    */
+    //display_mode *pm = si->card_info.is_panel ? &si->preferred_mode : &si->preferred_mode2;
     // Vediamo cosa abbiamo in memoria come fallback/preferito
+    /*
     debug_printf("SM750_ACC:  - In shared_info preferred: %dx%d\n", 
         pm->timing.h_display, pm->timing.v_display);
+        */
     
     uint32 bpp = (mode->space == B_RGB32) ? 32 : 16;
     //uint32 color_fmt = (mode->space == B_RGB32) ? 2 : 1; // 2=32bpp, 1=16bpp
@@ -449,15 +451,16 @@ sm750_set_display_mode(display_mode *mode)
     // Se h_display è 1024 ma virtual_width è 1024, il risultato non cambia.
     // Ma se virtual_width è 1040, il pitch sarà corretto e le righe spariranno.
     uint32 pitch = mode->virtual_width * (bpp / 8);
+    /*
     debug_printf("SM750_ACC: H_Disp: %u, Virtual_W: %u, Pitch: %u\n", 
                  mode->timing.h_display, mode->virtual_width, pitch);
     debug_printf("SM750_ACC:  - BPP: %u, Pitch calcolato: %u bytes\n", bpp, pitch);
-    
+    */
     
     // 1. Programmiamo il Clock (PLL)
-    debug_printf("SM750_ACC: programmazione pll...\n");
-    debug_printf("SM750_ACC: preferred mode pixel clock is %u:\n",pm->timing.pixel_clock);
-    debug_printf("SM750_ACC: preferred mode richiesto a sm750_set_display_mode %u:\n",mode->timing.pixel_clock);
+    //debug_printf("SM750_ACC: programmazione pll...\n");
+    //debug_printf("SM750_ACC: preferred mode pixel clock is %u:\n",pm->timing.pixel_clock);
+    //debug_printf("SM750_ACC: preferred mode richiesto a sm750_set_display_mode %u:\n",mode->timing.pixel_clock);
     //uint32 target_clock = mode->timing.pixel_clock;
 
     // Non è questo a generare rumore ma i 2 pll impostati diversamente e il ramo inusato di panel/crt attivo
@@ -468,7 +471,7 @@ sm750_set_display_mode(display_mode *mode)
     //}
     
     sm750_program_pll(mode->timing.pixel_clock, si->card_info.is_panel);
-    debug_printf("SM750_ACC: programmazione pll effettuata\n");
+    //debug_printf("SM750_ACC: programmazione pll effettuata\n");
     bool isPanel = si->card_info.is_panel;
     
     bool h_pos = (mode->timing.flags & B_POSITIVE_HSYNC);
@@ -478,6 +481,7 @@ sm750_set_display_mode(display_mode *mode)
     sm750_set_h_sync(mode->timing.h_sync_start, mode->timing.h_sync_end, isPanel);
     sm750_set_v_timing(mode->timing.v_total, mode->timing.v_display, isPanel);
     sm750_set_v_sync(mode->timing.v_sync_start, mode->timing.v_sync_end, isPanel);
+    /*
     debug_printf("SM750_ACC: Setup %s %dx%d (%d bpp)\n", isPanel ? "PANEL" : "CRT", mode->timing.h_display, mode->timing.v_display, bpp);
     debug_printf("SM750_DEBUG: H_Total: %d, H_Disp: %d, H_SyncStart: %d, H_SyncEnd: %d\n",
             mode->timing.h_total, mode->timing.h_display, 
@@ -485,6 +489,7 @@ sm750_set_display_mode(display_mode *mode)
     debug_printf("SM750_DEBUG: V_Total: %d, V_Disp: %d, V_SyncStart: %d, V_SyncEnd: %d\n",
             mode->timing.v_total, mode->timing.v_display, 
             mode->timing.v_sync_start, mode->timing.v_sync_end);
+            */
     // Puntiamo allo 0 fisico (inizio memoria video)
     // S (Bit 31): Read-only status (Flip pending). Lo scriviamo a 0.
     // Ext (Bit 27): Memory Selection. Deve essere 0 per Local Memory.
@@ -516,7 +521,7 @@ sm750_set_display_mode(display_mode *mode)
     	// Registro di Controllo PANEL (0x080000)
         // Bit di alimentazione LCD
         ctrl |= (1 << 24) | (1 << 25) | (1 << 26) | (1 << 27); 
-        debug_printf("SM750_ACC: Scrittura sul registro di controllo di PANEL: 0x%08x\n", ctrl);
+        //debug_printf("SM750_ACC: Scrittura sul registro di controllo di PANEL: 0x%08x\n", ctrl);
         SM750_WREG32(SM750_PANEL_CONTROL, ctrl);
         si->fbc.bytes_per_row = pitch;
         si->fbc.frame_buffer_dma = (void *)si->framebuffer_pci;
@@ -527,7 +532,7 @@ sm750_set_display_mode(display_mode *mode)
         ctrl |= (2 << 18);
         // 7. VGA Data Shift (Bit 26) -> Di solito 0 (Enable)
         // ctrl |= (0 << 26);
-        debug_printf("SM750_ACC: Scrittura sul registro di controllo del CRT: 0x%08x\n", ctrl);
+        //debug_printf("SM750_ACC: Scrittura sul registro di controllo del CRT: 0x%08x\n", ctrl);
         SM750_WREG32(SM750_CRT_CONTROL, ctrl);
         si->fbc2.bytes_per_row = pitch;
         si->fbc2.frame_buffer_dma = (void *)si->framebuffer_pci;
@@ -634,23 +639,25 @@ sm750_get_mode_list(display_mode* dm)
     //if (gInfo->si->mode_count == 0) return B_ERROR;
     shared_info *si = gInfo->si;
     
-    debug_printf("SM750_ACC: get_mode_list chiamata. mode_count = %u\n", si->mode_count);
+    //debug_printf("SM750_ACC: get_mode_list chiamata. mode_count = %u\n", si->mode_count);
     
     if (si->mode_count == 0 || gInfo->mode_list == NULL) {
         debug_printf("SM750_ACC: ERROR - Nessun modo trovato!\n");
         return B_ERROR;
     }
     // Vediamo cosa c'è nel primo modo prima di copiare
+    /*
     debug_printf("SM750_ACC: Modo[0] prima di memcpy: %ux%u @ %.2f Hz, Clock: %u\n", 
         gInfo->mode_list[0].timing.h_display, 
         gInfo->mode_list[0].timing.v_display,
         (float)gInfo->mode_list[0].timing.pixel_clock * 1000 / 
         ((uint32)gInfo->mode_list[0].timing.h_total * gInfo->mode_list[0].timing.v_total),
         gInfo->mode_list[0].timing.pixel_clock);
+        */
     
     // Copiamo la nostra lista precostruita nell'array passato da Haiku
     memcpy(dm, gInfo->mode_list, si->mode_count * sizeof(display_mode));
-    debug_printf("SM750_ACC: Memcpy effettuata con successo.\n");
+    //debug_printf("SM750_ACC: Memcpy effettuata con successo.\n");
     return B_OK;
 }
 
@@ -669,6 +676,20 @@ sm750_propose_display_mode(display_mode *target, const display_mode *low, const 
         target->virtual_width = target->timing.h_display;
     if (target->virtual_height < target->timing.v_display)
         target->virtual_height = target->timing.v_display;
+        
+    // 2.1 Verifica rispetto ai limiti low/high
+    if (target->virtual_width < low->virtual_width)
+        target->virtual_width = low->virtual_width;
+    if (target->virtual_width > high->virtual_width)
+        target->virtual_width = high->virtual_width;
+        
+    // Ri-verifica l'allineamento dopo il clamping (potrebbe essere necessario)
+    target->virtual_width &= ~15;
+    
+    // Se dopo il clamping la larghezza è diventata inferiore al minimo richiesto dall'hardware
+    // o dalla riga di scansione (timing.h_display), allora la modalità è impossibile.
+    if (target->virtual_width < target->timing.h_display)
+         return B_BAD_VALUE;
 
     // 3. Controllo memoria video
     uint32 bytesPerPixel = 0;
@@ -679,16 +700,25 @@ sm750_propose_display_mode(display_mode *target, const display_mode *low, const 
     }
     
     uint32 memNeeded = target->virtual_width * target->virtual_height * bytesPerPixel;
-    if (memNeeded > gInfo->si->card_info.mem_size)
-        return B_BAD_VALUE;
+    // Il Desktop NON deve invadere l'area dell'heap (gli ultimi 4MB)
+    // Usiamo 12MB come limite invalicabile per il frame buffer primario
+
+    if (memNeeded > gInfo->si->card_info.max_desktop_mem) {
+        debug_printf("SM750: Modalità rifiutata - serve %u byte, limite desktop %u\n", 
+                  memNeeded, gInfo->si->card_info.max_desktop_mem);
+    return B_BAD_VALUE;
+    }
 
     // 4. Limite Pixel Clock (SM750: circa 300MHz per il DAC)
     // pixel_clock è in kHz, quindi 300000 kHz = 300 MHz
     if (target->timing.pixel_clock > 300000)
         return B_BAD_VALUE;
 
-    // TODO: Qui potresti iterare la tua mode_list per trovare il "match" più vicino
-    // se i parametri non sono esattamente uguali a quelli richiesti.
+    // 5. Controllo finale: se il target è fuori dai limiti assoluti passati
+    // (A volte utile come check di sicurezza finale)
+    if (target->timing.pixel_clock < low->timing.pixel_clock 
+        || target->timing.pixel_clock > high->timing.pixel_clock)
+        return B_BAD_VALUE;
 
     return B_OK;
 }
