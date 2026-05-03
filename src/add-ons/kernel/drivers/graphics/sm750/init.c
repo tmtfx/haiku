@@ -51,12 +51,14 @@ typedef struct {
 
 static status_t init_vram_manager(shared_info* si) 
 {
-    // Con 16MB totali, riserviamo i primi 8MB al Desktop.
-    // È sufficiente per 1280x1024 @ 32bpp (circa 5MB) con margine per cambi risoluzione.
-    uint32 desktopReserve = 8 * 1024 * 1024; 
+    // Con 16MB totali, riserviamo i primi 12MB al Desktop.
+    // È sufficiente per garantire la risoluzione massima del chip 1920x1440 @ 32bpp (circa 11MB).
+    uint32 desktopReserve = 12 * 1024 * 1024; 
     
-    if (si->card_info.mem_size <= desktopReserve)
-        desktopReserve = si->card_info.mem_size / 2; 
+    if (si->card_info.mem_size <= desktopReserve) {
+        // Se la scheda ha meno di 12MB (rare varianti da 8MB), ci adattiamo
+        desktopReserve = si->card_info.mem_size - (2 * 1024 * 1024); 
+    }
 
     uint32 heapStart = desktopReserve;
     uint32 heapSize = si->card_info.mem_size - desktopReserve;
