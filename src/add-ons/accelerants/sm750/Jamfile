@@ -11,6 +11,9 @@ Addon sm750.accelerant :
 	Cursor.cpp
 	InitAccelerant.cpp
 	Power.cpp
+	memory_manager.c
+	Overlay.cpp
+	
 	
 	: be libaccelerantscommon.a
 ;
