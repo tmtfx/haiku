@@ -186,7 +186,18 @@ void sm750_wait_engine_idle(void) {
     CALLED();
     vuint32 *regs = gInfo->regs;
     // Bit 31: 0 = Idle, 1 = Busy
-    while (SM750_REG32(SM750_2D_CONTROL) & (1U << 31)) {
+    //while (SM750_REG32(SM750_2D_CONTROL) & (1U << 31)) {
+    //    asm volatile ("pause");
+    //}
+    // usiamo il registro di livello più alto
+    // 1. Aspetta che il motore 2D smetta di elaborare nuovi comandi
+    // Bit 22: 1 = Busy, 0 = Idle
+    while (SM750_REG32(SM750_SYS_CTRL) & (1U << 22)) {
+        asm volatile ("pause");
+    }
+    // 2. Aspetta che la FIFO di memoria sia completamente vuota
+    // Bit 21: 0 = Not Empty, 1 = Empty
+    while (!(SM750_REG32(SM750_SYS_CTRL) & (1U << 21))) {
         asm volatile ("pause");
     }
 }
