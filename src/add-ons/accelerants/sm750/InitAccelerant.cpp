@@ -128,6 +128,41 @@ create_mode_list()
             count++;
         }
     }
+    // ciclo di validazione (se sta all'interno della massima memoria disponibile per il desktop)
+    uint32 validCount = 0;
+    for (uint32 i = 0; i < count; i++) {
+        display_mode *dm = &list[i];
+        
+        // Calcoliamo lo spazio necessario (assumendo il caso peggiore: 32bpp)
+        uint32 bytesPerPixel = 4; // B_RGB32
+        uint32 memNeeded = dm->virtual_width * dm->virtual_height * bytesPerPixel;
+
+        bool modeOk = true;
+
+        // Check Memoria Desktop (i famosi 12MB)
+        if (memNeeded > gInfo->si->card_info.max_desktop_mem) {
+            modeOk = false;
+        }
+        
+        // Check Pixel Clock (limite fisico del DAC SM750)
+        if (dm->timing.pixel_clock > gInfo->si->card_info.max_pclk) {
+            modeOk = false;
+        }
+
+        if (modeOk) {
+            // Se il modo è valido, lo teniamo (compattiamo la lista se necessario)
+            if (validCount != i) {
+                list[validCount] = list[i];
+            }
+            validCount++;
+        } else {
+            debug_printf("SM750_ACC: Modo %dx%d rimosso (richiede %u MB, limite %u MB)\n", 
+                dm->timing.h_display, dm->timing.v_display, 
+                memNeeded / (1024*1024), 
+                gInfo->si->card_info.max_desktop_mem / (1024*1024));
+        }
+    }
+    count = validCount;
 
     // 5. PUBBLICAZIONE NELLA SHARED INFO
     // Se c'era una vecchia area del kernel, non cancelliamola (gestita dal driver),
@@ -372,13 +407,13 @@ void* get_accelerant_hook(uint32 feature, void* data) {
 		/* Overlay */
 		case B_OVERLAY_COUNT:				return (void*)(sm750_overlay_count);
 		case B_OVERLAY_SUPPORTED_SPACES:	return (void*)(sm750_overlay_supported_spaces);
-		//B_OVERLAY_SUPPORTED_FEATURES
+		case B_OVERLAY_SUPPORTED_FEATURES:	return (void*)(sm750_overlay_supported_features);
 		case B_ALLOCATE_OVERLAY_BUFFER:		return (void*)(sm750_allocate_overlay_buffer);
-		//B_RELEASE_OVERLAY_BUFFER
+		case B_RELEASE_OVERLAY_BUFFER:		return (void*)(sm750_release_overlay_buffer);
 		case B_GET_OVERLAY_CONSTRAINTS:		return (void*)(sm750_get_overlay_constraints);
-		//B_ALLOCATE_OVERLAY
-		//B_RELEASE_OVERLAY
-		//B_CONFIGURE_OVERLAY
+		case B_ALLOCATE_OVERLAY:			return (void*)(sm750_allocate_overlay);
+		case B_RELEASE_OVERLAY:				return (void*)(sm750_release_overlay);
+		case B_CONFIGURE_OVERLAY:			return (void*)(sm750_configure_overlay_api);
 		
 				
         default: return NULL;

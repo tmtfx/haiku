@@ -217,11 +217,13 @@ typedef struct {
 		Benaphore   lock;            /* Protegge l'accesso all'unico Layer Video */
 		overlay_token myToken;       /* Identificativo dell'overlay attivo */
 		// Usiamo MAXBUFFERS per il Double/Triple buffering video
-		overlay_buffer myBuffer[MAXBUFFERS]; 
+		overlay_buffer myBuffer[MAXBUFFERS];
+		uint32         myBufferBlockID[MAXBUFFERS];
 		bool        active;          /* Layer #2 è acceso? */
 	} overlay;
 
 	bool accelerant_in_use;
+	int32   overlay_in_use; // Flag per l'allocazione esclusiva dell'overlay
 	sm750_settings settings;
 } shared_info;
 

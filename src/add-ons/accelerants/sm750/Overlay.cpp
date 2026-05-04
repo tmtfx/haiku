@@ -109,28 +109,34 @@ sm750_get_overlay_constraints(const display_mode *dm, const overlay_buffer *ob,
     oc->v_scale.min = 1.0f / 8.0f;
     oc->v_scale.max = 8.0f;
 }
-
+/*
 overlay_buffer *
 sm750_allocate_overlay_buffer(color_space cs, uint16 width, uint16 height)
 {
-	CALLED();
+    CALLED();
     shared_info *si = gInfo->si;
-    uint32 bytesPerPixel = 2; // Per YCbCr422
+    
+    // La SM750 usa 16-bit YUYV mode o 16-bit RGB 5:6:5 mode (2 bytes per pixel in ogni caso)
+    uint32 bytesPerPixel = 2;
     uint32 size = width * height * bytesPerPixel;
     
     uint32 blockID;
     uint32 offset;
 
-    // CHIAMATA AL MEMORY MANAGER (tramite la nostra libreria mem_mgr)
-    // Usiamo un tag specifico 'OVER' per identificarlo
-    status_t status = mem_alloc((mem_info*)si->mem_mgr, size, (void*)0x4F564552, 
+    // 1. ALLOCAZIONE IN VRAM
+    // Usiamo il tag 'VIDO' (0x5649444F) coerentemente con la mem_free
+    status_t status = mem_alloc((mem_info*)si->mem_mgr, size, (void*)'VIDO', 
                                 &blockID, &offset);
 
-    if (status != B_OK) return NULL;
+    if (status != B_OK) {
+        debug_printf("SM750_ACC: Errore allocazione VRAM per overlay!\n");
+        return NULL;
+    }
 
+    // 2. ALLOCAZIONE STRUTTURA DI GESTIONE
     overlay_buffer *ob = (overlay_buffer *)malloc(sizeof(overlay_buffer));
     if (!ob) {
-        // mem_free(si->mem_mgr, blockID); // Da implementare
+        mem_free((mem_info*)si->mem_mgr, blockID, (void*)'VIDO');
         return NULL;
     }
 
@@ -139,16 +145,57 @@ sm750_allocate_overlay_buffer(color_space cs, uint16 width, uint16 height)
     ob->height = height;
     ob->bytes_per_row = width * bytesPerPixel;
     
-    // Indirizzo virtuale per l'AppServer (per scrivere i frame video)
+    // Indirizzo virtuale: dove l'applicazione scriverà i dati video
     ob->buffer = (void *)((addr_t)gInfo->framebuffer + offset);
     
-    // Indirizzo "PCI" per i registri hardware (salviamo l'offset nel campo reserved)
-    // Nota: Haiku usa buffer_dma per l'indirizzo fisico/PCI
+    // Indirizzo "DMA/PCI": l'offset rispetto alla base della VRAM
+    // È quello che scriveremo nei registri SM750_DISP_VIDEO_SOURCE_BASE
     ob->buffer_dma = (void *)(addr_t)offset; 
+
+    // IMPORTANTE: Salviamo il blockID nel token per poterlo liberare dopo!
+    ob->token = (void *)(addr_t)blockID;
+
+    return ob;
+}*/
+overlay_buffer *
+sm750_allocate_overlay_buffer(color_space cs, uint16 width, uint16 height)
+{
+    shared_info *si = gInfo->si;
+    
+    // 1. Cerchiamo uno slot libero nell'array myBuffer
+    int slot = -1;
+    for (int i = 0; i < MAXBUFFERS; i++) {
+        if (si->overlay.myBufferBlockID[i] == 0) { // Slot libero
+            slot = i;
+            break;
+        }
+    }
+
+    if (slot == -1) return NULL; // Tutti i buffer occupati
+
+    uint32 bytesPerPixel = 2; 
+    uint32 size = width * height * bytesPerPixel;
+    uint32 blockID, offset;
+
+    // 2. Allochiamo memoria fisica tramite il memory manager
+    if (mem_alloc((mem_info*)si->mem_mgr, size, (void*)'VIDO', &blockID, &offset) != B_OK)
+        return NULL;
+
+    // 3. Popoliamo lo slot nella shared_info
+    overlay_buffer *ob = &si->overlay.myBuffer[slot];
+    ob->space = cs;
+    ob->width = width;
+    ob->height = height;
+    ob->bytes_per_row = width * bytesPerPixel;
+    ob->buffer = (void *)((addr_t)gInfo->framebuffer + offset);
+    ob->buffer_dma = (void *)(addr_t)offset;
+
+    // 4. Salviamo il blockID nell'array parallelo
+    si->overlay.myBufferBlockID[slot] = blockID;
 
     return ob;
 }
-// TODO DA RIVEDERE TOTALMENTE valori casuali
+
 void
 sm750_configure_overlay(const overlay_window *window, const overlay_buffer *buffer)
 {
@@ -228,4 +275,116 @@ sm750_configure_overlay(const overlay_window *window, const overlay_buffer *buff
     debug_printf("SM750_ACC: nuovo registro video control: 0x%08x\n", control);
 
     SM750_WREG32(SM750_DISP_PANEL_VIDEO_DISP_CTRL, control);
+}
+/*
+status_t
+sm750_release_overlay_buffer(const overlay_buffer *buffer)
+{
+    if (buffer == NULL)
+        return B_BAD_VALUE;
+
+    debug_printf("SM750_ACC: Rilascio overlay buffer (DMA: %p)\n", buffer->buffer_dma);
+
+    // Recuperiamo l'ID del blocco memorizzato durante l'allocazione.
+    // In Haiku, la struct overlay_buffer ha un membro 'token' o simile, 
+    // ma noi avevamo salvato il block_id nel buffer_dma_handle o 
+    // lo gestiamo tramite il gestore di memoria.
+    
+    // Se nel buffer_handle avevamo salvato l'ID del blocco del memory manager:
+    uint32 blockID = (uint32)(addr_t)buffer->token;
+
+    if (gInfo->si->mem_mgr != NULL) {
+        // Liberiamo il blocco nell'heap dinamico
+        status_t status = mem_free((mem_info*)gInfo->si->mem_mgr, blockID, (void*)'VIDO');
+        if (status == B_OK) {
+            return B_OK;
+        }
+    }
+
+    return B_ERROR;
+}*/
+status_t
+sm750_release_overlay_buffer(const overlay_buffer *buffer)
+{
+	if (buffer == NULL)
+        return B_BAD_VALUE;
+        
+    shared_info *si = gInfo->si;
+
+    // Cerchiamo quale buffer dell'array coincide con quello passato
+    for (int i = 0; i < MAXBUFFERS; i++) {
+        if (&si->overlay.myBuffer[i] == buffer) {
+            // Liberiamo la VRAM usando il blockID salvato
+            mem_free((mem_info*)si->mem_mgr, si->overlay.myBufferBlockID[i], (void*)'VIDO');
+            
+            // Resettiamo lo slot
+            si->overlay.myBufferBlockID[i] = 0;
+            return B_OK;
+        }
+    }
+
+    return B_ERROR;
+}
+
+status_t
+sm750_allocate_overlay(overlay_token *token)
+{
+    // Usiamo una variabile atomica o un semplice flag nella shared info
+    // per assicurarci che solo un'applicazione alla volta usi l'overlay.
+    if (atomic_test_and_set(&gInfo->si->overlay_in_use, 1, 0) != 0) {
+        return B_BUSY; 
+    }
+
+    // Il "cookie" che passiamo può essere un identificatore dell'overlay
+    // (nel nostro caso abbiamo solo l'Overlay 0)
+    *token = (void*)(uintptr_t)0x534d37350; // "SM750" in hex come ID
+    
+    debug_printf("SM750_ACC: Overlay allocato con successo.\n");
+    return B_OK;
+}
+
+status_t
+sm750_release_overlay(overlay_token token)
+{
+    vuint32 *regs = gInfo->regs;
+
+    // 1. Spegniamo l'hardware prima di rilasciare il token
+    uint32 control = SM750_REG32(SM750_DISP_PANEL_VIDEO_DISP_CTRL);
+    control &= ~(1 << 2); // Disabilita Video Plane
+    SM750_WREG32(SM750_DISP_PANEL_VIDEO_DISP_CTRL, control);
+
+    // 2. Liberiamo il flag di utilizzo
+    atomic_set(&gInfo->si->overlay_in_use, 0);
+
+    debug_printf("SM750_ACC: Overlay rilasciato e hardware spento.\n");
+    return B_OK;
+}
+
+status_t
+sm750_configure_overlay_api(overlay_token token, const overlay_buffer *buffer,
+    const overlay_window *window, const overlay_view *view)
+{
+	vuint32 *regs = gInfo->regs;
+	
+    // Se buffer è NULL, l'utente vuole nascondere l'overlay temporaneamente
+    if (buffer == NULL) {
+        uint32 control = SM750_REG32(SM750_DISP_PANEL_VIDEO_DISP_CTRL);
+        control &= ~(1 << 2); 
+        SM750_WREG32(SM750_DISP_PANEL_VIDEO_DISP_CTRL, control);
+        return B_OK;
+    }
+
+    // Chiamiamo la nostra funzione interna di basso livello che scrive nei registri
+    sm750_configure_overlay(window, buffer);
+
+    return B_OK;
+}
+
+uint32
+sm750_overlay_supported_features(uint32 space)
+{
+    // La SM750 supporta:
+    return B_OVERLAY_COLOR_KEY |       // Trasparenza tramite colore (fondamentale)
+           B_OVERLAY_HORIZONTAL_FILTERING | // Scaling fluido orizzontale
+           B_OVERLAY_VERTICAL_FILTERING;   // Scaling fluido verticale
 }
