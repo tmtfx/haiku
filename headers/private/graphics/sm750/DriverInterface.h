@@ -248,6 +248,12 @@ typedef struct {
     overlay_token   current_ot;      /* Token dell'overlay se allocato */
     const overlay_buffer *current_ob; /* Buffer attualmente visualizzato */
     bool            overlay_active;
+    // Sincronizzazione V-Sync
+    sem_id  vblank_sem;      // Semaforo su cui dormirà il Service Thread
+    uint32  vblank_count;   // Contatore incrementato a ogni interrupt
+    
+    // Interrupt Management
+    int32   irq_enabled;    // Flag di stato
 } accelerant_info;
 
 /* Stato globale del driver */
