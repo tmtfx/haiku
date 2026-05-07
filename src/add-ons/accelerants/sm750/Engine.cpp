@@ -466,3 +466,36 @@ void sm750_fill_span(engine_token *et, uint32 color, uint16 *spans, uint32 count
 
     gInfo->si->engine.lock.Release();
 }
+// Questo thread "vive" nell'accelerante e gestisce i cambi di buffer
+//uint32 source = si->card_info->is_panel ? SM750_DISP_PANEL_VIDEO_FB0_ADDR : SM750_DISP_CRT_FB_ADDR;
+int32 
+sm750_vblank_service_thread(void *arg)
+{
+    accelerant_info *ai = (accelerant_info *)arg;
+    shared_info *si = ai->si;
+    vuint32* regs = ai->regs; // Per le macro
+
+    while (atomic_get(&si->irq_enabled)) {
+        // Aspettiamo l'interrupt dal kernel
+        if (acquire_sem(si->vblank_sem) == B_OK) {
+            
+            // C'è un nuovo buffer che aspetta il V-Sync?
+            if (ai->overlay_active && ai->next_buffer_to_show != NULL) {
+                
+                // Prendiamo l'indirizzo fisico del buffer
+                uint32 offset = (uint32)(addr_t)ai->next_buffer_to_show->buffer_dma;
+                
+                // Scriviamo nel registro del Panel Video Source (0x080044)
+                SM750_WREG32(SM750_DISP_PANEL_VIDEO_FB0_ADDR, offset);
+                
+                // Aggiorniamo lo stato locale
+                ai->current_ob = ai->next_buffer_to_show;
+                ai->next_buffer_to_show = NULL;
+                
+                // Svegliamo l'eventuale chiamata bloccante in attesa del flip
+                release_sem(si->vblank_sync_sem); 
+            }
+        }
+    }
+    return B_OK;
+}
