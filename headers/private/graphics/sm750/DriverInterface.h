@@ -147,7 +147,7 @@ typedef struct {
 	area_id	regs_area;	/* BAR0: Registri MMIO */
 	area_id	fb_area;		/* BAR1: Framebuffer */
 	
-	vuint32		*regs;		/* Puntatore virtuale ai registri (MMIO) */
+	//vuint32		*regs;		/* Puntatore virtuale ai registri (MMIO) */
 	uint8		*framebuffer; /* Puntatore virtuale alla video RAM */
 	phys_addr_t	framebuffer_pci; /* Indirizzo fisico (bus) per DMA */
 
@@ -161,7 +161,9 @@ typedef struct {
 
 	uint32	flags;
 	uint32	bits_per_pixel; // TODO, remove if unused (used for initial tests)
-	sem_id	vblank;		/* Semaforo sincronizzazione verticale */
+	uint32	framebuffer_size; // frame buffer size occupied by actual resolution
+	uint32	first_free_vram_offset; // offset available for video layer or anything else
+	
 
 	/* Cursore Hardware */
 	struct {
@@ -224,6 +226,14 @@ typedef struct {
 
 	bool accelerant_in_use;
 	int32   overlay_in_use; // Flag per l'allocazione esclusiva dell'overlay
+	// Sincronizzazione V-Sync
+	sem_id	vblank;		/* Semaforo sincronizzazione verticale */
+    sem_id  vblank_sem;      // Segnale dal Kernel all'Accelerante
+    sem_id  vblank_sync_sem; // Segnale dall'Accelerante all'App (User Sync)
+    uint32  vblank_count;   // Contatore incrementato a ogni interrupt
+    
+    // Interrupt Management
+    int32   irq_enabled;    // Flag di stato
 	sm750_settings settings;
 } shared_info;
 
@@ -231,7 +241,7 @@ typedef struct {
 	int		 fd;				 /* File descriptor del driver /dev/graphics/... */
 	shared_info *si;				/* Puntatore alla shared info clonata */
 	area_id	 shared_info_area;	/* ID area shared info */
-	uint32		*regs;				/* Puntatore ai registri MMIO clonati */
+	vuint32		*regs;				/* Puntatore ai registri MMIO clonati */
 	area_id	 regs_area;			/* ID area registri */
 	area_id	 fb_area;			/* ID area framebuffer clonato */
 	uint8 *framebuffer; /* Puntatore locale */
@@ -247,13 +257,8 @@ typedef struct {
 	// Stato locale Overlay
     overlay_token   current_ot;      /* Token dell'overlay se allocato */
     const overlay_buffer *current_ob; /* Buffer attualmente visualizzato */
+    const overlay_buffer *next_buffer_to_show;
     bool            overlay_active;
-    // Sincronizzazione V-Sync
-    sem_id  vblank_sem;      // Semaforo su cui dormirà il Service Thread
-    uint32  vblank_count;   // Contatore incrementato a ogni interrupt
-    
-    // Interrupt Management
-    int32   irq_enabled;    // Flag di stato
 } accelerant_info;
 
 /* Stato globale del driver */
