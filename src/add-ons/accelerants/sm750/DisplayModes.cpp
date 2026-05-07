@@ -451,6 +451,18 @@ sm750_set_display_mode(display_mode *mode)
     // Se h_display è 1024 ma virtual_width è 1024, il risultato non cambia.
     // Ma se virtual_width è 1040, il pitch sarà corretto e le righe spariranno.
     uint32 pitch = mode->virtual_width * (bpp / 8);
+    uint32 desktop_size = pitch * mode->virtual_height;
+    si->framebuffer_size = desktop_size;
+    // La memoria libera per l'overlay inizia subito dopo il desktop
+    // Allineiamo a 16 byte per sicurezza (richiesto dal chip SM750)
+    si->first_free_vram_offset = (desktop_size + 15) & ~15;
+    
+    // Se l'overlay era attivo, qui dovremmo resettarlo o notificare il cambio
+    // Per ora lo spegniamo per evitare che punti a zone di memoria vecchie
+    uint32 video_ctrl = SM750_REG32(SM750_DISP_PANEL_VIDEO_DISP_CTRL);
+    if (video_ctrl & (1 << 2)) {
+        SM750_WREG32(SM750_DISP_PANEL_VIDEO_DISP_CTRL, video_ctrl & ~(1 << 2));
+    }
     /*
     debug_printf("SM750_ACC: H_Disp: %u, Virtual_W: %u, Pitch: %u\n", 
                  mode->timing.h_display, mode->virtual_width, pitch);
