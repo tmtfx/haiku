@@ -297,6 +297,15 @@
 #define SM750_CSC_CONTROL				0x001000FC
 // ... aggiungi gli altri se ti servono per il video, ma questi sono i principali
 
+#define SM750_PWM0					0x00010020
+#define SM750_PWM1					0x00010024
+#define SM750_PWM2					0x00010028
+
+#define SM750_DMA1_SOURCE_ADDR		0x000D0010
+#define SM750_DMA1_DEST_ADDR		0x000D0014
+#define SM750_DMA1_SIZE_CTRL		0x000D0018
+#define SM750_DMA_ABORT_INTERRUPT	0x000D0020
+
 #define WAIT_2D_IDLE() \
 	while (SM750_REG32(SM750_2D_STATUS) & (1 << 31)) { snooze(1); }
 
