@@ -83,6 +83,77 @@ map_videomem(void **out_virt, phys_addr_t phys, uint32 size, const char *name)
     return area;
 }
 
+/*
+static int32 
+sm750_interrupt_handler(void* data)
+{
+    device_info* info = (device_info*)data;
+    vuint32* regs = info->regs;
+
+    // 1. Leggiamo chi ha bussato (Registro 0x24)
+    uint32 status = regs[SM750_SYS_INT_STATUS >> 2];
+    
+    if (status == 0) 
+        return B_UNHANDLED_INTERRUPT;
+
+    // 2. CLEAR (Registro 0x20): Di solito si scrive il bit che si vuole pulire
+    // Se il datasheet dice che 0x20 in scrittura è "Raw Interrupt Clear"
+    regs[SM750_SYS_RAW_INT_CLEAR >> 2] = status; 
+
+    // 3. Notifica all'accelerante
+    // Gestiamo sia Panel (bit 1) che CRT (bit 2)
+    if (status & 0x06) { 
+        info->shared_info->vblank_count++;
+        release_sem_etc(info->shared_info->vblank_sem, 1, B_DO_NOT_RESCHEDULE);
+    }
+    
+    // Se è il motore 2D (bit 5), svegliamo chi aspetta l'engine idle
+    if (status & (1 << 5)) {
+        release_sem_etc(info->shared_info->engine_sem, 1, B_DO_NOT_RESCHEDULE);
+    }
+
+    return B_INVOKE_SCHEDULER;
+}*/
+static int32 
+sm750_interrupt_handler(void* data)
+{
+    DeviceInfo* info = (DeviceInfo*)data;
+    vuint32* regs = info->regs; // Le macro usano la variabile 'regs'
+
+    // 1. Leggiamo lo Status (Registro 0x24)
+    uint32 status = SM750_REG32(SM750_SYS_INT_STATUS);
+    
+    // Se zero, l'interrupt non è nostro
+    if (status == 0) 
+        return B_UNHANDLED_INTERRUPT;
+
+    // 2. GESTIONE SPECIFICA MODULI
+    
+    // Bit 5: 2D Engine - Il datasheet dice "Write 0 to clear"
+    if (status & (1 << 5)) {
+        uint32 engineStatus = SM750_REG32(SM750_2D_STATUS);
+        engineStatus &= ~(1 << 0); // Pulisce bit 0 (2D)
+        engineStatus &= ~(1 << 1); // Pulisce bit 1 (CSC)
+        SM750_WREG32(SM750_2D_STATUS, engineStatus);
+    }
+
+    // Bit 1 o 2: V-Sync (Panel o CRT)
+    if (status & 0x06) {
+        // Incrementiamo il contatore globale nella shared info
+        info->si->vblank_count++;
+        // Svegliamo il Service Thread nell'accelerante
+        release_sem_etc(info->si->vblank_sem, 1, B_DO_NOT_RESCHEDULE);
+    }
+
+    // 3. ACK GENERALE (Registro 0x20)
+    // Scriviamo lo status letto per fare il "Clear" dei bit serviti
+    SM750_WREG32(SM750_SYS_RAW_INT_CLEAR, status);
+
+    return B_INVOKE_SCHEDULER;
+}
+
+
+
 /* --- Hooks di sistema --- */
 status_t init_hardware(void) {
     pci_info info;
@@ -159,6 +230,9 @@ open_device(const char *name, uint32 flags, void **cookie)
     	// 1. Abilitazione Bus Master e Memoria PCI
         // Leggiamo il Command Register (CSR04) all'indirizzo 0x04
         uint32 pci_cmd = pci->read_pci_config(di->pci.bus, di->pci.device, di->pci.function, PCI_command, 4); //PCI_command = 0x04 da PCI.h
+        if (pci_cmd & (1 << 10)) {
+            dprintf("SM750: Gli interrupt sono DISABILITATI a livello PCI. Li attivo...\n");
+        }
         // 2. Abilitiamo quello che serve veramente:
         // Bit 0: I/O Space (per le porte VGA legacy se servissero)
         // Bit 1: Memory Space (FONDAMENTALE per BAR0 e BAR1)
@@ -166,6 +240,8 @@ open_device(const char *name, uint32 flags, void **cookie)
         // Bit 6: Parity Error Response (Buona pratica)
         // Bit 8: SERR# Enable (Buona pratica)
         pci_cmd |= (PCI_command_memory | PCI_command_master | PCI_command_io);
+        // FORZIAMO l'abilitazione degli interrupt (Bit 10 a 0)
+        pci_cmd &= ~(1 << 10);
         pci_cmd |= (1 << 6) | (1 << 8); 
         pci->write_pci_config(di->pci.bus, di->pci.device, di->pci.function, 0x04, 4, pci_cmd);
 
@@ -190,9 +266,11 @@ open_device(const char *name, uint32 flags, void **cookie)
             delete_area(di->shared_area);
             return B_ERROR;
         }
+        
+        install_io_interrupt_handler(di->pci.u.h0.interrupt_line, sm750_interrupt_handler, di, 0);
 
         // 6. Inizializzazione Chip (Wake up)
-        di->si->regs = NULL; // L'accelerante mapperà la sua versione
+        //di->si->regs = NULL; // L'accelerante mapperà la sua versione
         di->si->framebuffer = NULL; // idem
         di->si->regs_area = di->regs_area; // Passa l'ID         
         di->si->fb_area = di->fb_area;     // Passa l'ID numerico
@@ -231,6 +309,7 @@ static status_t close_device(void *cookie) { return B_OK; }
 static status_t free_device(void *cookie) {
     DeviceInfo *di = (DeviceInfo *)cookie;
     if (--di->openCount == 0) {
+    	remove_io_interrupt_handler(di->pci.u.h0.interrupt_line, sm750_interrupt_handler, di);
         delete_area(di->shared_area);
         delete_area(di->regs_area);
         delete_area(di->fb_area);
