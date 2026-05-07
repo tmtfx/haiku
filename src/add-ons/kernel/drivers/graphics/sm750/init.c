@@ -295,6 +295,77 @@ static void draw_logo(DeviceInfo *di, display_mode* dm) {
         }
     }
 }
+
+/*
+void enable_interrupts(device_info* info) {
+	vuint32* regs = info->regs;
+    
+	// 1. Pulizia preventiva
+	SM750_WREG32(SM750_SYS_RAW_INT_CLEAR, 0xFFFFFFFF); 
+    
+	// 2. Mascheramento: Abilitiamo Panel V-Sync (bit 0) e CRT V-Sync (bit 1)
+	// Abilitiamo anche l'Engine 2D (bit 12) per quando lo sbloccheremo.
+	// HEI NO! il registro SM750_SYS_INT_MASK è di sola lettura!
+	// di fatto gli interrupt sono attivi di default
+	//SM750_WREG32(SM750_SYS_INT_MASK, (1 << 0) | (1 << 1) | (1 << 12));
+	// 2. Puliamo il 2D Engine (che sappiamo essere a 0x100050)
+	uint32 engineStatus = SM750_REG32(SM750_2D_STATUS);
+	engineStatus &= ~0x03; // Puliamo bit 0 e 1 scrivendo 0 come da datasheet
+	SM750_WREG32(SM750_2D_STATUS, engineStatus);
+
+	info->shared_info->irq_enabled = 1;
+}*/
+static void sm750_init_interrupts(DeviceInfo* info) 
+{
+	vuint32* regs = info->regs;
+
+	// 1. PULIZIA MASTER: 
+	// Scriviamo 1 su tutti i bit del registro Clear (0x20)
+	// Questo dovrebbe resettare la logica di combinazione degli interrupt
+	// 31:5 Reserved, 4 ZV1 Port, 3 ZV0 Port, 2 CRT VSYNC, 1 Panel VSYNC, 0 VGA VSYNC
+	SM750_WREG32(SM750_SYS_RAW_INT_CLEAR, 0x0000001F);
+
+	// 2. PULIZIA 2D ENGINE (0x100050)
+	// Datasheet dice: "Write 0 to clear"
+	uint32 engineStatus = SM750_REG32(SM750_2D_STATUS);
+	engineStatus &= ~0x00000003; // Azzera bit 0 (2D) e 1 (CSC)
+	SM750_WREG32(SM750_2D_STATUS, engineStatus);
+
+	// 3. PULIZIA DMA (0x0D0020) - Nuovo!
+	// Visto che hai trovato i registri DMA, puliamo anche qui per sicurezza
+	// Solitamente scrivere 1 sui bit di interrupt status del DMA li pulisce
+	uint32 dmaStatus = SM750_REG32(SM750_DMA_ABORT_INTERRUPT);
+	SM750_WREG32(SM750_DMA_ABORT_INTERRUPT, dmaStatus); 
+
+    // 4. PULIZIA V-SYNC (Panel e CRT)
+    // Dobbiamo cercare se ci sono bit di "Clear" nei registri 0x080000 (Panel)
+    // e 0x080200 (CRT). Se non li troviamo, il Clear al punto 1 potrebbe bastare.
+
+	// 5. PULIZIA PWM
+	// bit 3 PWM Interrupt Pending. In order to clear a pending interrupt, write a “1” in
+	//the IP bit.
+
+	uint32 pwmstat = SM750_REG32(SM750_PWM0);
+	SM750_WREG32(SM750_PWM0,pwmstat|(1<<3));
+	pwmstat = SM750_REG32(SM750_PWM1);
+	SM750_WREG32(SM750_PWM1,pwmstat|(1<<3));
+	pwmstat = SM750_REG32(SM750_PWM2);
+	SM750_WREG32(SM750_PWM2,pwmstat|(1<<3));
+    
+    
+	// ABILITAZIONE LOGICA
+	// Siccome la Mask (0x28) è Read-Only, non possiamo scriverci.
+	// Dobbiamo sperare che il valore letto non sia 0x00000000.
+	uint32 currentIntActive = SM750_REG32(SM750_SYS_RAW_INT_STATUS);
+	dprintf("SM750: System RAW Interrupt status: 0x%08" B_PRIx32 "\n", currentIntActive);
+	uint32 intstatus = SM750_REG32(SM750_SYS_INT_STATUS);
+	dprintf("SM750: Interrupt status: 0x%08" B_PRIx32 "\n", intstatus);
+	uint32 currentMask = SM750_REG32(SM750_SYS_INT_MASK);
+	dprintf("SM750: System Interrupt Mask is: 0x%08" B_PRIx32 "\n", currentMask);
+
+	info->si->irq_enabled = 1;
+}
+
 /* --- sm750_init_chip --- */
 void sm750_init_chip(DeviceInfo *di) {
     if (!di || !di->regs) return;
@@ -322,6 +393,8 @@ void sm750_init_chip(DeviceInfo *di) {
     uint8 revision = (uint8)(device_info & 0xFF);
     dprintf("SM750: Chip detected. ID: 0x%04X, Revision: 0x%02X\n", device_id, revision);
     
+    
+    sm750_init_interrupts(di);
     
     edid1_raw* boot_edid = (edid1_raw*)get_boot_item(VESA_EDID_BOOT_INFO, NULL);
 
@@ -476,6 +549,12 @@ void sm750_init_chip(DeviceInfo *di) {
         //dprintf("SM750: VESA FB a 0x%" B_PRIx64 ", %" B_PRId32 "x%" B_PRId32 "\n", 
         //        (uint64)bi->physical_frame_buffer, bi->width, bi->height);
         dprintf("SM750: FrameBuffer says %ux%u\n", bi->width, bi->height);
+        // set memory bounds
+        uint32 bpp = 32; // Quasi sempre 32 al boot
+        si->framebuffer_size = bi->width * bi->height * (bpp / 8);
+        // Spostiamo l'inizio della memoria libera dopo il desktop del boot
+        si->first_free_vram_offset = si->framebuffer_size;
+        
         bool found = false;
 
         for (int i = 0; vesa_dmt_table[i].width != 0; i++) {
