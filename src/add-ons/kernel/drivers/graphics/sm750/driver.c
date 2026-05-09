@@ -245,6 +245,26 @@ open_device(const char *name, uint32 flags, void **cookie)
         pci_cmd |= (1 << 6) | (1 << 8); 
         pci->write_pci_config(di->pci.bus, di->pci.device, di->pci.function, 0x04, 4, pci_cmd);
 
+        
+        // 2.1 TENTATIVO MSI
+        di->msi_enabled = false;
+        uint8 msiCount = pci->get_msi_count(di->pci.bus, di->pci.device, di->pci.function);
+        if (msiCount > 0) {
+            uint32 vector; // <--- Deve essere uint32 per conformità con l'API PCI
+            if (pci->configure_msi(di->pci.bus, di->pci.device, di->pci.function, 1, &vector) == B_OK) {
+                if (pci->enable_msi(di->pci.bus, di->pci.device, di->pci.function) == B_OK) {
+                    di->msi_vector = (uint8)vector; 
+                    di->msi_enabled = true;
+                    dprintf("SM750: MSI abilitato con successo. Vettore: %" B_PRIu32 "\n", vector);
+                } else {
+                    dprintf("SM750: Impossibile abilitare MSI (anche se configurato)\n");
+                }
+            } else {
+                dprintf("SM750: Configurazione MSI fallita\n");
+            }
+        }
+        
+        
         // 3. Allocazione Shared Info
         di->shared_area = create_area("sm750 shared info", (void **)&(di->si), 
             B_ANY_KERNEL_ADDRESS, B_PAGE_SIZE * 2 , B_FULL_LOCK, B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA | B_CLONEABLE_AREA);
@@ -267,7 +287,16 @@ open_device(const char *name, uint32 flags, void **cookie)
             return B_ERROR;
         }
         
-        install_io_interrupt_handler(di->pci.u.h0.interrupt_line, sm750_interrupt_handler, di, 0);
+        
+        // 3. Installazione Handler
+        // Se MSI è attivo, usiamo il vettore MSI, altrimenti la linea IRQ classica
+        uint8 irq = di->msi_enabled ? di->msi_vector : di->pci.u.h0.interrupt_line;
+        
+        status_t intStatus = install_io_interrupt_handler(irq, sm750_interrupt_handler, di, 0);
+        if (intStatus != B_OK) {
+            dprintf("SM750 ERROR: Impossibile installare interrupt handler su IRQ %u\n", irq);
+        }
+        //install_io_interrupt_handler(di->pci.u.h0.interrupt_line, sm750_interrupt_handler, di, 0);
 
         // 6. Inizializzazione Chip (Wake up)
         //di->si->regs = NULL; // L'accelerante mapperà la sua versione
@@ -309,7 +338,14 @@ static status_t close_device(void *cookie) { return B_OK; }
 static status_t free_device(void *cookie) {
     DeviceInfo *di = (DeviceInfo *)cookie;
     if (--di->openCount == 0) {
-    	remove_io_interrupt_handler(di->pci.u.h0.interrupt_line, sm750_interrupt_handler, di);
+    	//remove_io_interrupt_handler(di->pci.u.h0.interrupt_line, sm750_interrupt_handler, di);
+        uint8 irq = di->msi_enabled ? di->msi_vector : di->pci.u.h0.interrupt_line;
+        remove_io_interrupt_handler(irq, sm750_interrupt_handler, di);
+        
+        if (di->msi_enabled) {
+            pci->disable_msi(di->pci.bus, di->pci.device, di->pci.function);
+            pci->unconfigure_msi(di->pci.bus, di->pci.device, di->pci.function);
+        }
         delete_area(di->shared_area);
         delete_area(di->regs_area);
         delete_area(di->fb_area);

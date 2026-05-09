@@ -266,13 +266,15 @@ typedef struct {
 	uint32			openCount;
 	int32			flags;
 	pci_info		pci;			/* Nota: si chiama 'pci' ora */
-	const ChipInfo* pChipInfo;
-	area_id		 shared_area;
-	shared_info* si;
-	area_id		 regs_area;
-	vuint32* regs;			/* Deve essere vuint32* */
-	area_id		 fb_area;
-	uint8* framebuffer;
+	const ChipInfo*	pChipInfo;
+	area_id		 	shared_area;
+	shared_info*	si;
+	area_id		 	regs_area;
+	vuint32*		regs;			/* Deve essere vuint32* */
+	area_id			fb_area;
+	uint8*			framebuffer;
+	bool			msi_enabled;
+	uint8			msi_vector;
 	char			name[B_OS_NAME_LENGTH];
 } DeviceInfo;
 
