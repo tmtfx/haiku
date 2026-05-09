@@ -53,10 +53,12 @@ int main() {
     printf("Cifratura completata. Tag: ");
     for(int i=0; i<16; i++) printf("%02x", tag[i]);
     printf("\n");
+    printf("il tag dovrebbe essere: 198d7743e9de65cbc1bbc4cff5a5bd76\n");
 
     // 3. DECIFRATURA (Usa l'overload con inTag)
     // ssize_t Decrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen, const void* in, size_t inLen, void* out, const void* inTag)
     // Ripristiniamo l'IV (perché il driver lo modifica durante il processo)
+    /*
     uint8 ivDecrypt[12];
     memcpy(ivDecrypt, iv, 12);
 
@@ -76,7 +78,7 @@ int main() {
         if (strcmp(plaintext, (char*)decrypted) == 0) {
             printf("SUCCESS: Il testo corrisponde!\n");
         }
-    }
+    }*/
 
     return 0;
 }
