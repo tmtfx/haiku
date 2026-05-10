@@ -340,6 +340,12 @@ static void sm750_init_interrupts(DeviceInfo* info)
     // 4. PULIZIA V-SYNC (Panel e CRT)
     // Dobbiamo cercare se ci sono bit di "Clear" nei registri 0x080000 (Panel)
     // e 0x080200 (CRT). Se non li troviamo, il Clear al punto 1 potrebbe bastare.
+    // NO il bit (11) del vertical-sync di CRT 80200 è in sola lettura
+    uint32 panelStatus = SM750_REG32(SM750_PANEL_CONTROL);
+    panelStatus &= ~(1 << 11); // 0 a VSYNC
+    //panelStatus |= (1 << 11); // 1 a VSYNC
+    panelStatus |= 0x0000006; // abilita primary graphics plane e formato 32bit
+    SM750_WREG32(SM750_PANEL_CONTROL, panelStatus); 
 
 	// 5. PULIZIA PWM
 	// bit 3 PWM Interrupt Pending. In order to clear a pending interrupt, write a “1” in
@@ -351,11 +357,12 @@ static void sm750_init_interrupts(DeviceInfo* info)
 	SM750_WREG32(SM750_PWM1,pwmstat|(1<<3));
 	pwmstat = SM750_REG32(SM750_PWM2);
 	SM750_WREG32(SM750_PWM2,pwmstat|(1<<3));
-    
-    
+	
+	// TENTATIVO scrittura maschera anche se da datasheet è solo read only!
+	SM750_WREG32(SM750_SYS_INT_MASK,0xFE0013FF);
+	// ma a quanto pare accetta i valori e abilita gli interrupt!
+	
 	// ABILITAZIONE LOGICA
-	// Siccome la Mask (0x28) è Read-Only, non possiamo scriverci.
-	// Dobbiamo sperare che il valore letto non sia 0x00000000.
 	uint32 currentIntActive = SM750_REG32(SM750_SYS_RAW_INT_STATUS);
 	dprintf("SM750: System RAW Interrupt status: 0x%08" B_PRIx32 "\n", currentIntActive);
 	uint32 intstatus = SM750_REG32(SM750_SYS_INT_STATUS);
@@ -426,10 +433,14 @@ void sm750_init_chip(DeviceInfo *di) {
     // --- SBLOCCO CLOCK (Power Mode 0) ---
     uint32 mode0_gate = SM750_REG32(SM750_SYS_PWR_MODE_0_CLKC); // 0x000044
     // Abilitiamo GPIO (6), 2D (3), Display (2), Memory (1) e DMA (0)
-    mode0_gate |= (1 << 3) | (1 << 2) | (1 << 1) | (1 << 0); //(1 << 6) | 
-    mode0_gate &= ~(1 << 6); // Forza a 0 il clock GPIO visto che non riusciamo a usare il registro di direzione
-    mode0_gate &= ~(1 << 8); // Forza a 0 il clock I2C hardware visto che è rotto
-    mode0_gate |= (1 << 10); // Assicuriamoci che il VGA Clock (10) sia attivo se usiamo il CRT
+    mode0_gate |= (1 << 8) | (1 << 6) | (1 << 4) | (1 << 3) | (1 << 2) | (1 << 1) | (1 << 0); //attiviamo clock DMA, Local memory, Display , 2D, CSC GPIO, I2C
+    //mode0_gate &= ~(1 << 6); // Forza a 0 il clock GPIO visto che non riusciamo a usare il registro di direzione
+    //mode0_gate &= ~(1 << 8); // Forza a 0 il clock I2C hardware visto che è rotto
+    //mode0_gate |= (1 << 10); // Assicuriamoci che il VGA Clock (10) sia attivo se usiamo il CRT
+    mode0_gate &= ~(1 << 5); // Disattiviamo ZV
+    mode0_gate &= ~(1 << 7); // Disattiviamo SSP
+    mode0_gate &= ~(1 << 9); // Disattiviamo PWM
+    mode0_gate &= ~(1 << 10); // Disattiviamo VGA
     SM750_WREG32(SM750_SYS_PWR_MODE_0_CLKC, mode0_gate); // 0x000044
     //dprintf("SM750: Power Mode 0 Clock Gate set to: 0x%08x\n", mode0_gate);
 
