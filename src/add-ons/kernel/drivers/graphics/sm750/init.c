@@ -5,14 +5,9 @@
 
 #include <KernelExport.h>
 #include <PCI.h>
-//#include <drivers/bios.h>
-#include <string.h>  // Per memcpy
+#include <string.h>
 #include <SupportDefs.h>
-//typedef struct bios_regs bios_regs;
 #include <boot_item.h>
-//#include <edid.h>
-//typedef enum bios_type_enum bios_type_enum;
-//#include <vesa_info.h>
 
 #include <frame_buffer_console.h>
 
@@ -76,7 +71,8 @@ static status_t init_vram_manager(shared_info* si)
                                 &cursorBlockID, &cursorOffset);
     
     if (status == B_OK) {
-        si->cursor.pci_address = cursorOffset; 
+        //si->cursor.pci_address = cursorOffset; 
+        si->cursor.vram_offset = cursorOffset; 
         si->cursor.block_id = cursorBlockID;
         dprintf("SM750: Cursore allocato dinamicamente a offset 0x%x\n", cursorOffset);
     } else {
@@ -433,7 +429,7 @@ void sm750_init_chip(DeviceInfo *di) {
     // --- SBLOCCO CLOCK (Power Mode 0) ---
     uint32 mode0_gate = SM750_REG32(SM750_SYS_PWR_MODE_0_CLKC); // 0x000044
     // Abilitiamo GPIO (6), 2D (3), Display (2), Memory (1) e DMA (0)
-    mode0_gate |= (1 << 8) | (1 << 6) | (1 << 4) | (1 << 3) | (1 << 2) | (1 << 1) | (1 << 0); //attiviamo clock DMA, Local memory, Display , 2D, CSC GPIO, I2C
+    mode0_gate |= (1 << 8) | (1 << 6) | (1 << 4) | (1 << 3) | (1 << 2) | (1 << 1) | (1 << 0); //attiviamo clock DMA, Local memory, Display , 2D, CSC, GPIO, I2C
     //mode0_gate &= ~(1 << 6); // Forza a 0 il clock GPIO visto che non riusciamo a usare il registro di direzione
     //mode0_gate &= ~(1 << 8); // Forza a 0 il clock I2C hardware visto che è rotto
     //mode0_gate |= (1 << 10); // Assicuriamoci che il VGA Clock (10) sia attivo se usiamo il CRT
@@ -441,8 +437,17 @@ void sm750_init_chip(DeviceInfo *di) {
     mode0_gate &= ~(1 << 7); // Disattiviamo SSP
     mode0_gate &= ~(1 << 9); // Disattiviamo PWM
     mode0_gate &= ~(1 << 10); // Disattiviamo VGA
+    //mode0_gate |= (1 << 10); // Attiviamo VGA e vediamo se la generazione degli interrupt dipende da questo
     SM750_WREG32(SM750_SYS_PWR_MODE_0_CLKC, mode0_gate); // 0x000044
     //dprintf("SM750: Power Mode 0 Clock Gate set to: 0x%08x\n", mode0_gate);
+    
+    uint32 vga_mode = SM750_REG32(SM750_SYS_VGA_CONFIG);
+    dprintf("SM750: VGA CONFIG: 0x%08X\n", vga_mode);
+    vga_mode |= (1 << 2); //selettore CLOCK da vga a primary panel
+    SM750_WREG32(SM750_SYS_VGA_CONFIG, vga_mode);
+    snooze(100);
+    vga_mode = SM750_REG32(SM750_SYS_VGA_CONFIG);
+     dprintf("SM750: NEW VGA CONFIG: 0x%08X\n", vga_mode);
 
     // --- 2. SELEZIONA IL POWER MODE E ACCENDI L'OSCILLATORE ---
     //Power Mode Control
@@ -660,6 +665,7 @@ void sm750_init_chip(DeviceInfo *di) {
 
     // 3. Selezione Sorgente Dati (QUI CAMBIA!)
     if (si->card_info.is_panel) {
+        dprintf("SM750: Impostiamo i registri dati per PANEL\n");
         // Registro 0x80000: Bit 29:28. Vogliamo "Panel Data" (00)
         ctrl &= ~(3U << 28); // Panel Data for Primary Display
         nctrl &= ~(3U << 18); // Panel Data for Secondary Display
@@ -669,15 +675,27 @@ void sm750_init_chip(DeviceInfo *di) {
         
     } else {
         // Registro 0x80200: Bit 19:18. Vogliamo "CRT Data" (10)
+        dprintf("SM750: Impostiamo i registri dati per CRT\n");
         ctrl &= ~(3U << 18);
+        // la selezione di panel data o crt data sembra ininfluente!!!
         ctrl |= (2U << 18);  // CRT Data for Secondary Display
+        //ctrl &= ~(3U << 18);  // Panel Data for Secondary Display
         nctrl &= ~(3U << 28); 
         nctrl |= (2U << 28); // Secondary Display Data for Primary Disaply
-        nctrl &= ~(1 << 2); // disattiva il piano grafico primario, ma siamo sicuri che funziona poi? TODO, provare a rimuovere
+        nctrl &= ~(1 << 2); // disattiva il piano grafico primario, altrimenti vedo immagine falsata e rovinata
+        // giusto per provare, ho laciato attivo PANEL e disattivato CRT:
+        // ctrl &= ~(1 << 2); //disattiva piano crt lasciando piano panel attivo
+        // nota d'esercizio: disattivando il piano CRT e lasciando attivo il piano PANEL, il desktop compare a monito ma è difettato
+        // da righe orizzontali che traslano l'immagine.
+        // o la mia scheda non supporta il ramo PANEL, o il ramo PANEL non è correttamente configurato, o c'è altro in ballo
     
         // No Blank per CRT (Bit 10)
         ctrl &= ~(1 << 10);
     }
+    dprintf("SM750: Scrittura registro uscita usata 0x%08" B_PRIx32 "\n", display_reg);
+    dprintf("SM750: Valore 0x%08" B_PRIx32 "\n", ctrl);
+    dprintf("SM750: Scrittura registro uscita non utilizzata 0x%08" B_PRIx32 "\n", notdisplay_reg);
+    dprintf("SM750: Valore 0x%08" B_PRIx32 "\n", nctrl);
     SM750_WREG32(display_reg, ctrl);
     SM750_WREG32(notdisplay_reg, nctrl);
     
