@@ -166,7 +166,7 @@ sm750_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
     }
 
     //uint32 addr_val = (1 << 31) | ((si->card_info.mem_size - 1024) & 0x03FFFFF0);
-    uint32 addr_val = (1 << 31) | (si->cursor.pci_address & 0x03FFFFF0);
+    uint32 addr_val = (1 << 31) | (si->cursor.vram_offset & 0x03FFFFF0);
     uint32 color12 = 0x0000FFFF;
 
     if (si->card_info.is_panel) {
@@ -249,7 +249,7 @@ sm750_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
     
     // Forza i colori e l'indirizzo
     //uint32 addr_val = (1 << 31) | (CRT_CURSOR_VRAM_OFFSET & 0x03FFFFF0);
-    uint32 addr_val = (1 << 31) | (si->cursor.pci_address & 0x03FFFFF0);
+    uint32 addr_val = (1 << 31) | (si->cursor.vram_offset & 0x03FFFFF0);
 
     // Registri Colore SM750
     // Color 1 (0,0) = Bianco
