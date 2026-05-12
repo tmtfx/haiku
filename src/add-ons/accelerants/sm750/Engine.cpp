@@ -111,11 +111,10 @@ void sm750_program_pll(uint32 target_khz, bool is_panel)
     // impostiamo entrambi i pll alla stessa frequenza giusto per vedere se cambia qualcosa
     SM750_WREG32(SM750_DISP_PANEL_PLL,pll_reg);
     SM750_WREG32(SM750_DISP_CRT_PLL,pll_reg);
-    //decommentare  se non va bene
-    //uint32 ctrl_offset = is_panel ? SM750_CRT_CONTROL : SM750_PANEL_CONTROL;
-    // tentativo 1 lasciare attivi entrambi i pll
-    //pll_reg &= ~(1 << 17); // PLL Power down
-    //SM750_WREG32(ctrl_offset,pll_reg); // disattiva il pll in ctr o in panel
+    //commentare  se non va bene... // VERIFICA CON FUNZIONAMENTO OVERLAY
+    uint32 ctrl_offset = is_panel ? SM750_CRT_CONTROL : SM750_PANEL_CONTROL;
+    pll_reg &= ~(1 << 17); // PLL Power down
+    SM750_WREG32(ctrl_offset,pll_reg); // disattiva il pll in ctr o in panel se non usato
     snooze(1500); 
     debug_printf("SM750_PLL: Programmazione %s a %u kHz\n", is_panel ? "PANEL" : "CRT", target_khz);
     debug_printf("SM750_PLL: M:%u N:%u Div:%u -> Reg 0x%08x\n", m, n, div_val, pll_reg);
