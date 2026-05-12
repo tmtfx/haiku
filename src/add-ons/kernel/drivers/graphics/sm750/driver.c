@@ -83,37 +83,6 @@ map_videomem(void **out_virt, phys_addr_t phys, uint32 size, const char *name)
     return area;
 }
 
-/*
-static int32 
-sm750_interrupt_handler(void* data)
-{
-    device_info* info = (device_info*)data;
-    vuint32* regs = info->regs;
-
-    // 1. Leggiamo chi ha bussato (Registro 0x24)
-    uint32 status = regs[SM750_SYS_INT_STATUS >> 2];
-    
-    if (status == 0) 
-        return B_UNHANDLED_INTERRUPT;
-
-    // 2. CLEAR (Registro 0x20): Di solito si scrive il bit che si vuole pulire
-    // Se il datasheet dice che 0x20 in scrittura è "Raw Interrupt Clear"
-    regs[SM750_SYS_RAW_INT_CLEAR >> 2] = status; 
-
-    // 3. Notifica all'accelerante
-    // Gestiamo sia Panel (bit 1) che CRT (bit 2)
-    if (status & 0x06) { 
-        info->shared_info->vblank_count++;
-        release_sem_etc(info->shared_info->vblank_sem, 1, B_DO_NOT_RESCHEDULE);
-    }
-    
-    // Se è il motore 2D (bit 5), svegliamo chi aspetta l'engine idle
-    if (status & (1 << 5)) {
-        release_sem_etc(info->shared_info->engine_sem, 1, B_DO_NOT_RESCHEDULE);
-    }
-
-    return B_INVOKE_SCHEDULER;
-}*/
 static int32 
 sm750_interrupt_handler(void* data)
 {
@@ -122,6 +91,7 @@ sm750_interrupt_handler(void* data)
 
     // 1. Leggiamo lo Status (Registro 0x24)
     uint32 status = SM750_REG32(SM750_SYS_INT_STATUS);
+    dprintf("SM750: INTERRUPT! status: 0x%08" B_PRIx32 "\n", status);
     
     // Se zero, l'interrupt non è nostro
     if (status == 0) 
@@ -135,6 +105,8 @@ sm750_interrupt_handler(void* data)
         engineStatus &= ~(1 << 0); // Pulisce bit 0 (2D)
         engineStatus &= ~(1 << 1); // Pulisce bit 1 (CSC)
         SM750_WREG32(SM750_2D_STATUS, engineStatus);
+        // 2. Sveglia chi sta aspettando la fine del disegno
+        //release_sem_etc(info->si->engine.lock.sem, 1, B_DO_NOT_RESCHEDULE); non implementiamo così usiamo registro di stato fifo
     }
 
     // Bit 1 o 2: V-Sync (Panel o CRT)
@@ -248,6 +220,7 @@ open_device(const char *name, uint32 flags, void **cookie)
         
         // 2.1 TENTATIVO MSI
         di->msi_enabled = false;
+        /*
         uint8 msiCount = pci->get_msi_count(di->pci.bus, di->pci.device, di->pci.function);
         if (msiCount > 0) {
             uint32 vector; // <--- Deve essere uint32 per conformità con l'API PCI
@@ -262,7 +235,7 @@ open_device(const char *name, uint32 flags, void **cookie)
             } else {
                 dprintf("SM750: Configurazione MSI fallita\n");
             }
-        }
+        }*/
         
         
         // 3. Allocazione Shared Info
@@ -273,6 +246,9 @@ open_device(const char *name, uint32 flags, void **cookie)
         memset(di->si, 0, B_PAGE_SIZE * 2);
         strncpy(di->si->device_path, name, B_PATH_NAME_LENGTH);
         memcpy(&di->si->settings, &current_settings, sizeof(sm750_settings));
+        
+        di->si->vblank_sem = create_sem(0, "sm750 vblank sem");
+        di->si->engine.lock.sem = create_sem(0, "sm750 engine sem");
                 
         // 4. Mappatura REGISTRI (BAR 1 - 2MB)
         di->regs_area = map_mem((void **)&di->regs, di->pci.u.h0.base_registers[1], 
@@ -290,7 +266,8 @@ open_device(const char *name, uint32 flags, void **cookie)
         
         // 3. Installazione Handler
         // Se MSI è attivo, usiamo il vettore MSI, altrimenti la linea IRQ classica
-        uint8 irq = di->msi_enabled ? di->msi_vector : di->pci.u.h0.interrupt_line;
+        // uint8 irq = di->msi_enabled ? di->msi_vector : di->pci.u.h0.interrupt_line;
+        uint8 irq = di->pci.u.h0.interrupt_line;
         
         status_t intStatus = install_io_interrupt_handler(irq, sm750_interrupt_handler, di, 0);
         if (intStatus != B_OK) {
@@ -337,9 +314,13 @@ static status_t close_device(void *cookie) { return B_OK; }
 
 static status_t free_device(void *cookie) {
     DeviceInfo *di = (DeviceInfo *)cookie;
+    vuint32* regs = di->regs;
     if (--di->openCount == 0) {
     	//remove_io_interrupt_handler(di->pci.u.h0.interrupt_line, sm750_interrupt_handler, di);
         uint8 irq = di->msi_enabled ? di->msi_vector : di->pci.u.h0.interrupt_line;
+        SM750_WREG32(SM750_SYS_INT_MASK, 0);
+        uint32 status = SM750_REG32(SM750_SYS_INT_MASK);
+        dprintf("SM750: Freeing device... MASK set to: %" B_PRIu32 "\n", status);
         remove_io_interrupt_handler(irq, sm750_interrupt_handler, di);
         
         if (di->msi_enabled) {
