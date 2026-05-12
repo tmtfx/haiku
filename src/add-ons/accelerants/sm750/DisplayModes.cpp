@@ -676,7 +676,7 @@ sm750_get_mode_list(display_mode* dm)
 status_t
 sm750_propose_display_mode(display_mode *target, const display_mode *low, const display_mode *high)
 {
-	debug_printf("SM750_ACC: chiamata a sm750_propose_display_mode");
+	debug_printf("SM750_ACC: chiamata a sm750_propose_display_mode\n");
     // 1. Forza uno spazio colore supportato
     if (target->space != B_RGB32 && target->space != B_RGB16 && target->space != B_CMAP8)
         target->space = B_RGB32;
