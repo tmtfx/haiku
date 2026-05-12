@@ -147,7 +147,6 @@ typedef struct {
 	area_id	regs_area;	/* BAR0: Registri MMIO */
 	area_id	fb_area;		/* BAR1: Framebuffer */
 	
-	//vuint32		*regs;		/* Puntatore virtuale ai registri (MMIO) */
 	uint8		*framebuffer; /* Puntatore virtuale alla video RAM */
 	phys_addr_t	framebuffer_pci; /* Indirizzo fisico (bus) per DMA */
 
@@ -174,7 +173,7 @@ typedef struct {
 		uint16	width;
 		uint16	height;
 		bool	is_visible;
-		phys_addr_t	pci_address; 
+		phys_addr_t	vram_offset; 
 		void	*v_address;
 		uint32          block_id;
 	} cursor;
@@ -227,7 +226,6 @@ typedef struct {
 	bool accelerant_in_use;
 	int32   overlay_in_use; // Flag per l'allocazione esclusiva dell'overlay
 	// Sincronizzazione V-Sync
-	sem_id	vblank;		/* Semaforo sincronizzazione verticale */
     sem_id  vblank_sem;      // Segnale dal Kernel all'Accelerante
     sem_id  vblank_sync_sem; // Segnale dall'Accelerante all'App (User Sync)
     uint32  vblank_count;   // Contatore incrementato a ogni interrupt
@@ -277,8 +275,6 @@ typedef struct {
 	uint8			msi_vector;
 	char			name[B_OS_NAME_LENGTH];
 } DeviceInfo;
-
-void sm750_init_chip(DeviceInfo *di);
 
 /* Strutture per IOCTL */
 typedef struct {
