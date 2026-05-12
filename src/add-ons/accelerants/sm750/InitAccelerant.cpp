@@ -264,7 +264,7 @@ static status_t init_common(int fd,bool isClone) {
     }
     
     //si->cursor.v_address = (void *)(gInfo->framebuffer + CRT_CURSOR_VRAM_OFFSET);
-    si->cursor.v_address = (void *)((addr_t)gInfo->framebuffer + si->cursor.pci_address);
+    si->cursor.v_address = (void *)((addr_t)gInfo->framebuffer + si->cursor.vram_offset);
     
     // 7. Token per il motore 2D (necessario per Haiku)
     gInfo->sm750_engine_token.engine_id = 1; 
