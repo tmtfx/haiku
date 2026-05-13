@@ -51,6 +51,9 @@ uint32 sm750_dpms_mode(void);
 uint32 sm750_dpms_capabilities(void);
 status_t sm750_set_dpms_mode(uint32 mode);
 
+int32 sm750_vblank_service_thread(void *arg);
+sem_id sm750_retrace_semaphore(void);
+
 uint32 sm750_overlay_count(const display_mode *dm);
 const uint32 *sm750_overlay_supported_spaces(const display_mode *dm);
 void sm750_get_overlay_constraints(const display_mode *dm, const overlay_buffer *ob, overlay_constraints *oc);
