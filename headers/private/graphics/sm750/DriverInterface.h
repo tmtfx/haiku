@@ -216,7 +216,7 @@ typedef struct {
 	/* Overlay (Scaler - Layer #2 SM750) */
 	struct {
 		Benaphore   lock;            /* Protegge l'accesso all'unico Layer Video */
-		overlay_token myToken;       /* Identificativo dell'overlay attivo */
+		uintptr_t   overlay_token;       /* Identificativo dell'overlay attivo */
 		// Usiamo MAXBUFFERS per il Double/Triple buffering video
 		overlay_buffer myBuffer[MAXBUFFERS];
 		uint32         myBufferBlockID[MAXBUFFERS];
