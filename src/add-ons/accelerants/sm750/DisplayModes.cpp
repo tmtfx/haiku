@@ -12,28 +12,6 @@
 #include <create_display_modes.h>
 
 extern accelerant_info *gInfo;
-/* old
-status_t sm750_old_get_edid_info(void* info, size_t size, uint32* _version) {
-    shared_info *si = gInfo->si;
-
-    if (size < sizeof(struct edid1_info))
-        return B_BUFFER_OVERFLOW;
-
-    if (si->card_info.is_panel) {
-        if (!si->card_info.has_edid_panel)
-            return B_ERROR;
-        memcpy(info, si->edid_panel, sizeof(struct edid1_info));
-    } else {
-        if (!si->card_info.has_edid_crt)
-            return B_ERROR;
-        memcpy(info, si->edid_crt, sizeof(struct edid1_info));
-    }
-    
-    if (_version != NULL)
-        *_version = EDID_VERSION_1;
-
-    return B_OK;
-}*/
 
 status_t 
 sm750_get_edid_info(void* info, size_t size, uint32* _version) 
@@ -126,81 +104,7 @@ if (gInfo->si->card_info.has_vesa_edid_info) {
     debug_printf("SM750: Modalità preferita impostata a %dx%d @ 32bpp\n", 
         preferredTiming.h_display, preferredTiming.v_display);
 }
-// ********************************************************************
-extern "C" status_t 
-create_mode_list_from_edid(uint8* raw_buffer) 
-{
-    shared_info *si = gInfo->si;
-    edid1_info info;
-    display_mode edid_modes[MAX_EDID_MODES];
-    uint32 edid_count = 0;
-    
-    // Se non passiamo un buffer I2C fresco, proviamo a usare quello VESA del kernel
-    if (raw_buffer == NULL) {
-        if (si->card_info.has_edid_vesa) {
-            debug_printf("SM750_ACC: Nessun buffer EDID, uso EDID VESA di backup.\n");
-            edid_decode(&gInfo->edid_vesa_info, &si->vesa_edid_raw);
-            info = gInfo->edid_vesa_info; // Copia diretta della struct
-        } else {
-            debug_printf("SM750_ACC: Errore: nessun EDID disponibile (I2C o VESA).\n");
-            return B_ERROR;
-        }
-    } else {
-        // Decodifica il buffer grezzo letto via I2C
-        edid_decode(&info, (edid1_raw*)raw_buffer);
-        
-        // Salvataggio locale per riferimento futuro nell'accelerante
-        if (si->card_info.is_panel) {
-            gInfo->edid_panel_info = info;
-            gInfo->has_edid_panel = true;
-        } else {
-            gInfo->edid_crt_info = info;
-            gInfo->has_edid_crt = true;
-        }
-    }
-
-    // 1. Estraiamo i timing dall'EDID
-    for (int i = 0; i < EDID1_NUM_DETAILED_MONITOR_DESC; i++) {
-        if (info.detailed_monitor[i].monitor_desc_type == EDID1_IS_DETAILED_TIMING) {
-            display_timing timing;
-            
-            // Decodifica solo i tempi
-            decode_detailed_timing(&info.detailed_monitor[i].data.detailed_timing, &timing);
-            
-            // Assembla il display_mode (usiamo B_RGB32 di default)
-            // TODO, dovremmo inserire ache B_RGB16 e 8!!!! così è limitante, e dovremmo anche
-            // aggiungere i flags edid_modes[edid_count].flags = B_8_BIT_DAC | B_HARDWARE_CURSOR;
-            fill_display_mode(&timing, B_RGB32, &edid_modes[edid_count]);
-
-            // Se è il primo ed è il preferito dal monitor, aggiorniamo la shared_info
-            if (edid_count == 0 && info.display.preferred_timing_mode) {
-                if (si->card_info.is_panel) {
-                    si->preferred_mode = edid_modes[edid_count];
-                } else {
-                    si->preferred_mode2 = edid_modes[edid_count];
-                }
-                debug_printf("SM750_ACC: Modalità preferita aggiornata da EDID (%dx%d)\n", 
-                    timing.h_display, timing.v_display);
-            }
-            
-            edid_count++;
-            if (edid_count >= MAX_EDID_MODES) break;
-        }
-    }
-
-    // 2. Aggiorniamo la lista globale dei modi
-    if (edid_count > 0) {
-        debug_printf("SM750_ACC: Generati %d modi da EDID.\n", edid_count);
-        si->mode_count = edid_count;
-        for (uint32 j = 0; j < edid_count; j++) {
-            si->mode_list[j] = edid_modes[j];
-        }
-        return B_OK;
-    }
-
-    debug_printf("SM750_ACC: EDID non conteneva timing validi.\n");
-    return B_ERROR;
-}*/
+*/
 extern "C" status_t 
 create_mode_list_from_edid(uint8* raw_buffer) 
 {
@@ -222,6 +126,18 @@ create_mode_list_from_edid(uint8* raw_buffer)
     // 2. GENERAZIONE AUTOMATICA (Consigliato!)
     // Questa funzione di Haiku crea un'area, popola i modi per 8, 16 e 32 bit,
     // e gestisce i limiti di banda del chip se passati correttamente.
+    
+    static const color_space kSpaces[] = { B_RGB32, B_RGB16, B_CMAP8 };
+    // TODO: magari un giorno valutare se si può usare altro come
+    //static const color_space kSpaces[] = {
+    //    B_CMAP8,    // 8-bit
+    //    B_RGB15,    // 15-bit
+    //    B_RGB16,    // 16-bit
+    //    B_RGB32,    // 32-bit
+    //    B_RGBA32    // 32-bit con alpha
+    //};
+    static const uint32 kSpaceCount = sizeof(kSpaces) / sizeof(kSpaces[0]);
+    
     display_mode* list = NULL;
     uint32 count = 0;
     
@@ -230,8 +146,8 @@ create_mode_list_from_edid(uint8* raw_buffer)
     //                      risultato_lista, risultato_count)
     area_id new_area = create_display_modes("sm750 modes", &info, 
         NULL, 0, // Nessun modo extra
-        NULL, 0, // Usa tutti i modi standard Haiku compatibili con EDID
-        NULL,    // Nessun filtro
+        kSpaces, kSpaceCount, // Usa tutti i modi standard Haiku compatibili con EDID
+        NULL,    // Nessun filtro di callback
         &list, &count);
     /*listArea = create_display_modes("dummy",
 		si.bHaveEDID ? &si.edidInfo : NULL,
@@ -244,6 +160,7 @@ create_mode_list_from_edid(uint8* raw_buffer)
         // Aggiorniamo la shared info con la nuova area "dinamica"
         si->mode_list_area = new_area;
         si->mode_count = count;
+        gInfo->mode_list = list;
         
         // Aggiorniamo il preferred mode per il driver
         if (count > 0) {
@@ -251,7 +168,7 @@ create_mode_list_from_edid(uint8* raw_buffer)
             else si->preferred_mode2 = list[0];
         }
         
-        debug_printf("SM750_ACC: CreateDisplayModes ha generato %" B_PRIu32 " modi\n", count);
+        //debug_printf("SM750_ACC: CreateDisplayModes ha generato %" B_PRIu32 " modi\n", count);
         return B_OK;
     }
 
@@ -327,7 +244,7 @@ sm750_set_fb_addr(uint32 offset, bool is_panel)
     uint32 reg_offset = is_panel ? SM750_DISP_PANEL_FB_ADDR : SM750_DISP_CRT_FB_ADDR ;
     SM750_WREG32(reg_offset, reg_val);
     
-    debug_printf("SM750_ACC: %s FB Address impostato a: 0x%08x (Reg: 0x%08x)\n", is_panel ? "PANEL": "CRT" ,offset, reg_val);
+    //debug_printf("SM750_ACC: %s FB Address impostato a: 0x%08x (Reg: 0x%08x)\n", is_panel ? "PANEL": "CRT" ,offset, reg_val);
     return B_OK;
 }
 static void sm750_set_h_timing(uint32 total, uint32 active, bool is_panel)
@@ -383,29 +300,6 @@ static void sm750_set_v_sync(uint32 start, uint32 end, bool is_panel)
     SM750_WREG32(reg_offset, val);
 }
 
-// In sm750_accelerant.c (o dove hai i puntatori alle funzioni)
-/*
-status_t
-sm750_get_preferred_mode(display_mode* mode)
-{
-    shared_info *si = gInfo->si;
-    display_mode *preferred = si->card_info.is_panel ? &si->preferred_mode : &si->preferred_mode2;
-
-    // Se abbiamo una modalità preferita valida dall'EDID
-    if (preferred->timing.pixel_clock > 0 && preferred->timing.h_display > 10) {
-        *mode = *preferred;
-        return B_OK;
-    }
-
-    // Altrimenti torniamo il fallback di sicurezza
-    display_mode default_mode = {
-        { 65000, 1024, 1048, 1184, 1344, 768, 771, 777, 806, 0 },
-        B_RGB32, 1024, 768, 0, 0
-    };
-    *mode = default_mode;
-    
-    return B_OK;
-}*/
 status_t
 sm750_get_preferred_mode(display_mode* mode)
 {
@@ -428,7 +322,7 @@ sm750_get_preferred_mode(display_mode* mode)
 status_t
 sm750_set_display_mode(display_mode *mode)
 {
-	debug_printf("SM750_ACC: Avvio impostazione display mode\n");
+	//debug_printf("SM750_ACC: Avvio impostazione display mode\n");
     shared_info *si = gInfo->si;
     vuint32 *regs = gInfo->regs;
     
@@ -443,8 +337,25 @@ sm750_set_display_mode(display_mode *mode)
     debug_printf("SM750_ACC:  - In shared_info preferred: %dx%d\n", 
         pm->timing.h_display, pm->timing.v_display);
         */
-    
-    uint32 bpp = (mode->space == B_RGB32) ? 32 : 16;
+    uint32 bpp = 0;
+    uint32 fmt_reg = 0;
+    switch (mode->space) {
+        case B_RGB32:
+            bpp = 32;
+            fmt_reg = 2; // 32bpp
+            break;
+        case B_RGB16:
+            bpp = 16;
+            fmt_reg = 1; // 16bpp
+            break;
+        case B_CMAP8:
+            bpp = 8;
+            fmt_reg = 0; // 8bpp (Indexed)
+            break;
+        default:
+            return B_BAD_VALUE;
+    }
+    //uint32 bpp = (mode->space == B_RGB32) ? 32 : 16;
     //uint32 color_fmt = (mode->space == B_RGB32) ? 2 : 1; // 2=32bpp, 1=16bpp
     //uint32 pitch = mode->timing.h_display * (bpp / 8);
     // 2. Usiamo virtual_width per il Pitch (la memoria reale)
@@ -514,10 +425,12 @@ sm750_set_display_mode(display_mode *mode)
     
     uint32 ctrl = 0;
     // Formato (Bit 1:0) -> 10 per 32bpp, 01 per 16bpp
-    if (mode->space == B_RGB32) 
-        ctrl |= 0x2; 
-    else 
-        ctrl |= 0x1;
+    //if (mode->space == B_RGB32) 
+    //    ctrl |= 0x2; 
+    //else 
+    //    ctrl |= 0x1;
+    ctrl |= (fmt_reg & 0x3); // Imposta il formato (Bit 1:0)
+    
     //Abilita il piano grafico (Bit 2)
     ctrl |= (1 << 2);
     //Abilita i Timings (Bit 8) -> FONDAMENTALE per non avere schermo nero
@@ -537,7 +450,7 @@ sm750_set_display_mode(display_mode *mode)
         SM750_WREG32(SM750_PANEL_CONTROL, ctrl);
         si->fbc.bytes_per_row = pitch;
         si->fbc.frame_buffer_dma = (void *)si->framebuffer_pci;
-        debug_printf("SM750_ACC: --- FINE SETUP PANEL ---\n");
+        //debug_printf("SM750_ACC: --- FINE SETUP PANEL ---\n");
     } else {
         // Registro di Controllo CRT (0x080200)
         // Data Select (Bit 19:18) -> Vogliamo CRT Data (10)
@@ -548,7 +461,7 @@ sm750_set_display_mode(display_mode *mode)
         SM750_WREG32(SM750_CRT_CONTROL, ctrl);
         si->fbc2.bytes_per_row = pitch;
         si->fbc2.frame_buffer_dma = (void *)si->framebuffer_pci;
-    	debug_printf("SM750_ACC: --- FINE SETUP CRT ---\n");
+    	//debug_printf("SM750_ACC: --- FINE SETUP CRT ---\n");
     }
     
 
@@ -571,9 +484,6 @@ sm750_get_frame_buffer_config(frame_buffer_config *config)
     //}
     
     config->frame_buffer = (void *)gInfo->framebuffer; //usiamo il locale
-    //config->frame_buffer = (void *)si->framebuffer; //ma noi avevamo messo NULL
-    //config->frame_buffer_dma = (void *)si->framebuffer_pci;
-    //config->bytes_per_row = si->dm.timing.h_display * (bpp / 8);
     
     if (si->card_info.is_panel) {
         config->frame_buffer_dma = si->fbc.frame_buffer_dma;
@@ -595,56 +505,11 @@ sm750_get_display_mode(display_mode *current_mode)
     *current_mode = si->dm; // Restituiamo l'ultima modalità salvata
     return B_OK;
 }
-/*
-status_t
-sm750_propose_display_mode(display_mode *target, const display_mode *low, const display_mode *high)
-{
-    shared_info *si = gInfo->si;
-    debug_printf("SM750_ACC: Avvio chiamata propose display mode...\n");
-
-    // 1. Forza i valori virtuali se non impostati
-    if (target->virtual_width < target->timing.h_display)
-        target->virtual_width = target->timing.h_display;
-    if (target->virtual_height < target->timing.v_display)
-        target->virtual_height = target->timing.v_display;
-
-    // 2. Controllo Memoria
-    uint32 bpp = (target->space == B_RGB32) ? 4 : 2;
-    uint32 mem_needed = target->virtual_width * target->virtual_height * bpp;
-    
-    if (mem_needed > si->card_info.mem_size)
-        return B_BAD_VALUE;
-
-    // 3. Allineamento (Molto importante per SM750)
-    // Il pitch deve essere multiplo di 16 byte per il motore 2D/Display
-    target->virtual_width = (target->virtual_width + 15) & ~15;
-
-    debug_printf("SM750_ACC: Chiamata propose display mode terminata con successo...\n");
-    return B_OK;
-}*/
 
 uint32 sm750_accelerant_mode_count(void) {
     return gInfo->si->mode_count;
 }
-/* for test
-status_t 
-sm750_get_mode_list(display_mode* dm) {
-	debug_printf("SM750_ACC: Avvio chiamata get mode list...\n");
-    display_mode mode = {
-        { 65000, 1024, 1048, 1184, 1344, 768, 771, 777, 806, 0 }, // Timing
-        B_RGB32,     // space
-        1024, 768,   // virtual_width, virtual_height
-        0, 0         // h_display_start, v_display_start
-    };
-    
-    // Aggiungiamo i flag di polarità se necessari (Sync Positivo/Negativo)
-    // Molti monitor moderni vogliono B_POSITIVE_HSYNC | B_POSITIVE_VSYNC
-    mode.timing.flags = B_POSITIVE_HSYNC | B_POSITIVE_VSYNC;
 
-    dm[0] = mode;
-    debug_printf("SM750_ACC: Chiamata get mode list completata, restituendo in dm[0]...\n");
-    return B_OK;
-}*/
 status_t 
 sm750_get_mode_list(display_mode* dm) 
 {
@@ -657,16 +522,7 @@ sm750_get_mode_list(display_mode* dm)
         debug_printf("SM750_ACC: ERROR - Nessun modo trovato!\n");
         return B_ERROR;
     }
-    // Vediamo cosa c'è nel primo modo prima di copiare
-    /*
-    debug_printf("SM750_ACC: Modo[0] prima di memcpy: %ux%u @ %.2f Hz, Clock: %u\n", 
-        gInfo->mode_list[0].timing.h_display, 
-        gInfo->mode_list[0].timing.v_display,
-        (float)gInfo->mode_list[0].timing.pixel_clock * 1000 / 
-        ((uint32)gInfo->mode_list[0].timing.h_total * gInfo->mode_list[0].timing.v_total),
-        gInfo->mode_list[0].timing.pixel_clock);
-        */
-    
+
     // Copiamo la nostra lista precostruita nell'array passato da Haiku
     memcpy(dm, gInfo->mode_list, si->mode_count * sizeof(display_mode));
     //debug_printf("SM750_ACC: Memcpy effettuata con successo.\n");
@@ -676,24 +532,36 @@ sm750_get_mode_list(display_mode* dm)
 status_t
 sm750_propose_display_mode(display_mode *target, const display_mode *low, const display_mode *high)
 {
-	debug_printf("SM750_ACC: chiamata a sm750_propose_display_mode\n");
+	//debug_printf("SM750: Propose Mode: %dx%d @ Space 0x%x\n", target->timing.h_display, target->timing.v_display, target->space);
     // 1. Forza uno spazio colore supportato
+    
+    
     if (target->space != B_RGB32 && target->space != B_RGB16 && target->space != B_CMAP8)
         target->space = B_RGB32;
+    
 
     // 2. Allineamento larghezza (SM750 richiede 8 o 16 pixel per il pitch)
     target->virtual_width = (target->virtual_width + 15) & ~15;
+    uint32 min_width = (target->timing.h_display + 15) & ~15;
     
-    if (target->virtual_width < target->timing.h_display)
-        target->virtual_width = target->timing.h_display;
+    if (target->virtual_width < min_width)
+        target->virtual_width = min_width;
     if (target->virtual_height < target->timing.v_display)
         target->virtual_height = target->timing.v_display;
         
     // 2.1 Verifica rispetto ai limiti low/high
-    if (target->virtual_width < low->virtual_width)
-        target->virtual_width = low->virtual_width;
-    if (target->virtual_width > high->virtual_width)
-        target->virtual_width = high->virtual_width;
+    uint32 low_width = (low->virtual_width + 15) & ~15;
+    uint32 high_width = (high->virtual_width) & ~15;
+    
+    if (target->virtual_width < low_width)
+        target->virtual_width = low_width;
+    if (target->virtual_width > high_width)
+        target->virtual_width = high_width;
+        
+    if (target->virtual_height < low->virtual_height)
+        target->virtual_height = low->virtual_height;
+    if (target->virtual_height > high->virtual_height)
+        target->virtual_height = high->virtual_height;
         
     // Ri-verifica l'allineamento dopo il clamping (potrebbe essere necessario)
     target->virtual_width &= ~15;
@@ -709,6 +577,9 @@ sm750_propose_display_mode(display_mode *target, const display_mode *low, const 
         case B_RGB32: bytesPerPixel = 4; break;
         case B_RGB16: bytesPerPixel = 2; break;
         case B_CMAP8: bytesPerPixel = 1; break;
+        default: 
+            debug_printf("SM750: Formato colore 0x%x non riconosciuto!\n", target->space);
+            return B_BAD_VALUE;
     }
     
     uint32 memNeeded = target->virtual_width * target->virtual_height * bytesPerPixel;
@@ -718,7 +589,7 @@ sm750_propose_display_mode(display_mode *target, const display_mode *low, const 
     if (memNeeded > gInfo->si->card_info.max_desktop_mem) {
         debug_printf("SM750: Modalità rifiutata - serve %u byte, limite desktop %u\n", 
                   memNeeded, gInfo->si->card_info.max_desktop_mem);
-    return B_BAD_VALUE;
+        return B_BAD_VALUE;
     }
 
     // 4. Limite Pixel Clock (SM750: circa 300MHz per il DAC)
@@ -735,10 +606,42 @@ sm750_propose_display_mode(display_mode *target, const display_mode *low, const 
     return B_OK;
 }
 
-status_t sm750_set_indexed_colors(uint32 count, uint8 first, uint8 *colors, uint32 flags) {
-    // Non supportiamo gli 8-bit per ora, ma rispondiamo OK per far felice Haiku
-    return B_OK;
+void 
+sm750_set_indexed_colors(uint32 count, uint8 first, uint8 *color_data, uint32 flags)
+{
+    // Sicurezza: gInfo e regs devono essere validi
+    if (gInfo == NULL || gInfo->regs == NULL || color_data == NULL)
+        return;
+
+    volatile uint8* regs = (volatile uint8*)gInfo->regs;
+    
+    debug_printf("SM750_ACC: Aggiornamento palette: %u colori a partire da %u\n", count, first);
+    
+    // Iteriamo sui colori passati da Haiku
+    for (uint32 i = 0; i < count; i++) {
+        uint8 index = first + i;
+        
+        // Protezione contro overflow della palette (0-255)
+        if (index > 255)
+            break;
+
+        // Haiku passa i dati come R, G, B (8 bit per canale)
+        uint8 r = color_data[i * 3 + 0];
+        uint8 g = color_data[i * 3 + 1];
+        uint8 b = color_data[i * 3 + 2];
+
+        // Costruiamo il valore a 32 bit: 0x00RRGGBB
+        // Bit 23:16 = Red, 15:8 = Green, 7:0 = Blue
+        uint32 colorValue = (uint32(r) << 16) | (uint32(g) << 8) | uint32(b);
+
+        // Scriviamo nella Primary Palette (PANEL)
+        *(volatile uint32*)(regs + SM750_DISP_PALETTE_RAM + (index * 4)) = colorValue;
+
+        // Scriviamo nella Secondary Palette (CRT)
+        *(volatile uint32*)(regs + SM750_DISP_PALETTE_RAM2 + (index * 4)) = colorValue;
+    }
 }
+
 // da rivedere questi valori
 status_t
 sm750_get_timing_constraints(display_timing_constraints *dtc)
