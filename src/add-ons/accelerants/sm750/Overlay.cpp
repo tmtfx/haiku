@@ -141,7 +141,8 @@ sm750_allocate_overlay_buffer(color_space cs, uint16 width, uint16 height)
 
     if (slot == -1) return NULL; // Tutti i buffer occupati
 
-    uint32 bytesPerPixel = 2; 
+    //uint32 bytesPerPixel = 2; se usiamo solo i formati supportati
+    uint32 bytesPerPixel = (cs == B_RGB32) ? 4 : 2; // se usiamo anche B_RGB32
     uint32 alignedPitch = (width * bytesPerPixel + 15) & ~15;
     uint32 size = alignedPitch * height;
     uint32 blockID, offset;
@@ -206,11 +207,21 @@ sm750_configure_overlay(const overlay_window *window, const overlay_buffer *buff
     SM750_WREG32(SM750_DISP_PANEL_VIDEO_FB0_LAST_ADDR, lastAddrReg);
     
     // 2. Larghezza (Pitch)
-    uint32 pitchIn128BitUnits = buffer->bytes_per_row / 16;
-    // Assicuriamoci che non superi i limiti dei bit (10 bit per campo)
-    pitchIn128BitUnits &= 0x3FF;
-    SM750_WREG32(SM750_DISP_PANEL_VIDEO_FB_WIDTH, (pitchIn128BitUnits << 20) | (pitchIn128BitUnits << 4));
-    //SM750_WREG32(SM750_DISP_PANEL_VIDEO_FB_WIDTH, (buffer->bytes_per_row << 16) | buffer->bytes_per_row);
+    uint32 fbPitchUnits = buffer->bytes_per_row / 16;
+    // Calcoliamo la larghezza della finestra (window width) in unità di 16 byte.
+    // ATTENZIONE: Se la larghezza in pixel non è divisibile per 16, 
+    // dobbiamo arrotondare per eccesso per non tagliare il video.
+    uint32 bytesPerPixel = (buffer->space == B_RGB32) ? 4 : 2;
+    uint32 windowWidthBytes = buffer->width * bytesPerPixel;
+    uint32 windowWidthUnits = (windowWidthBytes + 15) / 16;
+    
+    // Mascheriamo secondo il datasheet (10 bit per campo: 29:20 e 13:4)
+    uint32 fbWidthReg = ((windowWidthUnits & 0x3FF) << 20) | ((fbPitchUnits & 0x3FF) << 4);
+    debug_printf("SM750_ACC: FB_WIDTH Reg (0x44): 0x%08x (WinUnits: %u, PitchUnits: %u)\n", 
+                 fbWidthReg, windowWidthUnits, fbPitchUnits);
+
+    SM750_WREG32(SM750_DISP_PANEL_VIDEO_FB_WIDTH, fbWidthReg);
+    //SM750_WREG32(SM750_DISP_PANEL_VIDEO_FB_WIDTH, (pitchIn128BitUnits << 20) | (pitchIn128BitUnits << 4));
 
     // 3. Coordinate Finestra
     // TL: h_start (Left), v_start (Top)
@@ -248,8 +259,21 @@ sm750_configure_overlay(const overlay_window *window, const overlay_buffer *buff
     
     control = 0;
 
-    // Formato YUYV (11b)
-    control |= (3 & 0x3);
+    // Formato YUYV (11b) NO! siamo un po' più dinamici per favore
+    //control |= (3 & 0x3);
+    uint32 format = 0;
+    switch (buffer->space) {
+        case B_YCbCr422: format = 3; break; // YUYV
+        case B_RGB16:    format = 1; break; // 16bpp 5:6:5
+        case B_RGB32:
+        default:
+            // Se arriviamo qui con RGB32 e non è supportato, 
+            // forziamo YUV o restituiamo errore.
+            debug_printf("SM750_ACC: Formato %d non supportato dall'hardware! Forzo YUV.\n", buffer->space);
+            format = 3; 
+            break;
+    }
+    control |= (format & 0x3);
 
     // Abilitazione Video Plane
     control |= (1 << 2);
@@ -302,18 +326,22 @@ status_t
 sm750_allocate_overlay(overlay_token *token)
 {
 	CALLED();
+	shared_info *si = gInfo->si;
     // Usiamo una variabile atomica o un semplice flag nella shared info
     // per assicurarci che solo un'applicazione alla volta usi l'overlay.
-    if (atomic_test_and_set(&gInfo->si->overlay_in_use, 1, 0) != 0) {
+    if (atomic_test_and_set(&si->overlay_in_use, 1, 0) != 0) {
         return B_BUSY; 
     }
 
     // Il "cookie" che passiamo può essere un identificatore dell'overlay
     // (nel nostro caso abbiamo solo l'Overlay 0)
     //*token = (void*)(uintptr_t)0x534d37350; // "SM750" in hex come ID
-    *token = (void*)gInfo;
+    // Incrementiamo il token numerico
+    si->overlay.overlay_token++;
+    // 3. Lo restituiamo castato al tipo richiesto dall'API (void*)
+    *token = (overlay_token)si->overlay.overlay_token;
     
-    debug_printf("SM750_ACC: Overlay allocato con successo.\n");
+    debug_printf("SM750_ACC: Overlay allocato. Token ID: %ld\n", (uintptr_t)*token);
     return B_OK;
 }
 
@@ -321,6 +349,10 @@ status_t
 sm750_release_overlay(overlay_token token)
 {
 	CALLED();
+	if (token != (overlay_token)gInfo->si->overlay.overlay_token) {
+        return B_BAD_VALUE;
+    }
+	
     vuint32 *regs = gInfo->regs;
 
     // 1. Spegniamo l'hardware prima di rilasciare il token
@@ -329,6 +361,7 @@ sm750_release_overlay(overlay_token token)
     SM750_WREG32(SM750_DISP_PANEL_VIDEO_DISP_CTRL, control);
 
     // 2. Liberiamo il flag di utilizzo
+    gInfo->si->overlay.overlay_token = 0;
     atomic_set(&gInfo->si->overlay_in_use, 0);
 
     debug_printf("SM750_ACC: Overlay rilasciato e hardware spento.\n");
@@ -340,6 +373,9 @@ sm750_configure_overlay_api(overlay_token token, const overlay_buffer *buffer,
     const overlay_window *window, const overlay_view *view)
 {
 	CALLED();
+	if (token != (overlay_token)gInfo->si->overlay.overlay_token) {
+        return B_BAD_VALUE;
+    }
 	vuint32 *regs = gInfo->regs;
 	
     // Se buffer è NULL, l'utente vuole nascondere l'overlay temporaneamente
@@ -362,7 +398,7 @@ sm750_overlay_supported_features(uint32 space)
     // La SM750 è particolare, il layer video supporta YUYV ma non ha il color key,
     // il layer video alpha ha il color key ma non il formato YUYV
     // B_OVERLAY_COLOR_KEY |       // Trasparenza tramite colore (fondamentale)
-    return 
+    return B_OVERLAY_COLOR_KEY |
            B_OVERLAY_HORIZONTAL_FILTERING | // Scaling fluido orizzontale
            B_OVERLAY_VERTICAL_FILTERING;   // Scaling fluido verticale
 }
