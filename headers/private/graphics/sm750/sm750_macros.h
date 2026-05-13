@@ -38,44 +38,6 @@
 #define SM750_INT_VBLANK_CRT1	(1 << 0)   // Bit per il VBlank del Canale primario (CRT)
 #define SM750_INT_VBLANK_PANEL   (1 << 1)   // Bit per il VBlank del Canale secondario (Panel)
 
-/* --- Registri di Controllo Motore 2D (SM750 GE) --- */
-#define SM750_GE_SOURCE				0x10000 // Sorgente (Offset)
-#define SM750_GE_DESTINATION		0x10004 // Destinazione (Offset)
-#define SM750_GE_DIMENSION	   		0x10008 // Larghezza e Altezza
-#define SM750_GE_CONTROL			0x1000C // Comando (BitBlt, Fill, ecc.)
-#define SM750_GE_PITCH				0x10010 // Pitch sorgente e destinazione
-#define SM750_GE_FOREGROUND			0x10014 // Colore primo piano
-#define SM750_GE_BACKGROUND			0x10018 // Colore sfondo
-#define SM750_GE_STRETCH			0x1001C // Parametri di stretch
-#define SM750_GE_COLOR_COMPARE		0x10020 // Color Key
-#define SM750_GE_CLIP_TL			0x10024 // Clipping Top-Left
-#define SM750_GE_CLIP_BR			0x10028 // Clipping Bottom-Right
-#define SM750_GE_MONO_PATTERN_L		0x1002C // Pattern Monocromatico (Low)
-#define SM750_GE_MONO_PATTERN_H		0x10030 // Pattern Monocromatico (High)
-#define SM750_GE_STATUS		  		0x10034 // Stato del motore (Busy/Idle)
-// --------------------------------- DA VERIFICARE -------------------------*/
-/* --- ROP (Raster Operations) --- */
-/* SM750 usa un codice ROP a 8 bit (es. 0xCC per copia, 0xF0 per pattern) */
-#define SM750_GE_ROP_CODE			0x1000C // Parte del registro di controllo
-
-/* --- Clipping Registers --- */
-#define SM750_GE_CLIP_TL			0x10024 // Top-Left (X in 31:16, Y in 15:0)
-#define SM750_GE_CLIP_BR			0x10028 // Bottom-Right
-
-/* --- Pattern & Color Registers --- */
-#define SM750_GE_COLOR_0			0x10014 // Foreground Color (Pattern/Rect Fill)
-#define SM750_GE_COLOR_1			0x10018 // Background Color
-#define SM750_GE_MONO_PAT_L			0x1002C // Mono Pattern 64-bit (Low)
-#define SM750_GE_MONO_PAT_H			0x10030 // Mono Pattern 64-bit (High)
-
-/* --- BitBlt (Blit) Registers --- */
-#define SM750_GE_SRC_ADDR		0x10000 // Indirizzo sorgente (offset in memoria video)
-#define SM750_GE_DST_ADDR		0x10004 // Indirizzo destinazione
-#define SM750_GE_PITCH			0x10010 // Pitch (Src in 31:16, Dst in 15:0)
-#define SM750_GE_DIMENSION		0x10008 // Dimensione (Width in 31:16, Height in 15:0)
-#define SM750_GE_SRC_XY			0x10040 // Coordinate X,Y sorgente (se usate)
-#define SM750_GE_DST_XY			0x10044 // Coordinate X,Y destinazione
-/* -------------------------------- FINO QUI ----------------------------------*/
 /* System Control Registers (SM750) 
  * Sostituisce PWRUP/Coldstart
  */
@@ -323,10 +285,6 @@
 /* --- PCI Config Space (via ioctl) --- */
 #define CFGR(A)   (eng_pci_access.offset=SM750_PCI_##A, ioctl(fd,ENG_GET_PCI, &eng_pci_access,sizeof(eng_pci_access)), eng_pci_access.value)
 #define CFGW(A,B) (eng_pci_access.offset=SM750_PCI_##A, eng_pci_access.value = B, ioctl(fd,ENG_SET_PCI,&eng_pci_access,sizeof(eng_pci_access)))
-
-/* --- Graphic Engine (2D Acceleration) --- */
-#define GE_R(A)	  (SM750_REG32(SM750_GE_##A))
-#define GE_W(A,B)	(SM750_REG32(SM750_GE_##A) = (B))
 
 /* --- Display Control (Panel/CRT) --- */
 #define DISP_R(A)	(SM750_REG32(SM750_DISP_##A))
