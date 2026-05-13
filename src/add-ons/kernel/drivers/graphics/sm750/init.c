@@ -203,8 +203,22 @@ sm750_get_clocks(vuint32 *regs, shared_info *si)
     // sembra che la frequenza di riferimento sia 14.31818f
     //si->card_info.f_ref = 14.31818f; // già impostato prima...
 }*/
+
+static const color_space kFallbackSpaces[] = {
+    B_RGB32,
+    B_RGB16,
+    B_CMAP8
+};
+
 static status_t create_mode_list(shared_info* si) {
-    size_t size = (MAX_EDID_MODES * sizeof(display_mode) + B_PAGE_SIZE - 1) & ~(B_PAGE_SIZE - 1);
+	uint32 vesa_count = 0;
+    while (vesa_dmt_table[vesa_count].width != 0) {
+        vesa_count++;
+    }
+	uint32 total_modes = vesa_count * 3;
+	
+    //size_t size = (MAX_EDID_MODES * sizeof(display_mode) + B_PAGE_SIZE - 1) & ~(B_PAGE_SIZE - 1);
+    size_t size = (total_modes * sizeof(display_mode) + B_PAGE_SIZE - 1) & ~(B_PAGE_SIZE - 1);
     display_mode* local_list = NULL;
 
     area_id m_area = create_area("sm750 modes", (void **)&local_list,
@@ -221,31 +235,37 @@ static status_t create_mode_list(shared_info* si) {
         dprintf("SM750: EDID presente, potrei filtrare i modi ma non ancora implementato...\n");
     }
 
-    for (int i = 0; vesa_dmt_table[i].width != 0 && count < MAX_EDID_MODES; i++) {
-        // USA local_list, NON si->mode_list!
-        display_mode* dm = &local_list[count]; 
+    for (int i = 0; vesa_dmt_table[i].width != 0; i++) {
         const vesa_timing_t* vesa = &vesa_dmt_table[i];
+        
+        for (int s = 0; s < 3; s++) {
+            //if (count >= MAX_EDID_MODES) break;
 
-        dm->timing.pixel_clock = vesa->pixel_clock;
-        dm->timing.h_display    = vesa->width;
-        dm->timing.h_sync_start = vesa->h_sync_start;
-        dm->timing.h_sync_end   = vesa->h_sync_end;
-        dm->timing.h_total      = vesa->h_total;
-        
-        dm->timing.v_display    = vesa->height;
-        dm->timing.v_sync_start = vesa->v_sync_start;
-        dm->timing.v_sync_end   = vesa->v_sync_end;
-        dm->timing.v_total      = vesa->v_total;
-        dm->timing.flags        = vesa->flags;
-        
-        dm->space = B_RGB32;
-        dm->virtual_width  = vesa->width;
-        dm->virtual_height = vesa->height;
-        dm->h_display_start = 0;
-        dm->v_display_start = 0;
-        dm->flags = 0;
-        
-        count++;
+            display_mode* dm = &local_list[count];
+            
+            // Copia Timing
+            dm->timing.pixel_clock = vesa->pixel_clock;
+            dm->timing.h_display    = vesa->width;
+            dm->timing.h_sync_start = vesa->h_sync_start;
+            dm->timing.h_sync_end   = vesa->h_sync_end;
+            dm->timing.h_total      = vesa->h_total;
+            dm->timing.v_display    = vesa->height;
+            dm->timing.v_sync_start = vesa->v_sync_start;
+            dm->timing.v_sync_end   = vesa->v_sync_end;
+            dm->timing.v_total      = vesa->v_total;
+            dm->timing.flags        = vesa->flags;
+
+            // Imposta lo spazio colore corrente del sotto-ciclo
+            dm->space = kFallbackSpaces[s];
+            
+            dm->virtual_width  = vesa->width;
+            dm->virtual_height = vesa->height;
+            dm->h_display_start = 0;
+            dm->v_display_start = 0;
+            dm->flags = 0;
+
+            count++;
+        }
     }
 
     si->mode_count = count;
@@ -292,25 +312,6 @@ static void draw_logo(DeviceInfo *di, display_mode* dm) {
     }
 }
 
-/*
-void enable_interrupts(device_info* info) {
-	vuint32* regs = info->regs;
-    
-	// 1. Pulizia preventiva
-	SM750_WREG32(SM750_SYS_RAW_INT_CLEAR, 0xFFFFFFFF); 
-    
-	// 2. Mascheramento: Abilitiamo Panel V-Sync (bit 0) e CRT V-Sync (bit 1)
-	// Abilitiamo anche l'Engine 2D (bit 12) per quando lo sbloccheremo.
-	// HEI NO! il registro SM750_SYS_INT_MASK è di sola lettura!
-	// di fatto gli interrupt sono attivi di default
-	//SM750_WREG32(SM750_SYS_INT_MASK, (1 << 0) | (1 << 1) | (1 << 12));
-	// 2. Puliamo il 2D Engine (che sappiamo essere a 0x100050)
-	uint32 engineStatus = SM750_REG32(SM750_2D_STATUS);
-	engineStatus &= ~0x03; // Puliamo bit 0 e 1 scrivendo 0 come da datasheet
-	SM750_WREG32(SM750_2D_STATUS, engineStatus);
-
-	info->shared_info->irq_enabled = 1;
-}*/
 static void sm750_init_interrupts(DeviceInfo* info) 
 {
 	vuint32* regs = info->regs;
@@ -616,7 +617,10 @@ void sm750_init_chip(DeviceInfo *di) {
         }
     
         // Altri parametri obbligatori
-        dm->space = B_RGB32;
+        if (bi && bi->depth <= 8) dm->space = B_CMAP8;
+        else if (bi && bi->depth <= 16) dm->space = B_RGB16;
+        else dm->space = B_RGB32;
+        //dm->space = B_RGB32;
         dm->virtual_width = dm->timing.h_display;
         dm->virtual_height = dm->timing.v_display;
     }
@@ -635,14 +639,6 @@ void sm750_init_chip(DeviceInfo *di) {
 		// Se la tua lettura I2C fallisce, copia questa info 
 		// nella struct edid locale dell'accelerante
 	//}
-    
-      
-    // Initialize 2D engine Benaphore 
-    // NO LO FACCIAMO in init_common con is_clone false
-    //si->engine.lock.sem = create_sem(0, "sm750 engine benaphore");
-    //si->engine.lock.ben = 0;
-    //set_sem_owner(si->engine.lock.sem, B_SYSTEM_TEAM);
-
     
     // F. VGA BYPASS (Necessario per usare il Framebuffer lineare in modo nativo)
     // Abilitiamo il bypass VGA su entrambe le pipe (Primary e Secondary)
@@ -683,9 +679,7 @@ void sm750_init_chip(DeviceInfo *di) {
         nctrl &= ~(3U << 28); 
         nctrl |= (2U << 28); // Secondary Display Data for Primary Disaply
         nctrl &= ~(1 << 2); // disattiva il piano grafico primario, altrimenti vedo immagine falsata e rovinata
-        // giusto per provare, ho laciato attivo PANEL e disattivato CRT:
-        // ctrl &= ~(1 << 2); //disattiva piano crt lasciando piano panel attivo
-        // nota d'esercizio: disattivando il piano CRT e lasciando attivo il piano PANEL, il desktop compare a monito ma è difettato
+        // nota d'esercizio: disattivando il piano CRT e lasciando attivo il piano PANEL, il desktop compare a monitor ma difettato
         // da righe orizzontali che traslano l'immagine.
         // o la mia scheda non supporta il ramo PANEL, o il ramo PANEL non è correttamente configurato, o c'è altro in ballo
     
@@ -719,8 +713,6 @@ void sm750_init_chip(DeviceInfo *di) {
     si->fbc.bytes_per_row = dm->timing.h_display * (bpp / 8);
     si->fbc2 = si->fbc; // per sicurezza copiamo la configurazione anche nell'altra uscita
     
-    
-
     //dprintf("SM750: Init  completato. Mem: %d MB, Mode: %s\n", detected_mem / (1024*1024), si->card_info.is_panel ? "PANEL" : "CRT");
     
     // --- INIZIO CONFIGURAZIONE GPIO PER EDID/I2C ---
@@ -769,21 +761,9 @@ void sm750_init_chip(DeviceInfo *di) {
     uint32 detect = SM750_REG32(SM750_CRT_MONITOR_DETECT);
     dprintf("SM750: Monitor Detect Status: 0x%08" B_PRIx32 "\n", detect);
     
-    // 7. DIAGNOSTICA FINALE MMIO
-    //sm750_get_clocks(regs, si);
-    
-    // SPLASH SCREEN che non funziona per ora
-    //uint32* kfb = (uint32*)di->framebuffer;
-    //uint32 size = detected_mem / 4; // in pixel a 32bpp
-    //// Riempimento brutale ma efficace - metteremo logo se possibile
-    //for (uint32 i = 0; i < size; i++) {
-    //    kfb[i] = 0xFFFF0000;
-    //}
     if (showLogo) {
     	display_mode *dm = si->card_info.is_panel ? &si->preferred_mode : &si->preferred_mode2;
     	draw_logo(di, dm);
     }
-    snooze(3000000); // 3 seconds of glory
-
-    //dprintf("SM750: Inizializzazione completata.\n");
+    snooze(5000000); // 5 seconds of glory
 }
