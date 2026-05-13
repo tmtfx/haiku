@@ -13,7 +13,7 @@
 
 extern accelerant_info *gInfo;
 
-#define CALLED() debug_printf("SM750_ACC: %s\n", __FUNCTION__)
+#define CALLED() debug_printf("SM750_ACC OVERLAY: %s\n", __FUNCTION__)
 
 static void
 sm750_set_video_scale(const overlay_window *window, const overlay_buffer *buffer)
@@ -73,11 +73,12 @@ sm750_overlay_supported_spaces(const display_mode *dm)
 {
 	CALLED();
     static const uint32 spaces[] = {
+    	B_RGB32,
         B_YCbCr422,	// YUY2 (Il più comune)
         B_RGB16,	// RGB 5:6:5
-        B_RGB15,	// RGB 5:5:5
         0
     };
+    //static const uint32 spaces[] = { B_YCbCr422, 0 };
     return spaces;
 }
 
@@ -87,9 +88,20 @@ sm750_get_overlay_constraints(const display_mode *dm, const overlay_buffer *ob,
     overlay_constraints *oc)
 {
 	CALLED();
+	if (dm == NULL) {
+        debug_printf("SM750_ACC: ATTENZIONE! display_mode è NULL in constraints\n");
+        return;
+    }
+    if (!oc) {
+    	debug_printf("SM750_ACC: Richista overlay constraints con oc NULL");
+    	return;
+    }
+    debug_printf("SM750_ACC: Constraints per buffer %p\n", ob);
     // Rapporto di scala (SM750 supporta upscaling generoso)
     oc->view.width_alignment = 7;      // Allineamento 8 pixel
     oc->view.height_alignment = 0;
+    oc->window.width_alignment = 7;
+    oc->window.height_alignment = 0;
     
     // Dimensioni sorgente (il video originale)
     oc->view.width.min = 32;
@@ -98,10 +110,12 @@ sm750_get_overlay_constraints(const display_mode *dm, const overlay_buffer *ob,
     oc->view.height.max = 1080;
 
     // Dimensioni destinazione (sullo schermo)
-    oc->window.width.min = 32;
-    oc->window.width.max = dm->virtual_width;
-    oc->window.height.min = 32;
-    oc->window.height.max = dm->virtual_height;
+    if (dm) {
+        oc->window.width.min = 32;
+        oc->window.width.max = dm->virtual_width;
+        oc->window.height.min = 32;
+        oc->window.height.max = dm->virtual_height;
+    }
     
     // Fattore di scala (Haiku usa 1/64k come unità)
     oc->h_scale.min = 1.0f / 8.0f; 
@@ -180,6 +194,16 @@ sm750_configure_overlay(const overlay_window *window, const overlay_buffer *buff
     // Usiamo l'offset salvato in buffer_dma durante l'allocazione
     uint32 bufferOffset = (uint32)(addr_t)buffer->buffer_dma;
     SM750_WREG32(SM750_DISP_PANEL_VIDEO_FB0_ADDR, bufferOffset & 0x03FFFFF0);
+    
+    // Calcoliamo la fine: Inizio + (Pitch * Altezza) - 1
+    uint32 bufferSize = buffer->bytes_per_row * buffer->height;
+    uint32 endAddr = bufferOffset + bufferSize - 1;
+    // FB 0 Last Address: 
+    // Applichiamo la maschera 0x03FFFFF0 per forzare i bit 3:0 a zero 
+    // e restare nel range dei 26 bit di indirizzamento (25:4).
+    // Se usi memoria interna, il bit 27 resta 0.
+    uint32 lastAddrReg = endAddr & 0x03FFFFF0;
+    SM750_WREG32(SM750_DISP_PANEL_VIDEO_FB0_LAST_ADDR, lastAddrReg);
     
     // 2. Larghezza (Pitch)
     uint32 pitchIn128BitUnits = buffer->bytes_per_row / 16;
@@ -286,7 +310,8 @@ sm750_allocate_overlay(overlay_token *token)
 
     // Il "cookie" che passiamo può essere un identificatore dell'overlay
     // (nel nostro caso abbiamo solo l'Overlay 0)
-    *token = (void*)(uintptr_t)0x534d37350; // "SM750" in hex come ID
+    //*token = (void*)(uintptr_t)0x534d37350; // "SM750" in hex come ID
+    *token = (void*)gInfo;
     
     debug_printf("SM750_ACC: Overlay allocato con successo.\n");
     return B_OK;
@@ -314,6 +339,7 @@ status_t
 sm750_configure_overlay_api(overlay_token token, const overlay_buffer *buffer,
     const overlay_window *window, const overlay_view *view)
 {
+	CALLED();
 	vuint32 *regs = gInfo->regs;
 	
     // Se buffer è NULL, l'utente vuole nascondere l'overlay temporaneamente
@@ -333,8 +359,10 @@ sm750_configure_overlay_api(overlay_token token, const overlay_buffer *buffer,
 uint32
 sm750_overlay_supported_features(uint32 space)
 {
-    // La SM750 supporta:
-    return B_OVERLAY_COLOR_KEY |       // Trasparenza tramite colore (fondamentale)
+    // La SM750 è particolare, il layer video supporta YUYV ma non ha il color key,
+    // il layer video alpha ha il color key ma non il formato YUYV
+    // B_OVERLAY_COLOR_KEY |       // Trasparenza tramite colore (fondamentale)
+    return 
            B_OVERLAY_HORIZONTAL_FILTERING | // Scaling fluido orizzontale
            B_OVERLAY_VERTICAL_FILTERING;   // Scaling fluido verticale
 }
