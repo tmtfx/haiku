@@ -91,7 +91,7 @@ sm750_interrupt_handler(void* data)
 
     // 1. Leggiamo lo Status (Registro 0x24)
     uint32 status = SM750_REG32(SM750_SYS_INT_STATUS);
-    dprintf("SM750: INTERRUPT! status: 0x%08" B_PRIx32 "\n", status);
+    //dprintf("SM750: INTERRUPT! status: 0x%08" B_PRIx32 "\n", status);
     
     // Se zero, l'interrupt non è nostro
     if (status == 0) 
@@ -246,10 +246,18 @@ open_device(const char *name, uint32 flags, void **cookie)
         memset(di->si, 0, B_PAGE_SIZE * 2);
         strncpy(di->si->device_path, name, B_PATH_NAME_LENGTH);
         memcpy(&di->si->settings, &current_settings, sizeof(sm750_settings));
-        
+        /* questi li creiamo nell'accelerante
         di->si->vblank_sem = create_sem(0, "sm750 vblank sem");
+        set_sem_owner(di->si->vblank_sem, B_SYSTEM_TEAM);
         di->si->engine.lock.sem = create_sem(0, "sm750 engine sem");
-                
+        set_sem_owner(di->si->engine.lock.sem, B_SYSTEM_TEAM);
+        di->si->vblank_sync_sem = create_sem(0, "sm750_vblank_sync_user");
+        set_sem_owner(di->si->vblank_sync_sem, B_SYSTEM_TEAM);     
+        */
+        // per il momento assegno valore -1
+        di->si->vblank_sem = -1;
+        di->si->vblank_sync_sem = -1;
+        di->si->engine.lock.sem = -1;
         // 4. Mappatura REGISTRI (BAR 1 - 2MB)
         di->regs_area = map_mem((void **)&di->regs, di->pci.u.h0.base_registers[1], 
                                di->pci.u.h0.base_register_sizes[1], "sm750_regs_k");
