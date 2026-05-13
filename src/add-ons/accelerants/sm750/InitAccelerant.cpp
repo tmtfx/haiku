@@ -252,6 +252,55 @@ static status_t init_common(int fd,bool isClone) {
         gInfo->mode_list_area = clone_area("sm750 modes user", (void**)&gInfo->mode_list,
             B_ANY_ADDRESS, B_READ_AREA | B_WRITE_AREA, si->mode_list_area);
         if (gInfo->mode_list_area < 0) return gInfo->mode_list_area;
+        // --- AVVIO SERVIZIO INTERRUPT ---
+        si->vblank_sem = create_sem(0, "sm750_vblank_kernel_signal");
+        si->vblank_sync_sem = create_sem(0, "sm750_vblank_sync_user");
+        si->engine.lock.sem = create_sem(0, "sm750 engine sem");
+
+        // Fondamentale: cambiamo l'owner a B_SYSTEM_TEAM così il Kernel 
+        // può manipolarli senza restrizioni di team
+        //set_sem_owner(si->vblank_sem, B_SYSTEM_TEAM);
+        //set_sem_owner(si->vblank_sync_sem, B_SYSTEM_TEAM);
+        //set_sem_owner(si->engine.lock.sem, B_SYSTEM_TEAM);
+        
+        atomic_set(&si->irq_enabled, 1);
+        gInfo->vblank_thread = spawn_thread(
+            sm750_vblank_service_thread, 
+            "sm750 vblank service", 
+            B_DISPLAY_PRIORITY, 
+            gInfo);
+        if (gInfo->vblank_thread >= 0) {
+            resume_thread(gInfo->vblank_thread);
+            debug_printf("SM750_ACC: VBlank service thread avviato (ID: %" B_PRId32 ")\n", gInfo->vblank_thread);
+            // --- DIAGNOSTICA TEMPORANEA ---
+            thread_id diagThread = spawn_thread([](void* data) -> int32 {
+                accelerant_info* ai = (accelerant_info*)data;
+                snooze(2000000); // Aspetta 2 secondi che tutto si stabilizzi
+        
+                uint32 start_count = ai->si->vblank_count;
+                bigtime_t start_time = system_time();
+        
+                snooze(5000000); // Monitora per 5 secondi
+        
+                uint32 end_count = ai->si->vblank_count;
+                bigtime_t end_time = system_time();
+        
+                bigtime_t duration = end_time - start_time;
+                uint32 diff_count = end_count - start_count;
+
+                // Calcoliamo senza float per sicurezza del dprintf
+                // FPS = (count * 1000000) / durata_in_microsecondi
+                uint32 fps = (uint32)(diff_count * 1000000ULL / duration);
+
+                // Usa debug_printf (che è quello corretto per l'accelerante)
+                debug_printf("SM750: DIAGNOSTICA - Interrupt ricevuti: %" B_PRIu32 " in %" B_PRId64 " us. FPS stimati: %" B_PRIu32 "\n", diff_count, duration, fps);
+                return B_OK;
+            }, "sm750_vblank_diag", B_LOW_PRIORITY, gInfo);
+            if (diagThread >= 0) resume_thread(diagThread);
+            // --- FINE DIAGNOSTICA ---
+        } else {
+            debug_printf("SM750_ACC: ERRORE spawn_thread fallito!\n");
+        }
     } else {
         // ISTANZA CLONE: si limita a mappare l'area decisa dal primario
         gInfo->mode_list_area = clone_area("sm750 modes clone", (void**)&gInfo->mode_list,
@@ -336,6 +385,11 @@ status_t sm750_get_accelerant_device_info(accelerant_device_info *adi) {
     return B_OK;
 }
 
+sem_id sm750_retrace_semaphore(void)
+{
+    return gInfo->si->vblank_sync_sem;
+}
+
 
 void sm750_uninit_accelerant(void) {
     if (gInfo->si != NULL && !gInfo->is_clone) {
@@ -360,7 +414,7 @@ void* get_accelerant_hook(uint32 feature, void* data) {
         case B_CLONE_ACCELERANT:            return (void*)sm750_clone_accelerant;
         case B_UNINIT_ACCELERANT:           return (void*)sm750_uninit_accelerant;
         case B_GET_ACCELERANT_DEVICE_INFO:  return (void*)sm750_get_accelerant_device_info;
-        //B_ACCELERANT_RETRACE_SEMAPHORE
+        case B_ACCELERANT_RETRACE_SEMAPHORE: return (void *)sm750_retrace_semaphore;
         
         
         /* Display Modes */
