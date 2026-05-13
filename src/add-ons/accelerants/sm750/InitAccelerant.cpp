@@ -69,8 +69,15 @@ create_mode_list()
         debug_printf("SM750_ACC: Nessun EDID valido. Uso fallback BIOS/VesaTable.\n");
         
         // Creiamo un'area manualmente per contenere i nostri modi di fallback
-        size_t area_size = (MAX_EDID_MODES * sizeof(display_mode) + B_PAGE_SIZE - 1) 
-            & ~(B_PAGE_SIZE - 1);
+        //size_t area_size = (MAX_EDID_MODES * sizeof(display_mode) + B_PAGE_SIZE - 1) 
+        //    & ~(B_PAGE_SIZE - 1);
+        uint32 vesa_count = 0;
+        while (vesa_dmt_table[vesa_count].width != 0) vesa_count++;
+    
+        // Ogni timing avrà 3 spazi colore (8, 16, 32 bit) + 1 per il preferred mode
+        uint32 total_needed = (vesa_count * 3) + 3; 
+
+        size_t area_size = (total_needed * sizeof(display_mode) + B_PAGE_SIZE - 1) & ~(B_PAGE_SIZE - 1);
         
         new_area = create_area("sm750 modes fallback", (void**)&list, 
             B_ANY_ADDRESS, area_size, B_NO_LOCK, B_READ_AREA | B_WRITE_AREA);
@@ -81,8 +88,12 @@ create_mode_list()
             &gInfo->si->preferred_mode : &gInfo->si->preferred_mode2;
             
         if (pm->timing.h_display > 0 && pm->timing.v_display > 0) {
-            list[0] = *pm;
-            count = 1;
+        	color_space spaces[] = { B_RGB32, B_RGB16, B_CMAP8 };
+            for (int s = 0; s < 3; s++) {
+                list[count] = *pm;
+                list[count].space = spaces[s];
+                count++;
+            }
             debug_printf("SM750_ACC: Modo preferito (Boot) impostato in list[0]: %dx%d\n", 
                 pm->timing.h_display, pm->timing.v_display);
         } else {
@@ -97,35 +108,40 @@ create_mode_list()
         }
 
         // Secondo passaggio: aggiungiamo gli altri modi dalla tabella VESA (evitando duplicati)
-        for (int i = 0; vesa_dmt_table[i].width != 0 && count < MAX_EDID_MODES; i++) {
+        for (int i = 0; vesa_dmt_table[i].width != 0; i++) {
             const vesa_timing_t* vesa = &vesa_dmt_table[i];
+            color_space spaces[] = { B_RGB32, B_RGB16, B_CMAP8 };
 
             // Salta se è lo stesso del modo preferito già inserito
-            if (count > 0 && vesa->width == list[0].timing.h_display && 
-                vesa->height == list[0].timing.v_display) {
-                continue;
+            for (int s = 0; s < 3; s++) {
+                // Evitiamo duplicati rispetto al preferred mode già inserito
+                if (pm->timing.h_display == vesa->width && pm->timing.v_display == vesa->height)
+                    continue;
+
+                display_mode* dm = &list[count];
+                // Riempimento Timing (uguale a prima)
+                dm->timing.pixel_clock = vesa->pixel_clock;
+                dm->timing.h_display    = vesa->width;
+                dm->timing.h_sync_start = vesa->h_sync_start;
+                dm->timing.h_sync_end   = vesa->h_sync_end;
+                dm->timing.h_total      = vesa->h_total;
+                dm->timing.v_display    = vesa->height;
+                dm->timing.v_sync_start = vesa->v_sync_start;
+                dm->timing.v_sync_end   = vesa->v_sync_end;
+                dm->timing.v_total      = vesa->v_total;
+                dm->timing.flags        = vesa->flags;
+
+                // IMPOSTA LO SPAZIO COLORE DINAMICAMENTE
+                dm->space = spaces[s];
+            
+                dm->virtual_width  = vesa->width;
+                dm->virtual_height = vesa->height;
+                dm->h_display_start = 0;
+                dm->v_display_start = 0;
+                dm->flags = 0;
+
+                count++;
             }
-
-            display_mode* dm = &list[count];
-            dm->timing.pixel_clock = vesa->pixel_clock;
-            dm->timing.h_display    = vesa->width;
-            dm->timing.h_sync_start = vesa->h_sync_start;
-            dm->timing.h_sync_end   = vesa->h_sync_end;
-            dm->timing.h_total      = vesa->h_total;
-            dm->timing.v_display    = vesa->height;
-            dm->timing.v_sync_start = vesa->v_sync_start;
-            dm->timing.v_sync_end   = vesa->v_sync_end;
-            dm->timing.v_total      = vesa->v_total;
-            dm->timing.flags        = vesa->flags;
-
-            dm->space = B_RGB32;
-            dm->virtual_width  = vesa->width;
-            dm->virtual_height = vesa->height;
-            dm->h_display_start = 0;
-            dm->v_display_start = 0;
-            dm->flags = 0;
-
-            count++;
         }
     }
     // ciclo di validazione (se sta all'interno della massima memoria disponibile per il desktop)
@@ -134,7 +150,13 @@ create_mode_list()
         display_mode *dm = &list[i];
         
         // Calcoliamo lo spazio necessario (assumendo il caso peggiore: 32bpp)
-        uint32 bytesPerPixel = 4; // B_RGB32
+        uint32 bytesPerPixel = 0;
+        switch (dm->space) {
+            case B_RGB32: bytesPerPixel = 4; break;
+            case B_RGB16: bytesPerPixel = 2; break;
+            case B_CMAP8: bytesPerPixel = 1; break;
+            default: continue; // Salta formati sconosciuti
+        }
         uint32 memNeeded = dm->virtual_width * dm->virtual_height * bytesPerPixel;
 
         bool modeOk = true;
@@ -272,6 +294,7 @@ static status_t init_common(int fd,bool isClone) {
         if (gInfo->vblank_thread >= 0) {
             resume_thread(gInfo->vblank_thread);
             debug_printf("SM750_ACC: VBlank service thread avviato (ID: %" B_PRId32 ")\n", gInfo->vblank_thread);
+            /*
             // --- DIAGNOSTICA TEMPORANEA ---
             thread_id diagThread = spawn_thread([](void* data) -> int32 {
                 accelerant_info* ai = (accelerant_info*)data;
@@ -297,7 +320,7 @@ static status_t init_common(int fd,bool isClone) {
                 return B_OK;
             }, "sm750_vblank_diag", B_LOW_PRIORITY, gInfo);
             if (diagThread >= 0) resume_thread(diagThread);
-            // --- FINE DIAGNOSTICA ---
+            // --- FINE DIAGNOSTICA ---*/
         } else {
             debug_printf("SM750_ACC: ERRORE spawn_thread fallito!\n");
         }
@@ -320,7 +343,7 @@ static status_t init_common(int fd,bool isClone) {
     gInfo->sm750_engine_token.capability_mask = 0;
     gInfo->sm750_engine_token.opaque = NULL;
     
-    debug_printf("SM750_ACC: Engine Sem ID: %d\n", gInfo->si->engine.lock.sem);
+    //debug_printf("SM750_ACC: Engine Sem ID: %d\n", gInfo->si->engine.lock.sem);
 
     return B_OK;
 }
