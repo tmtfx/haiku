@@ -93,7 +93,7 @@ extern "C" {
 //#define CURSOR_VRAM_SIZE (16 * 1024)
 //#define CRT_CURSOR_VRAM_OFFSET (si->card_info.mem_size - CURSOR_VRAM_SIZE)
 
-#define MAX_EDID_MODES 8 // Di solito 4 detailed + eventuali standard
+//#define MAX_EDID_MODES 10 // Di solito 4 detailed + eventuali standard
 
 enum {
 	ENG_GET_PRIVATE_DATA = B_DEVICE_OP_CODES_END + 1,
