@@ -257,6 +257,7 @@ typedef struct {
     const overlay_buffer *current_ob; /* Buffer attualmente visualizzato */
     const overlay_buffer *next_buffer_to_show;
     bool            overlay_active;
+    thread_id       vblank_thread;
 } accelerant_info;
 
 /* Stato globale del driver */
