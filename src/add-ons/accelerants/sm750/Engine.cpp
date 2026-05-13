@@ -80,7 +80,7 @@ void sm750_program_pll(uint32 target_khz, bool is_panel)
     // Cerchiamo i valori ottimali. 
     // m (1-255), n (2-15), div_val (1, 2, 4, 8, 16, 32, 64)
     if (sm750_calc_pll(target_khz, &m, &n, &div_val) != B_OK) return;
-    debug_printf("SM750_PLL: target kH %u, m %u, n %u\n",target_khz,m,n);
+    //debug_printf("SM750_PLL: target kH %u, m %u, n %u\n",target_khz,m,n);
 
     uint32 pod_bits = 0;
     uint32 od_bits = 0;
@@ -101,7 +101,7 @@ void sm750_program_pll(uint32 target_khz, bool is_panel)
     }
 
     uint32 pll_reg = 0;
-    debug_printf("SM750_PLL: pod_bits %u, od_bits %u, n %u, m %u\n",pod_bits,od_bits,n,m);
+    //debug_printf("SM750_PLL: pod_bits %u, od_bits %u, n %u, m %u\n",pod_bits,od_bits,n,m);
     pll_reg |= (1 << 17);               // PD: PLL Power On
     pll_reg |= (pod_bits << 14);        // POD
     pll_reg |= (od_bits << 12);         // OD
@@ -116,8 +116,8 @@ void sm750_program_pll(uint32 target_khz, bool is_panel)
     pll_reg &= ~(1 << 17); // PLL Power down
     SM750_WREG32(ctrl_offset,pll_reg); // disattiva il pll in ctr o in panel se non usato
     snooze(1500); 
-    debug_printf("SM750_PLL: Programmazione %s a %u kHz\n", is_panel ? "PANEL" : "CRT", target_khz);
-    debug_printf("SM750_PLL: M:%u N:%u Div:%u -> Reg 0x%08x\n", m, n, div_val, pll_reg);
+    //debug_printf("SM750_PLL: Programmazione %s a %u kHz\n", is_panel ? "PANEL" : "CRT", target_khz);
+    //debug_printf("SM750_PLL: M:%u N:%u Div:%u -> Reg 0x%08x\n", m, n, div_val, pll_reg);
 }
 
 status_t sm750_move_display_area(uint16 h_display_start, uint16 v_display_start)
@@ -321,7 +321,7 @@ void sm750_init_2d_engine(display_mode *mode) {
     // Bit 12:0  = Right (width - 1)  -> Maschera 0x1FFF (13 bit) max 8191
     uint32 clipBR = (((height - 1) & 0xFFFF) << 16) | ((width - 1) & 0x1FFF);
     SM750_WREG32(SM750_2D_CLIP_BR, clipBR);
-    debug_printf("SM750_ACC: 2D engine succesfully initializated\n");
+    //debug_printf("SM750_ACC: 2D engine succesfully initializated\n");
 }
 
 void sm750_fill_rectangle(engine_token *et, uint32 color, 
