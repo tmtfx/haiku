@@ -467,16 +467,19 @@ void sm750_fill_span(engine_token *et, uint32 color, uint16 *spans, uint32 count
 }
 // Questo thread "vive" nell'accelerante e gestisce i cambi di buffer
 //uint32 source = si->card_info->is_panel ? SM750_DISP_PANEL_VIDEO_FB0_ADDR : SM750_DISP_CRT_FB_ADDR;
-int32 
-sm750_vblank_service_thread(void *arg)
+int32 sm750_vblank_service_thread(void *arg)
 {
     accelerant_info *ai = (accelerant_info *)arg;
     shared_info *si = ai->si;
     vuint32* regs = ai->regs; // Per le macro
+    
+    debug_printf("SM750_ACC: Thread vblank in ascolto su SEM ID: %d\n", si->vblank_sem);
 
-    while (atomic_get(&si->irq_enabled)) {
+    while (atomic_get(&si->irq_enabled) > 0) {
+    	//status_t err = acquire_sem(si->vblank_sem);
+    	status_t err = acquire_sem_etc(si->vblank_sem, 1, B_CAN_INTERRUPT, 0);
         // Aspettiamo l'interrupt dal kernel
-        if (acquire_sem(si->vblank_sem) == B_OK) {
+        if (err == B_OK) {
             
             // C'è un nuovo buffer che aspetta il V-Sync?
             if (ai->overlay_active && ai->next_buffer_to_show != NULL) {
@@ -490,10 +493,18 @@ sm750_vblank_service_thread(void *arg)
                 // Aggiorniamo lo stato locale
                 ai->current_ob = ai->next_buffer_to_show;
                 ai->next_buffer_to_show = NULL;
-                
-                // Svegliamo l'eventuale chiamata bloccante in attesa del flip
-                release_sem(si->vblank_sync_sem); 
             }
+            // 3. ORA segnaliamo al resto del mondo (App, Media Player) che il V-Sync è avvenuto
+            // Solo se qualcuno lo ha creato!
+            if (si->vblank_sync_sem > 0)   
+                // Svegliamo l'eventuale chiamata bloccante in attesa del flip
+                release_sem(si->vblank_sync_sem);
+        } else {
+            // Errore grave (permessi, semaforo distrutto, ecc.)
+            // Snooze per evitare di saturare la CPU in caso di errore
+            debug_printf("SM750_ACC: Errore acquire_sem: %s\n", strerror(err));
+            snooze(50000); // 50ms di pausa per far respirare il sistema
+            if (err == B_BAD_SEM_ID) break; // Esci se il semaforo è morto
         }
     }
     return B_OK;
