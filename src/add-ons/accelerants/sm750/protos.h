@@ -45,7 +45,7 @@ void sm750_wait_engine_idle(void);
 status_t sm750_get_sync_token(engine_token *et, sync_token *st);
 status_t sm750_sync_to_token(sync_token *st);
 status_t sm750_set_fb_addr(uint32 offset, bool is_panel);
-status_t sm750_set_indexed_colors(uint32 count, uint8 first, uint8 *colors, uint32 flags);
+void sm750_set_indexed_colors(uint32 count, uint8 first, uint8 *color_data, uint32 flags);
 status_t sm750_get_timing_constraints(display_timing_constraints *dtc);
 uint32 sm750_dpms_mode(void);
 uint32 sm750_dpms_capabilities(void);
