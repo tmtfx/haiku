@@ -196,7 +196,10 @@ open_device(const char *name, uint32 flags, void **cookie)
     for (int32 i = 0; devices[i]; i++) {
         if (strcmp(name, devices[i]->name) == 0) { di = devices[i]; break; }
     }
-    if (!di) return B_BAD_VALUE;
+    if (!di) {
+    	dprintf("SM750: Device not supported");
+    	return B_BAD_VALUE;
+    }
 
     if (di->openCount == 0) {
     	// 1. Abilitazione Bus Master e Memoria PCI
@@ -276,10 +279,13 @@ open_device(const char *name, uint32 flags, void **cookie)
         // Se MSI è attivo, usiamo il vettore MSI, altrimenti la linea IRQ classica
         // uint8 irq = di->msi_enabled ? di->msi_vector : di->pci.u.h0.interrupt_line;
         uint8 irq = di->pci.u.h0.interrupt_line;
+        dprintf("SM750: Tentativo di installazione interrupt legacy su Linea IRQ: %u\n", irq);
         
         status_t intStatus = install_io_interrupt_handler(irq, sm750_interrupt_handler, di, 0);
         if (intStatus != B_OK) {
             dprintf("SM750 ERROR: Impossibile installare interrupt handler su IRQ %u\n", irq);
+        } else {
+            dprintf("SM750: Handler installato con successo su IRQ %u\n", irq);
         }
         //install_io_interrupt_handler(di->pci.u.h0.interrupt_line, sm750_interrupt_handler, di, 0);
 
