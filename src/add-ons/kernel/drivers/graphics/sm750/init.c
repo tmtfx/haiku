@@ -56,24 +56,36 @@ static status_t init_vram_manager(shared_info* si)
     dprintf("SM750: Heap VRAM allocato a 0x%x (Size: %u KB)\n", heapStart, heapSize / 1024);
 
     // Inizializziamo l'heap sulla seconda metà della RAM
+    /*
     si->mem_mgr = (void*)mem_init("sm750_vram_heap", heapStart, heapSize, 8, 128);
     
     if (si->mem_mgr == NULL) {
     	dprintf("SM750 ERROR: mem_init fallito!\n");
     	return B_ERROR;
+    }*/
+    void* local_mem_mgr = (void*)mem_init("sm750_vram_heap", heapStart, heapSize, 8, 128);
+    
+    if (local_mem_mgr == NULL) {
+        dprintf("SM750 ERROR: mem_init fallito!\n");
+        return B_ERROR;
     }
 
     // --- ALLOCAZIONE CURSORE ---
     // Il cursore della SM750 in modalità "3-color + transparency" occupa 16KB.
     uint32 cursorBlockID;
     uint32 cursorOffset;
-    status_t status = mem_alloc((mem_info*)si->mem_mgr, 16384, (void*)0x43555253, // Tag 'CURS'
+    //status_t status = mem_alloc((mem_info*)si->mem_mgr, 16384, (void*)0x43555253, // Tag 'CURS'
+    //                            &cursorBlockID, &cursorOffset);
+    status_t status = mem_alloc((mem_info*)local_mem_mgr, 16384, (void*)0x43555253, 
                                 &cursorBlockID, &cursorOffset);
     
     if (status == B_OK) {
-        //si->cursor.pci_address = cursorOffset; 
-        si->cursor.vram_offset = cursorOffset; 
-        si->cursor.block_id = cursorBlockID;
+        ////si->cursor.pci_address = cursorOffset; 
+        //si->cursor.vram_offset = cursorOffset; 
+        //si->cursor.block_id = cursorBlockID;
+        user_memcpy(&si->cursor.vram_offset, &cursorOffset, sizeof(uint32));
+        user_memcpy(&si->cursor.block_id, &cursorBlockID, sizeof(uint32));
+        user_memcpy(&si->mem_mgr, &local_mem_mgr, sizeof(void*));
         dprintf("SM750: Cursore allocato dinamicamente a offset 0x%x\n", cursorOffset);
     } else {
         dprintf("SM750 ERROR: Impossibile allocare memoria per il cursore!\n");
