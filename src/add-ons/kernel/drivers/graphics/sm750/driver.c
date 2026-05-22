@@ -30,7 +30,7 @@ static const struct ChipInfo sm750_chips[] = {
 };
 
 static sm750_settings current_settings = {
-    "sm750.accelerant", true, 0, 0, false, true, true
+    "sm750.accelerant", true, 0, 0, false, true, false, false, true,
 };
 
 static DeviceInfo *devices[8];
@@ -81,6 +81,26 @@ map_videomem(void **out_virt, phys_addr_t phys, uint32 size, const char *name)
         *out_virt = virt;
     }
     return area;
+}
+
+static void
+load_settings(void)
+{
+    void* handle = load_driver_settings("sm750");
+    if (handle != NULL) {
+        // Estraiamo i parametri booleani sovrascrivendo i default di current_settings
+        current_settings.force_CRT = get_driver_boolean_parameter(
+            handle, "force_crt", current_settings.force_CRT, current_settings.force_CRT);
+            
+        current_settings.force_Panel = get_driver_boolean_parameter(
+            handle, "force_panel", current_settings.force_Panel, current_settings.force_Panel);
+            
+        // Se hai altri parametri da file come "hardcursor" o "usebios", puoi leggerli qui:
+        current_settings.hardcursor = get_driver_boolean_parameter(
+            handle, "hardcursor", current_settings.hardcursor, current_settings.hardcursor);
+
+        unload_driver_settings(handle);
+    }
 }
 
 static int32 
@@ -248,6 +268,7 @@ open_device(const char *name, uint32 flags, void **cookie)
         if (di->shared_area < 0) return di->shared_area;
         memset(di->si, 0, B_PAGE_SIZE * 2);
         strncpy(di->si->device_path, name, B_PATH_NAME_LENGTH);
+        load_settings();
         memcpy(&di->si->settings, &current_settings, sizeof(sm750_settings));
         /* questi li creiamo nell'accelerante
         di->si->vblank_sem = create_sem(0, "sm750 vblank sem");

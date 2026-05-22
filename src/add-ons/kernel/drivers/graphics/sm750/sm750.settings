@@ -15,6 +15,9 @@ hardcursor  true                 # if true use on-chip hardware cursor
 #logmask    0x00000000           # nothing logged (default)
 #logmask    0xffffffff           # log everything to file
 
+#force_crt true                 # mutually exclusive with force_panel: force crt layer usage
+#force_panel true            # force panel layer usage
+
 # SM750 specific tweaks:
 dualhead    true                 # enable support for both CRT and Panel
 force_pci   true                 # SM750 is native PCI/PCIe, keep true

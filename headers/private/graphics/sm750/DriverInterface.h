@@ -119,6 +119,8 @@ typedef struct {
 	uint32 memory;		/* Forza riconoscimento memoria */
 	bool	usebios;
 	bool	hardcursor;
+	bool	force_CRT;
+    bool	force_Panel;
 	bool	dualhead;
 	bool	force_pci;
 } sm750_settings;

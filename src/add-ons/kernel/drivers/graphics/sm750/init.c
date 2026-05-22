@@ -409,8 +409,11 @@ void sm750_init_chip(DeviceInfo *di) {
     uint8 revision = (uint8)(device_info & 0xFF);
     dprintf("SM750: Chip detected. ID: 0x%04X, Revision: 0x%02X\n", device_id, revision);
     
-    
+    dprintf("SM750: inizializzazione interrupts\n");
     sm750_init_interrupts(di);
+    
+    dprintf("SM750: Lettura edid\n");
+    edid1_raw local_edid;
     
     edid1_raw* boot_edid = (edid1_raw*)get_boot_item(VESA_EDID_BOOT_INFO, NULL);
 
@@ -429,15 +432,24 @@ void sm750_init_chip(DeviceInfo *di) {
         dprintf("SM750: EDID recuperato dal Bootloader\n");
     } else {
         dprintf("SM750: Bootloader vuoto, provo GetEdidFromBIOS...\n");
-        if (GetEdidFromBIOS(&si->vesa_edid_raw) == B_OK) {
+        //if (GetEdidFromBIOS(&si->vesa_edid_raw) == B_OK) {
+        //    si->card_info.has_edid_vesa = true;
+        //    dprintf("SM750: EDID recuperato correttamente dal BIOS\n");
+        //} else {
+        //    si->card_info.has_edid_vesa = false;
+        //    dprintf("SM750: Nessun EDID trovato via BIOS\n");
+        //}
+        if (GetEdidFromBIOS(&local_edid) == B_OK) {
+        	memcpy(&si->vesa_edid_raw, &local_edid, sizeof(edid1_raw));
             si->card_info.has_edid_vesa = true;
-            dprintf("SM750: EDID recuperato correttamente dal BIOS\n");
+            dprintf("SM750: EDID recuperato correttamente dal BIOS nello stack\n");
         } else {
-            si->card_info.has_edid_vesa = false;
+        	si->card_info.has_edid_vesa = false;
             dprintf("SM750: Nessun EDID trovato via BIOS\n");
         }
     }
     
+    dprintf("SM750: Sveglia chip");
     // --- 1. SVEGLIA IL CHIP (Power Mode 0) ---
     // --- SBLOCCO CLOCK (Power Mode 0) ---
     uint32 mode0_gate = SM750_REG32(SM750_SYS_PWR_MODE_0_CLKC); // 0x000044
@@ -496,48 +508,101 @@ void sm750_init_chip(DeviceInfo *di) {
     // anche se non abilitato, in pratica con 2 bit si rileva la presenza del monito (25 e 27)
     // e con altri 2 bit li si abilita (24 e 26). di default con hdmi mi viene rilevato
     // un monitor alla porta 0 ma non è abilitato
-    // non è il modo migliore di operare
+    // non è né il modo migliore di operare né funziona!
     uint32 crt_detect = SM750_REG32(SM750_CRT_MONITOR_DETECT);
     dprintf("SM750: CRT Detect Status: 0x%08" B_PRIx32 "\n", crt_detect);
     //bool crt_physically_connected = (crt_detect & (1 << 25)) || (crt_detect & (1 << 27)); //rilevamento
-    bool crt_physically_connected = (crt_detect & (1 << 24)) || (crt_detect & (1 << 26)); //abilitazione
-    if (!crt_physically_connected) {
-        // Se non c'è l'EDID ma il DAC dice che non c'è nessun cavo VGA
-        si->card_info.is_panel = true;
-        si->card_info.active_outputs = 1; // Panel
-        dprintf("SM750: Rilevato schermo digitale, passaggio a PANEL.\n");
-    } else {
-        // Fallback classico se c'è un monitor VGA vero
-        si->card_info.is_panel = false;
-        si->card_info.active_outputs = 2; // CRT
-        dprintf("SM750: Rilevato monitor analogico CRT.\n");
-    }
-    // forse usando i valori preimpostati di panel control e crt control?
-    // valutare funzionamento con scheda uscite CRT
-    uint32 bios_panel_ctrl = SM750_REG32(SM750_PANEL_CONTROL); // 0x080000
-    uint32 bios_crt_ctrl   = SM750_REG32(SM750_CRT_CONTROL);   // 0x080200
-    dprintf("SM750: BIOS State - Panel Ctrl: 0x%08" B_PRIx32 ", CRT Ctrl: 0x%08" B_PRIx32 "\n", 
-            bios_panel_ctrl, bios_crt_ctrl);
-    if ((bios_panel_ctrl & (1 << 2)) && !(bios_crt_ctrl & (1 << 2))) {
-        si->card_info.is_panel = true;
-        si->card_info.active_outputs = 1;
-        dprintf("SM750: Il BIOS ha abilitato la pipe PANEL. Uso PANEL nativo.\n");
-    } else if ((bios_crt_ctrl & (1 << 2)) && !(bios_panel_ctrl & (1 << 2))) {
-        si->card_info.is_panel = false;
-        si->card_info.active_outputs = 2;
-        dprintf("SM750: Il BIOS ha abilitato la pipe CRT. Uso CRT nativo.\n");
-    } else {
-        // Se il BIOS li ha lasciati accesi entrambi (specchio) o spenti, 
-        // usiamo il comportamento del Panel come priorità se c'è un EDID digitale
-        if (boot_edid != NULL) {
+    //bool crt_physically_connected = (crt_detect & (1 << 24)) || (crt_detect & (1 << 26)); //abilitazione
+    //if (!crt_physically_connected) {
+    //    // Se non c'è l'EDID ma il DAC dice che non c'è nessun cavo VGA
+    //    si->card_info.is_panel = true;
+    //    si->card_info.active_outputs = 1; // Panel
+    //    dprintf("SM750: Rilevato schermo digitale, passaggio a PANEL.\n");
+    //} else {
+    //    // Fallback classico se c'è un monitor VGA vero
+    //    si->card_info.is_panel = false;
+    //    si->card_info.active_outputs = 2; // CRT
+    //    dprintf("SM750: Rilevato monitor analogico CRT.\n");
+    //}
+    // Nemmeno usando i valori preimpostati di panel control e crt control!
+    // Viene sempre attivato il ramo panel anche nella scheda con sole CRT
+    //uint32 bios_panel_ctrl = SM750_REG32(SM750_PANEL_CONTROL); // 0x080000
+    //uint32 bios_crt_ctrl   = SM750_REG32(SM750_CRT_CONTROL);   // 0x080200
+    //dprintf("SM750: BIOS State - Panel Ctrl: 0x%08" B_PRIx32 ", CRT Ctrl: 0x%08" B_PRIx32 "\n", 
+    //        bios_panel_ctrl, bios_crt_ctrl);
+    //if ((bios_panel_ctrl & (1 << 2)) && !(bios_crt_ctrl & (1 << 2))) {
+    //    si->card_info.is_panel = true;
+    //    si->card_info.active_outputs = 1;
+    //    dprintf("SM750: Il BIOS ha abilitato la pipe PANEL. Uso PANEL nativo.\n");
+    //} else if ((bios_crt_ctrl & (1 << 2)) && !(bios_panel_ctrl & (1 << 2))) {
+    //    si->card_info.is_panel = false;
+    //    si->card_info.active_outputs = 2;
+    //    dprintf("SM750: Il BIOS ha abilitato la pipe CRT. Uso CRT nativo.\n");
+    //} else {
+    //    // Se il BIOS li ha lasciati accesi entrambi (specchio) o spenti, 
+    //    // usiamo il comportamento del Panel come priorità se c'è un EDID digitale
+    //    if (boot_edid != NULL) {
+    //        si->card_info.is_panel = true;
+    //        si->card_info.active_outputs = 1;
+    //        dprintf("SM750: Stato BIOS ambiguo, ma EDID presente: scelgo PANEL.\n");
+    //    } else {
+    //        si->card_info.is_panel = false;
+    //        si->card_info.active_outputs = 2;
+    //        dprintf("SM750: Stato BIOS ambiguo: fallback su CRT.\n");
+    //    }
+    //}
+    // L'unica differenza prodotta dalle due schede è che la scheda che utilizza il ramo PANEL
+    // riesce ad ottenere l'edid dal bios, si deduce che il CRT usa le linee DDC standard (VGA pin 12 e 15).
+    // mentre l'HDMI usa il canale I2C dedicato e quindi:
+    // Se il bootloader ci ha passato un EDID, verifichiamo cosa c'è dentro.
+    // L'EDID ha un byte (offset 0x14 o 20) chiamato "Video Input Definition".
+    // Bit 7 = 1 -> Lo schermo è DIGITALE (HDMI/DVI/DP) -> siamo su PANEL!
+    // Bit 7 = 0 -> Lo schermo è ANALOGICO (VGA/CRT)   -> siamo su CRT!
+    /*
+    if (si->card_info.has_edid_vesa) {
+    	uint8* edid_bytes = (uint8*)&si->vesa_edid_raw;
+        uint8 video_input = edid_bytes[20]; // Il byte 20 dell'EDID
+        if (video_input & (1 << 7)) {
             si->card_info.is_panel = true;
             si->card_info.active_outputs = 1;
-            dprintf("SM750: Stato BIOS ambiguo, ma EDID presente: scelgo PANEL.\n");
+            dprintf("SM750: EDID dice 'Monitor Digitale'. Forzo PANEL (HDMI).\n");
         } else {
             si->card_info.is_panel = false;
             si->card_info.active_outputs = 2;
-            dprintf("SM750: Stato BIOS ambiguo: fallback su CRT.\n");
+            dprintf("SM750: EDID dice 'Monitor Analogico'. Forzo CRT (VGA).\n");
         }
+    } else {
+        // 2. FALLBACK SE NON C'E' EDID:
+        // Se non c'è l'EDID, andiamo a vedere i famosi bit di abilitazione reali.
+        // Ma visto che il BIOS della scheda CRT accende comunque il Panel, facciamo un controllo incrociato:
+        // Se il monitor detect analogico (anche se disabilitato) dà segni di vita, o se forziamo un controllo.
+        
+        // Sperimentiamo: se la scheda CRT pura non ha l'EDID, usiamo come fallback il CRT.
+        si->card_info.is_panel = false;
+        si->card_info.active_outputs = 2;
+        dprintf("SM750: Nessun EDID disponibile. Fallback prudenziale su CRT.\n");
+    }*/
+    if (si->settings.force_CRT) {
+        si->card_info.is_panel = false;
+        si->card_info.active_outputs = 2; // Forza CRT
+        dprintf("SM750: Override utente attivo! Forzato ramo CRT (Analogico).\n");
+    } 
+    else if (si->settings.force_Panel) {
+        si->card_info.is_panel = true;
+        si->card_info.active_outputs = 1; // Forza PANEL
+        dprintf("SM750: Override utente attivo! Forzato ramo PANEL (Digitale).\n");
+    } 
+    else if (si->card_info.has_edid_vesa) {
+        si->card_info.is_panel = true;
+        si->card_info.active_outputs = 1;
+        dprintf("SM750: Rilevato EDID -> Uso ramo PANEL.\n");
+    } 
+    else {
+        // Fallback disperato: niente file, niente EDID. 
+        // Imposta il default sulla base della tua scheda principale o lascia CRT.
+        si->card_info.is_panel = false; 
+        si->card_info.active_outputs = 2;
+        dprintf("SM750: EDID non rilevato -> Uso ramo CRT.\n");
     }
 
     uint32 misc_ctrl = SM750_REG32(SM750_SYS_MISC_CTRL); // 0x000004
