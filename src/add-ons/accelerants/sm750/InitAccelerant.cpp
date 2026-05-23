@@ -11,7 +11,7 @@
 #include <unistd.h>
 #include <edid.h>
 #include <create_display_modes.h>
-
+#include "memory_manager.h"
 #include "DriverInterface.h"
 #include "protos.h"
 #include "sm750_macros.h"
@@ -22,6 +22,47 @@
 /* gInfo globale per l'accelerante */
 accelerant_info g_info = { .shared_info_area = -1, .regs_area = -1, .fb_area = -1 };
 accelerant_info *gInfo = &g_info;
+
+
+static status_t init_vram_manager(shared_info* si) 
+{
+    // Usiamo il valore calcolato in init_chip
+    uint32 desktopReserve = si->card_info.max_desktop_mem; 
+
+    // L'heap per l'overlay e il cursore parte subito dopo la riserva desktop
+    uint32 heapStart = desktopReserve;
+    uint32 heapSize = si->card_info.mem_size - desktopReserve;
+
+    debug_printf("SM750_ACC: Heap VRAM allocato a 0x%x (Size: %u KB)\n", heapStart, heapSize / 1024);
+
+    // Inizializziamo l'heap sulla seconda metà della RAM
+    // usiamo local_mem_mgr su stack per evitare smap con si->mem_mgr
+    void* local_mem_mgr = (void*)mem_init("sm750_vram_heap", heapStart, heapSize, 8, 128);
+    
+    if (local_mem_mgr == NULL) {
+        debug_printf("SM750_ACC ERROR: mem_init fallito!\n");
+        return B_ERROR;
+    }
+
+    // --- ALLOCAZIONE CURSORE ---
+    // Il cursore della SM750 in modalità "3-color + transparency" occupa 16KB.
+    uint32 cursorBlockID;
+    uint32 cursorOffset;
+    status_t status = mem_alloc((mem_info*)local_mem_mgr, 16384, (void*)0x43555253, 
+                                &cursorBlockID, &cursorOffset);
+    
+    if (status == B_OK) {
+        si->cursor.vram_offset = cursorOffset;
+        si->cursor.block_id = cursorBlockID;
+        si->mem_mgr = local_mem_mgr;
+        debug_printf("SM750_ACC: Cursore allocato dinamicamente a offset 0x%x\n", cursorOffset);
+    } else {
+        debug_printf("SM750_ACC ERROR: Impossibile allocare memoria per il cursore!\n");
+    }
+
+    return B_OK;
+}
+
 
 static status_t 
 create_mode_list() 
@@ -256,9 +297,15 @@ static status_t init_common(int fd,bool isClone) {
     gInfo->framebuffer = (uint8*)fb_ptr; 
     
     if (!isClone) {
-        si->framebuffer = (uint8*)fb_ptr;
-        si->fbc.frame_buffer=si->framebuffer;
-        si->fbc2.frame_buffer=si->framebuffer;
+        //si->framebuffer = (uint8*)fb_ptr;
+        // --- INIZIALIZZAZIONE MEMORY MANAGER ---
+        // Ora che sappiamo quanta RAM c'è, attiviamo il gestore
+        if (init_vram_manager(si) != B_OK) {
+            debug_printf("SM750_ACC: WARNING - Memory Manager initialization failed!\n");
+        }
+        si->fbc.frame_buffer=gInfo->framebuffer;
+        si->fbc2.frame_buffer=gInfo->framebuffer;
+                
         // qui benaphore per engine 2d
         status_t result = si->engine.lock.Init("SM750 2D engine lock");
 		if (result == B_OK) {
@@ -279,12 +326,6 @@ static status_t init_common(int fd,bool isClone) {
         si->vblank_sync_sem = create_sem(0, "sm750_vblank_sync_user");
         si->engine.lock.sem = create_sem(0, "sm750 engine sem");
 
-        // Fondamentale: cambiamo l'owner a B_SYSTEM_TEAM così il Kernel 
-        // può manipolarli senza restrizioni di team
-        //set_sem_owner(si->vblank_sem, B_SYSTEM_TEAM);
-        //set_sem_owner(si->vblank_sync_sem, B_SYSTEM_TEAM);
-        //set_sem_owner(si->engine.lock.sem, B_SYSTEM_TEAM);
-        
         atomic_set(&si->irq_enabled, 1);
         gInfo->vblank_thread = spawn_thread(
             sm750_vblank_service_thread, 
@@ -294,38 +335,10 @@ static status_t init_common(int fd,bool isClone) {
         if (gInfo->vblank_thread >= 0) {
             resume_thread(gInfo->vblank_thread);
             debug_printf("SM750_ACC: VBlank service thread avviato (ID: %" B_PRId32 ")\n", gInfo->vblank_thread);
-            /*
-            // --- DIAGNOSTICA TEMPORANEA ---
-            thread_id diagThread = spawn_thread([](void* data) -> int32 {
-                accelerant_info* ai = (accelerant_info*)data;
-                snooze(2000000); // Aspetta 2 secondi che tutto si stabilizzi
-        
-                uint32 start_count = ai->si->vblank_count;
-                bigtime_t start_time = system_time();
-        
-                snooze(5000000); // Monitora per 5 secondi
-        
-                uint32 end_count = ai->si->vblank_count;
-                bigtime_t end_time = system_time();
-        
-                bigtime_t duration = end_time - start_time;
-                uint32 diff_count = end_count - start_count;
-
-                // Calcoliamo senza float per sicurezza del dprintf
-                // FPS = (count * 1000000) / durata_in_microsecondi
-                uint32 fps = (uint32)(diff_count * 1000000ULL / duration);
-
-                // Usa debug_printf (che è quello corretto per l'accelerante)
-                debug_printf("SM750: DIAGNOSTICA - Interrupt ricevuti: %" B_PRIu32 " in %" B_PRId64 " us. FPS stimati: %" B_PRIu32 "\n", diff_count, duration, fps);
-                return B_OK;
-            }, "sm750_vblank_diag", B_LOW_PRIORITY, gInfo);
-            if (diagThread >= 0) resume_thread(diagThread);
-            // --- FINE DIAGNOSTICA ---*/
         } else {
             debug_printf("SM750_ACC: ERRORE spawn_thread fallito!\n");
         }
     } else {
-        // ISTANZA CLONE: si limita a mappare l'area decisa dal primario
         gInfo->mode_list_area = clone_area("sm750 modes clone", (void**)&gInfo->mode_list,
             B_ANY_ADDRESS, B_READ_AREA, si->mode_list_area);
         
@@ -335,8 +348,8 @@ static status_t init_common(int fd,bool isClone) {
         }
     }
     
-    //si->cursor.v_address = (void *)(gInfo->framebuffer + CRT_CURSOR_VRAM_OFFSET);
-    si->cursor.v_address = (void *)((addr_t)gInfo->framebuffer + si->cursor.vram_offset);
+    //si->cursor.v_address = (void *)((addr_t)gInfo->framebuffer + si->cursor.vram_offset);
+    gInfo->cursor_virtual_address = (void *)((addr_t)gInfo->framebuffer + si->cursor.vram_offset);
     
     // 7. Token per il motore 2D (necessario per Haiku)
     gInfo->sm750_engine_token.engine_id = 1; 

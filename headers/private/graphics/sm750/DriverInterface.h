@@ -162,10 +162,13 @@ typedef struct {
 
 	uint32	flags;
 	uint32	bits_per_pixel; // TODO, remove if unused (used for initial tests)
-	uint32	framebuffer_size; // frame buffer size occupied by actual resolution
-	uint32	first_free_vram_offset; // offset available for video layer or anything else
+	uint32	framebuffer_size; // VRAM size used for frame buffer, conveninet variable, same as card_info.max_desktop_mem
+	uint32	real_framebuffer_size; // frame buffer size occupied by actual resolution
+	//uint32	first_free_vram_offset;
+	/* offset available for video layer or anything else through memory_manager
+	 * visto che è sempre uguale a card_info.max_desktop_mem non ha senso tenerlo
+	 */
 	
-
 	/* Cursore Hardware */
 	struct {
 		uint16	hot_x;
@@ -176,7 +179,7 @@ typedef struct {
 		uint16	height;
 		bool	is_visible;
 		phys_addr_t	vram_offset; 
-		void	*v_address;
+		//void	*v_address;
 		uint32          block_id;
 	} cursor;
 
@@ -260,6 +263,7 @@ typedef struct {
     const overlay_buffer *next_buffer_to_show;
     bool            overlay_active;
     thread_id       vblank_thread;
+    void	*cursor_virtual_address;
 } accelerant_info;
 
 /* Stato globale del driver */

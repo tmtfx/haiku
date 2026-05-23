@@ -15,7 +15,6 @@
 #include "sm750_macros.h"
 #include "common_modes.h"
 #include "sm750_logo.h"
-#include "memory_manager.h"
 
 extern pci_module_info *pci;
 
@@ -43,56 +42,6 @@ typedef struct {
 } sm750_bios_module_info; 
 
 #define B_BIOS_MODULE_NAME "generic/bios/v1"
-
-static status_t init_vram_manager(shared_info* si) 
-{
-    // Usiamo il valore calcolato in init_chip
-    uint32 desktopReserve = si->card_info.max_desktop_mem; 
-
-    // L'heap per l'overlay e il cursore parte subito dopo la riserva desktop
-    uint32 heapStart = desktopReserve;
-    uint32 heapSize = si->card_info.mem_size - desktopReserve;
-
-    dprintf("SM750: Heap VRAM allocato a 0x%x (Size: %u KB)\n", heapStart, heapSize / 1024);
-
-    // Inizializziamo l'heap sulla seconda metà della RAM
-    /*
-    si->mem_mgr = (void*)mem_init("sm750_vram_heap", heapStart, heapSize, 8, 128);
-    
-    if (si->mem_mgr == NULL) {
-    	dprintf("SM750 ERROR: mem_init fallito!\n");
-    	return B_ERROR;
-    }*/
-    void* local_mem_mgr = (void*)mem_init("sm750_vram_heap", heapStart, heapSize, 8, 128);
-    
-    if (local_mem_mgr == NULL) {
-        dprintf("SM750 ERROR: mem_init fallito!\n");
-        return B_ERROR;
-    }
-
-    // --- ALLOCAZIONE CURSORE ---
-    // Il cursore della SM750 in modalità "3-color + transparency" occupa 16KB.
-    uint32 cursorBlockID;
-    uint32 cursorOffset;
-    //status_t status = mem_alloc((mem_info*)si->mem_mgr, 16384, (void*)0x43555253, // Tag 'CURS'
-    //                            &cursorBlockID, &cursorOffset);
-    status_t status = mem_alloc((mem_info*)local_mem_mgr, 16384, (void*)0x43555253, 
-                                &cursorBlockID, &cursorOffset);
-    
-    if (status == B_OK) {
-        ////si->cursor.pci_address = cursorOffset; 
-        //si->cursor.vram_offset = cursorOffset; 
-        //si->cursor.block_id = cursorBlockID;
-        user_memcpy(&si->cursor.vram_offset, &cursorOffset, sizeof(uint32));
-        user_memcpy(&si->cursor.block_id, &cursorBlockID, sizeof(uint32));
-        user_memcpy(&si->mem_mgr, &local_mem_mgr, sizeof(void*));
-        dprintf("SM750: Cursore allocato dinamicamente a offset 0x%x\n", cursorOffset);
-    } else {
-        dprintf("SM750 ERROR: Impossibile allocare memoria per il cursore!\n");
-    }
-
-    return B_OK;
-}
 
 static status_t
 GetEdidFromBIOS(edid1_raw* edidRaw)
@@ -154,67 +103,6 @@ GetEdidFromBIOS(edid1_raw* edidRaw)
     put_module(B_BIOS_MODULE_NAME);
     return status;
 }
-
-/* cannot handle gpio direction tried unlocking vga registers */
-/* didn't work
-static void sm750_unlock_vga_registers()
-{
-    // 1. Leggiamo SR21 (Display Control)
-    pci->write_io_8(0x3C4, 0x21); // Seleziona indice 0x21
-    uint8 sr21 = pci->read_io_8(0x3C5);
-    dprintf("SM750: SR21 prima: 0x%02x\n", sr21);
-
-    // 2. Sblocchiamo i pin (Azzera i bit 0-3 che spesso forzano il DDC hardware)
-    pci->write_io_8(0x3C4, 0x21);
-    pci->write_io_8(0x3C5, sr21 & ~0x0F); 
-
-    // 3. Leggiamo SR6B (GPIO Selection)
-    pci->write_io_8(0x3C4, 0x6B);
-    uint8 sr6b = pci->read_io_8(0x3C5);
-    dprintf("SM750: SR6B prima: 0x%02x\n", sr6b);
-    
-    // In alcuni chip SM, scrivere 0 in SR6B abilita il controllo GPIO MMIO
-    pci->write_io_8(0x3C4, 0x6B);
-    pci->write_io_8(0x3C5, 0x00); 
-}*/
-
-/* --- sm750_get_clocks --- */
-/*
-void 
-sm750_get_clocks(vuint32 *regs, shared_info *si)
-{
-    // 1. Configurazione del selettore Power Mode
-    uint32 pwrCtrl = SM750_REG32(SM750_SYS_PWR_MODE_CTRL);
-    pwrCtrl &= ~0x00000003; // Forza i bit 1:0 a 00 (Power Mode 0)
-    // Assicuriamoci anche che l'oscillatore sia attivo (Bit 3)
-    pwrCtrl |= (1 << 3); 
-    SM750_WREG32(SM750_SYS_PWR_MODE_CTRL, pwrCtrl);
-    snooze(500);
-    uint32 clkStatus = SM750_REG32(SM750_SYS_CUR_CLK_STATUS);
-    dprintf("SM750: Clock Status: 0x%08" B_PRIx32 "\n", clkStatus);
-
-    if (!(clkStatus & (1 << 8))) {
-    	// --- 1. SETTAGGIO POWER MODE 0 ---
-        dprintf("SM750: Spengo I2C Clock perché buggato! Abilito GPIO nei Power Mode 0 e 1...\n");
-        uint32 mode0 = SM750_REG32(SM750_SYS_PWR_MODE_0_CLKC);
-        //mode0 |= (1 << 8); // I2C Clock // BUGGATO
-        mode0 &= ~(1 << 8); // I2C Clock OFF
-        mode0 |= (1 << 6); // GPIO Clock
-        SM750_WREG32(SM750_SYS_PWR_MODE_0_CLKC, mode0);
-
-        // --- 2. SETTAGGIO POWER MODE 1 ---
-        uint32 mode1 = SM750_REG32(SM750_SYS_PWR_MODE_1_CLKC);
-        //mode1 |= (1 << 8); // I2C Clock (Sempre acceso anche qui!) // BUGGATO
-        mode1 &= ~(1 << 8); // I2C Clock OFF
-        mode1 |= (1 << 6); // GPIO Clock
-        SM750_WREG32(SM750_SYS_PWR_MODE_1_CLKC, mode1);
-    }
-    snooze(1000);
-    // Salviamo la frequenza di riferimento (24MHz)
-    //si->card_info.f_ref = 24.0f; 
-    // sembra che la frequenza di riferimento sia 14.31818f
-    //si->card_info.f_ref = 14.31818f; // già impostato prima...
-}*/
 
 static const color_space kFallbackSpaces[] = {
     B_RGB32,
@@ -282,7 +170,6 @@ static status_t create_mode_list(shared_info* si) {
 
     si->mode_count = count;
     si->mode_list_area = m_area;
-    //si->mode_list = local_list; // Ora l'assegnazione è sicura dopo il ciclo!
 
     dprintf("SM750: create_mode_list finito. Modi: %u\n", count);
     return B_OK;
@@ -372,12 +259,12 @@ static void sm750_init_interrupts(DeviceInfo* info)
 	// ma a quanto pare accetta i valori e abilita gli interrupt!
 	
 	// ABILITAZIONE LOGICA
-	uint32 currentIntActive = SM750_REG32(SM750_SYS_RAW_INT_STATUS);
-	dprintf("SM750: System RAW Interrupt status: 0x%08" B_PRIx32 "\n", currentIntActive);
-	uint32 intstatus = SM750_REG32(SM750_SYS_INT_STATUS);
-	dprintf("SM750: Interrupt status: 0x%08" B_PRIx32 "\n", intstatus);
-	uint32 currentMask = SM750_REG32(SM750_SYS_INT_MASK);
-	dprintf("SM750: System Interrupt Mask is: 0x%08" B_PRIx32 "\n", currentMask);
+	//uint32 currentIntActive = SM750_REG32(SM750_SYS_RAW_INT_STATUS);
+	//dprintf("SM750: System RAW Interrupt status: 0x%08" B_PRIx32 "\n", currentIntActive);
+	//uint32 intstatus = SM750_REG32(SM750_SYS_INT_STATUS);
+	//dprintf("SM750: Interrupt status: 0x%08" B_PRIx32 "\n", intstatus);
+	//uint32 currentMask = SM750_REG32(SM750_SYS_INT_MASK);
+	//dprintf("SM750: System Interrupt Mask is: 0x%08" B_PRIx32 "\n", currentMask);
 
 	info->si->irq_enabled = 1;
 }
@@ -385,20 +272,6 @@ static void sm750_init_interrupts(DeviceInfo* info)
 /* --- sm750_init_chip --- */
 void sm750_init_chip(DeviceInfo *di) {
     if (!di || !di->regs) return;
-    
-    //dprintf("SM750: --- Inizializzazione Hardware ---\n");
-    
-    //dprintf("SM750: --- DUMP SEQUENCER ESTESO ---\n");
-    //// Array degli indici "sospetti" che non compaiono nel datasheet ufficiale
-    //uint8 indices[] = {0x00, 0x01, 0x21, 0x30, 0x62, 0x6A, 0x6B, 0x6C};
-    //for (uint32 i = 0; i < sizeof(indices); i++) {
-    //    // Scriviamo l'indice sulla porta 0x3C4
-    //    pci->write_io_8(0x3C4, indices[i]);
-    //    // Leggiamo il valore corrispondente dalla porta 0x3C5
-    //    uint8 val = pci->read_io_8(0x3C5);
-    //    dprintf("SM750: SEQ Index 0x%02x = 0x%02x\n", indices[i], val);
-    //}
-    //sm750_unlock_vga_registers();
 
     vuint32 *regs = di->regs;
     shared_info *si = di->si;
@@ -409,79 +282,82 @@ void sm750_init_chip(DeviceInfo *di) {
     uint8 revision = (uint8)(device_info & 0xFF);
     dprintf("SM750: Chip detected. ID: 0x%04X, Revision: 0x%02X\n", device_id, revision);
     
-    dprintf("SM750: inizializzazione interrupts\n");
     sm750_init_interrupts(di);
     
-    dprintf("SM750: Lettura edid\n");
     edid1_raw local_edid;
-    
     edid1_raw* boot_edid = (edid1_raw*)get_boot_item(VESA_EDID_BOOT_INFO, NULL);
 
-    // versione senza debug
-    //if (boot_edid) {
-    //    memcpy(&si->vesa_edid_raw, boot_edid, sizeof(edid1_raw));
-    //    si->card_info.has_edid_vesa = true;
-    //} else if (GetEdidFromBIOS(&si->vesa_edid_raw) == B_OK) {
-    //    si->card_info.has_edid_vesa = true;
-    //} else {
-    //    si->card_info.has_edid_vesa = false;
-    //}
     if (boot_edid != NULL) {
         memcpy(&si->vesa_edid_raw, boot_edid, sizeof(edid1_raw));
         si->card_info.has_edid_vesa = true;
-        dprintf("SM750: EDID recuperato dal Bootloader\n");
     } else {
-        dprintf("SM750: Bootloader vuoto, provo GetEdidFromBIOS...\n");
-        //if (GetEdidFromBIOS(&si->vesa_edid_raw) == B_OK) {
-        //    si->card_info.has_edid_vesa = true;
-        //    dprintf("SM750: EDID recuperato correttamente dal BIOS\n");
-        //} else {
-        //    si->card_info.has_edid_vesa = false;
-        //    dprintf("SM750: Nessun EDID trovato via BIOS\n");
-        //}
         if (GetEdidFromBIOS(&local_edid) == B_OK) {
         	memcpy(&si->vesa_edid_raw, &local_edid, sizeof(edid1_raw));
             si->card_info.has_edid_vesa = true;
-            dprintf("SM750: EDID recuperato correttamente dal BIOS nello stack\n");
         } else {
         	si->card_info.has_edid_vesa = false;
-            dprintf("SM750: Nessun EDID trovato via BIOS\n");
         }
     }
     
-    dprintf("SM750: Sveglia chip");
+    if (si->settings.force_CRT) {
+        si->card_info.is_panel = false;
+        si->card_info.active_outputs = 2; // Forza CRT
+        dprintf("SM750: Override utente attivo! Forzato ramo CRT (Analogico).\n");
+    } 
+    else if (si->settings.force_Panel) {
+        si->card_info.is_panel = true;
+        si->card_info.active_outputs = 1; // Forza PANEL
+        dprintf("SM750: Override utente attivo! Forzato ramo PANEL (Digitale).\n");
+    } 
+    else if (si->card_info.has_edid_vesa) {
+        si->card_info.is_panel = true;
+        si->card_info.active_outputs = 1;
+        dprintf("SM750: Rilevato EDID -> Uso ramo PANEL.\n");
+    } 
+    else {
+        // Fallback disperato: niente file, niente EDID. 
+        // Imposta il default sulla base della tua scheda principale o lascia CRT.
+        si->card_info.is_panel = false; 
+        si->card_info.active_outputs = 2;
+        dprintf("SM750: EDID non rilevato -> Uso ramo CRT.\n");
+    }
+    
     // --- 1. SVEGLIA IL CHIP (Power Mode 0) ---
     // --- SBLOCCO CLOCK (Power Mode 0) ---
     uint32 mode0_gate = SM750_REG32(SM750_SYS_PWR_MODE_0_CLKC); // 0x000044
     // Abilitiamo GPIO (6), 2D (3), Display (2), Memory (1) e DMA (0)
-    mode0_gate |= (1 << 8) | (1 << 6) | (1 << 4) | (1 << 3) | (1 << 2) | (1 << 1) | (1 << 0); //attiviamo clock DMA, Local memory, Display , 2D, CSC, GPIO, I2C
+    mode0_gate |= (1 << 6) | (1 << 4) | (1 << 3) | (1 << 2) | (1 << 1) | (1 << 0); //attiviamo clock DMA, Local memory, Display , 2D, CSC, GPIO, I2C
     //mode0_gate &= ~(1 << 6); // Forza a 0 il clock GPIO visto che non riusciamo a usare il registro di direzione
     //mode0_gate &= ~(1 << 8); // Forza a 0 il clock I2C hardware visto che è rotto
     //mode0_gate |= (1 << 10); // Assicuriamoci che il VGA Clock (10) sia attivo se usiamo il CRT
     mode0_gate &= ~(1 << 5); // Disattiviamo ZV
     mode0_gate &= ~(1 << 7); // Disattiviamo SSP
     mode0_gate &= ~(1 << 9); // Disattiviamo PWM
-    mode0_gate &= ~(1 << 10); // Disattiviamo VGA
+    //mode0_gate &= ~(1 << 10); // Disattiviamo VGA
     //mode0_gate |= (1 << 10); // Attiviamo VGA e vediamo se la generazione degli interrupt dipende da questo
+    if (si->card_info.is_panel) {
+        mode0_gate &= ~(1 << 10); // Spegniamo il clock VGA se siamo su PANEL
+        mode0_gate |= (1 << 8);   // Accendiamo I2C/DDC per il Panel
+    } else {
+        mode0_gate |= (1 << 10);  // FONDAMENTALE: Accendiamo il clock VGA per il CRT!
+        mode0_gate &= ~(1 << 8);  // Spegniamo I2C hardware se non serve
+    }
     SM750_WREG32(SM750_SYS_PWR_MODE_0_CLKC, mode0_gate); // 0x000044
     //dprintf("SM750: Power Mode 0 Clock Gate set to: 0x%08x\n", mode0_gate);
     
     uint32 vga_mode = SM750_REG32(SM750_SYS_VGA_CONFIG);
-    dprintf("SM750: VGA CONFIG: 0x%08X\n", vga_mode);
     vga_mode |= (1 << 2); //selettore CLOCK da vga a primary panel
     SM750_WREG32(SM750_SYS_VGA_CONFIG, vga_mode);
     snooze(100);
     vga_mode = SM750_REG32(SM750_SYS_VGA_CONFIG);
-     dprintf("SM750: NEW VGA CONFIG: 0x%08X\n", vga_mode);
 
     // --- 2. SELEZIONA IL POWER MODE E ACCENDI L'OSCILLATORE ---
     //Power Mode Control
-    //Read/Write  MMIO_base + 0x00004C
     uint32 pwr_ctrl = SM750_REG32(SM750_SYS_PWR_MODE_CTRL); // 0x00004C
     pwr_ctrl &= ~0x00000003; // Forza Mode 0 (bit 1:0 = 00)
     pwr_ctrl |= (1 << 3);    // Assicurati che l'oscillatore sia acceso
     SM750_WREG32(SM750_SYS_PWR_MODE_CTRL, pwr_ctrl); // 0x00004C
-    snooze(1000); // Diamogli un millisecondo per stabilizzare i clock
+    snooze(1000); // Stabilizzazione clock
     
     // --- 2. ABILITAZIONE BUS E MEMORIA (Registro 0x00) ---
     uint32 sys_ctrl = SM750_REG32(SM750_SYS_CTRL); // 0x00
@@ -490,7 +366,6 @@ void sm750_init_chip(DeviceInfo *di) {
     // Assicuriamoci che i sincronismi siano attivi (DPMS on, bit 31:30 = 00)
     sys_ctrl &= ~(3U << 30);
     SM750_WREG32(SM750_SYS_CTRL, sys_ctrl); //0x000000
-    //dprintf("SM750: System Control (0x00) configurato: 0x%08x\n", sys_ctrl);
     
     // --- 3. ORA FACCIAMO LA RILEVAZIONE (Dopo aver attivato i bus) ---
     // La logica che segue non funziona correttamente, con la scheda HDMI
@@ -509,8 +384,9 @@ void sm750_init_chip(DeviceInfo *di) {
     // e con altri 2 bit li si abilita (24 e 26). di default con hdmi mi viene rilevato
     // un monitor alla porta 0 ma non è abilitato
     // non è né il modo migliore di operare né funziona!
-    uint32 crt_detect = SM750_REG32(SM750_CRT_MONITOR_DETECT);
-    dprintf("SM750: CRT Detect Status: 0x%08" B_PRIx32 "\n", crt_detect);
+    
+    //uint32 crt_detect = SM750_REG32(SM750_CRT_MONITOR_DETECT);
+    //dprintf("SM750: CRT Detect Status: 0x%08" B_PRIx32 "\n", crt_detect);
     //bool crt_physically_connected = (crt_detect & (1 << 25)) || (crt_detect & (1 << 27)); //rilevamento
     //bool crt_physically_connected = (crt_detect & (1 << 24)) || (crt_detect & (1 << 26)); //abilitazione
     //if (!crt_physically_connected) {
@@ -558,52 +434,8 @@ void sm750_init_chip(DeviceInfo *di) {
     // L'EDID ha un byte (offset 0x14 o 20) chiamato "Video Input Definition".
     // Bit 7 = 1 -> Lo schermo è DIGITALE (HDMI/DVI/DP) -> siamo su PANEL!
     // Bit 7 = 0 -> Lo schermo è ANALOGICO (VGA/CRT)   -> siamo su CRT!
-    /*
-    if (si->card_info.has_edid_vesa) {
-    	uint8* edid_bytes = (uint8*)&si->vesa_edid_raw;
-        uint8 video_input = edid_bytes[20]; // Il byte 20 dell'EDID
-        if (video_input & (1 << 7)) {
-            si->card_info.is_panel = true;
-            si->card_info.active_outputs = 1;
-            dprintf("SM750: EDID dice 'Monitor Digitale'. Forzo PANEL (HDMI).\n");
-        } else {
-            si->card_info.is_panel = false;
-            si->card_info.active_outputs = 2;
-            dprintf("SM750: EDID dice 'Monitor Analogico'. Forzo CRT (VGA).\n");
-        }
-    } else {
-        // 2. FALLBACK SE NON C'E' EDID:
-        // Se non c'è l'EDID, andiamo a vedere i famosi bit di abilitazione reali.
-        // Ma visto che il BIOS della scheda CRT accende comunque il Panel, facciamo un controllo incrociato:
-        // Se il monitor detect analogico (anche se disabilitato) dà segni di vita, o se forziamo un controllo.
-        
-        // Sperimentiamo: se la scheda CRT pura non ha l'EDID, usiamo come fallback il CRT.
-        si->card_info.is_panel = false;
-        si->card_info.active_outputs = 2;
-        dprintf("SM750: Nessun EDID disponibile. Fallback prudenziale su CRT.\n");
-    }*/
-    if (si->settings.force_CRT) {
-        si->card_info.is_panel = false;
-        si->card_info.active_outputs = 2; // Forza CRT
-        dprintf("SM750: Override utente attivo! Forzato ramo CRT (Analogico).\n");
-    } 
-    else if (si->settings.force_Panel) {
-        si->card_info.is_panel = true;
-        si->card_info.active_outputs = 1; // Forza PANEL
-        dprintf("SM750: Override utente attivo! Forzato ramo PANEL (Digitale).\n");
-    } 
-    else if (si->card_info.has_edid_vesa) {
-        si->card_info.is_panel = true;
-        si->card_info.active_outputs = 1;
-        dprintf("SM750: Rilevato EDID -> Uso ramo PANEL.\n");
-    } 
-    else {
-        // Fallback disperato: niente file, niente EDID. 
-        // Imposta il default sulla base della tua scheda principale o lascia CRT.
-        si->card_info.is_panel = false; 
-        si->card_info.active_outputs = 2;
-        dprintf("SM750: EDID non rilevato -> Uso ramo CRT.\n");
-    }
+    
+    
 
     uint32 misc_ctrl = SM750_REG32(SM750_SYS_MISC_CTRL); // 0x000004
     // Assicuriamoci che:
@@ -643,41 +475,8 @@ void sm750_init_chip(DeviceInfo *di) {
     else
         si->card_info.max_desktop_mem = si->card_info.mem_size - (2 * 1024 * 1024);
     dprintf("SM750: Detected VRAM memory (from Reg 0x000004): %u MB\n", detected_mem / (1024*1024));
+    //si->first_free_vram_offset = si->card_info.max_desktop_mem
     
-    
-    // --- INIZIALIZZAZIONE MEMORY MANAGER ---
-    // Ora che sappiamo quanta RAM c'è, attiviamo il gestore
-    if (init_vram_manager(si) != B_OK) {
-        dprintf("SM750: WARNING - Memory Manager initialization failed!\n");
-    }
-    
-    // D. Rilevazione Uscita Attiva (LOGICA UNICA)
-    /*
-    uint32 sys_ctrl = SM750_REG32(0x00); 
-    bool crt_is_not_3stated = !(sys_ctrl & (1 << 3));   // Bit 3: CRT Interface
-    bool panel_is_not_3stated = !(sys_ctrl & (1 << 0)); // Bit 0: Panel Interface
-    if (crt_is_not_3stated) {
-        di->si->card_info.is_panel = false; // Priorità al CRT se non è spento
-        dprintf("SM750: CRT rilevato come interfaccia attiva.\n");
-    } else if (panel_is_not_3stated) {
-        di->si->card_info.is_panel = true;
-        dprintf("SM750: Panel rilevato come interfaccia attiva.\n");
-    } else {
-        // Se sono entrambi spenti (strano), default su CRT
-        di->si->card_info.is_panel = false;
-        dprintf("SM750: Nessuna interfaccia attiva rilevata, uso CRT.\n");
-    }
-    */
-    /*oppure così
-    uint32 display_ctrl = SM750_REG32(0x00080020); 
-
-        // Se il bit 2 è attivo, il CRT è abilitato
-        if (display_ctrl & (1 << 2)) {
-            di->si->card_info.is_panel = false; // Stiamo usando il CRT (0x80200)
-        } else {
-            di->si->card_info.is_panel = true;  // Stiamo usando il Panel (0x80000)
-        }
-    */
     
     bool showLogo = false;
     display_mode *dm = si->card_info.is_panel ? &si->preferred_mode : &si->preferred_mode2;
@@ -685,12 +484,12 @@ void sm750_init_chip(DeviceInfo *di) {
     if (bi) {
         //dprintf("SM750: VESA FB a 0x%" B_PRIx64 ", %" B_PRId32 "x%" B_PRId32 "\n", 
         //        (uint64)bi->physical_frame_buffer, bi->width, bi->height);
-        dprintf("SM750: FrameBuffer says %ux%u\n", bi->width, bi->height);
+        dprintf("SM750: FrameBuffer resolution: %ux%u\n", bi->width, bi->height);
         // set memory bounds
         uint32 bpp = 32; // Quasi sempre 32 al boot
-        si->framebuffer_size = bi->width * bi->height * (bpp / 8);
+        si->real_framebuffer_size = bi->width * bi->height * (bpp / 8);
         // Spostiamo l'inizio della memoria libera dopo il desktop del boot
-        si->first_free_vram_offset = si->framebuffer_size;
+        //si->first_free_vram_offset = si->framebuffer_size;
         
         bool found = false;
 
@@ -744,22 +543,7 @@ void sm750_init_chip(DeviceInfo *di) {
         dm->virtual_width = dm->timing.h_display;
         dm->virtual_height = dm->timing.v_display;
     }
-    /*
-    edid1_info* edidInfo = (edid1_info*)get_boot_item(VESA_EDID_BOOT_INFO, NULL);
-	if (edidInfo != NULL) {
-		si->card_info.has_vesa_edid_info = true;
-		memcpy(&si->vesa_edid_info, edidInfo, sizeof(edid1_info));
-		dprintf("SM750: EDID recuperato dal bootloader.\n");
-	} else {
-		si->card_info.has_vesa_edid_info = false;
-		dprintf("SM750: Impossibile recuperare l'EDID dal bootloader.\n");
-	}*/
-	//if (gInfo->si->card_info.has_vesa_edid_info) {
-	//	dprintf("SM750_ACC: EDID VESA trovato! Lo usiamo come fallback.\n");
-		// Se la tua lettura I2C fallisce, copia questa info 
-		// nella struct edid locale dell'accelerante
-	//}
-    
+        
     // F. VGA BYPASS (Necessario per usare il Framebuffer lineare in modo nativo)
     // Abilitiamo il bypass VGA su entrambe le pipe (Primary e Secondary)
     uint32 display_reg = si->card_info.is_panel ? SM750_PANEL_CONTROL : SM750_CRT_CONTROL; // 0x080000 : 0x080200
@@ -781,7 +565,7 @@ void sm750_init_chip(DeviceInfo *di) {
 
     // 3. Selezione Sorgente Dati (QUI CAMBIA!)
     if (si->card_info.is_panel) {
-        dprintf("SM750: Impostiamo i registri dati per PANEL\n");
+        //dprintf("SM750: Impostiamo i registri dati per PANEL\n");
         // Registro 0x80000: Bit 29:28. Vogliamo "Panel Data" (00)
         ctrl &= ~(3U << 28); // Panel Data for Primary Display
         nctrl &= ~(3U << 18); // Panel Data for Secondary Display
@@ -791,7 +575,7 @@ void sm750_init_chip(DeviceInfo *di) {
         
     } else {
         // Registro 0x80200: Bit 19:18. Vogliamo "CRT Data" (10)
-        dprintf("SM750: Impostiamo i registri dati per CRT\n");
+        //dprintf("SM750: Impostiamo i registri dati per CRT\n");
         ctrl &= ~(3U << 18);
         // la selezione di panel data o crt data sembra ininfluente!!!
         ctrl |= (2U << 18);  // CRT Data for Secondary Display
@@ -806,10 +590,6 @@ void sm750_init_chip(DeviceInfo *di) {
         // No Blank per CRT (Bit 10)
         ctrl &= ~(1 << 10);
     }
-    dprintf("SM750: Scrittura registro uscita usata 0x%08" B_PRIx32 "\n", display_reg);
-    dprintf("SM750: Valore 0x%08" B_PRIx32 "\n", ctrl);
-    dprintf("SM750: Scrittura registro uscita non utilizzata 0x%08" B_PRIx32 "\n", notdisplay_reg);
-    dprintf("SM750: Valore 0x%08" B_PRIx32 "\n", nctrl);
     SM750_WREG32(display_reg, ctrl);
     SM750_WREG32(notdisplay_reg, nctrl);
     
@@ -832,8 +612,6 @@ void sm750_init_chip(DeviceInfo *di) {
     si->fbc.frame_buffer_dma = (void *)(addr_t)di->pci.u.h0.base_registers[0];
     si->fbc.bytes_per_row = dm->timing.h_display * (bpp / 8);
     si->fbc2 = si->fbc; // per sicurezza copiamo la configurazione anche nell'altra uscita
-    
-    //dprintf("SM750: Init  completato. Mem: %d MB, Mode: %s\n", detected_mem / (1024*1024), si->card_info.is_panel ? "PANEL" : "CRT");
     
     // --- INIZIO CONFIGURAZIONE GPIO PER EDID/I2C ---
     /*
@@ -861,10 +639,15 @@ void sm750_init_chip(DeviceInfo *di) {
     // Configura Direzione Iniziale (Entrambi Output per ora)
     //uint32 gpio_dir = SM750_REG32(SM750_GPIO_DIRECTION);
     uint32 gpio_dir_high = SM750_REG32(SM750_GPIO_DIR_HIGH);
+    dprintf("SM750: GPIO direction detected: x%08x\n",gpio_dir_high);
     //gpio_dir |= (1U << 31) | (1U << 30); 
     gpio_dir_high |= (1U << 15) | (1U << 14); 
     //SM750_WREG32(SM750_GPIO_DIRECTION, gpio_dir);
     SM750_WREG32(SM750_GPIO_DIR_HIGH, gpio_dir_high);
+    snooze(100);
+    gpio_dir_high = SM750_REG32(SM750_GPIO_DIR_HIGH);
+    dprintf("SM750: GPIO direction after change: x%08x\n",gpio_dir_high);
+    
 
     // 5. Stato di IDLE (Bus High)
     //uint32 gpio_data = SM750_REG32(SM750_GPIO_DATA);
@@ -881,6 +664,7 @@ void sm750_init_chip(DeviceInfo *di) {
     
     
     if (showLogo) {
+    	//dprintf("5 seconds of glory\n");
     	display_mode *dm = si->card_info.is_panel ? &si->preferred_mode : &si->preferred_mode2;
     	draw_logo(di, dm);
     }

@@ -300,7 +300,7 @@ open_device(const char *name, uint32 flags, void **cookie)
         // Se MSI è attivo, usiamo il vettore MSI, altrimenti la linea IRQ classica
         // uint8 irq = di->msi_enabled ? di->msi_vector : di->pci.u.h0.interrupt_line;
         uint8 irq = di->pci.u.h0.interrupt_line;
-        dprintf("SM750: Tentativo di installazione interrupt legacy su Linea IRQ: %u\n", irq);
+        //dprintf("SM750: Tentativo di installazione interrupt legacy su Linea IRQ: %u\n", irq);
         
         status_t intStatus = install_io_interrupt_handler(irq, sm750_interrupt_handler, di, 0);
         if (intStatus != B_OK) {
@@ -354,8 +354,8 @@ static status_t free_device(void *cookie) {
     	//remove_io_interrupt_handler(di->pci.u.h0.interrupt_line, sm750_interrupt_handler, di);
         uint8 irq = di->msi_enabled ? di->msi_vector : di->pci.u.h0.interrupt_line;
         SM750_WREG32(SM750_SYS_INT_MASK, 0);
-        uint32 status = SM750_REG32(SM750_SYS_INT_MASK);
-        dprintf("SM750: Freeing device... MASK set to: %" B_PRIu32 "\n", status);
+        //uint32 status = SM750_REG32(SM750_SYS_INT_MASK);
+        //dprintf("SM750: Freeing device... MASK set to: %" B_PRIu32 "\n", status);
         remove_io_interrupt_handler(irq, sm750_interrupt_handler, di);
         
         if (di->msi_enabled) {

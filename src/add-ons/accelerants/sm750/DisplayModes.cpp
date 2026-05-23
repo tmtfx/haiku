@@ -326,17 +326,6 @@ sm750_set_display_mode(display_mode *mode)
     shared_info *si = gInfo->si;
     vuint32 *regs = gInfo->regs;
     
-    // --- LOG DI DEBUG PER IL PITCH ---
-    /*debug_printf("SM750_ACC: Richiesta SET_DISPLAY_MODE:\n");
-    debug_printf("SM750_ACC:  - Target Timing: %dx%d\n", mode->timing.h_display, mode->timing.v_display);
-    debug_printf("SM750_ACC:  - Target Virtual: %dx%d\n", mode->virtual_width, mode->virtual_height);
-    */
-    //display_mode *pm = si->card_info.is_panel ? &si->preferred_mode : &si->preferred_mode2;
-    // Vediamo cosa abbiamo in memoria come fallback/preferito
-    /*
-    debug_printf("SM750_ACC:  - In shared_info preferred: %dx%d\n", 
-        pm->timing.h_display, pm->timing.v_display);
-        */
     uint32 bpp = 0;
     uint32 fmt_reg = 0;
     switch (mode->space) {
@@ -355,18 +344,18 @@ sm750_set_display_mode(display_mode *mode)
         default:
             return B_BAD_VALUE;
     }
-    //uint32 bpp = (mode->space == B_RGB32) ? 32 : 16;
-    //uint32 color_fmt = (mode->space == B_RGB32) ? 2 : 1; // 2=32bpp, 1=16bpp
-    //uint32 pitch = mode->timing.h_display * (bpp / 8);
-    // 2. Usiamo virtual_width per il Pitch (la memoria reale)
-    // Se h_display è 1024 ma virtual_width è 1024, il risultato non cambia.
-    // Ma se virtual_width è 1040, il pitch sarà corretto e le righe spariranno.
+    
     uint32 pitch = mode->virtual_width * (bpp / 8);
     uint32 desktop_size = pitch * mode->virtual_height;
-    si->framebuffer_size = desktop_size;
+    si->real_framebuffer_size = desktop_size;
     // La memoria libera per l'overlay inizia subito dopo il desktop
     // Allineiamo a 16 byte per sicurezza (richiesto dal chip SM750)
-    si->first_free_vram_offset = (desktop_size + 15) & ~15;
+    // si->first_free_vram_offset = (desktop_size + 15) & ~15;
+    // La memoria veramente libera per l'user-space parte dopo il cursore allocato dal kernel!
+    // si->first_free_vram_offset = (si->cursor.vram_offset + 16384 + 15) & ~15;
+    // --- cambio logica usiamo gestore memoria ---
+    si->framebuffer_size = si->card_info.max_desktop_mem;
+    //si->first_free_vram_offset = si->card_info.max_desktop_mem;
     
     // Se l'overlay era attivo, qui dovremmo resettarlo o notificare il cambio
     // Per ora lo spegniamo per evitare che punti a zone di memoria vecchie
@@ -374,27 +363,10 @@ sm750_set_display_mode(display_mode *mode)
     if (video_ctrl & (1 << 2)) {
         SM750_WREG32(SM750_DISP_PANEL_VIDEO_DISP_CTRL, video_ctrl & ~(1 << 2));
     }
-    /*
-    debug_printf("SM750_ACC: H_Disp: %u, Virtual_W: %u, Pitch: %u\n", 
-                 mode->timing.h_display, mode->virtual_width, pitch);
-    debug_printf("SM750_ACC:  - BPP: %u, Pitch calcolato: %u bytes\n", bpp, pitch);
-    */
-    
+        
     // 1. Programmiamo il Clock (PLL)
-    //debug_printf("SM750_ACC: programmazione pll...\n");
-    //debug_printf("SM750_ACC: preferred mode pixel clock is %u:\n",pm->timing.pixel_clock);
-    //debug_printf("SM750_ACC: preferred mode richiesto a sm750_set_display_mode %u:\n",mode->timing.pixel_clock);
-    //uint32 target_clock = mode->timing.pixel_clock;
-
-    // Non è questo a generare rumore ma i 2 pll impostati diversamente e il ramo inusato di panel/crt attivo
-    // 2. Se è il valore "GTF" per la 1280x1024, riportalo alla "Verità" VESA
-    //if (target_clock == 107964 || (target_clock > 107900 && target_clock < 108100)) {
-    //	debug_printf("SM750_ACC: Rilevato clock GTF (%u), forzo a 108000 VESA DMT\n", target_clock);
-    //    mode->timing.pixel_clock = 108000;
-    //}
-    
     sm750_program_pll(mode->timing.pixel_clock, si->card_info.is_panel);
-    //debug_printf("SM750_ACC: programmazione pll effettuata\n");
+    
     bool isPanel = si->card_info.is_panel;
     
     bool h_pos = (mode->timing.flags & B_POSITIVE_HSYNC);
@@ -404,15 +376,7 @@ sm750_set_display_mode(display_mode *mode)
     sm750_set_h_sync(mode->timing.h_sync_start, mode->timing.h_sync_end, isPanel);
     sm750_set_v_timing(mode->timing.v_total, mode->timing.v_display, isPanel);
     sm750_set_v_sync(mode->timing.v_sync_start, mode->timing.v_sync_end, isPanel);
-    /*
-    debug_printf("SM750_ACC: Setup %s %dx%d (%d bpp)\n", isPanel ? "PANEL" : "CRT", mode->timing.h_display, mode->timing.v_display, bpp);
-    debug_printf("SM750_DEBUG: H_Total: %d, H_Disp: %d, H_SyncStart: %d, H_SyncEnd: %d\n",
-            mode->timing.h_total, mode->timing.h_display, 
-            mode->timing.h_sync_start, mode->timing.h_sync_end);
-    debug_printf("SM750_DEBUG: V_Total: %d, V_Disp: %d, V_SyncStart: %d, V_SyncEnd: %d\n",
-            mode->timing.v_total, mode->timing.v_display, 
-            mode->timing.v_sync_start, mode->timing.v_sync_end);
-            */
+    
     // Puntiamo allo 0 fisico (inizio memoria video)
     // S (Bit 31): Read-only status (Flip pending). Lo scriviamo a 0.
     // Ext (Bit 27): Memory Selection. Deve essere 0 per Local Memory.
@@ -425,10 +389,6 @@ sm750_set_display_mode(display_mode *mode)
     
     uint32 ctrl = 0;
     // Formato (Bit 1:0) -> 10 per 32bpp, 01 per 16bpp
-    //if (mode->space == B_RGB32) 
-    //    ctrl |= 0x2; 
-    //else 
-    //    ctrl |= 0x1;
     ctrl |= (fmt_reg & 0x3); // Imposta il formato (Bit 1:0)
     
     //Abilita il piano grafico (Bit 2)
@@ -446,27 +406,30 @@ sm750_set_display_mode(display_mode *mode)
     	// Registro di Controllo PANEL (0x080000)
         // Bit di alimentazione LCD
         ctrl |= (1 << 24) | (1 << 25) | (1 << 26) | (1 << 27); 
-        //debug_printf("SM750_ACC: Scrittura sul registro di controllo di PANEL: 0x%08x\n", ctrl);
         SM750_WREG32(SM750_PANEL_CONTROL, ctrl);
-        si->fbc.bytes_per_row = pitch;
-        si->fbc.frame_buffer_dma = (void *)si->framebuffer_pci;
-        //debug_printf("SM750_ACC: --- FINE SETUP PANEL ---\n");
     } else {
         // Registro di Controllo CRT (0x080200)
         // Data Select (Bit 19:18) -> Vogliamo CRT Data (10)
         ctrl |= (2 << 18);
         // 7. VGA Data Shift (Bit 26) -> Di solito 0 (Enable)
         // ctrl |= (0 << 26);
-        //debug_printf("SM750_ACC: Scrittura sul registro di controllo del CRT: 0x%08x\n", ctrl);
         SM750_WREG32(SM750_CRT_CONTROL, ctrl);
-        si->fbc2.bytes_per_row = pitch;
-        si->fbc2.frame_buffer_dma = (void *)si->framebuffer_pci;
-    	//debug_printf("SM750_ACC: --- FINE SETUP CRT ---\n");
     }
+    si->fbc.frame_buffer = gInfo->framebuffer;
+    si->fbc.bytes_per_row = pitch;
+    si->fbc.frame_buffer_dma = (void *)si->framebuffer_pci;
+    si->fbc2.frame_buffer = gInfo->framebuffer;
+    si->fbc2.bytes_per_row = pitch;
+    si->fbc2.frame_buffer_dma = (void *)si->framebuffer_pci;
     
 
     si->dm = *mode;
     sm750_init_2d_engine(&(si->dm));
+    
+    debug_printf("SM750_DEBUG: SPACE=0x%x, BPP=%d\n", mode->space, bpp);
+debug_printf("SM750_DEBUG: H_DISPLAY=%d, V_DISPLAY=%d\n", mode->timing.h_display, mode->timing.v_display);
+debug_printf("SM750_DEBUG: VIRT_W=%d, VIRT_H=%d\n", mode->virtual_width, mode->virtual_height);
+debug_printf("SM750_DEBUG: CALC_PITCH=%d, SI_FBC_PITCH=%d\n", pitch, (int)si->fbc.bytes_per_row);
     
     return B_OK;
 }
@@ -474,17 +437,13 @@ sm750_set_display_mode(display_mode *mode)
 status_t
 sm750_get_frame_buffer_config(frame_buffer_config *config)
 {
+	debug_printf("SM750_ACC: chiamata a sm750_get_frame_buffer_config");
+	if (!config) return B_BAD_VALUE;
+	
     shared_info *si = gInfo->si;
-    // Calcolo BPP al volo per evitare ridondanze in shared_info
-    //uint32 bpp = 0;
-    //switch (si->preferred_mode.space) {
-    //    case B_RGB32: case B_RGBA32: bpp = 32; break;
-    //    case B_RGB16: bpp = 16; break;
-    //    default: bpp = 8; break;
-    //}
-    
+        
     config->frame_buffer = (void *)gInfo->framebuffer; //usiamo il locale
-    
+        
     if (si->card_info.is_panel) {
         config->frame_buffer_dma = si->fbc.frame_buffer_dma;
         config->bytes_per_row = si->fbc.bytes_per_row;
@@ -492,8 +451,8 @@ sm750_get_frame_buffer_config(frame_buffer_config *config)
         config->frame_buffer_dma = si->fbc2.frame_buffer_dma;
         config->bytes_per_row = si->fbc2.bytes_per_row;
     }
-
-    //config->bytes_per_row = si->dm.timing.h_display * (si->bits_per_pixel / 8);
+    debug_printf("SM750_ACC: dw_config ptr=%p, dma=%p, row_bytes=%" B_PRIu32 " (IsPanel: %d)\n",
+        config->frame_buffer, config->frame_buffer_dma, config->bytes_per_row, si->card_info.is_panel);
     return B_OK;
 }
 

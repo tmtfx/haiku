@@ -120,7 +120,8 @@ sm750_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
     shared_info *si = gInfo->si;
     vuint32 *regs = gInfo->regs;
     
-    uint8* dest = (uint8*)si->cursor.v_address;
+    //uint8* dest = (uint8*)si->cursor.v_address;
+    uint8* dest = (uint8*)gInfo->cursor_virtual_address;
 
     if (dest == NULL)
         return B_NO_INIT;
@@ -190,9 +191,11 @@ sm750_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 	//       while changing the bitmap
     shared_info *si = gInfo->si;
     vuint32 *regs = gInfo->regs;
-    uint8* dest = (uint8*)si->cursor.v_address;
+    //uint8* dest = (uint8*)si->cursor.v_address;
+    uint8* dest = (uint8*)gInfo->cursor_virtual_address;
     
-    if (si->cursor.v_address == NULL) {
+    //if (si->cursor.v_address == NULL) {
+    if (gInfo->cursor_virtual_address == NULL) {
         debug_printf("SM750_ACC: Cursor: indirizzo di memoria non inizializzato");
         return B_NO_INIT;
     }

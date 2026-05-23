@@ -314,3 +314,21 @@ mem_freetag(mem_info *mem, void *tag)
 	release_sem(mem->lock);
 	return B_OK;
 }
+uint32
+mem_get_free_memory(mem_info *mem)
+{
+    mem_block *current;
+    uint32 free_size = 0;
+
+    if (acquire_sem(mem->lock) != B_OK)
+        return 0;
+
+    for (current = mem->first; current; current = current->next) {
+        if (!current->allocated) {
+            free_size += current->size;
+        }
+    }
+
+    release_sem(mem->lock);
+    return free_size;
+}

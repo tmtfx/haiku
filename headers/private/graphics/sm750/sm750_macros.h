@@ -271,6 +271,8 @@
 #define WAIT_2D_IDLE() \
 	while (SM750_REG32(SM750_2D_STATUS) & (1 << 31)) { snooze(1); }
 
+#define SM750_VRAM_ALIGN(OFFSET) (((OFFSET) + 15) & ~15)
+#define SM750_CURSOR_SIZE        (16 * 1024) // 16KB standard
 
 /* --- Core Access Macros (Memory Mapped IO) --- */
 #define SM750_REG8(r_)  ((vuint8  *)regs)[(r_)]

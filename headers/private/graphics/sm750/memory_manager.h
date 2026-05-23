@@ -24,6 +24,7 @@ void mem_destroy(mem_info *mem);
 status_t mem_alloc(mem_info *mem, uint32 size, void *tag, uint32 *blockID, uint32 *offset);
 status_t mem_free(mem_info *mem, uint32 blockID, void *tag);
 status_t mem_freetag(mem_info *mem, void *tag);
+uint32 mem_get_free_memory(mem_info *mem);
 
 #ifdef __cplusplus
 }

@@ -151,17 +151,26 @@ sm750_allocate_overlay_buffer(color_space cs, uint16 width, uint16 height)
     uint32 allocSize = size + 15;
     
     // VERIFICA SPAZIO: abbiamo abbastanza RAM dopo il desktop?
-    uint32 available_vram = si->card_info.mem_size - si->first_free_vram_offset;
-    
+    uint32 available_vram = mem_get_free_memory((mem_info*)si->mem_mgr);
+
     if (size > available_vram) {
-        debug_printf("SM750_ACC: Overlay troppo grande! RAM libera: %u, Richiesta: %u\n", 
-                      available_vram, size);
+        debug_printf("SM750_ACC: Overlay troppo grande! RAM heap libera: %u, Richiesta: %u\n", 
+                  available_vram, size);
         return NULL;
     }
+    //uint32 available_vram = si->card_info.mem_size - si->first_free_vram_offset;
+    
+    //if (size > available_vram) {
+    //    debug_printf("SM750_ACC: Overlay troppo grande! RAM libera: %u, Richiesta: %u\n", 
+    //                  available_vram, size);
+    //    return NULL;
+    //}
 
     // 2. Allochiamo memoria fisica tramite il memory manager
-    if (mem_alloc((mem_info*)si->mem_mgr, allocSize, (void*)'VIDO', &blockID, &offset) != B_OK)
+    if (mem_alloc((mem_info*)si->mem_mgr, allocSize, (void*)'VIDO', &blockID, &offset) != B_OK){
+        debug_printf("SM750_ACC: Memoria esaurita nell'Heap VRAM del kernel!\n");
         return NULL;
+    }
     
     // --- FORZIAMO L'ALLINEAMENTO A 16 BYTE ---
     uint32 alignedOffset = (offset + 15) & ~15;
