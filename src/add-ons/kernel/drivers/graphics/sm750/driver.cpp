@@ -73,9 +73,10 @@ map_videomem(void **out_virt, phys_addr_t phys, uint32 size, const char *name)
 {
     void *virt = NULL;
     size = (size + B_PAGE_SIZE - 1) & ~(B_PAGE_SIZE - 1);
-    area_id area = map_physical_memory(name, phys, size, B_ANY_KERNEL_ADDRESS, //| B_WRITE_COMBINING_MEMORY, 
-                                       B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA, &virt);
-        //B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA | B_CLONEABLE_AREA, &virt);
+    area_id area = map_physical_memory(name, phys, size, B_ANY_KERNEL_ADDRESS,
+        B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA
+            | B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA,
+        &virt);
 
     if (area < B_OK) {
         dprintf("SM750 ERROR: map_physical_memory(%s) failed\n", name);
