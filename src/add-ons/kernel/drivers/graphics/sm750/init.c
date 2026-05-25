@@ -176,10 +176,23 @@ static status_t create_mode_list(shared_info* si) {
 }
 
 static void draw_logo(DeviceInfo *di, display_mode* dm) {
-    if (!di || !di->framebuffer || !dm) return;
+    if (!di || !dm) return;
+
+    void* fb_virt = NULL;
+    area_id fb_area = -1;
+    uint32 fb_size = di->pci.u.h0.base_register_sizes[0];
+    if (fb_size == 0)
+        return;
+
+    fb_size = (fb_size + B_PAGE_SIZE - 1) & ~(B_PAGE_SIZE - 1);
+    fb_area = map_physical_memory("sm750_fb_init_logo",
+        di->pci.u.h0.base_registers[0], fb_size, B_ANY_KERNEL_ADDRESS,
+        B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA, &fb_virt);
+    if (fb_area < B_OK || fb_virt == NULL)
+        return;
 
     shared_info *si = di->si;
-    uint32* fb = (uint32*)di->framebuffer;
+    uint32* fb = (uint32*)fb_virt;
     
     uint32 screenWidth = dm->virtual_width;
     uint32 screenHeight = dm->virtual_height;
@@ -209,6 +222,8 @@ static void draw_logo(DeviceInfo *di, display_mode* dm) {
             fb[fbIndex] = sm750_logo[y * logoW + x];
         }
     }
+
+    delete_area(fb_area);
 }
 
 static void sm750_init_interrupts(DeviceInfo* info) 
