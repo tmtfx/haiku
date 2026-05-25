@@ -415,10 +415,12 @@ sm750_set_display_mode(display_mode *mode)
         // ctrl |= (0 << 26);
         SM750_WREG32(SM750_CRT_CONTROL, ctrl);
     }
-    si->fbc.frame_buffer = gInfo->framebuffer;
+    //si->fbc.frame_buffer = gInfo->framebuffer;
+    si->fbc.frame_buffer = si->framebuffer;
     si->fbc.bytes_per_row = pitch;
     si->fbc.frame_buffer_dma = (void *)si->framebuffer_pci;
-    si->fbc2.frame_buffer = gInfo->framebuffer;
+    //si->fbc2.frame_buffer = gInfo->framebuffer;
+    si->fbc2.frame_buffer = si->framebuffer;
     si->fbc2.bytes_per_row = pitch;
     si->fbc2.frame_buffer_dma = (void *)si->framebuffer_pci;
     
@@ -442,17 +444,19 @@ sm750_get_frame_buffer_config(frame_buffer_config *config)
 	
     shared_info *si = gInfo->si;
         
-    config->frame_buffer = (void *)gInfo->framebuffer; //usiamo il locale
-        
     if (si->card_info.is_panel) {
-    	//sono tutti la stessa cosa
-    	//config->frame_buffer_dma = (void *)(addr_t)gInfo->si->framebuffer_pci;
-    	//config->frame_buffer_dma = (phys_addr_t)di->pci.u.h0.base_registers[0];
-        config->frame_buffer_dma = si->fbc.frame_buffer_dma;
-        config->bytes_per_row = si->fbc.bytes_per_row;
+        ////sono tutti la stessa cosa
+        ////config->frame_buffer_dma = (void *)(addr_t)gInfo->si->framebuffer_pci;
+        ////config->frame_buffer_dma = (phys_addr_t)di->pci.u.h0.base_registers[0];
+        //config->frame_buffer_dma = si->fbc.frame_buffer_dma;
+        //config->bytes_per_row = si->fbc.bytes_per_row;
+
+        *config = si->fbc;
     } else {
-        config->frame_buffer_dma = si->fbc2.frame_buffer_dma;
-        config->bytes_per_row = si->fbc2.bytes_per_row;
+        //config->frame_buffer_dma = si->fbc2.frame_buffer_dma;
+        //config->bytes_per_row = si->fbc2.bytes_per_row;
+
+        *config = si->fbc2;
     }
     debug_printf("SM750_ACC: dw_config ptr=%p, dma=%p, row_bytes=%" B_PRIu32 " (IsPanel: %d)\n",
         config->frame_buffer, config->frame_buffer_dma, config->bytes_per_row, si->card_info.is_panel);

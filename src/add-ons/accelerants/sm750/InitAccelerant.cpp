@@ -20,7 +20,13 @@
 #define CALLED() debug_printf("SM750_ACC: %s\n", __FUNCTION__)
 
 /* gInfo globale per l'accelerante */
-accelerant_info g_info = { .shared_info_area = -1, .regs_area = -1, .fb_area = -1 };
+accelerant_info g_info = {
+    .shared_info_area = -1,
+    .regs_area = -1,
+    .fb_area = -1,
+    .mode_list_area = -1,
+    .vblank_thread = -1
+};
 accelerant_info *gInfo = &g_info;
 
 
@@ -282,7 +288,7 @@ static status_t init_common(int fd,bool isClone) {
         return B_ERROR;
     }
     
-    /* 4. Clona il Framebuffer (BAR0) */
+    /* 4. Clona il Framebuffer (BAR0) per l'uso locale dell'accelerante */
     void* fb_ptr = NULL;
     gInfo->fb_area = clone_area("sm750 fb user", &fb_ptr,
         B_ANY_ADDRESS, B_READ_AREA | B_WRITE_AREA, gInfo->si->fb_area);
@@ -298,14 +304,13 @@ static status_t init_common(int fd,bool isClone) {
     debug_printf("SM750_ACC: AccelerantInfo framebuffer ptr=%p\n",gInfo->framebuffer);
     
     if (!isClone) {
-        //si->framebuffer = (uint8*)fb_ptr;
         // --- INIZIALIZZAZIONE MEMORY MANAGER ---
         // Ora che sappiamo quanta RAM c'è, attiviamo il gestore
         if (init_vram_manager(si) != B_OK) {
             debug_printf("SM750_ACC: WARNING - Memory Manager initialization failed!\n");
         }
-        si->fbc.frame_buffer=gInfo->framebuffer;
-        si->fbc2.frame_buffer=gInfo->framebuffer;
+        si->fbc.frame_buffer = si->framebuffer; //gInfo->framebuffer;
+        si->fbc2.frame_buffer = si->framebuffer; //gInfo->framebuffer;
                 
         // qui benaphore per engine 2d
         status_t result = si->engine.lock.Init("SM750 2D engine lock");
@@ -322,10 +327,12 @@ static status_t init_common(int fd,bool isClone) {
         gInfo->mode_list_area = clone_area("sm750 modes user", (void**)&gInfo->mode_list,
             B_ANY_ADDRESS, B_READ_AREA | B_WRITE_AREA, si->mode_list_area);
         if (gInfo->mode_list_area < 0) return gInfo->mode_list_area;
-        // --- AVVIO SERVIZIO INTERRUPT ---
-        si->vblank_sem = create_sem(0, "sm750_vblank_kernel_signal");
-        si->vblank_sync_sem = create_sem(0, "sm750_vblank_sync_user");
-        si->engine.lock.sem = create_sem(0, "sm750 engine sem");
+
+        if (si->vblank_sem < B_OK || si->vblank_sync_sem < B_OK
+            || si->engine.lock.sem < B_OK) {
+            debug_printf("SM750_ACC: ERROR - Missing driver semaphores for vblank/engine\n");
+            return B_ERROR;
+        }
 
         atomic_set(&si->irq_enabled, 1);
         gInfo->vblank_thread = spawn_thread(
@@ -429,8 +436,19 @@ sem_id sm750_retrace_semaphore(void)
 
 
 void sm750_uninit_accelerant(void) {
-    if (gInfo->si != NULL && !gInfo->is_clone) {
-        gInfo->si->accelerant_in_use = false;
+    shared_info* si = gInfo->si;
+    thread_id vblankThread = gInfo->vblank_thread;
+
+    if (si != NULL && !gInfo->is_clone) {
+        si->accelerant_in_use = false;
+        atomic_set(&si->irq_enabled, 0);
+        if (si->vblank_sem >= B_OK)
+            release_sem(si->vblank_sem);
+    }
+
+    if (vblankThread >= B_OK) {
+        status_t result;
+        wait_for_thread(vblankThread, &result);
     }
 
     if (gInfo->fb_area >= 0) delete_area(gInfo->fb_area);
@@ -438,7 +456,8 @@ void sm750_uninit_accelerant(void) {
     if (gInfo->shared_info_area >= 0) delete_area(gInfo->shared_info_area);
     
     gInfo->regs = NULL;
-    gInfo->si->framebuffer = NULL;
+    gInfo->framebuffer = NULL;
+    gInfo->vblank_thread = -1;
     gInfo->si = NULL;
 }
 

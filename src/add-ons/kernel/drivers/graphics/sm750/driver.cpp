@@ -273,18 +273,23 @@ open_device(const char *name, uint32 flags, void **cookie)
         strncpy(di->si->device_path, name, B_PATH_NAME_LENGTH);
         load_settings();
         memcpy(&di->si->settings, &current_settings, sizeof(sm750_settings));
-        /* questi li creiamo nell'accelerante
         di->si->vblank_sem = create_sem(0, "sm750 vblank sem");
         set_sem_owner(di->si->vblank_sem, B_SYSTEM_TEAM);
         di->si->engine.lock.sem = create_sem(0, "sm750 engine sem");
         set_sem_owner(di->si->engine.lock.sem, B_SYSTEM_TEAM);
         di->si->vblank_sync_sem = create_sem(0, "sm750_vblank_sync_user");
         set_sem_owner(di->si->vblank_sync_sem, B_SYSTEM_TEAM);     
-        */
-        // per il momento assegno valore -1
-        di->si->vblank_sem = -1;
-        di->si->vblank_sync_sem = -1;
-        di->si->engine.lock.sem = -1;
+        if (di->si->vblank_sem < B_OK || di->si->engine.lock.sem < B_OK
+            || di->si->vblank_sync_sem < B_OK) {
+            if (di->si->vblank_sem >= B_OK)
+                delete_sem(di->si->vblank_sem);
+            if (di->si->engine.lock.sem >= B_OK)
+                delete_sem(di->si->engine.lock.sem);
+            if (di->si->vblank_sync_sem >= B_OK)
+                delete_sem(di->si->vblank_sync_sem);
+            delete_area(di->shared_area);
+            return B_ERROR;
+        }
         // 4. Mappatura REGISTRI (BAR 1 - 2MB)
         di->regs_area = map_mem((void **)&di->regs, di->pci.u.h0.base_registers[1], 
                                di->pci.u.h0.base_register_sizes[1], "sm750_regs_k");
@@ -294,6 +299,9 @@ open_device(const char *name, uint32 flags, void **cookie)
                              di->pci.u.h0.base_register_sizes[0], "sm750_fb_k");
 		dprintf("SM750: DeviceInfo framebuffer ptr=%p\n",di->framebuffer);
         if (di->regs_area < 0 || di->fb_area < 0) {
+            delete_sem(di->si->vblank_sync_sem);
+            delete_sem(di->si->engine.lock.sem);
+            delete_sem(di->si->vblank_sem);
             delete_area(di->shared_area);
             return B_ERROR;
         }
@@ -320,7 +328,6 @@ open_device(const char *name, uint32 flags, void **cookie)
 
         // 6. Inizializzazione Chip (Wake up)
         //di->si->regs = NULL; // L'accelerante mapperà la sua versione
-        di->si->framebuffer = NULL; // idem
         di->si->regs_area = di->regs_area; // Passa l'ID         
         di->si->fb_area = di->fb_area;     // Passa l'ID numerico
         di->si->framebuffer_pci = (phys_addr_t)di->pci.u.h0.base_registers[0];
@@ -371,6 +378,14 @@ static status_t free_device(void *cookie) {
         if (di->msi_enabled) {
             pci->disable_msi(di->pci.bus, di->pci.device, di->pci.function);
             pci->unconfigure_msi(di->pci.bus, di->pci.device, di->pci.function);
+        }
+        if (di->si != NULL) {
+            if (di->si->vblank_sync_sem >= B_OK)
+                delete_sem(di->si->vblank_sync_sem);
+            if (di->si->engine.lock.sem >= B_OK)
+                delete_sem(di->si->engine.lock.sem);
+            if (di->si->vblank_sem >= B_OK)
+                delete_sem(di->si->vblank_sem);
         }
         delete_area(di->shared_area);
         delete_area(di->regs_area);
