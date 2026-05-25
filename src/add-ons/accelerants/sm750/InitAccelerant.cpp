@@ -294,7 +294,8 @@ static status_t init_common(int fd,bool isClone) {
     }
 
     /* salviamo il puntatore virtuale LOCALMENTE */
-    gInfo->framebuffer = (uint8*)fb_ptr; 
+    gInfo->framebuffer = (uint8*)fb_ptr;
+    debug_printf("SM750_ACC: AccelerantInfo framebuffer ptr=%p\n",gInfo->framebuffer);
     
     if (!isClone) {
         //si->framebuffer = (uint8*)fb_ptr;

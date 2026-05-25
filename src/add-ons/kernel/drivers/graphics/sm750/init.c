@@ -609,7 +609,7 @@ void sm750_init_chip(DeviceInfo *di) {
     }
     
     si->fbc.frame_buffer = NULL;
-    si->fbc.frame_buffer_dma = (void *)(addr_t)di->pci.u.h0.base_registers[0];
+    si->fbc.frame_buffer_dma = (void *)(addr_t)di->pci.u.h0.base_registers[0]; // che è si->framebuffer_pci
     si->fbc.bytes_per_row = dm->timing.h_display * (bpp / 8);
     si->fbc2 = si->fbc; // per sicurezza copiamo la configurazione anche nell'altra uscita
     
@@ -664,9 +664,9 @@ void sm750_init_chip(DeviceInfo *di) {
     
     
     if (showLogo) {
-    	//dprintf("5 seconds of glory\n");
+    	//dprintf("3 seconds of glory\n");
     	display_mode *dm = si->card_info.is_panel ? &si->preferred_mode : &si->preferred_mode2;
     	draw_logo(di, dm);
     }
-    snooze(5000000); // 5 seconds of glory
+    snooze(3000000); // 3 seconds of glory
 }

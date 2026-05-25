@@ -426,10 +426,10 @@ sm750_set_display_mode(display_mode *mode)
     si->dm = *mode;
     sm750_init_2d_engine(&(si->dm));
     
-    debug_printf("SM750_DEBUG: SPACE=0x%x, BPP=%d\n", mode->space, bpp);
-debug_printf("SM750_DEBUG: H_DISPLAY=%d, V_DISPLAY=%d\n", mode->timing.h_display, mode->timing.v_display);
-debug_printf("SM750_DEBUG: VIRT_W=%d, VIRT_H=%d\n", mode->virtual_width, mode->virtual_height);
-debug_printf("SM750_DEBUG: CALC_PITCH=%d, SI_FBC_PITCH=%d\n", pitch, (int)si->fbc.bytes_per_row);
+    //debug_printf("SM750_DEBUG: SPACE=0x%x, BPP=%d\n", mode->space, bpp);
+    //debug_printf("SM750_DEBUG: H_DISPLAY=%d, V_DISPLAY=%d\n", mode->timing.h_display, mode->timing.v_display);
+    //debug_printf("SM750_DEBUG: VIRT_W=%d, VIRT_H=%d\n", mode->virtual_width, mode->virtual_height);
+    //debug_printf("SM750_DEBUG: CALC_PITCH=%d, SI_FBC_PITCH=%d\n", pitch, (int)si->fbc.bytes_per_row);
     
     return B_OK;
 }
@@ -437,7 +437,7 @@ debug_printf("SM750_DEBUG: CALC_PITCH=%d, SI_FBC_PITCH=%d\n", pitch, (int)si->fb
 status_t
 sm750_get_frame_buffer_config(frame_buffer_config *config)
 {
-	debug_printf("SM750_ACC: chiamata a sm750_get_frame_buffer_config");
+	debug_printf("SM750_ACC: chiamata a sm750_get_frame_buffer_config\n");
 	if (!config) return B_BAD_VALUE;
 	
     shared_info *si = gInfo->si;
@@ -445,6 +445,9 @@ sm750_get_frame_buffer_config(frame_buffer_config *config)
     config->frame_buffer = (void *)gInfo->framebuffer; //usiamo il locale
         
     if (si->card_info.is_panel) {
+    	//sono tutti la stessa cosa
+    	//config->frame_buffer_dma = (void *)(addr_t)gInfo->si->framebuffer_pci;
+    	//config->frame_buffer_dma = (phys_addr_t)di->pci.u.h0.base_registers[0];
         config->frame_buffer_dma = si->fbc.frame_buffer_dma;
         config->bytes_per_row = si->fbc.bytes_per_row;
     } else {
@@ -453,6 +456,8 @@ sm750_get_frame_buffer_config(frame_buffer_config *config)
     }
     debug_printf("SM750_ACC: dw_config ptr=%p, dma=%p, row_bytes=%" B_PRIu32 " (IsPanel: %d)\n",
         config->frame_buffer, config->frame_buffer_dma, config->bytes_per_row, si->card_info.is_panel);
+    
+    
     return B_OK;
 }
 

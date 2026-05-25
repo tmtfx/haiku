@@ -10,7 +10,7 @@ UsePrivateHeaders [ FDirName graphics sm750 ] ;
 UsePrivateKernelHeaders ;
 
 KernelAddon sm750 :
-	driver.c
+	driver.cpp
 	init.c
 	:
 	libgraphicscommon.a

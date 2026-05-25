@@ -15,6 +15,8 @@
 
 #include <driver_settings.h>
 
+//#include <util/kernel_cpp.h>
+#include <vm/vm.h>
 #include "DriverInterface.h"
 #include "sm750_macros.h"
 
@@ -71,8 +73,9 @@ map_videomem(void **out_virt, phys_addr_t phys, uint32 size, const char *name)
 {
     void *virt = NULL;
     size = (size + B_PAGE_SIZE - 1) & ~(B_PAGE_SIZE - 1);
-    area_id area = map_physical_memory(name, phys, size, B_ANY_KERNEL_ADDRESS | B_WRITE_COMBINING_MEMORY, 
-        B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA | B_CLONEABLE_AREA, &virt);
+    area_id area = map_physical_memory(name, phys, size, B_ANY_KERNEL_ADDRESS, //| B_WRITE_COMBINING_MEMORY, 
+                                       B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA, &virt);
+        //B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA | B_CLONEABLE_AREA, &virt);
 
     if (area < B_OK) {
         dprintf("SM750 ERROR: map_physical_memory(%s) failed\n", name);
@@ -171,7 +174,7 @@ status_t init_driver(void) {
     pci_info info;
     for (int32 i = 0; pci->get_nth_pci_info(i, &info) == B_OK && count < 8; i++) {
         if (info.vendor_id == VENDOR_ID_SMI && info.device_id == DEVICE_ID_SM750) {
-            devices[count] = malloc(sizeof(DeviceInfo));
+            devices[count] = (DeviceInfo*)malloc(sizeof(DeviceInfo));
             if (!devices[count]) continue;
             memset(devices[count], 0, sizeof(DeviceInfo));
             
@@ -289,11 +292,16 @@ open_device(const char *name, uint32 flags, void **cookie)
         // 5. Mappatura FRAMEBUFFER (BAR 0 - 64MB)
         di->fb_area = map_videomem((void **)&di->framebuffer, di->pci.u.h0.base_registers[0], 
                              di->pci.u.h0.base_register_sizes[0], "sm750_fb_k");
-
+		dprintf("SM750: DeviceInfo framebuffer ptr=%p\n",di->framebuffer);
         if (di->regs_area < 0 || di->fb_area < 0) {
             delete_area(di->shared_area);
             return B_ERROR;
         }
+        
+        //frame_buffer_update(di->frameBuffer, width, height, depth,
+		//			bytesPerRow);
+        
+        di->si->framebuffer = di->framebuffer;
         
         
         // 3. Installazione Handler
@@ -316,6 +324,8 @@ open_device(const char *name, uint32 flags, void **cookie)
         di->si->regs_area = di->regs_area; // Passa l'ID         
         di->si->fb_area = di->fb_area;     // Passa l'ID numerico
         di->si->framebuffer_pci = (phys_addr_t)di->pci.u.h0.base_registers[0];
+        
+        vm_set_area_memory_type(di->si->fb_area, di->si->framebuffer_pci, B_WRITE_COMBINING_MEMORY);
         
         sm750_init_chip(di);
     }
