@@ -360,7 +360,9 @@ control_device(void *cookie, uint32 op, void *arg, size_t len)
             return user_memcpy(arg, &gpd, sizeof(gpd));
         }
         case B_GET_ACCELERANT_SIGNATURE:
-            strcpy((char *)arg, "sm750.accelerant");
+            //strcpy((char *)arg, "sm750.accelerant"); //genera SMAP
+            if (user_strlcpy((char *)arg, "sm750.accelerant", len) < B_OK)
+                return B_BAD_ADDRESS;
             return B_OK;
     }
     return B_DEV_INVALID_IOCTL;
