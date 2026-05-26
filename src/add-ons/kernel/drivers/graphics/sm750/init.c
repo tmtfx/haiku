@@ -50,14 +50,14 @@ GetEdidFromBIOS(edid1_raw* edidRaw)
     sm750_bios_module_info* biosModule;
     status_t status = get_module(B_BIOS_MODULE_NAME, (module_info**)&biosModule);
     if (status != B_OK) {
-        dprintf("SM750: Impossibile caricare il modulo BIOS: 0x%" B_PRIx32 "\n", status);
+        dprintf("SM750: Unable loading the BIOS module: 0x%" B_PRIx32 "\n", status);
         return status;
     }
 
     bios_state* state;
     status = biosModule->prepare(&state);
     if (status != B_OK) {
-        dprintf("SM750: bios_prepare() fallito\n");
+        dprintf("SM750: bios_prepare() failed\n");
         put_module(B_BIOS_MODULE_NAME);
         return status;
     }
@@ -71,7 +71,6 @@ GetEdidFromBIOS(edid1_raw* edidRaw)
     
     // Verifichiamo se il BIOS supporta la funzione (0x4f = Successo)
     if (status == B_OK && (regs.eax & 0xffff) == 0x4f) {
-        // Allociamo memoria "bassa" accessibile dal BIOS per l'EDID
         edid1_raw* edid = (edid1_raw*)biosModule->allocate_mem(state, sizeof(edid1_raw));
         if (edid == NULL) {
             status = B_NO_MEMORY;
@@ -80,23 +79,21 @@ GetEdidFromBIOS(edid1_raw* edidRaw)
             regs.ebx = 1;  // Sottofunzione: Read EDID
             regs.ecx = 0;
             regs.edx = 0;
-            // Calcoliamo segmento e offset per l'indirizzo reale
             regs.es  = (uint16)((addr_t)edid >> 4);
             regs.edi = (uint16)((addr_t)edid & 0x0f);
 
             status = biosModule->interrupt(state, 0x10, &regs);
             
             if (status == B_OK && (regs.eax & 0xffff) == 0x4f) {
-                // Copiamo l'EDID nella nostra struttura finale
                 memcpy(edidRaw, edid, sizeof(edid1_raw));
-                dprintf("SM750: EDID letto correttamente via BIOS Interrupt!\n");
+                dprintf("SM750: EDID correctly read through BIOS interrupt!\n");
             } else {
-                dprintf("SM750: BIOS fallito nel leggere l'EDID (EAX=0x%x)\n", regs.eax);
+                dprintf("SM750: BIOS failed reading the EDID (EAX=0x%x)\n", regs.eax);
                 status = B_NOT_SUPPORTED;
             }
         }
     } else {
-        dprintf("SM750: DDC non supportato dal BIOS Video\n");
+        dprintf("SM750: DDC not supported by Video BIOS\n");
         status = B_NOT_SUPPORTED;
     }
 
@@ -110,71 +107,7 @@ static const color_space kFallbackSpaces[] = {
     B_RGB16,
     B_CMAP8
 };
-/* old create_mode_list
-static status_t create_mode_list(shared_info* si) {
-	uint32 vesa_count = 0;
-    while (vesa_dmt_table[vesa_count].width != 0) {
-        vesa_count++;
-    }
-	uint32 total_modes = vesa_count * 3;
-	
-    //size_t size = (MAX_EDID_MODES * sizeof(display_mode) + B_PAGE_SIZE - 1) & ~(B_PAGE_SIZE - 1);
-    size_t size = (total_modes * sizeof(display_mode) + B_PAGE_SIZE - 1) & ~(B_PAGE_SIZE - 1);
-    display_mode* local_list = NULL;
 
-    area_id m_area = create_area("sm750 modes", (void **)&local_list,
-        B_ANY_KERNEL_ADDRESS, size, B_FULL_LOCK, 
-        B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA | B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA);
-
-    if (m_area < 0) return m_area;
-
-    uint32 count = 0;
-    
-    // TODO: Qui potresti analizzare si->vesa_edid_info per filtrare i modi!
-    if (si->card_info.has_edid_vesa) {
-    	// TODO
-        dprintf("SM750: EDID VESA presente, potrei filtrare i modi ma non ancora implementato...\n");
-    }
-
-    for (int i = 0; vesa_dmt_table[i].width != 0; i++) {
-        const vesa_timing_t* vesa = &vesa_dmt_table[i];
-        
-        for (int s = 0; s < 3; s++) {
-            //if (count >= MAX_EDID_MODES) break;
-
-            display_mode* dm = &local_list[count];
-            
-            // Copia Timing
-            dm->timing.pixel_clock = vesa->pixel_clock;
-            dm->timing.h_display    = vesa->width;
-            dm->timing.h_sync_start = vesa->h_sync_start;
-            dm->timing.h_sync_end   = vesa->h_sync_end;
-            dm->timing.h_total      = vesa->h_total;
-            dm->timing.v_display    = vesa->height;
-            dm->timing.v_sync_start = vesa->v_sync_start;
-            dm->timing.v_sync_end   = vesa->v_sync_end;
-            dm->timing.v_total      = vesa->v_total;
-            dm->timing.flags        = vesa->flags;
-
-            // Imposta lo spazio colore corrente del sotto-ciclo
-            dm->space = kFallbackSpaces[s];
-            
-            dm->virtual_width  = vesa->width;
-            dm->virtual_height = vesa->height;
-            dm->h_display_start = 0;
-            dm->v_display_start = 0;
-            dm->flags = 0;
-
-            count++;
-        }
-    }
-
-    si->mode_count = count;
-    si->mode_list_area = m_area;
-
-    dprintf("SM750: create_mode_list finito. Modi: %u\n", count);
-    return B_OK;
-}*/
 static status_t create_mode_list(shared_info* si) {
     uint32 vesa_count = 0;
     while (vesa_dmt_table[vesa_count].width != 0) {
@@ -184,8 +117,6 @@ static status_t create_mode_list(shared_info* si) {
     
     size_t size = (total_modes * sizeof(display_mode) + B_PAGE_SIZE - 1) & ~(B_PAGE_SIZE - 1);
     
-    // --- MODIFICA CHIRURGICA ---
-    // Allocazione di memoria PURA KERNEL (Heap) che SMAP non controllerà mai
     display_mode* kernel_list = (display_mode*)malloc(size);
     if (kernel_list == NULL) return B_NO_MEMORY;
     memset(kernel_list, 0, size);
@@ -196,7 +127,7 @@ static status_t create_mode_list(shared_info* si) {
         const vesa_timing_t* vesa = &vesa_dmt_table[i];
         
         for (int s = 0; s < 3; s++) {
-            display_mode* dm = &kernel_list[count]; // Scriviamo nella memoria sicura del kernel
+            display_mode* dm = &kernel_list[count];
             
             dm->timing.pixel_clock = vesa->pixel_clock;
             dm->timing.h_display    = vesa->width;
@@ -220,7 +151,6 @@ static status_t create_mode_list(shared_info* si) {
         }
     }
 
-    // Ora creiamo l'area condivisa
     display_mode* user_list = NULL;
     area_id m_area = create_area("sm750 modes", (void **)&user_list,
         B_ANY_KERNEL_ADDRESS, size, B_FULL_LOCK, 
@@ -231,59 +161,19 @@ static status_t create_mode_list(shared_info* si) {
         return m_area;
     }
 
-    // Usiamo l'unica funzione ufficiale del kernel deputata a scrivere su aree con permessi utente:
-    // Copiamo l'intera lista safe del kernel dentro l'area appena creata
     if (user_memcpy(user_list, kernel_list, size) != B_OK) {
-        dprintf("SM750: user_memcpy fallito in create_mode_list!\n");
+        dprintf("SM750: user_memcpy failed in create_mode_list!\n");
     }
 
-    // Liberiamo la memoria temporanea del kernel
     free(kernel_list);
 
     si->mode_count = count;
     si->mode_list_area = m_area;
 
-    dprintf("SM750: create_mode_list finito chirurgicamente. Modi: %u\n", count);
+    dprintf("SM750: create_mode_list completed. # of Modes: %u\n", count);
     return B_OK;
 }
-/* old draw_logo:
-static void draw_logo(DeviceInfo *di, display_mode* dm) {
-    if (!di || !di->framebuffer || !dm) return;
 
-    shared_info *si = di->si;
-    uint32* fb = (uint32*)di->framebuffer;
-    
-    uint32 screenWidth = dm->virtual_width;
-    uint32 screenHeight = dm->virtual_height;
-    
-    uint32 bytesPerRow = si->fbc.bytes_per_row;
-    if (bytesPerRow == 0)
-        bytesPerRow = screenWidth * 4; 
-
-    uint32 fbPitch = bytesPerRow / 4; 
-
-    // Usiamo uint32 anche per le dimensioni del logo
-    uint32 logoW = 640;
-    uint32 logoH = 183;
-
-    int32 startX = (int32)((screenWidth - logoW) / 2);
-    int32 startY = (int32)((screenHeight - logoH) / 2);
-
-    if (startX < 0) startX = 0;
-    if (startY < 0) startY = 0;
-
-    //dprintf("SM750: Disegno logo su %ux%u (Pitch: %u)\n", screenWidth, screenHeight, fbPitch);
-
-    // Cambiato int in uint32 per i cicli
-    for (uint32 y = 0; y < logoH && (startY + (int32)y) < (int32)screenHeight; y++) {
-        for (uint32 x = 0; x < logoW && (startX + (int32)x) < (int32)screenWidth; x++) {
-            uint32 fbIndex = (uint32)((startY + (int32)y) * (int32)fbPitch + (startX + (int32)x));
-            fb[fbIndex] = sm750_logo[y * logoW + x];
-        }
-    }
-}*/
-
-/* new draw_logo */
 static void draw_logo(DeviceInfo *di, display_mode* dm) {
     if (!di || !dm) return;
 
@@ -312,7 +202,6 @@ static void draw_logo(DeviceInfo *di, display_mode* dm) {
 
     uint32 fbPitch = bytesPerRow / 4; 
 
-    // Usiamo uint32 anche per le dimensioni del logo
     uint32 logoW = 640;
     uint32 logoH = 183;
 
@@ -322,9 +211,6 @@ static void draw_logo(DeviceInfo *di, display_mode* dm) {
     if (startX < 0) startX = 0;
     if (startY < 0) startY = 0;
 
-    //dprintf("SM750: Disegno logo su %ux%u (Pitch: %u)\n", screenWidth, screenHeight, fbPitch);
-
-    // Cambiato int in uint32 per i cicli
     for (uint32 y = 0; y < logoH && (startY + (int32)y) < (int32)screenHeight; y++) {
         for (uint32 x = 0; x < logoW && (startX + (int32)x) < (int32)screenWidth; x++) {
             uint32 fbIndex = (uint32)((startY + (int32)y) * (int32)fbPitch + (startX + (int32)x));
@@ -341,7 +227,6 @@ static void sm750_init_interrupts(DeviceInfo* info)
 
 	// 1. PULIZIA MASTER: 
 	// Scriviamo 1 su tutti i bit del registro Clear (0x20)
-	// Questo dovrebbe resettare la logica di combinazione degli interrupt
 	// 31:5 Reserved, 4 ZV1 Port, 3 ZV0 Port, 2 CRT VSYNC, 1 Panel VSYNC, 0 VGA VSYNC
 	SM750_WREG32(SM750_SYS_RAW_INT_CLEAR, 0x0000001F);
 
@@ -351,9 +236,7 @@ static void sm750_init_interrupts(DeviceInfo* info)
 	engineStatus &= ~0x00000003; // Azzera bit 0 (2D) e 1 (CSC)
 	SM750_WREG32(SM750_2D_STATUS, engineStatus);
 
-	// 3. PULIZIA DMA (0x0D0020) - Nuovo!
-	// Visto che hai trovato i registri DMA, puliamo anche qui per sicurezza
-	// Solitamente scrivere 1 sui bit di interrupt status del DMA li pulisce
+	// 3. PULIZIA DMA (0x0D0020)
 	uint32 dmaStatus = SM750_REG32(SM750_DMA_ABORT_INTERRUPT);
 	SM750_WREG32(SM750_DMA_ABORT_INTERRUPT, dmaStatus); 
 
@@ -369,7 +252,7 @@ static void sm750_init_interrupts(DeviceInfo* info)
 
 	// 5. PULIZIA PWM
 	// bit 3 PWM Interrupt Pending. In order to clear a pending interrupt, write a “1” in
-	//the IP bit.
+	// the IP bit.
 
 	uint32 pwmstat = SM750_REG32(SM750_PWM0);
 	SM750_WREG32(SM750_PWM0,pwmstat|(1<<3));
@@ -380,16 +263,8 @@ static void sm750_init_interrupts(DeviceInfo* info)
 	
 	// TENTATIVO scrittura maschera anche se da datasheet è solo read only!
 	SM750_WREG32(SM750_SYS_INT_MASK,0xFE0013FF);
-	// ma a quanto pare accetta i valori e abilita gli interrupt!
+	// ma a quanto pare accetta i valori e abilita gli interrupt! <------ !!!
 	
-	// ABILITAZIONE LOGICA
-	//uint32 currentIntActive = SM750_REG32(SM750_SYS_RAW_INT_STATUS);
-	//dprintf("SM750: System RAW Interrupt status: 0x%08" B_PRIx32 "\n", currentIntActive);
-	//uint32 intstatus = SM750_REG32(SM750_SYS_INT_STATUS);
-	//dprintf("SM750: Interrupt status: 0x%08" B_PRIx32 "\n", intstatus);
-	//uint32 currentMask = SM750_REG32(SM750_SYS_INT_MASK);
-	//dprintf("SM750: System Interrupt Mask is: 0x%08" B_PRIx32 "\n", currentMask);
-
 	info->si->irq_enabled = 1;
 }
 
@@ -399,8 +274,7 @@ void sm750_init_chip(DeviceInfo *di) {
 
     vuint32 *regs = di->regs;
     shared_info *si = di->si;
-    // Verifica ID via MMIO (Offset 0x54)
-    uint32 device_info = SM750_REG32(SM750_SYS_DEVID); // 0x000054
+    uint32 device_info = SM750_REG32(SM750_SYS_DEVID);
     si->card_info.chip_id = (uint16)(device_info >> 16);
     uint16 device_id = (uint16)(device_info >> 16);
     uint8 revision = (uint8)(device_info & 0xFF);
@@ -426,27 +300,27 @@ void sm750_init_chip(DeviceInfo *di) {
     if (si->settings.force_CRT) {
         si->card_info.is_panel = false;
         si->card_info.active_outputs = 2; // Forza CRT
-        dprintf("SM750: Override utente attivo! Forzato ramo CRT (Analogico).\n");
+        dprintf("SM750: User override enabled! Forcing CRT branch (Analog).\n");
     } 
     else if (si->settings.force_Panel) {
         si->card_info.is_panel = true;
         si->card_info.active_outputs = 1; // Forza PANEL
-        dprintf("SM750: Override utente attivo! Forzato ramo PANEL (Digitale).\n");
+        dprintf("SM750: User override enabled! Forcing PANEL branch (Digital).\n");
     } 
     else if (si->card_info.has_edid_vesa) {
         si->card_info.is_panel = true;
         si->card_info.active_outputs = 1;
-        dprintf("SM750: Rilevato EDID -> Uso ramo PANEL.\n");
+        dprintf("SM750: EDID detected -> Using PANEL branch.\n");
     } 
     else {
-        // Fallback disperato: niente file, niente EDID. 
-        // Imposta il default sulla base della tua scheda principale o lascia CRT.
+        // Fallback: niente file, niente EDID. 
+        // Imposta il default sulla base della tua scheda CRT.
         si->card_info.is_panel = false; 
         si->card_info.active_outputs = 2;
-        dprintf("SM750: EDID non rilevato -> Uso ramo CRT.\n");
+        dprintf("SM750: EDID not detected -> Using CRT branch.\n");
     }
     
-    // --- 1. SVEGLIA IL CHIP (Power Mode 0) ---
+    // --- SVEGLIA IL CHIP (Power Mode 0) ---
     // --- SBLOCCO CLOCK (Power Mode 0) ---
     uint32 mode0_gate = SM750_REG32(SM750_SYS_PWR_MODE_0_CLKC); // 0x000044
     // Abilitiamo GPIO (6), 2D (3), Display (2), Memory (1) e DMA (0)
@@ -475,7 +349,7 @@ void sm750_init_chip(DeviceInfo *di) {
     snooze(100);
     vga_mode = SM750_REG32(SM750_SYS_VGA_CONFIG);
 
-    // --- 2. SELEZIONA IL POWER MODE E ACCENDI L'OSCILLATORE ---
+    // --- SELEZIONA IL POWER MODE E ACCENDI L'OSCILLATORE ---
     //Power Mode Control
     uint32 pwr_ctrl = SM750_REG32(SM750_SYS_PWR_MODE_CTRL); // 0x00004C
     pwr_ctrl &= ~0x00000003; // Forza Mode 0 (bit 1:0 = 00)
@@ -483,7 +357,7 @@ void sm750_init_chip(DeviceInfo *di) {
     SM750_WREG32(SM750_SYS_PWR_MODE_CTRL, pwr_ctrl); // 0x00004C
     snooze(1000); // Stabilizzazione clock
     
-    // --- 2. ABILITAZIONE BUS E MEMORIA (Registro 0x00) ---
+    // --- ABILITAZIONE BUS E MEMORIA (Registro 0x00) ---
     uint32 sys_ctrl = SM750_REG32(SM750_SYS_CTRL); // 0x00
     // Togliamo l'isolamento (bit 0,1,2,3) per collegare RAM e uscite video
     sys_ctrl &= ~0x0000000F; 
@@ -491,74 +365,21 @@ void sm750_init_chip(DeviceInfo *di) {
     sys_ctrl &= ~(3U << 30);
     SM750_WREG32(SM750_SYS_CTRL, sys_ctrl); //0x000000
     
-    // --- 3. ORA FACCIAMO LA RILEVAZIONE (Dopo aver attivato i bus) ---
-    // La logica che segue non funziona correttamente, con la scheda HDMI
-    // viene rilevato CRT occorre leggere il registro SM750_CRT_MONITOR_DETECT
-    //if (!(sys_ctrl & (1 << 3))) { 
-    //    si->card_info.is_panel = false;
-    //    si->card_info.active_outputs = 2; // CRT
-    //    dprintf("SM750: CRT detected as active.\n");
-    //} else {
-    //    si->card_info.is_panel = true;
-    //    si->card_info.active_outputs = 1; // Panel
-    //    dprintf("SM750: Panel detected as active.\n");
-    //}
-    // NO nemmeno SM750_CRT_MONITOR_DETECT è affidabile, rileva sulla porta0 un monitor
-    // anche se non abilitato, in pratica con 2 bit si rileva la presenza del monito (25 e 27)
-    // e con altri 2 bit li si abilita (24 e 26). di default con hdmi mi viene rilevato
-    // un monitor alla porta 0 ma non è abilitato
-    // non è né il modo migliore di operare né funziona!
-    
-    //uint32 crt_detect = SM750_REG32(SM750_CRT_MONITOR_DETECT);
-    //dprintf("SM750: CRT Detect Status: 0x%08" B_PRIx32 "\n", crt_detect);
-    //bool crt_physically_connected = (crt_detect & (1 << 25)) || (crt_detect & (1 << 27)); //rilevamento
-    //bool crt_physically_connected = (crt_detect & (1 << 24)) || (crt_detect & (1 << 26)); //abilitazione
-    //if (!crt_physically_connected) {
-    //    // Se non c'è l'EDID ma il DAC dice che non c'è nessun cavo VGA
-    //    si->card_info.is_panel = true;
-    //    si->card_info.active_outputs = 1; // Panel
-    //    dprintf("SM750: Rilevato schermo digitale, passaggio a PANEL.\n");
-    //} else {
-    //    // Fallback classico se c'è un monitor VGA vero
-    //    si->card_info.is_panel = false;
-    //    si->card_info.active_outputs = 2; // CRT
-    //    dprintf("SM750: Rilevato monitor analogico CRT.\n");
-    //}
-    // Nemmeno usando i valori preimpostati di panel control e crt control!
-    // Viene sempre attivato il ramo panel anche nella scheda con sole CRT
-    //uint32 bios_panel_ctrl = SM750_REG32(SM750_PANEL_CONTROL); // 0x080000
-    //uint32 bios_crt_ctrl   = SM750_REG32(SM750_CRT_CONTROL);   // 0x080200
-    //dprintf("SM750: BIOS State - Panel Ctrl: 0x%08" B_PRIx32 ", CRT Ctrl: 0x%08" B_PRIx32 "\n", 
-    //        bios_panel_ctrl, bios_crt_ctrl);
-    //if ((bios_panel_ctrl & (1 << 2)) && !(bios_crt_ctrl & (1 << 2))) {
-    //    si->card_info.is_panel = true;
-    //    si->card_info.active_outputs = 1;
-    //    dprintf("SM750: Il BIOS ha abilitato la pipe PANEL. Uso PANEL nativo.\n");
-    //} else if ((bios_crt_ctrl & (1 << 2)) && !(bios_panel_ctrl & (1 << 2))) {
-    //    si->card_info.is_panel = false;
-    //    si->card_info.active_outputs = 2;
-    //    dprintf("SM750: Il BIOS ha abilitato la pipe CRT. Uso CRT nativo.\n");
-    //} else {
-    //    // Se il BIOS li ha lasciati accesi entrambi (specchio) o spenti, 
-    //    // usiamo il comportamento del Panel come priorità se c'è un EDID digitale
-    //    if (boot_edid != NULL) {
-    //        si->card_info.is_panel = true;
-    //        si->card_info.active_outputs = 1;
-    //        dprintf("SM750: Stato BIOS ambiguo, ma EDID presente: scelgo PANEL.\n");
-    //    } else {
-    //        si->card_info.is_panel = false;
-    //        si->card_info.active_outputs = 2;
-    //        dprintf("SM750: Stato BIOS ambiguo: fallback su CRT.\n");
-    //    }
-    //}
-    // L'unica differenza prodotta dalle due schede è che la scheda che utilizza il ramo PANEL
+    // --- ORA FACCIAMO LA RILEVAZIONE (Dopo aver attivato i bus) ---
+    // Sono stati effettuati vari tentativi al fine di non usare la logica di rilevamento 
+    // usata poco fa, leggendo SM750_SYS_CTRL con if (!(sys_ctrl & (1 << 3))) viene indicato 
+    // crt anche se la scheda dispone di HDMI,
+    // nemmeno leggendo SM750_CRT_MONITOR_DETECT abbiamo un valore affidabile, rileva sulla 
+    // porta0 un monitor anche se non abilitato, in pratica con 2 suoi bit si rileva la presenza
+    // del monitor (25 e 27) e con altri 2 bit li si abilita (24 e 26). Di default con hdmi 
+    // viene rilevato un monitor alla porta 0 ma non è abilitato. Non attendibile
+    // Nemmeno usando i valori preimpostati di panel control e crt control funziona:
+    // Viene sempre attivato il ramo panel anche nella scheda con sole porte VGA -> ramo CRT
+    // L'unica differenza prodotta dalle due schede è che la scheda che utilizza il ramo PANEL (HDMI)
     // riesce ad ottenere l'edid dal bios, si deduce che il CRT usa le linee DDC standard (VGA pin 12 e 15).
-    // mentre l'HDMI usa il canale I2C dedicato e quindi:
-    // Se il bootloader ci ha passato un EDID, verifichiamo cosa c'è dentro.
-    // L'EDID ha un byte (offset 0x14 o 20) chiamato "Video Input Definition".
-    // Bit 7 = 1 -> Lo schermo è DIGITALE (HDMI/DVI/DP) -> siamo su PANEL!
-    // Bit 7 = 0 -> Lo schermo è ANALOGICO (VGA/CRT)   -> siamo su CRT!
-    
+    // mentre l'HDMI usa il canale I2C dedicato (che noi non riusciamo ad usare) e quindi:
+    // Se il bootloader ci ha passato un EDID, sappiamo che è una scheda con porta HDMI,
+    // in caso contrario assumiamo sia una con sole porte CRT
     
 
     uint32 misc_ctrl = SM750_REG32(SM750_SYS_MISC_CTRL); // 0x000004
@@ -574,14 +395,9 @@ void sm750_init_chip(DeviceInfo *di) {
     misc_ctrl &= ~(3 << 25);
     misc_ctrl |= (1 << 25);
     SM750_WREG32(SM750_SYS_MISC_CTRL, misc_ctrl); // 0x000004
-    //dprintf("SM750: Miscellaneous Control (0x04) stabilizzato a: 0x%08x\n", misc_ctrl);
     
-    
-    // C. Rilevazione Memoria (LOGICA UNICA)
+    // Rilevazione Memoria (LOGICA UNICA)
     uint32 mem_size_code = (misc_ctrl >> 12) & 0x03; // Bit 13:12
-    // versione senza debug
-    //uint32 sizes[] = { 16, 32, 64, 8 };
-    //si->card_info.mem_size = sizes[mem_size_code] * 1024 * 1024;
     uint32 detected_mem;
 
     switch (mem_size_code) {
@@ -592,7 +408,6 @@ void sm750_init_chip(DeviceInfo *di) {
         default: detected_mem = 8 * 1024 * 1024; break;
     }
 
-    // Aggiorniamo la shared info
     si->card_info.mem_size = detected_mem;
     if (si->card_info.mem_size > 12 * 1024 * 1024)
         si->card_info.max_desktop_mem = 12 * 1024 * 1024;
@@ -604,20 +419,13 @@ void sm750_init_chip(DeviceInfo *di) {
     display_mode *dm = si->card_info.is_panel ? &si->preferred_mode : &si->preferred_mode2;
     struct frame_buffer_boot_info* bi = (struct frame_buffer_boot_info*)get_boot_item(FRAME_BUFFER_BOOT_INFO, NULL);
     if (bi) {
-        //dprintf("SM750: VESA FB a 0x%" B_PRIx64 ", %" B_PRId32 "x%" B_PRId32 "\n", 
-        //        (uint64)bi->physical_frame_buffer, bi->width, bi->height);
-        dprintf("SM750: FrameBuffer resolution: %ux%u\n", bi->width, bi->height);
-        // set memory bounds
-        uint32 bpp = 32; // Quasi sempre 32 al boot
+        uint32 bpp = 32;
         si->real_framebuffer_size = bi->width * bi->height * (bpp / 8);
-        // Spostiamo l'inizio della memoria libera dopo il desktop del boot
-        //si->first_free_vram_offset = si->framebuffer_size;
         
         bool found = false;
 
         for (int i = 0; vesa_dmt_table[i].width != 0; i++) {
             if (vesa_dmt_table[i].width == bi->width && vesa_dmt_table[i].height == bi->height) {
-                //dprintf("SM750: Trovato timing VESA DMT per %ux%u\n", bi->width, bi->height);
             
                 dm->timing.pixel_clock = vesa_dmt_table[i].pixel_clock;
                 dm->timing.h_display    = vesa_dmt_table[i].width;
@@ -638,7 +446,7 @@ void sm750_init_chip(DeviceInfo *di) {
         }
         if (!found) {
             dprintf("SM750: WARNING! Boot resolution not in our table. Using 1024x768 fallback\n");
-            // Qui puoi mettere il codice per la 1024x768 come visto prima
+
             dm->timing.pixel_clock = 65000;
             dm->timing.h_display    = 1024;
             dm->timing.h_sync_start = 1048;
@@ -656,17 +464,15 @@ void sm750_init_chip(DeviceInfo *di) {
             dm->h_display_start = 0;
             dm->v_display_start = 0;
         }
-    
-        // Altri parametri obbligatori
+
         if (bi && bi->depth <= 8) dm->space = B_CMAP8;
         else if (bi && bi->depth <= 16) dm->space = B_RGB16;
         else dm->space = B_RGB32;
-        //dm->space = B_RGB32;
         dm->virtual_width = dm->timing.h_display;
         dm->virtual_height = dm->timing.v_display;
     }
         
-    // F. VGA BYPASS (Necessario per usare il Framebuffer lineare in modo nativo)
+    // VGA BYPASS (Necessario per usare il Framebuffer lineare in modo nativo)
     // Abilitiamo il bypass VGA su entrambe le pipe (Primary e Secondary)
     uint32 display_reg = si->card_info.is_panel ? SM750_PANEL_CONTROL : SM750_CRT_CONTROL; // 0x080000 : 0x080200
     uint32 notdisplay_reg = si->card_info.is_panel ? SM750_CRT_CONTROL : SM750_PANEL_CONTROL; // 0x080200 : 0x080000
@@ -674,20 +480,19 @@ void sm750_init_chip(DeviceInfo *di) {
     uint32 nctrl = SM750_REG32(notdisplay_reg);
     
 
-    // 1. Formato 32-bit (Bit 1:0 = 10) - Uguale per entrambi
+    // Formato 32-bit (Bit 1:0 = 10) - Uguale per entrambi
     ctrl &= ~0x00000003;
     ctrl |= 0x00000002;
     nctrl &= ~0x00000003;
     nctrl |= 0x00000002;
 
 
-    // 2. Abilitazione Piano e Timing (Bit 2 e 8) - Uguale per entrambi
+    // Abilitazione Piano e Timing (Bit 2 e 8) - Uguale per entrambi
     ctrl |= (1 << 2) | (1 << 8);
     nctrl |= (1 << 2) | (1 << 8);
 
-    // 3. Selezione Sorgente Dati (QUI CAMBIA!)
+    // Selezione Sorgente Dati (QUI CAMBIA!)
     if (si->card_info.is_panel) {
-        //dprintf("SM750: Impostiamo i registri dati per PANEL\n");
         // Registro 0x80000: Bit 29:28. Vogliamo "Panel Data" (00)
         ctrl &= ~(3U << 28); // Panel Data for Primary Display
         nctrl &= ~(3U << 18); // Panel Data for Secondary Display
@@ -697,17 +502,15 @@ void sm750_init_chip(DeviceInfo *di) {
         
     } else {
         // Registro 0x80200: Bit 19:18. Vogliamo "CRT Data" (10)
-        //dprintf("SM750: Impostiamo i registri dati per CRT\n");
         ctrl &= ~(3U << 18);
-        // la selezione di panel data o crt data sembra ininfluente!!!
         ctrl |= (2U << 18);  // CRT Data for Secondary Display
-        //ctrl &= ~(3U << 18);  // Panel Data for Secondary Display
         nctrl &= ~(3U << 28); 
         nctrl |= (2U << 28); // Secondary Display Data for Primary Disaply
         nctrl &= ~(1 << 2); // disattiva il piano grafico primario, altrimenti vedo immagine falsata e rovinata
         // nota d'esercizio: disattivando il piano CRT e lasciando attivo il piano PANEL, il desktop compare a monitor ma difettato
         // da righe orizzontali che traslano l'immagine.
         // o la mia scheda non supporta il ramo PANEL, o il ramo PANEL non è correttamente configurato, o c'è altro in ballo
+        // indagare...
     
         // No Blank per CRT (Bit 10)
         ctrl &= ~(1 << 10);
@@ -715,7 +518,6 @@ void sm750_init_chip(DeviceInfo *di) {
     SM750_WREG32(display_reg, ctrl);
     SM750_WREG32(notdisplay_reg, nctrl);
     
-    //si->card_info.chip_id = di->pci.device_id; fatto con registro sopra
     si->card_info.f_ref = 14.31818f; //24.0f; sembra sia 14.318 da datasheet vecchio valore NTSC
     si->card_info.max_sclk = 130000; // Valori tipici SM750 (130MHz)
     si->card_info.max_mclk = 145000; // 145MHz da datasheet
@@ -735,60 +537,9 @@ void sm750_init_chip(DeviceInfo *di) {
     si->fbc.bytes_per_row = dm->timing.h_display * (bpp / 8);
     si->fbc2 = si->fbc; // per sicurezza copiamo la configurazione anche nell'altra uscita
     
-    // --- INIZIO CONFIGURAZIONE GPIO PER EDID/I2C ---
-    /*
-    // 1. Leggiamo il registro corretto: 0x08
-    uint32 gpio_ctrl = SM750_REG32(SM750_SYS_GPIO_CTRL); //0x000008
-    // 2. Impostiamo i pin 30 e 31 come I2C (funzione speciale)
-    // Invece di azzerarli, li mettiamo a 1.
-    //gpio_ctrl |= (1 << 31); // Pin 31 = I2C Data
-    //gpio_ctrl |= (1 << 30); // Pin 30 = I2C Clock
-    // ANZI NO!!!! I2C BROKEN
-    // Mettiamo a 0 i bit 31 e 30 per usare i pin come GPIO normali
-    gpio_ctrl &= ~(1U << 31); // SDA
-    gpio_ctrl &= ~(1U << 30); // SCL
-    // 3. Scriviamo il risultato per DISabilitare i2c visto che è buggato facciamo a mano
-    SM750_WREG32(SM750_SYS_GPIO_CTRL, gpio_ctrl); //0x000008
-    dprintf("SM750: GPIO Control (0x08) impostato per GPIO: 0x%08x\n", gpio_ctrl);
-    
-    // Poi disabilita anche gli interrupt sui pin GPIO 30 e 31 (Registro 0x010010)
-    // Il registro gestisce i pin 25-31 nei primi bit
-    uint32 gpio_int = SM750_REG32(SM750_GPIO_INT_SETUP);
-    gpio_int &= ~(1U << 6); // Corrisponde al pin 31 (Enable31) -> 0: Regular GPIO
-    gpio_int &= ~(1U << 5); // Corrisponde al pin 30 (Enable30) -> 0: Regular GPIO
-    SM750_WREG32(SM750_GPIO_INT_SETUP, gpio_int);
-    
-    // Configura Direzione Iniziale (Entrambi Output per ora)
-    //uint32 gpio_dir = SM750_REG32(SM750_GPIO_DIRECTION);
-    uint32 gpio_dir_high = SM750_REG32(SM750_GPIO_DIR_HIGH);
-    dprintf("SM750: GPIO direction detected: x%08x\n",gpio_dir_high);
-    //gpio_dir |= (1U << 31) | (1U << 30); 
-    gpio_dir_high |= (1U << 15) | (1U << 14); 
-    //SM750_WREG32(SM750_GPIO_DIRECTION, gpio_dir);
-    SM750_WREG32(SM750_GPIO_DIR_HIGH, gpio_dir_high);
-    snooze(100);
-    gpio_dir_high = SM750_REG32(SM750_GPIO_DIR_HIGH);
-    dprintf("SM750: GPIO direction after change: x%08x\n",gpio_dir_high);
-    
-
-    // 5. Stato di IDLE (Bus High)
-    //uint32 gpio_data = SM750_REG32(SM750_GPIO_DATA);
-    //gpio_data |= (1U << 31) | (1U << 30);
-    //SM750_WREG32(SM750_GPIO_DATA, gpio_data);
-    uint32 gpio_data_high = SM750_REG32(SM750_GPIO_DATA_HIGH);
-    gpio_data_high |= (1U << 15) | (1U << 14);
-    SM750_WREG32(SM750_GPIO_DATA_HIGH, gpio_data_high);
-    // TERMINE configurazione iniziale GPIO per nostro bit-banging
-    dprintf("SM750: GPIO High Configurati - Dir: 0x%08x, Data: 0x%08x\n", 
-        SM750_REG32(SM750_GPIO_DIR_HIGH), SM750_REG32(SM750_GPIO_DATA_HIGH));
-    */
-   
-    
-    
     if (showLogo) {
-    	//dprintf("3 seconds of glory\n");
     	display_mode *dm = si->card_info.is_panel ? &si->preferred_mode : &si->preferred_mode2;
     	draw_logo(di, dm);
     }
-    snooze(3000000); // 3 seconds of glory
+    snooze(2000000); // 2 seconds of glory
 }

@@ -230,7 +230,7 @@ open_device(const char *name, uint32 flags, void **cookie)
         // Leggiamo il Command Register (CSR04) all'indirizzo 0x04
         uint32 pci_cmd = pci->read_pci_config(di->pci.bus, di->pci.device, di->pci.function, PCI_command, 4); //PCI_command = 0x04 da PCI.h
         if (pci_cmd & (1 << 10)) {
-            dprintf("SM750: Gli interrupt sono DISABILITATI a livello PCI. Li attivo...\n");
+            dprintf("SM750: Interrupts disabled at PCI level. Activating...\n");
         }
         // 2. Abilitiamo quello che serve veramente:
         // Bit 0: I/O Space (per le porte VGA legacy se servissero)
@@ -247,7 +247,7 @@ open_device(const char *name, uint32 flags, void **cookie)
         
         // 2.1 TENTATIVO MSI
         di->msi_enabled = false;
-        /*
+        
         uint8 msiCount = pci->get_msi_count(di->pci.bus, di->pci.device, di->pci.function);
         if (msiCount > 0) {
             uint32 vector; // <--- Deve essere uint32 per conformità con l'API PCI
@@ -262,7 +262,7 @@ open_device(const char *name, uint32 flags, void **cookie)
             } else {
                 dprintf("SM750: Configurazione MSI fallita\n");
             }
-        }*/
+        }
         
         
         // 3. Allocazione Shared Info
@@ -277,23 +277,6 @@ open_device(const char *name, uint32 flags, void **cookie)
         di->si->vblank_sem = -1;
         di->si->vblank_sync_sem = -1;
         di->si->engine.lock.sem = -1;
-        /*di->si->vblank_sem = create_sem(0, "sm750 vblank sem");
-        set_sem_owner(di->si->vblank_sem, B_SYSTEM_TEAM);
-        di->si->engine.lock.sem = create_sem(0, "sm750 engine sem");
-        set_sem_owner(di->si->engine.lock.sem, B_SYSTEM_TEAM);
-        di->si->vblank_sync_sem = create_sem(0, "sm750_vblank_sync_user");
-        set_sem_owner(di->si->vblank_sync_sem, B_SYSTEM_TEAM);     
-        if (di->si->vblank_sem < B_OK || di->si->engine.lock.sem < B_OK
-            || di->si->vblank_sync_sem < B_OK) {
-            if (di->si->vblank_sem >= B_OK)
-                delete_sem(di->si->vblank_sem);
-            if (di->si->engine.lock.sem >= B_OK)
-                delete_sem(di->si->engine.lock.sem);
-            if (di->si->vblank_sync_sem >= B_OK)
-                delete_sem(di->si->vblank_sync_sem);
-            delete_area(di->shared_area);
-            return B_ERROR;
-        }*/
         // 4. Mappatura REGISTRI (BAR 1 - 2MB)
         di->regs_area = map_mem((void **)&di->regs, di->pci.u.h0.base_registers[1], 
                                di->pci.u.h0.base_register_sizes[1], "sm750_regs_k");
@@ -301,34 +284,26 @@ open_device(const char *name, uint32 flags, void **cookie)
         // 5. Mappatura FRAMEBUFFER (BAR 0 - 64MB)
         di->fb_area = map_videomem((void **)&di->framebuffer, di->pci.u.h0.base_registers[0], 
                              di->pci.u.h0.base_register_sizes[0], "sm750_fb_k");
-		dprintf("SM750: DeviceInfo framebuffer ptr=%p\n",di->framebuffer);
         if (di->regs_area < 0 || di->fb_area < 0) {
-            /*delete_sem(di->si->vblank_sync_sem);
-            delete_sem(di->si->engine.lock.sem);
-            delete_sem(di->si->vblank_sem);*/
             delete_area(di->shared_area);
             return B_ERROR;
         }
-        
-        //frame_buffer_update(di->frameBuffer, width, height, depth,
-		//			bytesPerRow);
         
         di->si->framebuffer = di->framebuffer;
         
         
         // 3. Installazione Handler
         // Se MSI è attivo, usiamo il vettore MSI, altrimenti la linea IRQ classica
-        // uint8 irq = di->msi_enabled ? di->msi_vector : di->pci.u.h0.interrupt_line;
-        uint8 irq = di->pci.u.h0.interrupt_line;
+        uint8 irq = di->msi_enabled ? di->msi_vector : di->pci.u.h0.interrupt_line;
+        //uint8 irq = di->pci.u.h0.interrupt_line;
         //dprintf("SM750: Tentativo di installazione interrupt legacy su Linea IRQ: %u\n", irq);
         
         status_t intStatus = install_io_interrupt_handler(irq, sm750_interrupt_handler, di, 0);
         if (intStatus != B_OK) {
-            dprintf("SM750 ERROR: Impossibile installare interrupt handler su IRQ %u\n", irq);
-        } else {
-            dprintf("SM750: Handler installato con successo su IRQ %u\n", irq);
-        }
-        //install_io_interrupt_handler(di->pci.u.h0.interrupt_line, sm750_interrupt_handler, di, 0);
+            dprintf("SM750 ERROR: Unable to install interrupt handler on IRQ %u\n", irq);
+        }// else {
+        //    dprintf("SM750: Handler installato con successo su IRQ %u\n", irq);
+        //}
 
         // 6. Inizializzazione Chip (Wake up)
         //di->si->regs = NULL; // L'accelerante mapperà la sua versione
