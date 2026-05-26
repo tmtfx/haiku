@@ -10,6 +10,7 @@
 #include <boot_item.h>
 
 #include <frame_buffer_console.h>
+#include <stdlib.h>
 
 #include "DriverInterface.h"
 #include "sm750_macros.h"
@@ -109,7 +110,7 @@ static const color_space kFallbackSpaces[] = {
     B_RGB16,
     B_CMAP8
 };
-
+/* old create_mode_list
 static status_t create_mode_list(shared_info* si) {
 	uint32 vesa_count = 0;
     while (vesa_dmt_table[vesa_count].width != 0) {
@@ -173,8 +174,79 @@ static status_t create_mode_list(shared_info* si) {
 
     dprintf("SM750: create_mode_list finito. Modi: %u\n", count);
     return B_OK;
-}
+}*/
+static status_t create_mode_list(shared_info* si) {
+    uint32 vesa_count = 0;
+    while (vesa_dmt_table[vesa_count].width != 0) {
+        vesa_count++;
+    }
+    uint32 total_modes = vesa_count * 3;
+    
+    size_t size = (total_modes * sizeof(display_mode) + B_PAGE_SIZE - 1) & ~(B_PAGE_SIZE - 1);
+    
+    // --- MODIFICA CHIRURGICA ---
+    // Allocazione di memoria PURA KERNEL (Heap) che SMAP non controllerà mai
+    display_mode* kernel_list = (display_mode*)malloc(size);
+    if (kernel_list == NULL) return B_NO_MEMORY;
+    memset(kernel_list, 0, size);
 
+    uint32 count = 0;
+
+    for (int i = 0; vesa_dmt_table[i].width != 0; i++) {
+        const vesa_timing_t* vesa = &vesa_dmt_table[i];
+        
+        for (int s = 0; s < 3; s++) {
+            display_mode* dm = &kernel_list[count]; // Scriviamo nella memoria sicura del kernel
+            
+            dm->timing.pixel_clock = vesa->pixel_clock;
+            dm->timing.h_display    = vesa->width;
+            dm->timing.h_sync_start = vesa->h_sync_start;
+            dm->timing.h_sync_end   = vesa->h_sync_end;
+            dm->timing.h_total      = vesa->h_total;
+            dm->timing.v_display    = vesa->height;
+            dm->timing.v_sync_start = vesa->v_sync_start;
+            dm->timing.v_sync_end   = vesa->v_sync_end;
+            dm->timing.v_total      = vesa->v_total;
+            dm->timing.flags        = vesa->flags;
+
+            dm->space = kFallbackSpaces[s];
+            dm->virtual_width  = vesa->width;
+            dm->virtual_height = vesa->height;
+            dm->h_display_start = 0;
+            dm->v_display_start = 0;
+            dm->flags = 0;
+
+            count++;
+        }
+    }
+
+    // Ora creiamo l'area condivisa
+    display_mode* user_list = NULL;
+    area_id m_area = create_area("sm750 modes", (void **)&user_list,
+        B_ANY_KERNEL_ADDRESS, size, B_FULL_LOCK, 
+        B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA | B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA);
+
+    if (m_area < 0) {
+        free(kernel_list);
+        return m_area;
+    }
+
+    // Usiamo l'unica funzione ufficiale del kernel deputata a scrivere su aree con permessi utente:
+    // Copiamo l'intera lista safe del kernel dentro l'area appena creata
+    if (user_memcpy(user_list, kernel_list, size) != B_OK) {
+        dprintf("SM750: user_memcpy fallito in create_mode_list!\n");
+    }
+
+    // Liberiamo la memoria temporanea del kernel
+    free(kernel_list);
+
+    si->mode_count = count;
+    si->mode_list_area = m_area;
+
+    dprintf("SM750: create_mode_list finito chirurgicamente. Modi: %u\n", count);
+    return B_OK;
+}
+/* old draw_logo:
 static void draw_logo(DeviceInfo *di, display_mode* dm) {
     if (!di || !di->framebuffer || !dm) return;
 
@@ -209,6 +281,58 @@ static void draw_logo(DeviceInfo *di, display_mode* dm) {
             fb[fbIndex] = sm750_logo[y * logoW + x];
         }
     }
+}*/
+
+/* new draw_logo */
+static void draw_logo(DeviceInfo *di, display_mode* dm) {
+    if (!di || !dm) return;
+
+    void* fb_virt = NULL;
+    area_id fb_area = -1;
+    uint32 fb_size = di->pci.u.h0.base_register_sizes[0];
+    if (fb_size == 0)
+        return;
+
+    fb_size = (fb_size + B_PAGE_SIZE - 1) & ~(B_PAGE_SIZE - 1);
+    fb_area = map_physical_memory("sm750_fb_init_logo",
+        di->pci.u.h0.base_registers[0], fb_size, B_ANY_KERNEL_ADDRESS,
+        B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA, &fb_virt);
+    if (fb_area < B_OK || fb_virt == NULL)
+        return;
+
+    shared_info *si = di->si;
+    uint32* fb = (uint32*)fb_virt;
+    
+    uint32 screenWidth = dm->virtual_width;
+    uint32 screenHeight = dm->virtual_height;
+    
+    uint32 bytesPerRow = si->fbc.bytes_per_row;
+    if (bytesPerRow == 0)
+        bytesPerRow = screenWidth * 4; 
+
+    uint32 fbPitch = bytesPerRow / 4; 
+
+    // Usiamo uint32 anche per le dimensioni del logo
+    uint32 logoW = 640;
+    uint32 logoH = 183;
+
+    int32 startX = (int32)((screenWidth - logoW) / 2);
+    int32 startY = (int32)((screenHeight - logoH) / 2);
+
+    if (startX < 0) startX = 0;
+    if (startY < 0) startY = 0;
+
+    //dprintf("SM750: Disegno logo su %ux%u (Pitch: %u)\n", screenWidth, screenHeight, fbPitch);
+
+    // Cambiato int in uint32 per i cicli
+    for (uint32 y = 0; y < logoH && (startY + (int32)y) < (int32)screenHeight; y++) {
+        for (uint32 x = 0; x < logoW && (startX + (int32)x) < (int32)screenWidth; x++) {
+            uint32 fbIndex = (uint32)((startY + (int32)y) * (int32)fbPitch + (startX + (int32)x));
+            fb[fbIndex] = sm750_logo[y * logoW + x];
+        }
+    }
+
+    delete_area(fb_area);
 }
 
 static void sm750_init_interrupts(DeviceInfo* info) 
@@ -475,8 +599,6 @@ void sm750_init_chip(DeviceInfo *di) {
     else
         si->card_info.max_desktop_mem = si->card_info.mem_size - (2 * 1024 * 1024);
     dprintf("SM750: Detected VRAM memory (from Reg 0x000004): %u MB\n", detected_mem / (1024*1024));
-    //si->first_free_vram_offset = si->card_info.max_desktop_mem
-    
     
     bool showLogo = false;
     display_mode *dm = si->card_info.is_panel ? &si->preferred_mode : &si->preferred_mode2;
