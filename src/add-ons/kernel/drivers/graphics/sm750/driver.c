@@ -15,8 +15,6 @@
 
 #include <driver_settings.h>
 
-//#include <util/kernel_cpp.h>
-#include <vm/vm.h>
 #include "DriverInterface.h"
 #include "sm750_macros.h"
 
@@ -73,10 +71,8 @@ map_videomem(void **out_virt, phys_addr_t phys, uint32 size, const char *name)
 {
     void *virt = NULL;
     size = (size + B_PAGE_SIZE - 1) & ~(B_PAGE_SIZE - 1);
-    area_id area = map_physical_memory(name, phys, size, B_ANY_KERNEL_ADDRESS,
-        B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA
-            | B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA,
-        &virt);
+    area_id area = map_physical_memory(name, phys, size, B_ANY_KERNEL_ADDRESS | B_WRITE_COMBINING_MEMORY, 
+        B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA | B_CLONEABLE_AREA, &virt);
 
     if (area < B_OK) {
         dprintf("SM750 ERROR: map_physical_memory(%s) failed\n", name);
@@ -274,26 +270,35 @@ open_device(const char *name, uint32 flags, void **cookie)
         strncpy(di->si->device_path, name, B_PATH_NAME_LENGTH);
         load_settings();
         memcpy(&di->si->settings, &current_settings, sizeof(sm750_settings));
-        di->si->vblank_sem = -1;
-        di->si->vblank_sync_sem = -1;
-        di->si->engine.lock.sem = -1;
-        /*di->si->vblank_sem = create_sem(0, "sm750 vblank sem");
+        /* questi li creiamo nell'accelerante
+        di->si->vblank_sem = create_sem(0, "sm750 vblank sem");
         set_sem_owner(di->si->vblank_sem, B_SYSTEM_TEAM);
         di->si->engine.lock.sem = create_sem(0, "sm750 engine sem");
         set_sem_owner(di->si->engine.lock.sem, B_SYSTEM_TEAM);
         di->si->vblank_sync_sem = create_sem(0, "sm750_vblank_sync_user");
         set_sem_owner(di->si->vblank_sync_sem, B_SYSTEM_TEAM);     
-        if (di->si->vblank_sem < B_OK || di->si->engine.lock.sem < B_OK
-            || di->si->vblank_sync_sem < B_OK) {
-            if (di->si->vblank_sem >= B_OK)
-                delete_sem(di->si->vblank_sem);
-            if (di->si->engine.lock.sem >= B_OK)
-                delete_sem(di->si->engine.lock.sem);
-            if (di->si->vblank_sync_sem >= B_OK)
-                delete_sem(di->si->vblank_sync_sem);
-            delete_area(di->shared_area);
-            return B_ERROR;
-        }*/
+        */
+        // per il momento assegno valore -1
+        di->si->vblank_sem = -1;
+        di->si->vblank_sync_sem = -1;
+        di->si->engine.lock.sem = -1;
+        //di->si->vblank_sem = create_sem(0, "sm750 vblank sem");
+        //set_sem_owner(di->si->vblank_sem, B_SYSTEM_TEAM);
+        //di->si->engine.lock.sem = create_sem(0, "sm750 engine sem");
+        //set_sem_owner(di->si->engine.lock.sem, B_SYSTEM_TEAM);
+        //di->si->vblank_sync_sem = create_sem(0, "sm750_vblank_sync_user");
+        //set_sem_owner(di->si->vblank_sync_sem, B_SYSTEM_TEAM);     
+        //if (di->si->vblank_sem < B_OK || di->si->engine.lock.sem < B_OK
+        //    || di->si->vblank_sync_sem < B_OK) {
+        //    if (di->si->vblank_sem >= B_OK)
+        //        delete_sem(di->si->vblank_sem);
+        //    if (di->si->engine.lock.sem >= B_OK)
+        //        delete_sem(di->si->engine.lock.sem);
+        //    if (di->si->vblank_sync_sem >= B_OK)
+        //        delete_sem(di->si->vblank_sync_sem);
+        //    delete_area(di->shared_area);
+        //    return B_ERROR;
+        //}
         // 4. Mappatura REGISTRI (BAR 1 - 2MB)
         di->regs_area = map_mem((void **)&di->regs, di->pci.u.h0.base_registers[1], 
                                di->pci.u.h0.base_register_sizes[1], "sm750_regs_k");
@@ -301,21 +306,17 @@ open_device(const char *name, uint32 flags, void **cookie)
         // 5. Mappatura FRAMEBUFFER (BAR 0 - 64MB)
         di->fb_area = map_videomem((void **)&di->framebuffer, di->pci.u.h0.base_registers[0], 
                              di->pci.u.h0.base_register_sizes[0], "sm750_fb_k");
-		dprintf("SM750: DeviceInfo framebuffer ptr=%p\n",di->framebuffer);
+        dprintf("SM750: DeviceInfo framebuffer ptr=%p\n",di->framebuffer);
+
         if (di->regs_area < 0 || di->fb_area < 0) {
-            /*delete_sem(di->si->vblank_sync_sem);
-            delete_sem(di->si->engine.lock.sem);
-            delete_sem(di->si->vblank_sem);*/
+        	//delete_sem(di->si->vblank_sync_sem);
+            //delete_sem(di->si->engine.lock.sem);
+            //delete_sem(di->si->vblank_sem);
             delete_area(di->shared_area);
             return B_ERROR;
         }
         
-        //frame_buffer_update(di->frameBuffer, width, height, depth,
-		//			bytesPerRow);
-        
         di->si->framebuffer = di->framebuffer;
-        
-        
         // 3. Installazione Handler
         // Se MSI è attivo, usiamo il vettore MSI, altrimenti la linea IRQ classica
         // uint8 irq = di->msi_enabled ? di->msi_vector : di->pci.u.h0.interrupt_line;
@@ -332,11 +333,10 @@ open_device(const char *name, uint32 flags, void **cookie)
 
         // 6. Inizializzazione Chip (Wake up)
         //di->si->regs = NULL; // L'accelerante mapperà la sua versione
+        
         di->si->regs_area = di->regs_area; // Passa l'ID         
         di->si->fb_area = di->fb_area;     // Passa l'ID numerico
         di->si->framebuffer_pci = (phys_addr_t)di->pci.u.h0.base_registers[0];
-        
-        vm_set_area_memory_type(di->si->fb_area, di->si->framebuffer_pci, B_WRITE_COMBINING_MEMORY);
         
         sm750_init_chip(di);
     }
@@ -360,7 +360,9 @@ control_device(void *cookie, uint32 op, void *arg, size_t len)
             return user_memcpy(arg, &gpd, sizeof(gpd));
         }
         case B_GET_ACCELERANT_SIGNATURE:
-            strcpy((char *)arg, "sm750.accelerant");
+            //strcpy((char *)arg, "sm750.accelerant"); //genera SMAP
+            if (user_strlcpy((char *)arg, "sm750.accelerant", len) < B_OK)
+                return B_BAD_ADDRESS;
             return B_OK;
     }
     return B_DEV_INVALID_IOCTL;

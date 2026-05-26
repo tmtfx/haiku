@@ -328,6 +328,9 @@ static status_t init_common(int fd,bool isClone) {
             B_ANY_ADDRESS, B_READ_AREA | B_WRITE_AREA, si->mode_list_area);
         if (gInfo->mode_list_area < 0) return gInfo->mode_list_area;
 
+        si->vblank_sem = create_sem(0, "sm750_vblank_kernel_signal");
+        si->vblank_sync_sem = create_sem(0, "sm750_vblank_sync_user");
+        si->engine.lock.sem = create_sem(0, "sm750 engine sem");
         if (si->vblank_sem < B_OK || si->vblank_sync_sem < B_OK
             || si->engine.lock.sem < B_OK) {
             debug_printf("SM750_ACC: ERROR - Missing driver semaphores for vblank/engine\n");
