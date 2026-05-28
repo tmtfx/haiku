@@ -23,16 +23,6 @@
 #define SM750_PWR_DWN_CAP_REG	0x40
 #define SM750_PWR_DWN_CAP_DATA	0x44
 
-/* Base Address Registers (BARs) */
-/* NOPE
-#define SM750_PCI_BAR0_REGS		0x10 // MMIO Registers (Standard SM750: 2MB)
-#define SM750_PCI_BAR1_FB	  		0x14 // Frame Buffer (Video Memory)
-#define SM750_PCI_BAR2		 	0x18 // Generalmente non usato su SM750
-#define SM750_PCI_BAR3		 	0x1c 
-#define SM750_PCI_BAR4		 	0x20 
-#define SM750_PCI_BAR5		 	0x24 */
-
-
 
 /* Definizioni dei bit per VBlank (da usare con le macro SYS_R / SYS_W) */
 #define SM750_INT_VBLANK_CRT1	(1 << 0)   // Bit per il VBlank del Canale primario (CRT)
@@ -271,8 +261,8 @@
 #define WAIT_2D_IDLE() \
 	while (SM750_REG32(SM750_2D_STATUS) & (1 << 31)) { snooze(1); }
 
-#define SM750_VRAM_ALIGN(OFFSET) (((OFFSET) + 15) & ~15)
-#define SM750_CURSOR_SIZE        (16 * 1024) // 16KB standard
+//#define SM750_VRAM_ALIGN(OFFSET) (((OFFSET) + 15) & ~15)
+//#define SM750_CURSOR_SIZE        (16 * 1024) // 16KB standard
 
 /* --- Core Access Macros (Memory Mapped IO) --- */
 #define SM750_REG8(r_)  ((vuint8  *)regs)[(r_)]

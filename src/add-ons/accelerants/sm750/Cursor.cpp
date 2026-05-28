@@ -187,6 +187,7 @@ status_t
 sm750_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
     color_space colorSpace, uint16 bytesPerRow, const uint8* bitmapData)
 {
+	CALLED();
 	// TODO: if the mouse flickers bit 31 of SM750_DISP_PANEL_CUR_ADDR should be set 0
 	//       while changing the bitmap
     shared_info *si = gInfo->si;
@@ -251,7 +252,6 @@ sm750_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
     
     
     // Forza i colori e l'indirizzo
-    //uint32 addr_val = (1 << 31) | (CRT_CURSOR_VRAM_OFFSET & 0x03FFFFF0);
     uint32 addr_val = (1 << 31) | (si->cursor.vram_offset & 0x03FFFFF0);
 
     // Registri Colore SM750
