@@ -92,14 +92,12 @@ load_settings(void)
 {
     void* handle = load_driver_settings("sm750");
     if (handle != NULL) {
-        // Estraiamo i parametri booleani sovrascrivendo i default di current_settings
         current_settings.force_CRT = get_driver_boolean_parameter(
             handle, "force_crt", current_settings.force_CRT, current_settings.force_CRT);
             
         current_settings.force_Panel = get_driver_boolean_parameter(
             handle, "force_panel", current_settings.force_Panel, current_settings.force_Panel);
             
-        // Se hai altri parametri da file come "hardcursor" o "usebios", puoi leggerli qui:
         current_settings.hardcursor = get_driver_boolean_parameter(
             handle, "hardcursor", current_settings.hardcursor, current_settings.hardcursor);
 
@@ -111,38 +109,33 @@ static int32
 sm750_interrupt_handler(void* data)
 {
     DeviceInfo* info = (DeviceInfo*)data;
-    vuint32* regs = info->regs; // Le macro usano la variabile 'regs'
+    vuint32* regs = info->regs; // needed by macros
 
-    // 1. Leggiamo lo Status (Registro 0x24)
+    // Interrupt status
     uint32 status = SM750_REG32(SM750_SYS_INT_STATUS);
     //dprintf("SM750: INTERRUPT! status: 0x%08" B_PRIx32 "\n", status);
     
-    // Se zero, l'interrupt non è nostro
     if (status == 0) 
         return B_UNHANDLED_INTERRUPT;
-
-    // 2. GESTIONE SPECIFICA MODULI
     
-    // Bit 5: 2D Engine - Il datasheet dice "Write 0 to clear"
+    // Bit 5: 2D Engine - datasheet says "Write 0 to clear"
     if (status & (1 << 5)) {
         uint32 engineStatus = SM750_REG32(SM750_2D_STATUS);
         engineStatus &= ~(1 << 0); // Pulisce bit 0 (2D)
         engineStatus &= ~(1 << 1); // Pulisce bit 1 (CSC)
         SM750_WREG32(SM750_2D_STATUS, engineStatus);
-        // 2. Sveglia chi sta aspettando la fine del disegno
-        //release_sem_etc(info->si->engine.lock.sem, 1, B_DO_NOT_RESCHEDULE); non implementiamo così usiamo registro di stato fifo
+        // Wake up who's waiting the end of the drawing
+        //release_sem_etc(info->si->engine.lock.sem, 1, B_DO_NOT_RESCHEDULE); not this way, let's use the fifo status
     }
 
     // Bit 1 o 2: V-Sync (Panel o CRT)
     if (status & 0x06) {
-        // Incrementiamo il contatore globale nella shared info
         info->si->vblank_count++;
-        // Svegliamo il Service Thread nell'accelerante
+        // wake up the Accelerant's Service Thread
         release_sem_etc(info->si->vblank_sem, 1, B_DO_NOT_RESCHEDULE);
     }
 
-    // 3. ACK GENERALE (Registro 0x20)
-    // Scriviamo lo status letto per fare il "Clear" dei bit serviti
+    // Set read status to clear the served bits
     SM750_WREG32(SM750_SYS_RAW_INT_CLEAR, status);
 
     return B_INVOKE_SCHEDULER;
@@ -150,7 +143,7 @@ sm750_interrupt_handler(void* data)
 
 
 
-/* --- Hooks di sistema --- */
+/* --- System Hooks --- */
 status_t init_hardware(void) {
     pci_info info;
     status_t status = get_module(B_PCI_MODULE_NAME, (module_info **)&pci);
@@ -226,49 +219,49 @@ open_device(const char *name, uint32 flags, void **cookie)
     }
 
     if (di->openCount == 0) {
-    	// 1. Abilitazione Bus Master e Memoria PCI
-        // Leggiamo il Command Register (CSR04) all'indirizzo 0x04
+    	// Enable Bus Master e Memoria PCI
+        // Read the Command Register (CSR04), address 0x04
         uint32 pci_cmd = pci->read_pci_config(di->pci.bus, di->pci.device, di->pci.function, PCI_command, 4); //PCI_command = 0x04 da PCI.h
         if (pci_cmd & (1 << 10)) {
             dprintf("SM750: Interrupts disabled at PCI level. Activating...\n");
         }
-        // 2. Abilitiamo quello che serve veramente:
-        // Bit 0: I/O Space (per le porte VGA legacy se servissero)
-        // Bit 1: Memory Space (FONDAMENTALE per BAR0 e BAR1)
-        // Bit 2: Bus Master (FONDAMENTALE per l'accelerazione 2D e DMA)
-        // Bit 6: Parity Error Response (Buona pratica)
-        // Bit 8: SERR# Enable (Buona pratica)
+        // Enable needed functions:
+        // Bit 0: I/O Space (for the VGA legacy ports if needed)
+        // Bit 1: Memory Space (for BAR0 and BAR1)
+        // Bit 2: Bus Master (for 2D acceleration and DMA)
+        // Bit 6: Parity Error Response
+        // Bit 8: SERR# Enable
         pci_cmd |= (PCI_command_memory | PCI_command_master | PCI_command_io);
-        // FORZIAMO l'abilitazione degli interrupt (Bit 10 a 0)
+        // Forcing interrupt activation (Bit 10 to 0)
         pci_cmd &= ~(1 << 10);
         pci_cmd |= (1 << 6) | (1 << 8); 
         pci->write_pci_config(di->pci.bus, di->pci.device, di->pci.function, 0x04, 4, pci_cmd);
 
         
-        // 2.1 TENTATIVO MSI
+        // MSI ATTEMPT
         di->msi_enabled = false;
         
         uint8 msiCount = pci->get_msi_count(di->pci.bus, di->pci.device, di->pci.function);
         if (msiCount > 0) {
-            uint32 vector; // <--- Deve essere uint32 per conformità con l'API PCI
+            uint32 vector;
             if (pci->configure_msi(di->pci.bus, di->pci.device, di->pci.function, 1, &vector) == B_OK) {
                 if (pci->enable_msi(di->pci.bus, di->pci.device, di->pci.function) == B_OK) {
                     di->msi_vector = (uint8)vector; 
                     di->msi_enabled = true;
-                    dprintf("SM750: MSI abilitato con successo. Vettore: %" B_PRIu32 "\n", vector);
+                    dprintf("SM750: MSI succesfully enabled. Vector: %" B_PRIu32 "\n", vector);
                 } else {
-                    dprintf("SM750: Impossibile abilitare MSI (anche se configurato)\n");
+                    dprintf("SM750: Impossible to enable MSI (even if configured)\n");
                 }
             } else {
-                dprintf("SM750: Configurazione MSI fallita\n");
+                dprintf("SM750: MSI configuration failed\n");
             }
         }
         
         
-        // 3. Allocazione Shared Info
+        // Shared Info
         di->shared_area = create_area("sm750 shared info", (void **)&(di->si), 
             B_ANY_KERNEL_ADDRESS, B_PAGE_SIZE * 2 , B_FULL_LOCK, B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA | B_CLONEABLE_AREA);
-        // aggiungendo l'edid vesa la shared info ingrassa pertanto usiamo B_PAGE_SIZE * 2
+        // due to the edid vesa shared info has been widened to B_PAGE_SIZE * 2
         if (di->shared_area < 0) return di->shared_area;
         memset(di->si, 0, B_PAGE_SIZE * 2);
         strncpy(di->si->device_path, name, B_PATH_NAME_LENGTH);
@@ -277,11 +270,11 @@ open_device(const char *name, uint32 flags, void **cookie)
         di->si->vblank_sem = -1;
         di->si->vblank_sync_sem = -1;
         di->si->engine.lock.sem = -1;
-        // 4. Mappatura REGISTRI (BAR 1 - 2MB)
+        // Mapping REGISTRERS (BAR 1 - 2MB)
         di->regs_area = map_mem((void **)&di->regs, di->pci.u.h0.base_registers[1], 
                                di->pci.u.h0.base_register_sizes[1], "sm750_regs_k");
         
-        // 5. Mappatura FRAMEBUFFER (BAR 0 - 64MB)
+        // Mapping FRAMEBUFFER (BAR 0 - 64MB)
         di->fb_area = map_videomem((void **)&di->framebuffer, di->pci.u.h0.base_registers[0], 
                              di->pci.u.h0.base_register_sizes[0], "sm750_fb_k");
         if (di->regs_area < 0 || di->fb_area < 0) {
@@ -292,23 +285,18 @@ open_device(const char *name, uint32 flags, void **cookie)
         di->si->framebuffer = di->framebuffer;
         
         
-        // 3. Installazione Handler
-        // Se MSI è attivo, usiamo il vettore MSI, altrimenti la linea IRQ classica
+        // Handler installation
+        // if MSI is enabled, use MSI vector, otherwise use the legacy IRQ line
         uint8 irq = di->msi_enabled ? di->msi_vector : di->pci.u.h0.interrupt_line;
-        //uint8 irq = di->pci.u.h0.interrupt_line;
-        //dprintf("SM750: Tentativo di installazione interrupt legacy su Linea IRQ: %u\n", irq);
         
         status_t intStatus = install_io_interrupt_handler(irq, sm750_interrupt_handler, di, 0);
         if (intStatus != B_OK) {
             dprintf("SM750 ERROR: Unable to install interrupt handler on IRQ %u\n", irq);
-        }// else {
-        //    dprintf("SM750: Handler installato con successo su IRQ %u\n", irq);
-        //}
+        }
 
-        // 6. Inizializzazione Chip (Wake up)
-        //di->si->regs = NULL; // L'accelerante mapperà la sua versione
-        di->si->regs_area = di->regs_area; // Passa l'ID         
-        di->si->fb_area = di->fb_area;     // Passa l'ID numerico
+        // Chip Initialization(Wake up)
+        di->si->regs_area = di->regs_area; // ID         
+        di->si->fb_area = di->fb_area;     // numeric ID
         di->si->framebuffer_pci = (phys_addr_t)di->pci.u.h0.base_registers[0];
         
         vm_set_area_memory_type(di->si->fb_area, di->si->framebuffer_pci, B_WRITE_COMBINING_MEMORY);
@@ -335,8 +323,7 @@ control_device(void *cookie, uint32 op, void *arg, size_t len)
             return user_memcpy(arg, &gpd, sizeof(gpd));
         }
         case B_GET_ACCELERANT_SIGNATURE:
-            //strcpy((char *)arg, "sm750.accelerant"); //genera SMAP
-            if (user_strlcpy((char *)arg, "sm750.accelerant", len) < B_OK)
+            if (user_strlcpy((char *)arg, "sm750.accelerant", len) < B_OK) 
                 return B_BAD_ADDRESS;
             return B_OK;
     }
@@ -349,11 +336,8 @@ static status_t free_device(void *cookie) {
     DeviceInfo *di = (DeviceInfo *)cookie;
     vuint32* regs = di->regs;
     if (--di->openCount == 0) {
-    	//remove_io_interrupt_handler(di->pci.u.h0.interrupt_line, sm750_interrupt_handler, di);
         uint8 irq = di->msi_enabled ? di->msi_vector : di->pci.u.h0.interrupt_line;
         SM750_WREG32(SM750_SYS_INT_MASK, 0);
-        //uint32 status = SM750_REG32(SM750_SYS_INT_MASK);
-        //dprintf("SM750: Freeing device... MASK set to: %" B_PRIu32 "\n", status);
         remove_io_interrupt_handler(irq, sm750_interrupt_handler, di);
         
         if (di->msi_enabled) {
