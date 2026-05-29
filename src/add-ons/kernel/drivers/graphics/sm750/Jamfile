@@ -15,3 +15,7 @@ KernelAddon sm750 :
 	:
 	libgraphicscommon.a
 ;
+
+SEARCH on [ FGristFiles
+		kernel_cpp.cpp 
+	] = [ FDirName $(HAIKU_TOP) src system kernel util ] ;

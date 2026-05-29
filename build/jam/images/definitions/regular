@@ -181,6 +181,7 @@ SYSTEM_ADD_ONS_ACCELERANTS += [ FFilterByBuildFeatures
 		nvidia.accelerant
 		radeon.accelerant
 		radeon_hd.accelerant
+		sm750.accelerant
 		via.accelerant
 	}@ # x86,x86_64
 	x86 @{
@@ -296,6 +297,7 @@ SYSTEM_ADD_ONS_DRIVERS_GRAPHICS += [ FFilterByBuildFeatures
 		nvidia
 		radeon
 		radeon_hd
+		sm750
 		via
 	}@ # x86,x86_64
 	x86 @{
