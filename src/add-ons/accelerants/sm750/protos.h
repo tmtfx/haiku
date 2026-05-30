@@ -5,7 +5,7 @@
 #ifndef SM750_PROTOS_H
 #define SM750_PROTOS_H
 
-#include <Accelerant.h> // Serve per il tipo display_mode e status_t
+#include <Accelerant.h>
 #ifdef __cplusplus
 extern "C" {
 #endif

@@ -24,14 +24,13 @@ sm750_set_video_scale(const overlay_window *window, const overlay_buffer *buffer
     uint32 srcW = buffer->width;
     uint32 srcH = buffer->height;
     
-    // In Haiku overlay_window usiamo width e height direttamente
     uint32 destW = window->width;
     uint32 destH = window->height;
 
     uint32 hScaleValue, vScaleValue;
     uint32 hsBit = 0, vsBit = 0;
 
-    // Scala Orizzontale
+    // Horizontal scaling
     if (destW >= srcW) {
         hsBit = 0; // Expansion
         hScaleValue = (uint32)(((float)srcW / destW) * 4096.0f);
@@ -40,7 +39,7 @@ sm750_set_video_scale(const overlay_window *window, const overlay_buffer *buffer
         hScaleValue = (uint32)(((float)destW / srcW) * 4096.0f);
     }
 
-    // Scala Verticale
+    // Vertical scaling
     if (destH >= srcH) {
         vsBit = 0; // Expansion
         vScaleValue = (uint32)(((float)srcH / destH) * 4096.0f);
@@ -49,7 +48,7 @@ sm750_set_video_scale(const overlay_window *window, const overlay_buffer *buffer
         vScaleValue = (uint32)(((float)destH / srcH) * 4096.0f);
     }
 
-    // Componiamo il registro 0x080058
+    // Compose the register 0x080058
     // VS (bit 31), VScale (27:16), HS (bit 15), HScale (11:0)
     uint32 videoScale = ((vsBit & 0x1) << 31) | ((vScaleValue & 0xFFF) << 16) |
                         ((hsBit & 0x1) << 15) | (hScaleValue & 0xFFF);
@@ -57,32 +56,28 @@ sm750_set_video_scale(const overlay_window *window, const overlay_buffer *buffer
     SM750_WREG32(SM750_DISP_PANEL_VIDEO_SCALE, videoScale);
 }
 
-// --- HOOK 1: Quanti layer overlay abbiamo? ---
 uint32 
 sm750_overlay_count(const display_mode *dm)
 {
 	CALLED();
-    // La SM750 ha 2 layer totali: Layer 1 (Desktop) e Layer 2 (Video/Overlay).
-    // Quindi restituiamo 1 (un solo layer video disponibile).
+    // SM750 has 1 video layer and 1 alpha video layer (we probably would use it for 32 bit alphablended cursor)
+    // Let's return 1
     return 1;
 }
 
-// --- HOOK 2: Quali formati colore supportiamo? ---
 const uint32 *
 sm750_overlay_supported_spaces(const display_mode *dm)
 {
 	CALLED();
     static const uint32 spaces[] = {
-    	B_RGB32,
-        B_YCbCr422,	// YUY2 (Il più comune)
+    	B_RGB32, // actually not available, here for testing purposes
+        B_YCbCr422,	// YUY2 (most common)
         B_RGB16,	// RGB 5:6:5
         0
     };
-    //static const uint32 spaces[] = { B_YCbCr422, 0 };
     return spaces;
 }
 
-// --- HOOK 3: Capacità dello Scaler ---
 void 
 sm750_get_overlay_constraints(const display_mode *dm, const overlay_buffer *ob,
     overlay_constraints *oc)
@@ -97,19 +92,18 @@ sm750_get_overlay_constraints(const display_mode *dm, const overlay_buffer *ob,
     	return;
     }
     debug_printf("SM750_ACC: Constraints per buffer %p\n", ob);
-    // Rapporto di scala (SM750 supporta upscaling generoso)
-    oc->view.width_alignment = 7;      // Allineamento 8 pixel
+    oc->view.width_alignment = 7;      // Algnment to 8 pixels
     oc->view.height_alignment = 0;
     oc->window.width_alignment = 7;
     oc->window.height_alignment = 0;
     
-    // Dimensioni sorgente (il video originale)
+    // Source dimensions (original video)
     oc->view.width.min = 32;
     oc->view.width.max = 1920; 
     oc->view.height.min = 32;
     oc->view.height.max = 1080;
 
-    // Dimensioni destinazione (sullo schermo)
+    // Destination dimensions (on screen)
     if (dm) {
         oc->window.width.min = 32;
         oc->window.width.max = dm->virtual_width;
@@ -117,7 +111,7 @@ sm750_get_overlay_constraints(const display_mode *dm, const overlay_buffer *ob,
         oc->window.height.max = dm->virtual_height;
     }
     
-    // Fattore di scala (Haiku usa 1/64k come unità)
+    // Scale factor (Haiku uses 1/64k as unit)
     oc->h_scale.min = 1.0f / 8.0f; 
     oc->h_scale.max = 8.0f;
     oc->v_scale.min = 1.0f / 8.0f;
@@ -130,52 +124,43 @@ sm750_allocate_overlay_buffer(color_space cs, uint16 width, uint16 height)
 	CALLED();
     shared_info *si = gInfo->si;
     
-    // 1. Cerchiamo uno slot libero nell'array myBuffer
+    // Look for a free slot in myBuffer array
     int slot = -1;
     for (int i = 0; i < MAXBUFFERS; i++) {
-        if (si->overlay.myBufferBlockID[i] == 0) { // Slot libero
+        if (si->overlay.myBufferBlockID[i] == 0) {
             slot = i;
             break;
         }
     }
 
-    if (slot == -1) return NULL; // Tutti i buffer occupati
+    if (slot == -1) return NULL;
 
-    //uint32 bytesPerPixel = 2; se usiamo solo i formati supportati
-    uint32 bytesPerPixel = (cs == B_RGB32) ? 4 : 2; // se usiamo anche B_RGB32
+    //uint32 bytesPerPixel = 2; if we use only supported formats
+    uint32 bytesPerPixel = (cs == B_RGB32) ? 4 : 2; // if B_RGB32 is kept for test purposes
     uint32 alignedPitch = (width * bytesPerPixel + 15) & ~15;
     uint32 size = alignedPitch * height;
     uint32 blockID, offset;
     
-    // Aggiungiamo 15 byte extra per poter allineare l'inizio se mem_alloc ci dà un offset dispari
+    // Add 15 extra bytes for alignment if mem_alloc gives us an odd offset
     uint32 allocSize = size + 15;
     
-    // VERIFICA SPAZIO: abbiamo abbastanza RAM dopo il desktop?
+    // SPACE CHECK: do we have enough RAM after reserved desktop mem?
     uint32 available_vram = mem_get_free_memory((mem_info*)si->mem_mgr);
 
     if (size > available_vram) {
-        debug_printf("SM750_ACC: Overlay troppo grande! RAM heap libera: %u, Richiesta: %u\n", 
+        debug_printf("SM750_ACC: Overlay too big! Free RAM heap: %u, Needed: %u\n", 
                   available_vram, size);
         return NULL;
     }
-    //uint32 available_vram = si->card_info.mem_size - si->first_free_vram_offset;
     
-    //if (size > available_vram) {
-    //    debug_printf("SM750_ACC: Overlay troppo grande! RAM libera: %u, Richiesta: %u\n", 
-    //                  available_vram, size);
-    //    return NULL;
-    //}
-
-    // 2. Allochiamo memoria fisica tramite il memory manager
     if (mem_alloc((mem_info*)si->mem_mgr, allocSize, (void*)'VIDO', &blockID, &offset) != B_OK){
-        debug_printf("SM750_ACC: Memoria esaurita nell'Heap VRAM del kernel!\n");
+        debug_printf("SM750_ACC: Kernel VRAM Heap Out of Memory!\n");
         return NULL;
     }
     
-    // --- FORZIAMO L'ALLINEAMENTO A 16 BYTE ---
     uint32 alignedOffset = (offset + 15) & ~15;
 
-    // 3. Popoliamo lo slot nella shared_info
+    // Fill share_info slot
     overlay_buffer *ob = &si->overlay.myBuffer[slot];
     ob->space = cs;
     ob->width = width;
@@ -184,10 +169,10 @@ sm750_allocate_overlay_buffer(color_space cs, uint16 width, uint16 height)
     ob->buffer = (void *)((addr_t)gInfo->framebuffer + alignedOffset);
     ob->buffer_dma = (void *)(addr_t)alignedOffset;
     
-    if (ob) debug_printf("SM750_ACC: Buffer allocato. Offset originale: 0x%08x, Allineato: 0x%08x\n", 
+    if (ob) debug_printf("SM750_ACC: Buffer allocated. Original offset: 0x%08x, Aligned: 0x%08x\n", 
                  offset, (uint32)(addr_t)ob->buffer_dma);
 
-    // 4. Salviamo il blockID nell'array parallelo
+    // Save blockID
     si->overlay.myBufferBlockID[slot] = blockID;
 
     return ob;
@@ -197,34 +182,32 @@ void
 sm750_configure_overlay(const overlay_window *window, const overlay_buffer *buffer)
 {
 	CALLED();
-    //shared_info *si = gInfo->si;
     vuint32 *regs = gInfo->regs;
 
-    // 1. Indirizzo del Buffer (Offset VRAM)
-    // Usiamo l'offset salvato in buffer_dma durante l'allocazione
+    // Buffer address (Offset VRAM)
     uint32 bufferOffset = (uint32)(addr_t)buffer->buffer_dma;
     SM750_WREG32(SM750_DISP_PANEL_VIDEO_FB0_ADDR, bufferOffset & 0x03FFFFF0);
     
-    // Calcoliamo la fine: Inizio + (Pitch * Altezza) - 1
+    // End calculation: beginning + (Pitch * height) - 1
     uint32 bufferSize = buffer->bytes_per_row * buffer->height;
     uint32 endAddr = bufferOffset + bufferSize - 1;
     // FB 0 Last Address: 
-    // Applichiamo la maschera 0x03FFFFF0 per forzare i bit 3:0 a zero 
-    // e restare nel range dei 26 bit di indirizzamento (25:4).
-    // Se usi memoria interna, il bit 27 resta 0.
+    // Apply mask 0x03FFFFF0 to force bit 3:0 to zero 
+    // 26 addressing bits (25:4).
+    // with internal memory, bit 27 should stay 0.
     uint32 lastAddrReg = endAddr & 0x03FFFFF0;
     SM750_WREG32(SM750_DISP_PANEL_VIDEO_FB0_LAST_ADDR, lastAddrReg);
     
-    // 2. Larghezza (Pitch)
+    // Width (Pitch)
     uint32 fbPitchUnits = buffer->bytes_per_row / 16;
-    // Calcoliamo la larghezza della finestra (window width) in unità di 16 byte.
-    // ATTENZIONE: Se la larghezza in pixel non è divisibile per 16, 
-    // dobbiamo arrotondare per eccesso per non tagliare il video.
+    // (window width caclulation in units of 16 bytes.
+    // BEWARE: If the pixel width is not divisible by 16,
+    // we must round up to avoid cropping the video.
     uint32 bytesPerPixel = (buffer->space == B_RGB32) ? 4 : 2;
     uint32 windowWidthBytes = buffer->width * bytesPerPixel;
     uint32 windowWidthUnits = (windowWidthBytes + 15) / 16;
     
-    // Mascheriamo secondo il datasheet (10 bit per campo: 29:20 e 13:4)
+    // Mask as datasheet wants (10 bit for field: 29:20 e 13:4)
     uint32 fbWidthReg = ((windowWidthUnits & 0x3FF) << 20) | ((fbPitchUnits & 0x3FF) << 4);
     debug_printf("SM750_ACC: FB_WIDTH Reg (0x44): 0x%08x (WinUnits: %u, PitchUnits: %u)\n", 
                  fbWidthReg, windowWidthUnits, fbPitchUnits);
@@ -232,12 +215,12 @@ sm750_configure_overlay(const overlay_window *window, const overlay_buffer *buff
     SM750_WREG32(SM750_DISP_PANEL_VIDEO_FB_WIDTH, fbWidthReg);
     //SM750_WREG32(SM750_DISP_PANEL_VIDEO_FB_WIDTH, (pitchIn128BitUnits << 20) | (pitchIn128BitUnits << 4));
 
-    // 3. Coordinate Finestra
+    // Window Coordinates
     // TL: h_start (Left), v_start (Top)
     uint32 top = (uint32)window->v_start;
     uint32 left = (uint32)window->h_start;
     
-    // BR: calcoliamo Bottom e Right
+    // BR: caclulate Bottom and Right
     uint32 bottom = top + window->height;
     uint32 right = left + window->width;
 
@@ -247,62 +230,55 @@ sm750_configure_overlay(const overlay_window *window, const overlay_buffer *buff
     SM750_WREG32(SM750_DISP_PANEL_VIDEO_PL_TL_POS, topLeft);
     SM750_WREG32(SM750_DISP_PANEL_VIDEO_PL_BR_POS, bottomRight);
     
-    // 4. Scaling Factor (0x58)
-    // Calcolato con (src/dest) * 4096 (2^12) e impostazione bit HS/VS
+    // Scaling Factor (0x58)
     sm750_set_video_scale(window, buffer);
     
-    // 5. Initial Scale (0x5C)
-    // Impostiamo a 0 per iniziare il campionamento dall'origine del buffer
+    // Initial Scale (0x5C)
+    // Set to 0 to start sampling from the buffer source
     SM750_WREG32(SM750_DISP_PANEL_VIDEO_INIT_SCALE, 0);
     
-    // Inizializzazione costanti YUV (Color Space Conversion)
-    // Se non hai i valori esatti del datasheet, usiamo un default comune per SM750
-    // Spesso è 0x00(Y) 0x53(R) 0x15(G) 0x15(B) o simile.
+    // YUV constants initialization (Color Space Conversion)
     //SM750_WREG32(SM750_DISP_PANEL_VIDEO_YUV_CONST, 0x00531515);
     uint32 csc_video = SM750_REG32(SM750_DISP_PANEL_VIDEO_YUV_CONST);
-    debug_printf("SM750_ACC: costanti YUV (Color Space Conversion) 0x%08x\n", csc_video);
+    debug_printf("SM750_ACC: YUV constants(Color Space Conversion) 0x%08x\n", csc_video);
 
-    // 4. Configurazione del Control Register (0x080040)
+    // Control Register Configuration (0x080040)
     uint32 control = SM750_REG32(SM750_DISP_PANEL_VIDEO_DISP_CTRL);
-    debug_printf("SM750_ACC: vecchio registro video control: 0x%08x\n", control);
+    debug_printf("SM750_ACC: old value for video control register: 0x%08x\n", control);
     
     control = 0;
 
-    // Formato YUYV (11b) NO! siamo un po' più dinamici per favore
-    //control |= (3 & 0x3);
     uint32 format = 0;
     switch (buffer->space) {
         case B_YCbCr422: format = 3; break; // YUYV
         case B_RGB16:    format = 1; break; // 16bpp 5:6:5
         case B_RGB32:
         default:
-            // Se arriviamo qui con RGB32 e non è supportato, 
-            // forziamo YUV o restituiamo errore.
-            debug_printf("SM750_ACC: Formato %d non supportato dall'hardware! Forzo YUV.\n", buffer->space);
+            debug_printf("SM750_ACC: Format %d not supported by hardware! Force YUV.\n", buffer->space);
             format = 3; 
             break;
     }
     control |= (format & 0x3);
 
-    // Abilitazione Video Plane
+    // Enable Video Plane
     control |= (1 << 2);
 
-    // Abilitazione Interpolazione (Smooth scaling)
+    // Enable Interpolation (Smooth scaling)
     control |= (1 << 9) | (1 << 8);
 
-    // Abilitazione Line Buffer (Necessario per lo scaling)
+    // Enable Line Buffer (Needed for scaling)
     control |= (1 << 18);
 
-    // FIFO Request Level: 11 (Massima priorità di riempimento)
+    // FIFO Request Level: 11 (Max fill priority)
     control |= (3 << 16);
 
-    // Byte Swapping: 0 per YUYV, 1 per UYVY
-    // Haiku B_YCbCr422 è solitamente Y0-U0-Y1-V0, quindi BS=0
+    // Byte Swapping: 0 for YUYV, 1 for UYVY
+    // Haiku B_YCbCr422 is usually Y0-U0-Y1-V0, so BS=0, chech this <----
     control &= ~(1 << 12);
 
-    // Assicuriamoci che i Force Scale 1/2 siano spenti
+    // Ensure Force Scale 1/2 are off
     control &= ~((1 << 11) | (1 << 10));
-    debug_printf("SM750_ACC: nuovo registro video control: 0x%08x\n", control);
+    debug_printf("SM750_ACC: new video control register: 0x%08x\n", control);
 
     SM750_WREG32(SM750_DISP_PANEL_VIDEO_DISP_CTRL, control);
 }
@@ -316,13 +292,10 @@ sm750_release_overlay_buffer(const overlay_buffer *buffer)
         
     shared_info *si = gInfo->si;
 
-    // Cerchiamo quale buffer dell'array coincide con quello passato
     for (int i = 0; i < MAXBUFFERS; i++) {
         if (&si->overlay.myBuffer[i] == buffer) {
-            // Liberiamo la VRAM usando il blockID salvato
             mem_free((mem_info*)si->mem_mgr, si->overlay.myBufferBlockID[i], (void*)'VIDO');
             
-            // Resettiamo lo slot
             si->overlay.myBufferBlockID[i] = 0;
             return B_OK;
         }
@@ -336,21 +309,14 @@ sm750_allocate_overlay(overlay_token *token)
 {
 	CALLED();
 	shared_info *si = gInfo->si;
-    // Usiamo una variabile atomica o un semplice flag nella shared info
-    // per assicurarci che solo un'applicazione alla volta usi l'overlay.
     if (atomic_test_and_set(&si->overlay_in_use, 1, 0) != 0) {
         return B_BUSY; 
     }
 
-    // Il "cookie" che passiamo può essere un identificatore dell'overlay
-    // (nel nostro caso abbiamo solo l'Overlay 0)
-    //*token = (void*)(uintptr_t)0x534d37350; // "SM750" in hex come ID
-    // Incrementiamo il token numerico
     si->overlay.overlay_token++;
-    // 3. Lo restituiamo castato al tipo richiesto dall'API (void*)
     *token = (overlay_token)si->overlay.overlay_token;
     
-    debug_printf("SM750_ACC: Overlay allocato. Token ID: %ld\n", (uintptr_t)*token);
+    debug_printf("SM750_ACC: Overlay allocated. Token ID: %ld\n", (uintptr_t)*token);
     return B_OK;
 }
 
@@ -364,16 +330,15 @@ sm750_release_overlay(overlay_token token)
 	
     vuint32 *regs = gInfo->regs;
 
-    // 1. Spegniamo l'hardware prima di rilasciare il token
+    // hardware off before releasing the token
     uint32 control = SM750_REG32(SM750_DISP_PANEL_VIDEO_DISP_CTRL);
-    control &= ~(1 << 2); // Disabilita Video Plane
+    control &= ~(1 << 2); // Disable Video Plane
     SM750_WREG32(SM750_DISP_PANEL_VIDEO_DISP_CTRL, control);
 
-    // 2. Liberiamo il flag di utilizzo
     gInfo->si->overlay.overlay_token = 0;
     atomic_set(&gInfo->si->overlay_in_use, 0);
 
-    debug_printf("SM750_ACC: Overlay rilasciato e hardware spento.\n");
+    debug_printf("SM750_ACC: Overlay released and hardware off.\n");
     return B_OK;
 }
 
@@ -387,7 +352,7 @@ sm750_configure_overlay_api(overlay_token token, const overlay_buffer *buffer,
     }
 	vuint32 *regs = gInfo->regs;
 	
-    // Se buffer è NULL, l'utente vuole nascondere l'overlay temporaneamente
+    // If buffer is NULL, the user wants to hide the overlay temporarily
     if (buffer == NULL) {
         uint32 control = SM750_REG32(SM750_DISP_PANEL_VIDEO_DISP_CTRL);
         control &= ~(1 << 2); 
@@ -395,7 +360,6 @@ sm750_configure_overlay_api(overlay_token token, const overlay_buffer *buffer,
         return B_OK;
     }
 
-    // Chiamiamo la nostra funzione interna di basso livello che scrive nei registri
     sm750_configure_overlay(window, buffer);
 
     return B_OK;
@@ -404,9 +368,9 @@ sm750_configure_overlay_api(overlay_token token, const overlay_buffer *buffer,
 uint32
 sm750_overlay_supported_features(uint32 space)
 {
-    // La SM750 è particolare, il layer video supporta YUYV ma non ha il color key,
-    // il layer video alpha ha il color key ma non il formato YUYV
-    // B_OVERLAY_COLOR_KEY |       // Trasparenza tramite colore (fondamentale)
+    // The SM750 is special: the video layer supports YUYV but doesn't have color keying.
+    // The alpha video layer has color keying but not YUYV format.
+    // B_OVERLAY_COLOR_KEY | // Transparency via color (essential)
     return B_OVERLAY_COLOR_KEY |
            B_OVERLAY_HORIZONTAL_FILTERING | // Scaling fluido orizzontale
            B_OVERLAY_VERTICAL_FILTERING;   // Scaling fluido verticale

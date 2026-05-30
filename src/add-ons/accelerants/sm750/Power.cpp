@@ -10,18 +10,18 @@
 
 extern "C" uint32 sm750_dpms_mode(void)
 {
-    // Per ora restituiamo sempre ON per non bloccare il sistema
+    // For now let's return always ON for not locking the system
     return B_DPMS_ON;
 }
 
 // Restituisce cosa sa fare il chip
 uint32 sm750_dpms_capabilities(void)
 {
-    // Specifichiamo i modi standard
+    // Specify standard modes
     return B_DPMS_ON | B_DPMS_STAND_BY | B_DPMS_SUSPEND | B_DPMS_OFF;
 }
 
 status_t sm750_set_dpms_mode(uint32 mode) {
-    // Per ora non facciamo nulla, ma restituiamo successo
+    // For now don't do nothing, return success
     return B_OK;
 }
