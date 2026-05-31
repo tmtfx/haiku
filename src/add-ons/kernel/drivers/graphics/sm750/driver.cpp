@@ -32,7 +32,19 @@ static const struct ChipInfo sm750_chips[] = {
 };
 
 static sm750_settings current_settings = {
-    "sm750.accelerant", true, 0, 0, false, true, false, false, true,
+    //"sm750.accelerant", true, 0, 0, false, true, false, false, true,
+    
+    "sm750.accelerant",		// accelerant filename
+    false,					// dumprom, function still not integrated
+    0,						// logmask
+    0,						// memory, override builtin memory size detection in MB
+    false,					// usebios, rely on bios to coldstart (not recommended)
+    true,					// hardcursor, if true use on-chip hardware cursor
+    2,						// cursorbits, number of bits used to draw bitmap cursor
+    false,					// force_crt, utually exclusive with force_panel: force crt layer usage
+    false,					// force_panel, force panel layer usage
+    true,					// dualhead, support for both crt and panel, not implemented
+    true,					// force_pci
 };
 
 static DeviceInfo *devices[8];
@@ -101,6 +113,12 @@ load_settings(void)
         current_settings.hardcursor = get_driver_boolean_parameter(
             handle, "hardcursor", current_settings.hardcursor, current_settings.hardcursor);
 
+        const char* value_str = get_driver_parameter(handle, "cursorbits", "2", "2"); //default HC bits on SM750
+
+        if (value_str != nullptr) {
+            current_settings.cursorbits = (uint32)atoi(value_str);
+        }
+        
         unload_driver_settings(handle);
     }
 }

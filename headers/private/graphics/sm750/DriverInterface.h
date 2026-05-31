@@ -115,10 +115,11 @@ typedef struct {
 typedef struct {
 	char	accelerant[B_FILE_NAME_LENGTH];
 	bool	dumprom;
-	uint32 logmask;
-	uint32 memory;		/* Forza riconoscimento memoria */
+	uint32 	logmask;
+	uint32 	memory;		/* Forza riconoscimento memoria */
 	bool	usebios;
 	bool	hardcursor;
+	uint32	cursorbits;
 	bool	force_CRT;
     bool	force_Panel;
 	bool	dualhead;
