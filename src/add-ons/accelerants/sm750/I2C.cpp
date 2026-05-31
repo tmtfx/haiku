@@ -192,7 +192,7 @@ static status_t sm750_read_edid_I2C(uint8* buffer) {
 	uint32 MXCC_PLL_ctrl = SM750_REG32(SM750_DISP_MXCLKC_PLL); //I2C clock is connected to MXCLK PLL Control
 	uint32 I2C_ctrl  = SM750_REG32(SM750_I2C_CONTROL); // this should be 0x0 as default
 	
-	debug_printf("SM750_ACC: Configurazione iniziale:\n"
+	debug_printf("SM750_ACC: Initial configuration:\n"
     "  Power Mode 0: 0x%08x\n"
     "  Power Mode 1: 0x%08x\n"
     "  Power Mode Control: 0x%08x\n"
@@ -451,12 +451,12 @@ status_t
 sm750_read_edid(uint8* buffer)
 {
     // Tentativo 1: I2C Hardware
-    debug_printf("SM750_ACC: Tentativo lettura EDID via Hardware I2C...\n");
+    debug_printf("SM750_ACC: Trying to read EDID via Hardware I2C...\n");
     status_t status = sm750_read_edid_I2C(buffer);
 
     if (status != B_OK) {
         // Tentativo 2: GPIO Bit-Banging
-        debug_printf("SM750_ACC: Hardware I2C fallito o timeout. Provo Bit-Banging GPIO...\n");
+        debug_printf("SM750_ACC: Hardware I2C failed or timed out. Trying Bit-Banging GPIO...\n");
         status = sm750_read_edid_gpio(buffer);
     }
 
