@@ -143,6 +143,7 @@ sm750_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
     color_space colorSpace, uint16 bytesPerRow, const uint8* bitmapData)
 {
 	CALLED();
+	(void)colorSpace;
 	// TODO: if the mouse flickers bit 31 of SM750_DISP_PANEL_CUR_ADDR should be set 0
 	//       while changing the bitmap
     shared_info *si = gInfo->si;
@@ -226,4 +227,14 @@ sm750_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
     }
 
     return B_OK;
+}
+
+
+uint32
+sm750_get_cursor_bits(void)
+{
+	if (gInfo == NULL || gInfo->si == NULL)
+		return 0;
+
+	return gInfo->si->settings.cursorbits;
 }

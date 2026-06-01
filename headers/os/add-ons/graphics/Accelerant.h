@@ -60,6 +60,7 @@ enum {
 	B_SET_CURSOR_SHAPE,					/* optional */
 	B_SHOW_CURSOR,						/* optional */
 	B_SET_CURSOR_BITMAP,				/* optional */
+	B_GET_CURSOR_BITS,					/* optional */
 
 	/* synchronization */
 	B_ACCELERANT_ENGINE_COUNT = 0x300,	/* required */
@@ -317,6 +318,7 @@ typedef status_t (*set_cursor_shape)(uint16 width, uint16 height,
 typedef status_t (*set_cursor_bitmap)(uint16 width, uint16 height,
 	uint16 hotX, uint16 hotY, color_space colorSpace, uint16 bytesPerRow,
 	const uint8* bitmapData);
+typedef uint32 (*get_cursor_bits)(void);
 typedef void (*move_cursor)(uint16 x, uint16 y);
 typedef void (*show_cursor)(bool isVisible);
 

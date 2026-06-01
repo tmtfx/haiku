@@ -139,8 +139,11 @@ private:
 			get_edid_info			fAccGetEDIDInfo;
 			set_cursor_shape		fAccSetCursorShape;
 			set_cursor_bitmap		fAccSetCursorBitmap;
+			get_cursor_bits			fAccGetCursorBits;
 			move_cursor				fAccMoveCursor;
 			show_cursor				fAccShowCursor;
+
+			uint32					fCursorBits;
 
 			// dpms hooks
 			dpms_capabilities	fAccDPMSCapabilities;

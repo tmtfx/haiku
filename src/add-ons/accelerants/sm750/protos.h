@@ -26,6 +26,7 @@ status_t sm750_set_cursor_shape(uint16 width, uint16 height, uint16 hot_x, uint1
 void sm750_move_cursor(uint16 x, uint16 y);
 void sm750_show_cursor(bool is_visible);
 status_t sm750_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY, color_space colorSpace, uint16 bytesPerRow, const uint8* bitmapData);
+uint32 sm750_get_cursor_bits(void);
 status_t sm750_get_edid_info(void* info, size_t size, uint32* _version);
 
 status_t sm750_read_edid(uint8* buffer);

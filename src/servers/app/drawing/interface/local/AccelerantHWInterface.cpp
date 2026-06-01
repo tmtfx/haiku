@@ -118,8 +118,10 @@ AccelerantHWInterface::AccelerantHWInterface()
 	fAccProposeDisplayMode(NULL),
 	fAccSetCursorShape(NULL),
 	fAccSetCursorBitmap(NULL),
+	fAccGetCursorBits(NULL),
 	fAccMoveCursor(NULL),
 	fAccShowCursor(NULL),
+	fCursorBits(0),
 
 	// dpms hooks
 	fAccDPMSCapabilities(NULL),
@@ -396,8 +398,12 @@ AccelerantHWInterface::_SetupDefaultHooks()
 		= (set_cursor_shape)fAccelerantHook(B_SET_CURSOR_SHAPE, NULL);
 	fAccSetCursorBitmap
 		= (set_cursor_bitmap)fAccelerantHook(B_SET_CURSOR_BITMAP, NULL);
+	fAccGetCursorBits
+		= (get_cursor_bits)fAccelerantHook(B_GET_CURSOR_BITS, NULL);
 	fAccMoveCursor = (move_cursor)fAccelerantHook(B_MOVE_CURSOR, NULL);
 	fAccShowCursor = (show_cursor)fAccelerantHook(B_SHOW_CURSOR, NULL);
+
+	fCursorBits = fAccGetCursorBits != NULL ? fAccGetCursorBits() : 0;
 
 	// dpms
 	fAccDPMSCapabilities
@@ -1243,16 +1249,39 @@ AccelerantHWInterface::_UpdateHardwareCursor(bool wasHardwareCursorEnabled)
 
 	// Drag bitmaps need full-color alpha compositing, while some hardware
 	// cursor backends only expose limited palette/shape formats.
-	if (fDragBitmap == NULL && fAccSetCursorBitmap != NULL) {
+	const bool canUseBitmapCursorForDrag = fDragBitmap == NULL || fCursorBits >= 32;
+	if (canUseBitmapCursorForDrag && fAccSetCursorBitmap != NULL) {
 		uint16 xHotSpot = (uint16)cursor->GetHotSpot().x;
 		uint16 yHotSpot = (uint16)cursor->GetHotSpot().y;
 		uint16 width = (uint16)cursor->Bounds().IntegerWidth() + 1;
 		uint16 height = (uint16)cursor->Bounds().IntegerHeight() + 1;
 
+		const uint8* bits = cursor->Bits();
+		ArrayDeleter<uint8> unpremultiplied;
+		if (fDragBitmap != NULL && cursor->ColorSpace() == B_RGBA32) {
+			unpremultiplied.SetTo(new(nothrow) uint8[cursor->BitsLength()]);
+			if (unpremultiplied.IsSet()) {
+				memcpy(unpremultiplied.Get(), bits, cursor->BitsLength());
+				for (uint32 i = 0; i < cursor->BitsLength(); i += 4) {
+					uint8* p = unpremultiplied.Get() + i;
+					uint8 a = p[3];
+					if (a == 0) {
+						p[0] = p[1] = p[2] = 0;
+						continue;
+					}
+
+					p[0] = (uint8)min_c(255, (p[0] * 255 + a / 2) / a);
+					p[1] = (uint8)min_c(255, (p[1] * 255 + a / 2) / a);
+					p[2] = (uint8)min_c(255, (p[2] * 255 + a / 2) / a);
+				}
+				bits = unpremultiplied.Get();
+			}
+		}
+
 		cursorSet = fAccSetCursorBitmap(width, height, xHotSpot, yHotSpot,
-			cursor->ColorSpace(), (uint16)cursor->BytesPerRow(), cursor->Bits())
-			== B_OK;
-	} else if (cursor->CursorData() != NULL && fAccSetCursorShape != NULL) {
+			cursor->ColorSpace(), (uint16)cursor->BytesPerRow(), bits) == B_OK;
+	} else if (fDragBitmap == NULL && cursor->CursorData() != NULL
+		&& fAccSetCursorShape != NULL) {
 		// BeOS BCursor, 16x16 monochrome
 		uint8 size = cursor->CursorData()[0];
 		// CursorData()[1] is color depth (always monochrome)
@@ -1337,7 +1366,10 @@ AccelerantHWInterface::SetDragBitmap(const ServerBitmap* bitmap,
 {
 	bool wasHardwareCursorEnabled = fHardwareCursorEnabled;
 
-	if (bitmap != NULL && wasHardwareCursorEnabled && LockExclusiveAccess()) {
+	const bool canUseBitmapCursorForDrag = bitmap == NULL
+		|| (fAccSetCursorBitmap != NULL && fCursorBits >= 32);
+	if (bitmap != NULL && wasHardwareCursorEnabled && !canUseBitmapCursorForDrag
+		&& LockExclusiveAccess()) {
 		if (fAccShowCursor != NULL)
 			fAccShowCursor(false);
 		UnlockExclusiveAccess();
