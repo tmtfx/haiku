@@ -855,19 +855,30 @@ HWInterface::_RestoreCursorArea() const
 void
 HWInterface::_AdoptDragBitmap()
 {
-	// TODO: support other colorspaces/convert bitmap
-	if (fDragBitmap && !(fDragBitmap->ColorSpace() == B_RGB32
-		|| fDragBitmap->ColorSpace() == B_RGBA32)) {
-		fprintf(stderr, "HWInterface::_AdoptDragBitmap() - bitmap has yet "
-			"unsupported colorspace\n");
-		return;
+	const ServerBitmap* dragBitmap = fDragBitmap.Get();
+	ObjectDeleter<UtilityBitmap> convertedDragBitmap;
+
+	if (dragBitmap != NULL && dragBitmap->ColorSpace() != B_RGBA32) {
+		convertedDragBitmap.SetTo(new(std::nothrow) UtilityBitmap(
+			dragBitmap->Bounds(), B_RGBA32, 0));
+		if (!convertedDragBitmap.IsSet() || convertedDragBitmap->Bits() == NULL
+			|| convertedDragBitmap->ImportBits(dragBitmap->Bits(),
+				dragBitmap->BitsLength(), dragBitmap->BytesPerRow(),
+				dragBitmap->ColorSpace()) != B_OK) {
+			fprintf(stderr, "HWInterface::_AdoptDragBitmap() - failed to "
+				"convert drag bitmap to B_RGBA32\n");
+			return;
+		}
+
+		dragBitmap = convertedDragBitmap.Get();
 	}
 
 	_RestoreCursorArea();
 	BRect oldCursorFrame = _CursorFrame();
 
-	if (fDragBitmap != NULL && fDragBitmap->Bounds().Width() > 0 && fDragBitmap->Bounds().Height() > 0) {
-		BRect bitmapFrame = fDragBitmap->Bounds();
+	if (dragBitmap != NULL && dragBitmap->Bounds().Width() > 0
+		&& dragBitmap->Bounds().Height() > 0) {
+		BRect bitmapFrame = dragBitmap->Bounds();
 		if (fCursor) {
 			// put bitmap frame and cursor frame into the same
 			// coordinate space (the cursor location is the origin)
@@ -889,7 +900,7 @@ HWInterface::_AdoptDragBitmap()
 			bitmapFrame.OffsetBy(shift);
 
 			fCursorAndDragBitmap.SetTo(new(std::nothrow) ServerCursor(combindedBounds,
-				fDragBitmap->ColorSpace(), 0, shift), true);
+				dragBitmap->ColorSpace(), 0, shift), true);
 
 			uint8* dst = fCursorAndDragBitmap ? (uint8*)fCursorAndDragBitmap->Bits() : NULL;
 			if (dst == NULL) {
@@ -903,17 +914,18 @@ HWInterface::_AdoptDragBitmap()
 				memset(dst, 0, fCursorAndDragBitmap->BitsLength());
 
 				// put drag bitmap into combined buffer
-				uint8* src = (uint8*)fDragBitmap->Bits();
-				uint32 srcBPR = fDragBitmap->BytesPerRow();
+				uint8* src = (uint8*)dragBitmap->Bits();
+				uint32 srcBPR = dragBitmap->BytesPerRow();
 
 				dst += (int32)bitmapFrame.top * dstBPR
 					+ (int32)bitmapFrame.left * 4;
 
 				uint32 width = bitmapFrame.IntegerWidth() + 1;
 				uint32 height = bitmapFrame.IntegerHeight() + 1;
+				uint32 bytes = width * 4;
 
 				for (uint32 y = 0; y < height; y++) {
-					memcpy(dst, src, srcBPR);
+					memcpy(dst, src, bytes);
 					dst += dstBPR;
 					src += srcBPR;
 				}
@@ -987,9 +999,9 @@ HWInterface::_AdoptDragBitmap()
 				}
 			}
 		} else {
-			fCursorAndDragBitmap.SetTo(new ServerCursor(fDragBitmap->Bits(),
+			fCursorAndDragBitmap.SetTo(new ServerCursor(dragBitmap->Bits(),
 				bitmapFrame.IntegerWidth() + 1, bitmapFrame.IntegerHeight() + 1,
-				fDragBitmap->ColorSpace()), true);
+				dragBitmap->ColorSpace()), true);
 			fCursorAndDragBitmap->SetHotSpot(BPoint(-fDragBitmapOffset.x, -fDragBitmapOffset.y));
 		}
 	} else {
@@ -1012,7 +1024,6 @@ HWInterface::_AdoptDragBitmap()
 	}
  	_DrawCursor(_CursorFrame());
 }
-
 
 void
 HWInterface::_NotifyFrameBufferChanged()

@@ -80,6 +80,8 @@ public:
 
 	// cursor handling
 	virtual	void				SetCursor(ServerCursor* cursor);
+	virtual	void				SetDragBitmap(const ServerBitmap* bitmap,
+									const BPoint& offsetFromCursor);
 	virtual	void				SetCursorVisible(bool visible);
 	virtual	void				MoveCursorTo(float x, float y);
 
@@ -112,6 +114,7 @@ private:
 			status_t			_SetFallbackMode(display_mode& mode) const;
 			void				_SetSystemPalette();
 			void				_SetGrayscalePalette();
+			void				_UpdateHardwareCursor(bool wasHardwareCursorEnabled);
 
 private:
 			int					fCardFD;
