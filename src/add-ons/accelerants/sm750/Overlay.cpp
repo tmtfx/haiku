@@ -70,7 +70,7 @@ sm750_overlay_supported_spaces(const display_mode *dm)
 {
 	CALLED();
     static const uint32 spaces[] = {
-    	B_RGB32, // actually not available, here for testing purposes
+    	B_RGB32,       // L'esca per far triggerare il Media Kit
         B_YCbCr422,	// YUY2 (most common)
         B_RGB16,	// RGB 5:6:5
         0
@@ -92,9 +92,9 @@ sm750_get_overlay_constraints(const display_mode *dm, const overlay_buffer *ob,
     	return;
     }
     debug_printf("SM750_ACC: Constraints per buffer %p\n", ob);
-    oc->view.width_alignment = 7;      // Algnment to 8 pixels
+    oc->view.width_alignment = 1;//7      // Algnment to 8 pixels
     oc->view.height_alignment = 0;
-    oc->window.width_alignment = 7;
+    oc->window.width_alignment = 1;//7
     oc->window.height_alignment = 0;
     
     // Source dimensions (original video)
@@ -135,8 +135,8 @@ sm750_allocate_overlay_buffer(color_space cs, uint16 width, uint16 height)
 
     if (slot == -1) return NULL;
 
-    //uint32 bytesPerPixel = 2; if we use only supported formats
-    uint32 bytesPerPixel = (cs == B_RGB32) ? 4 : 2; // if B_RGB32 is kept for test purposes
+    uint32 bytesPerPixel = 2; //if we use only supported formats
+    //uint32 bytesPerPixel = (cs == B_RGB32) ? 4 : 2; // if B_RGB32 is kept for test purposes
     uint32 alignedPitch = (width * bytesPerPixel + 15) & ~15;
     uint32 size = alignedPitch * height;
     uint32 blockID, offset;
@@ -169,8 +169,10 @@ sm750_allocate_overlay_buffer(color_space cs, uint16 width, uint16 height)
     ob->buffer = (void *)((addr_t)gInfo->framebuffer + alignedOffset);
     ob->buffer_dma = (void *)(addr_t)alignedOffset;
     
-    if (ob) debug_printf("SM750_ACC: Buffer allocated. Original offset: 0x%08x, Aligned: 0x%08x\n", 
-                 offset, (uint32)(addr_t)ob->buffer_dma);
+    debug_printf("SM750_ACC: Buffer allocato con INGANNO (16-bit). Aligned Offset: 0x%08x, Pitch: %u\n", 
+                 (uint32)(addr_t)ob->buffer_dma, alignedPitch);
+    //if (ob) debug_printf("SM750_ACC: Buffer allocated. Original offset: 0x%08x, Aligned: 0x%08x\n", 
+    //             offset, (uint32)(addr_t)ob->buffer_dma);
 
     // Save blockID
     si->overlay.myBufferBlockID[slot] = blockID;
@@ -203,7 +205,8 @@ sm750_configure_overlay(const overlay_window *window, const overlay_buffer *buff
     // (window width caclulation in units of 16 bytes.
     // BEWARE: If the pixel width is not divisible by 16,
     // we must round up to avoid cropping the video.
-    uint32 bytesPerPixel = (buffer->space == B_RGB32) ? 4 : 2;
+    //uint32 bytesPerPixel = (buffer->space == B_RGB32) ? 4 : 2;
+    uint32 bytesPerPixel = 2;
     uint32 windowWidthBytes = buffer->width * bytesPerPixel;
     uint32 windowWidthUnits = (windowWidthBytes + 15) / 16;
     
@@ -245,7 +248,7 @@ sm750_configure_overlay(const overlay_window *window, const overlay_buffer *buff
     // Control Register Configuration (0x080040)
     uint32 control = SM750_REG32(SM750_DISP_PANEL_VIDEO_DISP_CTRL);
     debug_printf("SM750_ACC: old value for video control register: 0x%08x\n", control);
-    
+    /*
     control = 0;
 
     uint32 format = 0;
@@ -258,6 +261,15 @@ sm750_configure_overlay(const overlay_window *window, const overlay_buffer *buff
             format = 3; 
             break;
     }
+    control |= (format & 0x3);
+    */
+    control = 0; // Resettiamo a zero per sicurezza
+    
+    // Ignoriamo quello che c'è scritto in buffer->space. 
+    // Diciamo all'hardware che il buffer contiene pixel RGB16 (Formato = 1)
+    uint32 format = 1; 
+    
+    debug_printf("SM750_ACC: HACK! Forzato formato hardware video a RGB16 (1)\n");
     control |= (format & 0x3);
 
     // Enable Video Plane
@@ -274,10 +286,10 @@ sm750_configure_overlay(const overlay_window *window, const overlay_buffer *buff
 
     // Byte Swapping: 0 for YUYV, 1 for UYVY
     // Haiku B_YCbCr422 is usually Y0-U0-Y1-V0, so BS=0, chech this <----
-    control &= ~(1 << 12);
+    //control &= ~(1 << 12);
 
     // Ensure Force Scale 1/2 are off
-    control &= ~((1 << 11) | (1 << 10));
+    //control &= ~((1 << 11) | (1 << 10));
     debug_printf("SM750_ACC: new video control register: 0x%08x\n", control);
 
     SM750_WREG32(SM750_DISP_PANEL_VIDEO_DISP_CTRL, control);
@@ -368,10 +380,10 @@ sm750_configure_overlay_api(overlay_token token, const overlay_buffer *buffer,
 uint32
 sm750_overlay_supported_features(uint32 space)
 {
+	CALLED();
     // The SM750 is special: the video layer supports YUYV but doesn't have color keying.
     // The alpha video layer has color keying but not YUYV format.
     // B_OVERLAY_COLOR_KEY | // Transparency via color (essential)
-    return B_OVERLAY_COLOR_KEY |
-           B_OVERLAY_HORIZONTAL_FILTERING | // Scaling fluido orizzontale
+    return B_OVERLAY_HORIZONTAL_FILTERING | // Scaling fluido orizzontale
            B_OVERLAY_VERTICAL_FILTERING;   // Scaling fluido verticale
 }
