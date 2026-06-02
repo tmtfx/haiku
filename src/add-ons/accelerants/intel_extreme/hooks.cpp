@@ -87,6 +87,8 @@ get_accelerant_hook(uint32 feature, void* data)
 		case B_SHOW_CURSOR:
 			if (gInfo->shared_info->cursor_memory != NULL)
 				return (void*)intel_show_cursor;
+		case B_SET_CURSOR_BITMAP:
+				return (void*)intel_set_cursor_bitmap;
 
 			return NULL;
 
