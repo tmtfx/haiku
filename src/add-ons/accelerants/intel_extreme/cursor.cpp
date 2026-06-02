@@ -84,10 +84,22 @@ intel_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 }
 
 
+uint32
+intel_get_cursor_bits(void)
+{
+	if (gInfo->shared_info->device_type >= INTEL_MODEL_G45)
+        return 32;
+    return 1;
+}
+
+
 status_t
 intel_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
     uint32 colorSpace, uint16 bytesPerRow, uint8* bitmapData)
 {
+	if (gInfo->shared_info->device_type < INTEL_MODEL_G45)
+        return B_UNSUPPORTED;
+
     // Il cursore hardware Intel classico supporta dimensioni fino a 64x64
     if (width > 64 || height > 64)
         return B_BAD_VALUE;
@@ -116,9 +128,8 @@ intel_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
     }
 
     // Aggiorna il formato nei dati condivisi
-    // Nota: Assicurati che CURSOR_FORMAT_32BIT_ARGB sia definito nel tuo accelerant.h 
     // (sui registri Intel corrisponde solitamente al bitmask per la modalità a colori, es. 0x00060000 o simile)
-    gInfo->shared_info->cursor_format = CURSOR_FORMAT_32BIT_ARGB;
+    gInfo->shared_info->cursor_format = CURSOR_FORMAT_ARGB;
 
     // Configura e riabilita il cursore
     write32(INTEL_CURSOR_CONTROL, CURSOR_ENABLED | gInfo->shared_info->cursor_format);
@@ -186,11 +197,4 @@ intel_show_cursor(bool isVisible)
 		+ gInfo->shared_info->cursor_buffer_offset);
 
 	gInfo->shared_info->cursor_visible = isVisible;
-}
-
-
-uint32
-intel_get_cursor_bits(void)
-{
-	return 32;
 }
