@@ -87,8 +87,9 @@ intel_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 uint32
 intel_get_cursor_bits(void)
 {
-	if (gInfo->shared_info->device_type >= INTEL_MODEL_G45)
+	if (gInfo->shared_info->device_type.Generation() >= 4)
         return 32;
+
     return 1;
 }
 
@@ -97,7 +98,7 @@ status_t
 intel_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
     uint32 colorSpace, uint16 bytesPerRow, uint8* bitmapData)
 {
-	if (gInfo->shared_info->device_type < INTEL_MODEL_G45)
+	if (gInfo->shared_info->device_type.Generation() >= 4)
         return B_UNSUPPORTED;
 
     // Il cursore hardware Intel classico supporta dimensioni fino a 64x64
