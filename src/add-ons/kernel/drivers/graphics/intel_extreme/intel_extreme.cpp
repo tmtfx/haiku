@@ -57,7 +57,8 @@ init_overlay_registers(overlay_registers* _registers)
 static void
 read_settings(bool &hardwareCursor)
 {
-	hardwareCursor = false;
+	// Default to enabled if there is no settings file.
+	hardwareCursor = true;
 
 	void* settings = load_driver_settings("intel_extreme");
 	if (settings != NULL) {
