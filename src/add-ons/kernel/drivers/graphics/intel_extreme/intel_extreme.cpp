@@ -849,7 +849,12 @@ intel_extreme_init(intel_info &info)
 		// TODO: set status page
 	}
 	if (hardwareCursor) {
-		status_t cursorStatus = intel_allocate_memory(info, B_PAGE_SIZE, 0,
+		size_t cursorSize = B_PAGE_SIZE;
+		// ARGB/XRGB cursors are 64x64x4 bytes = 16KB.
+		if (info.device_type.Generation() >= 4)
+			cursorSize = 4 * B_PAGE_SIZE;
+
+		status_t cursorStatus = intel_allocate_memory(info, cursorSize, 0,
 			B_APERTURE_NEED_PHYSICAL,
 			(addr_t*)&info.shared_info->cursor_memory,
 			&info.shared_info->physical_cursor_memory);

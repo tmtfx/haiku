@@ -139,14 +139,18 @@ intel_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 	memset(dest, 0, 64 * 64 * sizeof(uint32));
 
 	// Copy into the 64-pixel-wide hardware layout.
+	// Note: B_RGB32 typically has an alpha byte of 0; force it opaque.
 	for (int32 y = 0; y < height; y++) {
 		for (int32 x = 0; x < width; x++) {
-			dest[64 * y + x] = src[srcPixelsPerRow * y + x];
+			uint32 pixel = src[srcPixelsPerRow * y + x];
+			if (colorSpace == B_RGB32)
+				pixel |= 0xff000000;
+			dest[64 * y + x] = pixel;
 		}
 	}
 
-	// Switch cursor to ARGB.
-	gInfo->shared_info->cursor_format = CURSOR_FORMAT_ARGB;
+	gInfo->shared_info->cursor_format
+		= (colorSpace == B_RGB32) ? CURSOR_FORMAT_XRGB : CURSOR_FORMAT_ARGB;
 
 	write32(INTEL_CURSOR_CONTROL,
 		CURSOR_ENABLED | gInfo->shared_info->cursor_format);
