@@ -88,8 +88,9 @@ get_accelerant_hook(uint32 feature, void* data)
 			if (gInfo->shared_info->cursor_memory != NULL)
 				return (void*)intel_show_cursor;
 		case B_SET_CURSOR_BITMAP:
+			// Registra l'hook solo se la scheda è almeno una Gen4 (o successiva)
+			if (gInfo->shared_info->device_type >= INTEL_TYPE_GEN4)
 				return (void*)intel_set_cursor_bitmap;
-
 			return NULL;
 
 		/* engine/synchronization */

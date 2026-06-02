@@ -87,9 +87,12 @@ intel_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 uint32
 intel_get_cursor_bits(void)
 {
-	if (gInfo->shared_info->device_type.Generation() >= 4)
+	if (gInfo->shared_info->device_type.Generation() >= 4){
+		debug_printf("Intel Extreme Accelerant: Cursor Color Depth 32-bit");
         return 32;
+	}
 
+    debug_printf("Intel Extreme Accelerant: Cursor Color Depth 1-bit");
     return 1;
 }
 
@@ -98,8 +101,11 @@ status_t
 intel_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
     uint32 colorSpace, uint16 bytesPerRow, uint8* bitmapData)
 {
-	if (gInfo->shared_info->device_type.Generation() >= 4)
+	if (gInfo->shared_info->device_type.Generation() < 4){
+		debug_printf("Intel Extreme Accelerant: Cursor Bitmap unavailable, Device generation %d\n",gInfo->shared_info->device_type.Generation());
         return B_UNSUPPORTED;
+	}
+	debug_printf("Intel Extreme Accelerant: Cursor Bitmap as 32-bit");
 
     // Il cursore hardware Intel classico supporta dimensioni fino a 64x64
     if (width > 64 || height > 64)
