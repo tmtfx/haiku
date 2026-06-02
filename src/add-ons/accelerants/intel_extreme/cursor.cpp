@@ -87,92 +87,97 @@ intel_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 uint32
 intel_get_cursor_bits(void)
 {
-	if (gInfo->shared_info->device_type.Generation() >= 4){
-		debug_printf("Intel Extreme Accelerant: Cursor Color Depth 32-bit");
-        return 32;
+	if (gInfo->shared_info->cursor_memory == NULL){
+		debug_printf("Intel Extreme Accelerant: No cursor memory, assigning 0 bits\n");
+		return 0;
 	}
 
-    debug_printf("Intel Extreme Accelerant: Cursor Color Depth 1-bit");
-    return 1;
+	if (gInfo->shared_info->device_type.Generation() >= 4) {
+		debug_printf("Intel Extreme Accelerant: Cursor Color Depth 32-bit\n");
+		return 32;
+	}
+
+	debug_printf("Intel Extreme Accelerant: Cursor Color Depth 1-bit\n");
+	return 1;
 }
 
 
 status_t
 intel_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
-    uint32 colorSpace, uint16 bytesPerRow, uint8* bitmapData)
+	color_space colorSpace, uint16 bytesPerRow, const uint8* bitmapData)
 {
-	if (gInfo->shared_info->device_type.Generation() < 4){
-		debug_printf("Intel Extreme Accelerant: Cursor Bitmap unavailable, Device generation %d\n",gInfo->shared_info->device_type.Generation());
-        return B_UNSUPPORTED;
+	if (gInfo->shared_info->device_type.Generation() < 4) {
+		debug_printf("Intel Extreme Accelerant: Cursor Bitmap unavailable, device generation %d\n",
+			gInfo->shared_info->device_type.Generation());
+		return B_UNSUPPORTED;
 	}
-	debug_printf("Intel Extreme Accelerant: Cursor Bitmap as 32-bit");
 
-    // Il cursore hardware Intel classico supporta dimensioni fino a 64x64
-    if (width > 64 || height > 64)
-        return B_BAD_VALUE;
+	if (gInfo->shared_info->cursor_memory == NULL || bitmapData == NULL)
+		return B_NO_INIT;
 
-    // Supportiamo principalmente lo spazio colore ARGB32 (o RGB32) standard di Haiku
-    if (colorSpace != B_RGBA32 && colorSpace != B_RGB32)
-        return B_BAD_TYPE;
+	debug_printf("Intel Extreme Accelerant: Cursor Bitmap as 32-bit\n");
 
-    // Disabilita il cursore hardware prima di modificare la memoria
-    write32(INTEL_CURSOR_CONTROL, 0);
+	// The Intel hardware cursor supports up to 64x64.
+	if (width == 0 || height == 0 || width > 64 || height > 64)
+		return B_BAD_VALUE;
 
-    uint32* dest = (uint32*)gInfo->shared_info->cursor_memory;
-    uint32* src = (uint32*)bitmapData;
-    uint32 srcPixelsPerRow = bytesPerRow / 4;
+	// We support Haiku's 32-bit cursor formats.
+	if (colorSpace != B_RGBA32 && colorSpace != B_RGB32)
+		return B_BAD_TYPE;
 
-    // Pulisci l'intero buffer del cursore (64x64 pixel a 32-bit) per evitare "fantasmi"
-    // se la bitmap passata è più piccola di 64x64.
-    memset(dest, 0, 64 * 64 * sizeof(uint32));
+	if (bytesPerRow < width * 4)
+		return B_BAD_VALUE;
 
-    // Copia i dati della bitmap nella memoria del cursore (allineamento hardware Intel a 64 pixel per riga)
-    for (int32 y = 0; y < height; y++) {
-        for (int32 x = 0; x < width; x++) {
-            // Intel ARGB si aspetta i dati nel formato standard a 32-bit (A8R8G8B8)
-            dest[64 * y + x] = src[srcPixelsPerRow * y + x];
-        }
-    }
+	// Disable the cursor before touching the backing store.
+	write32(INTEL_CURSOR_CONTROL, 0);
 
-    // Aggiorna il formato nei dati condivisi
-    // (sui registri Intel corrisponde solitamente al bitmask per la modalità a colori, es. 0x00060000 o simile)
-    gInfo->shared_info->cursor_format = CURSOR_FORMAT_ARGB;
+	uint32* dest = (uint32*)gInfo->shared_info->cursor_memory;
+	const uint32* src = (const uint32*)bitmapData;
+	uint32 srcPixelsPerRow = bytesPerRow / 4;
 
-    // Configura e riabilita il cursore
-    write32(INTEL_CURSOR_CONTROL, CURSOR_ENABLED | gInfo->shared_info->cursor_format);
-    write32(INTEL_CURSOR_SIZE, (height << 12) | width);
+	// Clear the whole 64x64 buffer to avoid garbage when the cursor is smaller.
+	memset(dest, 0, 64 * 64 * sizeof(uint32));
 
-    // Carica l'indirizzo di base fisico
-    write32(INTEL_CURSOR_BASE,
-        (uint32)gInfo->shared_info->physical_graphics_memory
-        + gInfo->shared_info->cursor_buffer_offset);
+	// Copy into the 64-pixel-wide hardware layout.
+	for (int32 y = 0; y < height; y++) {
+		for (int32 x = 0; x < width; x++) {
+			dest[64 * y + x] = src[srcPixelsPerRow * y + x];
+		}
+	}
 
-    // Gestione del punto caldo (Hotspot) e riposizionamento del cursore
-    if (hotX != gInfo->shared_info->cursor_hot_x
-        || hotY != gInfo->shared_info->cursor_hot_y) {
-        
-        int32 x = read32(INTEL_CURSOR_POSITION);
-        int32 y = x >> 16;
-        x &= 0xffff;
-        
-        if (x & CURSOR_POSITION_NEGATIVE)
-            x = -(x & CURSOR_POSITION_MASK);
-        if (y & CURSOR_POSITION_NEGATIVE)
-            y = -(y & CURSOR_POSITION_MASK);
+	// Switch cursor to ARGB.
+	gInfo->shared_info->cursor_format = CURSOR_FORMAT_ARGB;
 
-        // Ripristina la posizione assoluta originale dello schermo usando i vecchi hotspot
-        x += gInfo->shared_info->cursor_hot_x;
-        y += gInfo->shared_info->cursor_hot_y;
+	write32(INTEL_CURSOR_CONTROL,
+		CURSOR_ENABLED | gInfo->shared_info->cursor_format);
+	write32(INTEL_CURSOR_SIZE, (height << 12) | width);
 
-        // Salva i nuovi hotspot
-        gInfo->shared_info->cursor_hot_x = hotX;
-        gInfo->shared_info->cursor_hot_y = hotY;
+	write32(INTEL_CURSOR_BASE,
+		(uint32)gInfo->shared_info->physical_graphics_memory
+		+ gInfo->shared_info->cursor_buffer_offset);
 
-        // Sposta il cursore tenendo conto dei nuovi hotspot
-        intel_move_cursor(x, y);
-    }
+	// Changing the hot point changes the cursor position.
+	if (hotX != gInfo->shared_info->cursor_hot_x
+		|| hotY != gInfo->shared_info->cursor_hot_y) {
+		int32 x = read32(INTEL_CURSOR_POSITION);
+		int32 y = x >> 16;
+		x &= 0xffff;
 
-    return B_OK;
+		if (x & CURSOR_POSITION_NEGATIVE)
+			x = -(x & CURSOR_POSITION_MASK);
+		if (y & CURSOR_POSITION_NEGATIVE)
+			y = -(y & CURSOR_POSITION_MASK);
+
+		x += gInfo->shared_info->cursor_hot_x;
+		y += gInfo->shared_info->cursor_hot_y;
+
+		gInfo->shared_info->cursor_hot_x = hotX;
+		gInfo->shared_info->cursor_hot_y = hotY;
+
+		intel_move_cursor(x, y);
+	}
+
+	return B_OK;
 }
 
 

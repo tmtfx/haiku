@@ -848,9 +848,16 @@ intel_extreme_init(intel_info &info)
 		// TODO: set status page
 	}
 	if (hardwareCursor) {
-		intel_allocate_memory(info, B_PAGE_SIZE, 0, B_APERTURE_NEED_PHYSICAL,
+		status_t cursorStatus = intel_allocate_memory(info, B_PAGE_SIZE, 0,
+			B_APERTURE_NEED_PHYSICAL,
 			(addr_t*)&info.shared_info->cursor_memory,
 			&info.shared_info->physical_cursor_memory);
+		if (cursorStatus == B_OK) {
+			info.shared_info->cursor_buffer_offset
+				= (addr_t)info.shared_info->cursor_memory - info.aperture_base;
+		} else {
+			info.shared_info->cursor_memory = NULL;
+		}
 	}
 
 	edid1_info* edidInfo = (edid1_info*)get_boot_item(VESA_EDID_BOOT_INFO,

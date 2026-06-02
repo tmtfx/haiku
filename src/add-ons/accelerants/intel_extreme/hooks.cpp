@@ -77,18 +77,29 @@ get_accelerant_hook(uint32 feature, void* data)
 		case B_SET_DPMS_MODE:
 			return (void*)intel_set_dpms_mode;
 
-		/* cursor managment */
+		/* cursor management */
 		case B_SET_CURSOR_SHAPE:
 			if (gInfo->shared_info->cursor_memory != NULL)
 				return (void*)intel_set_cursor_shape;
+			return NULL;
 		case B_MOVE_CURSOR:
 			if (gInfo->shared_info->cursor_memory != NULL)
 				return (void*)intel_move_cursor;
+			return NULL;
 		case B_SHOW_CURSOR:
 			if (gInfo->shared_info->cursor_memory != NULL)
 				return (void*)intel_show_cursor;
+			return NULL;
+		case B_GET_CURSOR_BITS:
+			if (gInfo->shared_info->cursor_memory != NULL)
+				return (void*)intel_get_cursor_bits;
+			return NULL;
 		case B_SET_CURSOR_BITMAP:
+			if (gInfo->shared_info->cursor_memory != NULL
+				&& gInfo->shared_info->device_type.Generation() >= 4) {
 				return (void*)intel_set_cursor_bitmap;
+			}
+			return NULL;
 		
 		/* engine/synchronization */
 		case B_ACCELERANT_ENGINE_COUNT:
