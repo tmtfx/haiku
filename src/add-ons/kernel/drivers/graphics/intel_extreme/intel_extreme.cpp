@@ -861,7 +861,12 @@ intel_extreme_init(intel_info &info)
 		if (cursorStatus == B_OK) {
 			info.shared_info->cursor_buffer_offset
 				= (addr_t)info.shared_info->cursor_memory - info.aperture_base;
+			ERROR("cursor: allocated %zu bytes at %p (phys=%" B_PRIxPHYSADDR ") offset=0x%" B_PRIx32 "\n",
+				cursorSize, info.shared_info->cursor_memory,
+				info.shared_info->physical_cursor_memory,
+				info.shared_info->cursor_buffer_offset);
 		} else {
+			ERROR("cursor: allocation failed: %s\n", strerror(cursorStatus));
 			info.shared_info->cursor_memory = NULL;
 		}
 	}

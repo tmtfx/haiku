@@ -10,6 +10,7 @@
 #include "accelerant_protos.h"
 #include "accelerant.h"
 
+#include <inttypes.h>
 #include <string.h>
 
 
@@ -116,6 +117,11 @@ intel_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 		return B_NO_INIT;
 
 	debug_printf("Intel Extreme Accelerant: Cursor Bitmap as 32-bit\n");
+	debug_printf("intel_set_cursor_bitmap: w=%u h=%u hot=%u,%u cs=%" B_PRIu32 " bpr=%u data=%p cursorMem=%p physGM=%" B_PRIxPHYSADDR " off=0x%" B_PRIx32 "\n",
+		width, height, hotX, hotY, (uint32)colorSpace, bytesPerRow, bitmapData,
+		gInfo->shared_info->cursor_memory,
+		gInfo->shared_info->physical_graphics_memory,
+		gInfo->shared_info->cursor_buffer_offset);
 
 	// The Intel hardware cursor supports up to 64x64.
 	if (width == 0 || height == 0 || width > 64 || height > 64)
@@ -128,15 +134,19 @@ intel_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 	if (bytesPerRow < width * 4)
 		return B_BAD_VALUE;
 
+	debug_printf("intel_set_cursor_bitmap: disabling cursor\n");
 	// Disable the cursor before touching the backing store.
 	write32(INTEL_CURSOR_CONTROL, 0);
+	debug_printf("intel_set_cursor_bitmap: cursor disabled\n");
 
 	uint32* dest = (uint32*)gInfo->shared_info->cursor_memory;
 	const uint32* src = (const uint32*)bitmapData;
 	uint32 srcPixelsPerRow = bytesPerRow / 4;
 
+	debug_printf("intel_set_cursor_bitmap: clearing cursor buffer\n");
 	// Clear the whole 64x64 buffer to avoid garbage when the cursor is smaller.
 	memset(dest, 0, 64 * 64 * sizeof(uint32));
+	debug_printf("intel_set_cursor_bitmap: cursor buffer cleared\n");
 
 	// Copy into the 64-pixel-wide hardware layout.
 	// Note: B_RGB32 typically has an alpha byte of 0; force it opaque.
@@ -152,6 +162,8 @@ intel_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 	gInfo->shared_info->cursor_format
 		= (colorSpace == B_RGB32) ? CURSOR_FORMAT_XRGB : CURSOR_FORMAT_ARGB;
 
+	debug_printf("intel_set_cursor_bitmap: programming regs (format=0x%" B_PRIx32 ")\n",
+		gInfo->shared_info->cursor_format);
 	write32(INTEL_CURSOR_CONTROL,
 		CURSOR_ENABLED | gInfo->shared_info->cursor_format);
 	write32(INTEL_CURSOR_SIZE, (height << 12) | width);
