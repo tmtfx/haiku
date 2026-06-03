@@ -90,19 +90,24 @@ trace_cursor_regs(const char* where)
 }
 
 
+static bool
+hardware_cursor_supported()
+{
+    // On GeminiLake/Gen9 enabling the HW cursor via MCURSOR mode (eg 0x27) blanks
+    // the panel, while the legacy enable bit is ignored. Until the correct Gen9+
+    // cursor programming is implemented, force software cursor on DDI platforms.
+    return !gInfo->shared_info->device_type.HasDDI();
+}
+
+
 static uint32
 cursor_control_value(bool visible)
 {
     if (!visible)
         return 0;
 
-    // Gen8+ (DDI) uses "new style" cursor control: a non-zero mode value in the
-    // low bits enables the cursor. The legacy bit31 enable may be ignored.
-    if (gInfo->shared_info->device_type.HasDDI()) {
-        // 64x64 ARGB cursor mode (MCURSOR_MODE_64_ARGB_AX in Linux i915).
-        // Do NOT OR legacy format bits here (they overlap unrelated fields).
-        return 0x27;
-    }
+    if (!hardware_cursor_supported())
+        return 0;
 
     return CURSOR_ENABLED | gInfo->shared_info->cursor_format;
 }
@@ -209,6 +214,9 @@ status_t
 intel_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
     uint8* andMask, uint8* xorMask)
 {
+    if (!hardware_cursor_supported())
+        return B_OK;
+
     if (width > 64 || height > 64)
         return B_BAD_VALUE;
 
@@ -321,6 +329,9 @@ intel_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 uint32
 intel_get_cursor_bits(void)
 {
+    if (!hardware_cursor_supported())
+        return 0;
+
     if (gInfo->shared_info->cursor_memory == NULL)
         return 0;
 
@@ -335,6 +346,9 @@ status_t
 intel_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
     color_space colorSpace, uint16 bytesPerRow, const uint8* bitmapData)
 {
+    if (!hardware_cursor_supported())
+        return B_OK;
+
     if (width == 0 || height == 0 || width > 64 || height > 64)
         return B_BAD_VALUE;
 
@@ -420,6 +434,9 @@ intel_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 void
 intel_move_cursor(uint16 _x, uint16 _y)
 {
+    if (!hardware_cursor_supported())
+        return;
+
     init_cursor_registers();
 
     int32 x = (int32)_x - gInfo->shared_info->cursor_hot_x;
@@ -438,6 +455,9 @@ intel_move_cursor(uint16 _x, uint16 _y)
 void
 intel_show_cursor(bool isVisible)
 {
+    if (!hardware_cursor_supported())
+        return;
+
     init_cursor_registers();
 
     if (gInfo->shared_info->cursor_visible == isVisible)
