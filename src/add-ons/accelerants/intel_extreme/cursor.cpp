@@ -13,7 +13,7 @@
 #include <inttypes.h>
 #include <string.h>
 
-
+#undef TRACE
 //#define TRACE_CURSOR
 #ifdef TRACE_CURSOR
 #	define TRACE(x...) _sPrintf("intel_extreme cursor: " x)
