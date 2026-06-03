@@ -40,14 +40,13 @@ static pipe_index sCursorPipe = INTEL_PIPE_ANY;
 static addr_t
 pipe_offset(pipe_index pipe)
 {
+    // Cursor registers are laid out differently than many other per-pipe blocks.
+    // INTEL_CURSOR_* macros map to pipe A (eg 0x70080). Other pipes use a 0x40
+    // stride (B:+0x40, C:+0x80, D:+0xC0), not +0x1000 strides.
     if (pipe <= INTEL_PIPE_A)
         return 0;
 
-    // On DDI platforms (Gen9+ like GeminiLake) per-pipe MMIO blocks generally use
-    // +0x1000 strides (same scheme as INTEL_DISPLAY_[AB]_CONTROL). Older gens had
-    // cursor regs at smaller deltas.
-    addr_t stride = gInfo->shared_info->device_type.HasDDI() ? 0x1000 : 0x40;
-    return stride * (pipe - INTEL_PIPE_A);
+    return 0x40 * (pipe - INTEL_PIPE_A);
 }
 
 
@@ -100,10 +99,9 @@ cursor_control_value(bool visible)
     // Newer display engines use the "MCURSOR" mode field in low bits.
     // On these platforms, bit31 enable/format fields may be ignored.
     if (gInfo->shared_info->device_type.HasDDI()) {
-        // Pipe select is in bits 29:28 on newer platforms.
-        uint32 pipeSel = ((uint32)(sCursorPipe - INTEL_PIPE_A) & 0x3) << 28;
-        // 64x64 ARGB mode (MCURSOR_MODE_64_ARGB_AX in Linux i915).
-        return pipeSel | 0x27;
+        // New style: enable via MCURSOR mode field in low bits.
+        // Avoid programming additional high bits unless we know they're safe.
+        return gInfo->shared_info->cursor_format | 0x27;
     }
 
     return CURSOR_ENABLED | gInfo->shared_info->cursor_format;
