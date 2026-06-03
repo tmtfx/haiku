@@ -10,7 +10,18 @@
 #include "accelerant_protos.h"
 #include "accelerant.h"
 
+#include <inttypes.h>
 #include <string.h>
+
+
+#undef TRACE
+#define TRACE_CURSOR
+#ifdef TRACE_CURSOR
+#   define TRACE(x...) _sPrintf("intel_extreme: " x)
+#else
+#   define TRACE(x...) do {} while (0)
+#endif
+#define CALLED(x...) TRACE("CALLED %s\n", __PRETTY_FUNCTION__)
 
 
 struct cursor_registers {
@@ -29,13 +40,62 @@ static pipe_index sCursorPipe = INTEL_PIPE_ANY;
 static addr_t
 pipe_offset(pipe_index pipe)
 {
-    // Cursor registers are laid out differently than many other per-pipe blocks.
-    // INTEL_CURSOR_* macros map to pipe A (eg 0x70080). Other pipes use a 0x40
-    // stride (B:+0x40, C:+0x80, D:+0xC0), not +0x1000 strides.
     if (pipe <= INTEL_PIPE_A)
         return 0;
 
-    return 0x40 * (pipe - INTEL_PIPE_A);
+    // On DDI platforms (Gen9+ like GeminiLake) per-pipe MMIO blocks generally use
+    // +0x1000 strides (same scheme as INTEL_DISPLAY_[AB]_CONTROL). Older gens had
+    // cursor regs at smaller deltas.
+    addr_t stride = gInfo->shared_info->device_type.HasDDI() ? 0x1000 : 0x40;
+    return stride * (pipe - INTEL_PIPE_A);
+}
+
+
+static const char*
+pipe_name(pipe_index pipe)
+{
+    switch (pipe) {
+        case INTEL_PIPE_A: return "A";
+        case INTEL_PIPE_B: return "B";
+        case INTEL_PIPE_C: return "C";
+        case INTEL_PIPE_D: return "D";
+        default: return "?";
+    }
+}
+
+
+static void
+trace_cursor_regs(const char* where)
+{
+    // Read back the registers we *think* we programmed, and also dump the two
+    // possible per-pipe layouts (0x40 vs 0x1000 stride) to help debug on new HW.
+    uint32 ctl = read32(sCursorRegs.control);
+    uint32 base = read32(sCursorRegs.base);
+    uint32 pos = read32(sCursorRegs.position);
+    uint32 size = read32(sCursorRegs.size);
+
+    TRACE("cursor(%s): pipe=%s ctl=0x%08" B_PRIx32 " base=0x%08" B_PRIx32
+        " pos=0x%08" B_PRIx32 " size=0x%08" B_PRIx32 "\n",
+        where, pipe_name(sCursorPipe), ctl, base, pos, size);
+
+    // Pipe B candidate addresses
+    uint32 ctlB_40 = read32(INTEL_CURSOR_CONTROL + 0x40);
+    uint32 ctlB_1000 = read32(INTEL_CURSOR_CONTROL + 0x1000);
+    uint32 baseB_40 = read32(INTEL_CURSOR_BASE + 0x40);
+    uint32 baseB_1000 = read32(INTEL_CURSOR_BASE + 0x1000);
+
+    TRACE("cursor(%s): pipeB candidates ctl(+0x40)=0x%08" B_PRIx32
+        " ctl(+0x1000)=0x%08" B_PRIx32
+        " base(+0x40)=0x%08" B_PRIx32 " base(+0x1000)=0x%08" B_PRIx32 "\n",
+        where, ctlB_40, ctlB_1000, baseB_40, baseB_1000);
+}
+
+
+static void
+post_cursor_writes()
+{
+    // Posting read to make sure cursor register writes are committed.
+    (void)read32(sCursorRegs.control);
 }
 
 
@@ -81,6 +141,12 @@ init_cursor_registers()
 
     sCursorPipe = pipe;
     sCursorRegsInitialized = true;
+
+    static bool sTracedOnce = false;
+    if (!sTracedOnce) {
+        trace_cursor_regs("init");
+        sTracedOnce = true;
+    }
 }
 
 
@@ -93,8 +159,11 @@ intel_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 
     init_cursor_registers();
 
+    CALLED();
+
     // Disable cursor before touching the backing store.
     write32(sCursorRegs.control, 0);
+    post_cursor_writes();
 
     uint32 gen = gInfo->shared_info->device_type.Generation();
     if (gen >= 9) {
@@ -130,6 +199,8 @@ intel_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
         write32(sCursorRegs.size, (height << 12) | width);
         // Cursor base expects a graphics (GGTT) address, like primary planes.
         write32(sCursorRegs.base, gInfo->shared_info->cursor_buffer_offset);
+        post_cursor_writes();
+        trace_cursor_regs("shape");
     } else {
         // Two-color mode, data is ordered as follows (always 64 bit per line):
         //  plane 1: line 0 (AND mask)
@@ -157,6 +228,8 @@ intel_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
         write32(sCursorRegs.size, (height << 12) | width);
         // Cursor base expects a graphics (GGTT) address, like primary planes.
         write32(sCursorRegs.base, gInfo->shared_info->cursor_buffer_offset);
+        post_cursor_writes();
+        trace_cursor_regs("shape");
     }
 
     // Changing the hot point changes the cursor position.
@@ -217,6 +290,7 @@ intel_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 
     // Disable the cursor before touching the backing store.
     write32(sCursorRegs.control, 0);
+    post_cursor_writes();
 
     uint32* dest = (uint32*)gInfo->shared_info->cursor_memory;
     const uint32* src = (const uint32*)bitmapData;
@@ -239,11 +313,14 @@ intel_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
     gInfo->shared_info->cursor_format
         = (colorSpace == B_RGB32) ? CURSOR_FORMAT_XRGB : CURSOR_FORMAT_ARGB;
 
+    CALLED();
     write32(sCursorRegs.control,
         CURSOR_ENABLED | gInfo->shared_info->cursor_format);
     write32(sCursorRegs.size, (height << 12) | width);
     // Cursor base expects a graphics (GGTT) address, like primary planes.
     write32(sCursorRegs.base, gInfo->shared_info->cursor_buffer_offset);
+    post_cursor_writes();
+    trace_cursor_regs("bitmap");
 
     // Changing the hot point changes the cursor position.
     if (hotX != gInfo->shared_info->cursor_hot_x
@@ -284,6 +361,7 @@ intel_move_cursor(uint16 _x, uint16 _y)
         y = -y | CURSOR_POSITION_NEGATIVE;
 
     write32(sCursorRegs.position, (y << 16) | x);
+    post_cursor_writes();
 }
 
 
@@ -295,12 +373,15 @@ intel_show_cursor(bool isVisible)
     if (gInfo->shared_info->cursor_visible == isVisible)
         return;
 
+    CALLED();
     write32(sCursorRegs.control, (isVisible ? CURSOR_ENABLED : 0)
         | gInfo->shared_info->cursor_format);
 
     // Some generations require rewriting the base to commit double-buffered state.
     // Use GGTT address (offset into the aperture), not physical.
     write32(sCursorRegs.base, gInfo->shared_info->cursor_buffer_offset);
+    post_cursor_writes();
+    trace_cursor_regs(isVisible ? "show" : "hide");
 
     gInfo->shared_info->cursor_visible = isVisible;
 }
