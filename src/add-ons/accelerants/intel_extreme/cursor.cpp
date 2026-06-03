@@ -29,18 +29,13 @@ static pipe_index sCursorPipe = INTEL_PIPE_ANY;
 static addr_t
 pipe_offset(pipe_index pipe)
 {
-    switch (pipe) {
-        case INTEL_PIPE_B:
-            return 0x1000;
-        case INTEL_PIPE_C:
-            return 0x2000;
-        case INTEL_PIPE_D:
-            return 0xf000;
-        case INTEL_PIPE_A:
-        case INTEL_PIPE_ANY:
-        default:
-            return 0;
-    }
+    // Cursor registers are laid out differently than many other per-pipe blocks.
+    // INTEL_CURSOR_* macros map to pipe A (eg 0x70080). Other pipes use a 0x40
+    // stride (B:+0x40, C:+0x80, D:+0xC0), not +0x1000 strides.
+    if (pipe <= INTEL_PIPE_A)
+        return 0;
+
+    return 0x40 * (pipe - INTEL_PIPE_A);
 }
 
 
@@ -133,9 +128,8 @@ intel_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
         write32(sCursorRegs.control,
             CURSOR_ENABLED | gInfo->shared_info->cursor_format);
         write32(sCursorRegs.size, (height << 12) | width);
-        write32(sCursorRegs.base,
-            (uint32)gInfo->shared_info->physical_graphics_memory
-            + gInfo->shared_info->cursor_buffer_offset);
+        // Cursor base expects a graphics (GGTT) address, like primary planes.
+        write32(sCursorRegs.base, gInfo->shared_info->cursor_buffer_offset);
     } else {
         // Two-color mode, data is ordered as follows (always 64 bit per line):
         //  plane 1: line 0 (AND mask)
@@ -161,9 +155,8 @@ intel_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
         write32(sCursorRegs.control,
             CURSOR_ENABLED | gInfo->shared_info->cursor_format);
         write32(sCursorRegs.size, (height << 12) | width);
-        write32(sCursorRegs.base,
-            (uint32)gInfo->shared_info->physical_graphics_memory
-            + gInfo->shared_info->cursor_buffer_offset);
+        // Cursor base expects a graphics (GGTT) address, like primary planes.
+        write32(sCursorRegs.base, gInfo->shared_info->cursor_buffer_offset);
     }
 
     // Changing the hot point changes the cursor position.
@@ -249,9 +242,8 @@ intel_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
     write32(sCursorRegs.control,
         CURSOR_ENABLED | gInfo->shared_info->cursor_format);
     write32(sCursorRegs.size, (height << 12) | width);
-    write32(sCursorRegs.base,
-        (uint32)gInfo->shared_info->physical_graphics_memory
-        + gInfo->shared_info->cursor_buffer_offset);
+    // Cursor base expects a graphics (GGTT) address, like primary planes.
+    write32(sCursorRegs.base, gInfo->shared_info->cursor_buffer_offset);
 
     // Changing the hot point changes the cursor position.
     if (hotX != gInfo->shared_info->cursor_hot_x
@@ -307,9 +299,8 @@ intel_show_cursor(bool isVisible)
         | gInfo->shared_info->cursor_format);
 
     // Some generations require rewriting the base to commit double-buffered state.
-    write32(sCursorRegs.base,
-        (uint32)gInfo->shared_info->physical_graphics_memory
-        + gInfo->shared_info->cursor_buffer_offset);
+    // Use GGTT address (offset into the aperture), not physical.
+    write32(sCursorRegs.base, gInfo->shared_info->cursor_buffer_offset);
 
     gInfo->shared_info->cursor_visible = isVisible;
 }
