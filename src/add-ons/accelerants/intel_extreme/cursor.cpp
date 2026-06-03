@@ -91,6 +91,25 @@ trace_cursor_regs(const char* where)
 }
 
 
+static uint32
+cursor_control_value(bool visible)
+{
+    if (!visible)
+        return 0;
+
+    // Newer display engines use the "MCURSOR" mode field in low bits.
+    // On these platforms, bit31 enable/format fields may be ignored.
+    if (gInfo->shared_info->device_type.HasDDI()) {
+        // Pipe select is in bits 29:28 on newer platforms.
+        uint32 pipeSel = ((uint32)(sCursorPipe - INTEL_PIPE_A) & 0x3) << 28;
+        // 64x64 ARGB mode (MCURSOR_MODE_64_ARGB_AX in Linux i915).
+        return pipeSel | 0x27;
+    }
+
+    return CURSOR_ENABLED | gInfo->shared_info->cursor_format;
+}
+
+
 static void
 post_cursor_writes()
 {
@@ -160,6 +179,10 @@ intel_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
     init_cursor_registers();
 
     CALLED();
+    TRACE("cursor(shape-args): %ux%u hot=%u,%u gen=%" B_PRIu32 " ddi=%d\n",
+        width, height, hotX, hotY,
+        gInfo->shared_info->device_type.Generation(),
+        gInfo->shared_info->device_type.HasDDI());
 
     // Disable cursor before touching the backing store.
     write32(sCursorRegs.control, 0);
@@ -194,9 +217,9 @@ intel_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
         }
 
         gInfo->shared_info->cursor_format = CURSOR_FORMAT_ARGB;
-        write32(sCursorRegs.control,
-            CURSOR_ENABLED | gInfo->shared_info->cursor_format);
-        write32(sCursorRegs.size, (height << 12) | width);
+        write32(sCursorRegs.control, cursor_control_value(true));
+        if (!gInfo->shared_info->device_type.HasDDI())
+            write32(sCursorRegs.size, (height << 12) | width);
         // Cursor base expects a graphics (GGTT) address, like primary planes.
         write32(sCursorRegs.base, gInfo->shared_info->cursor_buffer_offset);
         post_cursor_writes();
@@ -223,9 +246,9 @@ intel_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 
         gInfo->shared_info->cursor_format = CURSOR_FORMAT_2_COLORS;
 
-        write32(sCursorRegs.control,
-            CURSOR_ENABLED | gInfo->shared_info->cursor_format);
-        write32(sCursorRegs.size, (height << 12) | width);
+        write32(sCursorRegs.control, cursor_control_value(true));
+        if (!gInfo->shared_info->device_type.HasDDI())
+            write32(sCursorRegs.size, (height << 12) | width);
         // Cursor base expects a graphics (GGTT) address, like primary planes.
         write32(sCursorRegs.base, gInfo->shared_info->cursor_buffer_offset);
         post_cursor_writes();
@@ -314,13 +337,21 @@ intel_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
         = (colorSpace == B_RGB32) ? CURSOR_FORMAT_XRGB : CURSOR_FORMAT_ARGB;
 
     CALLED();
-    write32(sCursorRegs.control,
-        CURSOR_ENABLED | gInfo->shared_info->cursor_format);
-    write32(sCursorRegs.size, (height << 12) | width);
+    TRACE("cursor(bitmap-args): %ux%u hot=%u,%u bpr=%u cs=%d\n",
+        width, height, hotX, hotY, bytesPerRow, (int)colorSpace);
+
+    write32(sCursorRegs.control, cursor_control_value(true));
+    if (!gInfo->shared_info->device_type.HasDDI())
+        write32(sCursorRegs.size, (height << 12) | width);
     // Cursor base expects a graphics (GGTT) address, like primary planes.
     write32(sCursorRegs.base, gInfo->shared_info->cursor_buffer_offset);
     post_cursor_writes();
-    trace_cursor_regs("bitmap");
+
+    static bool sTracedBitmapOnce = false;
+    if (!sTracedBitmapOnce) {
+        trace_cursor_regs("bitmap");
+        sTracedBitmapOnce = true;
+    }
 
     // Changing the hot point changes the cursor position.
     if (hotX != gInfo->shared_info->cursor_hot_x
@@ -374,8 +405,7 @@ intel_show_cursor(bool isVisible)
         return;
 
     CALLED();
-    write32(sCursorRegs.control, (isVisible ? CURSOR_ENABLED : 0)
-        | gInfo->shared_info->cursor_format);
+    write32(sCursorRegs.control, cursor_control_value(isVisible));
 
     // Some generations require rewriting the base to commit double-buffered state.
     // Use GGTT address (offset into the aperture), not physical.
