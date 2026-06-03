@@ -96,12 +96,12 @@ cursor_control_value(bool visible)
     if (!visible)
         return 0;
 
-    // Newer display engines use the "MCURSOR" mode field in low bits.
-    // On these platforms, bit31 enable/format fields may be ignored.
+    // Gen8+ (DDI) uses "new style" cursor control: a non-zero mode value in the
+    // low bits enables the cursor. The legacy bit31 enable may be ignored.
     if (gInfo->shared_info->device_type.HasDDI()) {
-        // GeminiLake regression: programming low bits (MCURSOR modes) can blank the
-        // panel on some setups. Stick to the legacy enable/format fields for now.
-        return CURSOR_ENABLED | gInfo->shared_info->cursor_format;
+        // 64x64 ARGB cursor mode (MCURSOR_MODE_64_ARGB_AX in Linux i915).
+        // Do NOT OR legacy format bits here (they overlap unrelated fields).
+        return 0x27;
     }
 
     return CURSOR_ENABLED | gInfo->shared_info->cursor_format;
@@ -253,11 +253,12 @@ intel_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
         }
 
         gInfo->shared_info->cursor_format = CURSOR_FORMAT_ARGB;
-        write32(sCursorRegs.control, cursor_control_value(true));
+        // Program base/size first, then enable cursor last.
         if (!gInfo->shared_info->device_type.HasDDI())
             write32(sCursorRegs.size, (height << 12) | width);
         // Cursor base expects a graphics (GGTT) address, like primary planes.
         write32(sCursorRegs.base, gInfo->shared_info->cursor_buffer_offset);
+        write32(sCursorRegs.control, cursor_control_value(true));
         post_cursor_writes();
         trace_cursor_regs("shape");
     } else {
@@ -282,11 +283,12 @@ intel_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 
         gInfo->shared_info->cursor_format = CURSOR_FORMAT_2_COLORS;
 
-        write32(sCursorRegs.control, cursor_control_value(true));
+        // Program base/size first, then enable cursor last.
         if (!gInfo->shared_info->device_type.HasDDI())
             write32(sCursorRegs.size, (height << 12) | width);
         // Cursor base expects a graphics (GGTT) address, like primary planes.
         write32(sCursorRegs.base, gInfo->shared_info->cursor_buffer_offset);
+        write32(sCursorRegs.control, cursor_control_value(true));
         post_cursor_writes();
         trace_cursor_regs("shape");
     }
@@ -376,11 +378,12 @@ intel_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
     TRACE("cursor(bitmap-args): %ux%u hot=%u,%u bpr=%u cs=%d\n",
         width, height, hotX, hotY, bytesPerRow, (int)colorSpace);
 
-    write32(sCursorRegs.control, cursor_control_value(true));
+    // Program base/size first, then enable cursor last.
     if (!gInfo->shared_info->device_type.HasDDI())
         write32(sCursorRegs.size, (height << 12) | width);
     // Cursor base expects a graphics (GGTT) address, like primary planes.
     write32(sCursorRegs.base, gInfo->shared_info->cursor_buffer_offset);
+    write32(sCursorRegs.control, cursor_control_value(true));
     post_cursor_writes();
 
     static bool sTracedBitmapOnce = false;
@@ -441,11 +444,12 @@ intel_show_cursor(bool isVisible)
         return;
 
     CALLED();
-    write32(sCursorRegs.control, cursor_control_value(isVisible));
 
     // Some generations require rewriting the base to commit double-buffered state.
     // Use GGTT address (offset into the aperture), not physical.
     write32(sCursorRegs.base, gInfo->shared_info->cursor_buffer_offset);
+    // Enable/disable last.
+    write32(sCursorRegs.control, cursor_control_value(isVisible));
     post_cursor_writes();
     trace_cursor_regs(isVisible ? "show" : "hide");
 
