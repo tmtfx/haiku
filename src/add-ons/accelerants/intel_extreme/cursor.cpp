@@ -99,9 +99,9 @@ cursor_control_value(bool visible)
     // Newer display engines use the "MCURSOR" mode field in low bits.
     // On these platforms, bit31 enable/format fields may be ignored.
     if (gInfo->shared_info->device_type.HasDDI()) {
-        // New style: enable via MCURSOR mode field in low bits.
-        // Avoid programming additional high bits unless we know they're safe.
-        return gInfo->shared_info->cursor_format | 0x27;
+        // GeminiLake regression: programming low bits (MCURSOR modes) can blank the
+        // panel on some setups. Stick to the legacy enable/format fields for now.
+        return CURSOR_ENABLED | gInfo->shared_info->cursor_format;
     }
 
     return CURSOR_ENABLED | gInfo->shared_info->cursor_format;
@@ -123,7 +123,45 @@ active_pipe()
     // on every cursor move would be very expensive (EDID/I2C probing), so prefer a
     // register-based heuristic.
 
-    // Fast path: use the enabled primary plane as an indicator.
+    // On DDI (Gen8+), the legacy plane control registers are not reliable
+    // indicators anymore (universal planes). Prefer PIPECONF / DDI func-ctl.
+    if (gInfo->shared_info->device_type.HasDDI()) {
+        uint32 pipeA = read32(INTEL_DISPLAY_A_PIPE_CONTROL);
+        uint32 pipeB = read32(INTEL_DISPLAY_B_PIPE_CONTROL);
+        uint32 pipeC = read32(INTEL_DISPLAY_C_PIPE_CONTROL);
+
+        uint32 ddiA = read32(PIPE_DDI_FUNC_CTL_A);
+        uint32 ddiB = read32(PIPE_DDI_FUNC_CTL_B);
+        uint32 ddiC = read32(PIPE_DDI_FUNC_CTL_C);
+
+        static bool sTracedOnce = false;
+        if (!sTracedOnce) {
+            TRACE("cursor(active_pipe): PIPECONF A=0x%08" B_PRIx32
+                " B=0x%08" B_PRIx32 " C=0x%08" B_PRIx32
+                " | DDI_FUNC_CTL A=0x%08" B_PRIx32
+                " B=0x%08" B_PRIx32 " C=0x%08" B_PRIx32 "\n",
+                pipeA, pipeB, pipeC, ddiA, ddiB, ddiC);
+            sTracedOnce = true;
+        }
+
+        if ((pipeA & INTEL_PIPE_ENABLED) != 0)
+            return INTEL_PIPE_A;
+        if ((pipeB & INTEL_PIPE_ENABLED) != 0)
+            return INTEL_PIPE_B;
+        if ((pipeC & INTEL_PIPE_ENABLED) != 0)
+            return INTEL_PIPE_C;
+
+        if ((ddiA & PIPE_DDI_FUNC_CTL_ENABLE) != 0)
+            return INTEL_PIPE_A;
+        if ((ddiB & PIPE_DDI_FUNC_CTL_ENABLE) != 0)
+            return INTEL_PIPE_B;
+        if ((ddiC & PIPE_DDI_FUNC_CTL_ENABLE) != 0)
+            return INTEL_PIPE_C;
+
+        return INTEL_PIPE_A;
+    }
+
+    // Pre-DDI fallback: use the enabled primary plane as an indicator.
     if ((read32(INTEL_DISPLAY_A_CONTROL) & DISPLAY_CONTROL_ENABLED) != 0)
         return INTEL_PIPE_A;
     if ((read32(INTEL_DISPLAY_B_CONTROL) & DISPLAY_CONTROL_ENABLED) != 0)
