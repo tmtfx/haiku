@@ -94,9 +94,11 @@ get_accelerant_hook(uint32 feature, void* data)
 			if (gInfo->shared_info->cursor_memory != NULL)
 				return (void*)intel_get_cursor_bits;
 			return NULL;
+			
 		case B_SET_CURSOR_BITMAP:
 			if (gInfo->shared_info->cursor_memory != NULL
-				&& gInfo->shared_info->device_type.Generation() >= 4) {
+				&& gInfo->shared_info->device_type.Generation() >= 4
+				&& gInfo->shared_info->device_type.Generation() < 9) {
 				return (void*)intel_set_cursor_bitmap;
 			}
 			return NULL;
