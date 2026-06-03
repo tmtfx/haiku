@@ -28,40 +28,7 @@ intel_en_gating(intel_info &info)
 	CALLED();
 	// Fix some problems on certain chips (taken from X driver)
 	// TODO: clean this up
-	uint32 gen = info.shared_info->device_type.Generation();
-    TRACE("intel_en_gating: Detected Generation %" B_PRIu32 "\n", gen);
-
-    if (gen >= 9) {
-        TRACE("Gen9+ (Geminilake/Skylake) power and clock gating override\n");
-        
-        // 1. Svegliamo il Power Well 1 e il Power Well dei piani grafici (PG1 e PG2)
-        // Il registro 0x45400 controlla lo stato dei domini di alimentazione hardware.
-        uint32 powerWellControl = read32(info, 0x45400);
-        TRACE("Gen9+ Current Power Well CTL (0x45400) = 0x%08" B_PRIx32 "\n", powerWellControl);
-        
-        // Bit 31: Request Power Well 1, Bit 29: Request Power Well 2 (Display core)
-        // Bit 27: Request PW3 (se presente)
-        powerWellControl |= (1UL << 31) | (1UL << 29) | (1UL << 27);
-        write32(info, 0x45400, powerWellControl);
-        
-        // Piccolo avviso all'hardware per stabilizzare le tensioni
-        snooze(10000); 
-        TRACE("Gen9+ Power Well CTL after enable = 0x%08" B_PRIx32 "\n", read32(info, 0x45400));
-
-        // 2. Disabilitiamo il murtagging del clock sul display core che congela i registri secondari
-        // Su Gen9+ il vecchio registro 0x6204 non va toccato con i flag i965.
-        // Usiamo il registro di controllo gating per l'unclogging delle unità di rendering
-        write32(info, 0x42020, (1UL << 14)); // Disattiva il gating sul fetch dei piani inferiori
-        
-        // 3. Controlliamo il Display Function Disable (DFSM) per sicurezza
-        uint32 dfsm = read32(info, 0x42000);
-        TRACE("Gen9+ DFSM Function Disable (0x42000) = 0x%08" B_PRIx32 "\n", dfsm);
-        if (dfsm & (1UL << 28)) {
-            TRACE("Warning: Cursor Plane is disabled in DFSM! Trying to unforce...\n");
-            write32(info, 0x42000, dfsm & ~(1UL << 28)); // Rimuove il blocco sul cursore se il BIOS lo ha spento
-        }
-
-    } else if (info.pci->device_id == 0x2a02 || info.pci->device_id == 0x2a12) {
+	if (info.pci->device_id == 0x2a02 || info.pci->device_id == 0x2a12) {
 		TRACE("i965GM/i965GME quirk\n");
 		write32(info, 0x6204, (1L << 29));
 	} else if (info.device_type.InGroup(INTEL_GROUP_SNB)) {
