@@ -60,17 +60,15 @@ hardware_cursor_supported()
 	if (gInfo->shared_info->cursor_memory == NULL)
 		return false;
 
-	// Allow hardware cursor on Haswell (INTEL_GROUP_HAS) and IronLake (INTEL_GROUP_ILK)
-	// despite HasDDI() being true for some groups. Keep software cursor for newer
-	// DDI platforms (Generation >= 8 and other DDI families) where programming differs.
-	if (gInfo->shared_info->device_type.HasDDI()) {
-		if (gInfo->shared_info->device_type.InGroup(INTEL_GROUP_HAS)
-			|| gInfo->shared_info->device_type.InGroup(INTEL_GROUP_ILK))
-			return true;
-		return false;
-	}
-
-	return true;
+	// Use an allowlist rather than HasDDI(): enable HW cursor for known-working
+	// groups (IronLake, Haswell) and conservatively for older generations.
+	// Newer DDI platforms (Generation >= 8, except Haswell) often need
+	// specialized programming, so keep software cursor there.
+	if (gInfo->shared_info->device_type.InGroup(INTEL_GROUP_ILK)
+		|| gInfo->shared_info->device_type.InGroup(INTEL_GROUP_HAS)
+		|| gInfo->shared_info->device_type.Generation() <= 7)
+		return true;
+	return false;
 }
 
 
