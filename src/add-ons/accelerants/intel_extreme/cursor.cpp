@@ -34,17 +34,21 @@ static cursor_registers sCursorRegs;
 static bool sCursorRegsInitialized = false;
 static pipe_index sCursorPipe = INTEL_PIPE_ANY;
 
-// Buffer dedicato da 16KB per evitare il buffer overflow sui 4KB di sistema
+// Buffer dedicato da 16KB per evitare il buffer overflow sui 4KB stock
 static uint8* sArgbCursorBuffer = NULL;
-static uint32 sArgbCursorOffset = 0;        // Offset GTT
-static phys_addr_t sArgbCursorPhysical = 0;    // Indirizzo Fisico hardware
+static uint32 sArgbCursorOffset = 0;        
+static phys_addr_t sArgbCursorPhysical = 0;    
 
-#define ARGB_CURSOR_SIZE    (64 * 64 * 4)   // 16384 Bytes necessari
+#define ARGB_CURSOR_SIZE    (64 * 64 * 4)   
 
-// Costanti native Gen5+ (Ironlake)
-#define ILK_CURSOR_MODE_DISABLE     0x00
-#define ILK_CURSOR_MODE_64_2COLOR   0x06
-#define ILK_CURSOR_MODE_64_ARGB     0x27
+// Costanti di controllo per generazione
+#define LEGACY_CURSOR_MODE_DISABLE   0x00
+#define LEGACY_CURSOR_MODE_64_ARGB   0x27
+
+// Gen9+ (GeminiLake, IceLake) -> Bit 31 (Enable) + Bit 2:0 (010b = ARGB 32bpp)
+#define GEN9_CURSOR_MODE_DISABLE     0x00
+#define GEN9_CURSOR_MODE_64_ARGB     ((1UL << 31) | (2UL << 0))
+
 
 static addr_t
 pipe_offset(pipe_index pipe)
@@ -52,13 +56,16 @@ pipe_offset(pipe_index pipe)
     if (pipe <= INTEL_PIPE_A)
         return 0;
 
-    // Se siamo su Ironlake (Gen 5), lo stride tra le Pipe è 0x1000
-    if (gInfo->shared_info->device_type.Generation() == 5)
+    uint32 gen = gInfo->shared_info->device_type.Generation();
+
+    // Da Ironlake (Gen5) in poi, lo stride tra le Pipe è di 0x1000
+    if (gen >= 5)
         return 0x1000 * (pipe - INTEL_PIPE_A);
 
     // Vecchio fallback pre-Gen5
     return 0x40 * (pipe - INTEL_PIPE_A);
 }
+
 
 static bool
 hardware_cursor_supported()
@@ -69,13 +76,13 @@ hardware_cursor_supported()
     if (!gInfo->shared_info->hardware_cursor_enabled)
         return false;
 
-    // ABILITAZIONE SELETTIVA: Accendiamo l'hardware cursor SOLO su IronLake.
-    // Haswell, GeminiLake e IceLake (Gen10 1005G1) useranno il cursore software dell'app_server.
-    if (gInfo->shared_info->device_type.InGroup(INTEL_GROUP_ILK))
-        return true;
+    if (gInfo->shared_info->cursor_memory == NULL)
+        return false;
 
-    return false;
+    // Ora supportiamo esplicitamente tutto l'hardware da Ironlake in su!
+    return true;
 }
+
 
 static pipe_index
 active_pipe()
@@ -90,6 +97,7 @@ active_pipe()
     return INTEL_PIPE_A;
 }
 
+
 static void
 init_cursor_registers()
 {
@@ -98,17 +106,32 @@ init_cursor_registers()
         return;
 
     addr_t offset = pipe_offset(pipe);
-    sCursorRegs.control = INTEL_CURSOR_CONTROL + offset;
-    sCursorRegs.base = INTEL_CURSOR_BASE + offset;
-    sCursorRegs.position = INTEL_CURSOR_POSITION + offset;
-    sCursorRegs.size = INTEL_CURSOR_SIZE + offset;
-    sCursorRegs.palette = INTEL_CURSOR_PALETTE + offset;
+    uint32 gen = gInfo->shared_info->device_type.Generation();
+
+    if (gen >= 9) {
+        // Layout moderno Gen9+ (GeminiLake, IceLake / Skylake+)
+        // I registri del cursore sono mappati nel blocco del Plane 7
+        sCursorRegs.control  = 0x70180 + offset;
+        sCursorRegs.position = 0x70188 + offset;
+        sCursorRegs.base     = 0x7019c + offset;
+        sCursorRegs.size     = 0x701a0 + offset;
+        sCursorRegs.palette  = 0x701a4 + offset;
+    } else {
+        // Layout classico (Ironlake, Haswell, e precedenti)
+        sCursorRegs.control  = INTEL_CURSOR_CONTROL + offset;
+        sCursorRegs.base     = INTEL_CURSOR_BASE + offset;
+        sCursorRegs.position = INTEL_CURSOR_POSITION + offset;
+        sCursorRegs.size     = INTEL_CURSOR_SIZE + offset;
+        sCursorRegs.palette  = INTEL_CURSOR_PALETTE + offset;
+    }
 
     sCursorPipe = pipe;
     sCursorRegsInitialized = true;
 
-    TRACE("init: pipe=%d off=0x%" B_PRIxADDR "\n", (int)pipe, offset);
+    TRACE("init: pipe=%d off=0x%" B_PRIxADDR " ctl_reg=0x%" PRIx32 "\n", 
+        (int)pipe, offset, sCursorRegs.control);
 }
+
 
 static void
 post_cursor_writes()
@@ -116,54 +139,37 @@ post_cursor_writes()
     (void)read32(sCursorRegs.control);
 }
 
+
 status_t
 intel_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
     uint8* andMask, uint8* xorMask)
 {
+    // Lasciamo che i cursori monocromatici usino il fallback software o 
+    // l'implementazione stock se non siamo su hardware supportato
     if (!hardware_cursor_supported())
         return B_OK;
 
-    if (width > 64 || height > 64 || andMask == NULL || xorMask == NULL)
-        return B_BAD_VALUE;
-
+    // Di fatto Haiku moderno usa quasi esclusivamente set_cursor_bitmap per i cursori ARGB.
+    // Manteniamo una disattivazione pulita di sicurezza qui.
     init_cursor_registers();
-
-    // Spegne il cursore prima delle modifiche
-    write32(sCursorRegs.control, ILK_CURSOR_MODE_DISABLE);
+    write32(sCursorRegs.control, 0);
     post_cursor_writes();
-
-    uint8* data = gInfo->shared_info->cursor_memory;
-    uint8 byteWidth = (width + 7) / 8;
-
-    for (int32 y = 0; y < height; y++) {
-        for (int32 x = 0; x < byteWidth; x++) {
-            data[16 * y + x] = andMask[byteWidth * y + x];
-            data[16 * y + x + 8] = xorMask[byteWidth * y + x];
-        }
-    }
-
-    write32(sCursorRegs.palette + 0, 0x00ffffff);
-    write32(sCursorRegs.palette + 4, 0);
-
-    gInfo->shared_info->cursor_format = ILK_CURSOR_MODE_64_2COLOR;
-
-    write32(sCursorRegs.size, (height << 12) | width);
-    write32(sCursorRegs.base, (uint32)gInfo->shared_info->physical_graphics_memory
-        + gInfo->shared_info->cursor_buffer_offset);
     
-    write32(sCursorRegs.control, ILK_CURSOR_MODE_64_2COLOR);
-    post_cursor_writes();
-
     return B_OK;
 }
+
 
 uint32
 intel_get_cursor_bits(void)
 {
-    if (!hardware_cursor_supported())
-        return 0;
-    return 32;
+    // Deve rispondere sempre. Da Gen4 in poi la GPU supporta i cursori a 32-bit ARGB.
+    if (gInfo != NULL && gInfo->shared_info != NULL 
+        && gInfo->shared_info->device_type.Generation() >= 4) {
+        return 32;
+    }
+    return 1;
 }
+
 
 status_t
 intel_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
@@ -180,7 +186,7 @@ intel_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 
     init_cursor_registers();
 
-    // ALLOCAZIONE DINAMICA SICURA 16KB (Previene il crash di memoria)
+    // Allocazione del buffer grafico da 16KB condiviso
     if (sArgbCursorBuffer == NULL) {
         intel_allocate_graphics_memory alloc;
         alloc.magic = INTEL_PRIVATE_DATA_MAGIC;
@@ -195,12 +201,12 @@ intel_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
         sArgbCursorPhysical = (phys_addr_t)gInfo->shared_info->physical_graphics_memory + sArgbCursorOffset;
     }
 
-    write32(sCursorRegs.control, ILK_CURSOR_MODE_DISABLE);
+    // Spegne il cursore prima di aggiornare i pixel
+    write32(sCursorRegs.control, 0);
     post_cursor_writes();
 
-    // Pulisce in modo sicuro lo spazio allocato da 16KB
+    // Copia della bitmap
     memset(sArgbCursorBuffer, 0, ARGB_CURSOR_SIZE);
-
     for (uint16 y = 0; y < height && y < 64; y++) {
         const uint32* src = (const uint32*)(bitmapData + y * bytesPerRow);
         uint32* dst = (uint32*)sArgbCursorBuffer + y * 64;
@@ -209,15 +215,31 @@ intel_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
         }
     }
 
-    gInfo->shared_info->cursor_format = ILK_CURSOR_MODE_64_ARGB;
-    
-    write32(sCursorRegs.size, (64 << 12) | 64);
-    write32(sCursorRegs.base, (uint32)sArgbCursorPhysical);
-    write32(sCursorRegs.control, ILK_CURSOR_MODE_64_ARGB);
+    uint32 gen = gInfo->shared_info->device_type.Generation();
+    uint32 ctlValue = 0;
+
+    if (gen >= 9) {
+        // GeminiLake / IceLake
+        ctlValue = GEN9_CURSOR_MODE_64_ARGB;
+        gInfo->shared_info->cursor_format = GEN9_CURSOR_MODE_64_ARGB;
+        
+        write32(sCursorRegs.size, (64 << 12) | 64);
+        write32(sCursorRegs.base, (uint32)sArgbCursorOffset); // Su Gen9+ serve l'offset GGTT, non il fisico!
+    } else {
+        // Ironlake (Gen5) e Haswell (Gen7.5)
+        ctlValue = LEGACY_CURSOR_MODE_64_ARGB;
+        gInfo->shared_info->cursor_format = LEGACY_CURSOR_MODE_64_ARGB;
+        
+        write32(sCursorRegs.size, (64 << 12) | 64);
+        write32(sCursorRegs.base, (uint32)sArgbCursorPhysical); // Richiede l'indirizzo fisico
+    }
+
+    write32(sCursorRegs.control, ctlValue);
     post_cursor_writes();
 
     return B_OK;
 }
+
 
 void
 intel_move_cursor(uint16 _x, uint16 _y)
@@ -239,6 +261,7 @@ intel_move_cursor(uint16 _x, uint16 _y)
     post_cursor_writes();
 }
 
+
 void
 intel_show_cursor(bool isVisible)
 {
@@ -246,14 +269,19 @@ intel_show_cursor(bool isVisible)
         return;
 
     init_cursor_registers();
+    uint32 gen = gInfo->shared_info->device_type.Generation();
 
-    write32(sCursorRegs.control, isVisible ? gInfo->shared_info->cursor_format : ILK_CURSOR_MODE_DISABLE);
-    
-    if (gInfo->shared_info->cursor_format == ILK_CURSOR_MODE_64_ARGB && sArgbCursorBuffer != NULL) {
-        write32(sCursorRegs.base, (uint32)sArgbCursorPhysical);
+    if (isVisible) {
+        write32(sCursorRegs.control, gInfo->shared_info->cursor_format);
     } else {
-        write32(sCursorRegs.base, (uint32)gInfo->shared_info->physical_graphics_memory
-            + gInfo->shared_info->cursor_buffer_offset);
+        write32(sCursorRegs.control, 0);
+    }
+
+    // Carica la base corretta per fare il latch del registro double-buffered
+    if (gen >= 9) {
+        write32(sCursorRegs.base, (uint32)sArgbCursorOffset);
+    } else {
+        write32(sCursorRegs.base, (uint32)sArgbCursorPhysical);
     }
     post_cursor_writes();
 
