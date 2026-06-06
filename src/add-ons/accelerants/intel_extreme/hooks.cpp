@@ -80,8 +80,7 @@ get_accelerant_hook(uint32 feature, void* data)
 		/* cursor management */
 		case B_SET_CURSOR_SHAPE:
 			if (gInfo->shared_info->cursor_memory != NULL
-			&& gInfo->shared_info->device_type.Generation() >= 4
-			&& gInfo->shared_info->device_type.Generation() < 9)
+			&& gInfo->shared_info->device_type.Generation() >= 4)
 				return (void*)intel_set_cursor_shape;
 			return NULL;
 		case B_MOVE_CURSOR:
@@ -99,8 +98,7 @@ get_accelerant_hook(uint32 feature, void* data)
 			
 		case B_SET_CURSOR_BITMAP:
 			if (gInfo->shared_info->cursor_memory != NULL
-				&& gInfo->shared_info->device_type.Generation() >= 4
-				&& gInfo->shared_info->device_type.Generation() < 9) {
+				&& gInfo->shared_info->device_type.Generation() >= 4) {
 				return (void*)intel_set_cursor_bitmap;
 			}
 			return NULL;
