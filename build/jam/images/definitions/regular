@@ -297,13 +297,13 @@ SYSTEM_ADD_ONS_DRIVERS_GRAPHICS += [ FFilterByBuildFeatures
 		nvidia
 		radeon
 		radeon_hd
+		s3
 		sm750
 		via
 	}@ # x86,x86_64
 	x86 @{
 		3dfx
 		neomagic
-		s3
 	}@ # x86
 ] ;
 
