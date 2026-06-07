@@ -122,6 +122,9 @@ status_t Virge_SetDPMSMode(uint32 dpms_flags);
 // Cursor
 status_t SetCursorShape(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
 						uint8* andMask, uint8* xorMask);
+status_t SetCursorBitmap(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
+						color_space colorSpace, uint16 bytesPerRow, const uint8* bitmapData);
+uint32 GetCursorBits(void);
 void	 MoveCursor(uint16 x, uint16 y);
 void	 Savage_ShowCursor(bool bShow);
 void	 Trio64_ShowCursor(bool bShow);
