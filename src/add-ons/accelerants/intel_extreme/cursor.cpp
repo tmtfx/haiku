@@ -170,7 +170,6 @@ intel_get_cursor_bits(void)
     return 1;
 }
 
-
 status_t
 intel_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
     color_space colorSpace, uint16 bytesPerRow, const uint8* bitmapData)
@@ -217,27 +216,75 @@ intel_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 
     uint32 gen = gInfo->shared_info->device_type.Generation();
     uint32 ctlValue = 0;
+    uint32 baseValue = 0;
 
+    // 1. Configura le variabili in base all'architettura specifica
     if (gen >= 9) {
         // GeminiLake / IceLake
         ctlValue = GEN9_CURSOR_MODE_64_ARGB;
         gInfo->shared_info->cursor_format = GEN9_CURSOR_MODE_64_ARGB;
-        
-        write32(sCursorRegs.size, (64 << 12) | 64);
-        write32(sCursorRegs.base, (uint32)sArgbCursorOffset); // Su Gen9+ serve l'offset GGTT, non il fisico!
-    } else {
-        // Ironlake (Gen5) e Haswell (Gen7.5)
+        baseValue = (uint32)sArgbCursorOffset; // Vuole offset GGTT
+    } else if (gInfo->shared_info->device_type.InGroup(INTEL_GROUP_HAS) || gen == 7) {
+        // Haswell (Gen 7.5 / IvyBridge Gen 7)
         ctlValue = LEGACY_CURSOR_MODE_64_ARGB;
         gInfo->shared_info->cursor_format = LEGACY_CURSOR_MODE_64_ARGB;
-        
-        write32(sCursorRegs.size, (64 << 12) | 64);
-        write32(sCursorRegs.base, (uint32)sArgbCursorPhysical); // Richiede l'indirizzo fisico
+        baseValue = (uint32)sArgbCursorOffset; // CORREZIONE: Haswell vuole l'offset, NON il fisico!
+    } else {
+        // Ironlake (Gen 5) e precedenti
+        ctlValue = LEGACY_CURSOR_MODE_64_ARGB;
+        gInfo->shared_info->cursor_format = LEGACY_CURSOR_MODE_64_ARGB;
+        baseValue = (uint32)sArgbCursorPhysical; // Ironlake vuole l'indirizzo fisico reale
     }
 
+    // 2. SCRITTURA SEQUENZIALE TASSETTIVA (Come da manuale Intel per il double-buffering)
+    write32(sCursorRegs.size, (64 << 12) | 64);
+    
+    // Scrivi la posizione attuale (o resetta se necessario) prima di attivare
+    int32 currentPos = read32(sCursorRegs.position);
+    write32(sCursorRegs.position, currentPos);
+
+    // Scrivi prima il controllo abilitando il formato
     write32(sCursorRegs.control, ctlValue);
+    
+    // INFINE, scrivi la Base. Questa operazione fa il commit (latch) dei registri!
+    write32(sCursorRegs.base, baseValue);
     post_cursor_writes();
 
+    gInfo->shared_info->cursor_visible = true;
+
     return B_OK;
+}
+
+void
+intel_show_cursor(bool isVisible)
+{
+    if (!hardware_cursor_supported())
+        return;
+
+    init_cursor_registers();
+    uint32 gen = gInfo->shared_info->device_type.Generation();
+    uint32 baseValue = 0;
+
+    // Determina la base corretta per il latching
+    if (gen >= 7) {
+        // Da Haswell (Gen 7.5) in poi, compresi Gen9/10
+        baseValue = (uint32)sArgbCursorOffset;
+    } else {
+        // Ironlake
+        baseValue = (uint32)sArgbCursorPhysical;
+    }
+
+    // Per mostrare/nascondere: prima si imposta il controllo, poi si dà il colpo di grazia scrivendo la base
+    if (isVisible) {
+        write32(sCursorRegs.control, gInfo->shared_info->cursor_format);
+    } else {
+        write32(sCursorRegs.control, 0);
+    }
+
+    write32(sCursorRegs.base, baseValue);
+    post_cursor_writes();
+
+    gInfo->shared_info->cursor_visible = isVisible;
 }
 
 
@@ -261,29 +308,3 @@ intel_move_cursor(uint16 _x, uint16 _y)
     post_cursor_writes();
 }
 
-
-void
-intel_show_cursor(bool isVisible)
-{
-    if (!hardware_cursor_supported())
-        return;
-
-    init_cursor_registers();
-    uint32 gen = gInfo->shared_info->device_type.Generation();
-
-    if (isVisible) {
-        write32(sCursorRegs.control, gInfo->shared_info->cursor_format);
-    } else {
-        write32(sCursorRegs.control, 0);
-    }
-
-    // Carica la base corretta per fare il latch del registro double-buffered
-    if (gen >= 9) {
-        write32(sCursorRegs.base, (uint32)sArgbCursorOffset);
-    } else {
-        write32(sCursorRegs.base, (uint32)sArgbCursorPhysical);
-    }
-    post_cursor_writes();
-
-    gInfo->shared_info->cursor_visible = isVisible;
-}
