@@ -4,6 +4,7 @@
 
 	Authors:
 	Gerald Zajac 2007-2008
+	Fabio Tomat 2026
 */
 
 #ifndef DRIVERINTERFACE_H

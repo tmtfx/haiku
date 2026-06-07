@@ -4,6 +4,7 @@
 
 	Authors:
 	Gerald Zajac 2007-2008
+	Fabio Tomat 2026
 */
 
 #include <KernelExport.h>
@@ -818,19 +819,26 @@ device_ioctl(void* dev, uint32 msg, void* buf, size_t len)
 
 	switch (msg) {
 		case B_GET_ACCELERANT_SIGNATURE:
-			strcpy((char*)buf, "s3.accelerant");
+			if (user_strlcpy((char*)buf, "s3.accelerant", B_FILE_NAME_LENGTH) < 0)
+				return B_BAD_ADDRESS;
 			return B_OK;
 
 		case S3_DEVICE_NAME:
-			strncpy((char*)buf, di.name, B_OS_NAME_LENGTH);
+			if (user_strlcpy((char*)buf, di.name, B_OS_NAME_LENGTH) < 0)
+				return B_BAD_ADDRESS;
 			((char*)buf)[B_OS_NAME_LENGTH -1] = '\0';
 			return B_OK;
 
 		case S3_GET_PRIVATE_DATA:
 		{
-			S3GetPrivateData* gpd = (S3GetPrivateData*)buf;
-			if (gpd->magic == S3_PRIVATE_DATA_MAGIC) {
-				gpd->sharedInfoArea = di.sharedArea;
+			S3GetPrivateData gpd;
+			if (user_memcpy(&gpd, buf, sizeof(S3GetPrivateData)) != B_OK)
+				return B_BAD_ADDRESS;
+
+			if (gpd.magic == S3_PRIVATE_DATA_MAGIC) {
+				gpd.sharedInfoArea = di.sharedArea;
+				if (user_memcpy(buf, &gpd, sizeof(S3GetPrivateData)) != B_OK)
+					return B_BAD_ADDRESS;
 				return B_OK;
 			}
 			break;
@@ -839,12 +847,17 @@ device_ioctl(void* dev, uint32 msg, void* buf, size_t len)
 		case S3_GET_EDID:
 		{
 #ifdef __HAIKU__
-			S3GetEDID* ged = (S3GetEDID*)buf;
-			if (ged->magic == S3_PRIVATE_DATA_MAGIC) {
+			S3GetEDID ged;
+			if (user_memcpy(&ged, buf, sizeof(S3GetEDID)) != B_OK)
+				return B_BAD_ADDRESS;
+			if (ged.magic == S3_PRIVATE_DATA_MAGIC) {
 				edid1_raw rawEdid;
 				status_t status = GetEdidFromBIOS(rawEdid);
-				if (status == B_OK)
-					user_memcpy(&ged->rawEdid, &rawEdid, sizeof(rawEdid));
+				if (status == B_OK) {
+					memcpy(&ged.rawEdid, &rawEdid, sizeof(rawEdid));
+					if (user_memcpy(buf, &ged, sizeof(S3GetEDID)) != B_OK)
+						return B_BAD_ADDRESS;
+				}
 				return status;
 			}
 #else
@@ -855,22 +868,27 @@ device_ioctl(void* dev, uint32 msg, void* buf, size_t len)
 
 		case S3_GET_PIO:
 		{
-			S3GetSetPIO* gsp = (S3GetSetPIO*)buf;
-			if (gsp->magic == S3_PRIVATE_DATA_MAGIC) {
-				switch (gsp->size) {
+			S3GetSetPIO gsp;
+			if (user_memcpy(&gsp, buf, sizeof(S3GetSetPIO)) != B_OK)
+				return B_BAD_ADDRESS;
+
+			if (gsp.magic == S3_PRIVATE_DATA_MAGIC) {
+				switch (gsp.size) {
 					case 1:
-						gsp->value = gPCI->read_io_8(gsp->offset);
+						gsp.value = gPCI->read_io_8(gsp.offset);
 						break;
 					case 2:
-						gsp->value = gPCI->read_io_16(gsp->offset);
+						gsp.value = gPCI->read_io_16(gsp.offset);
 						break;
 					case 4:
-						gsp->value = gPCI->read_io_32(gsp->offset);
+						gsp.value = gPCI->read_io_32(gsp.offset);
 						break;
 					default:
-						TRACE("device_ioctl() S3_GET_PIO invalid size: %ld\n", gsp->size);
+						TRACE("device_ioctl() S3_GET_PIO invalid size: %ld\n", gsp.size);
 						return B_ERROR;
 				}
+				if (user_memcpy(buf, &gsp, sizeof(S3GetSetPIO)) != B_OK)
+					return B_BAD_ADDRESS;
 				return B_OK;
 			}
 			break;
@@ -878,20 +896,23 @@ device_ioctl(void* dev, uint32 msg, void* buf, size_t len)
 
 		case S3_SET_PIO:
 		{
-			S3GetSetPIO* gsp = (S3GetSetPIO*)buf;
-			if (gsp->magic == S3_PRIVATE_DATA_MAGIC) {
-				switch (gsp->size) {
+			S3GetSetPIO gsp;
+			if (user_memcpy(&gsp, buf, sizeof(S3GetSetPIO)) != B_OK)
+				return B_BAD_ADDRESS;
+
+			if (gsp.magic == S3_PRIVATE_DATA_MAGIC) {
+				switch (gsp.size) {
 					case 1:
-						gPCI->write_io_8(gsp->offset, gsp->value);
+						gPCI->write_io_8(gsp.offset, gsp.value);
 						break;
 					case 2:
-						gPCI->write_io_16(gsp->offset, gsp->value);
+						gPCI->write_io_16(gsp.offset, gsp.value);
 						break;
 					case 4:
-						gPCI->write_io_32(gsp->offset, gsp->value);
+						gPCI->write_io_32(gsp.offset, gsp.value);
 						break;
 					default:
-						TRACE("device_ioctl() S3_SET_PIO invalid size: %ld\n", gsp->size);
+						TRACE("device_ioctl() S3_SET_PIO invalid size: %ld\n", gsp.size);
 						return B_ERROR;
 				}
 				return B_OK;
@@ -901,14 +922,18 @@ device_ioctl(void* dev, uint32 msg, void* buf, size_t len)
 
 		case S3_RUN_INTERRUPTS:
 		{
-			S3SetBoolState* ri = (S3SetBoolState*)buf;
-			if (ri->magic == S3_PRIVATE_DATA_MAGIC) {
-				if (ri->bEnable)
+			S3SetBoolState ri;
+			if (user_memcpy(&ri, buf, sizeof(S3SetBoolState)) != B_OK)
+				return B_BAD_ADDRESS;
+
+			if (ri.magic == S3_PRIVATE_DATA_MAGIC) {
+				if (ri.bEnable)
 					EnableVBI();
 				else
 					DisableVBI();
+				return B_OK;
 			}
-			return B_OK;
+			break;
 		}
 	}
 

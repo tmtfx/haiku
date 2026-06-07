@@ -4,8 +4,10 @@
 
 	Other authors:
 	Gerald Zajac 2007-2008
+	Fabio Tomat 2026
 */
-
+#include <cstdlib>
+#include <cstring>
 #include "accel.h"
 
 uint32
