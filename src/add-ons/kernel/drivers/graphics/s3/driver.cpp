@@ -215,8 +215,7 @@ MapDevice(DeviceInfo& di)
 
 	 		videoRamAddr = pciInfo.u.h0.base_registers[0];
 			videoRamSize = 16 * 1024 * 1024;	// 16 MB is max for 3D series
-			si.videoMemPCI = (void *)(pciInfo.u.h0.base_registers_pci[0]);
-		} else {
+			si.videoMemPCI = pciInfo.u.h0.base_registers_pci[0];		} else {
 			// All other Savage chips.
 
 			regsBase = pciInfo.u.h0.base_registers[0] + SavageMmioRegBaseNew;
@@ -224,7 +223,7 @@ MapDevice(DeviceInfo& di)
 
 			videoRamAddr = pciInfo.u.h0.base_registers[1];
 			videoRamSize = pciInfo.u.h0.base_register_sizes[1];
-			si.videoMemPCI = (void *)(pciInfo.u.h0.base_registers_pci[1]);
+			si.videoMemPCI = pciInfo.u.h0.base_registers_pci[1];
 		}
 	} else {
 		// Trio/Virge chips.
@@ -234,7 +233,7 @@ MapDevice(DeviceInfo& di)
 
  		videoRamAddr = pciInfo.u.h0.base_registers[0];
 		videoRamSize = 8 * 1024 * 1024;	// 8 MB is max for Trio/Virge chips
-		si.videoMemPCI = (void *)(pciInfo.u.h0.base_registers_pci[0]);
+		si.videoMemPCI = pciInfo.u.h0.base_registers_pci[0];
 	}
 
 	// Map the MMIO register area.

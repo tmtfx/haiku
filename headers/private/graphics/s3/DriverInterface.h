@@ -147,8 +147,8 @@ struct SharedInfo {
 	area_id regsArea;			// area_id for the memory mapped registers. It will
 								// be cloned into accelerant's address space.
 	area_id videoMemArea;		// video memory area_id.  The addresses are shared with all teams.
-	void*	videoMemAddr;		// video memory addr as viewed from virtual memory
-	void*	videoMemPCI;		// video memory addr as viewed from the PCI bus (for DMA)
+	addr_t	videoMemAddr; 		// video memory addr as viewed from virtual memory
+	phys_addr_t	videoMemPCI; 		// video memory addr as viewed from the PCI bus (for DMA)
 	uint32	videoMemSize; 		// video memory size in bytes.
 
 	uint32	cursorOffset;		// offset of cursor in video memory
