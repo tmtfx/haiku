@@ -262,7 +262,7 @@ MapDevice(DeviceInfo& di)
 		videoRamSize,
 		B_ANY_KERNEL_BLOCK_ADDRESS | B_WRITE_COMBINING_MEMORY,
 		B_READ_AREA + B_WRITE_AREA,
-		&(si.videoMemAddr));
+		(void**)(&(si.videoMemAddr)));
 
 	if (si.videoMemArea < 0) {
 		// Try to map this time without write combining.
@@ -272,10 +272,10 @@ MapDevice(DeviceInfo& di)
 			videoRamSize,
 			B_ANY_KERNEL_BLOCK_ADDRESS,
 			B_READ_AREA + B_WRITE_AREA,
-			&(si.videoMemAddr));
+			(void**)(&(si.videoMemAddr)));
 	}
 
-	TRACE("Video memory, area: %ld,  addr: 0x%" B_PRIXADDR "\n",
+	TRACE("Video memory, area: %d,  addr: 0x%" B_PRIXADDR "\n",
 		si.videoMemArea, (addr_t)(si.videoMemAddr));
 
 	// If there was an error, delete other areas.
@@ -284,7 +284,7 @@ MapDevice(DeviceInfo& di)
 		si.regsArea = -1;
 	}
 
-	TRACE("leave MapDevice(); result: %ld\n", si.videoMemArea);
+	TRACE("leave MapDevice(); result: %d\n", si.videoMemArea);
 	return si.videoMemArea;
 }
 
