@@ -46,13 +46,22 @@ status_t
 SetCursorBitmap(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
 				color_space colorSpace, uint16 bytesPerRow, const uint8* bitmapData)
 {
-	// Currently only support 16x16 cursors and simple conversion to AND/XOR
-	if ((width != 16) || (height != 16))
-		return B_ERROR;
-	if ((hot_x >= width) || (hot_y >= height))
-		return B_ERROR;
-
+	// Debug: log incoming parameters and driver state
 	SharedInfo& si = *gInfo.sharedInfo;
+	TRACE("SetCursorBitmap: w=%u h=%u hot=%u,%u color=0x%X bpr=%u bDisableHdwCursor=%d cursorOffset=0x%X\n",
+		width, height, hot_x, hot_y, (uint32)colorSpace, bytesPerRow,
+		si.bDisableHdwCursor ? 1 : 0, (uint32)si.cursorOffset);
+
+	// Currently only support 16x16 cursors and simple conversion to AND/XOR
+	if ((width != 16) || (height != 16)) {
+		TRACE("SetCursorBitmap: unsupported size %ux%u\n", width, height);
+		return B_ERROR;
+	}
+	if ((hot_x >= width) || (hot_y >= height)) {
+		TRACE("SetCursorBitmap: invalid hotspot %u,%u for size %ux%u\n", hot_x, hot_y, width, height);
+		return B_ERROR;
+	}
+
 	si.cursorHotX = hot_x;
 	si.cursorHotY = hot_y;
 
@@ -64,6 +73,7 @@ SetCursorBitmap(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
 	if (!andMask || !xorMask) {
 		free(andMask);
 		free(xorMask);
+		TRACE("SetCursorBitmap: allocation failed\n");
 		return B_NO_MEMORY;
 	}
 
@@ -74,27 +84,29 @@ SetCursorBitmap(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
 	// Only support 32-bit source bitmaps here (B_RGBA32 / B_RGB32)
 	if (colorSpace == B_RGBA32 || colorSpace == B_RGB32) {
 		for (int y = 0; y < height; y++) {
-				const uint8* row = bitmapData + y * bytesPerRow;
-				for (int x = 0; x < width; x++) {
-					const uint8* px = row + x * 4;
-					uint8 alpha = (colorSpace == B_RGBA32) ? px[3] : 0xFF;
-					bool opaque = (alpha != 0);
-					int bitIndex = y * width + x;
-					int byteIndex = bitIndex / 8;
-					int bit = 7 - (bitIndex % 8);
-					if (opaque) {
-						andMask[byteIndex] &= ~(1 << bit); // AND=0 -> draw
-						xorMask[byteIndex] |= (1 << bit);  // XOR=1 -> invert (simple visible cursor)
-					}
+			const uint8* row = bitmapData + y * bytesPerRow;
+			for (int x = 0; x < width; x++) {
+				const uint8* px = row + x * 4;
+				uint8 alpha = (colorSpace == B_RGBA32) ? px[3] : 0xFF;
+				bool opaque = (alpha != 0);
+				int bitIndex = y * width + x;
+				int byteIndex = bitIndex / 8;
+				int bit = 7 - (bitIndex % 8);
+				if (opaque) {
+					andMask[byteIndex] &= ~(1 << bit); // AND=0 -> draw
+					xorMask[byteIndex] |= (1 << bit);  // XOR=1 -> invert (simple visible cursor)
 				}
+			}
 		}
 	} else {
 		free(andMask);
 		free(xorMask);
+		TRACE("SetCursorBitmap: unsupported colorSpace 0x%X\n", (uint32)colorSpace);
 		return B_ERROR; // unsupported color space
 	}
 
 	bool ok = gInfo.LoadCursorImage(width, height, andMask, xorMask);
+	TRACE("SetCursorBitmap: LoadCursorImage returned %d\n", ok ? 1 : 0);
 
 	free(andMask);
 	free(xorMask);
