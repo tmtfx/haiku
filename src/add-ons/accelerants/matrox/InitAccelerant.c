@@ -13,6 +13,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include "acc_std.h"
+#include "mga_macros.h"
 
 static status_t init_common(int the_fd);
 
