@@ -747,6 +747,8 @@ static status_t open_hook (const char* name, uint32 flags, void** cookie) {
 	status_t	result = B_OK;
 	char shared_name[B_OS_NAME_LENGTH];
 
+	dprintf("matrox: open_hook ENTER name=%s flags=0x%08x\n", name ? name : "(null)", flags);
+
 	/* find the device name in the list of devices */
 	//char kname[B_OS_NAME_LENGTH];
 	//if (user_strlcpy(kname, name, sizeof(kname)) < B_OK)
@@ -755,8 +757,16 @@ static status_t open_hook (const char* name, uint32 flags, void** cookie) {
 	//while (pd->device_names[index] && (strcmp(kname, pd->device_names[index]) != 0)) index++;
 	while (pd->device_names[index] && (strcmp(name, pd->device_names[index]) != 0)) index++;
 
+	/* check that we actually found a device */
+	if (pd->device_names[index] == NULL) {
+		dprintf("matrox: open_hook - device name '%s' not found (index=%d, count=%u)\n", name ? name : "(null)", index, pd->count);
+		result = B_ENTRY_NOT_FOUND;
+		goto done;
+	}
+
 	/* for convienience */
 	di = &(pd->di[index]);
+	dprintf("matrox: open_hook - found device index=%d di=%p name=%s\n", index, di, pd->device_names[index]);
 
 	/* make sure no one else has write access to the common data */
 	AQUIRE_BEN(pd->kernel);
@@ -764,6 +774,7 @@ static status_t open_hook (const char* name, uint32 flags, void** cookie) {
 	/* if it's already open for writing */
 	if (di->is_open) {
 		/* mark it open another time */
+		dprintf("matrox: open_hook - device already open, is_open=%u\n", di->is_open);
 		goto mark_as_open;
 	}
 	/* create the shared area */
@@ -776,9 +787,11 @@ static status_t open_hook (const char* name, uint32 flags, void** cookie) {
 		B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA | B_CLONEABLE_AREA);
 	if (di->shared_area < 0) {
 		/* return the error */
+		dprintf("matrox: open_hook - create_area failed: %ld\n", di->shared_area);
 		result = di->shared_area;
 		goto done;
 	}
+	dprintf("matrox: open_hook - shared_area=%ld si_ptr=%p\n", di->shared_area, di->si);
 
 	/* save a few dereferences */
 	si = di->si;
@@ -796,7 +809,11 @@ static status_t open_hook (const char* name, uint32 flags, void** cookie) {
 
 	/* map the device */
 	result = map_device(di);
-	if (result < 0) goto free_shared;
+	if (result < 0) {
+		dprintf("matrox: open_hook - map_device failed: %ld\n", result);
+		goto free_shared;
+	}
+	dprintf("matrox: open_hook - map_device OK regs=%p framebuffer=%p fb_area=%ld\n", di->regs, si->framebuffer, si->fb_area);
 
 	/* we will be returning OK status for sure now */
 	result = B_OK;
@@ -809,7 +826,11 @@ static status_t open_hook (const char* name, uint32 flags, void** cookie) {
 
 	/* create a semaphore for vertical blank management */
 	si->vblank = create_sem(0, di->name);
-	if (si->vblank < 0) goto mark_as_open;
+	if (si->vblank < 0) {
+		dprintf("matrox: open_hook - create_sem failed: %ld\n", si->vblank);
+		goto mark_as_open;
+	}
+	dprintf("matrox: open_hook - vblank sem=%ld\n", si->vblank);
 
 	/* change the owner of the semaphores to the opener's team */
 	/* this is required because apps can't aquire kernel semaphores */
@@ -818,22 +839,26 @@ static status_t open_hook (const char* name, uint32 flags, void** cookie) {
 	set_sem_owner(si->vblank, thinfo.team);
 
 	/* If there is a valid interrupt line assigned then set up interrupts */
+	dprintf("matrox: open_hook - checking IRQ pin=0x%02x line=0x%02x\n", di->pcii.u.h0.interrupt_pin, di->pcii.u.h0.interrupt_line);
 	if ((di->pcii.u.h0.interrupt_pin == 0x00) ||
 	    (di->pcii.u.h0.interrupt_line == 0xff) || /* no IRQ assigned */
 	    (di->pcii.u.h0.interrupt_line <= 0x02))   /* system IRQ assigned */
 	{
 		/* delete the semaphore as it won't be used */
+		dprintf("matrox: open_hook - no usable IRQ, deleting vblank sem=%ld\n", si->vblank);
 		delete_sem(si->vblank);
 		si->vblank = -1;
 	}
 	else
 	{
 		/* otherwise install our interrupt handler */
+		dprintf("matrox: open_hook - installing interrupt handler on line %u\n", di->pcii.u.h0.interrupt_line);
 		result = install_io_interrupt_handler(di->pcii.u.h0.interrupt_line, gx00_interrupt, (void *)di, 0);
 		/* bail if we couldn't install the handler */
 		if (result != B_OK)
 		{
 			/* delete the semaphore as it won't be used */
+			dprintf("matrox: open_hook - install_io_interrupt_handler failed: %ld, deleting vblank sem=%ld\n", result, si->vblank);
 			delete_sem(si->vblank);
 			si->vblank = -1;
 		}
@@ -841,6 +866,7 @@ static status_t open_hook (const char* name, uint32 flags, void** cookie) {
 		{
 			/* inform accelerant(s) we can use INT related functions */
 			si->ps.int_assigned = true;
+			dprintf("matrox: open_hook - interrupt handler installed, int_assigned=1\n");
 		}
 	}
 
@@ -848,8 +874,18 @@ mark_as_open:
 	/* mark the device open */
 	di->is_open++;
 
-	/* send the cookie to the opener */
-	*cookie = di;
+	/* send the cookie to the opener (safe copy to user space) */
+	{
+		void *kdi = di;
+		status_t um = user_memcpy(cookie, &kdi, sizeof(kdi));
+		if (um == B_OK) {
+			dprintf("matrox: open_hook - user_memcpy(cookie) OK\n");
+		} else {
+			/* fallback: if user_memcpy failed, assume cookie is kernel pointer and store directly */
+			*(void **)cookie = kdi;
+			dprintf("matrox: open_hook - user_memcpy(cookie) failed (%ld), did kernel write fallback\n", (long)um);
+		}
+	}
 
 	goto done;
 
