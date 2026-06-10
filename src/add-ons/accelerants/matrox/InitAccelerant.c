@@ -125,8 +125,17 @@ status_t INIT_ACCELERANT(int the_fd)
 		goto error1;
 	}
 
-	/* assume G450/G550 signals are connected straight through (before powerup) */
-	si->crossed_conns = false;
+	/* try to preserve any connector mapping the framebuffer/BIOS left in the card's registers
+	 * read OUTPUTCONN register and set crossed_conns accordingly to avoid switching
+	 * outputs when the accelerant powers up the card. */
+	{
+		uint32 out_conn = DXIR(OUTPUTCONN);
+		/* common values: 0x04/0x05 means secondary connector, treat them as crossed */
+		if (out_conn == 0x04 || out_conn == 0x05)
+			si->crossed_conns = true;
+		else
+			si->crossed_conns = false;
+	}
 
 	/* call the device specific init code */
 	result = gx00_general_powerup();
