@@ -748,11 +748,12 @@ static status_t open_hook (const char* name, uint32 flags, void** cookie) {
 	char shared_name[B_OS_NAME_LENGTH];
 
 	/* find the device name in the list of devices */
-	char kname[B_OS_NAME_LENGTH];
-	if (user_strlcpy(kname, name, sizeof(kname)) < B_OK)
-		return B_BAD_ADDRESS;
+	//char kname[B_OS_NAME_LENGTH];
+	//if (user_strlcpy(kname, name, sizeof(kname)) < B_OK)
+	//	return B_BAD_ADDRESS;
 	/* we're never passed a name we didn't publish */
-	while (pd->device_names[index] && (strcmp(kname, pd->device_names[index]) != 0)) index++;
+	//while (pd->device_names[index] && (strcmp(kname, pd->device_names[index]) != 0)) index++;
+	while (pd->device_names[index] && (strcmp(name, pd->device_names[index]) != 0)) index++;
 
 	/* for convienience */
 	di = &(pd->di[index]);
