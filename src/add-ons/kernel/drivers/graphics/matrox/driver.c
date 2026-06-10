@@ -359,7 +359,8 @@ static status_t map_device(device_info *di)
 		di->pcii.u.h0.base_registers[registers],
 		di->pcii.u.h0.base_register_sizes[registers],
 		B_ANY_KERNEL_ADDRESS,
- 		B_CLONEABLE_AREA | (si->use_clone_bugfix ? B_READ_AREA|B_WRITE_AREA : 0),
+ 		//B_CLONEABLE_AREA | (si->use_clone_bugfix ? B_READ_AREA|B_WRITE_AREA : 0),
+ 		B_CLONEABLE_AREA | (si->use_clone_bugfix ? B_READ_AREA|B_WRITE_AREA : B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA),
 		(void **)&(di->regs));
  	si->clone_bugfix_regs = (uint32 *) di->regs;
 
@@ -450,7 +451,8 @@ static status_t map_device(device_info *di)
 			di->pcii.u.h0.base_registers[pseudo_dma],
 			di->pcii.u.h0.base_register_sizes[pseudo_dma],
 			B_ANY_KERNEL_ADDRESS,
-			B_WRITE_AREA,
+			//B_WRITE_AREA,
+			B_KERNEL_WRITE_AREA,
 			&(si->pseudo_dma));
 
 		/* if there was an error, delete our other areas and pass on error*/
@@ -499,7 +501,8 @@ static status_t map_device(device_info *di)
 		di->pcii.u.h0.base_registers[frame_buffer],
 		di->pcii.u.h0.base_register_sizes[frame_buffer],
 		B_ANY_KERNEL_BLOCK_ADDRESS | B_WRITE_COMBINING_MEMORY,
-		B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA,
+		//B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA,
+		B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA | B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA,
 		&(si->framebuffer));
 
 	/*if failed with write combining try again without*/
@@ -509,7 +512,8 @@ static status_t map_device(device_info *di)
 			di->pcii.u.h0.base_registers[frame_buffer],
 			di->pcii.u.h0.base_register_sizes[frame_buffer],
 			B_ANY_KERNEL_BLOCK_ADDRESS,
-			B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA,
+			//B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA,
+			B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA | B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA,
 			&(si->framebuffer));
 	}
 
@@ -750,16 +754,17 @@ static status_t open_hook (const char* name, uint32 flags, void** cookie) {
 	dprintf("matrox: open_hook ENTER name=%s flags=0x%08x\n", name ? name : "(null)", flags);
 
 	/* find the device name in the list of devices */
-	//char kname[B_OS_NAME_LENGTH];
-	//if (user_strlcpy(kname, name, sizeof(kname)) < B_OK)
+	char kname[B_OS_NAME_LENGTH];
+	if (user_strlcpy(kname, name, sizeof(kname)) < B_OK)
+		strlcpy(kname, name, sizeof(kname));
 	//	return B_BAD_ADDRESS;
 	/* we're never passed a name we didn't publish */
-	//while (pd->device_names[index] && (strcmp(kname, pd->device_names[index]) != 0)) index++;
-	while (pd->device_names[index] && (strcmp(name, pd->device_names[index]) != 0)) index++;
+	while (pd->device_names[index] && (strcmp(kname, pd->device_names[index]) != 0)) index++;
+	//while (pd->device_names[index] && (strcmp(name, pd->device_names[index]) != 0)) index++;
 
 	/* check that we actually found a device */
 	if (pd->device_names[index] == NULL) {
-		dprintf("matrox: open_hook - device name '%s' not found (index=%d, count=%u)\n", name ? name : "(null)", index, pd->count);
+		dprintf("matrox: open_hook - device name '%s' not found (index=%d, count=%u)\n", name ? kname : "(null)", index, pd->count);
 		result = B_ENTRY_NOT_FOUND;
 		goto done;
 	}
@@ -787,11 +792,11 @@ static status_t open_hook (const char* name, uint32 flags, void** cookie) {
 		B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA | B_CLONEABLE_AREA);
 	if (di->shared_area < 0) {
 		/* return the error */
-		dprintf("matrox: open_hook - create_area failed: %ld\n", di->shared_area);
+		dprintf("matrox: open_hook - create_area failed: %d\n", di->shared_area);
 		result = di->shared_area;
 		goto done;
 	}
-	dprintf("matrox: open_hook - shared_area=%ld si_ptr=%p\n", di->shared_area, di->si);
+	dprintf("matrox: open_hook - shared_area=%d si_ptr=%p\n", di->shared_area, di->si);
 
 	/* save a few dereferences */
 	si = di->si;
@@ -810,10 +815,10 @@ static status_t open_hook (const char* name, uint32 flags, void** cookie) {
 	/* map the device */
 	result = map_device(di);
 	if (result < 0) {
-		dprintf("matrox: open_hook - map_device failed: %ld\n", result);
+		dprintf("matrox: open_hook - map_device failed: %d\n", result);
 		goto free_shared;
 	}
-	dprintf("matrox: open_hook - map_device OK regs=%p framebuffer=%p fb_area=%ld\n", di->regs, si->framebuffer, si->fb_area);
+	dprintf("matrox: open_hook - map_device OK regs=%p framebuffer=%p fb_area=%d\n", di->regs, si->framebuffer, si->fb_area);
 
 	/* we will be returning OK status for sure now */
 	result = B_OK;
@@ -827,10 +832,10 @@ static status_t open_hook (const char* name, uint32 flags, void** cookie) {
 	/* create a semaphore for vertical blank management */
 	si->vblank = create_sem(0, di->name);
 	if (si->vblank < 0) {
-		dprintf("matrox: open_hook - create_sem failed: %ld\n", si->vblank);
+		dprintf("matrox: open_hook - create_sem failed: %d\n", si->vblank);
 		goto mark_as_open;
 	}
-	dprintf("matrox: open_hook - vblank sem=%ld\n", si->vblank);
+	dprintf("matrox: open_hook - vblank sem=%d\n", si->vblank);
 
 	/* change the owner of the semaphores to the opener's team */
 	/* this is required because apps can't aquire kernel semaphores */
@@ -845,7 +850,7 @@ static status_t open_hook (const char* name, uint32 flags, void** cookie) {
 	    (di->pcii.u.h0.interrupt_line <= 0x02))   /* system IRQ assigned */
 	{
 		/* delete the semaphore as it won't be used */
-		dprintf("matrox: open_hook - no usable IRQ, deleting vblank sem=%ld\n", si->vblank);
+		dprintf("matrox: open_hook - no usable IRQ, deleting vblank sem=%d\n", si->vblank);
 		delete_sem(si->vblank);
 		si->vblank = -1;
 	}
@@ -858,7 +863,7 @@ static status_t open_hook (const char* name, uint32 flags, void** cookie) {
 		if (result != B_OK)
 		{
 			/* delete the semaphore as it won't be used */
-			dprintf("matrox: open_hook - install_io_interrupt_handler failed: %ld, deleting vblank sem=%ld\n", result, si->vblank);
+			dprintf("matrox: open_hook - install_io_interrupt_handler failed: %d, deleting vblank sem=%d\n", result, si->vblank);
 			delete_sem(si->vblank);
 			si->vblank = -1;
 		}
