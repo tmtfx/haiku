@@ -155,6 +155,9 @@ sm750_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
         debug_printf("SM750_ACC: Cursor: indirizzo di memoria non inizializzato");
         return B_NO_INIT;
     }
+    
+    si->cursor.hot_x = hotX;
+    si->cursor.hot_y = hotY;
  
     // Cleaning the entire KB
     // 2-bit per pixel format
