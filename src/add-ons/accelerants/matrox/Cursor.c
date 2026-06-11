@@ -4,7 +4,8 @@
 
 	Other authors:
 	Mark Watson,
-	Rudolf Cornelissen 4/2003-11/2004
+	Rudolf Cornelissen 4/2003-11/2004,
+	Fabio Tomat 2026
 */
 
 #define MODULE_BIT 0x20000000
@@ -25,16 +26,14 @@
 
 static status_t program_old_matrox_cursor(uint16 width, uint16 height, uint16 bytesPerRow, const uint8* bitmapData)
 {
-	// Buffer temporaneo da 1KB (512 byte AND + 512 byte XOR)
 	uint8 temp_buf[1024];
 
-	// 1. Tutto il cursore inizialmente TRASPARENTE (AND = 0xFF, XOR = 0x00)
 	memset(temp_buf,	   0xFF, 512); 
 	memset(temp_buf + 512, 0x00, 512); 
 
 	const uint8* src = (const uint8*)bitmapData;
 
-	// 2. Conversione pixel da B_RGBA32 a 1-bit AND/XOR
+	// Pixel conversion from B_RGBA32 to 1-bit AND/XOR
 	for (int y = 0; y < height && y < 64; y++) {
 		const uint8* srcRow = src + (y * bytesPerRow);
 		uint8* andRowPtr = temp_buf + (y * 8);
@@ -48,38 +47,38 @@ static status_t program_old_matrox_cursor(uint16 width, uint16 height, uint16 by
 			uint8 a = pixel[3];
 
 			if (a < 100)
-				continue; // Lascia trasparente
+				continue; // keep transparent
 
 			int byteOffset = x / 8;
 			int bitShift = 7 - (x % 8);
 
-			// Pixel opaco: spegni l'AND
+			// Solid pixel: turn off AND
 			andRowPtr[byteOffset] &= ~(1 << bitShift);
 
-			// Scelta Bianco/Nero via Luma
+			// White/Black selection via via Luma
 			uint32 luma = (r + g + b) / 3;
 			if (luma > 128) {
-				// BIANCO (AND = 0, XOR = 1)
+				// WHITE (AND = 0, XOR = 1)
 				xorRowPtr[byteOffset] |= (1 << bitShift);
 			} else {
-				// NERO (AND = 0, XOR = 0). Lo XOR è già a zero.
+				// BLACK (AND = 0, XOR = 0). XOR is already zero.
 			}
 		}
 	}
 
-	// 3. Invio effettivo dei dati accumulati nel RAMDAC TVP3026 della Millennium
-	// Diciamo al RAMDAC di iniziare a scrivere dall'indice 0
+	// Send accumulated data into the Millennium's RAMDAC TVP3026
+	// Ask RAMDAC to start writing from index 0
 	DACW(TVP_CUROVRWTADD, 0x00);
 
-	// Spariamo il flusso di 1024 byte nella porta dati del cursore
+	// Send 1024 bytes in the cursor's data port
 	for (int i = 0; i < 1024; i++) {
 		DACW(TVP_CURRAMDATA, temp_buf[i]);
 	}
 
-	// Forza l'attivazione del cursore a livello di RAMDAC se visibile
+	// Activate cursor at the RAMDAC level if visible
 	uint8 cur_ctrl = DACR(TVP_DIRCURCTRL);
-	cur_ctrl &= ~0x0C; // Pulisce vecchie modalità interlacciate
-	cur_ctrl |= 0x03;  // Abilita cursore in modalità standard dual-plane (AND/XOR)
+	cur_ctrl &= ~0x0C; // Clear old interleaved modes
+	cur_ctrl |= 0x03;  // Enable cursor in standard dual-plane mode (AND/XOR)
 	DACW(TVP_DIRCURCTRL, cur_ctrl);
 
 	return B_OK;
@@ -319,7 +318,6 @@ uint32 GET_CURSOR_BITS(void)
 
 status_t SET_CURSOR_BITMAP(uint16 width, uint16 height, uint16 hotX, uint16 hotY, color_space colorSpace, uint16 bytesPerRow, const uint8* bitmapData)
 {
-	// 1. Limiti hardware e aggiornamento hotspot in shared_info
 	if (width > 64 || height > 64)
 		return B_ERROR;
 
