@@ -1,5 +1,5 @@
 /*
- * Copyright 2018, Your Name <your@email.address>
+ * Copyright 2026, Fabio Tomat <f.t.public@gmail.com>
  * All rights reserved. Distributed under the terms of the MIT license.
  */
 #include <string.h>
@@ -24,14 +24,14 @@ sm750_move_cursor(uint16 x, uint16 y)
     uint32 reg_val = 0;
 
     if (x_pos < 0) {
-        // Bit 11 = 1 (Fuori a sinistra), il valore diventa positivo (distanza dal bordo)
+        // Bit 11 = 1 (Out left), the value becomes positive (dinstance from border)
         reg_val |= (1 << 11) | (uint32)((-x_pos) & 0x3F); 
     } else {
         reg_val |= (uint32)(x_pos & 0x07FF);
     }
 
     if (y_pos < 0) {
-        // Bit 27 = 1 (Fuori in alto)
+        // Bit 27 = 1 (Out up)
         reg_val |= (1 << 27) | (uint32)(((-y_pos) & 0x3F) << 16);
     } else {
         reg_val |= (uint32)((y_pos & 0x07FF) << 16);
@@ -100,18 +100,18 @@ sm750_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
             bool andBit = (andMask[srcByteIdx] >> bitPos) & 0x01;
             bool xorBit = (xorMask[srcByteIdx] >> bitPos) & 0x01;
 
-            // AND=0, XOR=0 -> Nero (10 binario = 2)
-            // AND=0, XOR=1 -> Bianco (01 binario = 1)
-            // AND=1, XOR=0 -> Trasparente (00 binario = 0)
-            // AND=1, XOR=1 -> Inversione/Nero (per ora facciamo Nero = 2)
+            // AND=0, XOR=0 -> Black (10 binary = 2)
+            // AND=0, XOR=1 -> White (01 binary = 1)
+            // AND=1, XOR=0 -> Transparent (00 binary = 0)
+            // AND=1, XOR=1 -> Inversion/Black (for now let's make it black = 2)
             
             uint8 val = 0;
             if (andBit == 0) {
-                if (xorBit == 0) val = 2; // Nero
-                else val = 1;            // Bianco
+                if (xorBit == 0) val = 2; // Black
+                else val = 1;            // White
             } else {
-                if (xorBit == 1) val = 2; // Inversione, mappata a Nero
-                else val = 0;            // Trasparente
+                if (xorBit == 1) val = 2; // Inversion, mapped to black
+                else val = 0;            // Transparent
             }
 
             // writing to the interlaced buffer (16 bytes per row)
@@ -121,7 +121,6 @@ sm750_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
         }
     }
 
-    //uint32 addr_val = (1 << 31) | ((si->card_info.mem_size - 1024) & 0x03FFFFF0);
     uint32 addr_val = (1 << 31) | (si->cursor.vram_offset & 0x03FFFFF0);
     uint32 color12 = 0x0000FFFF;
 
@@ -157,14 +156,14 @@ sm750_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
         return B_NO_INIT;
     }
  
-    // Puliamo tutto il KB
-    // Formato 2-bit per pixel
-    // Proviamo a riempire tutto di "10" (Trasparente) -> in binario 10101010 = 0xAA
-    // con 0xFF NERO
-    // con 0xAA NERO
-    // con 0x55 BIANCO
-    // con 0x00 TRASPARENTE
-    memset(dest, 0x00, 1024);  // trasparenza 
+    // Cleaning the entire KB
+    // 2-bit per pixel format
+    // Fill with "10" (Transparent) -> binary: 10101010 = 0xAA
+    // with 0xFF Black
+    // with 0xAA BLACK
+    // with 0x55 White
+    // with 0x00 TRANSPARENTE
+    memset(dest, 0x00, 1024);  // transparence
 
     const uint8* src = (const uint8*)bitmapData;
 
@@ -178,43 +177,42 @@ sm750_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 
             uint8 val = 0; // Default: 00 (Transparent)
 
-            /* a due colori bianco e nero
+            /* two colors white and black
             if (a > 128) {
-                // Calcoliamo la luminosità per decidere tra Bianco e Nero
+                // Luminance for select between White and Black
                 uint32 luma = (r + g + b) / 3;
                 if (luma > 128)
-                    val = 1; // 01 (Colore 1: Bianco)
+                    val = 1; // 01 (Color 1: WHITE)
                 else
-                    val = 2; // 10 (Colore 2: Nero)
+                    val = 2; // 10 (Color 2: BLACK)
             }*/
             if (a < 100) {
-                val = 0; // Trasparente
+                val = 0; // Transparent
             } else if (a < 200) {
-                val = 3; // COLOR 3 (Grigio per l'ombra!)
+                val = 3; // COLOR 3 (Grey for shadows!)
             } else {
-                // Pixel solido: Bianco o Nero
+                // Solid pixel: White or black
                 uint32 luma = (r + g + b) / 3;
                 val = (luma > 128) ? 1 : 2; 
             }
 
-            // Inseriamo i 2 bit nel byte corretto
-            // Ogni riga hardware è di 16 byte (64 pixel * 2 bit / 8)
+            // Insert the 2 bits
             uint32 byteIdx = (y * 16) + (x / 4); 
-            uint8 shift = (x % 4) * 2; // Ordine dei bit nel byte (potrebbe servire 6 - ...)
+            uint8 shift = (x % 4) * 2;
             
             dest[byteIdx] |= (val << shift);
         }
     }
     
     
-    // Forza i colori e l'indirizzo
+    // Force colors and address
     uint32 addr_val = (1 << 31) | (si->cursor.vram_offset & 0x03FFFFF0);
 
-    // Registri Colore SM750
-    // Color 1 (0,0) = Bianco
-    // Color 2 (0,1) = Nero
-    uint32 color12 = 0x0000FFFF; // Nero nei bit alti, Bianco nei bassi
-    uint32 color3 = 0x00888888; // Grigio medio (R=88, G=88, B=88)
+    // SM750 Color registers
+    // Color 1 (0,0) = White
+    // Color 2 (0,1) = Black
+    uint32 color12 = 0x0000FFFF; // Black higher bits, White lower bits
+    uint32 color3 = 0x00888888; // Grey (R=88, G=88, B=88)
 
     if (si->card_info.is_panel) {
         SM750_WREG32(SM750_DISP_PANEL_CUR_COLOR12, color12);
