@@ -21,6 +21,155 @@
 */
 
 #include "acc_std.h"
+#include "mga_macros.h"
+
+static status_t program_old_matrox_cursor(uint16 width, uint16 height, uint16 bytesPerRow, const uint8* bitmapData)
+{
+	// Buffer temporaneo da 1KB (512 byte AND + 512 byte XOR)
+	uint8 temp_buf[1024];
+
+	// 1. Tutto il cursore inizialmente TRASPARENTE (AND = 0xFF, XOR = 0x00)
+	memset(temp_buf,	   0xFF, 512); 
+	memset(temp_buf + 512, 0x00, 512); 
+
+	const uint8* src = (const uint8*)bitmapData;
+
+	// 2. Conversione pixel da B_RGBA32 a 1-bit AND/XOR
+	for (int y = 0; y < height && y < 64; y++) {
+		const uint8* srcRow = src + (y * bytesPerRow);
+		uint8* andRowPtr = temp_buf + (y * 8);
+		uint8* xorRowPtr = temp_buf + 512 + (y * 8);
+
+		for (int x = 0; x < width && x < 64; x++) {
+			const uint8* pixel = srcRow + (x * 4);
+			uint8 b = pixel[0];
+			uint8 g = pixel[1];
+			uint8 r = pixel[2];
+			uint8 a = pixel[3];
+
+			if (a < 100)
+				continue; // Lascia trasparente
+
+			int byteOffset = x / 8;
+			int bitShift = 7 - (x % 8);
+
+			// Pixel opaco: spegni l'AND
+			andRowPtr[byteOffset] &= ~(1 << bitShift);
+
+			// Scelta Bianco/Nero via Luma
+			uint32 luma = (r + g + b) / 3;
+			if (luma > 128) {
+				// BIANCO (AND = 0, XOR = 1)
+				xorRowPtr[byteOffset] |= (1 << bitShift);
+			} else {
+				// NERO (AND = 0, XOR = 0). Lo XOR è già a zero.
+			}
+		}
+	}
+
+	// 3. Invio effettivo dei dati accumulati nel RAMDAC TVP3026 della Millennium
+	// Diciamo al RAMDAC di iniziare a scrivere dall'indice 0
+	DACW(TVP_CUROVRWTADD, 0x00);
+
+	// Spariamo il flusso di 1024 byte nella porta dati del cursore
+	for (int i = 0; i < 1024; i++) {
+		DACW(TVP_CURRAMDATA, temp_buf[i]);
+	}
+
+	// Forza l'attivazione del cursore a livello di RAMDAC se visibile
+	uint8 cur_ctrl = DACR(TVP_DIRCURCTRL);
+	cur_ctrl &= ~0x0C; // Pulisce vecchie modalità interlacciate
+	cur_ctrl |= 0x03;  // Abilita cursore in modalità standard dual-plane (AND/XOR)
+	DACW(TVP_DIRCURCTRL, cur_ctrl);
+
+	return B_OK;
+}
+static status_t matrox_set_cursor_bitmap_gseries(uint16 width, uint16 height, uint16 bytesPerRow, const uint8* bitmapData)
+{
+	if (width > 64 || height > 64)
+		return B_ERROR;
+
+	// L'indirizzo virtuale corrisponde all'inizio della VRAM clonato dall'accelerante
+	uint8* dest = (uint8*)si->framebuffer; 
+	if (dest == NULL) return B_NO_INIT;
+
+	// 1. Spegniamo temporaneamente il cursore per evitare sfarfallii (flicker) 
+	// o corruzioni della cache della CPU mentre scriviamo in VRAM.
+	// Leggiamo il registro di controllo corrente, tenendo spento il bit di abilitazione.
+	uint8 curctrl = DXIR(CURCTRL);
+	DXIW(CURCTRL, curctrl & ~0x01); 
+
+	// 2. Pulizia dell'area: 1024 byte riempiti con 0xFF (Trasparente in modalità 2-bit Matrox)
+	memset(dest, 0xFF, 1024); 
+
+	const uint8* src = (const uint8*)bitmapData;
+
+	// 3. Conversione dei pixel da B_RGBA32 al formato a 2-bit della Matrox
+	for (uint32 y = 0; y < height && y < 64; y++) {
+		for (uint32 x = 0; x < width && x < 64; x++) {
+			const uint8* pixel = src + (y * bytesPerRow) + (x * 4);
+			uint8 b = pixel[0];
+			uint8 g = pixel[1];
+			uint8 r = pixel[2];
+			uint8 a = pixel[3];
+
+			uint8 val = 3; // Default: 11 (Trasparente)
+
+			if (a >= 100) { // Se il pixel non è trasparente...
+				uint32 luma = (r + g + b) / 3;
+				if (a < 200) {
+					val = 2; // Pixel semitrasparente -> Grigio/Ombra (Colore 2)
+				} else {
+					val = (luma > 128) ? 0 : 1; // Colore 0 (Bianco) o Colore 1 (Nero)
+				}
+			}
+
+			// Calcolo dell'indice del byte e dello shift dei bit.
+			// Matrox organizza i pixel in sequenza nel byte.
+			uint32 byteIdx = (y * 16) + (x / 4); 
+			uint8 shift = (x % 4) * 2;
+			
+			// Mascheriamo i 2 bit correnti e inseriamo il valore calcolato
+			dest[byteIdx] &= ~(0x03 << shift);
+			dest[byteIdx] |= (val << shift);
+		}
+	}
+
+	// 4. Programmazione della Palette del Cursore Hardware via RAMDAC esteso (Macro DXIW)
+	
+	// Colore 0: Bianco (Usato per l'interno della freccia)
+	DXIW(CURCOL0RED,   0xFF);
+	DXIW(CURCOL0GREEN, 0xFF);
+	DXIW(CURCOL0BLUE,  0xFF);
+
+	// Colore 1: Nero (Usato per il bordo del cursore)
+	DXIW(CURCOL1RED,   0x00);
+	DXIW(CURCOL1GREEN, 0x00);
+	DXIW(CURCOL1BLUE,  0x00);
+
+	// Colore 2: Grigio (Per l'effetto ombra/anti-aliasing)
+	DXIW(CURCOL2RED,   0x88);
+	DXIW(CURCOL2GREEN, 0x88);
+	DXIW(CURCOL2BLUE,  0x88);
+
+	// 5. Configurazione finale del registro di controllo del cursore (`MGADXI_CURCTRL`)
+	// Dobbiamo assicurarci di impostare il cursore in modalità 64x64 True Color.
+	// Sulla serie G:
+	// Bit 0: Cursore Hardware Abilitato (lo riaccendiamo se era acceso prima, o lo lasciamo gestire a SHOW_CURSOR)
+	// Bit 1-3: Modalità del Cursore. Il valore `0x04` seleziona la modalità "64x64 a 3 colori con trasparenza".
+	
+	curctrl &= ~0x0E; // Puliamo i bit di modalità vecchi (bit 1, 2, 3)
+	curctrl |= 0x04;  // Impostiamo la modalità True Color 64x64
+	
+	// Se il cursore doveva essere visibile, riaccendiamolo preservando il bit 0
+	if (si->cursor.is_visible) {
+		curctrl |= 0x01;
+	}
+
+	DXIW(CURCTRL, curctrl);
+
+	return B_OK;
+}
 
 status_t SET_CURSOR_SHAPE(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y, uint8 *andMask, uint8 *xorMask) 
 {
@@ -52,7 +201,7 @@ void MOVE_CURSOR(uint16 x, uint16 y)
 {
 	uint16 hds = si->dm.h_display_start;	/* the current horizontal starting pixel */
 	uint16 vds = si->dm.v_display_start;	/* the current vertical starting line */
-	uint16 h_adjust;                     
+	uint16 h_adjust;					 
 
 	/* clamp cursor to display */
 	if (x >= si->dm.virtual_width) x = si->dm.virtual_width - 1;
@@ -168,3 +317,35 @@ uint32 GET_CURSOR_BITS(void)
 	return 2;
 }
 
+status_t SET_CURSOR_BITMAP(uint16 width, uint16 height, uint16 hotX, uint16 hotY, color_space colorSpace, uint16 bytesPerRow, const uint8* bitmapData)
+{
+	// 1. Limiti hardware e aggiornamento hotspot in shared_info
+	if (width > 64 || height > 64)
+		return B_ERROR;
+
+	(void)colorSpace;
+
+	si->cursor.hot_x = hotX;
+	si->cursor.hot_y = hotY;
+	si->cursor.width = width;
+	si->cursor.height = height;
+
+	// 2. Bivio generazionale
+	if (si->ps.card_type < G100) {
+		// ==============================================
+		// STRATEGIA ERA PRE-G (MIL1, MYST, MIL2) - 1 bit
+		// ==============================================
+		
+		// NOTE: first series (pre-G100) hardware cursor is inside DAC
+		
+		return program_old_matrox_cursor(width, height, bytesPerRow, bitmapData);
+
+	} else {
+		// ============================================
+		// SERIES G (G100 - G550) - 2 bit - RGB palette
+		// ============================================
+		
+		// NOTE: Hardware cursor is in the reserved VRAM's first KB
+		return matrox_set_cursor_bitmap_gseries(width, height, bytesPerRow, bitmapData);
+	}
+}

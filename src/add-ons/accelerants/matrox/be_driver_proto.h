@@ -36,6 +36,7 @@ status_t SET_CURSOR_SHAPE(uint16 width, uint16 height, uint16 hot_x, uint16 hot_
 void MOVE_CURSOR(uint16 x, uint16 y);
 void SHOW_CURSOR(bool is_visible);
 uint32 GET_CURSOR_BITS(void);
+status_t SET_CURSOR_BITMAP(uint16 width, uint16 height, uint16 hotX, uint16 hotY, color_space colorSpace, uint16 bytesPerRow, const uint8* bitmapData);
 
 uint32 ACCELERANT_ENGINE_COUNT(void);
 status_t ACQUIRE_ENGINE(uint32 capabilities, uint32 max_wait, sync_token *st, engine_token **et);

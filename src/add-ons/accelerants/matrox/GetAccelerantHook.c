@@ -74,6 +74,7 @@ void *	get_accelerant_hook(uint32 feature, void *data)
 		HRDC(MOVE_CURSOR);
 		HRDC(SHOW_CURSOR);
 		HRDC(GET_CURSOR_BITS);
+		HRDC(SET_CURSOR_BITMAP);
 
 		/* synchronization */
 		HOOK(ACCELERANT_ENGINE_COUNT);
