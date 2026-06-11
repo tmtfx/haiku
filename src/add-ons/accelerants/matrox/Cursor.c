@@ -158,3 +158,13 @@ void SHOW_CURSOR(bool is_visible)
 	else
 		gx00_crtc_cursor_hide();
 }
+
+uint32 GET_CURSOR_BITS(void)
+{
+	//  MIL1, MYST, MIL2 = 1 bit (black or white) + trnasparency
+	//  G100 - G400MAX = 2 bits (3 colors at 24bit palette) + transparency
+	//  G450 - G550 = 2 bits (3 colors at 24bit palette) + transparency, handled indipendently for CRTC1 and CRTC2
+	if (si->card_type < 3) return 1; // MIL1, MYST, MIL2
+	return 2;
+}
+
