@@ -22,10 +22,14 @@
 #include <util/kernel_cpp.h>
 
 #include <vesa_info.h>
+#include <boot_item.h>
+
+#include <frame_buffer_console.h>
 
 #include "driver.h"
 #include "power.h"
 #include "utility.h"
+#include "intel_logo.h"
 
 
 #define TRACE_INTELEXTREME
@@ -38,6 +42,53 @@
 #define ERROR(x...) dprintf("intel_extreme: " x)
 #define CALLED(x...) TRACE("intel_extreme: CALLED %s\n", __PRETTY_FUNCTION__)
 
+static void
+draw_intel_logo(intel_info &info)
+{
+    // Recuperiamo il boot item del framebuffer ereditato
+    struct frame_buffer_boot_info* bi = (struct frame_buffer_boot_info*)get_boot_item(
+        FRAME_BUFFER_BOOT_INFO, NULL);
+    
+    if (!bi)
+        return;
+
+    // L'array della mappa dei tesori è a 32-bit (0xFFRRGGBB).
+    // Evitiamo di scrivere se il bootloader è a 8, 15 o 16 bit.
+    if (bi->depth != 32)
+        return;
+
+    uint32 screenWidth = bi->width;
+    uint32 screenHeight = bi->height;
+    
+    uint32 bytesPerRow = bi->bytes_per_row;
+    if (bytesPerRow == 0)
+        bytesPerRow = screenWidth * 4;
+
+    uint32 fbPitch = bytesPerRow / 4;
+
+    uint32 logoW = intel_logo_width;   // 768
+    uint32 logoH = intel_logo_height;  // 768
+
+    // Centriamo la mappa Intel sullo schermo
+    int32 startX = (int32)((screenWidth - logoW) / 2);
+    int32 startY = (int32)((screenHeight - logoH) / 2);
+
+    if (startX < 0) startX = 0;
+    if (startY < 0) startY = 0;
+
+    // Calcoliamo l'indirizzo base del framebuffer usando l'aperture base del GART.
+    // Il bootloader mappa il frame buffer fisico iniziale all'inizio o a un determinato offset dell'aperture.
+    // Di norma, info.aperture_base punta all'inizio della memoria grafica lineare del kernel.
+    uint32* fb = (uint32*)info.aperture_base;
+
+    // Disegniamo la mappa dei tesori Intel con clipping di sicurezza
+    for (uint32 y = 0; y < logoH && (startY + (int32)y) < (int32)screenHeight; y++) {
+        for (uint32 x = 0; x < logoW && (startX + (int32)x) < (int32)screenWidth; x++) {
+            uint32 fbIndex = (uint32)((startY + (int32)y) * (int32)fbPitch + (startX + (int32)x));
+            fb[fbIndex] = intel_logo[y * logoW + x];
+        }
+    }
+}
 
 static void
 init_overlay_registers(overlay_registers* _registers)
@@ -935,6 +986,8 @@ intel_extreme_init(intel_info &info)
 		info.shared_info->hw_cdclk = 450000;
 	}
 	TRACE("%s: hw_cdclk: %" B_PRIu32 " kHz\n", __func__, info.shared_info->hw_cdclk);
+	
+	draw_intel_logo(info);
 
 	TRACE("%s: completed successfully!\n", __func__);
 	return B_OK;
