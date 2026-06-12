@@ -17,6 +17,10 @@
 #include <string.h>
 #include <graphic_driver.h>
 
+#include <boot_item.h>
+#include <frame_buffer_console.h>
+#include "s3_logo.h"
+
 #include "DriverInterface.h"
 
 
@@ -133,7 +137,58 @@ static device_hooks gDeviceHooks =
 	NULL
 };
 
+static void
+draw_logo(DeviceInfo& di)
+{
+    SharedInfo& si = *(di.sharedInfo);
+    
+    // Verifichiamo che il framebuffer sia mappato correttamente
+    if (si.videoMemArea < 0 || si.videoMemAddr == NULL)
+        return;
 
+    // Recuperiamo le informazioni sul framebuffer ereditato dal bootloader
+    struct frame_buffer_boot_info* bi = (struct frame_buffer_boot_info*)get_boot_item(
+        FRAME_BUFFER_BOOT_INFO, NULL);
+    
+    if (!bi)
+        return;
+
+    // Il nostro array s3_logo è a 32-bit (RGBA/RGB32). 
+    // Se il bootloader ha impostato uno schermo a 8, 15 o 16 bit, saltiamo per evitare artefatti o crash.
+    if (bi->depth != 32)
+        return;
+
+    uint32 screenWidth = bi->width;
+    uint32 screenHeight = bi->height;
+    
+    // Calcoliamo il pitch (larghezza della riga in pixel a 32-bit)
+    // Usiamo bi->bytes_per_row se disponibile, altrimenti fallback sul calcolo classico
+    uint32 bytesPerRow = bi->bytes_per_row;
+    if (bytesPerRow == 0)
+        bytesPerRow = screenWidth * 4;
+
+    uint32 fbPitch = bytesPerRow / 4;
+
+    uint32 logoW = s3_logo_width;   // 640
+    uint32 logoH = s3_logo_height;  // 240
+
+    // Centriamo l'immagine dello "S3 DOCK" sullo schermo
+    int32 startX = (int32)((screenWidth - logoW) / 2);
+    int32 startY = (int32)((screenHeight - logoH) / 2);
+
+    if (startX < 0) startX = 0;
+    if (startY < 0) startY = 0;
+
+    uint32* fb = (uint32*)si.videoMemAddr;
+
+    // Disegniamo l'immagine pixel per pixel con clipping di sicurezza
+    for (uint32 y = 0; y < logoH && (startY + (int32)y) < (int32)screenHeight; y++) {
+        for (uint32 x = 0; x < logoW && (startX + (int32)x) < (int32)screenWidth; x++) {
+            uint32 fbIndex = (uint32)((startY + (int32)y) * (int32)fbPitch + (startX + (int32)x));
+            fb[fbIndex] = s3_logo[y * logoW + x];
+        }
+    }
+}
 
 static inline uint32
 GetPCI(pci_info& info, uint8 offset, uint8 size)
@@ -444,6 +499,9 @@ InitDevice(DeviceInfo& di)
 	InitInterruptHandler(di);
 
 	TRACE("Interrupt assigned:  %s\n", si.bInterruptAssigned ? "yes" : "no");
+
+	draw_logo(di);
+	snooze(2000000);
 	return B_OK;
 }
 
