@@ -28,9 +28,7 @@ static status_t program_old_matrox_cursor(uint16 width, uint16 height, uint16 by
 {
 	uint8 temp_buf[1024];
 
-	memset(temp_buf,	   0xFF, 512); 
-	memset(temp_buf + 512, 0x00, 512); 
-	//memset(temp_buf, 0x00, 1024);
+	memset(temp_buf, 0x00, 1024);
 
 	const uint8* src = (const uint8*)bitmapData;
 
@@ -53,17 +51,15 @@ static status_t program_old_matrox_cursor(uint16 width, uint16 height, uint16 by
 			int byteOffset = x / 8;
 			int bitShift = 7 - (x % 8);
 
-			// Solid pixel: turn off AND
-			andRowPtr[byteOffset] &= ~(1 << bitShift);
-			//andRowPtr[byteOffset] |= (1 << bitShift);
-
 			// White/Black selection via via Luma
 			uint32 luma = (r + g + b) / 3;
 			if (luma > 128) {
-				// WHITE (AND = 0, XOR = 1)
-				
+				// WHITE
+				andRowPtr[byteOffset] |= (1 << bitShift); // solid
+				xorRowPtr[byteOffset] &= ~(1 << bitShift); // white
 			} else {
-				// BLACK (AND = 0, XOR = 0). XOR is already zero.
+				// BLACK
+				andRowPtr[byteOffset] &= ~(1 << bitShift);
 				xorRowPtr[byteOffset] |= (1 << bitShift);
 			}
 		}
