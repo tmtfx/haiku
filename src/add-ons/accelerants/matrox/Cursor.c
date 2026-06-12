@@ -89,25 +89,20 @@ static status_t matrox_set_cursor_bitmap_gseries(uint16 width, uint16 height, ui
 	if (width > 64 || height > 64)
 		return B_ERROR;
 
-	// L'indirizzo virtuale corrisponde all'inizio della VRAM clonato dall'accelerante
+	// Hardware cursor virtual address starts at the beginning of the VRAM
 	vuint8 * dest;
     int i;
 
-    // Ottieni il puntatore alla memoria del cursore
     dest = (vuint8*) si->framebuffer;
 	if (dest == NULL) return B_NO_INIT;
 
-	// Spegniamo temporaneamente il cursore per evitare sfarfallii (flicker) 
-	// o corruzioni della cache della CPU mentre scriviamo in VRAM.
-	// Leggiamo il registro di controllo corrente, tenendo spento il bit di abilitazione.
+	// Avoid flickering
 	uint8 curctrl = DXIR(CURCTRL);
 	DXIW(CURCTRL, curctrl & ~0x01); 
 
 	
-	/* 1. Resetta completamente i 1024 byte del cursore hardware a zero.
-     * Nelle Matrox, AND=0 e XOR=0 significa colore di trasparenza totale.
-     * Questo eliminerà istantaneamente il quadrato grigio di sfondo.
-     */
+	// Reset HC to 0 for transparency
+    // AND=0 and XOR=0 means transparency
     for (i = 0; i < 1024 ; i++) {
         dest[i] = 0x00; 
     }
@@ -115,9 +110,10 @@ static status_t matrox_set_cursor_bitmap_gseries(uint16 width, uint16 height, ui
 	const uint8* src = (const uint8*)bitmapData;
 
 	// 3. Conversione dei pixel da B_RGBA32 al formato a 2-bit della Matrox
-	for (uint32 y = 0; y < height && y < 64; y++) {
-        /* row punta all'inizio dei 16 byte della riga corrente nel framebuffer */
-        vuint8* row = &dest[y * 16];
+	// 3. COLOR CONVERSION RGBA32 TO 3 COLORS + TRANSPARENCY
+    for (uint32 y = 0; y < height && y < 64; y++) {
+
+        vuint32* word32_row = (vuint32*)(&dest[y * 16]);
 
         for (uint32 x = 0; x < width && x < 64; x++) {
             const uint8* pixel = src + (y * bytesPerRow) + (x * 4);
@@ -126,109 +122,65 @@ static status_t matrox_set_cursor_bitmap_gseries(uint16 width, uint16 height, ui
             uint8 r = pixel[2];
             uint8 a = pixel[3];
 
-            uint8 val = 0; // Default: 11 in binario (Trasparente)
+            uint8 val = 0; // Default: 00 (Transparent)
 
-            if (a >= 100) { // Se il pixel non è trasparente...
+            if (a >= 100) { // Not transparent
                 uint32 luma = (r + g + b) / 3;
                 if (a < 200) {
-                    val = 3; // Pixel semitrasparente -> Grigio/Ombra (Colore 2 = 10 in binario)
+                    val = 3; // Partial transparency -> Grey/shadow
                 } else {
-                    val = (luma > 128) ? 1 : 2; // Colore 0 (00 binario) o Colore 1 (01 binario)
+                    val = (luma > 128) ? 1 : 2; // 01 (white) o 10 (black)
                 }
             }
-            /*
-            // COSTRUZIONE DELLA PAROLA A 16-BIT PER LA MATROX
-            // Il bit 1 di 'val' va nel byte superiore, il bit 0 va nel byte inferiore.
-            //
-            uint16 pixel_bits_w;
-            pixel_bits_w = ((uint16)(val >> 1) << 8) | (uint16)(val & 0x01);
-
-            // CALCOLO DELLA POSIZIONE NELLA RIGA
-            // Ogni parola a 16-bit contiene i dati per 16 pixel hardware.
-            //
-            uint32 word_pos = x / 16;
             
-            // IL TRUCCO PER AGGIUSTARE LA MANO SPEZZATA:
-            // Visto che la mano appare divisa in due e invertita, applichiamo 
-            // uno XOR (^ 1) sulla posizione della parola. Questo inverte l'ordine 
-            // dei blocchi di pixel (il blocco di sinistra va a destra e viceversa), 
-            // riassemblando la mano in modo geometricamente corretto.
-            //
-            word_pos ^= 1; 
-
-            uint8 bitShift = (x % 16); // Posizione del bit all'interno della parola
-
-            // Cancelliamo i bit precedenti in quella posizione e inseriamo i nuovi
-            row[word_pos] &= ~(1 << bitShift);
-            row[word_pos] |= (pixel_bits_w << bitShift);
-            */
-            
-
-            // --- MAPPA DEI BIT STRUTTURATA MATROX ---
-            // Isoliamo i due singoli bit del nostro valore 'val'
-            // bit0 = val & 0x01
-            // bit1 = (val >> 1) & 0x01
-            //
             uint8 bit0 = val & 0x01;
             uint8 bit1 = (val >> 1) & 0x01;
 
-            // All'interno della riga, 64 pixel divisi in 8 byte significa 
-            // che ogni byte contiene 8 pixel (1 bit ciascuno).
-            // Troviamo l'indice del byte (da 0 a 7) e la posizione del bit.
-            // Matrox vuole il pixel 0 sul bit più significativo (MSB = 7) 
-            //uint32 bitPosition = x / 8;       // Determina il byte (0..7)
-            //uint8  bitShift    = 7 - (x % 8); // Inversione MSB->LSB per l'ordine dei pixel
-            //Calcoliamo la posizione standard del byte (0..7)
-            uint32 baseBytePosition = x / 8;       
-            
-            /* --- IL CORRETTIVO PER COMPENSARE LO SPOSTAMENTO A DESTRA ---
-             * Invertiamo l'ordine dei byte all'interno del piano da 8 byte.
-             * Il byte 0 diventa 7, il byte 1 diventa 6, ecc.
-             * Questo sposterà la manina da destra a sinistra.
-             */
-            uint32 bitPosition = 7 - baseBytePosition; 
+            uint32 bloc32_x = x / 32;       
 
-            // Mantieni l'ordine standard dei bit all'interno del byte
-            uint8 bitShift = (x % 8);
+            // --- LA CORREZIONE GEOMETRICA PER LE MATROX G-SERIES ---
+            // Reassembling... correct orientation:
+            // geometric byte-swap.
+            uint32 bloc32_pos = bloc32_x ^ 1; 
 
-            // Scriviamo il Bit 0 nel piano inferiore (byte 0..7)
-            row[bitPosition] &= ~(1 << bitShift);
-            row[bitPosition] |= (bit0 << bitShift);
 
-            // Scriviamo il Bit 1 nel piano superiore (byte 8..15)
-            row[bitPosition + 8] &= ~(1 << bitShift);
-            row[bitPosition + 8] |= (bit1 << bitShift);
+            // Matrox wants MSB at left.
 
+            uint8 bitShift = 31 - (x % 32); 
+
+            word32_row[bloc32_pos] &= ~(1 << bitShift);
+            word32_row[bloc32_pos] |= (bit0 << bitShift);
+
+            word32_row[bloc32_pos + 2] &= ~(1 << bitShift);
+            word32_row[bloc32_pos + 2] |= (bit1 << bitShift);
         }
     }
-
-	// 4. Programmazione della Palette del Cursore Hardware via RAMDAC esteso (Macro DXIW)
+	// Set Hardware Cursor Palette via extended RAMDAC (Macro DXIW)
 	
-	// Colore 0: Bianco (Usato per l'interno della freccia)
+	// Color 0: White
 	DXIW(CURCOL0RED,   0xFF);
 	DXIW(CURCOL0GREEN, 0xFF);
 	DXIW(CURCOL0BLUE,  0xFF);
 
-	// Colore 1: Nero (Usato per il bordo del cursore)
+	// Color 1: Black
 	DXIW(CURCOL1RED,   0x00);
 	DXIW(CURCOL1GREEN, 0x00);
 	DXIW(CURCOL1BLUE,  0x00);
 
-	// Colore 2: Grigio (Per l'effetto ombra/anti-aliasing)
+	// Color 2: Grey
 	DXIW(CURCOL2RED,   0x88);
 	DXIW(CURCOL2GREEN, 0x88);
 	DXIW(CURCOL2BLUE,  0x88);
 
-	// 5. Configurazione finale del registro di controllo del cursore (`MGADXI_CURCTRL`)
-	// Dobbiamo assicurarci di impostare il cursore in modalità 64x64 True Color.
-	// Sulla serie G:
-	// Bit 0: Cursore Hardware Abilitato (lo riaccendiamo se era acceso prima, o lo lasciamo gestire a SHOW_CURSOR)
-	// Bit 1-3: Modalità del Cursore. Il valore `0x04` seleziona la modalità "64x64 a 3 colori con trasparenza".
+	// FINAL CONFIGURATION
+	// Set cursor in True Color 64x64 mode.
+	// Bit 0: Enable Hardware Crusror
+	// Bit 1-3: Cursor mode. `0x04` means "3 colors+transparency 64x64" mode.
 	
-	curctrl &= ~0x0E; // Puliamo i bit di modalità vecchi (bit 1, 2, 3)
-	curctrl |= 0x04;  // Impostiamo la modalità True Color 64x64
+	curctrl &= ~0x0E; // Clear old modes
+	curctrl |= 0x04;  // Set True Color 64x64 mode
 	
-	// Se il cursore doveva essere visibile, riaccendiamolo preservando il bit 0
+	// if it had to be visible, enable keeping bit 0
 	if (si->cursor.is_visible) {
 		curctrl |= 0x01;
 	}
