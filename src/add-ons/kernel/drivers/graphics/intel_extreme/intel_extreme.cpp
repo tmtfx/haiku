@@ -43,12 +43,8 @@
 #define CALLED(x...) TRACE("intel_extreme: CALLED %s\n", __PRETTY_FUNCTION__)
 
 static void
-draw_intel_logo(intel_info &info)
+draw_intel_logo(intel_info &info,struct frame_buffer_boot_info *bi)
 {
-    // Recuperiamo il boot item del framebuffer ereditato
-    struct frame_buffer_boot_info* bi = (struct frame_buffer_boot_info*)get_boot_item(
-        FRAME_BUFFER_BOOT_INFO, NULL);
-    
     if (!bi)
         return;
 
@@ -652,6 +648,9 @@ status_t
 intel_extreme_init(intel_info &info)
 {
 	CALLED();
+	struct frame_buffer_boot_info* bi = (struct frame_buffer_boot_info*)get_boot_item(
+        FRAME_BUFFER_BOOT_INFO, NULL);
+
 	info.aperture = gGART->map_aperture(info.pci->bus, info.pci->device,
 		info.pci->function, 0, &info.aperture_base);
 	if (info.aperture < B_OK) {
@@ -987,7 +986,7 @@ intel_extreme_init(intel_info &info)
 	}
 	TRACE("%s: hw_cdclk: %" B_PRIu32 " kHz\n", __func__, info.shared_info->hw_cdclk);
 	
-	draw_intel_logo(info);
+	draw_intel_logo(info, bi);
 
 	TRACE("%s: completed successfully!\n", __func__);
 	return B_OK;
