@@ -641,8 +641,13 @@ status_t g450_general_powerup()
 	g400_crtc2_dpms(false, false, false);
 	gx00_crtc_cursor_hide();
 
-	/* power up everything except DVI electronics (for now) */
-	DXIW(PWRCTRL,0x1b); 
+	/* power up everything except DVI electronics (for now)
+	 * If a DVI connector is present, also power up DVI electronics. */
+	if (si->ps.primary_dvi || si->ps.secondary_dvi) {
+		DXIW(PWRCTRL, 0x3f); /* enable all power domains including DVI */
+	} else {
+		DXIW(PWRCTRL, 0x1b); /* default: leave DVI electronics off */
+	} 
 	/* set voltage reference - not using DAC reference block */
 	DXIW(VREFCTRL,0x00);
 	/* wait for 100ms for voltage reference to stabilize */
@@ -917,8 +922,13 @@ status_t gx00_general_bios_to_powergraphics()
 			break;
 		case G450:
 		case G550:
-			/* power up everything except DVI electronics (for now) */
-			DXIW(PWRCTRL,0x1b); 
+			/* power up everything except DVI electronics (for now)
+			 * If DVI is present, enable DVI electronics as well. */
+			if (si->ps.primary_dvi || si->ps.secondary_dvi) {
+				DXIW(PWRCTRL, 0x3f);
+			} else {
+				DXIW(PWRCTRL,0x1b); 
+			}
 			/* enable 'straight-through' sync outputs on both analog output
 			 * connectors and make sure CRTC1 sync outputs are patched through! */
 			DXIW(SYNCCTRL,0x00); 
