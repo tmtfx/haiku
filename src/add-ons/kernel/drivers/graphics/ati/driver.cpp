@@ -4,6 +4,8 @@
 
 	Authors:
 	Gerald Zajac
+	Modified:
+	Fabio Tomat
 */
 
 #include <KernelExport.h>
@@ -16,6 +18,7 @@
 #include <boot_item.h>
 
 #include "DriverInterface.h"
+#include "ati_logo.h"
 
 
 #undef TRACE
@@ -240,6 +243,79 @@ DisableVBI()
 }
 
 
+static void draw_ati_logo_safe(DeviceInfo& di, struct frame_buffer_boot_info *bi)
+{
+    if (bi == NULL) return;
+    
+    pci_info& pciInfo = di.pciInfo;
+
+    void* fb_virt = NULL;
+    area_id fb_area = -1;
+    
+    // Determinazione dinamica del BAR del framebuffer (allineata a map_device)
+    int frame_buffer_bar = 0;
+    
+    // Calcoliamo la dimensione del BAR del framebuffer
+    uint32 fb_size = pciInfo.u.h0.base_register_sizes[frame_buffer_bar];
+    if (fb_size == 0)
+        return;
+
+    // Allineamento alla pagina hardware di Haiku
+    fb_size = (fb_size + B_PAGE_SIZE - 1) & ~(B_PAGE_SIZE - 1);
+    
+    /* Mappatura fisica isolata temporanea in Kernel Space.
+     * Usiamo pciInfo.u.h0.base_registers[frame_buffer_bar] come da sorgente. */
+    fb_area = map_physical_memory("matrox_fb_init_logo",
+        pciInfo.u.h0.base_registers[frame_buffer_bar], fb_size, B_ANY_KERNEL_ADDRESS,
+        B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA, &fb_virt);
+        
+    if (fb_area < B_OK || fb_virt == NULL) {
+        dprintf("matrox: Errore map_physical_memory per il logo: %" B_PRId32 "\n", fb_area);
+        return;
+    }
+
+    uint32* fb = (uint32*)fb_virt;
+    
+    // Geometria reale ereditata dal bootloader
+    uint32 screenWidth = bi->width;
+    uint32 screenHeight = bi->height;
+    
+    uint32 bytesPerRow = bi->bytes_per_row;
+    if (bytesPerRow == 0)
+        bytesPerRow = screenWidth * 4; 
+
+    uint32 fbPitch = bytesPerRow / 4; 
+
+    // Dimensioni del logo Matrox
+    uint32 logoW = ati_logo_width;
+    uint32 logoH = ati_logo_height;
+    const uint32* logo_data = (const uint32*)ati_logo;
+
+    // Calcolo coordinate centrali con clipping preventivo (stile SM750)
+    int32 startX = (int32)((screenWidth - logoW) / 2);
+    int32 startY = (int32)((screenHeight - logoH) / 2);
+
+    if (startX < 0) startX = 0;
+    if (startY < 0) startY = 0;
+
+    dprintf("matrox: safe_logo - Scrittura su fb_virt = %p (BAR %d, Pitch: %u)\n", 
+            fb_virt, frame_buffer_bar, fbPitch);
+
+    // Ciclo di copia pixel corazzato contro i fuori-confine di memoria
+    for (uint32 y = 0; y < logoH && (startY + (int32)y) < (int32)screenHeight; y++) {
+        for (uint32 x = 0; x < logoW && (startX + (int32)x) < (int32)screenWidth; x++) {
+            uint32 fbIndex = (uint32)((startY + (int32)y) * (int32)fbPitch + (startX + (int32)x));
+            uint32 logoIndex = y * logoW + x;
+            
+            fb[fbIndex] = logo_data[logoIndex];
+        }
+    }
+
+    dprintf("matrox: safe_logo - Completato con successo. Smantello area temporanea.\n");
+
+    // Pulizia immediata delle tabelle delle pagine del kernel
+    delete_area(fb_area);
+}
 
 static status_t
 GetEdidFromBIOS(edid1_raw& edidRaw)
@@ -785,12 +861,22 @@ InitDevice(DeviceInfo& di)
 	// Get the table of VESA modes that the chip supports.  Note that we will
 	// need this table only for chips that are currently connected to a laptop
 	// display or a monitor connected via a DVI interface.
-
+	
 	size_t vesaModeTableSize = 0;
 	VesaMode* vesaModes = (VesaMode*)get_boot_item(VESA_MODES_BOOT_INFO,
 		&vesaModeTableSize);
 
 	size_t sharedSize = (sizeof(SharedInfo) + 7) & ~7;
+	
+	//
+	struct frame_buffer_boot_info *bi = (struct frame_buffer_boot_info *)get_boot_item(FRAME_BUFFER_BOOT_INFO, NULL);
+	bool enable_logo = true;
+	// Se il bootloader non ha passato informazioni o la modalità non è a 32-bit (RGBA), usciamo
+	if (bi == NULL) {
+		dprintf("ati: frame buffer boot info - Impossibile ricavare info boot FB\n");
+		enable_logo = false;
+	}
+	
 
 	// Create the area for shared info with NO user-space read or write
 	// permissions, to prevent accidental damage.
@@ -869,6 +955,13 @@ InitDevice(DeviceInfo& di)
 	InitInterruptHandler(di);
 
 	TRACE("Interrupt assigned:  %s\n", si.bInterruptAssigned ? "yes" : "no");
+	// write here drawlogo
+	if (enable_logo && bi != NULL) {
+		dprintf("matrox: open_hook done - Avvio draw_matrox_logo_safe...\n");
+		// Passiamo di (o pd) e il bi recuperato a inizio open_hook
+		draw_ati_logo_safe(di,bi); 
+		snooze(2000000);
+	}
 	return B_OK;
 }
 

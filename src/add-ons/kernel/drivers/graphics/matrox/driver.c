@@ -1050,11 +1050,11 @@ static status_t open_hook (const char* name, uint32 flags, void** cookie) {
 	struct frame_buffer_boot_info *bi = (struct frame_buffer_boot_info *)get_boot_item(
         FRAME_BUFFER_BOOT_INFO, NULL);
 	bool enable_logo = true;
-    // Se il bootloader non ha passato informazioni o la modalità non è a 32-bit (RGBA), usciamo
-    if (bi == NULL) {
-        dprintf("matrox: frame buffer boot info - Impossibile ricavare info boot FB o profondità colore non a 32-bit\n");
-        enable_logo = false;
-    }
+	// Se il bootloader non ha passato informazioni o la modalità non è a 32-bit (RGBA), usciamo
+	if (bi == NULL) {
+		dprintf("matrox: frame buffer boot info - Impossibile ricavare info boot FB o profondità colore non a 32-bit\n");
+		enable_logo = false;
+	}
 
 	/* find the device name in the list of devices */
 	char kname[B_OS_NAME_LENGTH];
@@ -1207,13 +1207,11 @@ free_shared:
 done:
 	/* end of critical section */
 	if (enable_logo && result == B_OK && bi != NULL) {
-        dprintf("matrox: open_hook done - Avvio draw_matrox_logo_safe...\n");
-        
-        // Passiamo di (o pd) e il bi recuperato a inizio open_hook
-        draw_matrox_logo_safe(di, bi); 
-        
-        snooze(2000000);
-    }
+		dprintf("matrox: open_hook done - Avvio draw_matrox_logo_safe...\n");
+		// Passiamo di (o pd) e il bi recuperato a inizio open_hook
+		draw_matrox_logo_safe(di, bi); 
+		snooze(2000000);
+	}
 
 	
 	RELEASE_BEN(pd->kernel);
