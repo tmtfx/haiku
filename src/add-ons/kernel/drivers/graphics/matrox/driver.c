@@ -16,6 +16,9 @@
 #include <malloc.h>
 #include <stdlib.h> // for strtoXX
 
+#include <boot_item.h>
+#include <frame_buffer_console.h>
+
 /* this is for the standardized portion of the driver API */
 /* currently only one operation is defined: B_GET_ACCELERANT_SIGNATURE */
 #include <graphic_driver.h>
@@ -29,6 +32,7 @@
 /* The private interface between the accelerant and the kernel driver. */
 #include "DriverInterface.h"
 #include "mga_macros.h"
+#include "matrox_logo.h"
 
 #define get_pci(o, s) (*pci_bus->read_pci_config)(pcii->bus, pcii->device, pcii->function, (o), (s))
 #define set_pci(o, s, v) (*pci_bus->write_pci_config)(pcii->bus, pcii->device, pcii->function, (o), (s), (v))
@@ -301,29 +305,151 @@ void uninit_driver(void) {
 	put_module(B_PCI_MODULE_NAME);
 }
 
+static void draw_matrox_logo_safe(device_info *di, struct frame_buffer_boot_info *bi)
+{
+    if (!di || !bi) return;
+
+    void* fb_virt = NULL;
+    area_id fb_area = -1;
+    
+    // Determinazione dinamica del BAR del framebuffer (allineata a map_device)
+    int frame_buffer_bar = 0;
+
+    // Se è una Millennium I (MIL1), il framebuffer risiede nel BAR 1
+    if (di->pcii.device_id == 0x0519)
+    {
+        frame_buffer_bar = 1;
+    }
+    
+    // Calcoliamo la dimensione del BAR del framebuffer
+    uint32 fb_size = di->pcii.u.h0.base_register_sizes[frame_buffer_bar];
+    if (fb_size == 0)
+        return;
+
+    // Allineamento alla pagina hardware di Haiku
+    fb_size = (fb_size + B_PAGE_SIZE - 1) & ~(B_PAGE_SIZE - 1);
+    
+    /* Mappatura fisica isolata temporanea in Kernel Space.
+     * Usiamo di->pcii.u.h0.base_registers[frame_buffer_bar] come da sorgente. */
+    fb_area = map_physical_memory("matrox_fb_init_logo",
+        di->pcii.u.h0.base_registers[frame_buffer_bar], fb_size, B_ANY_KERNEL_ADDRESS,
+        B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA, &fb_virt);
+        
+    if (fb_area < B_OK || fb_virt == NULL) {
+        dprintf("matrox: Errore map_physical_memory per il logo: %" B_PRId32 "\n", fb_area);
+        return;
+    }
+
+    uint32* fb = (uint32*)fb_virt;
+    
+    // Geometria reale ereditata dal bootloader
+    uint32 screenWidth = bi->width;
+    uint32 screenHeight = bi->height;
+    
+    uint32 bytesPerRow = bi->bytes_per_row;
+    if (bytesPerRow == 0)
+        bytesPerRow = screenWidth * 4; 
+
+    uint32 fbPitch = bytesPerRow / 4; 
+
+    // Dimensioni del logo Matrox
+    uint32 logoW = matrox_logo_width;
+    uint32 logoH = matrox_logo_height;
+    const uint32* logo_data = (const uint32*)matrox_logo;
+
+    // Calcolo coordinate centrali con clipping preventivo (stile SM750)
+    int32 startX = (int32)((screenWidth - logoW) / 2);
+    int32 startY = (int32)((screenHeight - logoH) / 2);
+
+    if (startX < 0) startX = 0;
+    if (startY < 0) startY = 0;
+
+    dprintf("matrox: safe_logo - Scrittura su fb_virt = %p (BAR %d, Pitch: %u)\n", 
+            fb_virt, frame_buffer_bar, fbPitch);
+
+    // Ciclo di copia pixel corazzato contro i fuori-confine di memoria
+    for (uint32 y = 0; y < logoH && (startY + (int32)y) < (int32)screenHeight; y++) {
+        for (uint32 x = 0; x < logoW && (startX + (int32)x) < (int32)screenWidth; x++) {
+            uint32 fbIndex = (uint32)((startY + (int32)y) * (int32)fbPitch + (startX + (int32)x));
+            uint32 logoIndex = y * logoW + x;
+            
+            fb[fbIndex] = logo_data[logoIndex];
+        }
+    }
+
+    dprintf("matrox: safe_logo - Completato con successo. Smantello area temporanea.\n");
+
+    // Pulizia immediata delle tabelle delle pagine del kernel
+    delete_area(fb_area);
+}
+/*
+static void draw_matrox_logo(shared_info *si, uint32 screen_width, uint32 screen_height, uint32 screen_stride)
+{
+	dprintf("matrox_acc: draw_matrox_logo started\n");
+    // Sicurezza: verifica che il framebuffer del driver sia mappato
+    if (si == NULL || si->framebuffer == NULL)
+        return;
+
+    // Dimensioni del tuo logo dal file .h
+    uint32 logo_w = matrox_logo_width;
+    uint32 logo_h = matrox_logo_height;
+    uint32 *logo_data = (uint32 *)matrox_logo;
+
+    // Controllo di sicurezza: se il logo è più grande dello schermo reale, non disegniamo
+    if (logo_w > screen_width || logo_h > screen_height) {
+        dprintf("matrox: Schermo di boot (%dx%d) troppo piccolo per il logo (%dx%d)\n", 
+            screen_width, screen_height, logo_w, logo_h);
+        return;
+    }
+
+    // Puntatore alla memoria video (framebuffer) interpretato a 32-bit
+    uint32 *fb = (uint32 *)si->framebuffer;
+
+    // Calcoliamo le coordinate per centrare il logo sullo schermo reale
+    uint32 start_x = (screen_width - logo_w) / 2;
+    uint32 start_y = (screen_height - logo_h) / 2;
+
+    dprintf("matrox_acc: starting to paint the screen\n");
+    // Disegno pixel per pixel
+    for (uint32 y = 0; y < logo_h; y++) {
+        for (uint32 x = 0; x < logo_w; x++) {
+            uint32 current_x = start_x + x;
+            uint32 current_y = start_y + y;
+
+            // Usiamo screen_stride anziché screen_width per il calcolo dell'indice.
+            // Questo garantisce che l'immagine sia dritta e non "affettata" o 
+            // obliqua su monitor con allineamenti di memoria particolari.
+            int fb_index = (current_y * screen_stride) + current_x;
+            int logo_index = (y * logo_w) + x;
+
+            fb[fb_index] = logo_data[logo_index];
+        }
+    }
+}*/
+
 static status_t map_device(device_info *di)
 {
-	char buffer[B_OS_NAME_LENGTH]; /*memory for device name*/
+	char buffer[B_OS_NAME_LENGTH]; //memory for device name
 	shared_info *si = di->si;
 	uint32	tmpUlong;
 	pci_info *pcii = &(di->pcii);
 	system_info sysinfo;
-
-	/*storage for the physical to virtual table (used for dma buffer)*/
+	
+	//storage for the physical to virtual table (used for dma buffer)
 //	physical_entry physical_memory[2];
 //	#define G400_DMA_BUFFER_SIZE 1024*1024
 
-	/*variables for making copy of ROM*/
+	// variables for making copy of ROM
 	uint8 *rom_temp;
 	area_id rom_area;
 
-	/* MIL1 has frame_buffer in [1], control_regs in [0], and nothing in [2], while
-	 * MIL2 and later have frame_buffer in [0], control_regs in [1], pseudo_dma in [2] */
+	// MIL1 has frame_buffer in [1], control_regs in [0], and nothing in [2], while
+	// MIL2 and later have frame_buffer in [0], control_regs in [1], pseudo_dma in [2]
 	int frame_buffer = 0;
 	int registers = 1;
 	int pseudo_dma = 2;
 
-	/* correct layout for MIL1 */
+	// correct layout for MIL1
 	//fixme: checkout Mystique 170 and 220...
 	if (di->pcii.device_id == 0x0519)
 	{
@@ -331,15 +457,15 @@ static status_t map_device(device_info *di)
 		registers = 0;
 	}
 
-	/* enable memory mapped IO, disable VGA I/O - this is standard*/
+	// enable memory mapped IO, disable VGA I/O - this is standard
 	tmpUlong = get_pci(PCI_command, 4);
 	tmpUlong |= 0x00000002;
 	tmpUlong &= 0xfffffffe;
 	set_pci(PCI_command, 4, tmpUlong);
 
- 	/*work out which version of BeOS is running*/
+ 	//work out which version of BeOS is running
  	get_system_info(&sysinfo);
- 	if (0)//sysinfo.kernel_build_date[0]=='J')/*FIXME - better ID version*/
+ 	if (0)//sysinfo.kernel_build_date[0]=='J') // FIXME - better ID version
  	{
  		si->use_clone_bugfix = 1;
  	}
@@ -348,12 +474,12 @@ static status_t map_device(device_info *di)
  		si->use_clone_bugfix = 0;
  	}
 
-	/* work out a name for the register mapping */
+	// work out a name for the register mapping
 	sprintf(buffer, DEVICE_FORMAT " regs",
 		di->pcii.vendor_id, di->pcii.device_id,
 		di->pcii.bus, di->pcii.device, di->pcii.function);
 
-	/* get a virtual memory address for the registers*/
+	// get a virtual memory address for the registers
 	si->regs_area = map_physical_memory(
 		buffer,
 		di->pcii.u.h0.base_registers[registers],
@@ -364,15 +490,15 @@ static status_t map_device(device_info *di)
 		(void **)&(di->regs));
  	si->clone_bugfix_regs = (uint32 *) di->regs;
 
-	/* if mapping registers to vmem failed then pass on error */
+	// if mapping registers to vmem failed then pass on error
 	if (si->regs_area < 0) return si->regs_area;
 
-	/* work out a name for the ROM mapping*/
+	// work out a name for the ROM mapping
 	sprintf(buffer, DEVICE_FORMAT " rom",
 		di->pcii.vendor_id, di->pcii.device_id,
 		di->pcii.bus, di->pcii.device, di->pcii.function);
 
-	/*place ROM over the fbspace (this is definately safe)*/
+	//place ROM over the fbspace (this is definately safe)
 	tmpUlong = di->pcii.u.h0.base_registers[frame_buffer];
 	tmpUlong |= 0x00000001;
 	set_pci(PCI_rom_base, 4, tmpUlong);
@@ -386,22 +512,22 @@ static status_t map_device(device_info *di)
 		(void **)&(rom_temp)
 	);
 
-	/* if mapping ROM to vmem failed then clean up and pass on error */
+	// if mapping ROM to vmem failed then clean up and pass on error
 	if (rom_area < 0) {
 		delete_area(si->regs_area);
 		si->regs_area = -1;
 		return rom_area;
 	}
 
-	/* if we have a MMS card which only has a BIOS on the primary card, copy the
-	 * primary card's BIOS for our reference too if we aren't primary ourselves.
-	 * (confirmed OK on 'quad' G200MMS.) */
+	// if we have a MMS card which only has a BIOS on the primary card, copy the
+	// primary card's BIOS for our reference too if we aren't primary ourselves.
+	// (confirmed OK on 'quad' G200MMS.)
 	if ((di->pcii.class_base == PCI_display) &&
 		(di->pcii.class_sub == PCI_display_other) &&
 		((rom_temp[0] != 0x55) || (rom_temp[1] != 0xaa)) && di->pcii.device)
 	{
-		/* locate the main VGA adaptor on our bus, should sit on device #0
-		 * (MMS cards have a own bridge: so there are only graphics cards on it's bus). */
+		// locate the main VGA adaptor on our bus, should sit on device #0
+		// (MMS cards have a own bridge: so there are only graphics cards on it's bus). 
 		uint8 index = 0;
 		bool found = false;
 		for (index = 0; index < pd->count; index++)
@@ -415,37 +541,37 @@ static status_t map_device(device_info *di)
 		}
 		if (found)
 		{
-			/* make the copy from the primary VGA card on our bus */
+			// make the copy from the primary VGA card on our bus
 			memcpy (si->rom_mirror, pd->di[index].rom_mirror, 32768);
 		}
 		else
 		{
-			/* make a copy of 'non-ok' ROM area for future reference just in case */
+			// make a copy of 'non-ok' ROM area for future reference just in case
 			memcpy (si->rom_mirror, rom_temp, 32768);
 		}
 	}
 	else
 	{
-		/* make a copy of ROM for future reference */
+		// make a copy of ROM for future reference
 		memcpy (si->rom_mirror, rom_temp, 32768);
 	}
 
 	if (current_settings.dumprom) dumprom (si->rom_mirror, 32768, di->pcii);
 
-	/*disable ROM and delete the area*/
+	// disable ROM and delete the area
 	set_pci(PCI_rom_base,4,0);
 	delete_area(rom_area);
 
-	/* (pseudo)DMA does not exist on MIL1 */
+	// (pseudo)DMA does not exist on MIL1
 	//fixme: checkout Mystique 170 and 220...
 	if (di->pcii.device_id != 0x0519)
 	{
-		/* work out a name for the pseudo dma mapping*/
+		// work out a name for the pseudo dma mapping
 		sprintf(buffer, DEVICE_FORMAT " pseudodma",
 			di->pcii.vendor_id, di->pcii.device_id,
 			di->pcii.bus, di->pcii.device, di->pcii.function);
 
-		/* map the pseudo dma into vmem (write-only)*/
+		// map the pseudo dma into vmem (write-only)
 		si->pseudo_dma_area = map_physical_memory(
 			buffer,
 			di->pcii.u.h0.base_registers[pseudo_dma],
@@ -455,19 +581,19 @@ static status_t map_device(device_info *di)
 			B_KERNEL_WRITE_AREA,
 			&(si->pseudo_dma));
 
-		/* if there was an error, delete our other areas and pass on error*/
+		// if there was an error, delete our other areas and pass on error
 		if (si->pseudo_dma_area < 0) {
 			delete_area(si->regs_area);
 			si->regs_area = -1;
 			return si->pseudo_dma_area;
 		}
 
-		/* work out a name for the a dma buffer*/
+		// work out a name for the a dma buffer
 //		sprintf(buffer, DEVICE_FORMAT " dmabuffer",
 //			di->pcii.vendor_id, di->pcii.device_id,
 //			di->pcii.bus, di->pcii.device, di->pcii.function);
 
-		/* create an area for the dma buffer*/
+		// create an area for the dma buffer
 //		si->dma_buffer_area = create_area(
 //			buffer,
 //			&si->dma_buffer,
@@ -476,7 +602,7 @@ static status_t map_device(device_info *di)
 //			B_CONTIGUOUS,
 //			B_READ_AREA|B_WRITE_AREA);
 
-		/* if there was an error, delete our other areas and pass on error*/
+		// if there was an error, delete our other areas and pass on error
 //		if (si->dma_buffer_area < 0) {
 //			delete_area(si->pseudo_dma_area);
 //			si->pseudo_dma_area = -1;
@@ -485,17 +611,17 @@ static status_t map_device(device_info *di)
 //			return si->dma_buffer_area;
 //		}
 
-		/*find where it is in real memory*/
+		//find where it is in real memory
 //		get_memory_map(si->dma_buffer,4,physical_memory,1);
-//		si->dma_buffer_pci = physical_memory[0].address; /*addr from PCI space*/
+//		si->dma_buffer_pci = physical_memory[0].address; //addr from PCI space
 	}
 
-	/* work out a name for the framebuffer mapping*/
+	// work out a name for the framebuffer mapping
 	sprintf(buffer, DEVICE_FORMAT " framebuffer",
 		di->pcii.vendor_id, di->pcii.device_id,
 		di->pcii.bus, di->pcii.device, di->pcii.function);
 
-	/* map the framebuffer into vmem, using Write Combining*/
+	// map the framebuffer into vmem, using Write Combining
 	si->fb_area = map_physical_memory(
 		buffer,
 		di->pcii.u.h0.base_registers[frame_buffer],
@@ -505,7 +631,7 @@ static status_t map_device(device_info *di)
 		B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA | B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA,
 		&(si->framebuffer));
 
-	/*if failed with write combining try again without*/
+	// if failed with write combining try again without
 	if (si->fb_area < 0) {
 		si->fb_area = map_physical_memory(
 			buffer,
@@ -517,10 +643,10 @@ static status_t map_device(device_info *di)
 			&(si->framebuffer));
 	}
 
-	/* if there was an error, delete our other areas and pass on error*/
+	// if there was an error, delete our other areas and pass on error
 	if (si->fb_area < 0)
 	{
-		/* (pseudo)DMA does not exist on MIL1 */
+		// (pseudo)DMA does not exist on MIL1
 		//fixme: checkout Mystique 170 and 220...
 		if (di->pcii.device_id != 0x0519)
 		{
@@ -533,15 +659,183 @@ static status_t map_device(device_info *di)
 		si->regs_area = -1;
 		return si->fb_area;
 	}
-	/* remember the DMA address of the frame buffer for BDirectWindow?? purposes */
+	// remember the DMA address of the frame buffer for BDirectWindow?? purposes
 	si->framebuffer_pci = (void *)(addr_t)di->pcii.u.h0.base_registers_pci[frame_buffer];
 
 	// remember settings for use here and in accelerant
 	si->settings = current_settings;
-
-	/* in any case, return the result */
+	
+	// in any case, return the result
 	return si->fb_area;
 }
+/*
+static status_t map_device(device_info *di)
+{
+    char buffer[B_OS_NAME_LENGTH]; //memory for device name
+    shared_info *si = di->si;
+    uint32    tmpUlong;
+    pci_info *pcii = &(di->pcii);
+    system_info sysinfo;
+
+    //storage for the physical to virtual table (used for dma buffer)
+//    physical_entry physical_memory[2];
+//    #define G400_DMA_BUFFER_SIZE 1024*1024
+
+    // Un tempo qui c'erano rom_temp e rom_area, rimossi perché non più necessari 
+
+    // MIL1 has frame_buffer in [1], control_regs in [0], and nothing in [2], while
+    // MIL2 and later have frame_buffer in [0], control_regs in [1], pseudo_dma in [2] 
+    int frame_buffer = 0;
+    int registers = 1;
+    int pseudo_dma = 2;
+
+    // correct layout for MIL1 
+    //fixme: checkout Mystique 170 and 220...
+    if (di->pcii.device_id == 0x0519)
+    {
+        frame_buffer = 1;
+        registers = 0;
+    }
+
+    // enable memory mapped IO, disable VGA I/O - this is standard
+    tmpUlong = get_pci(PCI_command, 4);
+    tmpUlong |= 0x00000002;
+    tmpUlong &= 0xfffffffe;
+    set_pci(PCI_command, 4, tmpUlong);
+
+     //work out which version of BeOS is running
+     get_system_info(&sysinfo);
+     if (0)//sysinfo.kernel_build_date[0]=='J')//FIXME - better ID version
+     {
+          si->use_clone_bugfix = 1;
+     }
+     else
+     {
+          si->use_clone_bugfix = 0;
+     }
+
+    // work out a name for the register mapping 
+    sprintf(buffer, DEVICE_FORMAT " regs",
+        di->pcii.vendor_id, di->pcii.device_id,
+        di->pcii.bus, di->pcii.device, di->pcii.function);
+
+    // get a virtual memory address for the registers
+    si->regs_area = map_physical_memory(
+        buffer,
+        di->pcii.u.h0.base_registers[registers],
+        di->pcii.u.h0.base_register_sizes[registers],
+        B_ANY_KERNEL_ADDRESS,
+         //B_CLONEABLE_AREA | (si->use_clone_bugfix ? B_READ_AREA|B_WRITE_AREA : 0),
+         B_CLONEABLE_AREA | (si->use_clone_bugfix ? B_READ_AREA|B_WRITE_AREA : B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA),
+        (void **)&(di->regs));
+     si->clone_bugfix_regs = (uint32 *) di->regs;
+
+    // if mapping registers to vmem failed then pass on error 
+    if (si->regs_area < 0) return si->regs_area;
+
+    // ===================================================================== 
+    // >>> MODIFICA: GESTIONE MULTI-CARD BIOS SICURA                        
+    // ===================================================================== 
+    // Eliminato completamente il vecchio blocco che:
+    // 1) Cambiava il PCI_rom_base appoggiandolo sul framebuffer (conflitto bus!)
+    // 2) Chiamava map_physical_memory sulla ROM fisica al volo.
+    // 3) Eseguiva il ciclo for 'MMS' che copiava il BIOS della prima scheda (G200)
+    // sulla seconda (G450), distruggendone l'inizializzazione nell'accelerante.
+    //
+    // Al suo posto, preleviamo il BIOS nativo della scheda specifica, isolato
+    // e salvato in di->rom_mirror dal kernel durante la fase di probe_devices. 
+
+    memcpy(si->rom_mirror, di->rom_mirror, 32768);
+
+    if (current_settings.dumprom) dumprom(si->rom_mirror, 32768, di->pcii);
+
+    // Rimossi anche set_pci(PCI_rom_base,4,0) e delete_area(rom_area) 
+    // poiché non abbiamo allocato aree d'appoggio temporanee in questa fase. 
+    // ===================================================================== 
+
+    // (pseudo)DMA does not exist on MIL1 
+    //fixme: checkout Mystique 170 and 220...
+    if (di->pcii.device_id != 0x0519)
+    {
+        // work out a name for the pseudo dma mapping
+        sprintf(buffer, DEVICE_FORMAT " pseudodma",
+            di->pcii.vendor_id, di->pcii.device_id,
+            di->pcii.bus, di->pcii.device, di->pcii.function);
+
+        // map the pseudo dma into vmem (write-only)
+        si->pseudo_dma_area = map_physical_memory(
+            buffer,
+            di->pcii.u.h0.base_registers[pseudo_dma],
+            di->pcii.u.h0.base_register_sizes[pseudo_dma],
+            B_ANY_KERNEL_ADDRESS,
+            //B_WRITE_AREA,
+            B_KERNEL_WRITE_AREA,
+            (&(si->pseudo_dma)));
+
+        // if there was an error, delete our other areas and pass on error
+        if (si->pseudo_dma_area < 0) {
+            delete_area(si->regs_area);
+            si->regs_area = -1;
+            return si->pseudo_dma_area;
+        }
+    }
+
+    // work out a name for the framebuffer mapping
+    sprintf(buffer, DEVICE_FORMAT " framebuffer",
+        di->pcii.vendor_id, di->pcii.device_id,
+        di->pcii.bus, di->pcii.device, di->pcii.function);
+
+    // map the framebuffer into vmem, using Write Combining
+    si->fb_area = map_physical_memory(
+        buffer,
+        di->pcii.u.h0.base_registers[frame_buffer],
+        di->pcii.u.h0.base_register_sizes[frame_buffer],
+        B_ANY_KERNEL_BLOCK_ADDRESS | B_WRITE_COMBINING_MEMORY,
+        //B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA,
+        B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA | B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA,
+        &(si->framebuffer));
+
+    //if failed with write combining try again without
+    if (si->fb_area < 0) {
+        si->fb_area = map_physical_memory(
+            buffer,
+            di->pcii.u.h0.base_registers[frame_buffer],
+            di->pcii.u.h0.base_register_sizes[frame_buffer],
+            B_ANY_KERNEL_BLOCK_ADDRESS,
+            //B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA,
+            B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA | B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA,
+            &(si->framebuffer));
+    }
+
+    // if there was an error, delete our other areas and pass on error
+    if (si->fb_area < 0)
+    {
+        // (pseudo)DMA does not exist on MIL1 
+        //fixme: checkout Mystique 170 and 220...
+        if (di->pcii.device_id != 0x0519)
+        {
+            delete_area(si->dma_buffer_area);
+            si->dma_buffer_area = -1;
+            delete_area(si->pseudo_dma_area);
+            si->pseudo_dma_area = -1;
+        }
+        delete_area(si->regs_area);
+        si->regs_area = -1;
+        return si->fb_area;
+    }
+    // remember the DMA address of the frame buffer for BDirectWindow?? purposes 
+    si->framebuffer_pci = (void *)(addr_t)di->pcii.u.h0.base_registers_pci[frame_buffer];
+
+    // remember settings for use here and in accelerant
+    si->settings = current_settings;
+    
+    dprintf("matrox: map_device - Iniezione del logo nel framebuffer...\n");
+    draw_matrox_logo(si);
+    snooze(2000000);
+
+    // in any case, return the result 
+    return si->fb_area;
+}*/
 
 static void unmap_device(device_info *di) {
 	shared_info *si = di->si;
@@ -752,6 +1046,15 @@ static status_t open_hook (const char* name, uint32 flags, void** cookie) {
 	char shared_name[B_OS_NAME_LENGTH];
 
 	dprintf("matrox: open_hook ENTER name=%s flags=0x%08x\n", name ? name : "(null)", flags);
+	
+	struct frame_buffer_boot_info *bi = (struct frame_buffer_boot_info *)get_boot_item(
+        FRAME_BUFFER_BOOT_INFO, NULL);
+	bool enable_logo = true;
+    // Se il bootloader non ha passato informazioni o la modalità non è a 32-bit (RGBA), usciamo
+    if (bi == NULL) {
+        dprintf("matrox: frame buffer boot info - Impossibile ricavare info boot FB o profondità colore non a 32-bit\n");
+        enable_logo = false;
+    }
 
 	/* find the device name in the list of devices */
 	char kname[B_OS_NAME_LENGTH];
@@ -903,6 +1206,16 @@ free_shared:
 
 done:
 	/* end of critical section */
+	if (enable_logo && result == B_OK && bi != NULL) {
+        dprintf("matrox: open_hook done - Avvio draw_matrox_logo_safe...\n");
+        
+        // Passiamo di (o pd) e il bi recuperato a inizio open_hook
+        draw_matrox_logo_safe(di, bi); 
+        
+        snooze(2000000);
+    }
+
+	
 	RELEASE_BEN(pd->kernel);
 
 	/* all done, return the status */
