@@ -754,6 +754,10 @@ status_t g450_general_powerup()
 		//MAVW(LOCK,0x01);
 		CR2W(DATACTL,0x00000000);
 	}
+	
+	/* provo ad abilitare tutto e impostare il panelmode a 24bit */
+	//DXIW(PWRCTRL, 0x3f);
+	//DXIW(PANELMODE, 0x18);
 
 	/* enable primary analog output */
 	gx50_general_output_select();
@@ -776,6 +780,7 @@ status_t gx50_general_output_select()
 		if (i2c_sec_tv_adapter() == B_OK)
 		{
 			LOG(4,("INIT: secondary TV-adapter detected, using primary connector\n"));
+			debug_printf("matrox_acc INIT: secondary TV-adapter detected, using primary connector\n");
 			DXIW(OUTPUTCONN,0x01); 
 			/* signal CRTC2 DPMS which connector to program */
 			si->crossed_conns = false;
@@ -783,15 +788,18 @@ status_t gx50_general_output_select()
 		else
 		{
 			LOG(4,("INIT: no secondary TV-adapter detected, using secondary connector\n"));
-			DXIW(OUTPUTCONN,0x04); 
+			debug_printf("matrox_acc INIT: no secondary TV-adapter detected, using secondary connector\n");
+			DXIW(OUTPUTCONN,0x04); //con 0x05 non va né uno né l'altro
 			/* signal CRTC2 DPMS which connector to program */
-			si->crossed_conns = true;
+			//si->crossed_conns = true;
+			si->crossed_conns = false;
 		}
 	}
 	else
 	{
 		LOG(4,("INIT: using primary connector\n"));
-		DXIW(OUTPUTCONN,0x01); 
+		debug_printf("matrox_acc INIT: using primary connector\n");
+		DXIW(OUTPUTCONN,0x01);
 		/* signal CRTC2 DPMS which connector to program */
 		si->crossed_conns = false;
 	}
