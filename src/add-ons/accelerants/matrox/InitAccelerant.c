@@ -77,7 +77,7 @@ static status_t init_common(int the_fd)
         B_READ_AREA | B_WRITE_AREA, si->fb_area);
     
     if (fb_user_area < 0) {
-    	debug_printf("matrox_acc: ERRORE critico clone_area framebuffer: %ld\n", fb_user_area);
+    	debug_printf("matrox_acc: ERRORE critico clone_area framebuffer: %d\n", fb_user_area);
         result = fb_user_area;
         if (regs_area >= 0) delete_area(regs_area);
         goto error2;
