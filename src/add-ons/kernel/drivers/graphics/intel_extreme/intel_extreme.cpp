@@ -987,6 +987,7 @@ intel_extreme_init(intel_info &info)
 	TRACE("%s: hw_cdclk: %" B_PRIu32 " kHz\n", __func__, info.shared_info->hw_cdclk);
 	
 	draw_intel_logo(info, bi);
+	snooze(2000000);
 
 	TRACE("%s: completed successfully!\n", __func__);
 	return B_OK;
