@@ -791,8 +791,7 @@ status_t gx50_general_output_select()
 			debug_printf("matrox_acc INIT: no secondary TV-adapter detected, using secondary connector\n");
 			DXIW(OUTPUTCONN,0x04); //con 0x05 non va né uno né l'altro
 			/* signal CRTC2 DPMS which connector to program */
-			//si->crossed_conns = true;
-			si->crossed_conns = false;
+			si->crossed_conns = true;
 		}
 	}
 	else
