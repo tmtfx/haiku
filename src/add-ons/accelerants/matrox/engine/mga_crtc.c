@@ -225,6 +225,11 @@ status_t gx00_crtc_set_timing(display_mode target)
 	VGAW(MISCW, temp);
 
 	LOG(2,(", MISC reg readback: $%02x\n", VGAR(MISCR)));
+	/* Debug: mirror timing registers to kernel log */
+	debug_printf("matrox_acc CRTC: HTOT=0x%04x HDISPEND=0x%04x HBLNKS=0x%04x HBLNKE=0x%04x HSYNCS=0x%04x HSYNCE=0x%04x\n",
+		htotal, hdisp_e, hblnk_s, hblnk_e, hsync_s, hsync_e);
+	debug_printf("matrox_acc CRTC: VTOT=0x%04x VDISPEND=0x%04x VBLNKS=0x%04x VBLNKE=0x%04x VSYNCS=0x%04x VSYNCE=0x%04x MISC=0x%02x\n",
+		vtotal, vdisp_e, vblnk_s, vblnk_e, vsync_s, vsync_e, VGAR(MISCR));
 
 	return B_OK;
 }

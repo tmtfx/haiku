@@ -205,8 +205,12 @@ status_t gx00_dac_set_pix_pll(display_mode target)
 	result = gx00_dac_pix_pll_find(target,&pix_setting,&m,&n,&p, 1);
 	if (result != B_OK)
 	{
+		debug_printf("matrox_acc DAC: gx00_dac_pix_pll_find failed for requested %0.3f MHz\n", req_pclk);
 		return result;
 	}
+	/* Debug: report found PLL settings before programming */
+	debug_printf("matrox_acc DAC: pix pll find: requested=%0.3f MHz -> calc=%0.3f MHz, m=0x%02x, n=0x%02x, p=0x%02x\n",
+			req_pclk, pix_setting, m, n, p);
 	
 	/*reprogram (disable,select,wait for stability,enable)*/
 	DXIW(PIXCLKCTRL,(DXIR(PIXCLKCTRL)&0x0F)|0x04);  /*disable the PIXPLL*/
@@ -453,6 +457,9 @@ static status_t milx_dac_pix_pll_find(
 	/* display the found pixelclock values */
 	LOG(2, ("DAC: TVP pix PLL check: requested %fMHz got %fMHz, mnp 0x%02x 0x%02x 0x%02x\n",
 		req_pclk, *calc_pclk, *m_result, *n_result, *p_result));
+	/* Debug: mirror to kernel log for easy capture */
+	debug_printf("matrox_acc DAC: TVP pix PLL: requested=%0.3f MHz got=%0.3f MHz, m=0x%02x, n=0x%02x, p=0x%02x\n",
+			req_pclk, *calc_pclk, *m_result, *n_result, *p_result);
 
 	return B_OK;
 }
@@ -613,6 +620,9 @@ static status_t g100_g400max_dac_pix_pll_find(
 	/* display the found pixelclock values */
 	LOG(2, ("DAC: pix PLL check: requested %fMHz got %fMHz, mnp 0x%02x 0x%02x 0x%02x\n",
 		req_pclk, *calc_pclk, *m_result, *n_result, *p_result));
+	/* Debug: mirror to kernel log for easy capture */
+	debug_printf("matrox_acc DAC: pix PLL: requested=%0.3f MHz got=%0.3f MHz, m=0x%02x, n=0x%02x, p=0x%02x\n",
+			req_pclk, *calc_pclk, *m_result, *n_result, *p_result);
 
 	return B_OK;
 }
@@ -748,6 +758,9 @@ static status_t g450_g550_dac_pix_pll_find
 	/* display the found pixelclock values */
 	LOG(2, ("DAC: pix PLL check: requested %fMHz got %fMHz, mnp 0x%02x 0x%02x 0x%02x\n",
 		req_pclk, *calc_pclk, *m_result, *n_result, *p_result));
+	/* Debug: mirror to kernel log for easy capture */
+	debug_printf("matrox_acc DAC: pix PLL: requested=%0.3f MHz got=%0.3f MHz, m=0x%02x, n=0x%02x, p=0x%02x\n",
+			req_pclk, *calc_pclk, *m_result, *n_result, *p_result);
 
 	return B_OK;
 }

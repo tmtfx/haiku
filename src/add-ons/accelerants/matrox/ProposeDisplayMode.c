@@ -235,7 +235,11 @@ status_t PROPOSE_DISPLAY_MODE(display_mode *target, const display_mode *low, con
 	/* calculate settings, but do not actually test anything (that costs too much time!) */
 	result = gx00_dac_pix_pll_find(*target,&pix_clock_found,&m,&n,&p,0);
 	/* update the target mode */
-	target->timing.pixel_clock = (pix_clock_found * 1000);	
+	target->timing.pixel_clock = (pix_clock_found * 1000);
+	/* Debug: report requested vs computed pixelclock and M/N/P candidates */
+	debug_printf("matrox_acc PROPOSE: requested_pixel_clock=%d kHz -> selected %0.3f MHz (pixel_clock=%d kHz), m=0x%02x, n=0x%02x, p=0x%02x, result=%d\n",
+			(int)(target_refresh * ((double)target->timing.h_total) * ((double)target->timing.v_total) / 1000.0),
+			pix_clock_found, (int)(pix_clock_found * 1000), m, n, p, result);	
 
 	/* note if we fell outside the limits */
 	if ((target->timing.pixel_clock < low->timing.pixel_clock) ||

@@ -66,6 +66,15 @@ status_t SET_DISPLAY_MODE(display_mode *mode_to_set)
 	/* See BOUNDS WARNING above... */
 	if (PROPOSE_DISPLAY_MODE(&target, &target, &target) == B_ERROR)	return B_ERROR;
 
+	/* Debug: print resolved mode/timings after propose */
+	debug_printf("matrox_acc SETMODE: proposed pixel_clock=%d kHz, h_display=%d,h_total=%d,h_sync_s=%d,h_sync_e=%d, v_display=%d,v_total=%d,v_sync_s=%d,v_sync_e=%d, flags=0x%08x\n",
+			(target.timing.pixel_clock),
+			target.timing.h_display, target.timing.h_total, target.timing.h_sync_start, target.timing.h_sync_end,
+			target.timing.v_display, target.timing.v_total, target.timing.v_sync_start, target.timing.v_sync_end,
+			target.flags);
+	debug_printf("matrox_acc SETMODE: proposed virtual %dx%d, color space=%d\n",
+			target.virtual_width, target.virtual_height, target.space);
+
 	/* overlay engine, cursor and MOVE_DISPLAY need to know the status even when
 	 * in singlehead mode */
 	si->switched_crtcs = false;
@@ -103,8 +112,13 @@ status_t SET_DISPLAY_MODE(display_mode *mode_to_set)
 
 		/* set the pixel clock PLL(s) */
 		LOG(8,("SETMODE: target clock %dkHz\n",target.timing.pixel_clock));
-		if (gx00_dac_set_pix_pll(target) == B_ERROR)
-			LOG(8,("SETMODE: error setting pixel clock (internal DAC)\n"));
+		{
+			status_t pll_res = gx00_dac_set_pix_pll(target);
+			debug_printf("matrox_acc SETMODE: gx00_dac_set_pix_pll returned %ld, PIXPLLSTAT=0x%02x, requested=%d kHz\n",
+				pll_res, (int)DXIR(PIXPLLSTAT), target.timing.pixel_clock);
+			if (pll_res == B_ERROR)
+				LOG(8,("SETMODE: error setting pixel clock (internal DAC)\n"));
+		}
 
 		/* we do not need to set the pixelclock here for a head that's in TVout mode */
 		if (!(target2.flags & TV_BITS))
