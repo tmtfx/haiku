@@ -33,6 +33,23 @@ SetCursorShape(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
 	return B_OK;
 }
 
+status_t
+SetCursorBitmap(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
+                color_space colorSpace, uint16 bytesPerRow, const uint8* bitmapData) {
+    SharedInfo& si = *gInfo.sharedInfo;
+    
+    if (width > 64 || height > 64 || hot_x >= width || hot_y >= height)
+        return B_ERROR;
+
+    si.cursorHotX = hot_x;
+    si.cursorHotY = hot_y;
+
+    if ( ! gInfo.SetCursorBitmap(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
+                         color_space colorSpace, uint16 bytesPerRow, const uint8* bitmapData))
+			return B_ERROR;
+	
+	return B_OK;
+}
 
 void
 MoveCursor(uint16 xPos, uint16 yPos)
