@@ -813,6 +813,9 @@ status_t gx50_general_output_select()
 /* connect CRTC(s) to the specified DAC(s) */
 status_t gx00_general_dac_select(int dac)
 {
+	/* Debug: log requested DAC selection and current routing registers */
+	debug_printf("matrox_acc DAC_SELECT: requested=%d before PIXCLKCTRL=0x%02x OUTPUTCONN=0x%02x MISCCTRL=0x%02x\n",
+			dac, (int)DXIR(PIXCLKCTRL), (int)DXIR(OUTPUTCONN), (int)DXIR(MISCCTRL));
 	/*MISCCTRL, clock src,...*/
 	switch(dac)
 	{
@@ -884,6 +887,9 @@ status_t gx00_general_dac_select(int dac)
 		default:
 			return B_ERROR;
 	}
+	/* Debug: log routing registers after selection */
+	debug_printf("matrox_acc DAC_SELECT: after PIXCLKCTRL=0x%02x OUTPUTCONN=0x%02x MISCCTRL=0x%02x PIXPLLSTAT=0x%02x\n",
+		(int)DXIR(PIXCLKCTRL), (int)DXIR(OUTPUTCONN), (int)DXIR(MISCCTRL), (int)DXIR(PIXPLLSTAT));
 	return B_OK;
 }
 

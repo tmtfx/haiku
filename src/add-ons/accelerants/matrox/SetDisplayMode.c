@@ -304,6 +304,23 @@ status_t SET_DISPLAY_MODE(display_mode *mode_to_set)
 				startadd_right = temp;
 		}
 
+		/* Debug: show connector/PLL routing before reprogramming PLLs */
+		debug_printf("matrox_acc SETMODE (DUALHEAD): before reprogram PIXCLKCTRL=0x%02x OUTPUTCONN=0x%02x PIXPLLSTAT=0x%02x\n",
+				(int)DXIR(PIXCLKCTRL), (int)DXIR(OUTPUTCONN), (int)DXIR(PIXPLLSTAT));
+
+		/* Reprogram pixel clocks after DAC/output selection to ensure PLLs feed the correct outputs */
+		{
+			status_t r1 = B_OK, r2 = B_OK;
+			/* reprogram PLL for CRTC1 */
+			r1 = gx00_dac_set_pix_pll(target);
+			debug_printf("matrox_acc SETMODE (DUALHEAD): reprogram CRTC1 PLL returned %ld PIXPLLSTAT=0x%02x\n", r1, (int)DXIR(PIXPLLSTAT));
+			/* reprogram PLL for CRTC2 if not TVout */
+			if (!(target2.flags & TV_BITS)) {
+				r2 = gx00_maven_set_vid_pll(target2);
+				debug_printf("matrox_acc SETMODE (DUALHEAD): reprogram CRTC2/MAVEN PLL returned %ld\n", r2);
+			}
+		}
+
 		/*Tell card what memory to display*/
 		switch (target.flags & DUALHEAD_BITS)
 		{
@@ -397,6 +414,19 @@ status_t SET_DISPLAY_MODE(display_mode *mode_to_set)
 			break;
 		default:
 			break;
+		}
+
+		/* Debug: show connector/PLL routing before reprogramming (singlehead) */
+		debug_printf("matrox_acc SETMODE (SINGLE): before reprogram PIXCLKCTRL=0x%02x OUTPUTCONN=0x%02x PIXPLLSTAT=0x%02x\n",
+			(int)DXIR(PIXCLKCTRL), (int)DXIR(OUTPUTCONN), (int)DXIR(PIXPLLSTAT));
+		/* Reprogram pixel clock after DAC selection to ensure PLL feeds correct output */
+		{
+			status_t r = B_OK;
+			if (si->ps.card_type >= G100)
+				r = gx00_dac_set_pix_pll(target);
+			else
+				r = mil2_dac_set_pix_pll((target.timing.pixel_clock)/1000.0, colour_depth1);
+			debug_printf("matrox_acc SETMODE (SINGLE): reprogram PLL returned %ld PIXPLLSTAT=0x%02x\n", r, (int)DXIR(PIXPLLSTAT));
 		}
 
 		/* set the timing */
