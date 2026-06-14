@@ -1,7 +1,8 @@
 /* Authors:
    Mark Watson 12/1999,
    Apsed,
-   Rudolf Cornelissen 10/2002-10/2009
+   Rudolf Cornelissen 10/2002-10/2009,
+   Fabio Tomat 2026
 */
 
 #define MODULE_BIT 0x00008000
@@ -760,10 +761,6 @@ status_t g450_general_powerup()
 		CR2W(DATACTL,0x00000000);
 	}
 	
-	/* provo ad abilitare tutto e impostare il panelmode a 24bit */
-	//DXIW(PWRCTRL, 0x3f);
-	//DXIW(PANELMODE, 0x18);
-
 	/* enable primary analog output */
 	gx50_general_output_select();
 
@@ -785,7 +782,6 @@ status_t gx50_general_output_select()
 		if (i2c_sec_tv_adapter() == B_OK)
 		{
 			LOG(4,("INIT: secondary TV-adapter detected, using primary connector\n"));
-			debug_printf("matrox_acc INIT: secondary TV-adapter detected, using primary connector\n");
 			DXIW(OUTPUTCONN,0x01); 
 			/* signal CRTC2 DPMS which connector to program */
 			si->crossed_conns = false;
@@ -793,8 +789,7 @@ status_t gx50_general_output_select()
 		else
 		{
 			LOG(4,("INIT: no secondary TV-adapter detected, using secondary connector\n"));
-			debug_printf("matrox_acc INIT: no secondary TV-adapter detected, using secondary connector\n");
-			DXIW(OUTPUTCONN,0x04); //con 0x05 non va né uno né l'altro
+			DXIW(OUTPUTCONN,0x04);
 			/* signal CRTC2 DPMS which connector to program */
 			si->crossed_conns = true;
 		}
@@ -802,7 +797,6 @@ status_t gx50_general_output_select()
 	else
 	{
 		LOG(4,("INIT: using primary connector\n"));
-		debug_printf("matrox_acc INIT: using primary connector\n");
 		DXIW(OUTPUTCONN,0x01);
 		/* signal CRTC2 DPMS which connector to program */
 		si->crossed_conns = false;
@@ -813,9 +807,6 @@ status_t gx50_general_output_select()
 /* connect CRTC(s) to the specified DAC(s) */
 status_t gx00_general_dac_select(int dac)
 {
-	/* Debug: log requested DAC selection and current routing registers */
-	debug_printf("matrox_acc DAC_SELECT: requested=%d before PIXCLKCTRL=0x%02x OUTPUTCONN=0x%02x MISCCTRL=0x%02x\n",
-			dac, (int)DXIR(PIXCLKCTRL), (int)DXIR(OUTPUTCONN), (int)DXIR(MISCCTRL));
 	/*MISCCTRL, clock src,...*/
 	switch(dac)
 	{
@@ -859,7 +850,14 @@ status_t gx00_general_dac_select(int dac)
 			//otherwise keep it disabled.
 			CR2W(CTL,(CR2R(CTL)&0x2de00779)|0x6|(0x0<<20));
 			/* connect DAC1 to CON1, CRTC2/'DAC2' to CON2 (monitor mode) */
-			DXIW(OUTPUTCONN,0x09); 
+			if (CFGR(DEVID) == 0x2527102b) { // G550
+				/* on a G550 keep CRTC1 anchored to CON2 */
+				DXIW(OUTPUTCONN, 0x04);  
+				si->crossed_conns = true; /* Inform DPMS about this */
+			} else {
+				DXIW(OUTPUTCONN, 0x09);  // Not tested
+				si->crossed_conns = false;
+			}
 			/* Select 1.5 Volt MAVEN DAC ref. for monitor mode */
 			DXIW(GENIOCTRL, DXIR(GENIOCTRL) & ~0x40);
 			DXIW(GENIODATA, 0x00);
@@ -877,7 +875,13 @@ status_t gx00_general_dac_select(int dac)
 			 * disable TVout mode (b12). */
 			CR2W(CTL,(CR2R(CTL)&0x2de00779)|0x6|(0x1<<20));
 			/* connect DAC1 to CON2 (monitor mode), CRTC2/'DAC2' to CON1 */
-			DXIW(OUTPUTCONN,0x05); 
+			if (CFGR(DEVID) == 0x2527102b) { // G550
+				DXIW(OUTPUTCONN, 0x04);  /* Forza l'output a 0x04 anziché 0x05 per evitare lo schermo nero */
+				si->crossed_conns = true;
+			} else {
+				DXIW(OUTPUTCONN, 0x05);  
+				si->crossed_conns = true;
+			}
 			/* Select 1.5 Volt MAVEN DAC ref. for monitor mode */
 			DXIW(GENIOCTRL, DXIR(GENIOCTRL) & ~0x40);
 			DXIW(GENIODATA, 0x00);
@@ -887,9 +891,6 @@ status_t gx00_general_dac_select(int dac)
 		default:
 			return B_ERROR;
 	}
-	/* Debug: log routing registers after selection */
-	debug_printf("matrox_acc DAC_SELECT: after PIXCLKCTRL=0x%02x OUTPUTCONN=0x%02x MISCCTRL=0x%02x PIXPLLSTAT=0x%02x\n",
-		(int)DXIR(PIXCLKCTRL), (int)DXIR(OUTPUTCONN), (int)DXIR(MISCCTRL), (int)DXIR(PIXPLLSTAT));
 	return B_OK;
 }
 
