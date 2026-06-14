@@ -380,13 +380,6 @@ status_t SET_DISPLAY_MODE(display_mode *mode_to_set)
 		case G550: 
 			gx00_general_dac_select(DS_CRTC1CON1_CRTC2CON2);
 			gx50_general_output_select();
-			/* Force accelerant to primary connector when BIOS/PINS reports a primary DVI
-			 * to ensure the driver/accelerant framebuffer is mapped to the digital output. */
-			if (si->ps.primary_dvi) {
-				DXIW(OUTPUTCONN, 0x01); /* ensure primary connector selected */
-				gx00_general_dac_select(DS_CRTC1CON1_CRTC2CON2); /* re-assert mapping */
-				si->switched_crtcs = false;
-			}
 			break;
 		default:
 			break;
