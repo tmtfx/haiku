@@ -108,8 +108,7 @@ static status_t matrox_set_cursor_bitmap_gseries(uint16 width, uint16 height, ui
 
 	const uint8* src = (const uint8*)bitmapData;
 
-	// 3. Conversione dei pixel da B_RGBA32 al formato a 2-bit della Matrox
-	// 3. COLOR CONVERSION RGBA32 TO 3 COLORS + TRANSPARENCY
+	// COLOR CONVERSION RGBA32 TO 3 COLORS + TRANSPARENCY
     for (uint32 y = 0; y < height && y < 64; y++) {
 
         vuint32* word32_row = (vuint32*)(&dest[y * 16]);
@@ -137,7 +136,6 @@ static status_t matrox_set_cursor_bitmap_gseries(uint16 width, uint16 height, ui
 
             uint32 bloc32_x = x / 32;       
 
-            // --- LA CORREZIONE GEOMETRICA PER LE MATROX G-SERIES ---
             // Reassembling... correct orientation:
             // geometric byte-swap.
             uint32 bloc32_pos = bloc32_x ^ 1; 
@@ -347,10 +345,9 @@ status_t SET_CURSOR_BITMAP(uint16 width, uint16 height, uint16 hotX, uint16 hotY
 	si->cursor.width = width;
 	si->cursor.height = height;
 
-	// 2. Bivio generazionale
 	if (si->ps.card_type < G100) {
 		// ==============================================
-		// STRATEGIA ERA PRE-G (MIL1, MYST, MIL2) - 1 bit
+		// PRE-G (MIL1, MYST, MIL2) - 1 bit
 		// ==============================================
 		
 		// NOTE: first series (pre-G100) hardware cursor is inside DAC
