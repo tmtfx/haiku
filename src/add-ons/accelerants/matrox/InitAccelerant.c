@@ -5,6 +5,7 @@
 	Other authors:
 	Mark Watson,
 	Rudolf Cornelissen 10/2002-1/2006.
+	Fabio Tomat 2026
 */
 
 #define MODULE_BIT 0x00800000
