@@ -402,6 +402,12 @@ status_t SET_DISPLAY_MODE(display_mode *mode_to_set)
 	}
 
 	/* update driver's mode store */
+
+	/* Update frame buffer pointer so GET_FRAME_BUFFER_CONFIG reflects the visible start */
+	/* startadd contains the byte offset from si->framebuffer to the displayed area */
+	si->fbc.frame_buffer = (void *)((uint8*)si->framebuffer + startadd);
+	si->fbc.frame_buffer_dma = (void *)((uint8*)si->framebuffer_pci + startadd);
+
 	si->dm = target;
 
 	/* set up acceleration for this mode */
@@ -538,6 +544,10 @@ status_t MOVE_DISPLAY(uint16 h_display_start, uint16 v_display_start) {
 			g400_crtc2_set_display_start(startadd,colour_depth);
 			break;
 	}
+
+	/* update frame buffer pointer so GET_FRAME_BUFFER_CONFIG reflects the visible start */
+	si->fbc.frame_buffer = (void *)((uint8*)si->framebuffer + startadd);
+	si->fbc.frame_buffer_dma = (void *)((uint8*)si->framebuffer_pci + startadd);
 
 	interrupt_enable(true);
 	return B_OK;
