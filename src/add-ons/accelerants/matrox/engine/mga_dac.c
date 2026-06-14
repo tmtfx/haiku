@@ -212,12 +212,25 @@ status_t gx00_dac_set_pix_pll(display_mode target)
 	debug_printf("matrox_acc DAC: pix pll find: requested=%0.3f MHz -> calc=%0.3f MHz, m=0x%02x, n=0x%02x, p=0x%02x\n",
 			req_pclk, pix_setting, m, n, p);
 	
-	/*reprogram (disable,select,wait for stability,enable)*/
+	/*reprogram (disable,select,wait for stability,enable)
+	 * Write the PLL parameters to all PIXPLL A/B/C to avoid mismatches
+	 * when mapping between CRTC and DAC changes. */
 	DXIW(PIXCLKCTRL,(DXIR(PIXCLKCTRL)&0x0F)|0x04);  /*disable the PIXPLL*/
 	DXIW(PIXCLKCTRL,(DXIR(PIXCLKCTRL)&0x0C)|0x01);  /*select the PIXPLL*/
+	/* Program PIXPLLA */
+	VGAW(MISCW,((VGAR(MISCR)&0xF3)|0x0));           /*select PIXPLLA (assumed)*/
+	DXIW(PIXPLLAM,(m));
+	DXIW(PIXPLLAN,(n));
+	DXIW(PIXPLLAP,(p));
+	/* Program PIXPLLB */
+	VGAW(MISCW,((VGAR(MISCR)&0xF3)|0x4));           /*select PIXPLLB (assumed)*/
+	DXIW(PIXPLLBM,(m));
+	DXIW(PIXPLLBN,(n));
+	DXIW(PIXPLLBP,(p));
+	/* Program PIXPLLC */
 	VGAW(MISCW,((VGAR(MISCR)&0xF3)|0x8));           /*select PIXPLLC*/
-	DXIW(PIXPLLCM,(m));								/*set m value*/
-	DXIW(PIXPLLCN,(n));								/*set n value*/
+	DXIW(PIXPLLCM,(m));						/*set m value*/
+	DXIW(PIXPLLCN,(n));						/*set n value*/
 	DXIW(PIXPLLCP,(p));                             /*set p value*/
 
 	/* Wait for the PIXPLL frequency to lock until timeout occurs */
@@ -231,7 +244,12 @@ status_t gx00_dac_set_pix_pll(display_mode target)
 		LOG(2,("DAC: PIX PLL frequency not locked!\n"));
 	else
 		LOG(2,("DAC: PIX PLL frequency locked\n"));
+	/* Re-enable PIXPLL, clear disable bit */
 	DXIW(PIXCLKCTRL,DXIR(PIXCLKCTRL)&0x0B);         /*enable the PIXPLL*/
+
+	/* Debug: report which PLL regs programmed */
+	debug_printf("matrox_acc DAC: programmed PIXPLLs A/B/C with m=0x%02x n=0x%02x p=0x%02x PIXCLKCTRL=0x%02x OUTPUTCONN=0x%02x PIXPLLSTAT=0x%02x\n",
+		m, n, p, (int)DXIR(PIXCLKCTRL), (int)DXIR(OUTPUTCONN), (int)DXIR(PIXPLLSTAT));
 
 	return B_OK;
 }
