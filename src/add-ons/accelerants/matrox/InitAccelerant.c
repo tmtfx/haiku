@@ -68,23 +68,20 @@ static status_t init_common(int the_fd)
 	//LOG(4,("DMA_virtual:%x\tDMA_physical:%x\tDMA_area:%x\n",si->dma_buffer,si->dma_buffer_pci,si->dma_buffer_area));
 	
 	/* ===================================================================== */
-    /* >>> NUOVO: CLONE DEL FRAMEBUFFER IN USERSPACE                         */
+    //                         ADD FRAMEBUFFER CLONE
     /* ===================================================================== */
-    /* Se non cloniamo l'area del framebuffer in userland, si->framebuffer    */
-    /* rimane un puntatore kernel inaccessibile all'accelerante e all'app_server! */
+    
     void *local_fb_ptr;
     area_id fb_user_area = clone_area(DRIVER_PREFIX " framebuffer", (void **)&local_fb_ptr, B_ANY_ADDRESS,
         B_READ_AREA | B_WRITE_AREA, si->fb_area);
     
     if (fb_user_area < 0) {
-    	debug_printf("matrox_acc: ERRORE critico clone_area framebuffer: %d\n", fb_user_area);
+    	debug_printf("matrox_acc: ERROR clone_area framebuffer: %d\n", fb_user_area);
         result = fb_user_area;
         if (regs_area >= 0) delete_area(regs_area);
         goto error2;
     }
     
-    /* Aggiorniamo il puntatore della shared_info in modo che sia valido 
-     * per l'app_server e per l'accelerante in questo spazio di indirizzamento virtuale */
     si->framebuffer = local_fb_ptr;
 
 	/* all done */
@@ -125,7 +122,6 @@ report success or failure.
 */
 status_t INIT_ACCELERANT(int the_fd)
 {
-	debug_printf("matrox_acc: INIT_ACCELERANT partito con fd=%d\n", fd);
 	status_t result;
 	int pointer_reservation; //mem reserved for pointer
 	int cnt; 				 //used for iteration through the overlay buffers
@@ -148,12 +144,6 @@ status_t INIT_ACCELERANT(int the_fd)
 		goto error0;
 	// LOG now available: !NULL si
 	
-	debug_printf("matrox_acc: ID RICEVUTI -> Vendor=0x%04x, Device=0x%04x, Bus=%d, Dev=%d, Fun=%d\n",
-				si->vendor_id, si->device_id, si->bus, si->device, si->function);
-
-	debug_printf("matrox_acc: AREALIST -> regs_area=%d, fb_area=%d, framebuffer_ptr=%p\n", 
-				si->regs_area, si->fb_area, si->framebuffer);
-
 	/* ensure that INIT_ACCELERANT is executed just once (copies should be clones) */
 	if (si->accelerant_in_use)
 	{
@@ -161,20 +151,8 @@ status_t INIT_ACCELERANT(int the_fd)
 		goto error1;
 	}
 
-	/* try to preserve any connector mapping the framebuffer/BIOS left in the card's registers
-	 * read OUTPUTCONN register and set crossed_conns accordingly to avoid switching
-	 * outputs when the accelerant powers up the card. */
-	
 	/* assume G450/G550 signals are connected straight through (before powerup) */
 	si->crossed_conns = false;
-	/*
-	if (si->ps.card_type >= G450) {
-        uint32 out_conn = DXIR(OUTPUTCONN);
-        // common values: 0x04/0x05 means secondary connector, treat them as crossed
-        if (out_conn == 0x04 || out_conn == 0x05) {
-            si->crossed_conns = true;
-        }
-    }*/
 
 	/* call the device specific init code */
 	result = gx00_general_powerup();
