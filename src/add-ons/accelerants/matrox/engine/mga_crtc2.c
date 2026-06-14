@@ -57,7 +57,7 @@ status_t g400_crtc2_set_timing(display_mode target)
 		/* On <= G400MAX dualhead cards we need to send a copy to the MAVEN;
 		 * unless TVout is active */
 		if ((si->ps.secondary_head) && (!(target.flags & TV_BITS)))
-													gx00_maven_set_timing(target);
+			gx00_maven_set_timing(target);
 	}
 	else
 	{
