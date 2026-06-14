@@ -1,6 +1,8 @@
 /*
  * Copyright 2026, Fabio Tomat <f.t.public@gmail.com>
  * All rights reserved. Distributed under the terms of the MIT license.
+ * 
+ * Image produced by Nano Banana 2
  */
 #ifndef LOGO_H
 #define LOGO_H
