@@ -97,10 +97,11 @@ private:
 			BMenuField*		fTVStandardField;
 
 			BSlider*		fBrightnessSlider;
+			BCheckBox* 	fHardwareCursorCheckbox;
 
-			BButton*		fDefaultsButton;
-			BButton*		fApplyButton;
-			BButton*		fRevertButton;
+			BButton* 	fDefaultsButton;
+			BButton* 	fApplyButton;
+			BButton* 	fRevertButton;
 
 			ScreenMode		fScreenMode;
 			ScreenMode		fUndoScreenMode;

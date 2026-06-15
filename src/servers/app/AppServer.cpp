@@ -142,6 +142,22 @@ AppServer::MessageReceived(BMessage* message)
 			break;
 		}
 
+		case 'hsbm':
+		{
+			bool has = false;
+			BAutolock locker(gScreenManager);
+			if (gScreenManager && gScreenManager->CountScreens() > 0) {
+				Screen* s = gScreenManager->ScreenAt(0);
+				if (s && s->HWInterface())
+					has = s->HWInterface()->HasSetCursorBitmap();
+			}
+
+			BMessage reply;
+			reply.AddBool("has_set_cursor_bitmap", has);
+			message->SendReply(&reply);
+			break;
+		}
+
 		default:
 			// We don't allow application scripting
 			STRACE(("AppServer received unexpected code %" B_PRId32 "\n",

@@ -156,7 +156,9 @@ AccelerantHWInterface::AccelerantHWInterface()
 	fRectParams(new (nothrow) fill_rect_params[kDefaultParamsCount]),
 	fRectParamsCount(kDefaultParamsCount),
 	fBlitParams(new (nothrow) blit_params[kDefaultParamsCount]),
-	fBlitParamsCount(kDefaultParamsCount)
+	fBlitParamsCount(kDefaultParamsCount),
+
+	fUserEnableHardwareCursor(true)
 {
 	fDisplayMode.virtual_width = 0;
 	fDisplayMode.virtual_height = 0;
@@ -175,6 +177,13 @@ AccelerantHWInterface::~AccelerantHWInterface()
 	delete[] fBlitParams;
 
 	delete[] fModeList;
+}
+
+
+bool
+AccelerantHWInterface::HasSetCursorBitmap() const
+{
+	return fAccSetCursorBitmap != NULL;
 }
 
 
@@ -203,6 +212,23 @@ AccelerantHWInterface::Initialize()
 
 			close(fCardFD);
 			// _OpenAccelerant() failed, try to open next graphics card
+		}
+
+		// Read user preference for hardware cursor from user settings Screen_data
+		{
+			BPath path;
+			if (find_directory(B_USER_SETTINGS_DIRECTORY, &path) == B_OK) {
+				path.Append("Screen_data");
+				BFile file(path.Path(), B_READ_ONLY);
+				if (file.InitCheck() == B_OK) {
+					// skip offset
+					BPoint offset;
+					file.Read(&offset, sizeof(BPoint));
+					bool hw = true;
+					if (file.Read(&hw, sizeof(bool)) == (ssize_t)sizeof(bool))
+						fUserEnableHardwareCursor = hw;
+				}
+			}
 		}
 
 		return fCardFD >= 0 ? B_OK : fCardFD;
@@ -1241,6 +1267,24 @@ AccelerantHWInterface::HideOverlay(Overlay* overlay)
 void
 AccelerantHWInterface::_UpdateHardwareCursor(bool wasHardwareCursorEnabled)
 {
+	// Read user preference dynamically from settings file so changes take effect
+	bool userEnableHardwareCursor = true;
+	{
+		BPath path;
+		if (find_directory(B_USER_SETTINGS_DIRECTORY, &path) == B_OK) {
+			path.Append("Screen_data");
+			BFile file(path.Path(), B_READ_ONLY);
+			if (file.InitCheck() == B_OK) {
+				// skip offset if present
+				BPoint offset;
+				file.Read(&offset, sizeof(BPoint));
+				bool hw = true;
+				if (file.Read(&hw, sizeof(bool)) == (ssize_t)sizeof(bool))
+					userEnableHardwareCursor = hw;
+			}
+		}
+	}
+
 	ServerCursorReference cursor = CursorAndDragBitmap();
 	if (!cursor.IsSet() || !LockExclusiveAccess())
 		return;
@@ -1250,7 +1294,7 @@ AccelerantHWInterface::_UpdateHardwareCursor(bool wasHardwareCursorEnabled)
 	// Drag bitmaps need full-color alpha compositing, while some hardware
 	// cursor backends only expose limited palette/shape formats.
 	const bool canUseBitmapCursorForDrag = fDragBitmap == NULL || fCursorBits >= 32;
-	if (canUseBitmapCursorForDrag && fAccSetCursorBitmap != NULL) {
+	if (canUseBitmapCursorForDrag && fAccSetCursorBitmap != NULL && userEnableHardwareCursor) {
 		uint16 xHotSpot = (uint16)cursor->GetHotSpot().x;
 		uint16 yHotSpot = (uint16)cursor->GetHotSpot().y;
 		uint16 width = (uint16)cursor->Bounds().IntegerWidth() + 1;
@@ -1366,8 +1410,29 @@ AccelerantHWInterface::SetDragBitmap(const ServerBitmap* bitmap,
 {
 	bool wasHardwareCursorEnabled = fHardwareCursorEnabled;
 
-	const bool canUseBitmapCursorForDrag = bitmap == NULL
+	// Read user preference dynamically
+	bool userEnableHardwareCursor = true;
+	{
+		BPath path;
+		if (find_directory(B_USER_SETTINGS_DIRECTORY, &path) == B_OK) {
+			path.Append("Screen_data");
+			BFile file(path.Path(), B_READ_ONLY);
+			if (file.InitCheck() == B_OK) {
+				// skip offset if present
+				BPoint offset;
+				file.Read(&offset, sizeof(BPoint));
+				bool hw = true;
+				if (file.Read(&hw, sizeof(bool)) == (ssize_t)sizeof(bool))
+					userEnableHardwareCursor = hw;
+			}
+		}
+	}
+
+	bool canUseBitmapCursorForDrag = bitmap == NULL
 		|| (fAccSetCursorBitmap != NULL && fCursorBits >= 32);
+	if (!userEnableHardwareCursor)
+		canUseBitmapCursorForDrag = false;
+
 	if (bitmap != NULL && wasHardwareCursorEnabled && !canUseBitmapCursorForDrag
 		&& LockExclusiveAccess()) {
 		if (fAccShowCursor != NULL)

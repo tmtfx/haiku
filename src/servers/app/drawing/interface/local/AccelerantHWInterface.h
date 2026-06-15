@@ -27,6 +27,7 @@ public:
 								AccelerantHWInterface();
 	virtual						~AccelerantHWInterface();
 
+	virtual bool HasSetCursorBitmap() const;
 	virtual	status_t			Initialize();
 	virtual	status_t			Shutdown();
 
@@ -183,6 +184,9 @@ private:
 	mutable	uint32				fRectParamsCount;
 	mutable	blit_params*		fBlitParams;
 	mutable	uint32				fBlitParamsCount;
+
+			// user preference: if false, avoid calling accelerant bitmap cursor hook
+			bool			fUserEnableHardwareCursor;
 };
 
 #endif // ACCELERANT_HW_INTERFACE_H
