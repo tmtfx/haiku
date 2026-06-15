@@ -67,23 +67,6 @@ static status_t init_common(int the_fd)
 
 	/*FIXME - print dma addresses*/
 	//LOG(4,("DMA_virtual:%x\tDMA_physical:%x\tDMA_area:%x\n",si->dma_buffer,si->dma_buffer_pci,si->dma_buffer_area));
-	
-	/* ===================================================================== */
-    //                         ADD FRAMEBUFFER CLONE
-    /* ===================================================================== */
-    
-    void *local_fb_ptr;
-    area_id fb_user_area = clone_area(DRIVER_PREFIX " framebuffer", (void **)&local_fb_ptr, B_ANY_ADDRESS,
-        B_READ_AREA | B_WRITE_AREA, si->fb_area);
-    
-    if (fb_user_area < 0) {
-    	debug_printf("matrox_acc: ERROR clone_area framebuffer: %d\n", fb_user_area);
-        result = fb_user_area;
-        if (regs_area >= 0) delete_area(regs_area);
-        goto error2;
-    }
-    
-    si->framebuffer = local_fb_ptr;
 
 	/* all done */
 	
