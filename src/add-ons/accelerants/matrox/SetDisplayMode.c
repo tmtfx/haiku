@@ -401,13 +401,6 @@ status_t SET_DISPLAY_MODE(display_mode *mode_to_set)
 		}
 	}
 
-	/* update driver's mode store */
-
-	/* Update frame buffer pointer so GET_FRAME_BUFFER_CONFIG reflects the visible start */
-	/* startadd contains the byte offset from si->framebuffer to the displayed area */
-	si->fbc.frame_buffer = (void *)((uint8*)si->framebuffer + startadd);
-	si->fbc.frame_buffer_dma = (void *)((uint8*)si->framebuffer_pci + startadd);
-
 	si->dm = target;
 
 	/* set up acceleration for this mode */
@@ -497,7 +490,7 @@ status_t MOVE_DISPLAY(uint16 h_display_start, uint16 v_display_start) {
 	{
 	case DUALHEAD_ON:
 	case DUALHEAD_SWITCH:
-		if (((si->dm.timing.h_display * 2) + h_display_start) > si->dm.virtual_width)
+		if (((si->dm.timing.h_display * 2) + h_display_start) > si->dm.virtual_width) 
 			return B_ERROR;
 		break;
 	default:
@@ -517,7 +510,7 @@ status_t MOVE_DISPLAY(uint16 h_display_start, uint16 v_display_start) {
 	startadd = v_display_start * si->fbc.bytes_per_row;
 	startadd += h_display_start * (colour_depth >> 3);
 	startadd += (uint8*)si->fbc.frame_buffer - (uint8*)si->framebuffer;
-	startadd_right = startadd + si->dm.timing.h_display * (colour_depth >> 3);
+	startadd_right = startadd + (si->dm.timing.h_display * (colour_depth >> 3));
 
 	/* account for switched CRTC's */
 	if (si->switched_crtcs)
@@ -544,10 +537,6 @@ status_t MOVE_DISPLAY(uint16 h_display_start, uint16 v_display_start) {
 			g400_crtc2_set_display_start(startadd,colour_depth);
 			break;
 	}
-
-	/* update frame buffer pointer so GET_FRAME_BUFFER_CONFIG reflects the visible start */
-	si->fbc.frame_buffer = (void *)((uint8*)si->framebuffer + startadd);
-	si->fbc.frame_buffer_dma = (void *)((uint8*)si->framebuffer_pci + startadd);
 
 	interrupt_enable(true);
 	return B_OK;
