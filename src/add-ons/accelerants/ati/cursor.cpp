@@ -45,8 +45,7 @@ SetCursorBitmap(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
     si.cursorHotX = hot_x;
     si.cursorHotY = hot_y;
 
-    if ( ! gInfo.SetCursorBitmap(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
-                         color_space colorSpace, uint16 bytesPerRow, const uint8* bitmapData))
+    if ( ! gInfo.SetCursorBitmap(width, height, hot_x, hot_y, colorSpace, bytesPerRow, bitmapData))
 			return B_ERROR;
 	
 	return B_OK;
@@ -100,8 +99,5 @@ MoveCursor(uint16 xPos, uint16 yPos)
 uint32
 GetCursorBits(void)
 {
-	if (gInfo == NULL || gInfo->si == NULL)
-		return 0;
-
 	return 1; // 1 bit + transparency/inversion
 }

@@ -67,10 +67,10 @@ Mach64_LoadCursorImage(int width, int height, uint8* andMask, uint8* xorMask)
 	// buffer.  Note that a particular bit in these masks will have the
 	// following effect upon the corresponding cursor pixel:
 	//	AND  XOR	Result
-	//	 0    0		 White pixel
-	//	 0    1		 Black pixel
-	//	 1    0		 Screen color (for transparency)
-	//	 1    1		 Reverse screen color to black or white
+	//	 0	0		 White pixel
+	//	 0	1		 Black pixel
+	//	 1	0		 Screen color (for transparency)
+	//	 1	1		 Reverse screen color to black or white
 
 	for (int row = 0; row < height; row++) {
 		for (int colByte = 0; colByte < width / 8; colByte++) {
@@ -103,62 +103,61 @@ Mach64_LoadCursorImage(int width, int height, uint8* andMask, uint8* xorMask)
 
 status_t
 Mach64_SetCursorBitmap(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
-                       color_space colorSpace, uint16 bytesPerRow, const uint8* bitmapData)
+					   color_space colorSpace, uint16 bytesPerRow, const uint8* bitmapData)
 {
-    uint16* fbCursor = (uint16*)((addr_t)si.videoMemAddr + si.cursorOffset);
-    if (fbCursor == NULL)
-        return B_NO_INIT;
+	SharedInfo& si = *gInfo.sharedInfo;
+	uint16* fbCursor = (uint16*)((addr_t)si.videoMemAddr + si.cursorOffset);
+	if (fbCursor == NULL)
+		return B_NO_INIT;
 
-    // 1. INIZIALIZZAZIONE: 64 righe, ognuna da 8 Word (16 byte).
-    // Inizializziamo a Trasparente. Bit hardware: AND=1, XOR=0 -> binario 10 (0xA in esadecimale)
-    // 0xAAAA significa che tutti gli 8 pixel della Word sono impostati su 10 (trasparente).
-    for (int i = 0; i < 64 * 8; i++) {
-        fbCursor[i] = 0xAAAA;
-    }
+	// INITIALIZATION: 64 rows, every row are 8 Words (16 bytes).
+	// Start Transparent. Bit hardware: AND=1, XOR=0 -> binary 10 (0xA hex)
+	for (int i = 0; i < 64 * 8; i++) {
+		fbCursor[i] = 0xAAAA;
+	}
 
-    // 2. COPIAMO I PIXEL CONVERTENDO NELLA STRUTTURA A 2-BIT INTERALLACCIATI
-    if (colorSpace == B_RGBA32 || colorSpace == B_RGB32) {
-        for (int y = 0; y < height && y < 64; y++) {
-            const uint8* srcRow = bitmapData + y * bytesPerRow;
-            uint16* rowPtr = fbCursor + (y * 8); // 8 word per riga
+	// COPY THE PIXELS CONVERTING INTO AN INTERLACED 2-BITS STRUCTURE
+	if (colorSpace == B_RGBA32 || colorSpace == B_RGB32) {
+		for (int y = 0; y < height && y < 64; y++) {
+			const uint8* srcRow = bitmapData + y * bytesPerRow;
+			uint16* rowPtr = fbCursor + (y * 8); // 8 words per row
 
-            for (int x = 0; x < width && x < 64; x++) {
-                const uint8* pixel = srcRow + x * 4;
-                
-                uint8 b = pixel[0];
-                uint8 g = pixel[1];
-                uint8 r = pixel[2];
-                uint8 a = (colorSpace == B_RGBA32) ? pixel[3] : 0xFF;
+			for (int x = 0; x < width && x < 64; x++) {
+				const uint8* pixel = srcRow + x * 4;
+				
+				uint8 b = pixel[0];
+				uint8 g = pixel[1];
+				uint8 r = pixel[2];
+				uint8 a = (colorSpace == B_RGBA32) ? pixel[3] : 0xFF;
 
-                if (a < 128)
-                    continue; // Rimane trasparente (0x10) come inizializzato
+				if (a < 128)
+					continue; // keep transparent (0x10) as initialized
 
-                // Troviamo quale Word delle 8 contiene il nostro pixel x
-                int wordIdx = x / 8;
-                // Posizione all'interno della Word (da sinistra a destra: il bit 15 è il primo pixel)
-                int bitPos = 14 - ((x % 8) * 2);
+				// Find which word (of those 8) contains the pixel "x"
+				int wordIdx = x / 8;
+				int bitPos = 14 - ((x % 8) * 2);
 
-                // Puliamo i 2 bit correnti (impostandoli a 00 temporaneamente)
-                rowPtr[wordIdx] &= ~(0x3 << bitPos);
+				// Clear actual 2 bits (temporarily set them to 00)
+				rowPtr[wordIdx] &= ~(0x3 << bitPos);
 
-                // Calcoliamo la luminosità
-                uint32 luma = (r * 77 + g * 150 + b * 29) >> 8;
-                if (luma > 128) {
-                    // Bianco -> AND=0, XOR=0 -> 00b
-                    // Non serve fare or, abbiamo già azzerato i bit
-                } else {
-                    // Nero -> AND=0, XOR=1 -> 01b
-                    rowPtr[wordIdx] |= (0x1 << bitPos);
-                }
-            }
-        }
-    } else {
-        return B_ERROR;
-    }
+				// Luma
+				uint32 luma = (r * 77 + g * 150 + b * 29) >> 8;
+				if (luma > 128) {
+					// white -> AND=0, XOR=0 -> 00b
+					// No need to "or", already zeroed the bits
+				} else {
+					// black -> AND=0, XOR=1 -> 01b
+					rowPtr[wordIdx] |= (0x1 << bitPos);
+				}
+			}
+		}
+	} else {
+		return B_ERROR;
+	}
 
-    // 3. AGGIORNAMENTO REGISTRI COLORE CURSORE (Mach64)
-    OUTREG(CUR_CLR0, 0xFFFFFF); // Background Bianco
-    OUTREG(CUR_CLR1, 0x000000); // Foreground Nero
+	// UPDATE CURSOR COLOR REGISTERS(Mach64)
+	OUTREG(CUR_CLR0, 0xFFFFFF); // Background White
+	OUTREG(CUR_CLR1, 0x000000); // Foreground Black
 
-    return B_OK;
+	return B_OK;
 }
