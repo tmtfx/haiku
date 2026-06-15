@@ -16,6 +16,7 @@
 #include <string.h>
 #include <graphic_driver.h>
 #include <boot_item.h>
+#include <frame_buffer_console.h>
 
 #include "DriverInterface.h"
 #include "ati_logo.h"
