@@ -103,6 +103,7 @@ status_t
 Rage128_SetCursorBitmap(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
 						 color_space colorSpace, uint16 bytesPerRow, const uint8* bitmapData)
 {
+	debug_printf("ATI_acc: rage128_cursor, setting bitmap\n");
 	SharedInfo& si = *gInfo.sharedInfo;
 	uint8* fbCursor = (uint8*)((addr_t)si.videoMemAddr + si.cursorOffset);
 	if (fbCursor == NULL)
