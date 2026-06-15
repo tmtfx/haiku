@@ -202,8 +202,8 @@ static void draw_logo(DeviceInfo *di, display_mode* dm) {
 
     uint32 fbPitch = bytesPerRow / 4; 
 
-    uint32 logoW = 640;
-    uint32 logoH = 183;
+    uint32 logoW = sm750_logo_width;
+    uint32 logoH = sm750_logo_height;
 
     int32 startX = (int32)((screenWidth - logoW) / 2);
     int32 startY = (int32)((screenHeight - logoH) / 2);
