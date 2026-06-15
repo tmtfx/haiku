@@ -71,11 +71,7 @@ static status_t init_common(int the_fd)
 	/* all done */
 	
 	goto error0;
-error2:
-    if (!si->use_clone_bugfix && regs_area >= 0) {
-        delete_area(regs_area);
-        regs = NULL;
-    }
+
 error1:
 	if (shared_info_area >= 0) {
         delete_area(shared_info_area);
