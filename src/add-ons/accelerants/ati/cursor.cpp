@@ -37,7 +37,6 @@ status_t
 SetCursorBitmap(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
                 color_space colorSpace, uint16 bytesPerRow, const uint8* bitmapData)
 {
-	debug_printf("ATI_ACC: chiamata a SetCursorBitmap");
     SharedInfo& si = *gInfo.sharedInfo;
     
     if (width > 64 || height > 64 || hot_x >= width || hot_y >= height)
@@ -46,10 +45,12 @@ SetCursorBitmap(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
     si.cursorHotX = hot_x;
     si.cursorHotY = hot_y;
 
-    if ( ! gInfo.SetCursorBitmap(width, height, hot_x, hot_y, colorSpace, bytesPerRow, bitmapData)) {
-		debug_printf("ATI_ACC: SetCursorBitmap error on gInfo.SetCursorBitmap");
+    if (gInfo.SetCursorBitmap == NULL) 
 		return B_ERROR;
-	}
+
+	status_t err = gInfo.SetCursorBitmap(width, height, hot_x, hot_y, colorSpace, bytesPerRow, bitmapData);
+	if (err != B_OK) 
+		return err;
 	
 	return B_OK;
 }
