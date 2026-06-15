@@ -166,7 +166,8 @@ sm750_allocate_overlay_buffer(color_space cs, uint16 width, uint16 height)
     ob->width = width;
     ob->height = height;
     ob->bytes_per_row = alignedPitch;
-    ob->buffer = (void *)((addr_t)gInfo->framebuffer + alignedOffset);
+    //ob->buffer = (void *)((addr_t)gInfo->framebuffer + alignedOffset);
+	ob->buffer = (void *)((addr_t)si->framebuffer + alignedOffset);
     ob->buffer_dma = (void *)(addr_t)alignedOffset;
     
     debug_printf("SM750_ACC: Buffer allocato con INGANNO (16-bit). Aligned Offset: 0x%08x, Pitch: %u\n", 

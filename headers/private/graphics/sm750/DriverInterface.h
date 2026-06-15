@@ -248,7 +248,7 @@ typedef struct {
 	vuint32		*regs;				/* Puntatore ai registri MMIO clonati */
 	area_id	 regs_area;			/* ID area registri */
 	area_id	 fb_area;			/* ID area framebuffer clonato */
-	uint8 *framebuffer; /* Puntatore locale */
+	//uint8 *framebuffer; /* Puntatore locale */
 	display_mode*	mode_list;		// cloned list of standard display modes
 	area_id			mode_list_area;
 	edid1_info		edid_panel_info;

@@ -205,9 +205,6 @@ static status_t sm750_read_edid_I2C(uint8* buffer) {
     (unsigned int)PM0_state, (unsigned int)PM1_state, (unsigned int)PMC_state, 
     (unsigned int)P_control, (unsigned int)C_control, (unsigned int)GPIO_ctrl, 
     (unsigned int)PPLL_ctrl, (unsigned int)CPLL_ctrl, (unsigned int)MXCC_PLL_ctrl);
-	// Questi non ci interessano
-	//SM750_SYS_MISC_CTRL
-	//SM750_SYS_CTRL
 	
 	// IMPOSTAZIONE MINIMALE
 	

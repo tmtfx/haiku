@@ -264,19 +264,19 @@ static status_t init_common(int fd,bool isClone) {
     }
     
     /* Clone the Framebuffer (BAR0) for accelerant local use */
-    void* fb_ptr = NULL;
-    gInfo->fb_area = clone_area("sm750 fb user", &fb_ptr,
-        B_ANY_ADDRESS, B_READ_AREA | B_WRITE_AREA, gInfo->si->fb_area);
+    //void* fb_ptr = NULL;
+    //gInfo->fb_area = clone_area("sm750 fb user", &fb_ptr,
+    //    B_ANY_ADDRESS, B_READ_AREA | B_WRITE_AREA, gInfo->si->fb_area);
     
-    if (gInfo->fb_area < 0) {
-        delete_area(gInfo->regs_area);
-        delete_area(gInfo->shared_info_area);
-        return gInfo->fb_area;
-    }
+    //if (gInfo->fb_area < 0) {
+    //    delete_area(gInfo->regs_area);
+    //    delete_area(gInfo->shared_info_area);
+    //    return gInfo->fb_area;
+    //}
 
     /* save virtual pointer LOCALLY */
-    gInfo->framebuffer = (uint8*)fb_ptr;
-    debug_printf("SM750_ACC: AccelerantInfo framebuffer ptr=%p\n",gInfo->framebuffer);
+    //gInfo->framebuffer = (uint8*)fb_ptr;
+    //debug_printf("SM750_ACC: AccelerantInfo framebuffer ptr=%p\n",gInfo->framebuffer);
     
     if (!isClone) {
         // --- MEMORY MANAGER INITIALIZATION ---
@@ -331,7 +331,8 @@ static status_t init_common(int fd,bool isClone) {
         }
     }
     
-    gInfo->cursor_virtual_address = (void *)((addr_t)gInfo->framebuffer + si->cursor.vram_offset);
+    //gInfo->cursor_virtual_address = (void *)((addr_t)gInfo->framebuffer + si->cursor.vram_offset);
+	gInfo->cursor_virtual_address = (void *)((addr_t)si->framebuffer + si->cursor.vram_offset);
     
     // Token for 2D engine
     gInfo->sm750_engine_token.engine_id = 1; 
@@ -426,7 +427,7 @@ void sm750_uninit_accelerant(void) {
     if (gInfo->shared_info_area >= 0) delete_area(gInfo->shared_info_area);
     
     gInfo->regs = NULL;
-    gInfo->framebuffer = NULL;
+    //gInfo->framebuffer = NULL;
     gInfo->vblank_thread = -1;
     gInfo->si = NULL;
 }
