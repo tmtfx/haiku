@@ -7,7 +7,6 @@
  *		Axel Dörfler, axeld@pinc-software.de
  *		Stephan Aßmus <superstippi@gmx.de>
  * 		Christian Packmann
- *		Fabio Tomat, <f.t.public@gmail.com>
  */
 
 
@@ -26,7 +25,6 @@
 #include "InputManager.h"
 #include "ScreenManager.h"
 #include "ServerProtocol.h"
-#include "HWInterface.h"
 
 
 //#define DEBUG_SERVER

@@ -6,7 +6,6 @@
  *		Stephan Aßmus <superstippi@gmx.de>
  *		Axel Dörfler, axeld@pinc-software.de
  *		Michael Lotz <mmlr@mlotz.ch>
- *		Fabio Tomat, <f.t.public@gmail.com>
  */
 #ifndef ACCELERANT_HW_INTERFACE_H
 #define ACCELERANT_HW_INTERFACE_H
@@ -91,7 +90,6 @@ public:
 	virtual	RenderingBuffer*	FrontBuffer() const;
 	virtual	RenderingBuffer*	BackBuffer() const;
 	virtual	bool				IsDoubleBuffered() const;
-	virtual void 				SetUserHardwareCursor(bool enable);
 
 protected:
 	virtual	void				_CopyBackToFront(/*const*/ BRegion& region);

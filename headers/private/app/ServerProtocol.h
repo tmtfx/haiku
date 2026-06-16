@@ -8,7 +8,6 @@
  *		Axel Dörfler, axeld@pinc-software.de
  *		Andrej Spielmann, <andrej.spielmann@seh.ox.ac.uk>
  *		Julian Harnath, <julian.harnath@rwth-aachen.de>
- *		Fabio Tomat, <f.t.public@gmail.com>
  */
 #ifndef APP_SERVER_PROTOCOL_H
 #define APP_SERVER_PROTOCOL_H
@@ -369,7 +368,6 @@ enum {
 	// New clipping: cumulative, transformed
 	AS_VIEW_CLIP_TO_RECT,
 	AS_VIEW_CLIP_TO_SHAPE,
-	AS_SET_HW_CUR_BITMAP_ENABLED,
 
 	AS_LAST_CODE
 };
