@@ -151,6 +151,7 @@ Mach64_SetCursorBitmap(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
                 uint32 luma = (r * 77 + g * 150 + b * 29) >> 8;
                 if (luma > 128) {
                     // White -> AND=0, XOR=0 (00b) -> already zeroed
+					// rowPtr[wordIdx] |= (0x2 << bitPos); <-- with this white becomes tansparent
                 } else {
                     // Black -> AND=0, XOR=1 (01b)
                     rowPtr[wordIdx] |= (0x1 << bitPos);
@@ -162,8 +163,8 @@ Mach64_SetCursorBitmap(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
     }
 
     // UPDATE CURSOR PALETTES
-    OUTREG(CUR_CLR0, 0xFFFFFF); // White
-    OUTREG(CUR_CLR1, 0x000000); // Black
+    OUTREG(CUR_CLR0, 0xFFFFFF00); // White - correct byte order
+    OUTREG(CUR_CLR1, 0x00000000); // Black
 
     return B_OK;
 }
