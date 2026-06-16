@@ -6,6 +6,7 @@
  *		Axel Dörfler, axeld@pinc-software.de
  *		Alexander von Gluck IV, kallisti5@unixzen.com
  *		Adrien Destugues, pulkomandy@pulkomandy.tk
+ *		Fabio Tomat, f.t.public@gmail.com
  */
 
 
@@ -58,16 +59,23 @@ draw_intel_logo(intel_info &info, struct frame_buffer_boot_info *bi)
 
 	uint32 logoW = intel_logo_width;
 	uint32 logoH = intel_logo_height;
+	
+	int32 startX = (int32)((screenWidth - logoW) / 2);
+    if (startX < 0) startX = 0;
 
-	int32 startX = max(0, (int32)((screenWidth - logoW) / 2));
-	int32 startY = max(0, (int32)((screenHeight - logoH) / 2));
-
+    int32 startY = (int32)((screenHeight - logoH) / 2);
+    if (startY < 0) startY = 0;
 	uint8* fb = (uint8*)info.aperture_base;
+	// Se da problemi, non usare l'inizio assoluto dell'aperture, 
+	// usare l'indirizzo logico del FB del bootloader!
+	//uint8* fb = (uint8*)bi->frame_buffer;
 
 	for (uint32 y = 0; y < logoH && (startY + y) < screenHeight; y++) {
 		uint32 fbOffset = ((startY + y) * fbPitch + startX) * sizeof(uint32);
 		uint32 logoRowOffset = y * logoW;
-		uint32 copySize = min(logoW, screenWidth - startX) * sizeof(uint32);
+		uint32 remainingWidth = screenWidth - startX;
+		uint32 copyPixels = (logoW < remainingWidth) ? logoW : remainingWidth;
+		uint32 copySize = copyPixels * sizeof(uint32);
 
 		user_memcpy(fb + fbOffset, (void*)&intel_logo[logoRowOffset], copySize);
 	}
