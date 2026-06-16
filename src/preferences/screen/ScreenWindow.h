@@ -24,6 +24,7 @@ class BMenuField;
 class BSlider;
 class BSpinner;
 class BStringView;
+class BCheckBox;
 
 class RefreshWindow;
 class MonitorView;
