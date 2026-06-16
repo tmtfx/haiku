@@ -15,8 +15,9 @@
 #include <File.h>
 #include <FindDirectory.h>
 #include <Path.h>
-#include <AppServerLink.h>
-#include <ServerProtocol.h>
+#include <Message.h>
+#include <Messenger.h>
+#include "ServerProtocol.h"
 
 
 static const char* kSettingsFileName = "Screen_data";
@@ -89,8 +90,8 @@ ScreenSettings::SetHardwareCursorEnabled(bool enabled)
 	BPoint offset = fWindowFrame.LeftTop();
 	_WriteSettingsFile(offset, fHardwareCursorEnabled);
 	// communicate with app_server
-	BPrivate::AppServerLink link;
-    link.StartMessage(AS_SET_HW_CUR_BITMAP_ENABLED);
-    link.Attach<bool>(enabled);
-    link.Flush();
+	BMessage msg(AS_SET_HW_CUR_BITMAP_ENABLED);
+	msg.AddBool("enable", enabled);
+	BMessenger appServerMessenger("application/x-vnd.Haiku-app_server");
+	appServerMessenger.SendMessage(&msg);
 }
