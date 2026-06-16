@@ -6,6 +6,7 @@
  *		Rafael Romo
  *		Stefano Ceccherini (burton666@libero.it)
  *		Axel Dörfler, axeld@pinc-software.de
+ *		Fabio Tomat, f.t.public@gmail.com
  */
 
 
@@ -14,6 +15,8 @@
 #include <File.h>
 #include <FindDirectory.h>
 #include <Path.h>
+#include <AppServerLink.h>
+#include <ServerProtocol.h>
 
 
 static const char* kSettingsFileName = "Screen_data";
@@ -85,4 +88,9 @@ ScreenSettings::SetHardwareCursorEnabled(bool enabled)
 	// persist immediately
 	BPoint offset = fWindowFrame.LeftTop();
 	_WriteSettingsFile(offset, fHardwareCursorEnabled);
+	// communicate with app_server
+	BPrivate::AppServerLink link;
+    link.StartMessage(AS_SET_HW_CUR_BITMAP_ENABLED);
+    link.Attach<bool>(enabled);
+    link.Flush();
 }
