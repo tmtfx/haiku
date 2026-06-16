@@ -1269,26 +1269,6 @@ AccelerantHWInterface::HideOverlay(Overlay* overlay)
 void
 AccelerantHWInterface::_UpdateHardwareCursor(bool wasHardwareCursorEnabled)
 {
-	// Read user preference dynamically from settings file so changes take effect
-	// TODO : remove reading, implement differently! we cannot have a disk access every time we change mouse cursor bitmap, or drags
-	/*
-	bool userEnableHardwareCursor = true;
-	{
-		BPath path;
-		if (find_directory(B_USER_SETTINGS_DIRECTORY, &path) == B_OK) {
-			path.Append("Screen_data");
-			BFile file(path.Path(), B_READ_ONLY);
-			if (file.InitCheck() == B_OK) {
-				// skip offset if present
-				BPoint offset;
-				file.Read(&offset, sizeof(BPoint));
-				bool hw = true;
-				if (file.Read(&hw, sizeof(bool)) == (ssize_t)sizeof(bool))
-					userEnableHardwareCursor = hw;
-			}
-		}
-	}*/
-
 	ServerCursorReference cursor = CursorAndDragBitmap();
 	if (!cursor.IsSet() || !LockExclusiveAccess())
 		return;
@@ -1406,33 +1386,16 @@ AccelerantHWInterface::SetCursor(ServerCursor* cursor)
 	_UpdateHardwareCursor(wasHardwareCursorEnabled);
 }
 
-void AccelerantHWInterface::SetUserHardwareCursor(bool enable) { fUserEnableHardwareCursor = enable; }
+void AccelerantHWInterface::SetUserHardwareCursor(bool enable)
+{
+	fUserEnableHardwareCursor = enable; 
+}
 
 void
 AccelerantHWInterface::SetDragBitmap(const ServerBitmap* bitmap,
 	const BPoint& offsetFromCursor)
 {
 	bool wasHardwareCursorEnabled = fHardwareCursorEnabled;
-
-	// Read user preference dynamically
-	// TODO : remove reading, implement differently! we cannot have a disk access every time we change mouse cursor bitmap, or drags
-	/*
-	bool userEnableHardwareCursor = true;
-	{
-		BPath path;
-		if (find_directory(B_USER_SETTINGS_DIRECTORY, &path) == B_OK) {
-			path.Append("Screen_data");
-			BFile file(path.Path(), B_READ_ONLY);
-			if (file.InitCheck() == B_OK) {
-				// skip offset if present
-				BPoint offset;
-				file.Read(&offset, sizeof(BPoint));
-				bool hw = true;
-				if (file.Read(&hw, sizeof(bool)) == (ssize_t)sizeof(bool))
-					userEnableHardwareCursor = hw;
-			}
-		}
-	}*/
 
 	bool canUseBitmapCursorForDrag = bitmap == NULL
 		|| (fAccSetCursorBitmap != NULL && fCursorBits >= 32);
