@@ -43,47 +43,34 @@
 #define CALLED(x...) TRACE("intel_extreme: CALLED %s\n", __PRETTY_FUNCTION__)
 
 static void
-draw_intel_logo(intel_info &info,struct frame_buffer_boot_info *bi)
+draw_intel_logo(intel_info &info, struct frame_buffer_boot_info *bi)
 {
-    if (!bi)
-        return;
+	if (!bi)
+		return;
 
-    // L'array della mappa dei tesori è a 32-bit (0xFFRRGGBB).
-    // Evitiamo di scrivere se il bootloader è a 8, 15 o 16 bit.
-    if (bi->depth != 32)
-        return;
+	if (bi->depth != 32)
+		return;
 
-    uint32 screenWidth = bi->width;
-    uint32 screenHeight = bi->height;
-    
-    uint32 bytesPerRow = bi->bytes_per_row;
-    if (bytesPerRow == 0)
-        bytesPerRow = screenWidth * 4;
+	uint32 screenWidth = bi->width;
+	uint32 screenHeight = bi->height;
+	uint32 bytesPerRow = bi->bytes_per_row ? bi->bytes_per_row : screenWidth * 4;
+	uint32 fbPitch = bytesPerRow / 4;
 
-    uint32 fbPitch = bytesPerRow / 4;
+	uint32 logoW = intel_logo_width;
+	uint32 logoH = intel_logo_height;
 
-    uint32 logoW = intel_logo_width;   // 768
-    uint32 logoH = intel_logo_height;  // 768
+	int32 startX = max(0, (int32)((screenWidth - logoW) / 2));
+	int32 startY = max(0, (int32)((screenHeight - logoH) / 2));
 
-    // Centriamo la mappa Intel sullo schermo
-    int32 startX = (int32)((screenWidth - logoW) / 2);
-    int32 startY = (int32)((screenHeight - logoH) / 2);
+	uint8* fb = (uint8*)info.aperture_base;
 
-    if (startX < 0) startX = 0;
-    if (startY < 0) startY = 0;
+	for (uint32 y = 0; y < logoH && (startY + y) < screenHeight; y++) {
+		uint32 fbOffset = ((startY + y) * fbPitch + startX) * sizeof(uint32);
+		uint32 logoRowOffset = y * logoW;
+		uint32 copySize = min(logoW, screenWidth - startX) * sizeof(uint32);
 
-    // Calcoliamo l'indirizzo base del framebuffer usando l'aperture base del GART.
-    // Il bootloader mappa il frame buffer fisico iniziale all'inizio o a un determinato offset dell'aperture.
-    // Di norma, info.aperture_base punta all'inizio della memoria grafica lineare del kernel.
-    uint32* fb = (uint32*)info.aperture_base;
-
-    // Disegniamo la mappa dei tesori Intel con clipping di sicurezza
-    for (uint32 y = 0; y < logoH && (startY + (int32)y) < (int32)screenHeight; y++) {
-        for (uint32 x = 0; x < logoW && (startX + (int32)x) < (int32)screenWidth; x++) {
-            uint32 fbIndex = (uint32)((startY + (int32)y) * (int32)fbPitch + (startX + (int32)x));
-            fb[fbIndex] = intel_logo[y * logoW + x];
-        }
-    }
+		user_memcpy(fb + fbOffset, (void*)&intel_logo[logoRowOffset], copySize);
+	}
 }
 
 static void
