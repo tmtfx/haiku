@@ -4,7 +4,8 @@
 
 	Other authors:
 	Mark Watson;
-	Rudolf Cornelissen 3/2002-1/2006.
+	Rudolf Cornelissen 3/2002-1/2006;
+	Fabio Tomat 2026.
 */
 
 /* standard kernel driver stuff */
@@ -312,37 +313,33 @@ static void draw_matrox_logo_safe(device_info *di, struct frame_buffer_boot_info
     void* fb_virt = NULL;
     area_id fb_area = -1;
     
-    // Determinazione dinamica del BAR del framebuffer (allineata a map_device)
+    // set correct index for framebuffer BAR
     int frame_buffer_bar = 0;
 
-    // Se è una Millennium I (MIL1), il framebuffer risiede nel BAR 1
+    // If Millennium I (MIL1), framebuffer stays on BAR 1
     if (di->pcii.device_id == 0x0519)
     {
         frame_buffer_bar = 1;
     }
     
-    // Calcoliamo la dimensione del BAR del framebuffer
     uint32 fb_size = di->pcii.u.h0.base_register_sizes[frame_buffer_bar];
     if (fb_size == 0)
         return;
 
-    // Allineamento alla pagina hardware di Haiku
+    // Alignment to Haiku's hardware page
     fb_size = (fb_size + B_PAGE_SIZE - 1) & ~(B_PAGE_SIZE - 1);
     
-    /* Mappatura fisica isolata temporanea in Kernel Space.
-     * Usiamo di->pcii.u.h0.base_registers[frame_buffer_bar] come da sorgente. */
     fb_area = map_physical_memory("matrox_fb_init_logo",
         di->pcii.u.h0.base_registers[frame_buffer_bar], fb_size, B_ANY_KERNEL_ADDRESS,
         B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA, &fb_virt);
         
     if (fb_area < B_OK || fb_virt == NULL) {
-        dprintf("matrox: Errore map_physical_memory per il logo: %" B_PRId32 "\n", fb_area);
+        dprintf("matrox: Error on map_physical_memory for logo: %" B_PRId32 "\n", fb_area);
         return;
     }
 
     uint32* fb = (uint32*)fb_virt;
     
-    // Geometria reale ereditata dal bootloader
     uint32 screenWidth = bi->width;
     uint32 screenHeight = bi->height;
     
@@ -352,22 +349,17 @@ static void draw_matrox_logo_safe(device_info *di, struct frame_buffer_boot_info
 
     uint32 fbPitch = bytesPerRow / 4; 
 
-    // Dimensioni del logo Matrox
     uint32 logoW = matrox_logo_width;
     uint32 logoH = matrox_logo_height;
     const uint32* logo_data = (const uint32*)matrox_logo;
 
-    // Calcolo coordinate centrali con clipping preventivo (stile SM750)
     int32 startX = (int32)((screenWidth - logoW) / 2);
     int32 startY = (int32)((screenHeight - logoH) / 2);
 
     if (startX < 0) startX = 0;
     if (startY < 0) startY = 0;
 
-    dprintf("matrox: safe_logo - Scrittura su fb_virt = %p (BAR %d, Pitch: %u)\n", 
-            fb_virt, frame_buffer_bar, fbPitch);
-
-    // Ciclo di copia pixel corazzato contro i fuori-confine di memoria
+    // Pixel copy cycle reinforced against memory out of borders
     for (uint32 y = 0; y < logoH && (startY + (int32)y) < (int32)screenHeight; y++) {
         for (uint32 x = 0; x < logoW && (startX + (int32)x) < (int32)screenWidth; x++) {
             uint32 fbIndex = (uint32)((startY + (int32)y) * (int32)fbPitch + (startX + (int32)x));
@@ -377,55 +369,8 @@ static void draw_matrox_logo_safe(device_info *di, struct frame_buffer_boot_info
         }
     }
 
-    dprintf("matrox: safe_logo - Completato con successo. Smantello area temporanea.\n");
-
-    // Pulizia immediata delle tabelle delle pagine del kernel
     delete_area(fb_area);
 }
-/*
-static void draw_matrox_logo(shared_info *si, uint32 screen_width, uint32 screen_height, uint32 screen_stride)
-{
-	dprintf("matrox_acc: draw_matrox_logo started\n");
-    // Sicurezza: verifica che il framebuffer del driver sia mappato
-    if (si == NULL || si->framebuffer == NULL)
-        return;
-
-    // Dimensioni del tuo logo dal file .h
-    uint32 logo_w = matrox_logo_width;
-    uint32 logo_h = matrox_logo_height;
-    uint32 *logo_data = (uint32 *)matrox_logo;
-
-    // Controllo di sicurezza: se il logo è più grande dello schermo reale, non disegniamo
-    if (logo_w > screen_width || logo_h > screen_height) {
-        dprintf("matrox: Schermo di boot (%dx%d) troppo piccolo per il logo (%dx%d)\n", 
-            screen_width, screen_height, logo_w, logo_h);
-        return;
-    }
-
-    // Puntatore alla memoria video (framebuffer) interpretato a 32-bit
-    uint32 *fb = (uint32 *)si->framebuffer;
-
-    // Calcoliamo le coordinate per centrare il logo sullo schermo reale
-    uint32 start_x = (screen_width - logo_w) / 2;
-    uint32 start_y = (screen_height - logo_h) / 2;
-
-    dprintf("matrox_acc: starting to paint the screen\n");
-    // Disegno pixel per pixel
-    for (uint32 y = 0; y < logo_h; y++) {
-        for (uint32 x = 0; x < logo_w; x++) {
-            uint32 current_x = start_x + x;
-            uint32 current_y = start_y + y;
-
-            // Usiamo screen_stride anziché screen_width per il calcolo dell'indice.
-            // Questo garantisce che l'immagine sia dritta e non "affettata" o 
-            // obliqua su monitor con allineamenti di memoria particolari.
-            int fb_index = (current_y * screen_stride) + current_x;
-            int logo_index = (y * logo_w) + x;
-
-            fb[fb_index] = logo_data[logo_index];
-        }
-    }
-}*/
 
 static status_t map_device(device_info *di)
 {
@@ -668,174 +613,6 @@ static status_t map_device(device_info *di)
 	// in any case, return the result
 	return si->fb_area;
 }
-/*
-static status_t map_device(device_info *di)
-{
-    char buffer[B_OS_NAME_LENGTH]; //memory for device name
-    shared_info *si = di->si;
-    uint32    tmpUlong;
-    pci_info *pcii = &(di->pcii);
-    system_info sysinfo;
-
-    //storage for the physical to virtual table (used for dma buffer)
-//    physical_entry physical_memory[2];
-//    #define G400_DMA_BUFFER_SIZE 1024*1024
-
-    // Un tempo qui c'erano rom_temp e rom_area, rimossi perché non più necessari 
-
-    // MIL1 has frame_buffer in [1], control_regs in [0], and nothing in [2], while
-    // MIL2 and later have frame_buffer in [0], control_regs in [1], pseudo_dma in [2] 
-    int frame_buffer = 0;
-    int registers = 1;
-    int pseudo_dma = 2;
-
-    // correct layout for MIL1 
-    //fixme: checkout Mystique 170 and 220...
-    if (di->pcii.device_id == 0x0519)
-    {
-        frame_buffer = 1;
-        registers = 0;
-    }
-
-    // enable memory mapped IO, disable VGA I/O - this is standard
-    tmpUlong = get_pci(PCI_command, 4);
-    tmpUlong |= 0x00000002;
-    tmpUlong &= 0xfffffffe;
-    set_pci(PCI_command, 4, tmpUlong);
-
-     //work out which version of BeOS is running
-     get_system_info(&sysinfo);
-     if (0)//sysinfo.kernel_build_date[0]=='J')//FIXME - better ID version
-     {
-          si->use_clone_bugfix = 1;
-     }
-     else
-     {
-          si->use_clone_bugfix = 0;
-     }
-
-    // work out a name for the register mapping 
-    sprintf(buffer, DEVICE_FORMAT " regs",
-        di->pcii.vendor_id, di->pcii.device_id,
-        di->pcii.bus, di->pcii.device, di->pcii.function);
-
-    // get a virtual memory address for the registers
-    si->regs_area = map_physical_memory(
-        buffer,
-        di->pcii.u.h0.base_registers[registers],
-        di->pcii.u.h0.base_register_sizes[registers],
-        B_ANY_KERNEL_ADDRESS,
-         //B_CLONEABLE_AREA | (si->use_clone_bugfix ? B_READ_AREA|B_WRITE_AREA : 0),
-         B_CLONEABLE_AREA | (si->use_clone_bugfix ? B_READ_AREA|B_WRITE_AREA : B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA),
-        (void **)&(di->regs));
-     si->clone_bugfix_regs = (uint32 *) di->regs;
-
-    // if mapping registers to vmem failed then pass on error 
-    if (si->regs_area < 0) return si->regs_area;
-
-    // ===================================================================== 
-    // >>> MODIFICA: GESTIONE MULTI-CARD BIOS SICURA                        
-    // ===================================================================== 
-    // Eliminato completamente il vecchio blocco che:
-    // 1) Cambiava il PCI_rom_base appoggiandolo sul framebuffer (conflitto bus!)
-    // 2) Chiamava map_physical_memory sulla ROM fisica al volo.
-    // 3) Eseguiva il ciclo for 'MMS' che copiava il BIOS della prima scheda (G200)
-    // sulla seconda (G450), distruggendone l'inizializzazione nell'accelerante.
-    //
-    // Al suo posto, preleviamo il BIOS nativo della scheda specifica, isolato
-    // e salvato in di->rom_mirror dal kernel durante la fase di probe_devices. 
-
-    memcpy(si->rom_mirror, di->rom_mirror, 32768);
-
-    if (current_settings.dumprom) dumprom(si->rom_mirror, 32768, di->pcii);
-
-    // Rimossi anche set_pci(PCI_rom_base,4,0) e delete_area(rom_area) 
-    // poiché non abbiamo allocato aree d'appoggio temporanee in questa fase. 
-    // ===================================================================== 
-
-    // (pseudo)DMA does not exist on MIL1 
-    //fixme: checkout Mystique 170 and 220...
-    if (di->pcii.device_id != 0x0519)
-    {
-        // work out a name for the pseudo dma mapping
-        sprintf(buffer, DEVICE_FORMAT " pseudodma",
-            di->pcii.vendor_id, di->pcii.device_id,
-            di->pcii.bus, di->pcii.device, di->pcii.function);
-
-        // map the pseudo dma into vmem (write-only)
-        si->pseudo_dma_area = map_physical_memory(
-            buffer,
-            di->pcii.u.h0.base_registers[pseudo_dma],
-            di->pcii.u.h0.base_register_sizes[pseudo_dma],
-            B_ANY_KERNEL_ADDRESS,
-            //B_WRITE_AREA,
-            B_KERNEL_WRITE_AREA,
-            (&(si->pseudo_dma)));
-
-        // if there was an error, delete our other areas and pass on error
-        if (si->pseudo_dma_area < 0) {
-            delete_area(si->regs_area);
-            si->regs_area = -1;
-            return si->pseudo_dma_area;
-        }
-    }
-
-    // work out a name for the framebuffer mapping
-    sprintf(buffer, DEVICE_FORMAT " framebuffer",
-        di->pcii.vendor_id, di->pcii.device_id,
-        di->pcii.bus, di->pcii.device, di->pcii.function);
-
-    // map the framebuffer into vmem, using Write Combining
-    si->fb_area = map_physical_memory(
-        buffer,
-        di->pcii.u.h0.base_registers[frame_buffer],
-        di->pcii.u.h0.base_register_sizes[frame_buffer],
-        B_ANY_KERNEL_BLOCK_ADDRESS | B_WRITE_COMBINING_MEMORY,
-        //B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA,
-        B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA | B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA,
-        &(si->framebuffer));
-
-    //if failed with write combining try again without
-    if (si->fb_area < 0) {
-        si->fb_area = map_physical_memory(
-            buffer,
-            di->pcii.u.h0.base_registers[frame_buffer],
-            di->pcii.u.h0.base_register_sizes[frame_buffer],
-            B_ANY_KERNEL_BLOCK_ADDRESS,
-            //B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA,
-            B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA | B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA,
-            &(si->framebuffer));
-    }
-
-    // if there was an error, delete our other areas and pass on error
-    if (si->fb_area < 0)
-    {
-        // (pseudo)DMA does not exist on MIL1 
-        //fixme: checkout Mystique 170 and 220...
-        if (di->pcii.device_id != 0x0519)
-        {
-            delete_area(si->dma_buffer_area);
-            si->dma_buffer_area = -1;
-            delete_area(si->pseudo_dma_area);
-            si->pseudo_dma_area = -1;
-        }
-        delete_area(si->regs_area);
-        si->regs_area = -1;
-        return si->fb_area;
-    }
-    // remember the DMA address of the frame buffer for BDirectWindow?? purposes 
-    si->framebuffer_pci = (void *)(addr_t)di->pcii.u.h0.base_registers_pci[frame_buffer];
-
-    // remember settings for use here and in accelerant
-    si->settings = current_settings;
-    
-    dprintf("matrox: map_device - Iniezione del logo nel framebuffer...\n");
-    draw_matrox_logo(si);
-    snooze(2000000);
-
-    // in any case, return the result 
-    return si->fb_area;
-}*/
 
 static void unmap_device(device_info *di) {
 	shared_info *si = di->si;
@@ -1045,14 +822,11 @@ static status_t open_hook (const char* name, uint32 flags, void** cookie) {
 	status_t	result = B_OK;
 	char shared_name[B_OS_NAME_LENGTH];
 
-	dprintf("matrox: open_hook ENTER name=%s flags=0x%08x\n", name ? name : "(null)", flags);
-	
 	struct frame_buffer_boot_info *bi = (struct frame_buffer_boot_info *)get_boot_item(
         FRAME_BUFFER_BOOT_INFO, NULL);
 	bool enable_logo = true;
 	// Se il bootloader non ha passato informazioni o la modalità non è a 32-bit (RGBA), usciamo
 	if (bi == NULL) {
-		dprintf("matrox: frame buffer boot info - Impossibile ricavare info boot FB o profondità colore non a 32-bit\n");
 		enable_logo = false;
 	}
 
@@ -1067,22 +841,19 @@ static status_t open_hook (const char* name, uint32 flags, void** cookie) {
 
 	/* check that we actually found a device */
 	if (pd->device_names[index] == NULL) {
-		dprintf("matrox: open_hook - device name '%s' not found (index=%d, count=%u)\n", name ? kname : "(null)", index, pd->count);
 		result = B_ENTRY_NOT_FOUND;
 		goto done;
 	}
 
 	/* for convienience */
 	di = &(pd->di[index]);
-	dprintf("matrox: open_hook - found device index=%d di=%p name=%s\n", index, di, pd->device_names[index]);
-
+	
 	/* make sure no one else has write access to the common data */
 	AQUIRE_BEN(pd->kernel);
 
 	/* if it's already open for writing */
 	if (di->is_open) {
 		/* mark it open another time */
-		dprintf("matrox: open_hook - device already open, is_open=%u\n", di->is_open);
 		goto mark_as_open;
 	}
 	/* create the shared area */
@@ -1095,12 +866,10 @@ static status_t open_hook (const char* name, uint32 flags, void** cookie) {
 		B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA | B_CLONEABLE_AREA);
 	if (di->shared_area < 0) {
 		/* return the error */
-		dprintf("matrox: open_hook - create_area failed: %d\n", di->shared_area);
 		result = di->shared_area;
 		goto done;
 	}
-	dprintf("matrox: open_hook - shared_area=%d si_ptr=%p\n", di->shared_area, di->si);
-
+	
 	/* save a few dereferences */
 	si = di->si;
 
@@ -1118,11 +887,9 @@ static status_t open_hook (const char* name, uint32 flags, void** cookie) {
 	/* map the device */
 	result = map_device(di);
 	if (result < 0) {
-		dprintf("matrox: open_hook - map_device failed: %d\n", result);
 		goto free_shared;
 	}
-	dprintf("matrox: open_hook - map_device OK regs=%p framebuffer=%p fb_area=%d\n", di->regs, si->framebuffer, si->fb_area);
-
+	
 	/* we will be returning OK status for sure now */
 	result = B_OK;
 
@@ -1135,11 +902,9 @@ static status_t open_hook (const char* name, uint32 flags, void** cookie) {
 	/* create a semaphore for vertical blank management */
 	si->vblank = create_sem(0, di->name);
 	if (si->vblank < 0) {
-		dprintf("matrox: open_hook - create_sem failed: %d\n", si->vblank);
 		goto mark_as_open;
 	}
-	dprintf("matrox: open_hook - vblank sem=%d\n", si->vblank);
-
+	
 	/* change the owner of the semaphores to the opener's team */
 	/* this is required because apps can't aquire kernel semaphores */
 	thid = find_thread(NULL);
@@ -1147,26 +912,21 @@ static status_t open_hook (const char* name, uint32 flags, void** cookie) {
 	set_sem_owner(si->vblank, thinfo.team);
 
 	/* If there is a valid interrupt line assigned then set up interrupts */
-	dprintf("matrox: open_hook - checking IRQ pin=0x%02x line=0x%02x\n", di->pcii.u.h0.interrupt_pin, di->pcii.u.h0.interrupt_line);
 	if ((di->pcii.u.h0.interrupt_pin == 0x00) ||
 	    (di->pcii.u.h0.interrupt_line == 0xff) || /* no IRQ assigned */
 	    (di->pcii.u.h0.interrupt_line <= 0x02))   /* system IRQ assigned */
 	{
 		/* delete the semaphore as it won't be used */
-		dprintf("matrox: open_hook - no usable IRQ, deleting vblank sem=%d\n", si->vblank);
-		delete_sem(si->vblank);
 		si->vblank = -1;
 	}
 	else
 	{
 		/* otherwise install our interrupt handler */
-		dprintf("matrox: open_hook - installing interrupt handler on line %u\n", di->pcii.u.h0.interrupt_line);
 		result = install_io_interrupt_handler(di->pcii.u.h0.interrupt_line, gx00_interrupt, (void *)di, 0);
 		/* bail if we couldn't install the handler */
 		if (result != B_OK)
 		{
 			/* delete the semaphore as it won't be used */
-			dprintf("matrox: open_hook - install_io_interrupt_handler failed: %d, deleting vblank sem=%d\n", result, si->vblank);
 			delete_sem(si->vblank);
 			si->vblank = -1;
 		}
@@ -1174,7 +934,6 @@ static status_t open_hook (const char* name, uint32 flags, void** cookie) {
 		{
 			/* inform accelerant(s) we can use INT related functions */
 			si->ps.int_assigned = true;
-			dprintf("matrox: open_hook - interrupt handler installed, int_assigned=1\n");
 		}
 	}
 
@@ -1186,12 +945,9 @@ mark_as_open:
 	{
 		void *kdi = di;
 		status_t um = user_memcpy(cookie, &kdi, sizeof(kdi));
-		if (um == B_OK) {
-			dprintf("matrox: open_hook - user_memcpy(cookie) OK\n");
-		} else {
+		if (um != B_OK) {
 			/* fallback: if user_memcpy failed, assume cookie is kernel pointer and store directly */
 			*(void **)cookie = kdi;
-			dprintf("matrox: open_hook - user_memcpy(cookie) failed (%ld), did kernel write fallback\n", (long)um);
 		}
 	}
 
@@ -1207,8 +963,6 @@ free_shared:
 done:
 	/* end of critical section */
 	if (enable_logo && result == B_OK && bi != NULL) {
-		dprintf("matrox: open_hook done - Avvio draw_matrox_logo_safe...\n");
-		// Passiamo di (o pd) e il bi recuperato a inizio open_hook
 		draw_matrox_logo_safe(di, bi); 
 		snooze(2000000);
 	}
