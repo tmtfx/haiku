@@ -142,27 +142,23 @@ draw_logo(DeviceInfo& di)
 {
     SharedInfo& si = *(di.sharedInfo);
     
-    // Verifichiamo che il framebuffer sia mappato correttamente
     if (si.videoMemArea < 0 || si.videoMemAddr == NULL)
         return;
 
-    // Recuperiamo le informazioni sul framebuffer ereditato dal bootloader
+    // Retrieve framebuffer info from bootloader
     struct frame_buffer_boot_info* bi = (struct frame_buffer_boot_info*)get_boot_item(
         FRAME_BUFFER_BOOT_INFO, NULL);
     
     if (!bi)
         return;
 
-    // Il nostro array s3_logo è a 32-bit (RGBA/RGB32). 
-    // Se il bootloader ha impostato uno schermo a 8, 15 o 16 bit, saltiamo per evitare artefatti o crash.
+    // s3_logo array is 32-bit (RGBA/RGB32). 
     if (bi->depth != 32)
         return;
 
     uint32 screenWidth = bi->width;
     uint32 screenHeight = bi->height;
     
-    // Calcoliamo il pitch (larghezza della riga in pixel a 32-bit)
-    // Usiamo bi->bytes_per_row se disponibile, altrimenti fallback sul calcolo classico
     uint32 bytesPerRow = bi->bytes_per_row;
     if (bytesPerRow == 0)
         bytesPerRow = screenWidth * 4;
@@ -172,7 +168,7 @@ draw_logo(DeviceInfo& di)
     uint32 logoW = s3_logo_width;   // 640
     uint32 logoH = s3_logo_height;  // 240
 
-    // Centriamo l'immagine dello "S3 DOCK" sullo schermo
+    // Centering
     int32 startX = (int32)((screenWidth - logoW) / 2);
     int32 startY = (int32)((screenHeight - logoH) / 2);
 
@@ -181,7 +177,7 @@ draw_logo(DeviceInfo& di)
 
     uint32* fb = (uint32*)si.videoMemAddr;
 
-    // Disegniamo l'immagine pixel per pixel con clipping di sicurezza
+    // Draw
     for (uint32 y = 0; y < logoH && (startY + (int32)y) < (int32)screenHeight; y++) {
         for (uint32 x = 0; x < logoW && (startX + (int32)x) < (int32)screenWidth; x++) {
             uint32 fbIndex = (uint32)((startY + (int32)y) * (int32)fbPitch + (startX + (int32)x));
