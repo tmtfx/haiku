@@ -62,7 +62,6 @@
 #include "Window.h"
 #include "Workspace.h"
 #include "WorkspacesView.h"
-#include "AccelerantHWInterface.h"
 
 #if TEST_MODE
 #	include "EventStream.h"
@@ -2872,27 +2871,6 @@ Desktop::_DispatchMessage(int32 code, BPrivate::LinkReceiver& link)
 			break;
 		}
 		
-		case AS_SET_HW_CUR_BITMAP_ENABLED:
-		{
-			bool enable;
-			// client wants to enable/disble Hw CURSOR BITMAP
-			link.Read<bool>(&enable); 
-
-			BAutolock locker(gScreenManager);
-			if (gScreenManager && gScreenManager->CountScreens() > 0) {
-				Screen* s = gScreenManager->ScreenAt(0);
-        
-				if (s != NULL && s->HWInterface() != NULL) {
-					AccelerantHWInterface* interface = dynamic_cast<AccelerantHWInterface*>(s->HWInterface());
-            
-					if (interface != NULL) {
-						interface->SetUserHardwareCursor(enable);
-						interface->SetCursorVisible(interface->IsCursorVisible());
-					}
-				}
-			}
-			break;
-		}
 		// ToDo: Remove this again. It is a message sent by the
 		// invalidate_on_exit kernel debugger add-on to trigger a redraw
 		// after exiting a kernel debugger session.
