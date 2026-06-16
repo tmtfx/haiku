@@ -2,6 +2,7 @@ SubDir HAIKU_TOP src add-ons translators jpeg2000 ;
 
 SubDirHdrs [ FDirName $(SUBDIR) $(DOTDOT) shared ] ;
 	#for BaseTranslator.h and friends
+UseHeaders /boot/system/develop/headers : true ;
 	
 # Exclude unwanted formats
 CCFLAGS += -DEXCLUDE_MIF_SUPPORT

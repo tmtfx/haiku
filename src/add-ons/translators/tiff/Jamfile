@@ -1,6 +1,7 @@
 SubDir HAIKU_TOP src add-ons translators tiff ;
 
 SubDirHdrs [ FDirName $(SUBDIR) $(DOTDOT) shared ] ;
+UseHeaders /boot/system/develop/headers : true ;
 
 AddResources TIFFTranslator : TIFFTranslator.rdef ;
 

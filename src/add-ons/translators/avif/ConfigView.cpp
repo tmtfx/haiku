@@ -22,7 +22,7 @@
 #include <Slider.h>
 #include <StringView.h>
 
-#include "avif/avif.h"
+#include <avif/avif.h>
 
 #include "TranslatorSettings.h"
 #include "AVIFTranslator.h"

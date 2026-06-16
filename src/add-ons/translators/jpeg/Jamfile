@@ -6,6 +6,8 @@ SubDirSysHdrs [ FDirName $(SUBDIR) $(DOTDOT) raw ] ;
 SubDirHdrs [ FDirName $(SUBDIR) $(DOTDOT) shared ] ;
 	#for BaseTranslator.h and friends
 
+UseHeaders /boot/system/develop/headers : true ;
+
 AddResources JPEGTranslator : JPEGTranslator.rdef ;
 
 local architectureObject ;

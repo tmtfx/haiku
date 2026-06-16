@@ -21,7 +21,7 @@
 #include <List.h>
 
 extern "C" {
-#include "icns.h"
+#include <icns.h>
 }
 
 #define IS_SPUPPORTED_TYPE(type) ((type) == ICNS_1024x1024_32BIT_ARGB_DATA || \

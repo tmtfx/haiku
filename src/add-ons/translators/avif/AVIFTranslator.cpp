@@ -19,7 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "avif/avif.h"
+#include <avif/avif.h>
 
 #include "ConfigView.h"
 #include "TranslatorSettings.h"

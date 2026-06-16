@@ -12,7 +12,7 @@
 #include "TIFFView.h"
 
 #define TIFF_DISABLE_DEPRECATED
-#include "tiffio.h"
+#include <tiffio.h>
 
 #if __GNUC__ == 2
 #define TIFF_UINT32_TYPE uint32

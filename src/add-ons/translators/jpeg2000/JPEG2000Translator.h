@@ -50,7 +50,7 @@ EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <string.h>
 
 #include "BaseTranslator.h"
-#include "jasper/jasper.h"
+#include <jasper/jasper.h>
 
 // jasper includes stdbool
 #undef bool
