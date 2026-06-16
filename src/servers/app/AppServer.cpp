@@ -19,7 +19,10 @@
 #include <LaunchRoster.h>
 #include <PortLink.h>
 #include <RosterPrivate.h>
+#include <Autolock.h>
 
+#include "AccelerantHWInterface.h"
+#include "Screen.h"
 #include "BitmapManager.h"
 #include "Desktop.h"
 #include "GlobalFontManager.h"
@@ -141,6 +144,26 @@ AppServer::MessageReceived(BMessage* message)
 				reply.what = (uint32)B_ERROR;
 
 			message->SendReply(&reply);
+			break;
+		}
+		case AS_SET_HW_CUR_BITMAP_ENABLED:
+		{
+			bool enable;
+			if (message->FindBool("enable", &enable) == B_OK) {
+				BAutolock locker(gScreenManager);
+				if (gScreenManager && gScreenManager->CountScreens() > 0) {
+					Screen* s = gScreenManager->ScreenAt(0);
+			
+					if (s != NULL && s->HWInterface() != NULL) {
+						AccelerantHWInterface* interface = dynamic_cast<AccelerantHWInterface*>(s->HWInterface());
+				
+						if (interface != NULL) {
+							interface->SetUserHardwareCursor(enable);
+							interface->SetCursorVisible(interface->IsCursorVisible());
+						}
+					}
+				}
+			}
 			break;
 		}
 
