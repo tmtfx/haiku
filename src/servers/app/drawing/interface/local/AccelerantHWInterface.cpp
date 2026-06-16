@@ -8,6 +8,7 @@
  *		Axel Dörfler, axeld@pinc-software.de
  *		Michael Lotz, mmlr@mlotz.ch
  *		John Scipione, jscipione@gmail.com
+ *		Fabio Tomat, f.t.public@gmail.com
  */
 
 
@@ -40,6 +41,7 @@
 #include <PathFinder.h>
 #include <String.h>
 #include <StringList.h>
+#include <File.h>
 
 #include "AccelerantBuffer.h"
 #include "MallocBuffer.h"
@@ -1269,6 +1271,7 @@ AccelerantHWInterface::_UpdateHardwareCursor(bool wasHardwareCursorEnabled)
 {
 	// Read user preference dynamically from settings file so changes take effect
 	// TODO : remove reading, implement differently! we cannot have a disk access every time we change mouse cursor bitmap, or drags
+	/*
 	bool userEnableHardwareCursor = true;
 	{
 		BPath path;
@@ -1284,7 +1287,7 @@ AccelerantHWInterface::_UpdateHardwareCursor(bool wasHardwareCursorEnabled)
 					userEnableHardwareCursor = hw;
 			}
 		}
-	}
+	}*/
 
 	ServerCursorReference cursor = CursorAndDragBitmap();
 	if (!cursor.IsSet() || !LockExclusiveAccess())
@@ -1295,7 +1298,7 @@ AccelerantHWInterface::_UpdateHardwareCursor(bool wasHardwareCursorEnabled)
 	// Drag bitmaps need full-color alpha compositing, while some hardware
 	// cursor backends only expose limited palette/shape formats.
 	const bool canUseBitmapCursorForDrag = fDragBitmap == NULL || fCursorBits >= 32;
-	if (canUseBitmapCursorForDrag && fAccSetCursorBitmap != NULL && userEnableHardwareCursor) {
+	if (canUseBitmapCursorForDrag && fAccSetCursorBitmap != NULL && fUserEnableHardwareCursor) {
 		uint16 xHotSpot = (uint16)cursor->GetHotSpot().x;
 		uint16 yHotSpot = (uint16)cursor->GetHotSpot().y;
 		uint16 width = (uint16)cursor->Bounds().IntegerWidth() + 1;
@@ -1403,7 +1406,7 @@ AccelerantHWInterface::SetCursor(ServerCursor* cursor)
 	_UpdateHardwareCursor(wasHardwareCursorEnabled);
 }
 
-
+void AccelerantHWInterface::SetUserHardwareCursor(bool enable) { fUserEnableHardwareCursor = enable; }
 
 void
 AccelerantHWInterface::SetDragBitmap(const ServerBitmap* bitmap,
@@ -1413,6 +1416,7 @@ AccelerantHWInterface::SetDragBitmap(const ServerBitmap* bitmap,
 
 	// Read user preference dynamically
 	// TODO : remove reading, implement differently! we cannot have a disk access every time we change mouse cursor bitmap, or drags
+	/*
 	bool userEnableHardwareCursor = true;
 	{
 		BPath path;
@@ -1428,11 +1432,11 @@ AccelerantHWInterface::SetDragBitmap(const ServerBitmap* bitmap,
 					userEnableHardwareCursor = hw;
 			}
 		}
-	}
+	}*/
 
 	bool canUseBitmapCursorForDrag = bitmap == NULL
 		|| (fAccSetCursorBitmap != NULL && fCursorBits >= 32);
-	if (!userEnableHardwareCursor)
+	if (!fUserEnableHardwareCursor)
 		canUseBitmapCursorForDrag = false;
 
 	if (bitmap != NULL && wasHardwareCursorEnabled && !canUseBitmapCursorForDrag
