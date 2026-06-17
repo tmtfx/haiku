@@ -142,7 +142,7 @@ draw_logo(DeviceInfo& di)
 {
     SharedInfo& si = *(di.sharedInfo);
     
-    if (si.videoMemArea < 0 || si.videoMemAddr == NULL)
+    if (si.videoMemArea < 0)
         return;
 
     // Retrieve framebuffer info from bootloader
@@ -170,20 +170,39 @@ draw_logo(DeviceInfo& di)
 
     // Centering
     int32 startX = (int32)((screenWidth - logoW) / 2);
+	if (startX < 0) startX = 0;
     int32 startY = (int32)((screenHeight - logoH) / 2);
+	if (startY < 0) startY = 0;
 
     if (startX < 0) startX = 0;
     if (startY < 0) startY = 0;
 
-    uint32* fb = (uint32*)si.videoMemAddr;
+    
+	uint8* fb = (uint8*)si.videoMemAddr;
+	if (fb == NULL) {
+		fb = (uint8*)bi->frame_buffer;
+	}
+	if (fb == NULL)
+		return;
 
-    // Draw
+    // Draw kernel space
+	/*
+	uint32* fb = (uint32*)si.videoMemAddr;
     for (uint32 y = 0; y < logoH && (startY + (int32)y) < (int32)screenHeight; y++) {
         for (uint32 x = 0; x < logoW && (startX + (int32)x) < (int32)screenWidth; x++) {
             uint32 fbIndex = (uint32)((startY + (int32)y) * (int32)fbPitch + (startX + (int32)x));
             fb[fbIndex] = s3_logo[y * logoW + x];
         }
-    }
+    }*/
+	for (uint32 y = 0; y < logoH && (startY + y) < screenHeight; y++) {
+		uint32 fbOffset = ((startY + y) * fbPitch + startX) * sizeof(uint32);
+		uint32 logoRowOffset = y * logoW;
+		uint32 remainingWidth = screenWidth - startX;
+		uint32 copyPixels = (logoW < remainingWidth) ? logoW : remainingWidth;
+		uint32 copySize = copyPixels * sizeof(uint32);
+
+		user_memcpy(fb + fbOffset, (void*)&s3_logo[logoRowOffset], copySize);
+	}
 }
 
 static inline uint32
@@ -707,7 +726,7 @@ status_t  init_driver(void)
 
 	gDeviceNames[count] = NULL;	// terminate list with null pointer
 
-	TRACE("init_driver() %ld supported devices\n", count);
+	TRACE("init_driver() %d supported devices\n", count);
 
 	return B_OK;
 }
@@ -779,7 +798,7 @@ device_open(const char* name, uint32 /*flags*/, void** cookie)
 		*cookie = &di;		// send cookie to opener
 	}
 
-	TRACE("device_open() returning 0x%lx,  open count: %ld\n", status, di.openCount);
+	TRACE("device_open() returning 0x%x,  open count: %d\n", status, di.openCount);
 	return status;
 }
 
@@ -857,7 +876,7 @@ device_free(void* dev)
 
 	gLock.Release();	// unlock driver
 
-	TRACE("exit device_free() openCount: %ld\n", di.openCount);
+	TRACE("exit device_free() openCount: %d\n", di.openCount);
 	return B_OK;
 }
 
@@ -938,7 +957,7 @@ device_ioctl(void* dev, uint32 msg, void* buf, size_t len)
 						gsp.value = gPCI->read_io_32(gsp.offset);
 						break;
 					default:
-						TRACE("device_ioctl() S3_GET_PIO invalid size: %ld\n", gsp.size);
+						TRACE("device_ioctl() S3_GET_PIO invalid size: %d\n", gsp.size);
 						return B_ERROR;
 				}
 				if (user_memcpy(buf, &gsp, sizeof(S3GetSetPIO)) != B_OK)
@@ -966,7 +985,7 @@ device_ioctl(void* dev, uint32 msg, void* buf, size_t len)
 						gPCI->write_io_32(gsp.offset, gsp.value);
 						break;
 					default:
-						TRACE("device_ioctl() S3_SET_PIO invalid size: %ld\n", gsp.size);
+						TRACE("device_ioctl() S3_SET_PIO invalid size: %d\n", gsp.size);
 						return B_ERROR;
 				}
 				return B_OK;
