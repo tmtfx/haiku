@@ -271,7 +271,7 @@ static void draw_ati_logo_safe(DeviceInfo& di, struct frame_buffer_boot_info *bi
         B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA, &fb_virt);
         
     if (fb_area < B_OK || fb_virt == NULL) {
-        dprintf("matrox: Errore map_physical_memory per il logo: %" B_PRId32 "\n", fb_area);
+        dprintf("ati: Errore map_physical_memory per il logo: %" B_PRId32 "\n", fb_area);
         return;
     }
 
@@ -299,9 +299,6 @@ static void draw_ati_logo_safe(DeviceInfo& di, struct frame_buffer_boot_info *bi
     if (startX < 0) startX = 0;
     if (startY < 0) startY = 0;
 
-    dprintf("matrox: safe_logo - Scrittura su fb_virt = %p (BAR %d, Pitch: %u)\n", 
-            fb_virt, frame_buffer_bar, fbPitch);
-
     // Ciclo di copia pixel corazzato contro i fuori-confine di memoria
     for (uint32 y = 0; y < logoH && (startY + (int32)y) < (int32)screenHeight; y++) {
         for (uint32 x = 0; x < logoW && (startX + (int32)x) < (int32)screenWidth; x++) {
@@ -311,8 +308,6 @@ static void draw_ati_logo_safe(DeviceInfo& di, struct frame_buffer_boot_info *bi
             fb[fbIndex] = logo_data[logoIndex];
         }
     }
-
-    dprintf("matrox: safe_logo - Completato con successo. Smantello area temporanea.\n");
 
     // Pulizia immediata delle tabelle delle pagine del kernel
     delete_area(fb_area);
@@ -958,7 +953,6 @@ InitDevice(DeviceInfo& di)
 	TRACE("Interrupt assigned:  %s\n", si.bInterruptAssigned ? "yes" : "no");
 	// write here drawlogo
 	if (enable_logo && bi != NULL) {
-		dprintf("matrox: open_hook done - Avvio draw_matrox_logo_safe...\n");
 		// Passiamo di (o pd) e il bi recuperato a inizio open_hook
 		draw_ati_logo_safe(di,bi); 
 		snooze(2000000);
