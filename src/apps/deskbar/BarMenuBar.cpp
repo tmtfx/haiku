@@ -101,7 +101,7 @@ TSeparatorItem::Draw()
 
 //	#pragma mark - TBarMenuBar
 
-
+/* original for vector icon
 TBarMenuBar::TBarMenuBar(BRect frame, const char* name, TBarView* barView)
 	:
 	BMenuBar(frame, name, B_FOLLOW_NONE, B_ITEMS_IN_ROW, false),
@@ -136,7 +136,77 @@ TBarMenuBar::TBarMenuBar(BRect frame, const char* name, TBarView* barView)
 
 	fDeskbarMenuItem = new TBarMenuTitle(0.0f, 0.0f, icon, beMenu, fBarView);
 	AddItem(fDeskbarMenuItem);
+}*/
+
+/* Mine for bitmap icon */
+#include <syslog.h>
+TBarMenuBar::TBarMenuBar(BRect frame, const char* name, TBarView* barView)
+    :
+    BMenuBar(frame, name, B_FOLLOW_NONE, B_ITEMS_IN_ROW, false),
+    fBarView(barView),
+    fAppListMenuItem(NULL),
+    fSeparatorItem(NULL),
+    fTeamIconData(NULL),
+    fTeamIconSize(0)
+{
+    SetItemMargins(0.0f, 0.0f, 0.0f, 0.0f);
+    SetFont(be_bold_font);
+
+    TDeskbarMenu* beMenu = new TDeskbarMenu(barView);
+    TBarWindow::SetDeskbarMenu(beMenu);
+    BBitmap* icon = NULL;
+    size_t dataSize = 0;
+    
+    // 1. Cerca la risorsa
+    const void* data = AppResSet()->FindResource(B_MESSAGE_TYPE,
+        R_LeafLogoBitmap, &dataSize);
+        
+    if (data == NULL) {
+        log_team(LOG_ERR, "TBarMenuBar: Errore! Risorsa R_LeafLogoBitmap non trovata nell'AppResSet.");
+    } else {
+        log_team(LOG_INFO, "TBarMenuBar: Risorsa trovata. Dimensione dati grezzi: %lu byte.", dataSize);
+
+        BMessage archiveMessage;
+        // 2. Unflatten del buffer grezzo
+        status_t status = archiveMessage.Unflatten((const char*)data);
+        if (status != B_OK) {
+            log_team(LOG_ERR, "TBarMenuBar: Unflatten del BMessage fallito! Errore: %s", strerror(status));
+        } else {
+            log_team(LOG_INFO, "TBarMenuBar: Unflatten completato con successo.");
+
+            // 3. Tentativo di ricostruzione della BBitmap
+            BBitmap* instantiatedBitmap = new(std::nothrow) BBitmap(&archiveMessage);
+            
+            if (instantiatedBitmap == NULL) {
+                log_team(LOG_ERR, "TBarMenuBar: Memoria insufficiente per allocare instantiatedBitmap.");
+            } else {
+                // 4. Verifica validità della bitmap (struttura dati interna, cspace, ecc.)
+                status = instantiatedBitmap->InitCheck();
+                if (status != B_OK) {
+                    log_team(LOG_ERR, "TBarMenuBar: InitCheck() della BBitmap fallito! Errore: %s", strerror(status));
+                    delete instantiatedBitmap;
+                } else {
+                    // Log di conferma delle specifiche caricate
+                    BRect bounds = instantiatedBitmap->Bounds();
+                    log_team(LOG_INFO, "TBarMenuBar: BBitmap creata correttamente dall'archivio.");
+                    log_team(LOG_INFO, "TBarMenuBar: Specifica Bitmap -> Dimensioni: %.0f x %.0f, Color Space: 0x%x, Bytes/Row: %ld",
+                        bounds.Width() + 1, bounds.Height() + 1, 
+                        instantiatedBitmap->ColorSpace(), instantiatedBitmap->BytesPerRow());
+                    
+                    icon = instantiatedBitmap;
+                }
+            }
+        }
+    }
+
+    if (icon == NULL) {
+        log_team(LOG_WARNING, "TBarMenuBar: Icona non caricata. Il DeskbarMenu verrà creato senza logo.");
+    }
+
+    fDeskbarMenuItem = new TBarMenuTitle(0.0f, 0.0f, icon, beMenu, fBarView);
+    AddItem(fDeskbarMenuItem);
 }
+
 
 
 TBarMenuBar::~TBarMenuBar()
