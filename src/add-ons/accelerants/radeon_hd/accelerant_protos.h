@@ -49,6 +49,15 @@ status_t radeon_acquire_engine(uint32 capabilities, uint32 maxWait,
 status_t radeon_release_engine(engine_token* engineToken,
 	sync_token* syncToken);
 
+// cursor
+status_t radeon_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
+	uint8* andMask, uint8* xorMask);
+status_t radeon_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
+	color_space colorSpace, uint16 bytesPerRow, const uint8* bitmapData);
+uint32 radeon_get_cursor_bits(void);
+void radeon_move_cursor(uint16 x, uint16 y);
+void radeon_show_cursor(bool isVisible);
+
 
 #ifdef __cplusplus
 }

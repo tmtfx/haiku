@@ -80,6 +80,16 @@ struct accelerant_info {
 	uint32			lvdsSpreadSpectrumID;
 
 	RingQueue*		ringQueue[RADEON_QUEUE_MAX]; // Ring buffer command processor
+
+	/* Cursor state */
+	uint32		cursor_fb_offset; /* offset from framebuffer base */
+	addr_t		cursor_phys; /* physical GPU address */
+	uint8*		cursor_vaddr; /* virtual pointer into mapped framebuffer */
+	uint16		cursor_width;
+	uint16		cursor_height;
+	uint16		cursor_hotx;
+	uint16		cursor_hoty;
+	bool		cursor_visible;
 };
 
 
