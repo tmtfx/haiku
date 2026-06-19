@@ -97,9 +97,78 @@ status_t radeon_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint
 status_t radeon_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 	uint8* andMask, uint8* xorMask)
 {
-	// Legacy shape not implemented for radeon_hd; prefer bitmap API
-	(void)andMask; (void)xorMask;
-	return B_ERROR;
+	if (width > 64 || height > 64 || hotX >= width || hotY >= height)
+		return B_ERROR;
+
+	// Ensure cursor area allocated
+	if (gInfo->cursor_vaddr == NULL) {
+		uint64 fbSize = gInfo->fb.vramSize; // bytes
+		uint64 cursorSize = 64 * 64 * 4; // ARGB32
+		if (fbSize < cursorSize)
+			return B_ERROR;
+
+		uint64 offset = fbSize - cursorSize;
+		// align to 4KB
+		offset &= ~((uint64)0xfff);
+		gInfo->cursor_fb_offset = (uint32)offset;
+		gInfo->cursor_phys = (addr_t)gInfo->shared_info->frame_buffer_phys + gInfo->cursor_fb_offset;
+		gInfo->cursor_vaddr = (uint8*)gInfo->shared_info->frame_buffer + gInfo->cursor_fb_offset;
+	}
+
+	// Clear framebuffer cursor area
+	memset(gInfo->cursor_vaddr, 0, 64 * 64 * 4);
+
+	// Compute bytes per row in masks
+	int maskBytesPerRow = (width + 7) / 8;
+
+	for (int y = 0; y < height && y < 64; y++) {
+		uint32* dstRow = (uint32*)(gInfo->cursor_vaddr + y * 64 * 4);
+		const uint8* andRow = andMask + y * maskBytesPerRow;
+		const uint8* xorRow = xorMask + y * maskBytesPerRow;
+		for (int x = 0; x < width && x < 64; x++) {
+			int byteIdx = x / 8;
+			int bit = 7 - (x % 8);
+			bool andBit = ((andRow[byteIdx] >> bit) & 0x1) != 0;
+			bool xorBit = ((xorRow[byteIdx] >> bit) & 0x1) != 0;
+
+			if (andBit) {
+				// transparent
+				continue;
+			}
+			// opaque: xorBit==0 => white, xorBit==1 => black
+			uint8 r = xorBit ? 0x00 : 0xFF;
+			uint8 g = xorBit ? 0x00 : 0xFF;
+			uint8 b = xorBit ? 0x00 : 0xFF;
+			uint8 a = 0xFF;
+			uint32 packed = ((uint32)a << 24) | ((uint32)r << 16) | ((uint32)g << 8) | (uint32)b;
+			dstRow[x] = packed;
+		}
+	}
+
+	// Save metadata
+	gInfo->cursor_width = width;
+	gInfo->cursor_height = height;
+	gInfo->cursor_hotx = hotX;
+	gInfo->cursor_hoty = hotY;
+
+	// Program registers like bitmap
+	uint32 addr = (uint32)(gInfo->cursor_phys & EVERGREEN_CUR_SURFACE_ADDRESS_MASK);
+	Write32(OUT, EVERGREEN_CUR_SURFACE_ADDRESS, addr);
+	#ifdef EVERGREEN_CUR_SURFACE_ADDRESS_HIGH
+	Write32(OUT, EVERGREEN_CUR_SURFACE_ADDRESS_HIGH, (uint32)(gInfo->cursor_phys >> 32));
+	#endif
+
+	Write32(OUT, EVERGREEN_CUR_SIZE, ((uint32)gInfo->cursor_height << 16) | (uint32)gInfo->cursor_width);
+	Write32(OUT, EVERGREEN_CUR_HOT_SPOT, ((uint32)gInfo->cursor_hoty << 16) | (uint32)gInfo->cursor_hotx);
+
+	uint32 control = EVERGREEN_CURSOR_EN | EVERGREEN_CURSOR_24_8_UNPRE_MULT | EVERGREEN_CURSOR_FORCE_MC_ON;
+	Write32(OUT, EVERGREEN_CUR_CONTROL, control);
+
+	Write32(OUT, EVERGREEN_CUR_UPDATE, EVERGREEN_CURSOR_UPDATE_LOCK);
+	for (volatile int i = 0; i < 1000; i++) ;
+	Write32(OUT, EVERGREEN_CUR_UPDATE, 0);
+
+	return B_OK;
 }
 
 void radeon_move_cursor(uint16 x, uint16 y)
