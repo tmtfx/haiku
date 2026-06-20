@@ -189,6 +189,11 @@ struct SharedInfo {
 	uint32	cobOffset;			// offset in video memory
 
 	uint32	globalBitmapDesc;	// Global Bitmap Descriptor for BCI
+	
+	bool has_boot_info;
+    uint32 boot_width;
+    uint32 boot_height;
+    uint32 boot_depth;
 };
 
 

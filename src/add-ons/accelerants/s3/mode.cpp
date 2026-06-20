@@ -11,6 +11,7 @@
 #include <create_display_modes.h>		// common accelerant header file
 #include <string.h>
 #include <unistd.h>
+#include "common_modes.h"
 
 
 void 
@@ -224,84 +225,137 @@ IsModeUsable(const display_mode* mode)
 	return true;
 }
 
-
 status_t
 CreateModeList( bool (*checkMode)(const display_mode* mode),
-				bool (*getEdid)(edid1_info& edidInfo))
+                bool (*getEdid)(edid1_info& edidInfo))
 {
-	SharedInfo& si = *gInfo.sharedInfo;
+    SharedInfo& si = *gInfo.sharedInfo;
 
-	// Obtain EDID info which is needed for for building the mode list.
-	// However, if a laptop's LCD display is active, bypass getting the EDID
-	// info since it is not needed, and if the external display supports only
-	// resolutions smaller than the size of the laptop LCD display, it would
-	// unnecessarily restrict size of the resolutions that could be set for
-	// laptop LCD display.
+    // Obtain EDID info which is needed for for building the mode list.
+    si.bHaveEDID = false;
 
-	si.bHaveEDID = false;
+    if (si.displayType != MT_LCD) {
+        if (getEdid != NULL)
+            si.bHaveEDID = getEdid(si.edidInfo);
 
-	if (si.displayType != MT_LCD) {
-		if (getEdid != NULL)
-			si.bHaveEDID = getEdid(si.edidInfo);
+        if ( ! si.bHaveEDID) {
+            S3GetEDID ged;
+            ged.magic = S3_PRIVATE_DATA_MAGIC;
 
-		if ( ! si.bHaveEDID) {
-			S3GetEDID ged;
-			ged.magic = S3_PRIVATE_DATA_MAGIC;
+            if (ioctl(gInfo.deviceFileDesc, S3_GET_EDID, &ged, sizeof(ged)) == B_OK) {
+                if (ged.rawEdid.version.version != 1
+                        || ged.rawEdid.version.revision > 4) {
+                    TRACE("CreateModeList(); EDID version %d.%d out of range\n",
+                        ged.rawEdid.version.version, ged.rawEdid.version.revision);
+                } else {
+                    edid_decode(&si.edidInfo, &ged.rawEdid);    // decode & save EDID info
+                    si.bHaveEDID = true;
+                }
+            }
+        }
 
-			if (ioctl(gInfo.deviceFileDesc, S3_GET_EDID, &ged, sizeof(ged)) == B_OK) {
-				if (ged.rawEdid.version.version != 1
-						|| ged.rawEdid.version.revision > 4) {
-					TRACE("CreateModeList(); EDID version %d.%d out of range\n",
-						ged.rawEdid.version.version, ged.rawEdid.version.revision);
-				} else {
-					edid_decode(&si.edidInfo, &ged.rawEdid);	// decode & save EDID info
-					si.bHaveEDID = true;
-				}
-			}
-		}
-
-		if (si.bHaveEDID) {
+        if (si.bHaveEDID) {
 #ifdef ENABLE_DEBUG_TRACE
-			edid_dump(&(si.edidInfo));
+            edid_dump(&(si.edidInfo));
 #endif
-		} else {
-			TRACE("CreateModeList(); Unable to get EDID info\n");
-		}
-	}
+        } else {
+            TRACE("CreateModeList(); Unable to get EDID info\n");
+        }
+    }
 
-	display_mode* list;
-	uint32 count = 0;
-	area_id listArea;
+    display_mode* list;
+    uint32 count = 0;
+    area_id listArea;
 
-	listArea = create_display_modes("S3 modes",
-		si.bHaveEDID ? &si.edidInfo : NULL,
-		NULL, 0, si.colorSpaces, si.colorSpaceCount, 
-		(check_display_mode_hook)checkMode, &list, &count);
+    listArea = create_display_modes("S3 modes",
+        si.bHaveEDID ? &si.edidInfo : NULL,
+        NULL, 0, si.colorSpaces, si.colorSpaceCount, 
+        (check_display_mode_hook)checkMode, &list, &count);
 
-	if (listArea < 0)
-		return listArea;		// listArea has error code
+    if (listArea < 0)
+        return listArea;        // listArea has error code
 
-	si.modeArea = gInfo.modeListArea = listArea;
-	si.modeCount = count;
-	gInfo.modeList = list;
+    // ─────────────────────────────
+    // !!! FALLBACK WITHOUT EDID !!!
+    // ─────────────────────────────
+    if (!si.bHaveEDID) {
+        TRACE("CreateModeList(): no EDID. Overwriting list with fallback resolution.\n");
 
-	return B_OK;
+        bool found = false;
+        display_mode fallbackMode;
+        memset(&fallbackMode, 0, sizeof(display_mode));
+
+        if (si.has_boot_info) {
+            uint32 bootBpp = (si.boot_depth <= 8) ? 1 : 2;
+            if (si.boot_depth > 16) bootBpp = 4;
+            
+            uint32 bootMemory = si.boot_width * si.boot_height * bootBpp;
+
+            if (bootMemory < si.videoMemSize) {
+                for (int i = 0; vesa_dmt_table[i].width != 0; i++) {
+                    if (vesa_dmt_table[i].width == si.boot_width 
+                        && vesa_dmt_table[i].height == si.boot_height) {
+                        
+                        fallbackMode.timing.pixel_clock = vesa_dmt_table[i].pixel_clock;
+                        fallbackMode.timing.h_display    = vesa_dmt_table[i].width;
+                        fallbackMode.timing.h_sync_start = vesa_dmt_table[i].h_sync_start;
+                        fallbackMode.timing.h_sync_end   = vesa_dmt_table[i].h_sync_end;
+                        fallbackMode.timing.h_total      = vesa_dmt_table[i].h_total;
+                        
+                        fallbackMode.timing.v_display    = vesa_dmt_table[i].height;
+                        fallbackMode.timing.v_sync_start = vesa_dmt_table[i].v_sync_start;
+                        fallbackMode.timing.v_sync_end   = vesa_dmt_table[i].v_sync_end;
+                        fallbackMode.timing.v_total      = vesa_dmt_table[i].v_total;
+                        fallbackMode.timing.flags        = vesa_dmt_table[i].flags;
+                        
+                        found = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (!found) {
+            TRACE("CreateModeList(): Strinct fallback to 1024x768 (safe for video RAM size)\n");
+            fallbackMode.timing.pixel_clock = 65000;
+            fallbackMode.timing.h_display    = 1024;
+            fallbackMode.timing.h_sync_start = 1048;
+            fallbackMode.timing.h_sync_end   = 1184;
+            fallbackMode.timing.h_total      = 1344;
+            
+            fallbackMode.timing.v_display    = 768;
+            fallbackMode.timing.v_sync_start = 771;
+            fallbackMode.timing.v_sync_end   = 777;
+            fallbackMode.timing.v_total      = 806;
+            fallbackMode.timing.flags        = 0;
+        }
+
+        if (si.has_boot_info && si.boot_depth <= 8) {
+            fallbackMode.space = B_CMAP8;
+        } else {
+            fallbackMode.space = B_RGB16;
+        }
+
+        fallbackMode.virtual_width = fallbackMode.timing.h_display;
+        fallbackMode.virtual_height = fallbackMode.timing.v_display;
+        fallbackMode.h_display_start = 0;
+        fallbackMode.v_display_start = 0;
+
+        if (count > 0) {
+            list[0] = fallbackMode;
+            count = 1;
+        }
+    }
+
+    si.modeArea = gInfo.modeListArea = listArea;
+    si.modeCount = count;
+    gInfo.modeList = list;
+
+    return B_OK;
 }
 
+/*
 
-
-status_t
-ProposeDisplayMode(display_mode *target, const display_mode *low,
-	const display_mode *high)
-{
-	(void)low;		// avoid compiler warning for unused arg
-	(void)high;		// avoid compiler warning for unused arg
-
-	TRACE("ProposeDisplayMode()  %dx%d, pixel clock: %d kHz, space: 0x%X\n",
-		target->timing.h_display, target->timing.v_display,
-		target->timing.pixel_clock, target->space);
-
-	// Search the mode list for the specified mode.
 
 	uint32 modeCount = gInfo.sharedInfo->modeCount;
 
@@ -315,8 +369,65 @@ ProposeDisplayMode(display_mode *target, const display_mode *low,
 	}
 
 	return B_BAD_VALUE;		// mode not found in list
-}
+}*/
+status_t
+ProposeDisplayMode(display_mode *target, const display_mode *low,
+    const display_mode *high)
+{
+	(void)low;		// avoid compiler warning for unused arg
+	(void)high;		// avoid compiler warning for unused arg
+	
+    TRACE("ProposeDisplayMode() %dx%d, pixel clock: %d kHz, space: 0x%X\n",
+        target->timing.h_display, target->timing.v_display,
+        target->timing.pixel_clock, target->space);
 
+    SharedInfo& si = *(gInfo.sharedInfo);
+
+    uint32 bytesPerPixel = 0;
+    switch (target->space) {
+        case B_CMAP8:  bytesPerPixel = 1; break;
+        case B_RGB15:
+        case B_RGB16:  bytesPerPixel = 2; break;
+        case B_RGB32:  bytesPerPixel = 4; break;
+        default:
+            TRACE("ProposeDisplayMode(): Color space not supported 0x%X\n", target->space);
+            return B_BAD_VALUE;
+    }
+
+    uint32 requiredMemory = target->timing.h_display * target->timing.v_display * bytesPerPixel;
+    
+    // Keep safe distance (200 KB) from total videoMemSize
+    if (si.videoMemSize > 0 && requiredMemory > (si.videoMemSize - (200 * 1024))) {
+        TRACE("ProposeDisplayMode(): REJECTED. Asked %" B_PRIu32 " bytes, available %" B_PRIu32 "\n",
+            requiredMemory, si.videoMemSize);
+        return B_BAD_VALUE; 
+    }
+
+	// Search the mode list for the specified mode.
+    uint32 modeCount = si.modeCount;
+    for (uint32 j = 0; j < modeCount; j++) {
+        display_mode& mode = gInfo.modeList[j];
+
+        if (target->timing.h_display == mode.timing.h_display
+            && target->timing.v_display == mode.timing.v_display
+            && target->space == mode.space) {
+            
+            *target = mode;
+            return B_OK;
+        }
+    }
+
+    // Fallback: if the app_server asks something outside the list (or rejects, look above),
+    // force hit to fallback to the first mode from the list (the safe boot one)
+    if (modeCount > 0) {
+        TRACE("ProposeDisplayMode(): Modalità non in lista. Forzo fallback a %dx%d\n", 
+            gInfo.modeList[0].timing.h_display, gInfo.modeList[0].timing.v_display);
+        *target = gInfo.modeList[0];
+        return B_OK;
+    }
+
+    return B_BAD_VALUE;
+}
 
 
 status_t 

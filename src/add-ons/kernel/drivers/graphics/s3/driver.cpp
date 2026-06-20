@@ -483,6 +483,18 @@ InitDevice(DeviceInfo& di)
 		return di.sharedArea;	// return error code
 
 	SharedInfo& si = *(di.sharedInfo);
+	
+	struct frame_buffer_boot_info* bi = (struct frame_buffer_boot_info*)get_boot_item(
+FRAME_BUFFER_BOOT_INFO, NULL);
+
+	if (bi) {
+		si.has_boot_info = true;
+		si.boot_width = bi->width;
+		si.boot_height = bi->height;
+		si.boot_depth = bi->depth;
+	} else {
+		si.has_boot_info = false;
+	}
 
 	si.vendorID = pciInfo.vendor_id;
 	si.deviceID = pciInfo.device_id;
