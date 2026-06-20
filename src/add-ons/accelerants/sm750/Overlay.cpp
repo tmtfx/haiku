@@ -70,7 +70,7 @@ sm750_overlay_supported_spaces(const display_mode *dm)
 {
 	CALLED();
     static const uint32 spaces[] = {
-    	B_RGB32,       // L'esca per far triggerare il Media Kit
+    	//B_RGB32,       // L'esca per far triggerare il Media Kit
         B_YCbCr422,	// YUY2 (most common)
         B_RGB16,	// RGB 5:6:5
         0
