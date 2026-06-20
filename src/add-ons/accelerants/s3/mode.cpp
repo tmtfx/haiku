@@ -231,7 +231,6 @@ CreateModeList( bool (*checkMode)(const display_mode* mode),
 {
     SharedInfo& si = *gInfo.sharedInfo;
 
-    // Obtain EDID info which is needed for for building the mode list.
     si.bHaveEDID = false;
 
     if (si.displayType != MT_LCD) {
@@ -248,7 +247,7 @@ CreateModeList( bool (*checkMode)(const display_mode* mode),
                     TRACE("CreateModeList(); EDID version %d.%d out of range\n",
                         ged.rawEdid.version.version, ged.rawEdid.version.revision);
                 } else {
-                    edid_decode(&si.edidInfo, &ged.rawEdid);    // decode & save EDID info
+                    edid_decode(&si.edidInfo, &ged.rawEdid);
                     si.bHaveEDID = true;
                 }
             }
@@ -267,85 +266,69 @@ CreateModeList( bool (*checkMode)(const display_mode* mode),
     uint32 count = 0;
     area_id listArea;
 
+    // Chiamata nativa ad Haiku (alloca l'area corretta). 
+    // Se bHaveEDID è false, genera la lista standard di fallback (8, 16, 32 bit).
     listArea = create_display_modes("S3 modes",
         si.bHaveEDID ? &si.edidInfo : NULL,
         NULL, 0, si.colorSpaces, si.colorSpaceCount, 
         (check_display_mode_hook)checkMode, &list, &count);
 
     if (listArea < 0)
-        return listArea;        // listArea has error code
+        return listArea;
 
-    // ─────────────────────────────
-    // !!! FALLBACK WITHOUT EDID !!!
-    // ─────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
+    // INTERVENTO CHIRURGICO: Se l'EDID è fallito, filtriamo la lista in base alla RAM
+    // ─────────────────────────────────────────────────────────────────────
     if (!si.bHaveEDID) {
-        TRACE("CreateModeList(): no EDID. Overwriting list with fallback resolution.\n");
+        TRACE("CreateModeList(): EDID assente. Filtro la lista VESA standard per %" B_PRIu32 " byte di RAM\n", 
+            si.videoMemSize);
 
-        bool found = false;
-        display_mode fallbackMode;
-        memset(&fallbackMode, 0, sizeof(display_mode));
+        uint32 validCount = 0;
 
-        if (si.has_boot_info) {
-            uint32 bootBpp = (si.boot_depth <= 8) ? 1 : 2;
-            if (si.boot_depth > 16) bootBpp = 4;
-            
-            uint32 bootMemory = si.boot_width * si.boot_height * bootBpp;
-
-            if (bootMemory < si.videoMemSize) {
-                for (int i = 0; vesa_dmt_table[i].width != 0; i++) {
-                    if (vesa_dmt_table[i].width == si.boot_width 
-                        && vesa_dmt_table[i].height == si.boot_height) {
-                        
-                        fallbackMode.timing.pixel_clock = vesa_dmt_table[i].pixel_clock;
-                        fallbackMode.timing.h_display    = vesa_dmt_table[i].width;
-                        fallbackMode.timing.h_sync_start = vesa_dmt_table[i].h_sync_start;
-                        fallbackMode.timing.h_sync_end   = vesa_dmt_table[i].h_sync_end;
-                        fallbackMode.timing.h_total      = vesa_dmt_table[i].h_total;
-                        
-                        fallbackMode.timing.v_display    = vesa_dmt_table[i].height;
-                        fallbackMode.timing.v_sync_start = vesa_dmt_table[i].v_sync_start;
-                        fallbackMode.timing.v_sync_end   = vesa_dmt_table[i].v_sync_end;
-                        fallbackMode.timing.v_total      = vesa_dmt_table[i].v_total;
-                        fallbackMode.timing.flags        = vesa_dmt_table[i].flags;
-                        
-                        found = true;
-                        break;
-                    }
-                }
+        for (uint32 i = 0; i < count; i++) {
+            uint32 bytesPerPixel = 0;
+            switch (list[i].space) {
+                case B_CMAP8:  bytesPerPixel = 1; break;
+                case B_RGB15:
+                case B_RGB16:  bytesPerPixel = 2; break;
+                case B_RGB32:  bytesPerPixel = 4; break;
+                default: continue; // Salta spazi colore non codificati o non supportati
             }
+
+            // Calcolo reale della memoria occupata dal framebuffer primario
+            uint32 requiredMemory = list[i].timing.h_display * list[i].timing.v_display * bytesPerPixel;
+
+            // Filtro 1: Limite fisico della RAM della scheda (lasciando un margine di 256 KB)
+            if (si.videoMemSize > 0 && requiredMemory > (si.videoMemSize - (256 * 1024))) {
+                continue; // Troppa memoria richiesta, scarta questa modalità
+            }
+
+            // Filtro 2: Limite prudenziale sul pixel clock per la stabilità del chip ViRGE (max 135MHz)
+            if (list[i].timing.pixel_clock > 135000) {
+                continue; 
+            }
+
+            // Se supera i controlli, sovrascriviamo la modalità spostandola all'inizio della lista
+            list[validCount] = list[i];
+            validCount++;
         }
 
-        if (!found) {
-            TRACE("CreateModeList(): Strinct fallback to 1024x768 (safe for video RAM size)\n");
-            fallbackMode.timing.pixel_clock = 65000;
-            fallbackMode.timing.h_display    = 1024;
-            fallbackMode.timing.h_sync_start = 1048;
-            fallbackMode.timing.h_sync_end   = 1184;
-            fallbackMode.timing.h_total      = 1344;
-            
-            fallbackMode.timing.v_display    = 768;
-            fallbackMode.timing.v_sync_start = 771;
-            fallbackMode.timing.v_sync_end   = 777;
-            fallbackMode.timing.v_total      = 806;
-            fallbackMode.timing.flags        = 0;
+        // Caso limite: se il filtro ha svuotato tutto (improbabile), forziamo una risoluzione minima
+        if (validCount == 0) {
+            TRACE("CreateModeList(): Nessuna modalità compatibile con la RAM, imposto safe fallback\n");
+            memset(&list[0], 0, sizeof(display_mode));
+            list[0].timing.pixel_clock = 65000;
+            list[0].timing.h_display = 1024; list[0].timing.h_sync_start = 1048; list[0].timing.h_sync_end = 1184; list[0].timing.h_total = 1344;
+            list[0].timing.v_display = 768;  list[0].timing.v_sync_start = 771;  list[0].timing.v_sync_end = 777;  list[0].timing.v_total = 806;
+            list[0].space = B_RGB16;
+            list[0].virtual_width = 1024; list[0].virtual_height = 768;
+            validCount = 1;
         }
 
-        if (si.has_boot_info && si.boot_depth <= 8) {
-            fallbackMode.space = B_CMAP8;
-        } else {
-            fallbackMode.space = B_RGB16;
-        }
-
-        fallbackMode.virtual_width = fallbackMode.timing.h_display;
-        fallbackMode.virtual_height = fallbackMode.timing.v_display;
-        fallbackMode.h_display_start = 0;
-        fallbackMode.v_display_start = 0;
-
-        if (count > 0) {
-            list[0] = fallbackMode;
-            count = 1;
-        }
+        count = validCount;
+        TRACE("CreateModeList(): Generate %" B_PRIu32 " modalità filtrate (comprese quelle a 32bit leggere).\n", count);
     }
+    // ─────────────────────────────────────────────────────────────────────
 
     si.modeArea = gInfo.modeListArea = listArea;
     si.modeCount = count;
