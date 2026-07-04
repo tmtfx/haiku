@@ -40,6 +40,7 @@ crypto_open_modern(void* device_cookie, const char* name, int flags, void** cook
         return B_NO_MEMORY;
 
     memset(session, 0, sizeof(crypto_session));
+    mutex_init(&session->lock, "crypto session");
     session->is_active = false;
     
     *cookie = session;
@@ -84,6 +85,7 @@ crypto_close(void* cookie)
     }
 
     // Ora che lo stato interno è certamente pulito, cancelliamo la sessione.
+    mutex_destroy(&session->lock);
     secure_memzero(session, sizeof(crypto_session));
     free(session);
 

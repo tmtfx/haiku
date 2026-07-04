@@ -98,13 +98,12 @@ void bcrypto_restore_regs(BCryptoFPUContext* ctx) {
     }
 }
 
-struct MutexLocking {
-    typedef mutex* Lockable;
-    static inline status_t Lock(Lockable lock) { return mutex_lock(lock); }
-    static inline void Unlock(Lockable lock) { mutex_unlock(lock); }
-};
-
-static mutex sCryptoLock;
+// rw_lock protects the sAlgorithms list:
+//   - Multiple concurrent read-lock holders can search/use algorithms in parallel.
+//   - Write lock is held only during BRegisterCryptoAlgorithm / BUnregisterCryptoAlgorithm.
+// Per-session operations also hold crypto_session::lock to protect session state,
+// allowing different sessions to run fully in parallel.
+static rw_lock sAlgoListLock;
 static bool sCoreInitialized = false;
 
 struct AlgoNode : DoublyLinkedListLinkImpl<AlgoNode> {
@@ -119,12 +118,12 @@ crypto_init_core()
 {
     if (sCoreInitialized) return B_OK;
     
-    mutex_init(&sCryptoLock, "crypto core lock");
+    rw_lock_init(&sAlgoListLock, "crypto algo list");
     
     // 1. Inizializza il manager dei dispositivi
     status_t status = crypto_manager_init();
     if (status != B_OK) {
-        mutex_destroy(&sCryptoLock);
+        rw_lock_destroy(&sAlgoListLock);
         return status;
     }
     
@@ -147,13 +146,15 @@ crypto_uninit_core()
     if (!sCoreInitialized) return;
     
     // Svuota la lista degli algoritmi
-    MutexLocker _(&sCryptoLock);
-    while (AlgoNode* node = sAlgorithms.RemoveHead()) {
-        delete node;
+    {
+        WriteLocker _(sAlgoListLock);
+        while (AlgoNode* node = sAlgorithms.RemoveHead()) {
+            delete node;
+        }
     }
 
     crypto_manager_uninit();
-    mutex_destroy(&sCryptoLock);
+    rw_lock_destroy(&sAlgoListLock);
     
     sCoreInitialized = false;
     sCryptoCapabilities = 0;
@@ -183,7 +184,7 @@ _FindAlgorithm(BCryptoAlgorithmID id, BCryptoMode mode)
 status_t
 BCheckAlgorithmAvailability(BCryptoAlgorithmID id)
 {
-    MutexLocker _(sCryptoLock);
+    ReadLocker _(sAlgoListLock);
     
     DoublyLinkedList<AlgoNode>::Iterator it = sAlgorithms.GetIterator();
     while (AlgoNode* node = it.Next()) {
@@ -201,7 +202,7 @@ BGetAlgorithmInfo(BCryptoAlgorithmInfo* info)
     if (info == NULL)
         return B_BAD_VALUE;
 
-    MutexLocker _(sCryptoLock);
+    ReadLocker _(sAlgoListLock);
     
     uint32 target = info->cookie;
     uint32 current = 0;
@@ -244,7 +245,7 @@ BRegisterCryptoAlgorithm(BCryptoAlgorithm* algorithm)
 	if (!algorithm)
         return B_BAD_VALUE;
         
-    MutexLocker _(sCryptoLock);
+    WriteLocker _(sAlgoListLock);
 
     AlgoNode* node = new(std::nothrow) AlgoNode;
     if (node == NULL)
@@ -273,7 +274,7 @@ BRegisterCryptoAlgorithm(BCryptoAlgorithm* algorithm)
 status_t
 BUnregisterCryptoAlgorithm(BCryptoAlgorithmID algorithm)
 {
-	MutexLocker _(sCryptoLock);
+	WriteLocker _(sAlgoListLock);
 	
 	DoublyLinkedList<AlgoNode>::Iterator it = sAlgorithms.GetIterator();
 	while (AlgoNode* node = it.Next()) {
@@ -298,9 +299,11 @@ static status_t _FinalizeRequest(BCryptoRequest* request, status_t st) {
 status_t
 BHashInit(crypto_session* session)
 {
-    MutexLocker _(sCryptoLock);
+    ReadLocker listLock(sAlgoListLock);
     AlgoNode* node = _FindAlgorithm(session->algorithm, B_CRYPTO_MODE_ANY);
     if (!node || !node->algo->HashInit) return B_NOT_SUPPORTED;
+
+    MutexLocker sessionLock(session->lock);
 
     status_t st = node->algo->HashInit(&session->algorithm_state, &session->state_size);
     if (st == B_OK) {
@@ -331,9 +334,11 @@ BHashInit(crypto_session* session)
 status_t
 BHashUpdate(crypto_session* session, BCryptoUserRequest* request)
 {
-    MutexLocker _(sCryptoLock);
+    ReadLocker listLock(sAlgoListLock);
     AlgoNode* node = _FindAlgorithm(session->algorithm, B_CRYPTO_MODE_ANY);
     if (!node || !node->algo->HashUpdate) return B_NOT_SUPPORTED;
+
+    MutexLocker sessionLock(session->lock);
     
     // Lock della memoria sorgente (chunk attuale)
     status_t st = B_OK;
@@ -380,7 +385,10 @@ BHashFinal(crypto_session* session, BCryptoUserRequest* request)
     if (session == NULL)
         return B_BAD_VALUE;
 
-    MutexLocker _(sCryptoLock);
+    // Consistent lock order: list lock first, then session lock.
+    // If the session is not active we still take both to avoid deadlock.
+    ReadLocker listLock(sAlgoListLock);
+    MutexLocker sessionLock(session->lock);
     status_t st = B_OK;
 
     // 2. FASE DI CALCOLO (Solo se la sessione è attiva e abbiamo una richiesta)
@@ -434,15 +442,15 @@ BHashFinal(crypto_session* session, BCryptoUserRequest* request)
 status_t
 BStreamInit(crypto_session* session, BCryptoRequest* req)
 {
-	MutexLocker _(sCryptoLock);
-    //BCryptoAlgorithm* algo = _FindAlgorithm(session->algorithm, session->mode);
+	ReadLocker listLock(sAlgoListLock);
     AlgoNode* node = _FindAlgorithm(session->algorithm, session->mode);
-    //if (!node || !node->algo->StreamInit) return B_NOT_SUPPORTED;
     if (!node) return B_NOT_SUPPORTED;
     if (node->algo->StreamInit == nullptr) {
         dprintf("CryptoCore: Errore - l'algoritmo %d non supporta lo streaming!\n", session->algorithm);
         return B_NOT_SUPPORTED;
     }
+
+    MutexLocker sessionLock(session->lock);
 
     void* context = nullptr;
     size_t actualSize = 0;
@@ -478,10 +486,11 @@ BStreamInit(crypto_session* session, BCryptoRequest* req)
 status_t
 BStreamUpdate(crypto_session* session, BCryptoRequest* req)
 {
-	MutexLocker _(sCryptoLock);
-    //BCryptoAlgorithm* algo = _FindAlgorithm(session->algorithm, session->mode);
+	ReadLocker listLock(sAlgoListLock);
     AlgoNode* node = _FindAlgorithm(session->algorithm, session->mode);
     if (!node || !node->algo->StreamUpdate) return B_NOT_SUPPORTED;
+
+    MutexLocker sessionLock(session->lock);
     
     status_t st = B_OK;
     size_t lockedSrcCount = 0;
@@ -529,9 +538,11 @@ BStreamUpdate(crypto_session* session, BCryptoRequest* req)
 status_t
 BStreamFinal(crypto_session* session, BCryptoRequest* req)
 {
-	MutexLocker _(sCryptoLock);
+	ReadLocker listLock(sAlgoListLock);
     AlgoNode* node = _FindAlgorithm(session->algorithm, session->mode);
     if (!node || !node->algo->StreamFinal) return B_NOT_SUPPORTED;
+
+    MutexLocker sessionLock(session->lock);
     
     if (session->algorithm_state == nullptr) return B_BAD_VALUE;
 
@@ -581,7 +592,8 @@ status_t
 BStreamUninit(crypto_session* session) {
     if (session == NULL || session->algorithm_state == NULL)
         return B_OK;
-    
+
+    MutexLocker sessionLock(session->lock);
 
     SoftAEADContext* aead = (SoftAEADContext*)session->algorithm_state;
     
@@ -606,7 +618,7 @@ BSubmitCryptoRequest(BCryptoRequest* request)
         return B_BAD_VALUE;
     }
 
-    MutexLocker _(sCryptoLock);
+    ReadLocker _(sAlgoListLock);
     
     AlgoNode* node = _FindAlgorithm(request->algorithm, request->mode);
     if (!node)

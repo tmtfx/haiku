@@ -8,6 +8,7 @@
 #include <OS.h>
 #include <SupportDefs.h>
 #include <iovec.h>
+#include <lock.h>
 #include <crypto/BCryptoDefs.h>
 #include <arch/x86/arch_cpu.h>
 
@@ -37,6 +38,7 @@ struct BCryptoRequest {
 };
 
 struct crypto_session {
+	mutex               lock;        // Per-session mutex: protects session state
 	BCryptoOperation    op;
     BCryptoAlgorithmID  algorithm;
     void*               algorithm_state; // Puntatore al contesto specifico (es: SHA256_CTX)
