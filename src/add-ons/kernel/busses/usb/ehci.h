@@ -236,6 +236,7 @@ inline	uint32						ReadCapReg32(uint32 reg);
 		sem_id						fCleanupSem;
 		thread_id					fCleanupThread;
 		bool						fStopThreads;
+		int32						fHostSystemError;
 		int32						fNextStartingFrame;
 
 		// fFrameBandwidth[n] holds the available bandwidth

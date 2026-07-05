@@ -342,6 +342,7 @@ EHCI::EHCI(pci_info *info, pci_device_module_info* pci, pci_device* device, Stac
 		fCleanupSem(-1),
 		fCleanupThread(-1),
 		fStopThreads(false),
+		fHostSystemError(0),
 		fNextStartingFrame(-1),
 		fFrameBandwidth(NULL),
 		fFirstIsochronousTransfer(NULL),
@@ -1615,8 +1616,14 @@ EHCI::Interrupt()
 		result = B_INVOKE_SCHEDULER;
 	}
 
-	if (status & EHCI_USBSTS_HOSTSYSERR)
+	if (status & EHCI_USBSTS_HOSTSYSERR) {
 		TRACE_ERROR("host system error!\n");
+		// Set with a barrier so the finisher thread reliably observes it.
+		atomic_set(&fHostSystemError, 1);
+		// Wake isochronous finisher so it can abort gracefully
+		release_sem_etc(fFinishIsochronousTransfersSem, 1,
+			B_DO_NOT_RESCHEDULE);
+	}
 
 	WriteOpReg(EHCI_USBSTS, status);
 	release_spinlock(&lock);
@@ -2130,6 +2137,25 @@ EHCI::FinishIsochronousTransfers()
 		// Go to sleep if there are no isochronous transfers to process
 		if (acquire_sem(fFinishIsochronousTransfersSem) != B_OK)
 			return;
+
+		// Check for host system error before processing descriptors.
+		// After HSE, DMA memory may be corrupted and accessing iTD
+		// fields can cause a General Protection Exception panic.
+		if (atomic_get(&fHostSystemError) != 0) {
+			TRACE_ERROR("host system error detected, cancelling "
+				"isochronous transfers\n");
+			if (LockIsochronous()) {
+				isochronous_transfer_data *transfer
+					= fFirstIsochronousTransfer;
+				while (transfer != NULL) {
+					transfer->is_active = false;
+					transfer = transfer->link;
+				}
+				UnlockIsochronous();
+			}
+			atomic_set(&fHostSystemError, 0);
+			continue;
+		}
 
 		bool transferDone = false;
 
