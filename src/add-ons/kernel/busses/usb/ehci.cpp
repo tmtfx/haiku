@@ -1731,6 +1731,8 @@ EHCI::AddPendingIsochronousTransfer(Transfer *transfer, ehci_itd **isoRequest,
 
 	data->transfer = transfer;
 	data->descriptors = isoRequest;
+	data->is_split = false;
+	data->sitd_descriptors = NULL;
 	data->last_to_process = lastIndex;
 	data->incoming = directionIn;
 	data->is_active = true;
