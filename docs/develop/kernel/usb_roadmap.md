@@ -43,12 +43,12 @@ Legenda gravità: **C**ritica · **A**lta · **M**edia · **B**assa.
   - Fix: spostare il controllo `fArray[..][index]==0` dentro la sezione bloccata.
   - Accettazione: nessuna corruzione con alloc/free concorrenti (stress test).
   - Commit: 62c3e08d · Verificato: revisione codice; build/test in FASE 2
-- [~] **USB-STAB-04** (A) — Refcount letto/free fuori lock in `usb_raw_device_removed`.
+- [x] **USB-STAB-04** (A) — Refcount letto/free fuori lock in `usb_raw_device_removed`.
   - File: `src/add-ons/kernel/drivers/bus/usb/usb_raw.cpp:126–134`
   - Fix: spostato `device->device = 0` e il free dentro `gDeviceListLock` (dove open/free
     aggiornano `reference_count`), chiudendo la race sul device a metà rimozione.
   - Accettazione: unplug durante ioctl attivo non produce UAF (test hotplug ripetuto).
-  - Commit: nel working tree, NON committato (file con tuo WIP isocrono) · Verificato: revisione codice
+  - Commit: bbbe11e9 (solo l'hunk device_removed; WIP iso ioctl lasciato intatto) · Verificato: revisione codice; build/test in FASE 2
 - [x] **USB-STAB-05** (M) — Parsing config descriptor: over‑read di 1 byte e hang su `length==0`.
   - File: `src/add-ons/kernel/bus_managers/usb/Device.cpp:141–142` (+ avanzamento in coda al loop)
   - Fix: validare `descriptorStart+2 <= actualLength` prima di leggere il tipo; se il
@@ -60,11 +60,11 @@ Legenda gravità: **C**ritica · **A**lta · **M**edia · **B**assa.
   - Fix: rifiutare `packet_count == 0` a monte in `UHCI::SubmitIsochronous`.
   - Accettazione: ioctl isocrono con `packet_count=0` → `B_BAD_VALUE`, niente div‑by‑zero.
   - Commit: d98d5f2f · Verificato: revisione codice; build/test in FASE 2
-- [~] **USB-STAB-07** (M) — `fHostSystemError` è `volatile bool` senza barriere.
+- [x] **USB-STAB-07** (M) — `fHostSystemError` è `volatile bool` senza barriere.
   - File: `src/add-ons/kernel/busses/usb/ehci.h:234`, `ehci.cpp:1621`/`2141`
   - Fix: `int32` + `atomic_set/atomic_get` per la visibilità cross‑CPU.
   - Accettazione: il finisher vede il flag in modo affidabile; nessun accesso a iTD post‑HSE.
-  - Commit: nel working tree, NON committato (file con tuo WIP isocrono) · Verificato: revisione codice
+  - Commit: 497a2d0d (include l'intera feature HSE EHCI, prima non committata) · Verificato: revisione codice; build/test in FASE 2
 
 **Uscita FASE 0:** tutte `[x]`; nessun panico/hang nei percorsi control/bulk/interrupt/iso di base.
 
