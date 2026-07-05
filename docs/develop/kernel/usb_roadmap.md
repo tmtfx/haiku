@@ -87,7 +87,7 @@ Legenda gravità: **C**ritica · **A**lta · **M**edia · **B**assa.
   - File: `src/add-ons/kernel/busses/usb/ehci.cpp` (`SubmitIsochronous` :1159 crea solo ITD; scaffolding siTD già presente: `CreateSitdDescriptor` :2708, `Link/UnlinkSITDescriptors`, `fSitdEntries`)
   - Analisi (2026-07-05): il path di finish è ITD‑only e va generalizzato; `isochronous_transfer_data` non può contenere siTD; campi hub/porta/speed disponibili via `pipe->HubAddress()/HubPort()/Speed()` (vedi `InitQueueHead` :2333).
   - Sotto‑task:
-    - [ ] ROB-03a — Estendere `isochronous_transfer_data` per contenere siTD (flag `is_split` + storage), così finish/free gestiscono entrambi.
+    - [x] ROB-03a — Estendere `isochronous_transfer_data` per contenere siTD (flag `is_split` + storage). Commit a5958100 (plumbing additivo; attende build utente).
     - [ ] ROB-03b — Builder siTD in `SubmitIsochronous` per pipe non‑HS: programmare device/endpoint/hub/port, direzione, smask/cmask (budget split FS ≤188 B/microframe), `buffer_phy[0/1]`, `transfer_length`; linkare in `fSitdEntries[frame]`.
     - [ ] ROB-03c — Generalizzare `FinishIsochronousTransfers` per distinguere itd/sitd (bit `EHCI_ITEM_TYPE_SITD`) e processare il completamento siTD (`status`, residuo `transfer_length`), poi free.
     - [ ] ROB-03d — Copia dati siTD IN/OUT (ROB-08 fatto: `WriteIsochronousDescriptorChain` ora disponibile per l'OUT).
