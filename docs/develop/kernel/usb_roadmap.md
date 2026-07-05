@@ -90,14 +90,15 @@ Legenda gravità: **C**ritica · **A**lta · **M**edia · **B**assa.
     - [ ] ROB-03a — Estendere `isochronous_transfer_data` per contenere siTD (flag `is_split` + storage), così finish/free gestiscono entrambi.
     - [ ] ROB-03b — Builder siTD in `SubmitIsochronous` per pipe non‑HS: programmare device/endpoint/hub/port, direzione, smask/cmask (budget split FS ≤188 B/microframe), `buffer_phy[0/1]`, `transfer_length`; linkare in `fSitdEntries[frame]`.
     - [ ] ROB-03c — Generalizzare `FinishIsochronousTransfers` per distinguere itd/sitd (bit `EHCI_ITEM_TYPE_SITD`) e processare il completamento siTD (`status`, residuo `transfer_length`), poi free.
-    - [ ] ROB-03d — Copia dati siTD IN/OUT (dipende da ROB-08).
+    - [ ] ROB-03d — Copia dati siTD IN/OUT (ROB-08 fatto: `WriteIsochronousDescriptorChain` ora disponibile per l'OUT).
     - [ ] ROB-03e — Accounting di banda per l'isocrono split FS.
   - Accettazione: webcam/audio USB1.1 dietro hub USB2 streamano.
   - NOTA: timing‑critical, non build/hardware‑testabile qui → richiede compilazione + test su hardware reale prima di `[x]`.
-- [ ] **USB-ROB-08** (A) — `WriteIsochronousDescriptorChain()` è uno stub `// TODO implement`.
+- [x] **USB-ROB-08** (A) — `WriteIsochronousDescriptorChain()` è uno stub `// TODO implement`.
   - File: `src/add-ons/kernel/busses/usb/ehci.cpp:2958`
-  - Impatto: **l'isocrono OUT è rotto anche in high‑speed** — `SubmitIsochronous` azzera il buffer e non copia mai i dati utente. Prerequisito di ROB-03d.
-  - Fix: implementare la copia user→buffer per l'isocrono OUT (simmetrico a `ReadIsochronousDescriptorChain`).
+  - Impatto: **l'isocrono OUT era rotto anche in high‑speed** — `SubmitIsochronous` azzerava il buffer e non copiava mai i dati utente. Prerequisito di ROB-03d.
+  - Fix: implementata la copia vettori→buffer al submit (prima del linking degli ITD), `PrepareKernelAccess` + copia bounded; firma cambiata in `(Transfer*, bufferLog, bufferSize)`.
+  - Commit: 7400b447 · Verificato: revisione codice; attende build+test utente (workflow incrementale, non regredibile: il path OUT era già non funzionante)
 - [ ] **USB-ROB-04** (B) — Spinlock ISR per‑istanza invece di `static`.
   - File: `ehci.cpp:1575`, `ohci.cpp:~922`
   - Fix: membro `fInterruptLock` per controller.
