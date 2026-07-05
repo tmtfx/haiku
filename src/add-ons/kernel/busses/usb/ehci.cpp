@@ -1245,6 +1245,19 @@ EHCI::SubmitIsochronous(Transfer *transfer)
 
 	memset(bufferLog, 0, dataLength);
 
+	// For outbound transfers, fill the DMA buffer with the user data now,
+	// before the iTDs are linked into the schedule (the controller may start
+	// reading them as soon as they are linked).
+	if (!directionIn) {
+		result = transfer->PrepareKernelAccess();
+		if (result != B_OK) {
+			fStack->FreeChunk(bufferLog, bufferPhy, dataLength);
+			delete[] isoRequest;
+			return result;
+		}
+		WriteIsochronousDescriptorChain(transfer, bufferLog, dataLength);
+	}
+
 	phys_addr_t currentPhy = bufferPhy;
 	uint32 frameCount = 0;
 	while (dataLength > 0) {
@@ -3060,10 +3073,37 @@ EHCI::ReadActualLength(ehci_qtd *topDescriptor, bool *nextDataToggle)
 
 
 size_t
-EHCI::WriteIsochronousDescriptorChain(isochronous_transfer_data *transfer)
+EHCI::WriteIsochronousDescriptorChain(Transfer *transfer, void *bufferLog,
+	size_t bufferSize)
 {
-	// TODO implement
-	return 0;
+	// Unlike the read path this runs at submit time, before the descriptors
+	// are linked into the periodic schedule, so there is no
+	// isochronous_transfer_data yet. Copy the outbound data from the transfer
+	// vectors into the contiguous DMA buffer the iTDs point at.
+	generic_io_vec *vector = transfer->Vector();
+	size_t vectorCount = transfer->VectorCount();
+	const bool physical = transfer->IsPhysical();
+	size_t vectorIndex = 0;
+	size_t vectorOffset = 0;
+	size_t bufferOffset = 0;
+
+	while (bufferOffset < bufferSize && vectorIndex < vectorCount) {
+		size_t length = min_c(bufferSize - bufferOffset,
+			vector[vectorIndex].length - vectorOffset);
+		status_t status = generic_memcpy(
+			(generic_addr_t)bufferLog + bufferOffset, false,
+			vector[vectorIndex].base + vectorOffset, physical, length);
+		ASSERT_ALWAYS(status == B_OK);
+
+		bufferOffset += length;
+		vectorOffset += length;
+		if (vectorOffset >= vector[vectorIndex].length) {
+			vectorIndex++;
+			vectorOffset = 0;
+		}
+	}
+
+	return bufferOffset;
 }
 
 

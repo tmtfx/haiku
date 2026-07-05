@@ -191,7 +191,8 @@ static int32						FinishIsochronousThread(void *data);
 		size_t						ReadActualLength(ehci_qtd *topDescriptor,
 										bool *nextDataToggle);
 		size_t						WriteIsochronousDescriptorChain(
-										isochronous_transfer_data *transfer);
+										Transfer *transfer, void *bufferLog,
+										size_t bufferSize);
 		size_t						ReadIsochronousDescriptorChain(
 										isochronous_transfer_data *transfer);
 
