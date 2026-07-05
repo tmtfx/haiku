@@ -28,43 +28,43 @@ Legenda gravità: **C**ritica · **A**lta · **M**edia · **B**assa.
 > Obiettivo: eliminare i crash/hang certi senza cambiare architettura. Ogni voce è
 > stata verificata leggendo il sorgente.
 
-- [ ] **USB-STAB-01** (A) — `set_pipe_policy` casta un `bool` a puntatore.
+- [x] **USB-STAB-01** (A) — `set_pipe_policy` casta un `bool` a puntatore.
   - File: `src/add-ons/kernel/bus_managers/usb/usb.cpp:514`
   - Fix: `(IsochronousPipe *)object.IsSet()` → `(IsochronousPipe *)object.Get()`.
   - Accettazione: `set_pipe_policy` su pipe isocrona non causa crash; smoke test iso.
-  - Commit: ___  · Verificato: ___
-- [ ] **USB-STAB-02** (M) — Leak di `fMemoryWaitersCount` su timeout in `Allocate`.
+  - Commit: a3644135 · Verificato: revisione codice; build/test in FASE 2
+- [x] **USB-STAB-02** (M) — Leak di `fMemoryWaitersCount` su timeout in `Allocate`.
   - File: `src/add-ons/kernel/bus_managers/usb/PhysicalMemoryAllocator.cpp:206–220`
   - Fix: decrementare il contatore anche sul percorso `B_TIMED_OUT` prima del `break`.
   - Accettazione: sotto pressione di memoria il contatore torna a 0; niente `NotifyAll` spurii.
-  - Commit: ___  · Verificato: ___
-- [ ] **USB-STAB-03** (M) — TOCTOU nel double‑free check di `Deallocate`.
+  - Commit: f3863cda · Verificato: revisione codice; build/test in FASE 2
+- [x] **USB-STAB-03** (M) — TOCTOU nel double‑free check di `Deallocate`.
   - File: `src/add-ons/kernel/bus_managers/usb/PhysicalMemoryAllocator.cpp:268` (lettura fuori da `fLock` acquisito a 273)
   - Fix: spostare il controllo `fArray[..][index]==0` dentro la sezione bloccata.
   - Accettazione: nessuna corruzione con alloc/free concorrenti (stress test).
-  - Commit: ___  · Verificato: ___
-- [ ] **USB-STAB-04** (A) — Refcount letto/free fuori lock in `usb_raw_device_removed`.
+  - Commit: 62c3e08d · Verificato: revisione codice; build/test in FASE 2
+- [~] **USB-STAB-04** (A) — Refcount letto/free fuori lock in `usb_raw_device_removed`.
   - File: `src/add-ons/kernel/drivers/bus/usb/usb_raw.cpp:126–134`
-  - Fix: leggere `reference_count` e decidere la `free()` mantenendo `gDeviceListLock`
-    (o proteggere con `device->lock`); chiudere la finestra UAF con ioctl in volo.
+  - Fix: spostato `device->device = 0` e il free dentro `gDeviceListLock` (dove open/free
+    aggiornano `reference_count`), chiudendo la race sul device a metà rimozione.
   - Accettazione: unplug durante ioctl attivo non produce UAF (test hotplug ripetuto).
-  - Commit: ___  · Verificato: ___
-- [ ] **USB-STAB-05** (M) — Parsing config descriptor: over‑read di 1 byte e hang su `length==0`.
+  - Commit: nel working tree, NON committato (file con tuo WIP isocrono) · Verificato: revisione codice
+- [x] **USB-STAB-05** (M) — Parsing config descriptor: over‑read di 1 byte e hang su `length==0`.
   - File: `src/add-ons/kernel/bus_managers/usb/Device.cpp:141–142` (+ avanzamento in coda al loop)
   - Fix: validare `descriptorStart+2 <= actualLength` prima di leggere il tipo; se il
     campo `length` è 0 abortire il parse invece di ciclare.
   - Accettazione: descrittore malformato (length 0 / troncato) → errore pulito, niente hang.
-  - Commit: ___  · Verificato: ___
-- [ ] **USB-STAB-06** (M) — Guardie mancanti contro `packet_count == 0` nei percorsi isocroni.
-  - File: `src/add-ons/kernel/busses/usb/uhci.cpp:~1260`, `ohci.cpp:~2161` (verificare esatti)
-  - Fix: rifiutare `packet_count == 0` a monte; controllare overflow di `packetSize`.
+  - Commit: 5fe1f7fd · Verificato: revisione codice; build/test in FASE 2
+- [x] **USB-STAB-06** (M) — Guardie mancanti contro `packet_count == 0` nei percorsi isocroni.
+  - File: `src/add-ons/kernel/busses/usb/uhci.cpp:1258` (OHCI aveva già la guardia a `ohci.cpp:2156`)
+  - Fix: rifiutare `packet_count == 0` a monte in `UHCI::SubmitIsochronous`.
   - Accettazione: ioctl isocrono con `packet_count=0` → `B_BAD_VALUE`, niente div‑by‑zero.
-  - Commit: ___  · Verificato: ___
-- [ ] **USB-STAB-07** (M) — `fHostSystemError` è `volatile bool` senza barriere.
+  - Commit: d98d5f2f · Verificato: revisione codice; build/test in FASE 2
+- [~] **USB-STAB-07** (M) — `fHostSystemError` è `volatile bool` senza barriere.
   - File: `src/add-ons/kernel/busses/usb/ehci.h:234`, `ehci.cpp:1621`/`2141`
-  - Fix: usare `int32` + `atomic_set/atomic_get` (o barriere esplicite) per la visibilità cross‑CPU.
+  - Fix: `int32` + `atomic_set/atomic_get` per la visibilità cross‑CPU.
   - Accettazione: il finisher vede il flag in modo affidabile; nessun accesso a iTD post‑HSE.
-  - Commit: ___  · Verificato: ___
+  - Commit: nel working tree, NON committato (file con tuo WIP isocrono) · Verificato: revisione codice
 
 **Uscita FASE 0:** tutte `[x]`; nessun panico/hang nei percorsi control/bulk/interrupt/iso di base.
 
