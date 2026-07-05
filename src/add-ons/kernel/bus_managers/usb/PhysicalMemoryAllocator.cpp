@@ -210,8 +210,13 @@ PhysicalMemoryAllocator::Allocate(size_t size, void **logicalAddress,
 		TRACE_ERROR(("PMA: found no free slot to store %ld bytes, waiting\n",
 			size));
 
-		if (entry.Wait(B_RELATIVE_TIMEOUT, 1 * 1000 * 1000) == B_TIMED_OUT)
+		if (entry.Wait(B_RELATIVE_TIMEOUT, 1 * 1000 * 1000) == B_TIMED_OUT) {
+			// Re-acquire the lock to drop our waiter count before giving up.
+			// Otherwise Deallocate() keeps signalling a waiter that is gone.
+			if (locker.Lock())
+				fMemoryWaitersCount--;
 			break;
+		}
 
 		if (!locker.Lock())
 			return B_ERROR;
