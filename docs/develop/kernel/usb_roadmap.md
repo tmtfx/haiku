@@ -88,8 +88,11 @@ Legenda gravità: **C**ritica · **A**lta · **M**edia · **B**assa.
   - Analisi (2026-07-05): il path di finish è ITD‑only e va generalizzato; `isochronous_transfer_data` non può contenere siTD; campi hub/porta/speed disponibili via `pipe->HubAddress()/HubPort()/Speed()` (vedi `InitQueueHead` :2333).
   - Sotto‑task:
     - [x] ROB-03a — Estendere `isochronous_transfer_data` per contenere siTD (flag `is_split` + storage). Commit a5958100 (plumbing additivo; attende build utente).
-    - [ ] ROB-03b — Builder siTD in `SubmitIsochronous` per pipe non‑HS: programmare device/endpoint/hub/port, direzione, smask/cmask (budget split FS ≤188 B/microframe), `buffer_phy[0/1]`, `transfer_length`; linkare in `fSitdEntries[frame]`.
-    - [ ] ROB-03c — Generalizzare `FinishIsochronousTransfers` per distinguere itd/sitd (bit `EHCI_ITEM_TYPE_SITD`) e processare il completamento siTD (`status`, residuo `transfer_length`), poi free.
+    - [x] ROB-03b.1 — Fix layout `ehci_sitd`: i campi‑byte DW1‑DW3 erano invertiti/non allineabili ai bit‑field HW → sostituiti con parole `uint32` + define `EHCI_SITD_*` (spec 3.4). Commit be0720dd (dead scaffolding, non regredibile). Confermato da 2 esperti + analisi diretta.
+    - [ ] ROB-03b.2 — Builder siTD vivo in `SubmitIsochronous` (pipe non‑HS): programmare DW1 device/ep/hub/port/dir, DW2 smask/cmask (IN: `smask=1<<S`, cmask copre `dm+2` µframe da S+2; OUT: `smask=((1<<dm)-1)<<S`, cmask=0; `dm=ceil(L/188)`), DW3 Active+totalBytes+IOC(ultimo), DW4/DW5 buffer+T‑P/T‑count, DW6=TERMINATE; linkare in `fSitdEntries[frame]`; nuovo `AddPendingIsochronousTransfer` split‑aware.
+    - [ ] ROB-03c — Generalizzare `FinishIsochronousTransfers` per `fSitdEntries` (walk siTD, `FindIsochronousSitdTransfer`, gate su `is_split`, read `EHCI_SITD_STATUS_*` + residuo, free).
+    - ⚠️ ACCOPPIAMENTO (esperti): ROB-03b.2 e ROB-03c **devono atterrare insieme**. La lista `fFirstIsochronousTransfer` è condivisa e `FindIsochronousTransfer` dereferenzia `descriptors[last]` incondizionatamente → per un transfer split (`descriptors==NULL`) è **null-deref panic**. Il builder da solo farebbe panic e perderebbe i transfer (buffer leak, semaforo appeso). Serve anche una guardia `is_split` in `FindIsochronousTransfer`.
+    - ⚠️ ORDERING (§4.12): l'init linka iTD‑anchor prima di siTD‑anchor (inverso alla raccomandazione siTD‑first). Tocca anche il path iTD funzionante → valutare con test HW, non cambiato ora.
     - [ ] ROB-03d — Copia dati siTD IN/OUT (ROB-08 fatto: `WriteIsochronousDescriptorChain` ora disponibile per l'OUT).
     - [ ] ROB-03e — Accounting di banda per l'isocrono split FS.
   - Accettazione: webcam/audio USB1.1 dietro hub USB2 streamano.
