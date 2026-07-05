@@ -83,10 +83,21 @@ Legenda gravità: **C**ritica · **A**lta · **M**edia · **B**assa.
   - File: `src/add-ons/kernel/busses/usb/xhci.cpp` (HandleTransferComplete)
   - Fix: propagare lo stato ai packet descriptor isocroni (pacchetto vuoto marcato),
     non lasciarli non inizializzati.
-- [ ] **USB-ROB-03** (A) — EHCI split‑isochronous (SITD) per device FS dietro hub HS.
-  - File: `src/add-ons/kernel/busses/usb/ehci.cpp:1191` (`SubmitIsochronous` crea solo ITD; SITD allocati a 682–691 ma non usati)
-  - Fix: cablare creazione/scheduling SITD nel submit isocrono.
+- [~] **USB-ROB-03** (A) — EHCI split‑isochronous (SITD) per device FS dietro hub HS.
+  - File: `src/add-ons/kernel/busses/usb/ehci.cpp` (`SubmitIsochronous` :1159 crea solo ITD; scaffolding siTD già presente: `CreateSitdDescriptor` :2708, `Link/UnlinkSITDescriptors`, `fSitdEntries`)
+  - Analisi (2026-07-05): il path di finish è ITD‑only e va generalizzato; `isochronous_transfer_data` non può contenere siTD; campi hub/porta/speed disponibili via `pipe->HubAddress()/HubPort()/Speed()` (vedi `InitQueueHead` :2333).
+  - Sotto‑task:
+    - [ ] ROB-03a — Estendere `isochronous_transfer_data` per contenere siTD (flag `is_split` + storage), così finish/free gestiscono entrambi.
+    - [ ] ROB-03b — Builder siTD in `SubmitIsochronous` per pipe non‑HS: programmare device/endpoint/hub/port, direzione, smask/cmask (budget split FS ≤188 B/microframe), `buffer_phy[0/1]`, `transfer_length`; linkare in `fSitdEntries[frame]`.
+    - [ ] ROB-03c — Generalizzare `FinishIsochronousTransfers` per distinguere itd/sitd (bit `EHCI_ITEM_TYPE_SITD`) e processare il completamento siTD (`status`, residuo `transfer_length`), poi free.
+    - [ ] ROB-03d — Copia dati siTD IN/OUT (dipende da ROB-08).
+    - [ ] ROB-03e — Accounting di banda per l'isocrono split FS.
   - Accettazione: webcam/audio USB1.1 dietro hub USB2 streamano.
+  - NOTA: timing‑critical, non build/hardware‑testabile qui → richiede compilazione + test su hardware reale prima di `[x]`.
+- [ ] **USB-ROB-08** (A) — `WriteIsochronousDescriptorChain()` è uno stub `// TODO implement`.
+  - File: `src/add-ons/kernel/busses/usb/ehci.cpp:2958`
+  - Impatto: **l'isocrono OUT è rotto anche in high‑speed** — `SubmitIsochronous` azzera il buffer e non copia mai i dati utente. Prerequisito di ROB-03d.
+  - Fix: implementare la copia user→buffer per l'isocrono OUT (simmetrico a `ReadIsochronousDescriptorChain`).
 - [ ] **USB-ROB-04** (B) — Spinlock ISR per‑istanza invece di `static`.
   - File: `ehci.cpp:1575`, `ohci.cpp:~922`
   - Fix: membro `fInterruptLock` per controller.
