@@ -8,6 +8,7 @@
  *		Axel Dörfler, axeld@pinc-software.de
  *		Michael Lotz, mmlr@mlotz.ch
  *		John Scipione, jscipione@gmail.com
+ *		Fabio Tomat, f.t.public@gmail.com
  */
 
 
@@ -40,6 +41,7 @@
 #include <PathFinder.h>
 #include <String.h>
 #include <StringList.h>
+#include <File.h>
 
 #include "AccelerantBuffer.h"
 #include "MallocBuffer.h"
@@ -118,8 +120,10 @@ AccelerantHWInterface::AccelerantHWInterface()
 	fAccProposeDisplayMode(NULL),
 	fAccSetCursorShape(NULL),
 	fAccSetCursorBitmap(NULL),
+	fAccGetCursorBits(NULL),
 	fAccMoveCursor(NULL),
 	fAccShowCursor(NULL),
+	fCursorBits(0),
 
 	// dpms hooks
 	fAccDPMSCapabilities(NULL),
@@ -154,7 +158,9 @@ AccelerantHWInterface::AccelerantHWInterface()
 	fRectParams(new (nothrow) fill_rect_params[kDefaultParamsCount]),
 	fRectParamsCount(kDefaultParamsCount),
 	fBlitParams(new (nothrow) blit_params[kDefaultParamsCount]),
-	fBlitParamsCount(kDefaultParamsCount)
+	fBlitParamsCount(kDefaultParamsCount),
+
+	fUserEnableHardwareCursor(true)
 {
 	fDisplayMode.virtual_width = 0;
 	fDisplayMode.virtual_height = 0;
@@ -173,6 +179,13 @@ AccelerantHWInterface::~AccelerantHWInterface()
 	delete[] fBlitParams;
 
 	delete[] fModeList;
+}
+
+
+bool
+AccelerantHWInterface::HasSetCursorBitmap() const
+{
+	return fAccSetCursorBitmap != NULL;
 }
 
 
@@ -201,6 +214,23 @@ AccelerantHWInterface::Initialize()
 
 			close(fCardFD);
 			// _OpenAccelerant() failed, try to open next graphics card
+		}
+
+		// Read user preference for hardware cursor from user settings Screen_data
+		{
+			BPath path;
+			if (find_directory(B_USER_SETTINGS_DIRECTORY, &path) == B_OK) {
+				path.Append("Screen_data");
+				BFile file(path.Path(), B_READ_ONLY);
+				if (file.InitCheck() == B_OK) {
+					// skip offset
+					BPoint offset;
+					file.Read(&offset, sizeof(BPoint));
+					bool hw = true;
+					if (file.Read(&hw, sizeof(bool)) == (ssize_t)sizeof(bool))
+						fUserEnableHardwareCursor = hw;
+				}
+			}
 		}
 
 		return fCardFD >= 0 ? B_OK : fCardFD;
@@ -396,8 +426,12 @@ AccelerantHWInterface::_SetupDefaultHooks()
 		= (set_cursor_shape)fAccelerantHook(B_SET_CURSOR_SHAPE, NULL);
 	fAccSetCursorBitmap
 		= (set_cursor_bitmap)fAccelerantHook(B_SET_CURSOR_BITMAP, NULL);
+	fAccGetCursorBits
+		= (get_cursor_bits)fAccelerantHook(B_GET_CURSOR_BITS, NULL);
 	fAccMoveCursor = (move_cursor)fAccelerantHook(B_MOVE_CURSOR, NULL);
 	fAccShowCursor = (show_cursor)fAccelerantHook(B_SHOW_CURSOR, NULL);
+
+	fCursorBits = fAccGetCursorBits != NULL ? fAccGetCursorBits() : 0;
 
 	// dpms
 	fAccDPMSCapabilities
@@ -634,7 +668,7 @@ AccelerantHWInterface::SetMode(const display_mode& mode)
 
 	_UpdateHooksAfterModeChange();
 
-	// update backbuffer if necessary
+	// update backbuffer if neccessary
 	if (!fBackBuffer.IsSet()
 		|| fBackBuffer->Width() != fFrontBuffer->Width()
 		|| fBackBuffer->Height() != fFrontBuffer->Height()
@@ -728,6 +762,14 @@ AccelerantHWInterface::GetDeviceInfo(accelerant_device_info* info)
 	}
 
 	return GetAccelerantDeviceInfo(info);
+}
+
+
+status_t
+AccelerantHWInterface::GetFrameBufferConfig(frame_buffer_config& config)
+{
+	config = fFrameBufferConfig;
+	return B_OK;
 }
 
 
@@ -1223,31 +1265,51 @@ AccelerantHWInterface::HideOverlay(Overlay* overlay)
 // #pragma mark - cursor
 
 
+
 void
-AccelerantHWInterface::SetCursor(ServerCursor* cursor)
+AccelerantHWInterface::_UpdateHardwareCursor(bool wasHardwareCursorEnabled)
 {
-	// cursor should never be NULL, but let us be safe!!
-	if (cursor == NULL || LockExclusiveAccess() == false)
+	ServerCursorReference cursor = CursorAndDragBitmap();
+	if (!cursor.IsSet() || !LockExclusiveAccess())
 		return;
 
 	bool cursorSet = false;
 
-	if (fAccSetCursorBitmap != NULL) {
-		// Bitmap cursor
-		// TODO are x and y switched for this, too?
+	// Drag bitmaps need full-color alpha compositing, while some hardware
+	// cursor backends only expose limited palette/shape formats.
+	const bool canUseBitmapCursorForDrag = fDragBitmap == NULL || fCursorBits >= 32;
+	if (canUseBitmapCursorForDrag && fAccSetCursorBitmap != NULL && fUserEnableHardwareCursor) {
 		uint16 xHotSpot = (uint16)cursor->GetHotSpot().x;
 		uint16 yHotSpot = (uint16)cursor->GetHotSpot().y;
+		uint16 width = (uint16)cursor->Bounds().IntegerWidth() + 1;
+		uint16 height = (uint16)cursor->Bounds().IntegerHeight() + 1;
 
-		uint16 width = (uint16)cursor->Width();
-		uint16 height = (uint16)cursor->Height();
+		const uint8* bits = cursor->Bits();
+		ArrayDeleter<uint8> unpremultiplied;
+		if (fDragBitmap != NULL && cursor->ColorSpace() == B_RGBA32) {
+			unpremultiplied.SetTo(new(nothrow) uint8[cursor->BitsLength()]);
+			if (unpremultiplied.IsSet()) {
+				memcpy(unpremultiplied.Get(), bits, cursor->BitsLength());
+				for (uint32 i = 0; i < cursor->BitsLength(); i += 4) {
+					uint8* p = unpremultiplied.Get() + i;
+					uint8 a = p[3];
+					if (a == 0) {
+						p[0] = p[1] = p[2] = 0;
+						continue;
+					}
 
-		// Time to talk to the accelerant!
-		cursorSet = fAccSetCursorBitmap(width, height, xHotSpot,
-			yHotSpot, cursor->ColorSpace(), (uint16)cursor->BytesPerRow(),
-			cursor->Bits()) == B_OK;
-	}
+					p[0] = (uint8)min_c(255, (p[0] * 255 + a / 2) / a);
+					p[1] = (uint8)min_c(255, (p[1] * 255 + a / 2) / a);
+					p[2] = (uint8)min_c(255, (p[2] * 255 + a / 2) / a);
+				}
+				bits = unpremultiplied.Get();
+			}
+		}
 
-	if (!cursorSet && cursor->CursorData() != NULL && fAccSetCursorShape != NULL) {
+		cursorSet = fAccSetCursorBitmap(width, height, xHotSpot, yHotSpot,
+			cursor->ColorSpace(), (uint16)cursor->BytesPerRow(), bits) == B_OK;
+	} else if (fDragBitmap == NULL && cursor->CursorData() != NULL
+		&& fAccSetCursorShape != NULL) {
 		// BeOS BCursor, 16x16 monochrome
 		uint8 size = cursor->CursorData()[0];
 		// CursorData()[1] is color depth (always monochrome)
@@ -1279,13 +1341,12 @@ AccelerantHWInterface::SetCursor(ServerCursor* cursor)
 		for (int32 i = 0; i < 32; i++)
 			andMask[i] = ~transMask[i];
 
-		// Time to talk to the accelerant!
-		cursorSet = fAccSetCursorShape(size, size, xHotSpot,
-			yHotSpot, andMask, xorMask) == B_OK;
+		cursorSet = fAccSetCursorShape(size, size, xHotSpot, yHotSpot, andMask,
+			xorMask) == B_OK;
 	}
 
-	if (cursorSet && !fHardwareCursorEnabled) {
-		// we switched from SW to HW, so we need to erase the SW cursor
+	if (cursorSet && !wasHardwareCursorEnabled) {
+		// We switched from SW to HW, so we need to erase the SW cursor.
 		if (fCursorVisible && fFloatingOverlaysLock.Lock()) {
 			IntRect r = _CursorFrame();
 			fCursorVisible = false;
@@ -1295,10 +1356,9 @@ AccelerantHWInterface::SetCursor(ServerCursor* cursor)
 			fCursorVisible = true;
 			fFloatingOverlaysLock.Unlock();
 		}
-		// and we need to update our position
-		if (fAccMoveCursor != NULL)
-			fAccMoveCursor((uint16)fCursorLocation.x,
-				(uint16)fCursorLocation.y);
+		if (fAccMoveCursor != NULL) {
+			fAccMoveCursor((uint16)fCursorLocation.x, (uint16)fCursorLocation.y);
+		}
 	}
 
 	if (fAccShowCursor != NULL)
@@ -1308,9 +1368,52 @@ AccelerantHWInterface::SetCursor(ServerCursor* cursor)
 
 	fHardwareCursorEnabled = cursorSet;
 
-	HWInterface::SetCursor(cursor);
-		// HWInterface claims ownership of cursor.
+	if (!cursorSet && wasHardwareCursorEnabled && fFloatingOverlaysLock.Lock()) {
+		Invalidate(_CursorFrame());
+		fFloatingOverlaysLock.Unlock();
+	}
 }
+
+void
+AccelerantHWInterface::SetCursor(ServerCursor* cursor)
+{
+	// cursor should never be NULL, but let us be safe!!
+	if (cursor == NULL)
+		return;
+
+	bool wasHardwareCursorEnabled = fHardwareCursorEnabled;
+	HWInterface::SetCursor(cursor);
+	_UpdateHardwareCursor(wasHardwareCursorEnabled);
+}
+
+void AccelerantHWInterface::SetUserHardwareCursor(bool enable)
+{
+	fUserEnableHardwareCursor = enable; 
+}
+
+void
+AccelerantHWInterface::SetDragBitmap(const ServerBitmap* bitmap,
+	const BPoint& offsetFromCursor)
+{
+	bool wasHardwareCursorEnabled = fHardwareCursorEnabled;
+
+	bool canUseBitmapCursorForDrag = bitmap == NULL
+		|| (fAccSetCursorBitmap != NULL && fCursorBits >= 32);
+	if (!fUserEnableHardwareCursor)
+		canUseBitmapCursorForDrag = false;
+
+	if (bitmap != NULL && wasHardwareCursorEnabled && !canUseBitmapCursorForDrag
+		&& LockExclusiveAccess()) {
+		if (fAccShowCursor != NULL)
+			fAccShowCursor(false);
+		UnlockExclusiveAccess();
+		fHardwareCursorEnabled = false;
+	}
+
+	HWInterface::SetDragBitmap(bitmap, offsetFromCursor);
+	_UpdateHardwareCursor(wasHardwareCursorEnabled);
+}
+
 
 
 void
@@ -1423,8 +1526,8 @@ AccelerantHWInterface::_RegionToRectParams(/*const*/ BRegion* region,
 uint32
 AccelerantHWInterface::_NativeColor(const rgb_color& color) const
 {
-	// NOTE: This functions looks somehow suspicious to me.
-	// It assumes that all graphics cards have the same native endianness, no?
+	// NOTE: This functions looks somehow suspicios to me.
+	// It assumes that all graphics cards have the same native endianess, no?
 	switch (fDisplayMode.space) {
 		case B_CMAP8:
 		case B_GRAY8:

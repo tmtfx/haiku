@@ -2,7 +2,9 @@ SubDir HAIKU_TOP src add-ons kernel drivers graphics matrox ;
 
 UsePrivateSystemHeaders ;
 UsePrivateHeaders graphics ;
+UsePrivateHeaders [ FDirName graphics vesa ] ;
 UsePrivateHeaders [ FDirName graphics matrox ] ;
+UsePrivateKernelHeaders ;
 
 KernelAddon matrox :
 	driver.c

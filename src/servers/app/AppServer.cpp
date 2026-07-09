@@ -7,6 +7,7 @@
  *		Axel Dörfler, axeld@pinc-software.de
  *		Stephan Aßmus <superstippi@gmx.de>
  * 		Christian Packmann
+ *		Fabio Tomat, <f.t.public@gmail.com>
  */
 
 
@@ -18,13 +19,17 @@
 #include <LaunchRoster.h>
 #include <PortLink.h>
 #include <RosterPrivate.h>
+#include <Autolock.h>
 
+#include "AccelerantHWInterface.h"
+#include "Screen.h"
 #include "BitmapManager.h"
 #include "Desktop.h"
 #include "GlobalFontManager.h"
 #include "InputManager.h"
 #include "ScreenManager.h"
 #include "ServerProtocol.h"
+#include "HWInterface.h"
 
 
 //#define DEBUG_SERVER
@@ -138,6 +143,42 @@ AppServer::MessageReceived(BMessage* message)
 			else
 				reply.what = (uint32)B_ERROR;
 
+			message->SendReply(&reply);
+			break;
+		}
+		case AS_SET_HW_CUR_BITMAP_ENABLED:
+		{
+			bool enable;
+			if (message->FindBool("enable", &enable) == B_OK) {
+				BAutolock locker(gScreenManager);
+				if (gScreenManager && gScreenManager->CountScreens() > 0) {
+					Screen* s = gScreenManager->ScreenAt(0);
+			
+					if (s != NULL && s->HWInterface() != NULL) {
+						AccelerantHWInterface* interface = dynamic_cast<AccelerantHWInterface*>(s->HWInterface());
+				
+						if (interface != NULL) {
+							interface->SetUserHardwareCursor(enable);
+							interface->SetCursorVisible(interface->IsCursorVisible());
+						}
+					}
+				}
+			}
+			break;
+		}
+
+		case 'hsbm':
+		{
+			bool has = false;
+			BAutolock locker(gScreenManager);
+			if (gScreenManager && gScreenManager->CountScreens() > 0) {
+				Screen* s = gScreenManager->ScreenAt(0);
+				if (s && s->HWInterface())
+					has = s->HWInterface()->HasSetCursorBitmap();
+			}
+
+			BMessage reply;
+			reply.AddBool("has_set_cursor_bitmap", has);
 			message->SendReply(&reply);
 			break;
 		}

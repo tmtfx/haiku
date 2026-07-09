@@ -369,7 +369,7 @@ UnmapDevice(DeviceInfo& di)
 		delete_area(si.videoMemArea);
 
 	si.regsArea = si.videoMemArea = -1;
-	si.videoMemAddr = NULL;
+	si.videoMemAddr = 0;
 	di.regs = NULL;
 
 	TRACE("exit UnmapDevice()\n");

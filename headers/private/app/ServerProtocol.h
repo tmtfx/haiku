@@ -367,6 +367,7 @@ enum {
 	// New clipping: cumulative, transformed
 	AS_VIEW_CLIP_TO_RECT,
 	AS_VIEW_CLIP_TO_SHAPE,
+	AS_SET_HW_CUR_BITMAP_ENABLED,
 
 	AS_LAST_CODE
 };

@@ -6,6 +6,7 @@
  *		Stephan Aßmus <superstippi@gmx.de>
  *		Axel Dörfler, axeld@pinc-software.de
  *		Michael Lotz <mmlr@mlotz.ch>
+ *		Fabio Tomat, <f.t.public@gmail.com>
  */
 #ifndef ACCELERANT_HW_INTERFACE_H
 #define ACCELERANT_HW_INTERFACE_H
@@ -27,6 +28,7 @@ public:
 								AccelerantHWInterface();
 	virtual						~AccelerantHWInterface();
 
+	virtual bool HasSetCursorBitmap() const;
 	virtual	status_t			Initialize();
 	virtual	status_t			Shutdown();
 
@@ -34,6 +36,8 @@ public:
 	virtual	void				GetMode(display_mode* mode);
 
 	virtual status_t			GetDeviceInfo(accelerant_device_info* info);
+	virtual status_t			GetFrameBufferConfig(
+									frame_buffer_config& config);
 
 	virtual status_t			GetModeList(display_mode** _modeList,
 									uint32* _count);
@@ -78,6 +82,8 @@ public:
 
 	// cursor handling
 	virtual	void				SetCursor(ServerCursor* cursor);
+	virtual	void				SetDragBitmap(const ServerBitmap* bitmap,
+									const BPoint& offsetFromCursor);
 	virtual	void				SetCursorVisible(bool visible);
 	virtual	void				MoveCursorTo(float x, float y);
 
@@ -85,6 +91,7 @@ public:
 	virtual	RenderingBuffer*	FrontBuffer() const;
 	virtual	RenderingBuffer*	BackBuffer() const;
 	virtual	bool				IsDoubleBuffered() const;
+	virtual void 				SetUserHardwareCursor(bool enable);
 
 protected:
 	virtual	void				_CopyBackToFront(/*const*/ BRegion& region);
@@ -110,6 +117,7 @@ private:
 			status_t			_SetFallbackMode(display_mode& mode) const;
 			void				_SetSystemPalette();
 			void				_SetGrayscalePalette();
+			void				_UpdateHardwareCursor(bool wasHardwareCursorEnabled);
 
 private:
 			int					fCardFD;
@@ -134,8 +142,11 @@ private:
 			get_edid_info			fAccGetEDIDInfo;
 			set_cursor_shape		fAccSetCursorShape;
 			set_cursor_bitmap		fAccSetCursorBitmap;
+			get_cursor_bits			fAccGetCursorBits;
 			move_cursor				fAccMoveCursor;
 			show_cursor				fAccShowCursor;
+
+			uint32					fCursorBits;
 
 			// dpms hooks
 			dpms_capabilities	fAccDPMSCapabilities;
@@ -175,6 +186,9 @@ private:
 	mutable	uint32				fRectParamsCount;
 	mutable	blit_params*		fBlitParams;
 	mutable	uint32				fBlitParamsCount;
+
+			// user preference: if false, avoid calling accelerant bitmap cursor hook
+			bool			fUserEnableHardwareCursor;
 };
 
 #endif // ACCELERANT_HW_INTERFACE_H
