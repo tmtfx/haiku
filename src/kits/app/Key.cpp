@@ -57,6 +57,7 @@ BKey::~BKey()
 void
 BKey::Unset()
 {
+	fEncrypted = false;
 	SetTo(B_KEY_PURPOSE_GENERIC, "", "", NULL, 0);
 }
 
@@ -66,6 +67,7 @@ BKey::SetTo(BKeyPurpose purpose, const char* identifier,
 	const char* secondaryIdentifier, const uint8* data, size_t length)
 {
 	fCreationTime = 0;
+	fEncrypted = false;
 	SetPurpose(purpose);
 	SetIdentifier(identifier);
 	SetSecondaryIdentifier(secondaryIdentifier);
@@ -152,6 +154,20 @@ BKey::GetData(uint8* buffer, size_t bufferSize) const
 }
 
 
+void
+BKey::SetEncrypted(bool encrypted)
+{
+	fEncrypted = encrypted;
+}
+
+
+bool
+BKey::IsEncrypted() const
+{
+	return fEncrypted;
+}
+
+
 
 const char*
 BKey::Owner() const
@@ -183,6 +199,10 @@ BKey::Flatten(BMessage& message) const
 		return B_ERROR;
 	}
 
+	// "encrypted" is only written when true to preserve backward compat.
+	if (fEncrypted && message.AddBool("encrypted", true) != B_OK)
+		return B_ERROR;
+
 	return B_OK;
 }
 
@@ -207,6 +227,10 @@ BKey::Unflatten(const BMessage& message)
 		return B_ERROR;
 	}
 
+	// "encrypted" field is absent on legacy (pre-encryption) keys → false.
+	if (message.FindBool("encrypted", &fEncrypted) != B_OK)
+		fEncrypted = false;
+
 	return SetData((const uint8*)data, (size_t)dataLength);
 }
 
@@ -221,6 +245,7 @@ BKey::operator=(const BKey& other)
 	fSecondaryIdentifier = other.fSecondaryIdentifier;
 	fOwner = other.fOwner;
 	fCreationTime = other.fCreationTime;
+	fEncrypted = other.fEncrypted;
 
 	return *this;
 }
@@ -316,6 +341,17 @@ BPasswordKey::SetTo(const char* password, BKeyPurpose purpose,
 {
 	return BKey::SetTo(purpose, identifier, secondaryIdentifier,
 		(const uint8*)password, strlen(password) + 1);
+}
+
+
+status_t
+BPasswordKey::EncryptedSetTo(const char* password, BKeyPurpose purpose,
+	const char* identifier, const char* secondaryIdentifier)
+{
+	status_t result = SetTo(password, purpose, identifier, secondaryIdentifier);
+	if (result == B_OK)
+		SetEncrypted(true);
+	return result;
 }
 
 
