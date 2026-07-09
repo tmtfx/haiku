@@ -184,6 +184,72 @@ BKeyStore::GetNextKey(const char* keyring, BKeyType type, BKeyPurpose purpose,
 }
 
 
+// #pragma mark - Encrypted key variants
+
+
+status_t
+BKeyStore::GetEncryptedKey(BKeyType type, const char* identifier, BKey& key)
+{
+	return GetEncryptedKey(NULL, type, identifier, key);
+}
+
+
+status_t
+BKeyStore::GetEncryptedKey(const char* keyring, BKeyType type,
+	const char* identifier, BKey& key)
+{
+	return GetEncryptedKey(keyring, type, identifier, NULL, key);
+}
+
+
+status_t
+BKeyStore::GetEncryptedKey(const char* keyring, BKeyType type,
+	const char* identifier, const char* secondaryIdentifier, BKey& key)
+{
+	BMessage message(KEY_STORE_GET_ENCRYPTED_KEY);
+	message.AddString("keyring", keyring);
+	message.AddUInt32("type", type);
+	message.AddString("identifier", identifier);
+	message.AddString("secondaryIdentifier", secondaryIdentifier);
+
+	BMessage reply;
+	status_t result = _SendKeyMessage(message, &reply);
+	if (result != B_OK)
+		return result;
+
+	BMessage keyMessage;
+	if (reply.FindMessage("key", &keyMessage) != B_OK)
+		return B_ERROR;
+
+	return key.Unflatten(keyMessage);
+}
+
+
+status_t
+BKeyStore::AddEncryptedKey(const BKey& key)
+{
+	return AddEncryptedKey(NULL, key);
+}
+
+
+status_t
+BKeyStore::AddEncryptedKey(const char* keyring, const BKey& key)
+{
+	BMessage keyMessage;
+	if (key.Flatten(keyMessage) != B_OK)
+		return B_BAD_VALUE;
+
+	// Ensure the encrypted flag is set so the server encrypts the payload.
+	keyMessage.SetBool("encrypted", true);
+
+	BMessage message(KEY_STORE_ADD_ENCRYPTED_KEY);
+	message.AddString("keyring", keyring);
+	message.AddMessage("key", &keyMessage);
+
+	return _SendKeyMessage(message, NULL);
+}
+
+
 // #pragma mark - Keyrings
 
 
