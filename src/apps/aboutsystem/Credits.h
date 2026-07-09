@@ -541,6 +541,7 @@ static const Translation kTranslations[] = {
 	"John Scipione\n" \
 	"Joachim Seemer (Humdinger)\n" \
 	"Gerasim Troeglazov\n" \
+	"Fabio Tomat\n" \
 	"\n"
 
 #define kPastMaintainers \
@@ -721,7 +722,8 @@ static const Translation kTranslations[] = {
 	"Gerald Zajac\n" \
 	"Łukasz Zemczak\n" \
 	"JiSheng Zhang\n" \
-	"Zhao Shuai\n"
+	"Zhao Shuai\n" \
+	"I Pirati Del Frico\n"
 
 #define kWebsiteTeam  \
 	"Augustin Cavalier\n" \

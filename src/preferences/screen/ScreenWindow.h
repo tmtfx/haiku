@@ -24,6 +24,7 @@ class BMenuField;
 class BSlider;
 class BSpinner;
 class BStringView;
+class BCheckBox;
 
 class RefreshWindow;
 class MonitorView;
@@ -97,6 +98,7 @@ private:
 			BMenuField*		fTVStandardField;
 
 			BSlider*		fBrightnessSlider;
+			BCheckBox* 	fHardwareCursorCheckbox;
 
 			BButton*		fDefaultsButton;
 			BButton*		fApplyButton;

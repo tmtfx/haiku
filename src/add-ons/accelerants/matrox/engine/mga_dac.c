@@ -227,6 +227,7 @@ status_t gx00_dac_set_pix_pll(display_mode target)
 		LOG(2,("DAC: PIX PLL frequency not locked!\n"));
 	else
 		LOG(2,("DAC: PIX PLL frequency locked\n"));
+
 	DXIW(PIXCLKCTRL,DXIR(PIXCLKCTRL)&0x0B);         /*enable the PIXPLL*/
 
 	return B_OK;

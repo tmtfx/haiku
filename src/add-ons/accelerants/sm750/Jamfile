@@ -1,0 +1,22 @@
+SubDir HAIKU_TOP src add-ons accelerants sm750 ;
+
+UsePrivateHeaders graphics ;
+UsePrivateHeaders [ FDirName graphics sm750 ] ;
+UsePrivateHeaders [ FDirName graphics common ] ;
+
+Addon sm750.accelerant :
+	DisplayModes.cpp
+	Engine.cpp
+	I2C.cpp
+	Cursor.cpp
+	InitAccelerant.cpp
+	Power.cpp
+	memory_manager.c
+	Overlay.cpp
+	
+	
+	: be libaccelerantscommon.a
+;
+
+Depends sm750.accelerant : sm750 ;
+

@@ -1,7 +1,8 @@
 /* Authors:
    Mark Watson 12/1999,
    Apsed,
-   Rudolf Cornelissen 10/2002-10/2009
+   Rudolf Cornelissen 10/2002-10/2009,
+   Fabio Tomat 2026
 */
 
 #define MODULE_BIT 0x00008000
@@ -641,8 +642,13 @@ status_t g450_general_powerup()
 	g400_crtc2_dpms(false, false, false);
 	gx00_crtc_cursor_hide();
 
-	/* power up everything except DVI electronics (for now) */
-	DXIW(PWRCTRL,0x1b); 
+	/* power up everything except DVI electronics (for now)
+	 * If a DVI connector is present, also power up DVI electronics. */
+	if (si->ps.primary_dvi || si->ps.secondary_dvi) {
+		DXIW(PWRCTRL, 0x3f); /* enable all power domains including DVI */
+	} else {
+		DXIW(PWRCTRL, 0x1b); /* default: leave DVI electronics off */
+	} 
 	/* set voltage reference - not using DAC reference block */
 	DXIW(VREFCTRL,0x00);
 	/* wait for 100ms for voltage reference to stabilize */
@@ -754,7 +760,7 @@ status_t g450_general_powerup()
 		//MAVW(LOCK,0x01);
 		CR2W(DATACTL,0x00000000);
 	}
-
+	
 	/* enable primary analog output */
 	gx50_general_output_select();
 
@@ -783,7 +789,7 @@ status_t gx50_general_output_select()
 		else
 		{
 			LOG(4,("INIT: no secondary TV-adapter detected, using secondary connector\n"));
-			DXIW(OUTPUTCONN,0x04); 
+			DXIW(OUTPUTCONN,0x04);
 			/* signal CRTC2 DPMS which connector to program */
 			si->crossed_conns = true;
 		}
@@ -791,7 +797,7 @@ status_t gx50_general_output_select()
 	else
 	{
 		LOG(4,("INIT: using primary connector\n"));
-		DXIW(OUTPUTCONN,0x01); 
+		DXIW(OUTPUTCONN,0x01);
 		/* signal CRTC2 DPMS which connector to program */
 		si->crossed_conns = false;
 	}
@@ -844,7 +850,14 @@ status_t gx00_general_dac_select(int dac)
 			//otherwise keep it disabled.
 			CR2W(CTL,(CR2R(CTL)&0x2de00779)|0x6|(0x0<<20));
 			/* connect DAC1 to CON1, CRTC2/'DAC2' to CON2 (monitor mode) */
-			DXIW(OUTPUTCONN,0x09); 
+			if (CFGR(DEVID) == 0x2527102b) { // G550
+				/* on a G550 keep CRTC1 anchored to CON2 */
+				DXIW(OUTPUTCONN, 0x04);  
+				si->crossed_conns = true; /* Inform DPMS about this */
+			} else {
+				DXIW(OUTPUTCONN, 0x09);  // Not tested
+				si->crossed_conns = false;
+			}
 			/* Select 1.5 Volt MAVEN DAC ref. for monitor mode */
 			DXIW(GENIOCTRL, DXIR(GENIOCTRL) & ~0x40);
 			DXIW(GENIODATA, 0x00);
@@ -862,7 +875,13 @@ status_t gx00_general_dac_select(int dac)
 			 * disable TVout mode (b12). */
 			CR2W(CTL,(CR2R(CTL)&0x2de00779)|0x6|(0x1<<20));
 			/* connect DAC1 to CON2 (monitor mode), CRTC2/'DAC2' to CON1 */
-			DXIW(OUTPUTCONN,0x05); 
+			if (CFGR(DEVID) == 0x2527102b) { // G550
+				DXIW(OUTPUTCONN, 0x04);  /* Forza l'output a 0x04 anziché 0x05 per evitare lo schermo nero */
+				si->crossed_conns = true;
+			} else {
+				DXIW(OUTPUTCONN, 0x05);  
+				si->crossed_conns = true;
+			}
 			/* Select 1.5 Volt MAVEN DAC ref. for monitor mode */
 			DXIW(GENIOCTRL, DXIR(GENIOCTRL) & ~0x40);
 			DXIW(GENIODATA, 0x00);
@@ -910,8 +929,13 @@ status_t gx00_general_bios_to_powergraphics()
 			break;
 		case G450:
 		case G550:
-			/* power up everything except DVI electronics (for now) */
-			DXIW(PWRCTRL,0x1b); 
+			/* power up everything except DVI electronics (for now)
+			 * If DVI is present, enable DVI electronics as well. */
+			if (si->ps.primary_dvi || si->ps.secondary_dvi) {
+				DXIW(PWRCTRL, 0x3f);
+			} else {
+				DXIW(PWRCTRL,0x1b); 
+			}
 			/* enable 'straight-through' sync outputs on both analog output
 			 * connectors and make sure CRTC1 sync outputs are patched through! */
 			DXIW(SYNCCTRL,0x00); 

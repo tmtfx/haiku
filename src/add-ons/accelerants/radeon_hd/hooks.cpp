@@ -84,6 +84,18 @@ get_accelerant_hook(uint32 feature, void* data)
 		case B_FILL_SPAN:
 			return (void*)radeon_fill_span;
 		*/
+
+		/* Cursor support */
+		case B_SET_CURSOR_SHAPE:
+			return (void*)radeon_set_cursor_shape;
+		case B_MOVE_CURSOR:
+			return (void*)radeon_move_cursor;
+		case B_SHOW_CURSOR:
+			return (void*)radeon_show_cursor;
+		case B_SET_CURSOR_BITMAP:
+			return (void*)radeon_set_cursor_bitmap;
+		case B_GET_CURSOR_BITS:
+			return (void*)radeon_get_cursor_bits;
 	}
 
 	return NULL;

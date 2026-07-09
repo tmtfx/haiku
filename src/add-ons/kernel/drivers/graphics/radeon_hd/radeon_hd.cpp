@@ -23,11 +23,15 @@
 #include <errno.h>
 
 #include <ACPI.h>
+#include <AreaKeeper.h>
 #include <boot_item.h>
 #include <driver_settings.h>
-#include <util/AreaKeeper.h>
 #include <util/kernel_cpp.h>
 #include <vm/vm.h>
+
+#include <boot_item.h>
+#include <frame_buffer_console.h>
+#include "radeon_hd_logo.h"
 
 
 #define TRACE_DEVICE
@@ -656,6 +660,53 @@ radeon_hd_pci_bar_mmio(uint16 chipsetID)
 }
 
 
+static void draw_radeonhd_logo(radeon_info &info, struct frame_buffer_boot_info *bi)
+{
+    if (bi == NULL) return;
+    
+    radeon_shared_info& si = *(info.shared_info);
+    
+    uint8* fb = (uint8*)si.frame_buffer;
+    if (fb == NULL) {
+        fb = (uint8*)bi->frame_buffer;
+    }
+    if (fb == NULL)
+        return;
+    
+    // Geometria reale ereditata dal bootloader
+    uint32 screenWidth = bi->width;
+    uint32 screenHeight = bi->height;
+    
+    uint32 bytesPerRow = bi->bytes_per_row;
+    if (bytesPerRow == 0)
+        bytesPerRow = screenWidth * 4; 
+
+    uint32 fbPitch = bytesPerRow / 4; 
+
+    // Dimensioni del logo Matrox
+    uint32 logoW = radeon_hd_logo_width;
+    uint32 logoH = radeon_hd_logo_height;
+    const uint32* logo_data = (const uint32*)radeon_hd_logo;
+
+    // Calcolo coordinate centrali con clipping preventivo (stile SM750)
+    int32 startX = (int32)((screenWidth - logoW) / 2);
+    int32 startY = (int32)((screenHeight - logoH) / 2);
+
+    if (startX < 0) startX = 0;
+    if (startY < 0) startY = 0;
+
+    // Ciclo di copia pixel corazzato contro i fuori-confine di memoria
+    for (uint32 y = 0; y < logoH && (startY + y) < screenHeight; y++) {
+		uint32 fbOffset = ((startY + y) * fbPitch + startX) * sizeof(uint32);
+		uint32 logoRowOffset = y * logoW;
+		uint32 remainingWidth = screenWidth - startX;
+		uint32 copyPixels = (logoW < remainingWidth) ? logoW : remainingWidth;
+		uint32 copySize = copyPixels * sizeof(uint32);
+
+		user_memcpy(fb + fbOffset, (void*)&logo_data[logoRowOffset], copySize);
+	}
+}
+
 status_t
 radeon_hd_init(radeon_info &info)
 {
@@ -664,6 +715,14 @@ radeon_hd_init(radeon_info &info)
 	ERROR("%s: card(%" B_PRId32 "): "
 		"Radeon %s 1002:%" B_PRIX32 "\n", __func__, info.id,
 		radeon_chip_name[info.chipsetID], info.pciID);
+	
+	struct frame_buffer_boot_info *bi = (struct frame_buffer_boot_info *)get_boot_item(FRAME_BUFFER_BOOT_INFO, NULL);
+	bool enable_logo = true;
+	// Se il bootloader non ha passato informazioni o la modalità non è a 32-bit (RGBA), usciamo
+	if (bi == NULL) {
+		dprintf("radeon_hd: frame buffer boot info - Impossibile ricavare info boot FB\n");
+		enable_logo = false;
+	}
 
 	// Enable response in I/O, memory space. Enable bus mastering
 	uint32 pciConfig = get_pci_config(info.pci, PCI_command, 2);
@@ -903,6 +962,12 @@ radeon_hd_init(radeon_info &info)
 
 	TRACE("card(%" B_PRId32 "): GPU thermal status: %" B_PRId32 "C\n",
 		info.id, radeon_thermal_query(info) / 1000);
+		
+	//draw_logo
+	if (enable_logo && bi != NULL) {
+		draw_radeonhd_logo(info,bi);
+		snooze(2000000);
+	}
 
 	return B_OK;
 }

@@ -9,6 +9,8 @@
 
 #include <String.h>
 #include <Window.h>
+#include <TextControl.h>
+#include <CardLayout.h>
 
 
 namespace BPrivate {
@@ -35,6 +37,20 @@ enum InstallStatus {
 	kCancelled
 };
 
+class PasswordTC : public BTextControl { //dynamic layout version
+public:
+								PasswordTC(const char* label,
+									BMessage* modificationMessage);
+		bool					Visible() const;
+		void					SetVisible(bool visible);
+
+protected:
+	virtual	void				DrawAfterChildren(BRect updateRect);
+
+private:
+		bool					fVisible;
+};
+
 
 class InstallerWindow : public BWindow {
 public:
@@ -43,6 +59,7 @@ public:
 
 	virtual	void				MessageReceived(BMessage* message);
 	virtual	bool				QuitRequested();
+	virtual	void				FrameResized(float newWidth, float newHeight);
 private:
 			void				_ShowOptionalPackages();
 			void				_LaunchDriveSetup();
@@ -56,6 +73,9 @@ private:
 			void				_SetCopyEngineCancelSemaphore(sem_id id,
 									bool alreadyLocked = false);
 			void				_QuitCopyEngine(bool askUser);
+			// outSalt must point to a 16-byte buffer; caller zeros it after use.
+			status_t			_WriteMasterPasswordShadow(uint8* outSalt);
+			status_t			_WriteKeystore(const uint8* salt);
 
 	static	int					_ComparePackages(const void* firstArg,
 									const void* secondArg);
@@ -84,6 +104,12 @@ private:
 			BMenuItem*			fMakeBootableItem;
 			BMenu*				fEFILoaderMenu;
 
+			BLayoutItem*		fPasswordLayoutItem;
+
+			BGroupView*			fMasterPasswordView;
+			BTextControl*			fMasterPassword1;
+			BTextControl*			fMasterPassword2;
+
 			bool				fEncouragedToSetupPartitions;
 
 			bool				fDriveSetupLaunched;
@@ -92,6 +118,8 @@ private:
 
 			WorkerThread*		fWorkerThread;
 			BString				fLastStatus;
+			
+			BCardLayout*		fCardLayout;
 			sem_id				fCopyEngineCancelSemaphore;
 };
 

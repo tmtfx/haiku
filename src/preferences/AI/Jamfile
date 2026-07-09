@@ -1,0 +1,16 @@
+SubDir HAIKU_TOP src preferences AI ;
+
+UsePrivateHeaders preferences shared app interface ;
+UsePublicHeaders ai ;
+
+Application AI : 
+	preflet.cpp
+	PrefletWindow.cpp
+	: be localestub [ TargetLibstdc++ ] [ TargetLibsupc++ ] shared
+	: AI.rdef
+;
+LinkAgainst AI : libai_api.so ;
+DoCatalogs AI :
+	x-vnd.Haiku-AI :
+	preflet.cpp PrefletWindow.cpp
+;

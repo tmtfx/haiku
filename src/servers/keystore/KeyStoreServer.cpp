@@ -8,6 +8,7 @@
 
 #include "AppAccessRequestWindow.h"
 #include "KeyRequestWindow.h"
+#include "MasterPasswordRequestWindow.h"
 #include "Keyring.h"
 
 #include <KeyStoreDefs.h>
@@ -20,8 +21,11 @@
 #include <String.h>
 
 #include <new>
-
+#include <string.h>
 #include <stdio.h>
+
+#include <crypto/BCrypto.h>
+#include <crypto/BCryptoDefs.h>
 
 
 using namespace BPrivate;
@@ -61,7 +65,8 @@ KeyStoreServer::KeyStoreServer()
 	:
 	BApplication(kKeyStoreServerSignature),
 	fMasterKeyring(NULL),
-	fKeyrings(20)
+	fKeyrings(20),
+	fHasSessionPassword(false)
 {
 	BPath path;
 	if (find_directory(B_USER_SETTINGS_DIRECTORY, &path) != B_OK)
@@ -129,6 +134,8 @@ KeyStoreServer::MessageReceived(BMessage* message)
 		case KEY_STORE_REMOVE_KEYRING_FROM_MASTER:
 		case KEY_STORE_GET_NEXT_APPLICATION:
 		case KEY_STORE_REMOVE_APPLICATION:
+		case KEY_STORE_GET_ENCRYPTED_KEY:
+		case KEY_STORE_ADD_ENCRYPTED_KEY:
 		{
 			BString keyringName;
 			if (message->FindString("keyring", &keyringName) != B_OK)
@@ -152,6 +159,8 @@ KeyStoreServer::MessageReceived(BMessage* message)
 				case KEY_STORE_ADD_KEYRING_TO_MASTER:
 				case KEY_STORE_GET_NEXT_APPLICATION:
 				case KEY_STORE_REMOVE_APPLICATION:
+				case KEY_STORE_GET_ENCRYPTED_KEY:
+				case KEY_STORE_ADD_ENCRYPTED_KEY:
 				{
 					// These need keyring access to do anything.
 					while (!keyring->IsUnlocked()) {
@@ -444,6 +453,72 @@ KeyStoreServer::MessageReceived(BMessage* message)
 			break;
 		}
 
+		case KEY_STORE_GET_ENCRYPTED_KEY:
+		{
+			// Ensure we have the session password before decrypting.
+			result = _GetOrAskSessionPassword();
+			if (result != B_OK)
+				break;
+
+			BString identifier;
+			if (message->FindString("identifier", &identifier) != B_OK) {
+				result = B_BAD_VALUE;
+				break;
+			}
+
+			BString secondaryIdentifier;
+			if (message->FindString("secondaryIdentifier",
+					&secondaryIdentifier) != B_OK) {
+				secondaryIdentifier = "";
+			}
+
+			BMessage keyMessage;
+			result = keyring->FindKey(identifier, secondaryIdentifier, true,
+				&keyMessage);
+			if (result != B_OK)
+				break;
+
+			// Decrypt in-place before returning to caller.
+			result = _DecryptKeyData(keyMessage);
+			if (result == B_OK)
+				reply.AddMessage("key", &keyMessage);
+
+			break;
+		}
+
+		case KEY_STORE_ADD_ENCRYPTED_KEY:
+		{
+			// Ensure we have the session password before encrypting.
+			result = _GetOrAskSessionPassword();
+			if (result != B_OK)
+				break;
+
+			BMessage keyMessage;
+			BString identifier;
+			if (message->FindMessage("key", &keyMessage) != B_OK
+					|| keyMessage.FindString("identifier", &identifier) != B_OK) {
+				result = B_BAD_VALUE;
+				break;
+			}
+
+			// Encrypt the key data with the session password.
+			result = _EncryptKeyData(keyMessage);
+			if (result != B_OK)
+				break;
+
+			BString secondaryIdentifier;
+			if (keyMessage.FindString("secondaryIdentifier",
+					&secondaryIdentifier) != B_OK) {
+				secondaryIdentifier = "";
+			}
+
+			result = keyring->AddKey(identifier, secondaryIdentifier, keyMessage);
+			if (result == B_OK)
+				_WriteKeyStoreDatabase();
+
+			break;
+		}
+
 		case 0:
 		{
 			// Just the error case from above.
@@ -539,10 +614,12 @@ KeyStoreServer::_AccessFlagsFor(uint32 command) const
 {
 	switch (command) {
 		case KEY_STORE_GET_KEY:
+		case KEY_STORE_GET_ENCRYPTED_KEY:
 			return kFlagGetKey;
 		case KEY_STORE_GET_NEXT_KEY:
 			return kFlagEnumerateKeys;
 		case KEY_STORE_ADD_KEY:
+		case KEY_STORE_ADD_ENCRYPTED_KEY:
 			return kFlagAddKey;
 		case KEY_STORE_REMOVE_KEY:
 			return kFlagRemoveKey;
@@ -784,6 +861,209 @@ KeyStoreServer::_RequestKey(const BString& keyringName, BMessage& keyMessage)
 		return B_NO_MEMORY;
 
 	return requestWindow->RequestKey(keyringName, keyMessage);
+}
+
+
+// --- Session password + encrypted key helpers ---
+
+static inline void
+secure_memzero_server(void* p, size_t n)
+{
+	volatile unsigned char* cp = (volatile unsigned char*)p;
+	while (n--) *cp++ = 0;
+}
+
+
+status_t
+KeyStoreServer::_GetOrAskSessionPassword()
+{
+	if (fHasSessionPassword)
+		return B_OK;
+
+	MasterPasswordRequestWindow* window
+		= new(std::nothrow) MasterPasswordRequestWindow();
+	if (window == NULL)
+		return B_NO_MEMORY;
+
+	BString password;
+	status_t result = window->RequestPassword(password);
+	if (result != B_OK)
+		return result;
+
+	if (password.IsEmpty())
+		return B_BAD_VALUE;
+
+	fSessionPassword = password;
+	fHasSessionPassword = true;
+	return B_OK;
+}
+
+
+// Derive a 32-byte key from the session password and a 16-byte nonce
+// using iterative SHA-256 (1000 rounds).
+static status_t
+derive_session_key(const char* password, size_t pwdLen,
+	const uint8_t* nonce, uint8_t* outKey32)
+{
+	BCrypto crypto;
+	if (crypto.InitCheck() != B_OK)
+		return B_ERROR;
+
+	size_t inputLen = pwdLen + 16;
+	uint8_t* input = new(std::nothrow) uint8_t[inputLen];
+	if (input == NULL)
+		return B_NO_MEMORY;
+
+	memcpy(input, password, pwdLen);
+	memcpy(input + pwdLen, nonce, 16);
+
+	status_t err = crypto.Digest(B_CRYPTO_SHA256, input, inputLen, outKey32);
+	secure_memzero_server(input, inputLen);
+	delete[] input;
+	if (err != B_OK)
+		return err;
+
+	for (int i = 1; i < 1000; i++) {
+		err = crypto.Digest(B_CRYPTO_SHA256, outKey32, 32, outKey32);
+		if (err != B_OK) {
+			secure_memzero_server(outKey32, 32);
+			return err;
+		}
+	}
+	return B_OK;
+}
+
+
+status_t
+KeyStoreServer::_EncryptKeyData(BMessage& keyMessage)
+{
+	// Retrieve the plaintext data field
+	const void* plainData = NULL;
+	ssize_t plainLen = 0;
+	if (keyMessage.FindData("data", B_RAW_TYPE, &plainData, &plainLen) != B_OK
+			|| plainLen <= 0) {
+		return B_BAD_VALUE;
+	}
+
+	BCrypto crypto;
+	if (crypto.InitCheck() != B_OK)
+		return B_ERROR;
+
+	// Generate a 16-byte nonce used as both PBKDF salt and AES IV
+	uint8_t nonce[16];
+	if (crypto.GetRandomBytes(nonce, sizeof(nonce)) != B_OK)
+		return B_ERROR;
+
+	// Derive 32-byte AES-256 key from session password + nonce
+	uint8_t key[32];
+	status_t err = derive_session_key(fSessionPassword.String(),
+		fSessionPassword.Length(), nonce, key);
+	if (err != B_OK)
+		return err;
+
+	// Encrypt the payload
+	crypto.SetAlgorithm(B_CRYPTO_AES);
+	crypto.SetMode(B_CRYPTO_MODE_CBC);
+	crypto.SetPadding(true, B_CRYPTO_PKCS7);
+
+	size_t encBufSize = crypto.GetOutputSize(plainLen, B_CRYPTO_ENCRYPT);
+	uint8_t* encData = new(std::nothrow) uint8_t[encBufSize];
+	if (encData == NULL) {
+		secure_memzero_server(key, sizeof(key));
+		return B_NO_MEMORY;
+	}
+
+	ssize_t encLen = crypto.Encrypt(key, sizeof(key), nonce, sizeof(nonce),
+		plainData, plainLen, encData, encBufSize);
+
+	secure_memzero_server(key, sizeof(key));
+
+	if (encLen < 0) {
+		secure_memzero_server(encData, encBufSize);
+		delete[] encData;
+		return B_ERROR;
+	}
+
+	// Replace "data" with encrypted payload; add nonce and encrypted flag
+	keyMessage.RemoveName("data");
+	keyMessage.AddData("data", B_RAW_TYPE, encData, encLen);
+	keyMessage.AddData("enc_nonce", B_RAW_TYPE, nonce, sizeof(nonce));
+	keyMessage.SetBool("encrypted", true);
+
+	secure_memzero_server(encData, encBufSize);
+	delete[] encData;
+	return B_OK;
+}
+
+
+status_t
+KeyStoreServer::_DecryptKeyData(BMessage& keyMessage)
+{
+	bool encrypted = false;
+	if (keyMessage.FindBool("encrypted", &encrypted) != B_OK || !encrypted)
+		return B_OK; // not encrypted, nothing to do
+
+	const void* encData = NULL;
+	ssize_t encLen = 0;
+	const void* nonceData = NULL;
+	ssize_t nonceLen = 0;
+
+	if (keyMessage.FindData("data", B_RAW_TYPE, &encData, &encLen) != B_OK
+			|| keyMessage.FindData("enc_nonce", B_RAW_TYPE,
+				&nonceData, &nonceLen) != B_OK
+			|| nonceLen != 16) {
+		return B_BAD_DATA;
+	}
+
+	uint8_t key[32];
+	status_t err = derive_session_key(fSessionPassword.String(),
+		fSessionPassword.Length(), (const uint8_t*)nonceData, key);
+	if (err != B_OK)
+		return err;
+
+	BCrypto crypto;
+	if (crypto.InitCheck() != B_OK) {
+		secure_memzero_server(key, sizeof(key));
+		return B_ERROR;
+	}
+
+	crypto.SetAlgorithm(B_CRYPTO_AES);
+	crypto.SetMode(B_CRYPTO_MODE_CBC);
+	crypto.SetPadding(true, B_CRYPTO_PKCS7);
+
+	uint8_t* plainData = new(std::nothrow) uint8_t[encLen];
+	if (plainData == NULL) {
+		secure_memzero_server(key, sizeof(key));
+		return B_NO_MEMORY;
+	}
+	
+	// usiamo copia locale di IV per sicurezza
+	uint8_t localIV[16];
+	memcpy(localIV, nonceData, 16);
+
+	ssize_t plainLen = crypto.Decrypt(key, sizeof(key),
+		//(const uint8_t*)nonceData, 16,
+		localIV, 16,
+		encData, encLen, plainData, encLen);
+
+	secure_memzero_server(localIV, sizeof(localIV));
+	secure_memzero_server(key, sizeof(key));
+
+	if (plainLen < 0) {
+		secure_memzero_server(plainData, encLen);
+		delete[] plainData;
+		return B_BAD_DATA;
+	}
+
+	// Replace with decrypted data; remove crypto metadata for the caller
+	keyMessage.RemoveName("data");
+	keyMessage.AddData("data", B_RAW_TYPE, plainData, plainLen);
+	keyMessage.RemoveName("enc_nonce");
+	keyMessage.SetBool("encrypted", false);
+
+	secure_memzero_server(plainData, encLen);
+	delete[] plainData;
+	return B_OK;
 }
 
 

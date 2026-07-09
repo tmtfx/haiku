@@ -2,9 +2,30 @@ SubDir HAIKU_TOP src apps installer ;
 
 UsePrivateHeaders interface shared storage tracker ;
 UsePrivateSystemHeaders ;
+UsePublicHeaders crypto support ;
 
 SubDirHdrs [ FDirName $(HAIKU_TOP) src kits tracker ] ;
 SubDirHdrs [ FDirName $(HAIKU_TOP) src servers launch ] ;
+
+local cryptoLib = libcrypto_api.so ;
+SEARCH on $(cryptoLib) = /boot/system/lib ;
+
+# OpenSSL is required for RSA-2048 key pair generation in _WriteKeystore().
+# BCrypto does not yet support asymmetric key operations.
+#if [ FIsBuildFeatureEnabled openssl ] {
+SubDirC++Flags -DOPENSSL_ENABLED -DOPENSSL_API_COMPAT=10101
+	-DOPENSSL_NO_DEPRECATED=1 ;
+UseBuildFeatureHeaders openssl ;
+SubDirSysHdrs /boot/system/develop/headers ;
+#}
+
+#local opensslLibs ;
+#if [ FIsBuildFeatureEnabled openssl ] {
+#	opensslLibs = libssl.so libcrypto.so ;
+#	SEARCH on $(opensslLibs) = /boot/system/develop/lib ;
+#}
+local opensslLibs = libssl.so libcrypto.so ;
+SEARCH on $(opensslLibs) = /boot/system/develop/lib ;
 
 Application Installer :
 	CopyEngine.cpp
@@ -23,8 +44,16 @@ Application Installer :
 
 	: be tracker translation shared [ TargetLibstdc++ ]
 		localestub package
+		$(cryptoLib)
+		$(opensslLibs)
 	: Installer.rdef
 ;
+
+if [ FIsBuildFeatureEnabled openssl ] {
+	local target = [ MultiArchDefaultGristFiles Installer ] ;
+	LINKFLAGS on $(target) +=
+		"-Xlinker --start-group -L/boot/system/develop/lib -lssl -lcrypto -Xlinker --end-group" ;
+}
 
 SEARCH on <src!apps!installer>Utility.cpp = [
 	FDirName $(HAIKU_TOP) src servers launch ] ;

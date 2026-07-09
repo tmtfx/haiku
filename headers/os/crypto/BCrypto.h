@@ -1,0 +1,184 @@
+/*
+ * Copyright 2026, Fabio Tomat <f.t.public@gmail.com>
+ * All rights reserved. Distributed under the terms of the MIT license.
+ */
+#ifndef _BCRYPTO_H
+#define _BCRYPTO_H
+
+#include <SupportDefs.h>
+#include <os/kernel/OS.h>
+#include <crypto/BCryptoDefs.h>
+#include <DataIO.h>
+
+class BCrypto {
+public:
+								BCrypto();
+	virtual						~BCrypto();
+
+			status_t			InitCheck() const;
+
+
+			status_t			GetRandomBytes(void* buffer, size_t len);
+			void                SetPadding(bool enable, BCryptoPaddingType type = B_CRYPTO_PKCS7);
+			size_t              GetOutputSize(size_t inputLen, BCryptoOperation op);
+			// Shorthand methods
+			ssize_t             Decrypt(uint8* key, size_t keyLen,
+			                            uint8* iv, size_t ivLen,
+                                        const void* in, size_t inLen,
+                                        void* out, size_t outSize);
+            ssize_t             Decrypt(uint8* key, size_t keyLen, 
+                                        uint8* iv, size_t ivLen,
+                                        BDataIO* source, BDataIO* destination);
+            ssize_t             Decrypt(uint8* key, size_t keyLen, 
+                                        uint8* iv, size_t ivLen, 
+                                        const void* in, size_t inLen, 
+                                        void* out, const void* inTag,
+                                        const void* aad = NULL, 
+                                        size_t aadLen = 0); //GCM
+            ssize_t             Decrypt(uint8* key, size_t keyLen, 
+                                        uint8* iv, size_t ivLen, 
+                                        BDataIO* source, BDataIO* destination, 
+                                        const void* inTag); // GCM STREAMING
+			ssize_t             Encrypt(uint8* key, size_t keyLen, 
+                                        uint8* iv, size_t ivLen, 
+                                        const void* in, size_t inLen, 
+                                        void* out, size_t outSize);
+            ssize_t             Encrypt(uint8* key, size_t keyLen, 
+                                        uint8* iv, size_t ivLen,
+                                        BDataIO* source, BDataIO* destination);
+            ssize_t             Encrypt(uint8* key, size_t keyLen, 
+                                        uint8* iv, size_t ivLen,
+                                        const void* in, size_t inLen, 
+                                        void* out, void* outTag,
+                                        const void* aad = NULL, 
+                                        size_t aadLen = 0); // GCM
+            ssize_t             Encrypt(uint8* key, size_t keyLen, 
+                                        uint8* iv, size_t ivLen, 
+                                        BDataIO* source, BDataIO* destination, 
+                                        void* outTag); // GCM STREAMING
+			status_t			Process(BCryptoUserRequest& userReq);
+			size_t              GetHashLength(BCryptoAlgorithmID algo) const;
+			status_t            Digest(BCryptoAlgorithmID algo, const void* data,
+			                           size_t len, void* outHash);
+			status_t            Digest(BCryptoAlgorithmID algo, BDataIO* source,
+			                           void* outHash);
+			void                SetAlgorithm(BCryptoAlgorithmID algo);
+			void                SetMode(BCryptoMode mode);
+			static bool         IsAlgorithmSupported(BCryptoAlgorithmID algo, 
+                                                     uint32 flags = 0);
+            status_t            GetNextAlgorithm(uint32* cookie, 
+                                                 BCryptoAlgorithmInfo* info);
+            status_t            GetEngineName(BCryptoAlgorithmID algo, 
+                                              char* outName, size_t nameSize);
+            status_t            GetEngineName(BCryptoAlgorithmID algo, 
+                                              BCryptoMode mode, 
+                                              char* outName, size_t nameSize);
+
+private:
+			int					fFd;
+			bool                fPaddingEnabled;
+			BCryptoPaddingType  fPaddingType;
+			BCryptoAlgorithmID  fAlgorithm;
+			BCryptoMode         fMode;
+			uint8               fLastBlockBuffer[16];
+			size_t fBufferSize;
+            void                _FillRequest(BCryptoUserRequest& req, BCryptoOperation op,
+                                             BCryptoAlgorithmID algo, BCryptoMode mode,
+                                             uint8* key, size_t keyLen,
+                                             uint8* iv, size_t ivLen, 
+                                             iovec* src, iovec* dst,
+                                             int vCount);
+            void                _ApplyPadding(uint8* buffer, size_t inputLen, size_t totalLen);
+            size_t              _RemovePadding(uint8* buffer, size_t len);
+};
+/* TODO: i parametri passati dovrebbero essere costanti immodificabili
+ * per ora lasciamo così in fase di debug...
+ * successivamente all'interno della computazione bisognerà fare qualcosa del genere:
+ * per esempio Dentro BCrypto::_FillRequest
+ * req.key = const_cast<uint8*>(key);
+ * req.iv  = const_cast<uint8*>(iv);
+ *
+class BCrypto {
+public:
+                                BCrypto();
+    virtual                     ~BCrypto();
+
+            status_t            InitCheck() const;
+
+            status_t            GetRandomBytes(void* buffer, size_t len);
+            void                SetPadding(bool enable, BCryptoPaddingType type = B_CRYPTO_PKCS7);
+            size_t              GetOutputSize(size_t inputLen, BCryptoOperation op);
+            
+            // Shorthand methods
+            ssize_t             Decrypt(const uint8* key, size_t keyLen,
+                                        const uint8* iv, size_t ivLen,
+                                        const void* in, size_t inLen,
+                                        void* out, size_t outSize);
+            ssize_t             Decrypt(const uint8* key, size_t keyLen, 
+                                        const uint8* iv, size_t ivLen,
+                                        BDataIO* source, BDataIO* destination);
+            ssize_t             Decrypt(const uint8* key, size_t keyLen, 
+                                        const uint8* iv, size_t ivLen, 
+                                        const void* in, size_t inLen, 
+                                        void* out, const void* inTag,
+                                        const void* aad = NULL, 
+                                        size_t aadLen = 0); //GCM
+            ssize_t             Decrypt(const uint8* key, size_t keyLen, 
+                                        const uint8* iv, size_t ivLen, 
+                                        BDataIO* source, BDataIO* destination, 
+                                        const void* inTag); // GCM STREAMING
+            ssize_t             Encrypt(const uint8* key, size_t keyLen, 
+                                        const uint8* iv, size_t ivLen, 
+                                        const void* in, size_t inLen, 
+                                        void* out, size_t outSize);
+            ssize_t             Encrypt(const uint8* key, size_t keyLen, 
+                                        const uint8* iv, size_t ivLen,
+                                        BDataIO* source, BDataIO* destination);
+            ssize_t             Encrypt(const uint8* key, size_t keyLen, 
+                                        const uint8* iv, size_t ivLen,
+                                        const void* in, size_t inLen, 
+                                        void* out, void* outTag,
+                                        const void* aad = NULL, 
+                                        size_t aadLen = 0); // GCM
+            ssize_t             Encrypt(const uint8* key, size_t keyLen, 
+                                        const uint8* iv, size_t ivLen, 
+                                        BDataIO* source, BDataIO* destination, 
+                                        void* outTag); // GCM STREAMING
+            status_t            Process(BCryptoUserRequest& userReq);
+            size_t              GetHashLength(BCryptoAlgorithmID algo) const;
+            status_t            Digest(BCryptoAlgorithmID algo, const void* data,
+                                       size_t len, void* outHash);
+            status_t            Digest(BCryptoAlgorithmID algo, BDataIO* source,
+                                       void* outHash);
+            void                SetAlgorithm(BCryptoAlgorithmID algo);
+            void                SetMode(BCryptoMode mode);
+    static  bool                IsAlgorithmSupported(BCryptoAlgorithmID algo, 
+                                                     uint32 flags = 0);
+            status_t            GetNextAlgorithm(uint32* cookie, 
+                                                 BCryptoAlgorithmInfo* info);
+            status_t            GetEngineName(BCryptoAlgorithmID algo, 
+                                              char* outName, size_t nameSize);
+            status_t            GetEngineName(BCryptoAlgorithmID algo, 
+                                              BCryptoMode mode, 
+                                              char* outName, size_t nameSize);
+
+private:
+            int                 fFd;
+            bool                fPaddingEnabled;
+            BCryptoPaddingType  fPaddingType;
+            BCryptoAlgorithmID  fAlgorithm;
+            BCryptoMode         fMode;
+            uint8               fLastBlockBuffer[16];
+            size_t              fBufferSize;
+            
+            void                _FillRequest(BCryptoUserRequest& req, BCryptoOperation op,
+                                             BCryptoAlgorithmID algo, BCryptoMode mode,
+                                             const uint8* key, size_t keyLen,
+                                             const uint8* iv, size_t ivLen, 
+                                             iovec* src, iovec* dst,
+                                             int vCount);
+            void                _ApplyPadding(uint8* buffer, size_t inputLen, size_t totalLen);
+            size_t              _RemovePadding(uint8* buffer, size_t len);
+};*/
+
+#endif // _BCRYPTO_H

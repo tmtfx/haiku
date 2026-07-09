@@ -54,6 +54,7 @@ public:
 
 	void SetContentSize(float width, float height);
 	void Draw();
+	void SetSpielActive(bool enable);
 
 	status_t Invoke(BMessage* message);
 
@@ -68,6 +69,7 @@ private:
 	BMenu* fMenu;
 	TBarView* fBarView;
 	status_t fInitStatus;
+	bool fSpielActive;
 };
 
 

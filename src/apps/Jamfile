@@ -51,6 +51,7 @@ HaikuSubInclude serialconnect ;
 HaikuSubInclude showimage ;
 HaikuSubInclude softwareupdater ;
 HaikuSubInclude soundrecorder ;
+HaikuSubInclude spielbar ;
 HaikuSubInclude stylededit ;
 HaikuSubInclude sudoku ;
 HaikuSubInclude switcher ;

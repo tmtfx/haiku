@@ -5,6 +5,7 @@
 	Other authors:
 	Mark Watson,
 	Rudolf Cornelissen 10/2002-1/2006.
+	Fabio Tomat 2026
 */
 
 #define MODULE_BIT 0x00800000
@@ -13,6 +14,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include "acc_std.h"
+#include "mga_macros.h"
 
 static status_t init_common(int the_fd);
 
@@ -67,10 +69,14 @@ static status_t init_common(int the_fd)
 	//LOG(4,("DMA_virtual:%x\tDMA_physical:%x\tDMA_area:%x\n",si->dma_buffer,si->dma_buffer_pci,si->dma_buffer_area));
 
 	/* all done */
+	
 	goto error0;
 
 error1:
-	delete_area(shared_info_area);
+	if (shared_info_area >= 0) {
+        delete_area(shared_info_area);
+        si = NULL;
+    }
 error0:
 	return result;
 }
@@ -117,7 +123,7 @@ status_t INIT_ACCELERANT(int the_fd)
 	if (result != B_OK)
 		goto error0;
 	// LOG now available: !NULL si
-
+	
 	/* ensure that INIT_ACCELERANT is executed just once (copies should be clones) */
 	if (si->accelerant_in_use)
 	{
@@ -130,6 +136,10 @@ status_t INIT_ACCELERANT(int the_fd)
 
 	/* call the device specific init code */
 	result = gx00_general_powerup();
+	
+	debug_printf("matrox_acc: Card Type enum=%d, Memory Size=%d MB, Secondary Head=%s\n",
+				si->ps.card_type, si->ps.memory_size, si->ps.secondary_head ? "SI" : "NO");
+
 
 	/* bail out if it failed */
 	if (result != B_OK)

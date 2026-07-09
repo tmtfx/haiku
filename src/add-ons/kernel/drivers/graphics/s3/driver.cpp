@@ -4,6 +4,7 @@
 
 	Authors:
 	Gerald Zajac 2007-2008
+	Fabio Tomat 2026
 */
 
 #include <KernelExport.h>
@@ -15,6 +16,10 @@
 #include <stdio.h>
 #include <string.h>
 #include <graphic_driver.h>
+
+#include <boot_item.h>
+#include <frame_buffer_console.h>
+#include "s3_logo.h"
 
 #include "DriverInterface.h"
 
@@ -132,7 +137,69 @@ static device_hooks gDeviceHooks =
 	NULL
 };
 
+static void
+draw_logo(DeviceInfo& di)
+{
+    SharedInfo& si = *(di.sharedInfo);
+    
+    if (si.videoMemArea < 0)
+        return;
 
+    // Retrieve framebuffer info from bootloader
+    struct frame_buffer_boot_info* bi = (struct frame_buffer_boot_info*)get_boot_item(
+        FRAME_BUFFER_BOOT_INFO, NULL);
+    
+    if (!bi)
+        return;
+
+    // s3_logo array is 32-bit (RGBA/RGB32). 
+    if (bi->depth != 32)
+        return;
+
+    uint32 screenWidth = bi->width;
+    uint32 screenHeight = bi->height;
+    
+    uint32 bytesPerRow = bi->bytes_per_row;
+    if (bytesPerRow == 0)
+        bytesPerRow = screenWidth * 4;
+
+    uint32 fbPitch = bytesPerRow / 4;
+
+    uint32 logoW = s3_logo_width;   // 640
+    uint32 logoH = s3_logo_height;  // 240
+
+    // Centering
+    int32 startX = (int32)((screenWidth - logoW) / 2);
+	if (startX < 0) startX = 0;
+    int32 startY = (int32)((screenHeight - logoH) / 2);
+	if (startY < 0) startY = 0;
+
+	uint8* fb = (uint8*)si.videoMemAddr;
+	if (fb == NULL) {
+		fb = (uint8*)bi->frame_buffer;
+	}
+	if (fb == NULL)
+		return;
+
+    // Draw kernel space
+	/*
+	uint32* fb = (uint32*)si.videoMemAddr;
+    for (uint32 y = 0; y < logoH && (startY + (int32)y) < (int32)screenHeight; y++) {
+        for (uint32 x = 0; x < logoW && (startX + (int32)x) < (int32)screenWidth; x++) {
+            uint32 fbIndex = (uint32)((startY + (int32)y) * (int32)fbPitch + (startX + (int32)x));
+            fb[fbIndex] = s3_logo[y * logoW + x];
+        }
+    }*/
+	for (uint32 y = 0; y < logoH && (startY + y) < screenHeight; y++) {
+		uint32 fbOffset = ((startY + y) * fbPitch + startX) * sizeof(uint32);
+		uint32 logoRowOffset = y * logoW;
+		uint32 remainingWidth = screenWidth - startX;
+		uint32 copyPixels = (logoW < remainingWidth) ? logoW : remainingWidth;
+		uint32 copySize = copyPixels * sizeof(uint32);
+
+		user_memcpy(fb + fbOffset, (void*)&s3_logo[logoRowOffset], copySize);
+	}
+}
 
 static inline uint32
 GetPCI(pci_info& info, uint8 offset, uint8 size)
@@ -215,8 +282,7 @@ MapDevice(DeviceInfo& di)
 
 	 		videoRamAddr = pciInfo.u.h0.base_registers[0];
 			videoRamSize = 16 * 1024 * 1024;	// 16 MB is max for 3D series
-			si.videoMemPCI = pciInfo.u.h0.base_registers_pci[0];
-		} else {
+			si.videoMemPCI = pciInfo.u.h0.base_registers_pci[0];		} else {
 			// All other Savage chips.
 
 			regsBase = pciInfo.u.h0.base_registers[0] + SavageMmioRegBaseNew;
@@ -263,7 +329,7 @@ MapDevice(DeviceInfo& di)
 		videoRamSize,
 		B_ANY_KERNEL_BLOCK_ADDRESS | B_WRITE_COMBINING_MEMORY,
 		B_READ_AREA + B_WRITE_AREA,
-		&(si.videoMemAddr));
+		(void**)(&(si.videoMemAddr)));
 
 	if (si.videoMemArea < 0) {
 		// Try to map this time without write combining.
@@ -273,11 +339,11 @@ MapDevice(DeviceInfo& di)
 			videoRamSize,
 			B_ANY_KERNEL_BLOCK_ADDRESS,
 			B_READ_AREA + B_WRITE_AREA,
-			&(si.videoMemAddr));
+			(void**)(&(si.videoMemAddr)));
 	}
 
-	TRACE("Video memory, area: %" B_PRId32 ",  addr: 0x%" B_PRIXADDR "\n", si.videoMemArea,
-		(addr_t)(si.videoMemAddr));
+	TRACE("Video memory, area: %d,  addr: 0x%" B_PRIXADDR "\n",
+		si.videoMemArea, (addr_t)(si.videoMemAddr));
 
 	// If there was an error, delete other areas.
 	if (si.videoMemArea < 0) {
@@ -285,7 +351,7 @@ MapDevice(DeviceInfo& di)
 		si.regsArea = -1;
 	}
 
-	TRACE("leave MapDevice(); result: %" B_PRId32 "\n", si.videoMemArea);
+	TRACE("leave MapDevice(); result: %d\n", si.videoMemArea);
 	return si.videoMemArea;
 }
 
@@ -417,6 +483,18 @@ InitDevice(DeviceInfo& di)
 		return di.sharedArea;	// return error code
 
 	SharedInfo& si = *(di.sharedInfo);
+	
+	struct frame_buffer_boot_info* bi = (struct frame_buffer_boot_info*)get_boot_item(
+FRAME_BUFFER_BOOT_INFO, NULL);
+
+	if (bi) {
+		si.has_boot_info = true;
+		si.boot_width = bi->width;
+		si.boot_height = bi->height;
+		si.boot_depth = bi->depth;
+	} else {
+		si.has_boot_info = false;
+	}
 
 	si.vendorID = pciInfo.vendor_id;
 	si.deviceID = pciInfo.device_id;
@@ -444,6 +522,9 @@ InitDevice(DeviceInfo& di)
 	InitInterruptHandler(di);
 
 	TRACE("Interrupt assigned:  %s\n", si.bInterruptAssigned ? "yes" : "no");
+
+	draw_logo(di);
+	snooze(2000000);
 	return B_OK;
 }
 
@@ -653,7 +734,7 @@ status_t  init_driver(void)
 
 	gDeviceNames[count] = NULL;	// terminate list with null pointer
 
-	TRACE("init_driver() %" B_PRIu32 " supported devices\n", count);
+	TRACE("init_driver() %d supported devices\n", count);
 
 	return B_OK;
 }
@@ -725,8 +806,7 @@ device_open(const char* name, uint32 /*flags*/, void** cookie)
 		*cookie = &di;		// send cookie to opener
 	}
 
-	TRACE("device_open() returning 0x%" B_PRIx32 ",  open count: %" B_PRIu32 "\n", status,
-		di.openCount);
+	TRACE("device_open() returning 0x%x,  open count: %d\n", status, di.openCount);
 	return status;
 }
 
@@ -804,121 +884,137 @@ device_free(void* dev)
 
 	gLock.Release();	// unlock driver
 
-	TRACE("exit device_free() openCount: %" B_PRIu32 "\n", di.openCount);
+	TRACE("exit device_free() openCount: %d\n", di.openCount);
 	return B_OK;
 }
 
 
 static status_t
-device_ioctl(void* dev, uint32 msg, void* buffer, size_t bufferLength)
+device_ioctl(void* dev, uint32 msg, void* buf, size_t len)
 {
 	DeviceInfo& di = *((DeviceInfo*)dev);
+
+	(void)len;		// avoid compiler warning for unused arg
 
 //	TRACE("device_ioctl(); ioctl: %lu, buf: 0x%08lx, len: %lu\n", msg, (uint32)buf, len);
 
 	switch (msg) {
 		case B_GET_ACCELERANT_SIGNATURE:
-			if (user_strlcpy((char*)buffer, "s3.accelerant",
-					bufferLength) < B_OK)
+			if (user_strlcpy((char*)buf, "s3.accelerant", B_FILE_NAME_LENGTH) < 0)
 				return B_BAD_ADDRESS;
 			return B_OK;
 
 		case S3_DEVICE_NAME:
-			return user_strlcpy((char*)buffer, di.name, B_OS_NAME_LENGTH);
+			if (user_strlcpy((char*)buf, di.name, B_OS_NAME_LENGTH) < 0)
+				return B_BAD_ADDRESS;
+			((char*)buf)[B_OS_NAME_LENGTH -1] = '\0';
+			return B_OK;
 
 		case S3_GET_PRIVATE_DATA:
 		{
-			S3GetPrivateData data;
-			if (user_memcpy(&data, buffer, sizeof(uint32)) != B_OK)
+			S3GetPrivateData gpd;
+			if (user_memcpy(&gpd, buf, sizeof(S3GetPrivateData)) != B_OK)
 				return B_BAD_ADDRESS;
-			if (data.magic != S3_PRIVATE_DATA_MAGIC)
-				return B_BAD_VALUE;
 
-			data.sharedInfoArea = di.sharedArea;
-			return user_memcpy(buffer, &data, sizeof(S3GetPrivateData));
+			if (gpd.magic == S3_PRIVATE_DATA_MAGIC) {
+				gpd.sharedInfoArea = di.sharedArea;
+				if (user_memcpy(buf, &gpd, sizeof(S3GetPrivateData)) != B_OK)
+					return B_BAD_ADDRESS;
+				return B_OK;
+			}
+			break;
 		}
 
 		case S3_GET_EDID:
 		{
-			S3GetEDID data;
-			if (user_memcpy(&data, buffer, sizeof(uint32)) != B_OK)
+#ifdef __HAIKU__
+			S3GetEDID ged;
+			if (user_memcpy(&ged, buf, sizeof(S3GetEDID)) != B_OK)
 				return B_BAD_ADDRESS;
-			if (data.magic != S3_PRIVATE_DATA_MAGIC)
-				return B_BAD_VALUE;
-
-			status_t status = GetEdidFromBIOS(data.rawEdid);
-			if (status == B_OK) {
-				status = user_memcpy(&((S3GetEDID*)buffer)->rawEdid, &data.rawEdid,
-					sizeof(data.rawEdid));
+			if (ged.magic == S3_PRIVATE_DATA_MAGIC) {
+				edid1_raw rawEdid;
+				status_t status = GetEdidFromBIOS(rawEdid);
+				if (status == B_OK) {
+					memcpy(&ged.rawEdid, &rawEdid, sizeof(rawEdid));
+					if (user_memcpy(buf, &ged, sizeof(S3GetEDID)) != B_OK)
+						return B_BAD_ADDRESS;
+				}
+				return status;
 			}
-			return status;
+#else
+			return B_UNSUPPORTED;
+#endif
+			break;
 		}
 
 		case S3_GET_PIO:
 		{
-			S3GetSetPIO data;
-			if (user_memcpy(&data, buffer, sizeof(data)) != B_OK)
+			S3GetSetPIO gsp;
+			if (user_memcpy(&gsp, buf, sizeof(S3GetSetPIO)) != B_OK)
 				return B_BAD_ADDRESS;
-			if (data.magic != S3_PRIVATE_DATA_MAGIC)
-				return B_BAD_VALUE;
 
-			switch (data.size) {
-				case 1:
-					data.value = gPCI->read_io_8(data.offset);
-					break;
-				case 2:
-					data.value = gPCI->read_io_16(data.offset);
-					break;
-				case 4:
-					data.value = gPCI->read_io_32(data.offset);
-					break;
-				default:
-					TRACE("device_ioctl() S3_GET_PIO invalid size: %" B_PRIu32 "\n", data.size);
-					return B_ERROR;
+			if (gsp.magic == S3_PRIVATE_DATA_MAGIC) {
+				switch (gsp.size) {
+					case 1:
+						gsp.value = gPCI->read_io_8(gsp.offset);
+						break;
+					case 2:
+						gsp.value = gPCI->read_io_16(gsp.offset);
+						break;
+					case 4:
+						gsp.value = gPCI->read_io_32(gsp.offset);
+						break;
+					default:
+						TRACE("device_ioctl() S3_GET_PIO invalid size: %d\n", gsp.size);
+						return B_ERROR;
+				}
+				if (user_memcpy(buf, &gsp, sizeof(S3GetSetPIO)) != B_OK)
+					return B_BAD_ADDRESS;
+				return B_OK;
 			}
-
-			return user_memcpy(buffer, &data, sizeof(data));
+			break;
 		}
 
 		case S3_SET_PIO:
 		{
-			S3GetSetPIO data;
-			if (user_memcpy(&data, buffer, sizeof(data)) != B_OK)
+			S3GetSetPIO gsp;
+			if (user_memcpy(&gsp, buf, sizeof(S3GetSetPIO)) != B_OK)
 				return B_BAD_ADDRESS;
-			if (data.magic != S3_PRIVATE_DATA_MAGIC)
-				return B_BAD_VALUE;
 
-			switch (data.size) {
-				case 1:
-					gPCI->write_io_8(data.offset, data.value);
-					break;
-				case 2:
-					gPCI->write_io_16(data.offset, data.value);
-					break;
-				case 4:
-					gPCI->write_io_32(data.offset, data.value);
-					break;
-				default:
-					TRACE("device_ioctl() S3_SET_PIO invalid size: %" B_PRIu32 "\n", data.size);
-					return B_ERROR;
+			if (gsp.magic == S3_PRIVATE_DATA_MAGIC) {
+				switch (gsp.size) {
+					case 1:
+						gPCI->write_io_8(gsp.offset, gsp.value);
+						break;
+					case 2:
+						gPCI->write_io_16(gsp.offset, gsp.value);
+						break;
+					case 4:
+						gPCI->write_io_32(gsp.offset, gsp.value);
+						break;
+					default:
+						TRACE("device_ioctl() S3_SET_PIO invalid size: %d\n", gsp.size);
+						return B_ERROR;
+				}
+				return B_OK;
 			}
-
-			return user_memcpy(buffer, &data, sizeof(data));
+			break;
 		}
 
 		case S3_RUN_INTERRUPTS:
 		{
-			S3SetBoolState data;
-			if (user_memcpy(&data, buffer, sizeof(data)) != B_OK)
+			S3SetBoolState ri;
+			if (user_memcpy(&ri, buf, sizeof(S3SetBoolState)) != B_OK)
 				return B_BAD_ADDRESS;
-			if (data.magic != S3_PRIVATE_DATA_MAGIC)
-				return B_BAD_VALUE;
 
-			if (data.bEnable)
-				EnableVBI();
-			else
-				DisableVBI();
-			return B_OK;
+			if (ri.magic == S3_PRIVATE_DATA_MAGIC) {
+				if (ri.bEnable)
+					EnableVBI();
+				else
+					DisableVBI();
+				return B_OK;
+			}
+			break;
 		}
 	}
 

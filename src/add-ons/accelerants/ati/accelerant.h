@@ -54,6 +54,8 @@ struct AccelerantInfo {
 	// Pointers to cursor functions.
 	bool	(*LoadCursorImage)(int width, int height, uint8* and_mask,
 				uint8* xor_mask);
+	status_t (*SetCursorBitmap)(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
+                         color_space colorSpace, uint16 bytesPerRow, const uint8* bitmapData);
 	void	(*SetCursorPosition)(int x, int y);
 	void	(*ShowCursor)(bool bShow);
 
@@ -127,7 +129,10 @@ status_t Rage128_SetDPMSMode(uint32 dpms_flags);
 // Cursor
 status_t SetCursorShape(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
 					uint8* andMask, uint8* xorMask);
+status_t SetCursorBitmap(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
+                color_space colorSpace, uint16 bytesPerRow, const uint8* bitmapData);
 void	 MoveCursor(uint16 x, uint16 y);
+uint32	 GetCursorBits(void);
 
 // Engine Management
 uint32   AccelerantEngineCount(void);
@@ -196,6 +201,8 @@ void	 Mach64_EngineInit(const DisplayModeEx& mode);
 
 bool	 Mach64_LoadCursorImage(int width, int height, uint8* and_mask,
 				uint8* xor_mask);
+status_t Mach64_SetCursorBitmap(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
+                       color_space colorSpace, uint16 bytesPerRow, const uint8* bitmapData);
 void	 Mach64_SetCursorPosition(int x, int y);
 void	 Mach64_ShowCursor(bool bShow);
 
@@ -222,6 +229,8 @@ bool	 Rage128_GetEdidInfo(void);
 
 bool	 Rage128_LoadCursorImage(int width, int height, uint8* and_mask,
 				uint8* xor_mask);
+status_t Rage128_SetCursorBitmap(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
+                         color_space colorSpace, uint16 bytesPerRow, const uint8* bitmapData);
 void	 Rage128_SetCursorPosition(int x, int y);
 void	 Rage128_ShowCursor(bool bShow);
 

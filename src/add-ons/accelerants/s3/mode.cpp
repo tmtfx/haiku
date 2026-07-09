@@ -11,6 +11,7 @@
 #include <create_display_modes.h>		// common accelerant header file
 #include <string.h>
 #include <unistd.h>
+#include "common_modes.h"
 
 
 void 
@@ -224,84 +225,120 @@ IsModeUsable(const display_mode* mode)
 	return true;
 }
 
-
 status_t
 CreateModeList( bool (*checkMode)(const display_mode* mode),
-				bool (*getEdid)(edid1_info& edidInfo))
+                bool (*getEdid)(edid1_info& edidInfo))
 {
-	SharedInfo& si = *gInfo.sharedInfo;
+    SharedInfo& si = *gInfo.sharedInfo;
 
-	// Obtain EDID info which is needed for for building the mode list.
-	// However, if a laptop's LCD display is active, bypass getting the EDID
-	// info since it is not needed, and if the external display supports only
-	// resolutions smaller than the size of the laptop LCD display, it would
-	// unnecessarily restrict size of the resolutions that could be set for
-	// laptop LCD display.
+    si.bHaveEDID = false;
 
-	si.bHaveEDID = false;
+    if (si.displayType != MT_LCD) {
+        if (getEdid != NULL)
+            si.bHaveEDID = getEdid(si.edidInfo);
 
-	if (si.displayType != MT_LCD) {
-		if (getEdid != NULL)
-			si.bHaveEDID = getEdid(si.edidInfo);
+        if ( ! si.bHaveEDID) {
+            S3GetEDID ged;
+            ged.magic = S3_PRIVATE_DATA_MAGIC;
 
-		if ( ! si.bHaveEDID) {
-			S3GetEDID ged;
-			ged.magic = S3_PRIVATE_DATA_MAGIC;
+            if (ioctl(gInfo.deviceFileDesc, S3_GET_EDID, &ged, sizeof(ged)) == B_OK) {
+                if (ged.rawEdid.version.version != 1
+                        || ged.rawEdid.version.revision > 4) {
+                    TRACE("CreateModeList(); EDID version %d.%d out of range\n",
+                        ged.rawEdid.version.version, ged.rawEdid.version.revision);
+                } else {
+                    edid_decode(&si.edidInfo, &ged.rawEdid);
+                    si.bHaveEDID = true;
+                }
+            }
+        }
 
-			if (ioctl(gInfo.deviceFileDesc, S3_GET_EDID, &ged, sizeof(ged)) == B_OK) {
-				if (ged.rawEdid.version.version != 1
-						|| ged.rawEdid.version.revision > 4) {
-					TRACE("CreateModeList(); EDID version %d.%d out of range\n",
-						ged.rawEdid.version.version, ged.rawEdid.version.revision);
-				} else {
-					edid_decode(&si.edidInfo, &ged.rawEdid);	// decode & save EDID info
-					si.bHaveEDID = true;
-				}
-			}
-		}
-
-		if (si.bHaveEDID) {
+        if (si.bHaveEDID) {
 #ifdef ENABLE_DEBUG_TRACE
-			edid_dump(&(si.edidInfo));
+            edid_dump(&(si.edidInfo));
 #endif
-		} else {
-			TRACE("CreateModeList(); Unable to get EDID info\n");
-		}
-	}
+        } else {
+            TRACE("CreateModeList(); Unable to get EDID info\n");
+        }
+    }
 
-	display_mode* list;
-	uint32 count = 0;
-	area_id listArea;
+    display_mode* list;
+    uint32 count = 0;
+    area_id listArea;
 
-	listArea = create_display_modes("S3 modes",
-		si.bHaveEDID ? &si.edidInfo : NULL,
-		NULL, 0, si.colorSpaces, si.colorSpaceCount, 
-		(check_display_mode_hook)checkMode, &list, &count);
+    // Chiamata nativa ad Haiku (alloca l'area corretta). 
+    // Se bHaveEDID è false, genera la lista standard di fallback (8, 16, 32 bit).
+    listArea = create_display_modes("S3 modes",
+        si.bHaveEDID ? &si.edidInfo : NULL,
+        NULL, 0, si.colorSpaces, si.colorSpaceCount, 
+        (check_display_mode_hook)checkMode, &list, &count);
 
-	if (listArea < 0)
-		return listArea;		// listArea has error code
+    if (listArea < 0)
+        return listArea;
 
-	si.modeArea = gInfo.modeListArea = listArea;
-	si.modeCount = count;
-	gInfo.modeList = list;
+    // ─────────────────────────────────────────────────────────────────────
+    // INTERVENTO CHIRURGICO: Se l'EDID è fallito, filtriamo la lista in base alla RAM
+    // ─────────────────────────────────────────────────────────────────────
+    if (!si.bHaveEDID) {
+        TRACE("CreateModeList(): EDID assente. Filtro la lista VESA standard per %" B_PRIu32 " byte di RAM\n", 
+            si.videoMemSize);
 
-	return B_OK;
+        uint32 validCount = 0;
+
+        for (uint32 i = 0; i < count; i++) {
+            uint32 bytesPerPixel = 0;
+            switch (list[i].space) {
+                case B_CMAP8:  bytesPerPixel = 1; break;
+                case B_RGB15:
+                case B_RGB16:  bytesPerPixel = 2; break;
+                case B_RGB32:  bytesPerPixel = 4; break;
+                default: continue; // Salta spazi colore non codificati o non supportati
+            }
+
+            // Calcolo reale della memoria occupata dal framebuffer primario
+            uint32 requiredMemory = list[i].timing.h_display * list[i].timing.v_display * bytesPerPixel;
+
+            // Filtro 1: Limite fisico della RAM della scheda (lasciando un margine di 256 KB)
+            if (si.videoMemSize > 0 && requiredMemory > (si.videoMemSize - (256 * 1024))) {
+                continue; // Troppa memoria richiesta, scarta questa modalità
+            }
+
+            // Filtro 2: Limite prudenziale sul pixel clock per la stabilità del chip ViRGE (max 135MHz)
+            if (list[i].timing.pixel_clock > 135000) {
+                continue; 
+            }
+
+            // Se supera i controlli, sovrascriviamo la modalità spostandola all'inizio della lista
+            list[validCount] = list[i];
+            validCount++;
+        }
+
+        // Caso limite: se il filtro ha svuotato tutto (improbabile), forziamo una risoluzione minima
+        if (validCount == 0) {
+            TRACE("CreateModeList(): Nessuna modalità compatibile con la RAM, imposto safe fallback\n");
+            memset(&list[0], 0, sizeof(display_mode));
+            list[0].timing.pixel_clock = 65000;
+            list[0].timing.h_display = 1024; list[0].timing.h_sync_start = 1048; list[0].timing.h_sync_end = 1184; list[0].timing.h_total = 1344;
+            list[0].timing.v_display = 768;  list[0].timing.v_sync_start = 771;  list[0].timing.v_sync_end = 777;  list[0].timing.v_total = 806;
+            list[0].space = B_RGB16;
+            list[0].virtual_width = 1024; list[0].virtual_height = 768;
+            validCount = 1;
+        }
+
+        count = validCount;
+        TRACE("CreateModeList(): Generate %" B_PRIu32 " modalità filtrate (comprese quelle a 32bit leggere).\n", count);
+    }
+    // ─────────────────────────────────────────────────────────────────────
+
+    si.modeArea = gInfo.modeListArea = listArea;
+    si.modeCount = count;
+    gInfo.modeList = list;
+
+    return B_OK;
 }
 
+/*
 
-
-status_t
-ProposeDisplayMode(display_mode *target, const display_mode *low,
-	const display_mode *high)
-{
-	(void)low;		// avoid compiler warning for unused arg
-	(void)high;		// avoid compiler warning for unused arg
-
-	TRACE("ProposeDisplayMode()  %dx%d, pixel clock: %d kHz, space: 0x%X\n",
-		target->timing.h_display, target->timing.v_display,
-		target->timing.pixel_clock, target->space);
-
-	// Search the mode list for the specified mode.
 
 	uint32 modeCount = gInfo.sharedInfo->modeCount;
 
@@ -315,8 +352,65 @@ ProposeDisplayMode(display_mode *target, const display_mode *low,
 	}
 
 	return B_BAD_VALUE;		// mode not found in list
-}
+}*/
+status_t
+ProposeDisplayMode(display_mode *target, const display_mode *low,
+    const display_mode *high)
+{
+	(void)low;		// avoid compiler warning for unused arg
+	(void)high;		// avoid compiler warning for unused arg
+	
+    TRACE("ProposeDisplayMode() %dx%d, pixel clock: %d kHz, space: 0x%X\n",
+        target->timing.h_display, target->timing.v_display,
+        target->timing.pixel_clock, target->space);
 
+    SharedInfo& si = *(gInfo.sharedInfo);
+
+    uint32 bytesPerPixel = 0;
+    switch (target->space) {
+        case B_CMAP8:  bytesPerPixel = 1; break;
+        case B_RGB15:
+        case B_RGB16:  bytesPerPixel = 2; break;
+        case B_RGB32:  bytesPerPixel = 4; break;
+        default:
+            TRACE("ProposeDisplayMode(): Color space not supported 0x%X\n", target->space);
+            return B_BAD_VALUE;
+    }
+
+    uint32 requiredMemory = target->timing.h_display * target->timing.v_display * bytesPerPixel;
+    
+    // Keep safe distance (200 KB) from total videoMemSize
+    if (si.videoMemSize > 0 && requiredMemory > (si.videoMemSize - (200 * 1024))) {
+        TRACE("ProposeDisplayMode(): REJECTED. Asked %" B_PRIu32 " bytes, available %" B_PRIu32 "\n",
+            requiredMemory, si.videoMemSize);
+        return B_BAD_VALUE; 
+    }
+
+	// Search the mode list for the specified mode.
+    uint32 modeCount = si.modeCount;
+    for (uint32 j = 0; j < modeCount; j++) {
+        display_mode& mode = gInfo.modeList[j];
+
+        if (target->timing.h_display == mode.timing.h_display
+            && target->timing.v_display == mode.timing.v_display
+            && target->space == mode.space) {
+            
+            *target = mode;
+            return B_OK;
+        }
+    }
+
+    // Fallback: if the app_server asks something outside the list (or rejects, look above),
+    // force hit to fallback to the first mode from the list (the safe boot one)
+    if (modeCount > 0) {
+        TRACE("ProposeDisplayMode(): Modalità non in lista. Forzo fallback a %dx%d\n", 
+            gInfo.modeList[0].timing.h_display, gInfo.modeList[0].timing.v_display);
+        *target = gInfo.modeList[0];
+        return B_OK;
+    }
+
+    return B_BAD_VALUE;
+}
 
 
 status_t 

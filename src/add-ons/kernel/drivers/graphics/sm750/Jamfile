@@ -1,0 +1,21 @@
+SubDir HAIKU_TOP src add-ons kernel drivers graphics sm750 ;
+
+SubDirCcFlags -DENABLE_LOGGING -DLOG_INCLUDE_STARTUP ;
+
+UsePrivateHeaders graphics ;
+UsePrivateSystemHeaders ;
+UsePrivateHeaders [ FDirName graphics common ] ;
+UsePrivateHeaders [ FDirName graphics vesa ] ;
+UsePrivateHeaders [ FDirName graphics sm750 ] ;
+UsePrivateKernelHeaders ;
+
+KernelAddon sm750 :
+	driver.cpp
+	init.c
+	:
+	libgraphicscommon.a
+;
+
+SEARCH on [ FGristFiles
+		kernel_cpp.cpp 
+	] = [ FDirName $(HAIKU_TOP) src system kernel util ] ;

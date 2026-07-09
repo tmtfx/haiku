@@ -1,5 +1,6 @@
 SubDir HAIKU_TOP src preferences ;
 
+SubInclude HAIKU_TOP src preferences AI ;
 SubInclude HAIKU_TOP src preferences appearance ;
 SubInclude HAIKU_TOP src preferences backgrounds ;
 SubInclude HAIKU_TOP src preferences bluetooth ;

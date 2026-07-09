@@ -462,7 +462,7 @@ TBarWindow::SetDeskbarLocation(deskbar_location location, bool newExpandState)
 			break;
 	}
 
-	fBarView->ChangeState(vertical, left, top, expand ? kExpandoState : kMiniState);
+	fBarView->ChangeState(expand, vertical, left, top);
 }
 
 
@@ -494,7 +494,7 @@ TBarWindow::Expand(BMessage* message)
 		bool vertical = fBarView->Vertical();
 		bool left = fBarView->Left();
 		bool top = fBarView->Top();
-		fBarView->ChangeState(vertical, left, top, expand ? kExpandoState : kMiniState);
+		fBarView->ChangeState(expand, vertical, left, top);
 	}
 }
 

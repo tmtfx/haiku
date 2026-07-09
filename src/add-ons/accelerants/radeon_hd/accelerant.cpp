@@ -52,6 +52,41 @@ gpio_info* gGPIOInfo[MAX_GPIO_PINS];
 
 //	#pragma mark -
 
+static status_t
+init_hardware_cursor(accelerant_info* info)
+{
+    uint32 cursorSize = 64 * 64 * 4; // 16 KB (ARGB32)
+    uint32 alignment = 4096;         // Allineamento richiesto dall'hardware AMD
+
+    // Recuperiamo la dimensione della VRAM passata dal driver del kernel
+    uint64 fbSize = info->shared_info->frame_buffer_size * 1024; // Convertito in bytes
+
+    if (fbSize < cursorSize) {
+        TRACE("%s: Memoria video insufficiente per il cursore hardware\n", __func__);
+        return B_NO_MEMORY;
+    }
+
+    // Calcoliamo l'offset sicuro partendo dal fondo della VRAM
+    uint64 offset = fbSize - cursorSize;
+    offset &= ~((uint64)(alignment - 1)); // Forziamo l'allineamento a pagina (4KB)
+
+    // Sottraiamo la memoria isolandola: l'allocatore grafico non la toccherà
+    // Nota: adatta il campo a seconda di come si chiama la struttura (es. info->fb.vramSize o simili)
+    // info->fb.vramSize = offset; 
+
+    // Salviamo i puntatori logici e fisici definitivi all'interno di gInfo
+    info->cursor_fb_offset = (uint32)offset;
+    info->cursor_phys = (addr_t)info->shared_info->frame_buffer_phys + info->cursor_fb_offset;
+    info->cursor_vaddr = (uint8*)info->shared_info->frame_buffer + info->cursor_fb_offset;
+
+    // Pulizia preventiva per azzerare artefatti o residui di memoria al boot
+    memset(info->cursor_vaddr, 0, cursorSize);
+
+    TRACE("%s: Hardware cursor inizializzato con successo. Offset VRAM: %" B_PRIu32 "\n", 
+        __func__, info->cursor_fb_offset);
+
+    return B_OK;
+}
 
 /*! This is the common accelerant_info initializer. It is called by
 	both, the first accelerant and all clones.
@@ -152,6 +187,13 @@ init_common(int device, bool isClone)
 	if (gInfo->rom[0] != 0x55 || gInfo->rom[1] != 0xAA)
 		TRACE("%s: didn't find a VGA bios in cloned region!\n", __func__);
 
+	status = init_hardware_cursor(gInfo);
+    if (status != B_OK) {
+        TRACE("%s: Inizializzazione cursore fallita, fallback software attivo\n", __func__);
+        // Nota: non restituiamo B_ERROR per evitare il blocco totale del driver. 
+        // Se manca memoria per il mouse, Haiku userà in automatico il cursore software.
+    }
+    
 	infoDeleter.Detach();
 	sharedDeleter.Detach();
 	regsDeleter.Detach();

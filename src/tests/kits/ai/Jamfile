@@ -1,0 +1,13 @@
+SubDir HAIKU_TOP src tests kits ai ;
+
+# Tests to exercise AI plugin API using built-in plugin sources (compiled into test binaries)
+UsePrivateHeaders network ;
+UsePublicHeaders ai support ;
+
+#local openai_src = [ FDirName $(HAIKU_TOP) src add-ons ai plugins openai_plugin.cpp ] ;
+#local ollama_src  = [ FDirName $(HAIKU_TOP) src add-ons ai plugins ollama_plugin.cpp ] ;
+
+SimpleTest TestSyncDefault : test_sync_default.cpp : be libai_api.so network [ TargetLibstdc++ ] ; # $(openai_src)
+SimpleTest TestOllama : test_ollama_request.cpp : be libai_api.so network [ TargetLibstdc++ ] ;
+SimpleTest TestSyncParams : test_sync_opt_params.cpp : be libai_api.so network [ TargetLibstdc++ ] ;
+SimpleTest TestAsync : test_async_request.cpp : be libai_api.so network [ TargetLibstdc++ ] ;

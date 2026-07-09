@@ -1,4 +1,5 @@
 /*
+ * Copyright 2026, I Pirati Del Frico
  * Copyright 2020-2023, Panagiotis "Ivory" Vasilopoulos <git@n0toose.net>
  * Copyright 2009-2010, Stephan Aßmus <superstippi@gmx.de>
  * Copyright 2005-2008, Jérôme DUVAL
@@ -21,6 +22,8 @@
 #include <ControlLook.h>
 #include <Directory.h>
 #include <FindDirectory.h>
+#include <File.h>
+#include <GroupView.h>
 #include <LayoutBuilder.h>
 #include <LayoutUtils.h>
 #include <Locale.h>
@@ -38,6 +41,19 @@
 #include <TextView.h>
 #include <TranslationUtils.h>
 #include <TranslatorFormats.h>
+
+#include <openssl/evp.h>
+#include <openssl/x509.h>
+#include <openssl/rsa.h>
+#include <openssl/err.h>
+
+#include <DiskDevice.h>
+#include <DiskDeviceRoster.h>
+#include <Partition.h>
+
+#include <new>
+
+#include "crypto/BCrypto.h"
 
 #include "tracker_private.h"
 
@@ -62,6 +78,9 @@ const uint32 LAUNCH_BOOTMAN = 'iWBM';
 const uint32 START_SCAN = 'iSSC';
 const uint32 PACKAGE_CHECKBOX = 'iPCB';
 const uint32 ENCOURAGE_DRIVESETUP = 'iENC';
+const uint32 PASSWORD_UPDATED       = 'PSWU';
+const uint32 MASTER_PASSWORD_SHOW   = 'MPSH';
+const uint32 MASTER_PASSWORD_SAVE   = 'MPSV';
 
 
 class LogoView : public BView {
@@ -157,6 +176,74 @@ LogoView::_Init()
 }
 
 
+
+PasswordTC::PasswordTC(const char* label, BMessage* modificationMessage)
+	:
+	BTextControl(label, "", modificationMessage),
+	fVisible(false)
+{
+}
+
+
+bool
+PasswordTC::Visible() const
+{
+	return fVisible;
+}
+
+
+void
+PasswordTC::SetVisible(bool visible)
+{
+	fVisible = visible;
+	Invalidate();
+}
+
+
+void
+PasswordTC::DrawAfterChildren(BRect /*updateRect*/)
+{
+	if (fVisible)
+		return;
+
+	BTextView* tv = TextView();
+	BRect tvFrame = tv->Frame();
+
+	// Cover the BTextView content area with its own background colour,
+	// hiding whatever the BTextView just drew (real characters).
+	SetHighColor(tv->ViewColor());
+	FillRect(tvFrame);
+
+	int32 len = tv->TextLength();
+	if (len == 0)
+		return;
+
+	// Build the masked display string.
+	BString masked;
+	masked.Append('*', len);
+
+	// Use the BTextView's font and text colour so the '*' glyphs look
+	// identical to what the real text would have looked like.
+	BFont font;
+	rgb_color textColor;
+	tv->GetFontAndColor(0, &font, &textColor);
+
+	font_height fh;
+	font.GetHeight(&fh);
+
+	// PointAt(0) returns the upper-left corner of the first character
+	// in BTextView coordinates; add ascent to land on the baseline.
+	BPoint origin = tv->PointAt(0);
+	BPoint drawPoint(
+		tvFrame.left + origin.x,
+		tvFrame.top  + origin.y + fh.ascent
+	);
+
+	SetHighColor(textColor);
+	SetFont(&font);
+	DrawString(masked.String(), drawPoint);
+}
+
 // #pragma mark -
 
 
@@ -168,7 +255,7 @@ layout_item_for(BView* view)
 	return layout->ItemAt(index);
 }
 
-
+/*
 InstallerWindow::InstallerWindow()
 	:
 	BWindow(BRect(-2400, -2000, -1800, -1800),
@@ -223,6 +310,9 @@ InstallerWindow::InstallerWindow()
 	fDestMenuField = new BMenuField("destMenuField", B_TRANSLATE("Onto:"),
 		fDestMenu);
 	fDestMenuField->SetAlignment(B_ALIGN_RIGHT);
+
+	//fPasswordTC = new PasswordTC(B_TRANSLATE("Password:"),
+	//	new BMessage(PASSWORD_UPDATED));
 
 	fPackagesSwitch = new PaneSwitch("options_button");
 	fPackagesSwitch->SetLabels(B_TRANSLATE("Hide optional packages"),
@@ -290,7 +380,8 @@ InstallerWindow::InstallerWindow()
 				.AddMenuField(fSrcMenuField, 0, 0)
 				.AddMenuField(fDestMenuField, 0, 1)
 				.AddGlue(2, 0, 1, 2)
-				.Add(BSpaceLayoutItem::CreateVerticalStrut(5), 0, 2, 3)
+				//.Add(fPasswordTC, 0, 2, 3)
+				.Add(BSpaceLayoutItem::CreateVerticalStrut(5), 0, 3, 3)
 			.End()
 			.Add(packagesGroup)
 			.AddGroup(B_HORIZONTAL, B_USE_WINDOW_SPACING)
@@ -310,6 +401,64 @@ InstallerWindow::InstallerWindow()
 	fPackagesLayoutItem->SetVisible(false);
 	fSizeViewLayoutItem->SetVisible(false);
 	fProgressLayoutItem->SetVisible(false);
+	//fPasswordLayoutItem = layout_item_for(fPasswordTC);
+	//fPasswordLayoutItem->SetVisible(false);
+
+	// --- Master password overlay (shown after installation completes) ---
+	BFont titleFont(be_bold_font);
+	titleFont.SetSize(titleFont.Size() * 1.8f);
+
+	BStringView* mpTitle = new BStringView("mpTitle",
+		B_TRANSLATE("Insert Master Password"));
+	mpTitle->SetFont(&titleFont);
+	mpTitle->SetExplicitAlignment(
+		BAlignment(B_ALIGN_HORIZONTAL_CENTER, B_ALIGN_VERTICAL_UNSET));
+
+	fMasterPassword1 = new PasswordTC(B_TRANSLATE("Password:"),
+		new BMessage(PASSWORD_UPDATED));
+	fMasterPassword2 = new PasswordTC(B_TRANSLATE("Repeat Password:"),
+		new BMessage(PASSWORD_UPDATED));
+
+	BButton* mpShow1 = new BButton("mpShow1", B_TRANSLATE("Show"),
+		new BMessage(MASTER_PASSWORD_SHOW));
+	BButton* mpShow2 = new BButton("mpShow2", B_TRANSLATE("Show"),
+		new BMessage(MASTER_PASSWORD_SHOW));
+	BButton* mpSave  = new BButton("mpSave",  B_TRANSLATE("Save"),
+		new BMessage(MASTER_PASSWORD_SAVE));
+
+	fMasterPasswordView = new BGroupView("masterPasswordView", B_VERTICAL, 0);
+	fMasterPasswordView->SetViewUIColor(B_PANEL_BACKGROUND_COLOR);
+
+	BLayoutBuilder::Group<>(fMasterPasswordView->GroupLayout())
+		.SetInsets(B_USE_WINDOW_SPACING)
+		.AddGlue()
+		.AddGroup(B_HORIZONTAL)
+			.AddGlue()
+			.Add(mpTitle)
+			.AddGlue()
+		.End()
+		.AddStrut(B_USE_ITEM_SPACING)
+		.AddGroup(B_HORIZONTAL)
+			.AddGlue()
+			.AddGrid(B_USE_ITEM_SPACING, B_USE_ITEM_SPACING)
+				.Add(fMasterPassword1, 0, 0)
+				.Add(mpShow1,          1, 0)
+				.Add(fMasterPassword2, 0, 1)
+				.Add(mpShow2,          1, 1)
+			.End()
+			.AddGlue()
+		.End()
+		.AddGlue()
+		.AddGroup(B_HORIZONTAL)
+			.AddGlue()
+			.Add(mpSave)
+		.End()
+	.End();
+
+	AddChild(fMasterPasswordView);
+	fMasterPasswordView->MoveTo(Bounds().LeftTop());
+	fMasterPasswordView->ResizeTo(Bounds().Width(), Bounds().Height());
+	fMasterPasswordView->Hide();
 
 	// finish creating window
 	if (!be_roster->IsRunning(kDeskbarSignature))
@@ -331,6 +480,245 @@ InstallerWindow::InstallerWindow()
 	}
 
 	PostMessage(START_SCAN);
+}*/
+InstallerWindow::InstallerWindow()
+    :
+    BWindow(BRect(-2400, -2000, -1800, -1800),
+        B_TRANSLATE_SYSTEM_NAME("Installer"), B_TITLED_WINDOW,
+        B_NOT_ZOOMABLE | B_AUTO_UPDATE_SIZE_LIMITS),
+    fEncouragedToSetupPartitions(false),
+    fDriveSetupLaunched(false),
+    fBootManagerLaunched(false),
+    fInstallStatus(kReadyForInstall),
+    fWorkerThread(new WorkerThread(this)),
+    fCardLayout(NULL), // <--- Mettilo PRIMA del semaforo
+    fCopyEngineCancelSemaphore(-1)// Inizializzalo a NULL nel costruttore
+{
+    if (!be_roster->IsRunning(kTrackerSignature))
+        SetWorkspaces(B_ALL_WORKSPACES);
+
+    LogoView* logoView = new LogoView();
+
+    rgb_color baseColor = ui_color(B_DOCUMENT_TEXT_COLOR);
+    fStatusView = new BTextView("statusView", be_plain_font, &baseColor,
+        B_WILL_DRAW);
+    fStatusView->SetViewUIColor(B_DOCUMENT_BACKGROUND_COLOR);
+    fStatusView->MakeEditable(false);
+    fStatusView->MakeSelectable(false);
+
+    BSize logoSize = logoView->MinSize();
+    logoView->SetExplicitMaxSize(logoSize);
+
+    // In the status view, make sure that we can display 5 lines of text of ~28 characters each
+    font_height height;
+    fStatusView->GetFontHeight(&height);
+    float fontHeight = height.ascent + height.descent + height.leading;
+    fStatusView->SetExplicitMinSize(BSize(fStatusView->StringWidth("W") * 28,
+        fontHeight * 5 + 8));
+
+    // Create a group view with a white background since the logo and status text won't have the
+    // same height, this background will show in the remaining space
+    fLogoGroup = new BGroupView(B_HORIZONTAL, 10);
+    fLogoGroup->SetViewUIColor(B_DOCUMENT_BACKGROUND_COLOR);
+    fLogoGroup->GroupLayout()->SetInsets(0, 0, 10, 0);
+    fLogoGroup->AddChild(logoView);
+    fLogoGroup->AddChild(fStatusView);
+
+    fDestMenu = new BPopUpMenu(B_TRANSLATE("scanning" B_UTF8_ELLIPSIS),
+        true, false);
+    fSrcMenu = new BPopUpMenu(B_TRANSLATE("scanning" B_UTF8_ELLIPSIS),
+        true, false);
+
+    fSrcMenuField = new BMenuField("srcMenuField",
+        B_TRANSLATE("Install from:"), fSrcMenu);
+    fSrcMenuField->SetAlignment(B_ALIGN_RIGHT);
+
+    fDestMenuField = new BMenuField("destMenuField", B_TRANSLATE("Onto:"),
+        fDestMenu);
+    fDestMenuField->SetAlignment(B_ALIGN_RIGHT);
+
+    fPackagesSwitch = new PaneSwitch("options_button");
+    fPackagesSwitch->SetLabels(B_TRANSLATE("Hide optional packages"),
+        B_TRANSLATE("Show optional packages"));
+    fPackagesSwitch->SetMessage(new BMessage(SHOW_BOTTOM_MESSAGE));
+    fPackagesSwitch->SetExplicitMaxSize(BSize(B_SIZE_UNLIMITED,
+        B_SIZE_UNSET));
+    fPackagesSwitch->SetExplicitAlignment(BAlignment(B_ALIGN_LEFT,
+        B_ALIGN_TOP));
+
+    fPackagesView = new PackagesView("packages_view");
+    BScrollView* packagesScrollView = new BScrollView("packagesScroll",
+        fPackagesView, B_WILL_DRAW, false, true);
+
+    const char* requiredDiskSpaceString
+        = B_TRANSLATE("Additional disk space required: 0.0 KiB");
+    fSizeView = new BStringView("size_view", requiredDiskSpaceString);
+    fSizeView->SetAlignment(B_ALIGN_RIGHT);
+    fSizeView->SetExplicitAlignment(
+        BAlignment(B_ALIGN_RIGHT, B_ALIGN_TOP));
+
+    fProgressBar = new BStatusBar("progress",
+        B_TRANSLATE("Install progress:  "));
+    fProgressBar->SetMaxValue(100.0);
+
+    fBeginButton = new BButton("begin_button", B_TRANSLATE("Begin"),
+        new BMessage(BEGIN_MESSAGE));
+    fBeginButton->MakeDefault(true);
+    fBeginButton->SetEnabled(false);
+
+    fLaunchDriveSetupButton = new BButton("setup_button",
+        B_TRANSLATE("Set up partitions" B_UTF8_ELLIPSIS),
+        new BMessage(LAUNCH_DRIVE_SETUP));
+
+    fLaunchBootManagerItem = new BMenuItem(B_TRANSLATE("Set up boot menu" B_UTF8_ELLIPSIS),
+        new BMessage(LAUNCH_BOOTMAN));
+    fLaunchBootManagerItem->SetEnabled(false);
+
+    fMakeBootableItem = new BMenuItem(B_TRANSLATE("Write boot sector"),
+        new BMessage(MSG_WRITE_BOOT_SECTOR));
+    fMakeBootableItem->SetEnabled(false);
+
+    fEFILoaderMenu = new BMenu(B_TRANSLATE("Install EFI loader"));
+
+    BMenuBar* mainMenu = new BMenuBar("main menu");
+    BMenu* toolsMenu = new BMenu(B_TRANSLATE("Tools"));
+    toolsMenu->AddItem(fLaunchBootManagerItem);
+    toolsMenu->AddItem(fMakeBootableItem);
+    toolsMenu->AddItem(fEFILoaderMenu);
+    mainMenu->AddItem(toolsMenu);
+
+    BGroupView* packagesGroup = new BGroupView(B_VERTICAL, B_USE_ITEM_SPACING);
+    packagesGroup->AddChild(fPackagesSwitch);
+    packagesGroup->AddChild(packagesScrollView);
+    packagesGroup->AddChild(fProgressBar);
+    packagesGroup->AddChild(fSizeView);
+
+    // -----------------------------------------------------------------
+    // CONTENITORE 1: Interfaccia standard dell'Installer
+    // -----------------------------------------------------------------
+    BGroupView* mainInstallerContainer = new BGroupView(B_VERTICAL, 0);
+    BLayoutBuilder::Group<BGroupView>(mainInstallerContainer)
+        .Add(mainMenu)
+        .Add(fLogoGroup)
+        .Add(new BSeparatorView(B_HORIZONTAL, B_PLAIN_BORDER))
+        .AddGroup(B_VERTICAL, B_USE_ITEM_SPACING)
+            .SetInsets(B_USE_WINDOW_SPACING)
+            .AddGrid(new BGridView(B_USE_ITEM_SPACING, B_USE_ITEM_SPACING))
+                .AddMenuField(fSrcMenuField, 0, 0)
+                .AddMenuField(fDestMenuField, 0, 1)
+                .AddGlue(2, 0, 1, 2)
+                .Add(BSpaceLayoutItem::CreateVerticalStrut(5), 0, 3, 3)
+            .End()
+            .Add(packagesGroup)
+            .AddGroup(B_HORIZONTAL, B_USE_WINDOW_SPACING)
+                .Add(fLaunchDriveSetupButton)
+                .AddGlue()
+                .Add(fBeginButton)
+            .End()
+        .End();
+
+    // Estraiamo i riferimenti dei layout item per poterli nascondere/mostrare dinamitamente
+    fPackagesLayoutItem = layout_item_for(packagesScrollView);
+    fPkgSwitchLayoutItem = layout_item_for(fPackagesSwitch);
+    fSizeViewLayoutItem = layout_item_for(fSizeView);
+    fProgressLayoutItem = layout_item_for(fProgressBar);
+
+    fPackagesLayoutItem->SetVisible(false);
+    fSizeViewLayoutItem->SetVisible(false);
+    fProgressLayoutItem->SetVisible(false);
+
+    // -----------------------------------------------------------------
+    // CONTENITORE 2: Interfaccia per la Master Password (Overlay)
+    // -----------------------------------------------------------------
+    BFont titleFont(be_bold_font);
+    titleFont.SetSize(titleFont.Size() * 1.8f);
+
+    BStringView* mpTitle = new BStringView("mpTitle",
+        B_TRANSLATE("Insert Master Password"));
+    mpTitle->SetFont(&titleFont);
+    mpTitle->SetExplicitAlignment(
+        BAlignment(B_ALIGN_HORIZONTAL_CENTER, B_ALIGN_VERTICAL_UNSET));
+
+	//fMasterPassword1 = new PasswordTC(B_TRANSLATE("Password:"),
+	fMasterPassword1 = new BTextControl(B_TRANSLATE("Password:"), "",
+        new BMessage(PASSWORD_UPDATED));
+	fMasterPassword1->Mask(true);
+    //fMasterPassword2 = new PasswordTC(B_TRANSLATE("Repeat Password:"),
+	fMasterPassword2 = new BTextControl(B_TRANSLATE("Repeat Password:"), "",
+        new BMessage(PASSWORD_UPDATED));
+	fMasterPassword2->Mask(true);
+
+    BButton* mpShow1 = new BButton("mpShow1", B_TRANSLATE("Show"),
+        new BMessage(MASTER_PASSWORD_SHOW));
+    BButton* mpShow2 = new BButton("mpShow2", B_TRANSLATE("Show"),
+        new BMessage(MASTER_PASSWORD_SHOW));
+    BButton* mpSave  = new BButton("mpSave",  B_TRANSLATE("Save"),
+        new BMessage(MASTER_PASSWORD_SAVE));
+
+    fMasterPasswordView = new BGroupView("masterPasswordView", B_VERTICAL, 0);
+    fMasterPasswordView->SetViewUIColor(B_PANEL_BACKGROUND_COLOR);
+
+    BLayoutBuilder::Group<>(fMasterPasswordView->GroupLayout())
+        .SetInsets(B_USE_WINDOW_SPACING)
+        .AddGlue()
+        .AddGroup(B_HORIZONTAL)
+            .AddGlue()
+            .Add(mpTitle)
+            .AddGlue()
+        .End()
+        .AddStrut(B_USE_ITEM_SPACING)
+        .AddGroup(B_HORIZONTAL)
+            .AddGlue()
+            .AddGrid(B_USE_ITEM_SPACING, B_USE_ITEM_SPACING)
+                .Add(fMasterPassword1, 0, 0)
+                .Add(mpShow1,          1, 0)
+                .Add(fMasterPassword2, 0, 1)
+                .Add(mpShow2,          1, 1)
+            .End()
+            .AddGlue()
+        .End()
+        .AddGlue()
+        .AddGroup(B_HORIZONTAL)
+            .AddGlue()
+            .Add(mpSave)
+        .End();
+
+    // -----------------------------------------------------------------
+    // SETUP DEL CARD LAYOUT GENERALE SULLA FINESTRA
+    // -----------------------------------------------------------------
+    fCardLayout = new BCardLayout();
+    
+    BLayoutBuilder::Group<>(this, B_VERTICAL, 0)
+        .Add(fCardLayout)
+    .End();
+
+    // Inseriamo i due grandi contenitori dentro il CardLayout
+    fCardLayout->AddView(mainInstallerContainer); // Carta indice 0
+    fCardLayout->AddView(fMasterPasswordView);    // Carta indice 1
+
+    // Mostriamo l'installer standard all'avvio dell'applicazione
+    fCardLayout->SetVisibleItem((int32)0);
+
+    // Finish creating window
+    if (!be_roster->IsRunning(kDeskbarSignature))
+        SetFlags(Flags() | B_NOT_MINIMIZABLE);
+
+    CenterOnScreen();
+    Show();
+
+    // Register to receive notifications when apps launch or quit...
+    be_roster->StartWatching(this);
+    // ... and check the two we are interested in.
+    fDriveSetupLaunched = be_roster->IsRunning(kDriveSetupSignature);
+    fBootManagerLaunched = be_roster->IsRunning(kBootManagerSignature);
+
+    if (Lock()) {
+        fLaunchDriveSetupButton->SetEnabled(!fDriveSetupLaunched);
+        fLaunchBootManagerItem->SetEnabled(!fBootManagerLaunched);
+        Unlock();
+    }
+
+    PostMessage(START_SCAN);
 }
 
 
@@ -534,6 +922,16 @@ InstallerWindow::MessageReceived(BMessage *msg)
 			fProgressLayoutItem->SetVisible(false);
 			fPkgSwitchLayoutItem->SetVisible(true);
 			_ShowOptionalPackages();
+
+			// Cover the window with the master password entry overlay.
+			//fMasterPasswordView->ResizeTo(Bounds().Width(), Bounds().Height());
+			//fMasterPasswordView->Show();
+			//fPasswordLayoutItem->SetVisible(true);
+			// --- Cambio Schermata Pulito Nativo ---
+            // Invece di ResizeTo e Show manuali, diciamo al layout di mostrare la carta 1
+            if (fCardLayout != NULL) {
+                fCardLayout->SetVisibleItem(1);
+            }
 			break;
 		}
 		case B_SOME_APP_LAUNCHED:
@@ -592,12 +990,427 @@ InstallerWindow::MessageReceived(BMessage *msg)
 			fWorkerThread->WriteBootSector(fDestMenu);
 			break;
 
+		case PASSWORD_UPDATED:
+		{
+			// Trigger DrawAfterChildren to keep the '*' overlay in sync.
+			//if (fMasterPassword1 != NULL && fMasterPassword1->TextView() != NULL) {
+			//	fMasterPassword1->TextView()->Invalidate();
+			//	fMasterPassword1->Invalidate();
+			//}
+			//if (fMasterPassword2 != NULL && fMasterPassword2->TextView() != NULL) {
+			//	fMasterPassword2->TextView()->Invalidate();
+			//	fMasterPassword2->Invalidate();
+			//}
+			break;
+		}
+
+		case MASTER_PASSWORD_SHOW:
+		{
+	    if (fMasterPassword1 != NULL)
+    	    fMasterPassword1->Mask(!fMasterPassword1->IsMasked());
+
+	    if (fMasterPassword2 != NULL)
+        	fMasterPassword2->Mask(!fMasterPassword2->IsMasked());
+        
+    	break;
+	}
+		/*{
+			// Toggle masked/visible on both fields simultaneously.
+			bool showText = fMasterPassword1->IsMasked();
+
+			if (fMasterPassword1 != NULL) {
+				fMasterPassword1->Mask(!showText);
+				// Ripristiniamo la selezione o forziamo il ridisegno pulito
+				if (fMasterPassword1->TextView() != NULL)
+					fMasterPassword1->TextView()->Invalidate();
+			}
+
+			if (fMasterPassword2 != NULL) {
+				fMasterPassword2->Mask(!showText);
+				if (fMasterPassword2->TextView() != NULL)
+					fMasterPassword2->TextView()->Invalidate();
+			}
+			break;
+		}*/
+		case MASTER_PASSWORD_SAVE:
+		{
+			uint8 salt[16];
+			status_t err = _WriteMasterPasswordShadow(salt);
+			if (err == B_OK)
+				err = _WriteKeystore(salt);
+			else {
+				memset(salt, 0, sizeof(salt));
+				BAlert* alert = new BAlert("shadowError",
+					B_TRANSLATE("Failed to save master password shadow file."),
+					B_TRANSLATE("OK"));
+				alert->SetFlags(alert->Flags() | B_CLOSE_ON_ESCAPE);
+				alert->Go();
+				break;
+			}
+			
+			memset(salt, 0, sizeof(salt));
+
+			if (err != B_OK) {
+				BAlert* alert = new BAlert("shadowError",
+					B_TRANSLATE("Failed to store encryption keys."),
+					B_TRANSLATE("OK"));
+				alert->SetFlags(alert->Flags() | B_CLOSE_ON_ESCAPE);
+				alert->Go();
+				break;
+			}
+			
+			if (fCardLayout != NULL) {
+                fCardLayout->SetVisibleItem(0);
+            }
+			break;
+		}
+
 		default:
 			BWindow::MessageReceived(msg);
 			break;
 	}
 }
 
+
+void
+InstallerWindow::FrameResized(float newWidth, float newHeight)
+{
+	BWindow::FrameResized(newWidth, newHeight);
+	// Keep the master password overlay covering the entire client area.
+	if (fMasterPasswordView != NULL)
+		fMasterPasswordView->ResizeTo(newWidth, newHeight);
+}
+
+
+status_t
+InstallerWindow::_WriteMasterPasswordShadow(uint8* outSalt)
+{
+	fprintf(stderr, "[Installer Shadow] Inizio procedura _WriteMasterPasswordShadow\n");
+	// --- 1. Resolve destination partition mount point ---
+	PartitionMenuItem* dstItem
+		= (PartitionMenuItem*)fDestMenu->FindMarked();
+	if (dstItem == NULL){
+		fprintf(stderr, "[Installer Shadow] ERRORE: Nessuna partizione di destinazione contrassegnata.\n");
+		return B_BAD_VALUE;
+	}
+
+	BDiskDeviceRoster roster;
+	BDiskDevice device;
+	BPartition* partition = NULL;
+
+	status_t err = roster.GetPartitionWithID(dstItem->ID(), &device, &partition);
+	if (err != B_OK){
+		fprintf(stderr, "[Installer Shadow] ERRORE GetPartitionWithID: %s (0x%" B_PRIx32 ")\n", strerror(err), err);
+		return err;
+	}
+
+	BPath destRoot;
+	if (partition != NULL)
+		err = partition->GetMountPoint(&destRoot);
+	else
+		err = device.GetMountPoint(&destRoot);
+	if (err != B_OK){
+		fprintf(stderr, "[Installer Shadow] ERRORE GetMountPoint: %s (0x%" B_PRIx32 ")\n", strerror(err), err);
+		return err;
+	}
+	
+    fprintf(stderr, "[Installer Shadow] Mount point destinazione: %s\n", destRoot.Path());
+	// --- 2. Ensure settings directory exists ---
+	BPath settingsDir(destRoot.Path(), "home/config/settings");
+	err = create_directory(settingsDir.Path(), 0755);
+	if (err != B_OK && err != B_FILE_EXISTS){
+		fprintf(stderr, "[Installer Shadow] ERRORE create_directory (%s): %s\n", settingsDir.Path(), strerror(err));
+		return err;
+	}
+
+	// --- 3. Generate 16-byte random salt ---
+	BCrypto crypto;
+	if (crypto.InitCheck() != B_OK){
+		fprintf(stderr, "[Installer Shadow] ERRORE: Inizializzazione BCrypto fallita.\n");
+		return B_ERROR;
+	}
+
+	uint8 salt[16];
+	err = crypto.GetRandomBytes(salt, sizeof(salt));
+	if (err != B_OK){
+		fprintf(stderr, "[Installer Shadow] ERRORE GetRandomBytes: %s\n", strerror(err));
+		return err;
+	}
+
+	// Copy salt out before any zeroing so the caller can reuse it.
+	memcpy(outSalt, salt, sizeof(salt));
+
+	// --- 4. Compute blake2b(password || salt) ---
+	// Concatenate password bytes and salt into a single input buffer.
+	const char* password = fMasterPassword1->Text();
+	size_t passLen = strlen(password);
+	fprintf(stderr, "[Installer Shadow] Lunghezza password recuperata: %zu caratteri\n", passLen);
+	
+	size_t inputLen = passLen + sizeof(salt);
+
+	uint8* input = new(std::nothrow) uint8[inputLen];
+	if (input == NULL) {
+		memset(salt, 0, sizeof(salt));
+		return B_NO_MEMORY;
+	}
+	memcpy(input, password, passLen);
+	memcpy(input + passLen, salt, sizeof(salt));
+
+	// blake2b always produces 64 bytes
+	uint8 hash[64];
+	size_t hashLen = crypto.GetHashLength(B_CRYPTO_BLAKE2B);
+	err = crypto.Digest(B_CRYPTO_BLAKE2B, input, inputLen, hash);
+
+	// Zero sensitive data as early as possible
+	memset(input, 0, inputLen);
+	delete[] input;
+
+	if (err != B_OK) {
+		fprintf(stderr, "[Installer Shadow] ERRORE crypto.Digest (BLAKE2B): %s\n", strerror(err));
+		memset(salt, 0, sizeof(salt));
+		memset(hash, 0, sizeof(hash));
+		return err;
+	}
+
+	// --- 5. Build BMessage and flatten to file ---
+	BMessage shadow;
+	shadow.AddData("salt", B_RAW_TYPE, salt, sizeof(salt));
+	shadow.AddData("hash", B_RAW_TYPE, hash, hashLen);
+
+	memset(salt, 0, sizeof(salt));
+	memset(hash, 0, sizeof(hash));
+
+	BPath shadowPath(settingsDir.Path(), "shadow");
+	BFile shadowFile(shadowPath.Path(),
+		B_WRITE_ONLY | B_CREATE_FILE | B_ERASE_FILE);
+	if (shadowFile.InitCheck() != B_OK){
+		status_t initErr = shadowFile.InitCheck();
+		fprintf(stderr, "[Installer Shadow] ERRORE Inizializzazione BFile (%s): %s (0x%" B_PRIx32 ")\n", 
+				shadowPath.Path(), strerror(initErr), initErr);
+		return initErr;
+    }
+
+	err = shadow.Flatten(&shadowFile);
+    if (err != B_OK) {
+        fprintf(stderr, "[Installer Shadow] ERRORE Flattening BMessage shadow: %s\n", strerror(err));
+    } else {
+        fprintf(stderr, "[Installer Shadow] File shadow salvato con successo in %s!\n", shadowPath.Path());
+    }
+
+    return err;
+}
+// 
+
+status_t
+InstallerWindow::_WriteKeystore(const uint8* salt)
+{
+	fprintf(stderr, "[Keystore] Inizio procedura _WriteKeystore...\n");
+	// --- 1. Resolve destination mount point ---
+	PartitionMenuItem* dstItem
+		= (PartitionMenuItem*)fDestMenu->FindMarked();
+	if (dstItem == NULL){
+		fprintf(stderr, "[Keystore] ERRORE: dstItem è NULL (Nessuna partizione selezionata).\n");
+		return B_BAD_VALUE;
+	}
+
+	BDiskDeviceRoster roster;
+	BDiskDevice device;
+	BPartition* partition = NULL;
+
+	status_t err = roster.GetPartitionWithID(dstItem->ID(), &device, &partition);
+	if (err != B_OK){
+		fprintf(stderr, "[Keystore] ERRORE GetPartitionWithID: %s (0x%" B_PRIx32 ")\n", strerror(err), err);
+		return err;
+	}
+
+	BPath destRoot;
+	if (partition != NULL)
+		err = partition->GetMountPoint(&destRoot);
+	else
+		err = device.GetMountPoint(&destRoot);
+	if (err != B_OK){
+		fprintf(stderr, "[Keystore] ERRORE GetMountPoint: %s (0x%" B_PRIx32 ")\n", strerror(err), err);
+		return err;
+	}
+	fprintf(stderr, "[Keystore] Target mount point: %s\n", destRoot.Path());
+
+	// --- 2. Ensure keystore directory exists ---
+	BPath keystoreDir(destRoot.Path(), "home/config/settings/system/keystore");
+	err = create_directory(keystoreDir.Path(), 0755);
+	if (err != B_OK && err != B_FILE_EXISTS) {
+		fprintf(stderr, "[Keystore] ERRORE create_directory in %s: %s\n", keystoreDir.Path(), strerror(err));
+		return err;
+	}
+
+	BPath keyPath(keystoreDir.Path(), "master");
+
+	// --- 3. Derive 32-byte AES-256 key via BCrypto: SHA-256(pwd||salt) × 1000 ---
+	BCrypto crypto;
+	if (crypto.InitCheck() != B_OK) {
+		fprintf(stderr, "[Keystore] ERRORE: InitCheck di BCrypto fallito nel keystore.\n");
+		return B_ERROR;
+	}
+
+	const char* password = fMasterPassword1->Text();
+	size_t passLen = strlen(password);
+	size_t inputLen = passLen + 16;
+
+	uint8* kdfInput = new(std::nothrow) uint8[inputLen];
+	if (kdfInput == NULL) {
+		fprintf(stderr, "[Keystore] ERRORE: Out of memory allocando kdfInput.\n");
+		return B_NO_MEMORY;
+	}
+	memcpy(kdfInput, password, passLen);
+	memcpy(kdfInput + passLen, salt, 16);
+
+	uint8 aesKey[32];
+	err = crypto.Digest(B_CRYPTO_SHA256, kdfInput, inputLen, aesKey);
+	memset(kdfInput, 0, inputLen);
+	delete[] kdfInput;
+	if (err != B_OK) {
+		fprintf(stderr, "[Keystore] ERRORE: Primo digest SHA-256 fallito: %s\n", strerror(err));
+		memset(aesKey, 0, sizeof(aesKey));
+		return err;
+	}
+
+	for (int i = 1; i < 1000; i++) {
+		err = crypto.Digest(B_CRYPTO_SHA256, aesKey, sizeof(aesKey), aesKey);
+		if (err != B_OK) {
+			fprintf(stderr, "[Keystore] ERRORE: Digest iterativo fallito all'indice %d: %s\n", i, strerror(err));
+			memset(aesKey, 0, sizeof(aesKey));
+			return err;
+		}
+	}
+	fprintf(stderr, "[Keystore] Chiave AES-256 derivata con successo.\n");
+
+	// --- 4. Generate RSA-2048 key pair via OpenSSL ---
+	EVP_PKEY* pkey = NULL;
+	{
+		EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, NULL);
+		if (ctx == NULL
+				|| EVP_PKEY_keygen_init(ctx) <= 0
+				|| EVP_PKEY_CTX_set_rsa_keygen_bits(ctx, 2048) <= 0
+				|| EVP_PKEY_keygen(ctx, &pkey) <= 0) {
+			fprintf(stderr, "[Keystore] ERRORE: Generazione coppia RSA fallita via OpenSSL.\n");
+			ERR_print_errors_fp(stderr);
+			EVP_PKEY_CTX_free(ctx);
+			memset(aesKey, 0, sizeof(aesKey));
+			return B_ERROR;
+		}
+		EVP_PKEY_CTX_free(ctx);
+	}
+	fprintf(stderr, "[Keystore] Coppia di chiavi RSA-2048 generata.\n");
+
+	// --- 5. Extract public key (DER SubjectPublicKeyInfo) ---
+	unsigned char* pubDer = NULL;
+	int pubLen = i2d_PUBKEY(pkey, &pubDer);
+	if (pubLen <= 0 || pubDer == NULL) {
+		fprintf(stderr, "[Keystore] ERRORE: Estrazione chiave pubblica (DER) fallita.\n");
+		EVP_PKEY_free(pkey);
+		memset(aesKey, 0, sizeof(aesKey));
+		return B_ERROR;
+	}
+
+	// --- 6. Extract private key (DER PrivateKeyInfo) ---
+	unsigned char* privDer = NULL;
+	int privLen = i2d_PrivateKey(pkey, &privDer);
+	EVP_PKEY_free(pkey);
+	if (privLen <= 0 || privDer == NULL) {
+		fprintf(stderr, "[Keystore] ERRORE: Estrazione chiave privata (DER) fallita.\n");
+		OPENSSL_free(pubDer);
+		memset(aesKey, 0, sizeof(aesKey));
+		return B_ERROR;
+	}
+
+	// --- 7. Encrypt private key with BCrypto AES-256-CBC-PKCS7 ---
+	uint8 iv[16];
+	err = crypto.GetRandomBytes(iv, sizeof(iv));
+	if (err != B_OK) {
+		fprintf(stderr, "[Keystore] ERRORE crypto.GetRandomBytes per IV: %s\n", strerror(err));
+		OPENSSL_cleanse(privDer, privLen);
+		OPENSSL_free(privDer);
+		OPENSSL_free(pubDer);
+		memset(aesKey, 0, sizeof(aesKey));
+		return err;
+	}
+
+	crypto.SetAlgorithm(B_CRYPTO_AES);
+	crypto.SetMode(B_CRYPTO_MODE_CBC);
+	crypto.SetPadding(true, B_CRYPTO_PKCS7);
+
+	size_t encBufSize = crypto.GetOutputSize(privLen, B_CRYPTO_ENCRYPT);
+	uint8* encPriv = new(std::nothrow) uint8[encBufSize];
+	if (encPriv == NULL) {
+		fprintf(stderr, "[Keystore] ERRORE: Out of memory allocando encPriv.\n");
+		OPENSSL_cleanse(privDer, privLen);
+		OPENSSL_free(privDer);
+		OPENSSL_free(pubDer);
+		memset(aesKey, 0, sizeof(aesKey));
+		return B_NO_MEMORY;
+	}
+
+	ssize_t encLen = crypto.Encrypt(aesKey, sizeof(aesKey), iv, sizeof(iv),
+		privDer, privLen, encPriv, encBufSize);
+
+	OPENSSL_cleanse(privDer, privLen);
+	OPENSSL_free(privDer);
+	memset(aesKey, 0, sizeof(aesKey));
+
+	if (encLen < 0) {
+		fprintf(stderr, "[Keystore] ERRORE crypto.Encrypt fallito (codice ritornato: %zd).\n", encLen);
+		memset(encPriv, 0, encBufSize);
+		delete[] encPriv;
+		OPENSSL_free(pubDer);
+		return B_ERROR;
+	}
+	fprintf(stderr, "[Keystore] Chiave privata cifrata con successo. Dimensione: %zd bytes.\n", encLen);
+
+	// --- 8. Write public key (in clear) and encrypted private key as attribute ---
+	BFile keyFile(keyPath.Path(), B_READ_WRITE | B_CREATE_FILE | B_ERASE_FILE);
+	if (keyFile.InitCheck() != B_OK) {
+		err = keyFile.InitCheck();
+		fprintf(stderr, "[Keystore] ERRORE Inizializzazione BFile in %s: %s (0x%" B_PRIx32 ")\n", keyPath.Path(),
+				strerror(err), err);
+		OPENSSL_free(pubDer);
+		memset(encPriv, 0, encBufSize);
+		delete[] encPriv;
+		return err;
+	}
+
+	// File content: DER-encoded SubjectPublicKeyInfo (public key in clear)
+	ssize_t written = keyFile.Write(pubDer, pubLen);
+	fprintf(stderr, "[Keystore] Scritto file master in chiaro (%zd di %d bytes).\n", written, pubLen);
+	OPENSSL_free(pubDer);
+
+	// Attribute: IV (16 bytes) || BCrypto-AES-256-CBC(DER private key)
+	size_t attrSize = sizeof(iv) + encLen;
+	uint8* attrData = new(std::nothrow) uint8[attrSize];
+	if (attrData == NULL) {
+		fprintf(stderr, "[Keystore] ERRORE: Out of memory allocando attrData.\n");
+		memset(encPriv, 0, encBufSize);
+		delete[] encPriv;
+		return B_NO_MEMORY;
+	}
+	memcpy(attrData, iv, sizeof(iv));
+	memcpy(attrData + sizeof(iv), encPriv, encLen);
+
+	memset(encPriv, 0, encBufSize);
+	delete[] encPriv;
+
+	ssize_t attrWritten = keyFile.WriteAttr("crypto:private_key", B_RAW_TYPE, 0, attrData, attrSize);
+	if (attrWritten < 0) {
+		fprintf(stderr, "[Keystore] ERRORE grave nello scrivere l'attributo esteso (WriteAttr ritarda: %zd, errore: %s)\n", attrWritten, strerror(attrWritten));
+		err = attrWritten;
+	} else {
+		fprintf(stderr, "[Keystore] Attributo esteso 'crypto:private_key' scritto correttamente (%zd bytes).\n", attrWritten);
+		err = B_OK;
+	}
+
+	memset(attrData, 0, attrSize);
+	delete[] attrData;
+
+	return B_OK;
+}
 
 bool
 InstallerWindow::QuitRequested()

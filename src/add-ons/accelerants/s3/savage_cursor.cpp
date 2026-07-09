@@ -107,10 +107,25 @@ Savage_LoadCursorImage(int width, int height, uint8* andMask, uint8* xorMask)
 
 	uint8* fbCursor = (uint8*)((addr_t)si.videoMemAddr + si.cursorOffset);
 
+	/*
 	for (int row = 0; row < height; row++) {
 		for (int colByte = 0; colByte < width / 8; colByte++) {
 			fbCursor[row * 16 + colByte] = *andMask++;
 			fbCursor[row * 16 + colByte + 2] = *xorMask++;
+		}
+	}*/
+
+	for (int row = 0; row < height && row < 64; row++) {
+		// Puntatori fissi alla riga hardware corrente da 16 byte complessivi
+		uint8* dstAndRow = fbCursor + (row * 16);
+		uint8* dstXorRow = fbCursor + (row * 16) + 8; // Lo XOR hardware è sempre 8 byte dopo l'AND
+
+		// Calcoliamo quanti byte reali dobbiamo copiare per questa riga
+		int bytesToCopy = width / 8; 
+
+		for (int colByte = 0; colByte < bytesToCopy && colByte < 8; colByte++) {
+			dstAndRow[colByte] = *andMask++;
+			dstXorRow[colByte] = *xorMask++;
 		}
 	}
 

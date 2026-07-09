@@ -235,7 +235,7 @@ status_t PROPOSE_DISPLAY_MODE(display_mode *target, const display_mode *low, con
 	/* calculate settings, but do not actually test anything (that costs too much time!) */
 	result = gx00_dac_pix_pll_find(*target,&pix_clock_found,&m,&n,&p,0);
 	/* update the target mode */
-	target->timing.pixel_clock = (pix_clock_found * 1000);	
+	target->timing.pixel_clock = (pix_clock_found * 1000);
 
 	/* note if we fell outside the limits */
 	if ((target->timing.pixel_clock < low->timing.pixel_clock) ||

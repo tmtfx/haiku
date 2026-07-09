@@ -1,0 +1,15 @@
+SubDir HAIKU_TOP src apps spielbar ;
+
+UsePrivateHeaders storage app ;
+
+Application SpielBar : 
+	App.cpp
+	: be localestub [ TargetLibsupc++ ]
+	: App.rdef
+	;
+
+DoCatalogs SpielBar :
+	x-vnd.SpielBar
+	:
+	App.cpp
+;

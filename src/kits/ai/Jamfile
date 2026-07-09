@@ -1,0 +1,24 @@
+SubDir HAIKU_TOP src kits ai ;
+
+SetSubDirSupportedPlatforms haiku ;
+UsePrivateHeaders shared ;
+
+local architectureObject ;
+for architectureObject in [ MultiArchSubDirSetup ] {
+    on $(architectureObject) {
+        local architecture = $(TARGET_PACKAGING_ARCH) ;
+
+        UsePrivateSystemHeaders ;
+        UsePublicHeaders ai support ;
+
+        SharedLibrary libai_api.so :
+            AIConfig.cpp
+            AICommands.cpp
+            AIPlugin.cpp
+            :
+            be
+        ;
+        
+        #HaikuInstall libai_api.so : /boot/system/lib ;
+    }
+}

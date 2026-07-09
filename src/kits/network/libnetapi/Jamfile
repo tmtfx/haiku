@@ -5,12 +5,7 @@ UsePrivateHeaders locale shared ;
 
 UseHeaders [ FDirName $(HAIKU_TOP) src libs compat freebsd_network ] : true ;
 UseHeaders [ FDirName $(HAIKU_TOP) src libs compat freebsd_wlan ] : true ;
-UseHeaders [ FDirName $(HAIKU_TOP) headers os add-ons network_settings ]
-	: true ;
-
-if $(TARGET_PACKAGING_ARCH) = x86_gcc2 {
-	SubDirC++Flags -Wno-error ;
-}
+UseHeaders [ FDirName $(HAIKU_TOP) headers os add-ons network_settings ] : true ;
 
 local architectureObject ;
 for architectureObject in [ MultiArchSubDirSetup ] {
@@ -29,7 +24,14 @@ for architectureObject in [ MultiArchSubDirSetup ] {
 				# before compiling the files.
 			SetupFeatureObjectsDir ssl ;
 		} else {
-			SetupFeatureObjectsDir no-ssl ;
+			# Fallback: make system OpenSSL headers available to the build tree
+			SubDirC++Flags -DOPENSSL_ENABLED -DOPENSSL_API_COMPAT=10101 -DOPENSSL_NO_DEPRECATED=1 ;
+			SubDirSysHdrs /boot/system/develop/headers ;
+			Includes [ FGristFiles SecureSocket.cpp HttpAuthentication.cpp Certificate.cpp ] ;
+			# Use the SSL feature object dir even when using system headers
+			SetupFeatureObjectsDir ssl ;
+
+		#	SetupFeatureObjectsDir no-ssl ;
 		}
 
 		SharedLibrary [ MultiArchDefaultGristFiles libbnetapi.so ] :
@@ -63,5 +65,7 @@ for architectureObject in [ MultiArchSubDirSetup ] {
 			[ TargetLibsupc++ ] [ BuildFeatureAttribute openssl : libraries ]
 			[ BuildFeatureAttribute icu : libraries ]
 			;
+		
+		LINKFLAGS on [ MultiArchDefaultGristFiles libbnetapi.so ] += "-L/boot/system/develop/lib -lssl -lcrypto" ;
 	}
 }

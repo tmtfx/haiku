@@ -63,6 +63,7 @@ All rights reserved.
 
 #include "BarView.h"
 #include "BarWindow.h"
+#include "BarMenuBar.h"
 #include "DeskbarUtils.h"
 #include "FSUtils.h"
 #include "PreferencesWindow.h"
@@ -81,7 +82,8 @@ BList TBarApp::sSubscribers;
 
 const uint32 kShowDeskbarMenu		= 'BeMn';
 const uint32 kShowTeamMenu			= 'TmMn';
-
+const uint32 kRaiseBtn				= 'RZBT';
+const uint32 kPressBtn				= 'PRBT';
 
 int
 main()
@@ -406,6 +408,16 @@ TBarApp::MessageReceived(BMessage* message)
 			message->SendReply(&reply);
 			break;
 		}
+		case kRaiseBtn:
+		{
+			fBarView->fBarMenuBar->SetSpielActive(false);
+			break;
+		}
+		case kPressBtn:
+		{
+			fBarView->fBarMenuBar->SetSpielActive(true);
+			break;
+		}
 		case kMsgIsAutoRaise:
 		{
 			BMessage reply('rply');
@@ -447,7 +459,7 @@ TBarApp::MessageReceived(BMessage* message)
 
 		case kStateChanged:
 			if (fPreferencesWindow != NULL)
-				fPreferencesWindow->PostMessage(message);
+				fPreferencesWindow->PostMessage(kStateChanged);
 			break;
 
 		case kShowDeskbarMenu:
@@ -515,7 +527,7 @@ TBarApp::MessageReceived(BMessage* message)
 
 		case B_ARCHIVED_OBJECT:
 			// TODO: what's this???
-			message->AddString("special", "Alex Osadzinski");
+			message->AddString("special", "I Pirati Del Frico");
 			fStatusViewMessenger.SendMessage(message);
 			break;
 

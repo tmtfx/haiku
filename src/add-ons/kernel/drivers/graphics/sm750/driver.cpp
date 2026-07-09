@@ -1,0 +1,395 @@
+/*
+ * Copyright 2026, Fabio Tomat <f.t.public@gmail.com>
+ * All rights reserved. Distributed under the terms of the MIT license.
+ */
+
+#include <KernelExport.h>
+#include <Drivers.h>
+#include <graphic_driver.h>
+#include <PCI.h>
+
+#include <OS.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+
+#include <driver_settings.h>
+
+//#include <util/kernel_cpp.h>
+#include <vm/vm.h>
+#include "DriverInterface.h"
+#include "sm750_macros.h"
+
+#define VENDOR_ID_SMI 0x126f
+#define DEVICE_ID_SM750 0x0750
+
+int32 api_version = B_CUR_DRIVER_API_VERSION;
+
+static const struct ChipInfo sm750_chips[] = {
+    { 0x0750, 0, "SM750 LynxExp" },
+    { 0x0751, 1, "SM750LE" },
+    { 0, 0, NULL }
+};
+
+static sm750_settings current_settings = {
+    //"sm750.accelerant", true, 0, 0, false, true, false, false, true,
+    
+    "sm750.accelerant",		// accelerant filename
+    false,					// dumprom, function still not integrated
+    0,						// logmask
+    0,						// memory, override builtin memory size detection in MB
+    false,					// usebios, rely on bios to coldstart (not recommended)
+    true,					// hardcursor, if true use on-chip hardware cursor
+    2,						// cursorbits, number of bits used to draw bitmap cursor
+    false,					// force_crt, utually exclusive with force_panel: force crt layer usage
+    false,					// force_panel, force panel layer usage
+    true,					// dualhead, support for both crt and panel, not implemented
+    true,					// force_pci
+};
+
+static DeviceInfo *devices[8];
+pci_module_info *pci;
+
+/* --- Prototypes --- */
+static status_t open_device(const char* name, uint32 flags, void** cookie);
+static status_t close_device(void* dev);
+static status_t free_device(void* dev);
+static status_t read_device(void* dev, off_t pos, void* buf, size_t* len);
+static status_t write_device(void* dev, off_t pos, const void* buf, size_t* len);
+static status_t control_device(void* dev, uint32 msg, void* buf, size_t len);
+
+static device_hooks gDeviceHooks = {
+    open_device, close_device, free_device, control_device,
+    read_device, write_device, NULL, NULL, NULL, NULL
+};
+
+/* Helper per la mappatura */
+static area_id
+map_mem(void **out_virt, phys_addr_t phys, uint32 size, const char *name)
+{
+    void *virt = NULL;
+    size = (size + B_PAGE_SIZE - 1) & ~(B_PAGE_SIZE - 1);
+    area_id area = map_physical_memory(name, phys, size, B_ANY_KERNEL_ADDRESS, 
+        B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA | B_CLONEABLE_AREA, &virt);
+
+    if (area < B_OK) {
+        dprintf("SM750 ERROR: map_physical_memory(%s) failed\n", name);
+        *out_virt = NULL;
+    } else {
+        *out_virt = virt;
+    }
+    return area;
+}
+static area_id
+map_videomem(void **out_virt, phys_addr_t phys, uint32 size, const char *name)
+{
+    void *virt = NULL;
+    size = (size + B_PAGE_SIZE - 1) & ~(B_PAGE_SIZE - 1);
+    /*
+    area_id area = map_physical_memory(name, phys, size, B_ANY_KERNEL_ADDRESS,
+        B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA
+            | B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA,
+        &virt);
+    */
+    area_id area = map_physical_memory(name, phys, size, B_ANY_KERNEL_BLOCK_ADDRESS|B_WRITE_COMBINING_MEMORY,
+        B_READ_AREA + B_WRITE_AREA,
+        &virt);
+    if (area < B_OK) {
+        area = map_physical_memory(name, phys, size, 
+            B_ANY_KERNEL_BLOCK_ADDRESS,
+            B_READ_AREA + B_WRITE_AREA,
+            &virt);
+    }
+
+    if (area < B_OK) {
+        dprintf("SM750 ERROR: map_physical_memory(%s) failed\n", name);
+        *out_virt = NULL;
+    } else {
+        *out_virt = virt;
+    }
+    return area;
+}
+
+static void
+load_settings(void)
+{
+    void* handle = load_driver_settings("sm750");
+    if (handle != NULL) {
+        current_settings.force_CRT = get_driver_boolean_parameter(
+            handle, "force_crt", current_settings.force_CRT, current_settings.force_CRT);
+            
+        current_settings.force_Panel = get_driver_boolean_parameter(
+            handle, "force_panel", current_settings.force_Panel, current_settings.force_Panel);
+            
+        current_settings.hardcursor = get_driver_boolean_parameter(
+            handle, "hardcursor", current_settings.hardcursor, current_settings.hardcursor);
+
+        const char* value_str = get_driver_parameter(handle, "cursorbits", "2", "2"); //default HC bits on SM750
+
+        if (value_str != nullptr) {
+            current_settings.cursorbits = (uint32)atoi(value_str);
+        }
+        
+        unload_driver_settings(handle);
+    }
+}
+
+static int32 
+sm750_interrupt_handler(void* data)
+{
+    DeviceInfo* info = (DeviceInfo*)data;
+    vuint32* regs = info->regs; // needed by macros
+
+    // Interrupt status
+    uint32 status = SM750_REG32(SM750_SYS_INT_STATUS);
+    //dprintf("SM750: INTERRUPT! status: 0x%08" B_PRIx32 "\n", status);
+    
+    if (status == 0) 
+        return B_UNHANDLED_INTERRUPT;
+    
+    // Bit 5: 2D Engine - datasheet says "Write 0 to clear"
+    if (status & (1 << 5)) {
+        uint32 engineStatus = SM750_REG32(SM750_2D_STATUS);
+        engineStatus &= ~(1 << 0); // Pulisce bit 0 (2D)
+        engineStatus &= ~(1 << 1); // Pulisce bit 1 (CSC)
+        SM750_WREG32(SM750_2D_STATUS, engineStatus);
+        // Wake up who's waiting the end of the drawing
+        //release_sem_etc(info->si->engine.lock.sem, 1, B_DO_NOT_RESCHEDULE); not this way, let's use the fifo status
+    }
+
+    // Bit 1 o 2: V-Sync (Panel o CRT)
+    if (status & 0x06) {
+        info->si->vblank_count++;
+        // wake up the Accelerant's Service Thread
+        release_sem_etc(info->si->vblank_sem, 1, B_DO_NOT_RESCHEDULE);
+    }
+
+    // Set read status to clear the served bits
+    SM750_WREG32(SM750_SYS_RAW_INT_CLEAR, status);
+
+    return B_INVOKE_SCHEDULER;
+}
+
+
+
+/* --- System Hooks --- */
+status_t init_hardware(void) {
+    pci_info info;
+    status_t status = get_module(B_PCI_MODULE_NAME, (module_info **)&pci);
+    if (status != B_OK) return status;
+
+    bool found = false;
+    for (int32 i = 0; pci->get_nth_pci_info(i, &info) == B_OK; i++) {
+        if (info.vendor_id == VENDOR_ID_SMI && info.device_id == DEVICE_ID_SM750) {
+            found = true;
+            break;
+        }
+    }
+    put_module(B_PCI_MODULE_NAME);
+    return found ? B_OK : B_ERROR;
+}
+
+status_t init_driver(void) {
+    status_t status = get_module(B_PCI_MODULE_NAME, (module_info **)&pci);
+    if (status != B_OK) return status;
+
+    int32 count = 0;
+    pci_info info;
+    for (int32 i = 0; pci->get_nth_pci_info(i, &info) == B_OK && count < 8; i++) {
+        if (info.vendor_id == VENDOR_ID_SMI && info.device_id == DEVICE_ID_SM750) {
+            devices[count] = (DeviceInfo*)malloc(sizeof(DeviceInfo));
+            if (!devices[count]) continue;
+            memset(devices[count], 0, sizeof(DeviceInfo));
+            
+            devices[count]->pci = info;
+            devices[count]->pChipInfo = (info.device_id == 0x0751) ? &sm750_chips[1] : &sm750_chips[0];
+            sprintf(devices[count]->name, "graphics/sm750_%02x%02x%02x", info.bus, info.device, info.function);
+            
+            dprintf("SM750: Found %s at PCI %d:%d:%d\n", 
+                devices[count]->pChipInfo->chipName, info.bus, info.device, info.function);
+            count++;
+        }
+    }
+    devices[count] = NULL;
+    return count > 0 ? B_OK : ENODEV;
+}
+
+void uninit_driver(void) {
+    for (int32 i = 0; devices[i]; i++) free(devices[i]);
+    put_module(B_PCI_MODULE_NAME);
+}
+
+const char **publish_devices(void) {
+    static const char *names[9];
+    int32 i;
+    for (i = 0; devices[i]; i++) names[i] = devices[i]->name;
+    names[i] = NULL;
+    return names;
+}
+
+device_hooks *find_device(const char *name) {
+    for (int32 i = 0; devices[i]; i++) {
+        if (strcmp(name, devices[i]->name) == 0) return &gDeviceHooks;
+    }
+    return NULL;
+}
+
+/* --- open_device --- */
+static status_t
+open_device(const char *name, uint32 flags, void **cookie)
+{
+    DeviceInfo *di = NULL;
+    for (int32 i = 0; devices[i]; i++) {
+        if (strcmp(name, devices[i]->name) == 0) { di = devices[i]; break; }
+    }
+    if (!di) {
+    	dprintf("SM750: Device not supported");
+    	return B_BAD_VALUE;
+    }
+
+    if (di->openCount == 0) {
+    	// Enable Bus Master e Memoria PCI
+        // Read the Command Register (CSR04), address 0x04
+        uint32 pci_cmd = pci->read_pci_config(di->pci.bus, di->pci.device, di->pci.function, PCI_command, 4); //PCI_command = 0x04 da PCI.h
+        if (pci_cmd & (1 << 10)) {
+            dprintf("SM750: Interrupts disabled at PCI level. Activating...\n");
+        }
+        // Enable needed functions:
+        // Bit 0: I/O Space (for the VGA legacy ports if needed)
+        // Bit 1: Memory Space (for BAR0 and BAR1)
+        // Bit 2: Bus Master (for 2D acceleration and DMA)
+        // Bit 6: Parity Error Response
+        // Bit 8: SERR# Enable
+        pci_cmd |= (PCI_command_memory | PCI_command_master | PCI_command_io);
+        // Forcing interrupt activation (Bit 10 to 0)
+        pci_cmd &= ~(1 << 10);
+        pci_cmd |= (1 << 6) | (1 << 8); 
+        pci->write_pci_config(di->pci.bus, di->pci.device, di->pci.function, 0x04, 4, pci_cmd);
+
+        
+        // MSI ATTEMPT
+        di->msi_enabled = false;
+        
+        uint8 msiCount = pci->get_msi_count(di->pci.bus, di->pci.device, di->pci.function);
+        if (msiCount > 0) {
+            uint32 vector;
+            if (pci->configure_msi(di->pci.bus, di->pci.device, di->pci.function, 1, &vector) == B_OK) {
+                if (pci->enable_msi(di->pci.bus, di->pci.device, di->pci.function) == B_OK) {
+                    di->msi_vector = (uint8)vector; 
+                    di->msi_enabled = true;
+                    dprintf("SM750: MSI succesfully enabled. Vector: %" B_PRIu32 "\n", vector);
+                } else {
+                    dprintf("SM750: Impossible to enable MSI (even if configured)\n");
+                }
+            } else {
+                dprintf("SM750: MSI configuration failed\n");
+            }
+        }
+        
+        
+        // Shared Info
+        di->shared_area = create_area("sm750 shared info", (void **)&(di->si), 
+            B_ANY_KERNEL_ADDRESS, B_PAGE_SIZE * 2 , B_FULL_LOCK, B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA | B_CLONEABLE_AREA);
+        // due to the edid vesa shared info has been widened to B_PAGE_SIZE * 2
+        if (di->shared_area < 0) return di->shared_area;
+        memset(di->si, 0, B_PAGE_SIZE * 2);
+        strncpy(di->si->device_path, name, B_PATH_NAME_LENGTH);
+        load_settings();
+        memcpy(&di->si->settings, &current_settings, sizeof(sm750_settings));
+        di->si->vblank_sem = -1;
+        di->si->vblank_sync_sem = -1;
+        di->si->engine.lock.sem = -1;
+        // Mapping REGISTRERS (BAR 1 - 2MB)
+        di->regs_area = map_mem((void **)&di->regs, di->pci.u.h0.base_registers[1], 
+                               di->pci.u.h0.base_register_sizes[1], "sm750_regs_k");
+        
+        // Mapping FRAMEBUFFER (BAR 0 - 64MB)
+        di->fb_area = map_videomem((void **)&di->framebuffer, di->pci.u.h0.base_registers[0], 
+                             di->pci.u.h0.base_register_sizes[0], "sm750_fb_k");
+        if (di->regs_area < 0 || di->fb_area < 0) {
+            delete_area(di->shared_area);
+            return B_ERROR;
+        }
+        
+        di->si->framebuffer = di->framebuffer;
+        
+        
+        // Handler installation
+        // if MSI is enabled, use MSI vector, otherwise use the legacy IRQ line
+        uint8 irq = di->msi_enabled ? di->msi_vector : di->pci.u.h0.interrupt_line;
+        
+        status_t intStatus = install_io_interrupt_handler(irq, sm750_interrupt_handler, di, 0);
+        if (intStatus != B_OK) {
+            dprintf("SM750 ERROR: Unable to install interrupt handler on IRQ %u\n", irq);
+        }
+
+        // Chip Initialization(Wake up)
+        di->si->regs_area = di->regs_area; // ID         
+        di->si->fb_area = di->fb_area;     // numeric ID
+        di->si->framebuffer_pci = (phys_addr_t)di->pci.u.h0.base_registers[0];
+        
+        //vm_set_area_memory_type(di->si->fb_area, di->si->framebuffer_pci, B_WRITE_COMBINING_MEMORY);
+        
+        sm750_init_chip(di);
+    }
+
+    di->openCount++;
+    *cookie = di;
+    return B_OK;
+}
+
+/* --- control_device --- */
+static status_t
+control_device(void *cookie, uint32 op, void *arg, size_t len)
+{
+    DeviceInfo *di = (DeviceInfo *)cookie;
+    switch (op) {
+        case ENG_GET_PRIVATE_DATA: {
+            sm750_get_private_data gpd;
+            if (user_memcpy(&gpd, arg, sizeof(gpd)) != B_OK) return B_BAD_ADDRESS;
+            if (gpd.magic != SM750_PRIVATE_DATA_MAGIC) return B_BAD_VALUE;
+            gpd.shared_info_area = di->shared_area;
+            return user_memcpy(arg, &gpd, sizeof(gpd));
+        }
+        case B_GET_ACCELERANT_SIGNATURE:
+            if (user_strlcpy((char *)arg, "sm750.accelerant", len) < B_OK) 
+                return B_BAD_ADDRESS;
+            return B_OK;
+    }
+    return B_DEV_INVALID_IOCTL;
+}
+
+static status_t close_device(void *cookie) { return B_OK; }
+
+static status_t free_device(void *cookie) {
+    DeviceInfo *di = (DeviceInfo *)cookie;
+    vuint32* regs = di->regs;
+    if (--di->openCount == 0) {
+        uint8 irq = di->msi_enabled ? di->msi_vector : di->pci.u.h0.interrupt_line;
+        SM750_WREG32(SM750_SYS_INT_MASK, 0);
+        remove_io_interrupt_handler(irq, sm750_interrupt_handler, di);
+        
+        if (di->msi_enabled) {
+            pci->disable_msi(di->pci.bus, di->pci.device, di->pci.function);
+            pci->unconfigure_msi(di->pci.bus, di->pci.device, di->pci.function);
+        }
+        if (di->si != NULL) {
+            if (di->si->vblank_sync_sem >= B_OK)
+                delete_sem(di->si->vblank_sync_sem);
+            if (di->si->engine.lock.sem >= B_OK)
+                delete_sem(di->si->engine.lock.sem);
+            if (di->si->vblank_sem >= B_OK)
+                delete_sem(di->si->vblank_sem);
+        }
+        delete_area(di->shared_area);
+        delete_area(di->regs_area);
+        delete_area(di->fb_area);
+        di->si = NULL;
+        di->regs = NULL;
+        di->framebuffer = NULL;
+    }
+    return B_OK;
+}
+
+static status_t read_device(void *cookie, off_t pos, void *buf, size_t *len) { return B_NOT_ALLOWED; }
+static status_t write_device(void *cookie, off_t pos, const void *buf, size_t *len) { return B_NOT_ALLOWED; }

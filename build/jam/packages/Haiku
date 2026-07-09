@@ -385,6 +385,11 @@ AddFilesToPackage add-ons mail_daemon outbound_filters :
 	Fortune
 	;
 
+AddFilesToPackage add-ons ai : $(SYSTEM_ADD_ONS_AI) ;
+
+AddFilesToPackage add-ons kernel drivers bin : $(SYSTEM_ADD_ONS_CRYPTO) ;
+AddSymlinkToPackage add-ons kernel drivers dev : /boot/system/add-ons/kernel/drivers/bin/crypto : v1 ;
+
 AddFilesToPackage add-ons media : $(SYSTEM_ADD_ONS_MEDIA) ;
 
 AddFilesToPackage add-ons Network\ Settings :

@@ -39,6 +39,10 @@ enum {
 	KEY_STORE_LOCK_KEYRING					= 'KlKR',
 	KEY_STORE_GET_NEXT_APPLICATION			= 'KnKA',
 	KEY_STORE_REMOVE_APPLICATION			= 'KrKA',
+
+	// Encrypted key operations (session-password protected)
+	KEY_STORE_GET_ENCRYPTED_KEY				= 'KgEK',
+	KEY_STORE_ADD_ENCRYPTED_KEY				= 'KaEK',
 };
 
 

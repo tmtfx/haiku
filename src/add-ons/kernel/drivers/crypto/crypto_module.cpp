@@ -1,0 +1,74 @@
+/*
+ * Copyright 2026, Fabio Tomat <f.t.public@gmail.com>
+ * All rights reserved. Distributed under the terms of the MIT license.
+ */
+#include <module.h>
+#include <KernelExport.h>
+
+#include "BCryptoCore.h"
+#include "BCryptoAlgorithm.h"
+#include "BCryptoEntropy.h"
+#include "BCryptoCPU.h"
+#include <crypto/BCryptoDefs.h>
+#include "PadLockRNG.h"
+#include "PadLock.h"
+#include "AESNI.h"
+#include "x86CPURNG.h"
+#include "SoftCrypto.h"
+#include "SoftDigest.h"
+#include "x86CPUDigest.h"
+#include "HybridB2Digest.h"
+#include "HybridSHADigest.h"
+
+struct crypto_module_info {
+	module_info info;
+	status_t (*register_algorithm)(BCryptoAlgorithm* algorithm);
+	status_t (*unregister_algorithm)(BCryptoAlgorithmID algorithm);
+	status_t (*submit_request)(BCryptoRequest* request);
+};
+
+extern "C" __attribute__((visibility("default"))) status_t
+crypto_std_ops(int op, ...)
+{
+	switch (op) {
+		case B_MODULE_INIT:
+		{
+			status_t status = crypto_init_core();
+            if (status != B_OK)
+                return status;
+			BInitPadLockRNG();
+			BInitx86CPURNG();
+			BInitPadLockCrypto();
+			BInitAESNICrypto();
+			BInitSoftCrypto();
+			BStartEntropyFeeder();
+			//BInitx86CPUDigest();
+			BInitSoftDigest();
+			BInitHybridB2Digest();
+			BInitHybridSHADigest();
+			return B_OK;
+		}
+		case B_MODULE_UNINIT:
+			return B_OK;
+	}
+
+	return B_ERROR;
+}
+
+static struct crypto_module_info sCryptoModuleInfo = {
+    {
+        "crypto/v1",
+        0,
+        crypto_std_ops
+    },
+    BRegisterCryptoAlgorithm,
+    BUnregisterCryptoAlgorithm,
+    BSubmitCryptoRequest
+};
+
+extern "C" __attribute__((visibility("default"))) module_info* modules[];
+
+module_info* modules[] = {
+    (module_info*)&sCryptoModuleInfo,
+    NULL
+};

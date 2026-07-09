@@ -264,6 +264,7 @@ Mach64_SetFunctionPointers(void)
 	gInfo.SetDPMSMode = Mach64_SetDPMSMode;
 
 	gInfo.LoadCursorImage = Mach64_LoadCursorImage;
+	gInfo.SetCursorBitmap = Mach64_SetCursorBitmap;
 	gInfo.SetCursorPosition = Mach64_SetCursorPosition;
 	gInfo.ShowCursor = Mach64_ShowCursor;
 

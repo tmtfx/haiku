@@ -5,6 +5,55 @@
 
 
 #include "Keyring.h"
+#include <stdlib.h>
+#include <string.h>
+#include <stdint.h>
+#include <new>
+
+#include <crypto/BCrypto.h>
+#include <crypto/BCryptoDefs.h>
+
+static inline void secure_memzero(void* ptr, size_t len)
+{
+	volatile unsigned char *p = (volatile unsigned char *)ptr;
+	while (len--) *p++ = 0;
+}
+
+
+// Derive a 32-byte AES-256 key from a password and a 16-byte salt using
+// iterated SHA-256 (1000 rounds). Simple, no external library required.
+static status_t
+derive_key(const uint8_t* pwd, size_t pwdLen,
+           const uint8_t* salt, size_t saltLen,
+           uint8_t* outKey32)
+{
+	BCrypto crypto;
+	if (crypto.InitCheck() != B_OK)
+		return B_ERROR;
+
+	size_t inputLen = pwdLen + saltLen;
+	uint8_t* input = new(std::nothrow) uint8_t[inputLen];
+	if (input == NULL)
+		return B_NO_MEMORY;
+
+	memcpy(input, pwd, pwdLen);
+	memcpy(input + pwdLen, salt, saltLen);
+
+	status_t err = crypto.Digest(B_CRYPTO_SHA256, input, inputLen, outKey32);
+	secure_memzero(input, inputLen);
+	delete[] input;
+	if (err != B_OK)
+		return err;
+
+	for (int i = 1; i < 1000; i++) {
+		err = crypto.Digest(B_CRYPTO_SHA256, outKey32, 32, outKey32);
+		if (err != B_OK) {
+			secure_memzero(outKey32, 32);
+			return err;
+		}
+	}
+	return B_OK;
+}
 
 
 Keyring::Keyring()
@@ -437,8 +486,26 @@ Keyring::RemoveKey(const BString& identifier,
 		if (fData.FindMessage(identifier, i, &candidate) != B_OK)
 			return B_ERROR;
 
-		// We require an exact match.
-		if (!candidate.HasSameData(keyMessage))
+		bool match = candidate.HasSameData(keyMessage);
+		if (!match) {
+			// Backward/forward compatible removal path: accept a match by
+			// (type, secondaryIdentifier) for this identifier. This allows
+			// callers to remove encrypted keys even when transport metadata
+			// (e.g. nonce fields) is not present in the request message.
+			BString candidateSecondary;
+			BString requestSecondary;
+			BKeyType candidateType;
+			BKeyType requestType;
+			if (candidate.FindString("secondaryIdentifier", &candidateSecondary) == B_OK
+				&& keyMessage.FindString("secondaryIdentifier", &requestSecondary) == B_OK
+				&& candidate.FindUInt32("type", (uint32*)&candidateType) == B_OK
+				&& keyMessage.FindUInt32("type", (uint32*)&requestType) == B_OK
+				&& candidateSecondary == requestSecondary
+				&& candidateType == requestType) {
+				match = true;
+			}
+		}
+		if (!match)
 			continue;
 
 		status_t result = fData.RemoveData(identifier, i);
@@ -493,7 +560,75 @@ Keyring::_EncryptToFlatBuffer()
 		return result;
 
 	if (fHasUnlockKey) {
-		// TODO: Actually encrypt the flat buffer...
+		// Encrypt with BCrypto: SHA-256 key derivation + AES-256-CBC-PKCS7
+		// Format: magic(4) version(4) salt(16) iv(16) len(4) cipherdata
+		const uint8_t* pwdData = NULL;
+		ssize_t pwdLen = 0;
+		if (fUnlockKey.FindData("data", B_RAW_TYPE, (const void**)&pwdData,
+				&pwdLen) != B_OK || pwdLen <= 0) {
+			return B_BAD_DATA;
+		}
+
+		BCrypto crypto;
+		if (crypto.InitCheck() != B_OK)
+			return B_ERROR;
+
+		// Generate random salt and IV
+		uint8_t salt[16], iv[16];
+		if (crypto.GetRandomBytes(salt, sizeof(salt)) != B_OK
+				|| crypto.GetRandomBytes(iv, sizeof(iv)) != B_OK) {
+			return B_ERROR;
+		}
+
+		// Derive 32-byte AES-256 key
+		uint8_t key[32];
+		result = derive_key(pwdData, (size_t)pwdLen, salt, sizeof(salt), key);
+		if (result != B_OK)
+			return result;
+
+		// Encrypt plain data with AES-256-CBC-PKCS7
+		size_t plainLen = (size_t)fFlatBuffer.BufferLength();
+		const uint8_t* plainPtr = (const uint8_t*)fFlatBuffer.Buffer();
+
+		crypto.SetAlgorithm(B_CRYPTO_AES);
+		crypto.SetMode(B_CRYPTO_MODE_CBC);
+		crypto.SetPadding(true, B_CRYPTO_PKCS7);
+
+		size_t cipherBufSize = crypto.GetOutputSize(plainLen, B_CRYPTO_ENCRYPT);
+		uint8_t* cipher = new(std::nothrow) uint8_t[cipherBufSize];
+		if (cipher == NULL) {
+			secure_memzero(key, sizeof(key));
+			return B_NO_MEMORY;
+		}
+
+		ssize_t cipherLen = crypto.Encrypt(key, sizeof(key), iv, sizeof(iv),
+			plainPtr, plainLen, cipher, cipherBufSize);
+
+		secure_memzero(key, sizeof(key));
+
+		if (cipherLen < 0) {
+			secure_memzero(cipher, cipherBufSize);
+			delete[] cipher;
+			return B_ERROR;
+		}
+
+		// Serialise header + ciphertext into fFlatBuffer
+		uint32 magic   = 0x4B534543; // 'KSEC'
+		uint32 version = 2;          // v2 = BCrypto-based KDF
+		uint32 cipherLen32 = (uint32)cipherLen;
+
+		size_t off = 0;
+		fFlatBuffer.SetSize(0);
+		fFlatBuffer.Seek(0, SEEK_SET);
+		fFlatBuffer.WriteAt(off, &magic,       sizeof(magic));       off += sizeof(magic);
+		fFlatBuffer.WriteAt(off, &version,     sizeof(version));     off += sizeof(version);
+		fFlatBuffer.WriteAt(off, salt,         sizeof(salt));        off += sizeof(salt);
+		fFlatBuffer.WriteAt(off, iv,           sizeof(iv));          off += sizeof(iv);
+		fFlatBuffer.WriteAt(off, &cipherLen32, sizeof(cipherLen32)); off += sizeof(cipherLen32);
+		fFlatBuffer.WriteAt(off, cipher,       cipherLen);
+
+		secure_memzero(cipher, cipherBufSize);
+		delete[] cipher;
 	}
 
 	fModified = false;
@@ -508,7 +643,98 @@ Keyring::_DecryptFromFlatBuffer()
 		return B_OK;
 
 	if (fHasUnlockKey) {
-		// TODO: Actually decrypt the flat buffer...
+		// Parse header: magic(4) version(4) salt(16) iv(16) len(4) cipherdata
+		const size_t kHeaderSize = 4 + 4 + 16 + 16 + 4;
+		if (fFlatBuffer.BufferLength() < kHeaderSize)
+			return B_BAD_DATA;
+
+		uint32 magic = 0, version = 0;
+		size_t off = 0;
+		fFlatBuffer.ReadAt(off, &magic,   sizeof(magic));   off += sizeof(magic);
+		fFlatBuffer.ReadAt(off, &version, sizeof(version)); off += sizeof(version);
+
+		if (magic != 0x4B534543) // 'KSEC'
+			return B_BAD_DATA;
+		if (version != 2) // only v2 (BCrypto-based) supported
+			return B_BAD_DATA;
+
+		uint8_t salt[16], iv[16];
+		fFlatBuffer.ReadAt(off, salt, sizeof(salt)); off += sizeof(salt);
+		fFlatBuffer.ReadAt(off, iv,   sizeof(iv));   off += sizeof(iv);
+
+		uint32 cipherLen32 = 0;
+		fFlatBuffer.ReadAt(off, &cipherLen32, sizeof(cipherLen32));
+		off += sizeof(cipherLen32);
+
+		if (fFlatBuffer.BufferLength() < off + cipherLen32)
+			return B_BAD_DATA;
+
+		uint8_t* cipher = new(std::nothrow) uint8_t[cipherLen32];
+		if (cipher == NULL)
+			return B_NO_MEMORY;
+		fFlatBuffer.ReadAt(off, cipher, cipherLen32);
+
+		// Retrieve stored password
+		const uint8_t* pwdData = NULL;
+		ssize_t pwdLen = 0;
+		if (fUnlockKey.FindData("data", B_RAW_TYPE, (const void**)&pwdData,
+				&pwdLen) != B_OK || pwdLen <= 0) {
+			secure_memzero(cipher, cipherLen32);
+			delete[] cipher;
+			return B_BAD_DATA;
+		}
+
+		// Re-derive AES-256 key
+		uint8_t key[32];
+		status_t err = derive_key(pwdData, (size_t)pwdLen,
+			salt, sizeof(salt), key);
+		if (err != B_OK) {
+			secure_memzero(cipher, cipherLen32);
+			delete[] cipher;
+			return err;
+		}
+
+		// Decrypt AES-256-CBC-PKCS7
+		BCrypto crypto;
+		if (crypto.InitCheck() != B_OK) {
+			secure_memzero(key, sizeof(key));
+			secure_memzero(cipher, cipherLen32);
+			delete[] cipher;
+			return B_ERROR;
+		}
+
+		crypto.SetAlgorithm(B_CRYPTO_AES);
+		crypto.SetMode(B_CRYPTO_MODE_CBC);
+		crypto.SetPadding(true, B_CRYPTO_PKCS7);
+
+		uint8_t* plain = new(std::nothrow) uint8_t[cipherLen32];
+		if (plain == NULL) {
+			secure_memzero(key, sizeof(key));
+			secure_memzero(cipher, cipherLen32);
+			delete[] cipher;
+			return B_NO_MEMORY;
+		}
+
+		ssize_t plainLen = crypto.Decrypt(key, sizeof(key), iv, sizeof(iv),
+			cipher, cipherLen32, plain, cipherLen32);
+
+		secure_memzero(key, sizeof(key));
+		secure_memzero(cipher, cipherLen32);
+		delete[] cipher;
+
+		if (plainLen < 0) {
+			secure_memzero(plain, cipherLen32);
+			delete[] plain;
+			return B_BAD_DATA;
+		}
+
+		// Replace fFlatBuffer with decrypted plaintext for normal unflatten
+		fFlatBuffer.SetSize(0);
+		fFlatBuffer.Seek(0, SEEK_SET);
+		fFlatBuffer.WriteAt(0, plain, plainLen);
+
+		secure_memzero(plain, cipherLen32);
+		delete[] plain;
 	}
 
 	BMessage container;

@@ -45,6 +45,9 @@ public:
 
 			void				Unset();
 
+			void				SetEncrypted(bool encrypted);
+			bool				IsEncrypted() const;
+
 			status_t			SetTo(BKeyPurpose purpose,
 									const char* identifier,
 									const char* secondaryIdentifier = NULL,
@@ -87,6 +90,7 @@ private:
 			BString				fOwner;
 			bigtime_t			fCreationTime;
 	mutable	BMallocIO			fData;
+			bool				fEncrypted;
 };
 
 
@@ -102,6 +106,12 @@ public:
 	virtual	BKeyType			Type() const { return B_KEY_TYPE_PASSWORD; };
 
 			status_t			SetTo(const char* password,
+									BKeyPurpose purpose,
+									const char* identifier,
+									const char* secondaryIdentifier = NULL);
+			// Same as SetTo, but marks the key as encrypted so the keystore
+			// server will cipher the data at rest.
+			status_t			EncryptedSetTo(const char* password,
 									BKeyPurpose purpose,
 									const char* identifier,
 									const char* secondaryIdentifier = NULL);

@@ -2,19 +2,33 @@ SubDir HAIKU_TOP src servers keystore ;
 
 UsePrivateHeaders app ;
 UsePrivateHeaders shared ;
+UsePublicHeaders crypto support ;
+
+local cryptoLib = libcrypto_api.so ;
+SEARCH on $(cryptoLib) = /boot/system/lib ;
 
 Application keystore_server :
-	AppAccessRequestWindow.cpp
-	KeyRequestWindow.cpp
-	Keyring.cpp
-	KeyStoreServer.cpp
-	: be localestub shared [ TargetLibstdc++ ]
-	: keystore_server.rdef
+    AppAccessRequestWindow.cpp
+    KeyRequestWindow.cpp
+    Keyring.cpp
+    KeyStoreServer.cpp
+    MasterPasswordRequestWindow.cpp
+    :
+    be
+    localestub
+    shared
+    $(cryptoLib)
+    [ TargetLibstdc++ ]
+    : keystore_server.rdef
 ;
+
+local target = [ MultiArchDefaultGristFiles keystore_server ] ;
+LINKFLAGS on $(target) += "-Xlinker -rpath -Xlinker /boot/system/lib" ;
 
 DoCatalogs keystore_server :
     x-vnd.Haiku-keystore_server
     :
-	AppAccessRequestWindow.cpp
-	KeyRequestWindow.cpp
+    AppAccessRequestWindow.cpp
+    KeyRequestWindow.cpp
+    MasterPasswordRequestWindow.cpp
 ;

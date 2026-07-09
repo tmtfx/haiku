@@ -56,7 +56,8 @@ TBarMenuTitle::TBarMenuTitle(float width, float height, const BBitmap* icon,
 	fIcon(icon),
 	fMenu(menu),
 	fBarView(barView),
-	fInitStatus(B_NO_INIT)
+	fInitStatus(B_NO_INIT),
+	fSpielActive(false)
 {
 	if (fIcon == NULL || fMenu == NULL || fBarView == NULL)
 		fInitStatus = B_BAD_VALUE;
@@ -85,6 +86,18 @@ TBarMenuTitle::GetContentSize(float* width, float* height)
 	*height = fHeight;
 }
 
+void
+TBarMenuTitle::SetSpielActive(bool active)
+{
+	if (fSpielActive == active)
+		return;
+	fSpielActive = active;
+	BMenu* menu = Menu();
+	if (menu != NULL && menu->LockLooper()) {
+		menu->Invalidate(Frame());
+		menu->UnlockLooper();
+	}
+}
 
 void
 TBarMenuTitle::Draw()
@@ -103,7 +116,7 @@ TBarMenuTitle::Draw()
 		frame.right = windowBounds.right;
 
 	// fill in background
-	if (IsSelected()) {
+	if (IsSelected() || fSpielActive) {
 		be_control_look->DrawMenuItemBackground(menu, frame, frame, base,
 			BControlLook::B_ACTIVATED);
 	} else

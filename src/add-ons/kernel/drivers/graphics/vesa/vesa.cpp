@@ -16,6 +16,7 @@
 #include "driver.h"
 #include "utility.h"
 #include "vesa_info.h"
+#include "vesa_logo.h"
 
 
 #define LINEAR_ADDRESS(segment, offset) \
@@ -353,6 +354,48 @@ remap_frame_buffer(vesa_info& info, addr_t physicalBase, uint32 width,
 //	#pragma mark -
 
 
+static void
+draw_vesa_logo(vesa_info &info, struct frame_buffer_boot_info *bi)
+{
+	if (!bi)
+		return;
+
+	if (bi->depth != 32)
+		return;
+
+	uint32 screenWidth = bi->width;
+	uint32 screenHeight = bi->height;
+	uint32 bytesPerRow = bi->bytes_per_row ? bi->bytes_per_row : screenWidth * 4;
+	uint32 fbPitch = bytesPerRow / 4;
+
+	uint32 logoW = vesa_logo_width;
+	uint32 logoH = vesa_logo_height;
+	
+	int32 startX = (int32)((screenWidth - logoW) / 2);
+	if (startX < 0) startX = 0;
+
+	int32 startY = (int32)((screenHeight - logoH) / 2);
+	if (startY < 0) startY = 0;
+	
+	uint8* fb = (uint8*)info.frame_buffer;
+	if (fb == NULL) {
+		fb = (uint8*)bi->frame_buffer;
+	}
+
+	if (fb == NULL)
+		return;
+
+	for (uint32 y = 0; y < logoH && (startY + y) < screenHeight; y++) {
+		uint32 fbOffset = ((startY + y) * fbPitch + startX) * sizeof(uint32);
+		uint32 logoRowOffset = y * logoW;
+		uint32 remainingWidth = screenWidth - startX;
+		uint32 copyPixels = (logoW < remainingWidth) ? logoW : remainingWidth;
+		uint32 copySize = copyPixels * sizeof(uint32);
+
+		user_memcpy(fb + fbOffset, (void*)&vesa_logo[logoRowOffset], copySize);
+	}
+}
+
 status_t
 vesa_init(vesa_info& info)
 {
@@ -461,6 +504,9 @@ vesa_init(vesa_info& info)
 		vbe_set_bits_per_gun(state, info, 8);
 
 	vbe_call_finish(state);
+	
+	draw_vesa_logo(info, bufferInfo);
+	snooze(2000000);
 
 	dprintf(DEVICE_NAME ": vesa_init() completed successfully!\n");
 	return B_OK;

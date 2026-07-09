@@ -61,6 +61,7 @@ public:
 								TBarView* barView);
 	virtual					~TBarMenuBar();
 
+	virtual	void			MouseDown(BPoint where);
 	virtual	void			MouseMoved(BPoint where, uint32 code,
 								const BMessage* message);
 	virtual	void			Draw(BRect);
@@ -74,6 +75,8 @@ public:
 
 			bool			AddSeparatorItem();
 			bool			RemoveSeperatorItem();
+			
+			void			SetSpielActive(bool enable);
 
 			void			InitTrackingHook(
 								bool (* hookfunction)(BMenu*, void*),

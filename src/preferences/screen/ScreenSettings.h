@@ -22,8 +22,13 @@ class ScreenSettings {
 		BRect WindowFrame() const { return fWindowFrame; };
 		void SetWindowFrame(BRect);
 
+		// hardware cursor preference
+		bool HardwareCursorEnabled() const { return fHardwareCursorEnabled; };
+		void SetHardwareCursorEnabled(bool enabled);
+
 	private:
 		BRect fWindowFrame;
+		bool fHardwareCursorEnabled;
 };
 
 #endif	// SCREEN_SETTINGS_H

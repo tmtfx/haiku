@@ -20,6 +20,7 @@
 #include "driver.h"
 #include "utility.h"
 #include "vesa_info.h"
+#include "framebuffer_logo.h"
 
 
 static uint32
@@ -87,6 +88,48 @@ remap_frame_buffer(framebuffer_info& info, addr_t physicalBase, uint32 width,
 //	#pragma mark -
 
 
+static void
+draw_framebuffer_logo(framebuffer_info &info, struct frame_buffer_boot_info *bi)
+{
+	if (!bi)
+		return;
+
+	if (bi->depth != 32)
+		return;
+
+	uint32 screenWidth = bi->width;
+	uint32 screenHeight = bi->height;
+	uint32 bytesPerRow = bi->bytes_per_row ? bi->bytes_per_row : screenWidth * 4;
+	uint32 fbPitch = bytesPerRow / 4;
+
+	uint32 logoW = framebuffer_logo_width;
+	uint32 logoH = framebuffer_logo_height;
+	
+	int32 startX = (int32)((screenWidth - logoW) / 2);
+	if (startX < 0) startX = 0;
+
+	int32 startY = (int32)((screenHeight - logoH) / 2);
+	if (startY < 0) startY = 0;
+	
+	uint8* fb = (uint8*)info.frame_buffer;
+	if (fb == NULL) {
+		fb = (uint8*)bi->frame_buffer;
+	}
+
+	if (fb == NULL)
+		return;
+
+	for (uint32 y = 0; y < logoH && (startY + y) < screenHeight; y++) {
+		uint32 fbOffset = ((startY + y) * fbPitch + startX) * sizeof(uint32);
+		uint32 logoRowOffset = y * logoW;
+		uint32 remainingWidth = screenWidth - startX;
+		uint32 copyPixels = (logoW < remainingWidth) ? logoW : remainingWidth;
+		uint32 copySize = copyPixels * sizeof(uint32);
+
+		user_memcpy(fb + fbOffset, (void*)&framebuffer_logo[logoRowOffset], copySize);
+	}
+}
+
 status_t
 framebuffer_init(framebuffer_info& info)
 {
@@ -127,6 +170,9 @@ framebuffer_init(framebuffer_info& info)
 		sharedInfo.has_edid = true;
 		memcpy(&sharedInfo.edid_info, edidInfo, sizeof(edid1_info));
 	}
+	
+	draw_framebuffer_logo(info, bufferInfo);
+	snooze(2000000);
 
 	dprintf(DEVICE_NAME ": framebuffer_init() completed successfully!\n");
 	return B_OK;

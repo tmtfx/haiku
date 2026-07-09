@@ -1,0 +1,98 @@
+SubDir HAIKU_TOP src add-ons ai ;
+
+# Use network private headers for URL/HTTP handling
+UsePrivateHeaders network netservices shared ;
+# 1. Impostiamo gli header per tutta la cartella dei plugin
+UsePublicHeaders ai support ;
+UseHeaders [ FDirName $(HAIKU_TOP) src kits ai ] : true ;
+
+# Se i sorgenti di microgpt-c hanno bisogno dei propri header interni
+UseHeaders [ FDirName $(HAIKU_TOP) src third_party microgpt-c src ] : true ;
+
+# Flag globali di compilazione (microgpt feature)
+SubDirC++Flags -DHAVE_MICROGPT=1 ;
+
+# ----------------------------------------------------
+# REGOLA CUSTOM PER GLI ATTRIBUTI BFS
+# ----------------------------------------------------
+# Questa regola dice a Jam di agganciare il comando addattr al target compilato
+rule AddPluginTypeAttribute Target : Type
+{
+    # Diciamo a Jam che l'azione dipende dalla creazione del Target
+    AddPluginTypeAttributeAction $(Target) ;
+    # Passiamo il tipo come variabile legata a quel preciso Target
+    PLUGIN_TYPE on $(Target) = $(Type) ;
+}
+
+actions AddPluginTypeAttributeAction
+{
+    addattr -t string "AI:plugin_type" "$(PLUGIN_TYPE)" "$(1)"
+}
+
+# ----------------------------------------------------
+# PLUGIN STANDARD (network + BE)
+# ----------------------------------------------------
+
+Addon OpenAIPlugin : openai_plugin.cpp : be libai_api.so libbnetapi.so libnetservices.a [ TargetLibstdc++ ]
+            [ TargetLibsupc++ ] <$(TARGET_PACKAGING_ARCH)>libshared.a $(TARGET_NETWORK_LIBS) ;
+AddPluginTypeAttribute OpenAIPlugin : remote ;
+
+Addon PublicAIPlugin : publicai_plugin.cpp : be libai_api.so libbnetapi.so libnetservices.a [ TargetLibstdc++ ]
+            [ TargetLibsupc++ ] <$(TARGET_PACKAGING_ARCH)>libshared.a $(TARGET_NETWORK_LIBS) ;
+AddPluginTypeAttribute PublicAIPlugin : remote ;
+
+Addon OllamaPlugin : ollama_plugin.cpp : be libai_api.so libbnetapi.so libnetservices.a [ TargetLibstdc++ ]
+            [ TargetLibsupc++ ] <$(TARGET_PACKAGING_ARCH)>libshared.a $(TARGET_NETWORK_LIBS) ;
+AddPluginTypeAttribute OllamaPlugin : local ;
+
+Addon GeminiPlugin : gemini_plugin.cpp : be libai_api.so libbnetapi.so libnetservices.a [ TargetLibstdc++ ]
+            [ TargetLibsupc++ ] <$(TARGET_PACKAGING_ARCH)>libshared.a $(TARGET_NETWORK_LIBS) ;
+AddPluginTypeAttribute GeminiPlugin : remote ;
+
+Addon HuggingFacePlugin : huggingface_plugin.cpp : be ai_api network ;
+AddPluginTypeAttribute HuggingFacePlugin : remote ;
+
+Addon AnthropicPlugin : anthropic_plugin.cpp : be libai_api.so libbnetapi.so libnetservices.a [ TargetLibstdc++ ]
+            [ TargetLibsupc++ ] <$(TARGET_PACKAGING_ARCH)>libshared.a $(TARGET_NETWORK_LIBS) ;
+AddPluginTypeAttribute AnthropicPlugin : remote ;
+
+Addon MistralPlugin : mistral_plugin.cpp : be libai_api.so libbnetapi.so libnetservices.a [ TargetLibstdc++ ]
+            [ TargetLibsupc++ ] <$(TARGET_PACKAGING_ARCH)>libshared.a $(TARGET_NETWORK_LIBS) ;
+AddPluginTypeAttribute MistralPlugin : remote ;
+
+Addon DeepSeekPlugin : deepseek_plugin.cpp : be libai_api.so libbnetapi.so libnetservices.a [ TargetLibstdc++ ]
+            [ TargetLibsupc++ ] <$(TARGET_PACKAGING_ARCH)>libshared.a $(TARGET_NETWORK_LIBS) ;
+AddPluginTypeAttribute DeepSeekPlugin : remote ;
+
+
+# ----------------------------------------------------
+# PLUGIN MICROGPT (Con sorgenti bundled incorporati)
+# ----------------------------------------------------
+
+# Definiamo la lista dei sorgenti di microgpt estratti in modo pulito
+local microgptSources =
+    [ FDirName $(HAIKU_TOP) src third_party microgpt-c src microgpt.c ]
+    [ FDirName $(HAIKU_TOP) src third_party microgpt-c src microgpt_organelle.c ]
+    [ FDirName $(HAIKU_TOP) src third_party microgpt-c src microgpt_msa.c ]
+    [ FDirName $(HAIKU_TOP) src third_party microgpt-c src microgpt_vm.c ]
+    [ FDirName $(HAIKU_TOP) src third_party microgpt-c src microgpt_vm_natives.c ]
+    [ FDirName $(HAIKU_TOP) src third_party microgpt-c src microgpt_vm_parser.l.c ]
+    [ FDirName $(HAIKU_TOP) src third_party microgpt-c src microgpt_vm_parser.tab.c ]
+    [ FDirName $(HAIKU_TOP) src third_party microgpt-c src microgpt_oql.c ]
+    [ FDirName $(HAIKU_TOP) src third_party microgpt-c src microgpt_oql_parser.l.c ]
+    [ FDirName $(HAIKU_TOP) src third_party microgpt-c src microgpt_oql_parser.tab.c ]
+    [ FDirName $(HAIKU_TOP) src third_party microgpt-c src microgpt_eml.c ]
+    [ FDirName $(HAIKU_TOP) src third_party microgpt-c src microgpt_vr.c ]
+    [ FDirName $(HAIKU_TOP) src third_party microgpt-c src microgpt_turboquant.c ]
+;
+
+Addon MicrogptPlugin : 
+    microgpt_plugin.cpp 
+    $(microgptSources) 
+    : 
+    be ai_api stdc++ 
+;
+# Essendo un LLM integrato/embedded che gira localmente sulla CPU:
+AddPluginTypeAttribute MicrogptPlugin : local ;
+
+# If a resource file is needed, AddResources can be used.

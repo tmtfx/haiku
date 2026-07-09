@@ -67,10 +67,10 @@ Mach64_LoadCursorImage(int width, int height, uint8* andMask, uint8* xorMask)
 	// buffer.  Note that a particular bit in these masks will have the
 	// following effect upon the corresponding cursor pixel:
 	//	AND  XOR	Result
-	//	 0    0		 White pixel
-	//	 0    1		 Black pixel
-	//	 1    0		 Screen color (for transparency)
-	//	 1    1		 Reverse screen color to black or white
+	//	 0	0		 White pixel
+	//	 0	1		 Black pixel
+	//	 1	0		 Screen color (for transparency)
+	//	 1	1		 Reverse screen color to black or white
 
 	for (int row = 0; row < height; row++) {
 		for (int colByte = 0; colByte < width / 8; colByte++) {
@@ -99,4 +99,72 @@ Mach64_LoadCursorImage(int width, int height, uint8* andMask, uint8* xorMask)
 	OUTREG(CUR_CLR1, 0);
 
 	return true;
+}
+
+status_t
+Mach64_SetCursorBitmap(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
+                       color_space colorSpace, uint16 bytesPerRow, const uint8* bitmapData)
+{
+    SharedInfo& si = *gInfo.sharedInfo;
+    
+    if (width > 64 || height > 64 || hot_x >= width || hot_y >= height)
+        return B_ERROR;
+
+    si.cursorHotX = hot_x;
+    si.cursorHotY = hot_y;
+
+    uint16* fbCursor = (uint16*)((addr_t)si.videoMemAddr + si.cursorOffset);
+    if (fbCursor == NULL)
+        return B_NO_INIT;
+
+    // INITIALIZATION TO TRANSPARENT
+    for (int i = 0; i < 64 * 8; i++) {
+        fbCursor[i] = 0xAAAA;
+    }
+
+    // PIXEL COPY
+    if (colorSpace == B_RGBA32 || colorSpace == B_RGB32) {
+        for (int y = 0; y < height && y < 64; y++) {
+            const uint8* srcRow = bitmapData + y * bytesPerRow;
+            uint16* rowPtr = fbCursor + (y * 8); // Y (Top-Down)
+
+            for (int x = 0; x < width && x < 64; x++) {
+                const uint8* pixel = srcRow + x * 4;
+                
+                uint8 b = pixel[0];
+                uint8 g = pixel[1];
+                uint8 r = pixel[2];
+                uint8 a = (colorSpace == B_RGBA32) ? pixel[3] : 0xFF;
+
+                if (a < 128)
+                    continue; // Keep transparent (10b)
+
+                int wordIdx = x / 8;
+                
+                // Chip ATI is Little-Endian
+                int bitPos = (x % 8) * 2;
+
+                // Temporary zeroing
+                rowPtr[wordIdx] &= ~(0x3 << bitPos);
+
+                // Luma
+                uint32 luma = (r * 77 + g * 150 + b * 29) >> 8;
+                if (luma > 128) {
+                    // White -> AND=0, XOR=0 (00b) -> already zeroed
+					// rowPtr[wordIdx] |= (0x2 << bitPos); <-- with this white becomes tansparent
+                } else {
+                    // Black -> AND=0, XOR=1 (01b)
+                    rowPtr[wordIdx] |= (0x1 << bitPos);
+                }
+            }
+        }
+    } else {
+        return B_ERROR;
+    }
+
+    // UPDATE CURSOR PALETTES
+    OUTREG(CUR_CLR0, 0xFFFFFF00); // White - correct byte order
+    OUTREG(CUR_CLR1, 0x00000000); // Black
+
+    return B_OK;
 }

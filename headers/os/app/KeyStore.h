@@ -40,6 +40,22 @@ public:
 			status_t			RemoveKey(const BKey& key);
 			status_t			RemoveKey(const char* keyring, const BKey& key);
 
+			// Encrypted key variants: the server uses its cached session
+			// password to encrypt/decrypt the key data at rest.
+			// On first use per session the server will prompt the user.
+			status_t			GetEncryptedKey(BKeyType type,
+									const char* identifier, BKey& key);
+			status_t			GetEncryptedKey(const char* keyring,
+									BKeyType type, const char* identifier,
+									BKey& key);
+			status_t			GetEncryptedKey(const char* keyring,
+									BKeyType type, const char* identifier,
+									const char* secondaryIdentifier,
+									BKey& key);
+			status_t			AddEncryptedKey(const BKey& key);
+			status_t			AddEncryptedKey(const char* keyring,
+									const BKey& key);
+
 			status_t			GetNextKey(uint32& cookie, BKey& key);
 			status_t			GetNextKey(BKeyType type, BKeyPurpose purpose,
 									uint32& cookie, BKey& key);

@@ -1,0 +1,12 @@
+SubDir HAIKU_TOP src servers ai ;
+
+UseHeaders [ FDirName $(HAIKU_TOP) src kits ai ] : true ;
+UsePublicHeaders ai ;
+
+AddResources ai_server : ai_server.rdef ;
+
+Application ai_server : 
+    ai_server.cpp
+;
+
+LinkAgainst ai_server : be [ TargetLibstdc++ ] libai_api.so ;

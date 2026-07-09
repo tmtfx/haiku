@@ -47,6 +47,7 @@
 #include <Window.h>
 
 #include <InterfacePrivate.h>
+#include <CheckBox.h>
 
 #include "AlertWindow.h"
 #include "Constants.h"
@@ -462,6 +463,35 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 	if (_IsVesa())
 		fRefreshField->Hide();
 
+	// hardware cursor checkbox: check whether any display mode advertises hardware cursor support
+	bool supportsHardwareCursor = false;
+	for (int32 i = 0; i < fScreenMode.CountModes(); i++) {
+	const display_mode &dm = fScreenMode.DisplayModeAt(i);
+	if (dm.flags & B_HARDWARE_CURSOR) {
+		supportsHardwareCursor = true;
+		break;
+	}
+	}
+
+	// create the checkbox (value from saved settings; default true)
+	fHardwareCursorCheckbox = new BCheckBox("hardware_cursor",
+	B_TRANSLATE("Enable hardware cursor"), new BMessage(TOGGLE_HARDWARE_CURSOR_MSG));
+		// Ask app_server whether the driver exposes B_SET_CURSOR_BITMAP
+		bool hasSetCursorBitmap = false;
+		{
+	BMessenger msgr("application/x-vnd.haiku-app_server");
+	BMessage request('hsbm');
+	BMessage reply;
+	if (msgr.IsValid() && msgr.SendMessage(&request, &reply, 200000) == B_OK) {
+		reply.FindBool("has_set_cursor_bitmap", &hasSetCursorBitmap);
+	}
+		}
+		fHardwareCursorCheckbox->SetEnabled(hasSetCursorBitmap);
+		if (fSettings->HardwareCursorEnabled())
+	fHardwareCursorCheckbox->SetValue(B_CONTROL_ON);
+		else
+	fHardwareCursorCheckbox->SetValue(B_CONTROL_OFF);
+
 	// enlarged area for multi-monitor settings
 	{
 		bool dummy;
@@ -577,6 +607,9 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 			.Add(fTVStandardField->CreateLabelLayoutItem(), 0, 6)
 			.Add(fTVStandardField->CreateMenuBarLayoutItem(), 1, 6)
 		.End();
+
+	// add the checkbox below the grid
+	outerControlsView->AddChild(fHardwareCursorCheckbox);
 
 	// TODO: we don't support getting the screen's preferred settings
 	/* fDefaultsButton = new BButton(buttonRect, "DefaultsButton", "Defaults",
@@ -1233,6 +1266,13 @@ ScreenWindow::MessageReceived(BMessage* message)
 			BScreen screen(this);
 			screen.SetBrightness(message->FindInt32("be:value") / 255.f);
 			_CheckApplyEnabled();
+			break;
+		}
+
+		case TOGGLE_HARDWARE_CURSOR_MSG:
+		{
+			bool enabled = fHardwareCursorCheckbox->Value() == B_CONTROL_ON;
+			fSettings->SetHardwareCursorEnabled(enabled);
 			break;
 		}
 

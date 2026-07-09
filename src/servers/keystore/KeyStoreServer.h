@@ -10,6 +10,7 @@
 #include <File.h>
 #include <Key.h>
 #include <ObjectList.h>
+#include <String.h>
 
 
 struct app_info;
@@ -55,9 +56,18 @@ private:
 		status_t					_RequestKey(const BString& keyringName,
 										BMessage& keyMessage);
 
+		// Session password: cached in RAM on first encrypted-key access.
+		// Cleared when the server shuts down.
+		status_t					_GetOrAskSessionPassword();
+		status_t					_EncryptKeyData(BMessage& keyMessage);
+		status_t					_DecryptKeyData(BMessage& keyMessage);
+
 		Keyring*					fMasterKeyring;
 		KeyringList					fKeyrings;
 		BFile						fKeyStoreFile;
+
+		BString						fSessionPassword;
+		bool						fHasSessionPassword;
 };
 
 

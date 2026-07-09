@@ -205,6 +205,7 @@ Rage128_SetFunctionPointers(void)
 
 	gInfo.LoadCursorImage = Rage128_LoadCursorImage;
 	gInfo.SetCursorPosition = Rage128_SetCursorPosition;
+	gInfo.SetCursorBitmap = Rage128_SetCursorBitmap;
 	gInfo.ShowCursor = Rage128_ShowCursor;
 
 	gInfo.FillRectangle = Rage128_FillRectangle;

@@ -4,6 +4,7 @@
 
 	Authors:
 	Gerald Zajac 2007-2008
+	Fabio Tomat 2026
 */
 
 #ifndef DRIVERINTERFACE_H
@@ -147,8 +148,8 @@ struct SharedInfo {
 	area_id regsArea;			// area_id for the memory mapped registers. It will
 								// be cloned into accelerant's address space.
 	area_id videoMemArea;		// video memory area_id.  The addresses are shared with all teams.
-	void*	videoMemAddr;		// video memory addr as viewed from virtual memory
-	phys_addr_t videoMemPCI;	// video memory addr as viewed from the PCI bus (for DMA)
+	addr_t	videoMemAddr; 		// video memory addr as viewed from virtual memory
+	phys_addr_t	videoMemPCI; 		// video memory addr as viewed from the PCI bus (for DMA)
 	uint32	videoMemSize; 		// video memory size in bytes.
 
 	uint32	cursorOffset;		// offset of cursor in video memory
@@ -188,6 +189,11 @@ struct SharedInfo {
 	uint32	cobOffset;			// offset in video memory
 
 	uint32	globalBitmapDesc;	// Global Bitmap Descriptor for BCI
+	
+	bool has_boot_info;
+    uint32 boot_width;
+    uint32 boot_height;
+    uint32 boot_depth;
 };
 
 
