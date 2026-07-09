@@ -52,6 +52,8 @@ public:
 								HWInterface();
 	virtual						~HWInterface();
 
+	// Query whether this HWInterface supports the accelerant bitmap cursor hook
+	virtual bool HasSetCursorBitmap() const { return false; }
 	// locking
 			bool				LockParallelAccess() { return ReadLock(); }
 #if DEBUG
