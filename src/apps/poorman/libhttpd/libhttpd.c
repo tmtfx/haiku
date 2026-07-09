@@ -415,7 +415,7 @@ httpd_initialize_listen_socket( httpd_sockaddr* saP )
 	return -1;
 	}
 
-    /* Set the listen file descriptor to no-delay / non-blocking mode. */
+    /* Keep listen file descriptor blocking (do not set O_NDELAY). */
     flags = fcntl( listen_fd, F_GETFL, 0 );
     if ( flags == -1 ) 
 	{
@@ -424,12 +424,8 @@ httpd_initialize_listen_socket( httpd_sockaddr* saP )
 	(void) close( listen_fd );
 	return -1;
 	}
-    if ( fcntl( listen_fd, F_SETFL, flags | O_NDELAY ) < 0 )
-	{
-//	syslog( LOG_CRIT, "fcntl O_NDELAY - %m" );
-	(void) close( listen_fd );
-	return -1;
-	}
+    /* Do not set O_NDELAY to avoid non-blocking send() behavior that may
+       cause premature connection close on some platforms. */
 
     /* Start a listen going. */
     if ( listen( listen_fd, LISTEN_BACKLOG ) < 0 )
