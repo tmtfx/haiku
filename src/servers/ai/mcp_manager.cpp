@@ -9,12 +9,13 @@
 #include <Entry.h>
 #include <Node.h>
 #include <Path.h>
+#include <fs_attr.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <vector>
 
-static bool ExtractStringFromJson(const char* json, const char* key, BString& out) {
+bool ExtractStringFromJson(const char* json, const char* key, BString& out) {
 	if (!json || !key) return false;
 	BString needle;
 	needle.SetToFormat("\"%s\"", key);
@@ -210,7 +211,7 @@ BString ExecuteLocalTool(const char* tool_name, const BMessage& arguments) {
 			char nameBuf[B_ATTR_NAME_LENGTH];
 			node.RewindAttrs();
 			result << "=== BFS ATTRIBUTES ===\n";
-			while (node.GetNextAttr(nameBuf) == B_OK) {
+			while (node.GetNextAttrName(nameBuf) == B_OK) {
 				attr_info info;
 				if (node.GetAttrInfo(nameBuf, &info) == B_OK) {
 					result << nameBuf << " (type: " << (int32)info.type << ", size: " << info.size << " bytes)\n";
