@@ -31,6 +31,8 @@ struct ClientSession {
     bool useCustomAPIKey;
     bool useRemoteContext;   // true = usa OpenAI Assistants API per questo contesto
     BString context_id;
+    
+    BList mpcManager;	// lista di messaggi che contengono le operazioni che può fare l'mpc
 };
 
 struct PluginEntry {

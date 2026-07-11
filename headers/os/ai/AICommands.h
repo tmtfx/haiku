@@ -36,7 +36,9 @@ static const uint32 MSG_SWITCH_CONTEXT		= 'SCTX'; // Cambio contesto
 static const uint32 MSG_GET_REMOTE_CTX_ID	= 'GRCX'; // Recupera remote_id del contesto corrente
 static const uint32 MSG_DELETE_REMOTE_CTX	= 'DRCX'; // Elimina contesto remoto
 static const uint32 MSG_SET_REMOTE_CTX		= 'SRCX'; // Abilita/disabilita contesto remoto per una sessione
-
+// MCP
+static const uint32 MSG_EXECUTE_TOOL		= 'EXTL';
+static const uint32 MSG_MCP_GET_TOOLS		= 'MGTL';
 struct AISessionInfo {
     int32 session_id;
     BString context_id;

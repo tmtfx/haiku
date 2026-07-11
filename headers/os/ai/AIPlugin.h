@@ -11,9 +11,10 @@
 #include <Message.h>
 
 enum capabilities {
-    AI_CAP_STREAMING          = 1 << 0,
-    AI_CAP_REMOTE_CONTEXT     = 1 << 1, // Il plugin supporta i thread/contesti remoti
-    AI_CAP_IMAGE_GENERATION   = 1 << 2
+    AI_CAP_STREAMING			= 1 << 0,
+    AI_CAP_REMOTE_CONTEXT		= 1 << 1, // Il plugin supporta i thread/contesti remoti
+    AI_CAP_IMAGE_GENERATION		= 1 << 2,
+    AI_CAP_MCP					= 1 << 3
 };
 
 
@@ -44,8 +45,10 @@ status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
 // Asynchronous generation: plugin should queue work and return immediately.
 // When ready, plugin MUST invoke a callback mechanism provided by the server
 // (not defined here). For simplicity plugins can ignore this and return error.
-status_t ai_plugin_generate_text_async(ai_plugin_t handle,  const char* prompt, BMessage* contextMsg);
-
+//status_t ai_plugin_generate_text_async(ai_plugin_t handle,  const char* prompt, BMessage* contextMsg);
+status_t ai_plugin_generate_async(ai_plugin_t handle, 
+                                  const char* prompt, 
+                                  BMessage* contextMsg);
 // List available models; plugin writes a JSON array string into buffer similarly
 // to generate_text_sync. Returns 0 on success.
 //status_t ai_plugin_list_models(const char* config_json, char* out_buf, size_t out_len);
