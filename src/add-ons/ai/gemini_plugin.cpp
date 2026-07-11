@@ -1,6 +1,7 @@
 // gemini_plugin.cpp
 // Plugin per il servizio Google Gemini AI su Haiku - Versione Stateless Concorrente.
 #include <os/ai/AIPlugin.h>
+#include <os/ai/AICommands.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -567,6 +568,58 @@ static status_t gemini_stream_thread_func(void* data)
 
     return B_OK;
 }*/
+void SerializeBMessageToJson(const BMessage* msg, BString& outJson) {
+    outJson << "{";
+    bool first = true;
+    
+    char* field_name = nullptr;
+    uint32 field_code = 0;
+    int32 field_count = 0;
+    
+    for (int which = 0; msg->GetInfo(B_ANY_TYPE, which, 
+            (char**)&field_name, &field_code, &field_count) == B_OK; which++) {
+        
+        if (!first) outJson << ",";
+        first = false;
+        
+        outJson << "\"" << field_name << "\":";
+        
+        if (field_code == B_MESSAGE_TYPE) {
+            BMessage subMsg;
+            if (msg->FindMessage(field_name, &subMsg) == B_OK) {
+                BString subJson;
+                SerializeBMessageToJson(&subMsg, subJson);
+                outJson << subJson;
+            } else {
+                outJson << "{}";
+            }
+        } else if (field_code == B_STRING_TYPE || field_code == B_CHAR_TYPE) {
+            const char* strVal = msg->FindString(field_name);
+            if (strVal) {
+                BString escaped(strVal);
+                escaped.ReplaceAll("\\", "\\\\");
+                escaped.ReplaceAll("\"", "\\\"");
+                escaped.ReplaceAll("\n", "\\n");
+                escaped.ReplaceAll("\r", "\\r");
+                escaped.ReplaceAll("\t", "\\t");
+                outJson << "\"" << escaped << "\"";
+            } else {
+                outJson << "\"\"";
+            }
+        } else if (field_code == B_BOOL_TYPE) {
+            bool boolVal = false;
+            msg->FindBool(field_name, &boolVal);
+            outJson << (boolVal ? "true" : "false");
+        } else {
+            int32 intVal = 0;
+            msg->FindInt32(field_name, &intVal);
+            outJson << intVal;
+        }
+    }
+    
+    outJson << "}";
+}
+
 void ConvertBMessageToGeminiToolsJson(const BMessage* toolsMsg, BString& outJson)
 {
     outJson = "[";
@@ -592,7 +645,7 @@ void ConvertBMessageToGeminiToolsJson(const BMessage* toolsMsg, BString& outJson
         
         if (!params.IsEmpty()) {
             BString jsonParams;
-            BJson::Serialize(params, jsonParams);
+            SerializeBMessageToJson(&params, jsonParams);
             outJson << ",\"parameters\":" << jsonParams;
         }
         
@@ -609,6 +662,10 @@ static status_t gemini_stream_thread_func(void* data)
     
     if (!args) return B_BAD_VALUE;
 
+    BMessage replyTools;
+    bool mcpActive = false;
+    bool executionLoop = true;
+
     // Controllo di sicurezza sulla chiave API
     if (!args->api_key || args->api_key[0] == '\0') {
         fprintf(stderr, "[GEMINI STREAM WORKER] ERRORE CRITICO: API key assente!\n");
@@ -621,9 +678,6 @@ static status_t gemini_stream_thread_func(void* data)
     }
 
     // === CONTROLLO CAPABILITY VIA MESSENGER ===
-    BMessage replyTools;
-    bool mcpActive = false;
-
     if (args->server_messenger.IsValid()) {
         BMessage reqTools(MSG_MCP_GET_TOOLS); 
         const char* ctxId = nullptr;
@@ -687,7 +741,7 @@ static status_t gemini_stream_thread_func(void* data)
     // === CASO 2: MODALITÀ MCP ATTIVA (LOOP STRUMENTI VIA IPC MESSENGER) ===
     fprintf(stderr, "[GEMINI STREAM WORKER] Modalità MCP Attiva: Avvio loop di interazione strumenti.\n");
     
-    bool executionLoop = true;
+    executionLoop = true;
     while (executionLoop) {
         BString url;
         if (args->base_url && args->base_url[0] != '\0') {
