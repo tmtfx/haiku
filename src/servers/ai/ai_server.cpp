@@ -28,7 +28,6 @@
 #include <Entry.h>
 #include <Node.h>
 #include <File.h>
-#include <Json.h>
 
 #include <os/ai/AIPlugin.h>
 #include <AIConfig.h>
@@ -307,6 +306,40 @@ status_t load_or_create_chat_context(const char* contextID, BMessage* outContext
 	outContext->AddMessage("messages", &emptyHistory);
 	
 	return save_chat_context(contextID, outContext);
+}
+
+static bool ExtractStringFromJson(const char* json, const char* key, BString& out) {
+	if (!json || !key) return false;
+	BString needle;
+	needle.SetToFormat("\"%s\"", key);
+	int32 pos = BString(json).FindFirst(needle);
+	if (pos == B_ERROR) return false;
+	
+	const char* p = json + pos + needle.Length();
+	while (*p && (*p == ' ' || *p == '\t' || *p == ':')) p++;
+	if (*p != '"') return false;
+	p++; // salta le virgolette aperte
+	
+	const char* q = p;
+	bool escaped = false;
+	while (*q) {
+		if (escaped) {
+			escaped = false;
+		} else if (*q == '\\') {
+			escaped = true;
+		} else if (*q == '"') {
+			break;
+		}
+		q++;
+	}
+	
+	out.SetTo(p, q - p);
+	// Unescape base
+	out.ReplaceAll("\\\\", "\\");
+	out.ReplaceAll("\\\"", "\"");
+	out.ReplaceAll("\\n", "\n");
+	out.ReplaceAll("\\t", "\t");
+	return true;
 }
 
 static void PopulateMcpTools(BList& mpcManager, uint32 permissions) {
@@ -1049,12 +1082,18 @@ public:
 					toolName = msg->FindString("tool_name");
 				}
 
-				BMessage arguments;
+				BString argPath;
+				BString argCmd;
 				BString argsJson = msg->FindString("args");
 				if (!argsJson.IsEmpty()) {
-					BJson::Parse(argsJson.String(), arguments);
+					ExtractStringFromJson(argsJson.String(), "path", argPath);
+					ExtractStringFromJson(argsJson.String(), "cmd", argCmd);
 				} else {
-					msg->FindMessage("arguments", &arguments);
+					BMessage arguments;
+					if (msg->FindMessage("arguments", &arguments) == B_OK) {
+						argPath = arguments.FindString("path");
+						argCmd = arguments.FindString("cmd");
+					}
 				}
 
 				fprintf(stderr, "[AI_SERVER] Richiesta esecuzione tool '%s'\n", toolName.String());
@@ -1103,9 +1142,8 @@ public:
 				if (execType == 1) { // Comando Terminale
 					BString finalCommand;
 					if (toolName == "run_command") {
-						finalCommand = arguments.FindString("cmd");
+						finalCommand = argCmd;
 					} else if (toolName == "list_directory") {
-						BString argPath = arguments.FindString("path");
 						if (argPath.IsEmpty()) argPath = "/boot/home";
 						finalCommand.SetToFormat("%s \"%s\"", execTarget.String(), argPath.String());
 					} else {
