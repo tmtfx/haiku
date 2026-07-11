@@ -225,10 +225,24 @@ void BuildPayloadFromContext(const BMessage* config, const char* currentPrompt, 
                 const char* response = msgItem.FindString("response");
                 if (!first) outPayload.Append(",");
                 
-                // NOTA: 'response' deve essere un oggetto JSON valido (es: {"output": "testo"})
-                //outPayload.AppendFormat("{\"role\":\"function\",\"parts\":[{\"functionResponse\":{\"name\":\"%s\",\"response\":%s}}]}", name, (response && response[0] != '\0') ? response : "{}");
+                BString formattedResponse;
+                BString respStr(response ? response : "");
+                respStr.Trim();
+                if (respStr.StartsWith("{") && respStr.EndsWith("}")) {
+                    formattedResponse = respStr;
+                } else {
+                    // Non è un oggetto JSON valido, lo wrappiamo noi facendo l'escape
+                    BString escapedResp = respStr;
+                    escapedResp.ReplaceAll("\\", "\\\\");
+                    escapedResp.ReplaceAll("\"", "\\\"");
+                    escapedResp.ReplaceAll("\n", "\\n");
+                    escapedResp.ReplaceAll("\r", "\\r");
+                    escapedResp.ReplaceAll("\t", "\\t");
+                    formattedResponse.SetToFormat("{\"output\":\"%s\"}", escapedResp.String());
+                }
+                
                 BString tempCall;
-                tempCall.SetToFormat("{\"role\":\"function\",\"parts\":[{\"functionResponse\":{\"name\":\"%s\",\"response\":%s}}]}", name, (response && response[0] != '\0') ? response : "{}");
+                tempCall.SetToFormat("{\"role\":\"function\",\"parts\":[{\"functionResponse\":{\"name\":\"%s\",\"response\":%s}}]}", name, formattedResponse.String());
                 outPayload << tempCall;
                 first = false;
             } 
@@ -612,6 +626,13 @@ static status_t gemini_stream_thread_func(void* data)
 
     if (args->server_messenger.IsValid()) {
         BMessage reqTools(MSG_MCP_GET_TOOLS); 
+        const char* ctxId = nullptr;
+        if (args->context_copy) {
+            args->context_copy->FindString("context_id", &ctxId);
+        }
+        if (ctxId) {
+            reqTools.AddString("context_id", ctxId);
+        }
         
         if (args->server_messenger.SendMessage(&reqTools, &replyTools) == B_OK) {
             // Controlliamo se la risposta contiene almeno un tool prima di attivare l'MCP
@@ -760,9 +781,17 @@ static status_t gemini_stream_thread_func(void* data)
                 fprintf(stderr, "[GEMINI MCP] L'LLM richiede lo strumento: %s con argomenti: %s\n", toolName, argsJson.String());
 
                 // Invochiamo lo strumento mandando un messaggio sincrono all'ai_server
-                BMessage reqExec(MSG_MCP_EXECUTE_TOOL);
+                BMessage reqExec(MSG_EXECUTE_TOOL);
                 reqExec.AddString("name", toolName);
                 reqExec.AddString("args", argsJson.String());
+                
+                const char* ctxId = nullptr;
+                if (args->context_copy) {
+                    args->context_copy->FindString("context_id", &ctxId);
+                }
+                if (ctxId) {
+                    reqExec.AddString("context_id", ctxId);
+                }
                 
                 BMessage replyExec;
                 BString toolResultBuf;

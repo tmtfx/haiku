@@ -308,6 +308,84 @@ status_t load_or_create_chat_context(const char* contextID, BMessage* outContext
 	return save_chat_context(contextID, outContext);
 }
 
+static void PopulateMcpTools(BList& mpcManager, uint32 permissions) {
+	// Svuota prima, per sicurezza
+	for (int32 i = 0; i < mpcManager.CountItems(); i++) {
+		delete (BMessage*)mpcManager.ItemAt(i);
+	}
+	mpcManager.MakeEmpty();
+
+	// 1. Tool: get_system_info (richiede AI_PERM_SYSTEM_INFO)
+	if (permissions & AI_PERM_SYSTEM_INFO) {
+		BMessage* tool = new BMessage();
+		tool->AddString("name", "get_system_info");
+		tool->AddString("description", "Get base information about the Haiku system, including uptime and CPU architecture.");
+		tool->AddInt32("exec_type", 1); // 1 = Terminal Command
+		tool->AddString("exec_target", "uptime");
+		
+		// Parametri schema (Gemini compatible parameter structure):
+		BMessage parameters;
+		parameters.AddString("type", "object");
+		BMessage properties;
+		parameters.AddMessage("properties", &properties);
+		tool->AddMessage("parameters", &parameters);
+		
+		mpcManager.AddItem(tool);
+	}
+
+	// 2. Tool: list_directory (richiede AI_PERM_FILE_SYSTEM)
+	if (permissions & AI_PERM_FILE_SYSTEM) {
+		BMessage* tool = new BMessage();
+		tool->AddString("name", "list_directory");
+		tool->AddString("description", "List files and folders inside the specified directory path.");
+		tool->AddInt32("exec_type", 1); // 1 = Terminal Command
+		tool->AddString("exec_target", "ls -la");
+		
+		// Parametri schema:
+		BMessage parameters;
+		parameters.AddString("type", "object");
+		
+		BMessage properties;
+		BMessage pathProp;
+		pathProp.AddString("type", "string");
+		pathProp.AddString("description", "The directory path to list (e.g. /boot/home)");
+		properties.AddMessage("path", &pathProp);
+		parameters.AddMessage("properties", &properties);
+		
+		parameters.AddString("required", "path");
+		
+		tool->AddMessage("parameters", &parameters);
+		
+		mpcManager.AddItem(tool);
+	}
+
+	// 3. Tool: run_command (richiede AI_PERM_RUN_COMMANDS)
+	if (permissions & AI_PERM_RUN_COMMANDS) {
+		BMessage* tool = new BMessage();
+		tool->AddString("name", "run_command");
+		tool->AddString("description", "Execute a terminal shell command. Use this tool with extreme care.");
+		tool->AddInt32("exec_type", 1); // 1 = Terminal Command
+		tool->AddString("exec_target", ""); // Will execute command passed in args
+		
+		// Parametri schema:
+		BMessage parameters;
+		parameters.AddString("type", "object");
+		
+		BMessage properties;
+		BMessage cmdProp;
+		cmdProp.AddString("type", "string");
+		cmdProp.AddString("description", "The exact command string to run (e.g. df -h)");
+		properties.AddMessage("cmd", &cmdProp);
+		parameters.AddMessage("properties", &properties);
+		
+		parameters.AddString("required", "cmd");
+		
+		tool->AddMessage("parameters", &parameters);
+		
+		mpcManager.AddItem(tool);
+	}
+}
+
 
 class AIServerApp : public BApplication {
 public:
@@ -419,6 +497,36 @@ public:
 						hasRemoteId = true;
 					}
 				}
+
+				int32 mcpPermissions = 0;
+				if (msg->FindInt32("mcp_permissions", &mcpPermissions) != B_OK) {
+					if (availableGlobalSettings) {
+						mcpPermissions = globalSettings.mcp_permissions;
+					}
+				}
+				session.mcp_permissions = mcpPermissions;
+
+				// Recuperiamo le capabilities del plugin per attivare MCP se supportato
+				PluginEntry* p = nullptr;
+				for (auto& pe : gPlugins) {
+					if (pe.name == session.plugin_name) {
+						p = &pe;
+						break;
+					}
+				}
+
+				uint32 caps = 0;
+				if (p && p->get_capabilities != nullptr) {
+					caps = p->get_capabilities();
+				}
+
+				if (caps & AI_CAP_MCP) {
+					PopulateMcpTools(session.mpcManager, session.mcp_permissions);
+					fprintf(stderr, "ai_server: Plugin '%s' supporta MCP. Popolati %" B_PRId32 " tool con permessi %" B_PRIu32 "\n",
+						session.plugin_name.String(), session.mpcManager.CountItems(), session.mcp_permissions);
+				} else {
+					fprintf(stderr, "ai_server: Plugin '%s' non supporta MCP.\n", session.plugin_name.String());
+				}
 				
 				gSessions[session.id] = session;
 
@@ -433,7 +541,14 @@ public:
 			case MSG_CLOSE_SESSION: {
 				int32 id = -1;
 				if (msg->FindInt32("session_id", &id) == B_OK) {
-					gSessions.erase(id);
+					auto it = gSessions.find(id);
+					if (it != gSessions.end()) {
+						for (int32 i = 0; i < it->second.mpcManager.CountItems(); i++) {
+							delete (BMessage*)it->second.mpcManager.ItemAt(i);
+						}
+						it->second.mpcManager.MakeEmpty();
+						gSessions.erase(it);
+					}
 					fprintf(stderr, "ai_server: Chiusa e liberata sessione %d\n", id);
 				}
 				break;
@@ -927,10 +1042,19 @@ public:
 			}
 			case MSG_EXECUTE_TOOL:
 			{
-				BString contextId = message->FindString("context_id");
-				BString toolName  = message->FindString("tool_name");
+				BString contextId = msg->FindString("context_id");
+				BString toolName = msg->FindString("name");
+				if (toolName.IsEmpty()) {
+					toolName = msg->FindString("tool_name");
+				}
+
 				BMessage arguments;
-				message->FindMessage("arguments", &arguments);
+				BString argsJson = msg->FindString("args");
+				if (!argsJson.IsEmpty()) {
+					BJson::Parse(argsJson.String(), arguments);
+				} else {
+					msg->FindMessage("arguments", &arguments);
+				}
 
 				fprintf(stderr, "[AI_SERVER] Richiesta esecuzione tool '%s'\n", toolName.String());
 
@@ -938,20 +1062,18 @@ public:
 				status_t resultStatus = B_ERROR;
 				BString resultOutput;
 
-				// ATTENZIONE QUI: Cerca la sessione nella tua lista/vettore di sessioni.
-				// Se nella tua AIServerApp la lista si chiama in un altro modo (es. fClientSessions),
-				// cambia 'fSessions' con il nome reale.
 				ClientSession* session = nullptr;
-				for (auto& s : gSessions) { 
-					if (s.context_id == contextId) {
-						session = &s;
+				for (auto& pair : gSessions) { 
+					if (pair.second.context_id == contextId) {
+						session = &pair.second;
 						break;
 					}
 				}
 
 				if (session == nullptr) {
 					reply.AddInt32("status", B_ENTRY_NOT_FOUND);
-					message->SendReply(&reply);
+					reply.AddString("result", "{\"error\":\"Session not found\"}");
+					msg->SendReply(&reply);
 					break;
 				}
 
@@ -968,7 +1090,8 @@ public:
 
 				if (foundTool == nullptr) {
 					reply.AddInt32("status", B_NAME_NOT_FOUND);
-					message->SendReply(&reply);
+					reply.AddString("result", "{\"error\":\"Tool not found or not permitted in this session\"}");
+					msg->SendReply(&reply);
 					break;
 				}
 
@@ -976,10 +1099,20 @@ public:
 				int32 execType = foundTool->FindInt32("exec_type");
 				BString execTarget = foundTool->FindString("exec_target");
 
-				if (execType == 1) { // Esempio: Comando Terminale
-					BString argPath = arguments.FindString("path"); 
+				if (execType == 1) { // Comando Terminale
 					BString finalCommand;
-					finalCommand.SetToFormat("%s \"%s\"", execTarget.String(), argPath.String());
+					if (toolName == "run_command") {
+						finalCommand = arguments.FindString("cmd");
+					} else if (toolName == "list_directory") {
+						BString argPath = arguments.FindString("path");
+						if (argPath.IsEmpty()) argPath = "/boot/home";
+						finalCommand.SetToFormat("%s \"%s\"", execTarget.String(), argPath.String());
+					} else {
+						// es: get_system_info (uptime)
+						finalCommand = execTarget;
+					}
+
+					fprintf(stderr, "[AI_SERVER] Esecuzione comando reale: '%s'\n", finalCommand.String());
 					
 					FILE* pipe = popen(finalCommand.String(), "r");
 					if (pipe) {
@@ -994,7 +1127,7 @@ public:
 
 				reply.AddInt32("status", resultStatus);
 				reply.AddString("result", resultOutput);
-				message->SendReply(&reply);
+				msg->SendReply(&reply);
 				break;
 			}
 			/*{

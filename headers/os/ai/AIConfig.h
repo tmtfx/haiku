@@ -5,12 +5,19 @@
 #include <Message.h>
 #include <Messenger.h>
 
+enum ai_mcp_permissions {
+    AI_PERM_SYSTEM_INFO     = 1 << 0,  // Permesso per recuperare info di sistema
+    AI_PERM_FILE_SYSTEM     = 1 << 1,  // Permesso per leggere directory / file system
+    AI_PERM_RUN_COMMANDS    = 1 << 2   // Permesso per eseguire comandi generali (da usare con cautela)
+};
+
 struct AISettings {
     BString engine; // "local" or "remote"
     BString plugin; // "Ollama", "OpenAI", ecc.
     BString model; // "llama3", "gpt-4o", ecc.
     BString api_key; // for remote engines
     bool    use_remote_context;
+    uint32  mcp_permissions;
 };
 
 // Load settings from ~/config/settings/AIService_settings (BMessage flattened)

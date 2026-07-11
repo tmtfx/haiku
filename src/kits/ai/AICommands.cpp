@@ -18,6 +18,10 @@ AIEngine::AIEngine()
       fContextID("")
 {
 	BMessage msg(MSG_OPEN_SESSION);
+    AISettings settings;
+    if (LoadAISettings(settings)) {
+        msg.AddInt32("mcp_permissions", (int32)settings.mcp_permissions);
+    }
     BMessage reply;
     
     if (_TalkToServer(&msg, reply) == B_OK) {
@@ -36,6 +40,10 @@ AIEngine::AIEngine(const char* contextID)
 {
     BMessage msg(MSG_OPEN_SESSION);
     msg.AddString("context_id", fContextID); // Comunichiamo al server che vogliamo QUESTO contesto
+    AISettings settings;
+    if (LoadAISettings(settings)) {
+        msg.AddInt32("mcp_permissions", (int32)settings.mcp_permissions);
+    }
     
     BMessage reply;
     if (_TalkToServer(&msg, reply) == B_OK) {
@@ -49,7 +57,7 @@ AIEngine::AIEngine(const char* contextID)
     }
 }
 
-AIEngine::AIEngine(const char* pluginName, const char* modelName, const char* apiKey)
+AIEngine::AIEngine(const char* pluginName, const char* modelName, const char* apiKey, uint32 mcpPermissions)
     : fPlugin(pluginName),
       fModel(modelName),
       fApiKey(apiKey ? apiKey : ""),
@@ -62,6 +70,14 @@ AIEngine::AIEngine(const char* pluginName, const char* modelName, const char* ap
     msg.AddString("plugin", fPlugin);
     msg.AddString("model", fModel);
     if (fApiKey.Length() > 0) msg.AddString("api_key", fApiKey);
+    if (mcpPermissions != 0) {
+        msg.AddInt32("mcp_permissions", (int32)mcpPermissions);
+    } else {
+        AISettings settings;
+        if (LoadAISettings(settings)) {
+            msg.AddInt32("mcp_permissions", (int32)settings.mcp_permissions);
+        }
+    }
     
     BMessage reply;
     if (_TalkToServer(&msg, reply) == B_OK) {
@@ -74,7 +90,7 @@ AIEngine::AIEngine(const char* pluginName, const char* modelName, const char* ap
     }
 }
 
-AIEngine::AIEngine(const char* contextID, const char* pluginName, const char* modelName, const char* apiKey)
+AIEngine::AIEngine(const char* contextID, const char* pluginName, const char* modelName, const char* apiKey, uint32 mcpPermissions)
     : fPlugin(pluginName),
       fModel(modelName),
       fApiKey(apiKey ? apiKey : ""),
@@ -88,6 +104,14 @@ AIEngine::AIEngine(const char* contextID, const char* pluginName, const char* mo
     msg.AddString("model", fModel);
     msg.AddString("context_id", fContextID);
     if (fApiKey.Length() > 0) msg.AddString("api_key", fApiKey);
+    if (mcpPermissions != 0) {
+        msg.AddInt32("mcp_permissions", (int32)mcpPermissions);
+    } else {
+        AISettings settings;
+        if (LoadAISettings(settings)) {
+            msg.AddInt32("mcp_permissions", (int32)settings.mcp_permissions);
+        }
+    }
     
     BMessage reply;
     if (_TalkToServer(&msg, reply) == B_OK) {

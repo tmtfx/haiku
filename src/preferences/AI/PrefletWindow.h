@@ -60,6 +60,9 @@ private:
     BButton* fToggleApiKeyButton;
     BButton* fClearApiKeyButton;
     BCheckBox* fRemoteContextCheckBox;
+    BCheckBox* fSystemInfoCheckBox;
+    BCheckBox* fFileSystemCheckBox;
+    BCheckBox* fRunCommandsCheckBox;
 
     // Sezione Centrale: Contesti
     BListView* fContextListView;

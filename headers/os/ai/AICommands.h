@@ -55,8 +55,8 @@ public:
     AIEngine(const char* contextID);
     
     // Inizializza ignorando la Preflet (es. per usare un plugin specifico in un'app)
-    AIEngine(const char* pluginName, const char* modelName, const char* apiKey = nullptr);
-    AIEngine(const char* contextID, const char* pluginName, const char* modelName, const char* apiKey);
+    AIEngine(const char* pluginName, const char* modelName, const char* apiKey = nullptr, uint32 mcpPermissions = 0);
+    AIEngine(const char* contextID, const char* pluginName, const char* modelName, const char* apiKey, uint32 mcpPermissions = 0);
     
     ~AIEngine();
 

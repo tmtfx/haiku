@@ -245,8 +245,21 @@ PrefletWindow::PrefletWindow()
     fClearApiKeyButton = new BButton("clear", B_TRANSLATE("Clear"), new BMessage(MSG_CLEAR_KEY));
     fRemoteContextCheckBox = new BCheckBox("remote_ctx", B_TRANSLATE("Use Remote Context"), new BMessage(MSG_TOGGLE_REM_CTX));
 
+    fSystemInfoCheckBox = new BCheckBox("perm_sys_info", B_TRANSLATE("Allow System Info Tool"), nullptr);
+    fFileSystemCheckBox = new BCheckBox("perm_file_sys", B_TRANSLATE("Allow File System Access Tool"), nullptr);
+    fRunCommandsCheckBox = new BCheckBox("perm_run_cmds", B_TRANSLATE("Allow Run Terminal Commands Tool"), nullptr);
+
     BBox* pluginConfigBox = new BBox("plugin_config");
     pluginConfigBox->SetLabel(B_TRANSLATE("Plugin Configuration"));
+
+    BBox* mcpPermissionsBox = new BBox("mcp_perms");
+    mcpPermissionsBox->SetLabel(B_TRANSLATE("MCP Tool Permissions"));
+    BLayoutBuilder::Group<>(mcpPermissionsBox, B_VERTICAL, 5)
+        .SetInsets(10, 20, 10, 10)
+        .Add(fSystemInfoCheckBox)
+        .Add(fFileSystemCheckBox)
+        .Add(fRunCommandsCheckBox)
+    .End();
 
     // Layout della destra della sezione plugin
     BLayoutBuilder::Group<>(pluginConfigBox, B_VERTICAL, 10)
@@ -261,6 +274,7 @@ PrefletWindow::PrefletWindow()
             .Add(fClearApiKeyButton)
         .End()
         .Add(fRemoteContextCheckBox)
+        .Add(mcpPermissionsBox)
         .AddGlue()
     .End();
 
@@ -649,6 +663,11 @@ void PrefletWindow::MessageReceived(BMessage* msg)
             // Supponendo che la tua struct AISettings supporti un bool o una stringa
             s.use_remote_context = (fRemoteContextCheckBox->Value() == B_CONTROL_ON);
 
+            s.mcp_permissions = 0;
+            if (fSystemInfoCheckBox->Value() == B_CONTROL_ON) s.mcp_permissions |= AI_PERM_SYSTEM_INFO;
+            if (fFileSystemCheckBox->Value() == B_CONTROL_ON) s.mcp_permissions |= AI_PERM_FILE_SYSTEM;
+            if (fRunCommandsCheckBox->Value() == B_CONTROL_ON) s.mcp_permissions |= AI_PERM_RUN_COMMANDS;
+
             fprintf(stderr, "[LOG] Sto scrivendo su file config:\n  Engine: '%s'\n  Plugin: '%s'\n  Model: '%s'\n", 
                     s.engine.String(), s.plugin.String(), s.model.String());
 
@@ -813,6 +832,40 @@ void PrefletWindow::_UpdatePluginDetails()
         // Se il plugin non ha la capacità, spegniamo e azzeriamo la checkbox
         fRemoteContextCheckBox->SetEnabled(false);
         fRemoteContextCheckBox->SetValue(B_CONTROL_OFF);
+    }
+
+    // Verifichiamo se il bitmask contiene la capacità AI_CAP_MCP (1 << 3)
+    bool supportsMcp = (caps & (1 << 3));
+
+    if (supportsMcp) {
+        fSystemInfoCheckBox->SetEnabled(true);
+        fFileSystemCheckBox->SetEnabled(true);
+        fRunCommandsCheckBox->SetEnabled(true);
+
+        AISettings s;
+        if (LoadAISettings(s)) {
+            if (s.plugin == pluginName) {
+                fSystemInfoCheckBox->SetValue((s.mcp_permissions & AI_PERM_SYSTEM_INFO) ? B_CONTROL_ON : B_CONTROL_OFF);
+                fFileSystemCheckBox->SetValue((s.mcp_permissions & AI_PERM_FILE_SYSTEM) ? B_CONTROL_ON : B_CONTROL_OFF);
+                fRunCommandsCheckBox->SetValue((s.mcp_permissions & AI_PERM_RUN_COMMANDS) ? B_CONTROL_ON : B_CONTROL_OFF);
+            } else {
+                fSystemInfoCheckBox->SetValue(B_CONTROL_OFF);
+                fFileSystemCheckBox->SetValue(B_CONTROL_OFF);
+                fRunCommandsCheckBox->SetValue(B_CONTROL_OFF);
+            }
+        } else {
+            fSystemInfoCheckBox->SetValue(B_CONTROL_OFF);
+            fFileSystemCheckBox->SetValue(B_CONTROL_OFF);
+            fRunCommandsCheckBox->SetValue(B_CONTROL_OFF);
+        }
+    } else {
+        fSystemInfoCheckBox->SetEnabled(false);
+        fFileSystemCheckBox->SetEnabled(false);
+        fRunCommandsCheckBox->SetEnabled(false);
+
+        fSystemInfoCheckBox->SetValue(B_CONTROL_OFF);
+        fFileSystemCheckBox->SetValue(B_CONTROL_OFF);
+        fRunCommandsCheckBox->SetValue(B_CONTROL_OFF);
     }
 }
 
