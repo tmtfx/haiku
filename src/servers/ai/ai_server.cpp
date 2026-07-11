@@ -347,6 +347,68 @@ BString ExecuteLocalTool(const char* tool_name, const BMessage& arguments) {
 		cmd.SetToFormat("open \"%s\"", path.String());
 		result = RunSystemCommand(cmd.String());
 	}
+	else if (name == "manage_attribute") {
+		BString action = arguments.FindString("action"); // "read", "write", "list"
+		BString path = arguments.FindString("path");
+		BString attrName = arguments.FindString("name");
+		BString attrValue = arguments.FindString("value");
+
+		if (path.IsEmpty() || action.IsEmpty()) {
+			return "{\"error\":\"Missing action or path arguments\"}";
+		}
+
+		BNode node(path.String());
+		if (node.InitCheck() != B_OK) {
+			result.SetToFormat("{\"error\":\"Cannot open node: %s\"}", strerror(node.InitCheck()));
+			return result;
+		}
+
+		if (action == "list") {
+			char nameBuf[B_ATTR_NAME_LENGTH];
+			node.RewindAttrs();
+			result << "=== BFS ATTRIBUTES ===\n";
+			while (node.GetNextAttr(nameBuf) == B_OK) {
+				attr_info info;
+				if (node.GetAttrInfo(nameBuf, &info) == B_OK) {
+					result << nameBuf << " (type: " << (int32)info.type << ", size: " << info.size << " bytes)\n";
+				} else {
+					result << nameBuf << "\n";
+				}
+			}
+		}
+		else if (action == "read") {
+			if (attrName.IsEmpty()) {
+				return "{\"error\":\"Missing attribute name for read action\"}";
+			}
+			attr_info info;
+			if (node.GetAttrInfo(attrName.String(), &info) != B_OK) {
+				result.SetToFormat("{\"error\":\"Attribute %s not found\"}", attrName.String());
+			} else {
+				std::vector<char> buffer(info.size + 1);
+				ssize_t bytesRead = node.ReadAttr(attrName.String(), info.type, 0, buffer.data(), info.size);
+				if (bytesRead >= 0) {
+					buffer[bytesRead] = '\0';
+					result = buffer.data();
+				} else {
+					result.SetToFormat("{\"error\":\"Failed to read attribute: %s\"}", strerror(bytesRead));
+				}
+			}
+		}
+		else if (action == "write") {
+			if (attrName.IsEmpty() || attrValue.IsEmpty()) {
+				return "{\"error\":\"Missing attribute name or value for write action\"}";
+			}
+			ssize_t bytesWritten = node.WriteAttr(attrName.String(), B_STRING_TYPE, 0, attrValue.String(), attrValue.Length() + 1);
+			if (bytesWritten >= 0) {
+				result = "Attribute written successfully.";
+			} else {
+				result.SetToFormat("{\"error\":\"Failed to write attribute: %s\"}", strerror(bytesWritten));
+			}
+		}
+		else {
+			result = "{\"error\":\"Invalid action. Supported: list, read, write\"}";
+		}
+	}
 	else if (name == "run_terminal_command") {
 		BString cmd = arguments.FindString("cmd");
 		if (cmd.IsEmpty()) {
@@ -575,6 +637,27 @@ static void PopulateMcpTools(BList& mpcManager, uint32 permissions) {
 			properties.AddMessage("path", &pathProp);
 			mpcManager.AddItem(CreateToolMessage("open_document", 
 				"Open any file, image, document, or application using the default Haiku preference application (like double-clicking).", &properties, "path"));
+		}
+		{
+			BMessage properties;
+			BMessage actionProp;
+			actionProp.AddString("type", "string");
+			actionProp.AddString("description", "The action to perform: 'read', 'write', or 'list'.");
+			properties.AddMessage("action", &actionProp);
+			BMessage pathProp;
+			pathProp.AddString("type", "string");
+			pathProp.AddString("description", "The absolute file path.");
+			properties.AddMessage("path", &pathProp);
+			BMessage nameProp;
+			nameProp.AddString("type", "string");
+			nameProp.AddString("description", "The attribute name (e.g. AI:plugin_type) (required for read and write).");
+			properties.AddMessage("name", &nameProp);
+			BMessage valueProp;
+			valueProp.AddString("type", "string");
+			valueProp.AddString("description", "The string value to write (required for write).");
+			properties.AddMessage("value", &valueProp);
+			mpcManager.AddItem(CreateToolMessage("manage_attribute", 
+				"Read, write, or list BFS custom file attributes (like AI:plugin_type, BEOS:TYPE, or custom metadata) on a file in Haiku.", &properties, "action"));
 		}
 	}
 
