@@ -28,6 +28,7 @@
 #include <Entry.h>
 #include <Node.h>
 #include <File.h>
+#include <Json.h>
 
 #include <os/ai/AIPlugin.h>
 #include <AIConfig.h>
@@ -1182,9 +1183,9 @@ public:
 				
 				// 1. Cerchiamo la ClientSession corretta nel server
 				ClientSession* session = nullptr;
-				for (auto& s : gSessions) {
-					if (s.context_id == contextId) {
-						session = &s;
+				for (auto& pair : gSessions) {
+					if (pair.second.context_id == contextId) {
+						session = &pair.second;
 						break;
 					}
 				}
