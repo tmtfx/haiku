@@ -56,6 +56,7 @@ private:
     BScrollView* fDetailsScroll;
 
     BButton*     fChangeMasterButton;
+    BButton*     fResetMasterButton;
     BButton*     fLockKeyringButton;
     BButton*     fRemoveKeyButton;
 };

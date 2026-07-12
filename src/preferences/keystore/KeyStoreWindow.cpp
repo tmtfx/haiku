@@ -4,6 +4,7 @@
  */
 #include "KeyStoreWindow.h"
 #include "PasswordWindow.h"
+#include "ResetMasterWindow.h"
 #include <Button.h>
 #include <TextView.h>
 #include <ScrollView.h>
@@ -20,6 +21,7 @@
 static const uint32 MSG_KEYRING_SELECTED   = 'KSEL';
 static const uint32 MSG_KEY_SELECTED       = 'YSEL';
 static const uint32 MSG_CHANGE_MASTER_PASS = 'CHMP';
+static const uint32 MSG_RESET_MASTER_PASS  = 'RSMP';
 static const uint32 MSG_LOCK_KEYRING       = 'LCKR';
 static const uint32 MSG_REMOVE_KEY         = 'RMKY';
 
@@ -62,6 +64,8 @@ KeyStoreWindow::KeyStoreWindow()
     // Pulsanti
     fChangeMasterButton = new BButton("change_master", B_TRANSLATE("Change Master Password" B_UTF8_ELLIPSIS),
         new BMessage(MSG_CHANGE_MASTER_PASS));
+    fResetMasterButton = new BButton("reset_master", B_TRANSLATE("Reset Master Password" B_UTF8_ELLIPSIS),
+        new BMessage(MSG_RESET_MASTER_PASS));
     fLockKeyringButton = new BButton("lock_keyring", B_TRANSLATE("Lock Keyring"),
         new BMessage(MSG_LOCK_KEYRING));
     fRemoveKeyButton = new BButton("remove_key", B_TRANSLATE("Remove Key"),
@@ -76,6 +80,7 @@ KeyStoreWindow::KeyStoreWindow()
         .AddGroup(B_VERTICAL, 10, 1) // Lato Sinistro: Portachiavi
             .Add(fKeyringsScroll)
             .Add(fChangeMasterButton)
+            .Add(fResetMasterButton)
         .End()
         .AddGroup(B_VERTICAL, 10, 2) // Lato Destro: Chiavi & Dettagli
             .Add(fKeysScroll, 3)
@@ -107,6 +112,11 @@ void KeyStoreWindow::MessageReceived(BMessage* msg)
         case MSG_CHANGE_MASTER_PASS: {
             PasswordWindow* pw = new PasswordWindow(this);
             pw->Show();
+            break;
+        }
+        case MSG_RESET_MASTER_PASS: {
+            ResetMasterWindow* rm = new ResetMasterWindow(this);
+            rm->Show();
             break;
         }
         case MSG_LOCK_KEYRING:
