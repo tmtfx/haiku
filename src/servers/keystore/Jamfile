@@ -7,6 +7,12 @@ UsePublicHeaders crypto support ;
 local cryptoLib = libcrypto_api.so ;
 SEARCH on $(cryptoLib) = /boot/system/lib ;
 
+local opensslLibs = libssl.so libcrypto.so ;
+SEARCH on $(opensslLibs) = /boot/system/develop/lib ;
+
+UseBuildFeatureHeaders openssl ;
+SubDirSysHdrs /boot/system/develop/headers ;
+
 Application keystore_server :
     AppAccessRequestWindow.cpp
     KeyRequestWindow.cpp
@@ -18,6 +24,7 @@ Application keystore_server :
     localestub
     shared
     $(cryptoLib)
+    $(opensslLibs)
     [ TargetLibstdc++ ]
     : keystore_server.rdef
 ;

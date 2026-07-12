@@ -12,10 +12,10 @@
 #include <ObjectList.h>
 #include <String.h>
 
-
 struct app_info;
 class Keyring;
 
+typedef struct evp_pkey_st EVP_PKEY;
 typedef BObjectList<Keyring, true> KeyringList;
 
 
@@ -61,6 +61,7 @@ private:
 		status_t					_GetOrAskSessionPassword();
 		status_t					_EncryptKeyData(BMessage& keyMessage);
 		status_t					_DecryptKeyData(BMessage& keyMessage);
+		EVP_PKEY*					_DecryptMasterPrivateKey();
 
 		Keyring*					fMasterKeyring;
 		KeyringList					fKeyrings;
