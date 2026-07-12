@@ -675,25 +675,19 @@ void PrefletWindow::MessageReceived(BMessage* msg)
             const char* apiText = fApiKeyControl->Text();
             
             // Controlliamo se l'utente ha lasciato la maschera degli asterischi intatta
-            //if (fApiKeyMasked && strncmp(apiText, "********", 8) == 0 && strlen(apiText) == (size_t)fActualApiKey.Length()) {
-            //    s.api_key = fActualApiKey;
-            //} else {
-                if (strlen(apiText) == 0) {
-                    s.api_key = "";
-                } else if (strlen(apiText) < 16) {
-                    BAlert* a = new BAlert(B_TRANSLATE("Invalid API Key"), B_TRANSLATE("API key is too short (min 16 chars)."), B_TRANSLATE("OK"));
-                    a->Go();
-                    break; // Interrompe il salvataggio se la chiave immessa è invalida
-                } else {
-                    s.api_key.SetTo(apiText);
-                }
-            //}
+            if (strlen(apiText) == 0) {
+                s.api_key = "";
+            } else if (strlen(apiText) < 16) {
+                BAlert* a = new BAlert(B_TRANSLATE("Invalid API Key"), B_TRANSLATE("API key is too short (min 16 chars)."), B_TRANSLATE("OK"));
+                a->Go();
+                break; // Interrompe il salvataggio se la chiave immessa è invalida
+            } else {
+                s.api_key.SetTo(apiText);
+            }
+            
 
             // 6. Scrittura effettiva su disco
-            if (SaveAISettings(s)) {
-                //fActualApiKey = s.api_key;
-                //fApiKeyMasked = (fActualApiKey.Length() > 0);
-                
+            if (SaveAISettings(s)) {                
                 // Aggiorniamo visivamente l'item nella lista per renderlo l'attuale predefinito
                 for (int32 i = 0; i < fPluginListView->CountItems(); i++) {
                     PluginListItem* item = static_cast<PluginListItem*>(fPluginListView->ItemAt(i));
@@ -731,7 +725,6 @@ void PrefletWindow::MessageReceived(BMessage* msg)
             if (RemoveAPIKey(currentPlugin.String())) {
                 fprintf(stderr, "[LOG] API Key rimossa con successo dal KeyStore per il plugin '%s'\n", currentPlugin.String());
                 
-                //fActualApiKey.SetTo("");
                 fApiKeyControl->SetText("");
                 fToggleApiKeyButton->SetLabel(B_TRANSLATE("Show"));
 
@@ -749,23 +742,6 @@ void PrefletWindow::MessageReceived(BMessage* msg)
         	const char* label = value ? B_TRANSLATE("Hide") : B_TRANSLATE("Show");
             fApiKeyControl->Mask(!value);
             fToggleApiKeyButton->SetLabel(label);
-/*            if (value) {
-                //fApiKeyControl->SetText(fActualApiKey.String());
-                fApiKeyControl->Mask(!value);
-                fToggleApiKeyButton->SetLabel(B_TRANSLATE("Hide"));
-                //fApiKeyMasked = false;
-            } else {
-            	fApiKeyControl->Mask(!value);
-                //if (fActualApiKey.Length() > 0) {
-                //    BString masked;
-                //    masked.Append("********", fActualApiKey.Length());
-                //    fApiKeyControl->SetText(masked.String());
-                //} else {
-                //    fApiKeyControl->SetText("");
-                //}
-                fToggleApiKeyButton->SetLabel(B_TRANSLATE("Show"));
-                //fApiKeyMasked = true;
-            }*/
             break;
         }
         case B_NODE_MONITOR:
