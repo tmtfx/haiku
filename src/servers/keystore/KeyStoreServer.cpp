@@ -1132,6 +1132,7 @@ KeyStoreServer::_DecryptKeyData(BMessage& keyMessage)
     return result;
 }
 
+/* versione con BCrypto
 EVP_PKEY*
 KeyStoreServer::_DecryptMasterPrivateKey()
 {
@@ -1140,6 +1141,164 @@ KeyStoreServer::_DecryptMasterPrivateKey()
     if (sessionCheck != B_OK || !fHasSessionPassword || fSessionPassword.IsEmpty()) {
     	fprintf(stderr, "[DEBUG CRYPTO-READ] ERRORE: Sessione non attiva e impossibile recuperare la password.\n");
     	return NULL;
+    }
+
+    // ==========================================
+    // LIVELLO 1: Recupero Salt dallo Shadow per KDF
+    // ==========================================
+    BPath settingsDir;
+    if (find_directory(B_USER_SETTINGS_DIRECTORY, &settingsDir) != B_OK) {
+        fprintf(stderr, "[DEBUG MASTER] ERRORE: find_directory per B_USER_SETTINGS_DIRECTORY fallita.\n");
+        return NULL;
+    }
+    
+    BPath shadowPath(settingsDir.Path(), "shadow");
+    BFile shadowFile(shadowPath.Path(), B_READ_ONLY);
+    status_t fileErr = shadowFile.InitCheck();
+    if (fileErr != B_OK) {
+        fprintf(stderr, "[DEBUG MASTER] ERRORE: Apertura shadow file '%s' fallita con errore: %d\n", shadowPath.Path(), fileErr);
+        return NULL;
+    }
+
+    BMessage shadowMsg;
+    status_t unflattenErr = shadowMsg.Unflatten(&shadowFile);
+    if (unflattenErr != B_OK) {
+        fprintf(stderr, "[DEBUG MASTER] ERRORE: Unflatten dello shadow message fallito: %d\n", unflattenErr);
+        return NULL;
+    }
+
+    const void* shadowSalt = NULL;
+    ssize_t saltLen = 0;
+    // Estraiamo il Salt dall'unico BMessage dello shadow
+    if (shadowMsg.FindData("salt", B_RAW_TYPE, &shadowSalt, &saltLen) != B_OK) {
+        fprintf(stderr, "[DEBUG MASTER] ERRORE: Campo 'salt' non trovato nello shadow message.\n");
+        return NULL;
+    }
+    if (saltLen != 16) {
+        fprintf(stderr, "[DEBUG MASTER] ERRORE: Lunghezza del salt errata. Attesi 16, trovati %" B_PRIdSSIZE "\n", saltLen);
+        return NULL;
+    }
+
+    // Rigeneriamo la chiave AES-256 usando Password + Salt (1000 round SHA256)
+    BCrypto crypto;
+    if (crypto.InitCheck() != B_OK) {
+        fprintf(stderr, "[DEBUG MASTER] ERRORE: Inizializzazione BCrypto fallita.\n");
+        return NULL;
+    }
+
+    size_t passLen = fSessionPassword.Length();
+    size_t inputLen = passLen + 16;
+    uint8_t* kdfInput = new(std::nothrow) uint8_t[inputLen];
+    if (kdfInput == NULL) return NULL;
+
+    memcpy(kdfInput, fSessionPassword.String(), passLen);
+    memcpy(kdfInput + passLen, shadowSalt, 16);
+
+    uint8_t aesKey[32];
+    status_t err = crypto.Digest(B_CRYPTO_SHA256, kdfInput, inputLen, aesKey);
+    secure_memzero_server(kdfInput, inputLen);
+    delete[] kdfInput;
+    if (err != B_OK) {
+        fprintf(stderr, "[DEBUG MASTER] ERRORE: Primo round di Digest fallito: %d\n", err);
+        return NULL;
+    }
+
+    for (int i = 1; i < 1000; i++) {
+        if (crypto.Digest(B_CRYPTO_SHA256, aesKey, 32, aesKey) != B_OK) {
+            fprintf(stderr, "[DEBUG MASTER] ERRORE: Iterazione %d del Digest fallita.\n", i);
+            return NULL;
+        }
+    }
+
+    // ==========================================
+    // LIVELLO 2: Estrazione e Decifratura della Privata RSA
+    // ==========================================
+    BPath keyPath(settingsDir.Path(), "system/keystore/master");
+    BFile keyFile(keyPath.Path(), B_READ_ONLY);
+    fileErr = keyFile.InitCheck();
+    if (fileErr != B_OK) {
+        fprintf(stderr, "[DEBUG MASTER] ERRORE: Apertura file master '%s' fallita con errore: %d\n", keyPath.Path(), fileErr);
+        return NULL;
+    }
+    
+    attr_info attrInfo;
+    if (keyFile.GetAttrInfo("crypto:private_key", &attrInfo) != B_OK) {
+        fprintf(stderr, "[DEBUG MASTER] ERRORE: Attributo BFS 'crypto:private_key' non trovato sul file master.\n");
+        return NULL;
+    }
+
+    uint8_t* attrData = new(std::nothrow) uint8_t[attrInfo.size];
+    if (attrData == NULL) {
+        fprintf(stderr, "[DEBUG MASTER] ERRORE: Memoria insufficiente per attrData (dimensione: %" B_PRIdOFF ").\n", attrInfo.size);
+        return NULL;
+    }
+
+    if (keyFile.ReadAttr("crypto:private_key", B_RAW_TYPE, 0, attrData, attrInfo.size) != attrInfo.size) {
+        fprintf(stderr, "[DEBUG MASTER] ERRORE: Lettura dell'attributo 'crypto:private_key' incompleta o fallita.\n");
+        delete[] attrData;
+        return NULL;
+    }
+
+    // Separizziamo l'IV casuale (primi 16 byte) dal payload cifrato (il resto dell'attributo)
+    uint8_t iv[16];
+    memcpy(iv, attrData, 16);
+    size_t encPrivLen = attrInfo.size - 16;
+    uint8_t* encPriv = attrData + 16;
+
+    crypto.SetAlgorithm(B_CRYPTO_AES);
+    crypto.SetMode(B_CRYPTO_MODE_CBC);
+    crypto.SetPadding(true, B_CRYPTO_PKCS7);
+
+    uint8_t* privDer = new(std::nothrow) uint8_t[encPrivLen];
+    if (privDer == NULL) {
+        fprintf(stderr, "[DEBUG MASTER] ERRORE: Memoria insufficiente per buffer privDer.\n");
+        delete[] attrData;
+        return NULL;
+    }
+
+    // Decifriamo l'RSA privata nativa in formato DER
+    ssize_t privLen = crypto.Decrypt(aesKey, sizeof(aesKey), iv, sizeof(iv), encPriv, encPrivLen, privDer, encPrivLen);
+    
+    secure_memzero_server(aesKey, sizeof(aesKey));
+    delete[] attrData;
+
+    if (privLen < 0) {
+    	fprintf(stderr, "[DEBUG MASTER] ERRORE: Decrypt simmetrico fallito (chiave errata o dati corrotti), codice: %" B_PRIdSSIZE "\n", privLen);
+        secure_memzero_server(privDer, encPrivLen);
+        delete[] privDer;
+        return NULL; 
+    }
+    
+	if (privLen > 0) {
+        fprintf(stderr, "[DEBUG CRYPTO-HEX] Primi 4 byte decifrati (DER?): %02x %02x %02x %02x\n", 
+            privDer[0], privDer[1], privDer[2], privDer[3]);
+    }
+
+    // Convertiamo l'array DER nell'oggetto OpenSSL d2i_PrivateKey pronto per l'uso volatile
+    const unsigned char* p = privDer;
+    //EVP_PKEY* privKey = d2i_PrivateKey(EVP_PKEY_RSA, NULL, &p, privLen);
+    EVP_PKEY* privKey = d2i_AutoPrivateKey(NULL, &p, privLen);
+    
+    if (privKey == NULL) {
+        fprintf(stderr, "[DEBUG MASTER] ERRORE: d2i_PrivateKey fallito. I dati decifrati non sono una chiave RSA DER valida.\n");
+        // OpenSSL error stack log se necessario
+    }
+    
+    secure_memzero_server(privDer, privLen);
+    delete[] privDer;
+
+    return privKey; 
+}*/
+#include <openssl/evp.h>
+
+EVP_PKEY*
+KeyStoreServer::_DecryptMasterPrivateKey()
+{
+    status_t sessionCheck = _GetOrAskSessionPassword();
+    
+    if (sessionCheck != B_OK || !fHasSessionPassword || fSessionPassword.IsEmpty()) {
+        fprintf(stderr, "[DEBUG MASTER] ERRORE: Sessione non attiva.\n");
+        return NULL;
     }
 
     // ==========================================
@@ -1157,15 +1316,11 @@ KeyStoreServer::_DecryptMasterPrivateKey()
 
     const void* shadowSalt = NULL;
     ssize_t saltLen = 0;
-    // Estraiamo il Salt dall'unico BMessage dello shadow
     if (shadowMsg.FindData("salt", B_RAW_TYPE, &shadowSalt, &saltLen) != B_OK || saltLen != 16) {
         return NULL;
     }
 
-    // Rigeneriamo la chiave AES-256 usando Password + Salt (1000 round SHA256)
-    BCrypto crypto;
-    if (crypto.InitCheck() != B_OK) return NULL;
-
+    // Rigeneriamo la chiave AES-256 (1000 round SHA256 manuali con OpenSSL)
     size_t passLen = fSessionPassword.Length();
     size_t inputLen = passLen + 16;
     uint8_t* kdfInput = new(std::nothrow) uint8_t[inputLen];
@@ -1175,17 +1330,20 @@ KeyStoreServer::_DecryptMasterPrivateKey()
     memcpy(kdfInput + passLen, shadowSalt, 16);
 
     uint8_t aesKey[32];
-    status_t err = crypto.Digest(B_CRYPTO_SHA256, kdfInput, inputLen, aesKey);
+    unsigned int mdLen = 0;
+    
+    // Primo round
+    EVP_Digest(kdfInput, inputLen, aesKey, &mdLen, EVP_sha256(), NULL);
     secure_memzero_server(kdfInput, inputLen);
     delete[] kdfInput;
-    if (err != B_OK) return NULL;
 
+    // Restanti 999 round
     for (int i = 1; i < 1000; i++) {
-        if (crypto.Digest(B_CRYPTO_SHA256, aesKey, 32, aesKey) != B_OK) return NULL;
+        EVP_Digest(aesKey, 32, aesKey, &mdLen, EVP_sha256(), NULL);
     }
 
     // ==========================================
-    // LIVELLO 2: Estrazione e Decifratura della Privata RSA
+    // LIVELLO 2: Estrazione e Decifratura OpenSSL Nativa
     // ==========================================
     BPath keyPath(settingsDir.Path(), "system/keystore/master");
     BFile keyFile(keyPath.Path(), B_READ_ONLY);
@@ -1202,15 +1360,10 @@ KeyStoreServer::_DecryptMasterPrivateKey()
         return NULL;
     }
 
-    // Separizziamo l'IV casuale (primi 16 byte) dal payload cifrato (il resto dell'attributo)
     uint8_t iv[16];
     memcpy(iv, attrData, 16);
     size_t encPrivLen = attrInfo.size - 16;
     uint8_t* encPriv = attrData + 16;
-
-    crypto.SetAlgorithm(B_CRYPTO_AES);
-    crypto.SetMode(B_CRYPTO_MODE_CBC);
-    crypto.SetPadding(true, B_CRYPTO_PKCS7);
 
     uint8_t* privDer = new(std::nothrow) uint8_t[encPrivLen];
     if (privDer == NULL) {
@@ -1218,26 +1371,49 @@ KeyStoreServer::_DecryptMasterPrivateKey()
         return NULL;
     }
 
-    // Decifriamo l'RSA privata nativa in formato DER
-    ssize_t privLen = crypto.Decrypt(aesKey, sizeof(aesKey), iv, sizeof(iv), encPriv, encPrivLen, privDer, encPrivLen);
-    
+    // --- DECIFRATURA DIRETTA CON EVP DI OPENSSL ---
+    EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+    int len = 0;
+    int privLen = 0;
+
+    EVP_DecryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, aesKey, iv);
+    // Abilitiamo il padding PKCS7 nativo di OpenSSL
+    EVP_CIPHER_CTX_set_padding(ctx, 1); 
+
+    if (EVP_DecryptUpdate(ctx, privDer, &len, encPriv, encPrivLen) != 1) {
+        fprintf(stderr, "[DEBUG TEST-OPENSSL] ERRORE in DecryptUpdate\n");
+    }
+    privLen = len;
+
+    if (EVP_DecryptFinal_ex(ctx, privDer + len, &len) != 1) {
+        fprintf(stderr, "[DEBUG TEST-OPENSSL] ERRORE in DecryptFinal (Padding non valido! Chiave errata?)\n");
+        privLen = -1;
+    } else {
+        privLen += len;
+    }
+
+    EVP_CIPHER_CTX_free(ctx);
     secure_memzero_server(aesKey, sizeof(aesKey));
     delete[] attrData;
 
     if (privLen < 0) {
         secure_memzero_server(privDer, encPrivLen);
         delete[] privDer;
-        return NULL; 
+        return NULL;
     }
 
-    // Convertiamo l'array DER nell'oggetto OpenSSL d2i_PrivateKey pronto per l'uso volatile
+    fprintf(stderr, "[DEBUG TEST-OPENSSL] Decifrato con successo. Output len: %d\n", privLen);
+    fprintf(stderr, "[DEBUG TEST-OPENSSL] Primi 4 byte: %02x %02x %02x %02x\n", 
+            privDer[0], privDer[1], privDer[2], privDer[3]);
+
+    // Proviamo a ricostruire la chiave
     const unsigned char* p = privDer;
     EVP_PKEY* privKey = d2i_PrivateKey(EVP_PKEY_RSA, NULL, &p, privLen);
-    
+
     secure_memzero_server(privDer, privLen);
     delete[] privDer;
 
-    return privKey; 
+    return privKey;
 }
 
 int
