@@ -110,6 +110,7 @@ static bool _StoreAPIKeyToKeyStore(const char* engine, const char* apiKey)
     if (!apiKey || apiKey[0] == '\0') {
     	fprintf(stderr,"Cancello la password visto che apiKey è vuoto\n");
         BPasswordKey existing;
+        existing.SetTo("", B_KEY_PURPOSE_GENERIC, kAPIIdentifier, engine);
         if (keyStore.GetEncryptedKey(kAIKeyring, B_KEY_TYPE_PASSWORD,
                 kAPIIdentifier, engine, existing) == B_OK) {
             fprintf(stderr,"la chiave cifrata esiste, procedo a rimuovere...\n");
@@ -130,6 +131,7 @@ static bool _StoreAPIKeyToKeyStore(const char* engine, const char* apiKey)
     // Remove existing if present
     fprintf(stderr,"Cancello la password precedente, se esiste...\n");
     BPasswordKey existing;
+    existing.SetTo("", B_KEY_PURPOSE_GENERIC, kAPIIdentifier, engine);
     if (keyStore.GetEncryptedKey(kAIKeyring, B_KEY_TYPE_PASSWORD,
             kAPIIdentifier, engine, existing) == B_OK) {
         fprintf(stderr,"la chiave cifrata esiste, procedo a rimuovere...\n");
@@ -139,6 +141,8 @@ static bool _StoreAPIKeyToKeyStore(const char* engine, const char* apiKey)
         } else {
                 fprintf(stderr, "impossibile rimuovere la chiave\n");
         }
+    } else {
+    	fprintf(stderr, "GetEncryptedKey non è riuscito a ottenere la password esistente\n");
     }
 
     // Ensure keyring exists (ignore error if already exists)
