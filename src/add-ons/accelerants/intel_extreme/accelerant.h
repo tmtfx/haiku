@@ -70,6 +70,9 @@ struct accelerant_info {
 	int				device;
 	uint8			head_mode;
 	bool			is_clone;
+		// X-Tiling state (accelerant-only, not in shared_info)
+	bool			frame_buffer_tiled;
+	uint32			fence_register_index;
 };
 
 
@@ -106,6 +109,8 @@ extern void set_display_power_mode(uint32 mode);
 // engine.cpp
 extern void uninit_ring_buffer(ring_buffer &ringBuffer);
 extern void setup_ring_buffer(ring_buffer &ringBuffer, const char* name);
+extern status_t init_batch_buffer();
+extern void uninit_batch_buffer();
 
 // modes.cpp
 extern void wait_for_vblank(void);
@@ -115,5 +120,5 @@ extern status_t create_mode_list(void);
 // memory.cpp
 extern void intel_free_memory(addr_t base);
 extern status_t intel_allocate_memory(size_t size, uint32 flags, addr_t &base);
-
+extern status_t intel_allocate_memory(size_t size, size_t alignment, uint32 flags, addr_t &base);
 #endif	/* INTEL_EXTREME_ACCELERANT_H */

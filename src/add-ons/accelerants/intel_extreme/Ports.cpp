@@ -1145,6 +1145,38 @@ LVDSPort::IsConnected()
 			return false;
 		}
 		// TODO: Skip if eDP support
+		
+		// Try EDID via GMBUS first
+		if (HasEDID())
+			return true;
+
+		// Fallback: use VESA EDID from bootloader
+		if (gInfo->shared_info->has_vesa_edid_info) {
+			TRACE("LVDS: Using VESA edid info\n");
+			memcpy(&fEDIDInfo, &gInfo->shared_info->vesa_edid_info,
+				sizeof(edid1_info));
+			if (fEDIDState != B_OK) {
+				fEDIDState = B_OK;
+				edid_dump(&fEDIDInfo);
+			}
+			return true;
+		}
+
+		// Fallback: VBT has valid panel data
+		if (gInfo->shared_info->got_vbt) {
+			TRACE("LVDS: No EDID, but force enabled as we have a VBT\n");
+			return true;
+		}
+
+		// Last resort: BIOS already enabled the port
+		if (registerValue & LVDS_PORT_EN) {
+			TRACE("LVDS: No EDID/VBT but port enabled by BIOS, "
+				"force connected\n");
+			return true;
+		}
+
+		TRACE("LVDS: PCH detected but no EDID/VBT and port not enabled\n");
+		return false;
 	} else if (gInfo->shared_info->device_type.Generation() <= 4) {
 		// Older generations don't have LVDS detection. If not mobile skip.
 		if (!gInfo->shared_info->device_type.IsMobile()) {
@@ -1274,8 +1306,14 @@ LVDSPort::SetDisplayMode(display_mode* target, uint32 colorMode)
 
 	// Setup PanelFitter and Train FDI if it exists
 	PanelFitter* fitter = fPipe->PFT();
-	if (fitter != NULL)
-		fitter->Enable(hardwareTarget);
+	//if (fitter != NULL)
+	//	fitter->Enable(hardwareTarget);
+	if (fitter != NULL) {
+		if (needsScaling)
+			fitter->Enable(hardwareTarget);
+		else
+			fitter->Disable();
+	}
 	FDILink* link = fPipe->FDI();
 	if (link != NULL) {
 		uint32 lanes = 0;
@@ -1307,15 +1345,27 @@ LVDSPort::SetDisplayMode(display_mode* target, uint32 colorMode)
 		else
 			lvds |= PORT_TRANS_B_SEL_CPT;
 	}
-
-	// Set the B0-B3 data pairs corresponding to whether we're going to
-	// set the DPLLs for dual-channel mode or not.
-	if (divisors.p2 == 5 || divisors.p2 == 7) {
-		TRACE("LVDS: dual channel\n");
-		lvds |= LVDS_B0B3_POWER_UP | LVDS_CLKB_POWER_UP;
+	if (gInfo->shared_info->device_type.InGroup(INTEL_GROUP_ILK)){
+		// Preserve the BIOS dual/single channel LVDS configuration.
+		// Overriding this based solely on P2 divisor can cause black screen
+		// on some panels (ref: 9front igfx fix by Michael Forney).
+		if (read32(_PortRegister()) & LVDS_CLKB_POWER_UP) {
+			TRACE("LVDS: dual channel (preserving BIOS setting)\n");
+			lvds |= LVDS_B0B3_POWER_UP | LVDS_CLKB_POWER_UP;
+		} else {
+			TRACE("LVDS: single channel (preserving BIOS setting)\n");
+			lvds &= ~(LVDS_B0B3_POWER_UP | LVDS_CLKB_POWER_UP);
+		}
 	} else {
-		TRACE("LVDS: single channel\n");
-		lvds &= ~(LVDS_B0B3_POWER_UP | LVDS_CLKB_POWER_UP);
+		// Set the B0-B3 data pairs corresponding to whether we're going to
+		// set the DPLLs for dual-channel mode or not.
+		if (divisors.p2 == 5 || divisors.p2 == 7) {
+			TRACE("LVDS: dual channel\n");
+			lvds |= LVDS_B0B3_POWER_UP | LVDS_CLKB_POWER_UP;
+		} else {
+			TRACE("LVDS: single channel\n");
+			lvds &= ~(LVDS_B0B3_POWER_UP | LVDS_CLKB_POWER_UP);
+		}
 	}
 
 	// LVDS port control moves polarity bits because Intel hates you.

@@ -542,7 +542,13 @@ enum {
 	INTEL_ALLOCATE_GRAPHICS_MEMORY,
 	INTEL_FREE_GRAPHICS_MEMORY,
 	INTEL_GET_BRIGHTNESS_LEGACY,
-	INTEL_SET_BRIGHTNESS_LEGACY
+	INTEL_SET_BRIGHTNESS_LEGACY,
+
+	// Ring buffer control (kernel-mediated MMIO writes)
+	INTEL_RING_RESET,			// re-init ring: disable, reset HEAD, re-enable
+	INTEL_RING_WRITE_TAIL,		// write TAIL register to kick GPU
+	INTEL_RING_INIT_3D,			// apply Gen5 3D workarounds (MI_MODE, etc)
+	INTEL_EXEC_BATCH			// emit MI_BATCH_BUFFER_START + kick (like i915)
 };
 
 // retrieve the area_id of the kernel/accelerant shared info
@@ -565,6 +571,23 @@ struct intel_free_graphics_memory {
 	uint32 	magic;
 	addr_t	buffer_base;
 };
+
+
+// ring buffer write tail (kernel writes TAIL register on behalf of userspace)
+struct intel_ring_tail {
+	uint32	magic;
+	uint32	tail_value;		// ring position to write to TAIL register
+};
+
+// batch buffer execution (kernel emits MI_BATCH_BUFFER_START + TAIL write)
+struct intel_exec_batch {
+	uint32	magic;
+	uint32	batch_gtt;		// GTT offset of batch buffer start
+	uint32	batch_len;		// batch length in bytes (unused, for future)
+	uint32	marker_gtt;		// GTT offset of marker DWORD (0 = no marker)
+	uint32	marker_value;	// value to write via MI_STORE_DATA_IMM
+};
+
 
 // brightness legacy
 struct intel_brightness_legacy {
@@ -1317,6 +1340,15 @@ struct intel_brightness_legacy {
 #define DISPLAY_CONTROL_RGB32_SKY		(0x04UL << 24)
 #define DISPLAY_CONTROL_RGB64_SKY		(0x06UL << 24)
 #define DISPLAY_CONTROL_TILE_MODE_MASK	(7UL << 10)
+#define DISPLAY_CONTROL_TILED			(1UL << 10)
+
+// Fence registers
+#define INTEL_FENCE_BASE_965			0x03000
+#define INTEL_FENCE_BASE_GEN6			0x100000
+#define INTEL_FENCE_SIZE				8
+#define INTEL_FENCE_COUNT				16
+#define FENCE_REG_VALID					(1 << 0)
+#define FENCE_REG_PITCH_SHIFT			2
 
 // INTEL_DISPLAY_A_PIPE_CONTROL ILK+
 #define INTEL_PIPE_DITHER_TYPE_MASK		(0x0000000c)
@@ -1532,6 +1564,18 @@ struct intel_brightness_legacy {
 #define COMMAND_OVERLAY_ON				(1 << 21)
 #define COMMAND_OVERLAY_OFF				(2 << 21)
 #define OVERLAY_UPDATE_COEFFICIENTS		0x1
+
+// MI commands
+#define MI_NOOP							0x00000000
+#define MI_FLUSH						(0x04 << 23)
+#define MI_BATCH_BUFFER_START			(0x31 << 23)
+#define MI_BATCH_GTT					(2 << 6)	// Gen4/5: GGTT address space
+#define MI_BATCH_BUFFER_END				(0x0A << 23)
+#define MI_STORE_DWORD_INDEX			((0x21 << 23) | (1 << 0))
+	// bit 0 = use DWORD index (not byte offset)
+
+// Sequence number location in HWS store[] array
+#define HWS_SYNC_SEQUENCE_INDEX			0
 
 // 2D acceleration
 #define XY_COMMAND_SOURCE_BLIT			0x54c00006

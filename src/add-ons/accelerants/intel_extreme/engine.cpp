@@ -8,10 +8,14 @@
 
 
 #include <Debug.h>
+#include <string.h>
+#include <unistd.h>
 
+#include "intel_extreme.h"
 #include "accelerant.h"
 #include "accelerant_protos.h"
 #include "commands.h"
+#include "render.h"
 
 
 #undef TRACE
@@ -27,6 +31,14 @@
 
 
 static engine_token sEngineToken = {1, 0 /*B_2D_ACCELERATION*/, NULL};
+static int32 sLastSubmittedSeq = 0;
+
+// Batch buffer for BLT commands - avoids per-command ring overhead
+#define BATCH_BUFFER_SIZE	(64 * 1024)
+
+static addr_t sBatchBase = 0;		// virtual address (WC mapped)
+static uint32 sBatchOffset = 0;	// GTT offset for GPU
+static uint32 sBatchSize = 0;
 
 
 QueueCommands::QueueCommands(ring_buffer &ring)
@@ -39,6 +51,18 @@ QueueCommands::QueueCommands(ring_buffer &ring)
 
 QueueCommands::~QueueCommands()
 {
+	// Emit MI_STORE_DWORD_INDEX to update the sequence number in the
+	// Hardware Status Page. Only emit every 8th submission to balance
+	// per-command overhead (4 DWORDs) vs sync accuracy.
+	uint32 seq = atomic_add(&sLastSubmittedSeq, 1) + 1;
+	if ((seq & 0x07) == 0) {
+		MakeSpace(4);
+		Write(MI_STORE_DWORD_INDEX);
+		Write(HWS_SYNC_SEQUENCE_INDEX);
+		Write(seq);
+		Write(MI_NOOP);
+	}
+
 	if (fRingBuffer.position & 0x07) {
 		// make sure the command is properly aligned
 		Write(COMMAND_NOOP);
@@ -48,10 +72,22 @@ QueueCommands::~QueueCommands()
 	// is in write combining mode - releasing the lock does this, as the
 	// buffer is flushed on a locked memory operation (which is what this
 	// benaphore does), but it must happen before writing the new tail...
-	int32 flush;
+	int32 flush = 0;
 	atomic_add(&flush, 1);
 
-	write32(fRingBuffer.register_base + RING_BUFFER_TAIL, fRingBuffer.position);
+	// Write TAIL register: try kernel ioctl first (userspace MMIO is
+	// read-only on Ironlake), fall back to direct MMIO for other gens.
+	if (gInfo != NULL && gInfo->device >= 0
+		&& gInfo->shared_info->device_type.InGroup(INTEL_GROUP_ILK)) {
+		intel_ring_tail tailData;
+		tailData.magic = INTEL_PRIVATE_DATA_MAGIC;
+		tailData.tail_value = fRingBuffer.position;
+		ioctl(gInfo->device, INTEL_RING_WRITE_TAIL, &tailData,
+			sizeof(tailData));
+	} else {
+		write32(fRingBuffer.register_base + RING_BUFFER_TAIL,
+			fRingBuffer.position);
+	}
 
 	release_lock(&fRingBuffer.lock);
 }
@@ -65,8 +101,17 @@ QueueCommands::Put(struct command &command, size_t size)
 
 	MakeSpace(count);
 
-	for (uint32 i = 0; i < count; i++) {
-		Write(data[i]);
+	// Fast path: if the command fits without wrapping, use memcpy
+	uint32 bytesLeft = fRingBuffer.size - fRingBuffer.position;
+	if (bytesLeft >= size) {
+		memcpy((uint8*)fRingBuffer.base + fRingBuffer.position, data, size);
+		fRingBuffer.position = (fRingBuffer.position + size)
+			& (fRingBuffer.size - 1);
+	} else {
+		// Slow path: write DWORD by DWORD across the wrap boundary
+		for (uint32 i = 0; i < count; i++) {
+			Write(data[i]);
+		}
 	}
 }
 
@@ -186,6 +231,106 @@ setup_ring_buffer(ring_buffer &ringBuffer, const char* name)
 }
 
 
+status_t
+init_batch_buffer()
+{
+	addr_t base;
+	if (intel_allocate_memory(BATCH_BUFFER_SIZE, 0, base) != B_OK) {
+		ERROR("Failed to allocate batch buffer\n");
+		return B_NO_MEMORY;
+	}
+
+	sBatchBase = base;
+	sBatchOffset = base - (addr_t)gInfo->shared_info->graphics_memory;
+	sBatchSize = BATCH_BUFFER_SIZE;
+
+	memset((void*)base, 0, BATCH_BUFFER_SIZE);
+	TRACE("Batch buffer: base %p, GTT offset 0x%" B_PRIx32 ", size 0x%"
+		B_PRIx32 "\n", (void*)base, sBatchOffset, sBatchSize);
+	return B_OK;
+}
+
+
+void
+uninit_batch_buffer()
+{
+	if (sBatchBase != 0) {
+		intel_free_memory(sBatchBase);
+		sBatchBase = 0;
+	}
+}
+
+
+//	#pragma mark - BatchCommands
+
+
+BatchCommands::BatchCommands(ring_buffer &ring)
+	:
+	fRing(ring),
+	fPosition(0)
+{
+}
+
+
+BatchCommands::~BatchCommands()
+{
+	if (sBatchBase == 0 || fPosition == 0)
+		return;
+
+	// Write sequence number to HWS page
+	uint32 seq = atomic_add(&sLastSubmittedSeq, 1) + 1;
+	WriteBatch(MI_STORE_DWORD_INDEX);
+	WriteBatch(HWS_SYNC_SEQUENCE_INDEX);
+	WriteBatch(seq);
+	WriteBatch(MI_NOOP);
+
+	// End the batch
+	WriteBatch(MI_BATCH_BUFFER_END);
+	if (fPosition & 0x07)
+		WriteBatch(MI_NOOP);
+
+	// Memory barrier: ensure batch writes are visible to GPU
+	int32 flush = 0;
+	atomic_add(&flush, 1);
+
+	// Submit batch via ring: MI_BATCH_BUFFER_START + GTT address
+	QueueCommands queue(fRing);
+	queue.MakeSpace(2);
+	queue.Write(MI_BATCH_BUFFER_START);
+	queue.Write(sBatchOffset);
+}
+
+
+void
+BatchCommands::Put(struct command &command, size_t size)
+{
+	// Check if batch has enough space (leave room for trailer)
+	if (fPosition + size + 32 > sBatchSize) {
+		// Batch full - shouldn't happen with 64KB buffer
+		ERROR("Batch buffer full!\n");
+		return;
+	}
+
+	memcpy((uint8*)sBatchBase + fPosition, command.Data(), size);
+	fPosition += size;
+}
+
+
+void
+BatchCommands::WriteBatch(uint32 data)
+{
+	*(uint32*)((uint8*)sBatchBase + fPosition) = data;
+	fPosition += sizeof(uint32);
+}
+
+
+bool
+batch_buffer_available()
+{
+	return sBatchBase != 0;
+}
+
+
 //	#pragma mark - engine management
 
 
@@ -203,6 +348,11 @@ intel_acquire_engine(uint32 capabilities, uint32 maxWait, sync_token* syncToken,
 	engine_token** _engineToken)
 {
 	CALLED();
+	static bool sFirstAcquire = true;
+	if (sFirstAcquire) {
+		_sPrintf("intel_extreme: intel_acquire_engine CALLED\n");
+		sFirstAcquire = false;
+	}
 	*_engineToken = &sEngineToken;
 
 	if (acquire_lock(&gInfo->shared_info->engine_lock) != B_OK)
@@ -238,14 +388,24 @@ intel_wait_engine_idle(void)
 		return;
 	}
 
+	// Fast path: check sequence number in Hardware Status Page.
+	// The seq is only updated every 8th submission to reduce overhead,
+	// so we round target down to the nearest multiple of 8.
+	uint32 target = (uint32)sLastSubmittedSeq & ~0x07;
+	hardware_status* hws =
+		(hardware_status*)gInfo->shared_info->status_page;
+
+	if (hws != NULL && target > 0
+		&& hws->store[HWS_SYNC_SEQUENCE_INDEX] >= target) {
+		// GPU already past our target - no wait needed
+		return;
+	}
+
+	// Slow path: poll ring HEAD == TAIL
 	{
 		QueueCommands queue(gInfo->shared_info->primary_ring_buffer);
 		queue.PutFlush();
 	}
-
-	// TODO: this should only be a temporary solution!
-	// a better way to do this would be to acquire the engine's lock and
-	// sync to the latest token
 
 	bigtime_t start = system_time();
 
@@ -261,7 +421,6 @@ intel_wait_engine_idle(void)
 			break;
 
 		if (system_time() > start + 1000000LL) {
-			// the engine seems to be locked up!
 			ERROR("engine locked up, head %" B_PRIx32 "!\n", head);
 			break;
 		}
@@ -295,10 +454,24 @@ void
 intel_screen_to_screen_blit(engine_token* token, blit_params* params,
 	uint32 count)
 {
-	QueueCommands queue(gInfo->shared_info->primary_ring_buffer);
-
-	for (uint32 i = 0; i < count; i++) {
+	if (false && batch_buffer_available()) {
+		BatchCommands batch(gInfo->shared_info->primary_ring_buffer);
 		xy_source_blit_command blit;
+		for (uint32 i = 0; i < count; i++) {
+			blit.source_left = params[i].src_left;
+			blit.source_top = params[i].src_top;
+			blit.dest_left = params[i].dest_left;
+			blit.dest_top = params[i].dest_top;
+			blit.dest_right = params[i].dest_left + params[i].width + 1;
+			blit.dest_bottom = params[i].dest_top + params[i].height + 1;
+			batch.Put(blit, sizeof(blit));
+		}
+		return;
+	}
+
+	QueueCommands queue(gInfo->shared_info->primary_ring_buffer);
+	xy_source_blit_command blit;
+	for (uint32 i = 0; i < count; i++) {
 		blit.source_left = params[i].src_left;
 		blit.source_top = params[i].src_top;
 		blit.dest_left = params[i].dest_left;
@@ -306,7 +479,38 @@ intel_screen_to_screen_blit(engine_token* token, blit_params* params,
 		blit.dest_right = params[i].dest_left + params[i].width + 1;
 		blit.dest_bottom = params[i].dest_top + params[i].height + 1;
 
+		// For overlapping regions where dest is below/right of source,
+		// the GPU handles this correctly with XY_SRC_COPY_BLT as long
+		// as source and dest use the same base address and pitch.
+		// The hardware processes scanlines top-to-bottom, so vertical
+		// overlap downward needs no special handling on Intel BLT.
+
 		queue.Put(blit, sizeof(blit));
+	}
+}
+
+
+// Render engine toggle: checked once, enabled by trigger file.
+// If the 3D pipeline hangs the GPU, reboot and delete the file.
+static int sRenderMode = -1;  // -1 = unchecked, 0 = BLT, 1 = render
+
+static void
+check_render_mode()
+{
+	if (sRenderMode != -1)
+		return;
+
+	bool isILK = gInfo->shared_info->device_type.InGroup(INTEL_GROUP_ILK);
+	int fileOK = access("/boot/home/config/settings/render_test", F_OK);
+	_sPrintf("intel_extreme: check_render_mode: ILK=%d, file=%d\n",
+		isILK, fileOK);
+
+	if (isILK && fileOK == 0) {
+		sRenderMode = 1;
+		_sPrintf("intel_extreme: 3D render engine ENABLED for fills "
+			"(delete /boot/home/config/settings/render_test to disable)\n");
+	} else {
+		sRenderMode = 0;
 	}
 }
 
@@ -315,16 +519,47 @@ void
 intel_fill_rectangle(engine_token* token, uint32 color,
 	fill_rect_params* params, uint32 count)
 {
-	QueueCommands queue(gInfo->shared_info->primary_ring_buffer);
+	static bool sFirstCall = true;
+	if (sFirstCall) {
+		_sPrintf("intel_extreme: intel_fill_rectangle CALLED "
+			"(count=%" B_PRIu32 ", color=0x%08" B_PRIx32 ")\n",
+			count, color);
+		sFirstCall = false;
+	}
 
-	for (uint32 i = 0; i < count; i++) {
+	check_render_mode();
+
+	if (sRenderMode == 1) {
+		for (uint32 i = 0; i < count; i++) {
+			render_fill_rect(color,
+				params[i].left, params[i].top,
+				params[i].right + 1, params[i].bottom + 1);
+		}
+		return;
+	}
+
+	if (false && batch_buffer_available()) {
+		BatchCommands batch(gInfo->shared_info->primary_ring_buffer);
 		xy_color_blit_command blit(false);
+		blit.color = color;
+		for (uint32 i = 0; i < count; i++) {
+			blit.dest_left = params[i].left;
+			blit.dest_top = params[i].top;
+			blit.dest_right = params[i].right + 1;
+			blit.dest_bottom = params[i].bottom + 1;
+			batch.Put(blit, sizeof(blit));
+		}
+		return;
+	}
+
+	QueueCommands queue(gInfo->shared_info->primary_ring_buffer);
+	xy_color_blit_command blit(false);
+	blit.color = color;
+	for (uint32 i = 0; i < count; i++) {
 		blit.dest_left = params[i].left;
 		blit.dest_top = params[i].top;
 		blit.dest_right = params[i].right + 1;
 		blit.dest_bottom = params[i].bottom + 1;
-		blit.color = color;
-
 		queue.Put(blit, sizeof(blit));
 	}
 }
@@ -334,16 +569,28 @@ void
 intel_invert_rectangle(engine_token* token, fill_rect_params* params,
 	uint32 count)
 {
-	QueueCommands queue(gInfo->shared_info->primary_ring_buffer);
-
-	for (uint32 i = 0; i < count; i++) {
+	if (false && batch_buffer_available()) {
+		BatchCommands batch(gInfo->shared_info->primary_ring_buffer);
 		xy_color_blit_command blit(true);
+		blit.color = 0xffffffff;
+		for (uint32 i = 0; i < count; i++) {
+			blit.dest_left = params[i].left;
+			blit.dest_top = params[i].top;
+			blit.dest_right = params[i].right + 1;
+			blit.dest_bottom = params[i].bottom + 1;
+			batch.Put(blit, sizeof(blit));
+		}
+		return;
+	}
+
+	QueueCommands queue(gInfo->shared_info->primary_ring_buffer);
+	xy_color_blit_command blit(true);
+	blit.color = 0xffffffff;
+	for (uint32 i = 0; i < count; i++) {
 		blit.dest_left = params[i].left;
 		blit.dest_top = params[i].top;
 		blit.dest_right = params[i].right + 1;
 		blit.dest_bottom = params[i].bottom + 1;
-		blit.color = 0xffffffff;
-
 		queue.Put(blit, sizeof(blit));
 	}
 }
@@ -366,11 +613,14 @@ intel_fill_span(engine_token* token, uint32 color, uint16* _params,
 	setup.pattern = 0;
 	queue.Put(setup, sizeof(setup));
 
+	xy_scanline_blit_command blit;
+
 	for (uint32 i = 0; i < count; i++) {
-		xy_scanline_blit_command blit;
 		blit.dest_left = params[i].left;
 		blit.dest_top = params[i].top;
 		blit.dest_right = params[i].right;
 		blit.dest_bottom = params[i].top;
+
+		queue.Put(blit, sizeof(blit));
 	}
 }

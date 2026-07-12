@@ -635,15 +635,28 @@ Pipe::Enable(bool enable)
 	if (enable) {
 		write32(pipeReg, read32(pipeReg) | INTEL_PIPE_ENABLED);
 		wait_for_vblank();
-		write32(planeReg, (read32(planeReg) | DISPLAY_CONTROL_ENABLED)
-			& ~DISPLAY_CONTROL_TILE_MODE_MASK);
+		if (gInfo->shared_info->device_type.InGroup(INTEL_GROUP_ILK)){
+			write32(planeReg, read32(planeReg) | DISPLAY_CONTROL_ENABLED);
 
-		//Enable default display main watermarks
-		if (gInfo->shared_info->pch_info == INTEL_PCH_CPT) {
-			if (fPipeOffset == 0)
-				write32(INTEL_DISPLAY_A_PIPE_WATERMARK, 0x0783818);
-			else
-				write32(INTEL_DISPLAY_B_PIPE_WATERMARK, 0x0783818);
+			//Enable default display main watermarks
+			if (gInfo->shared_info->pch_info == INTEL_PCH_CPT
+				|| gInfo->shared_info->pch_info == INTEL_PCH_IBX) {
+				if (fPipeOffset == 0)
+					write32(INTEL_DISPLAY_A_PIPE_WATERMARK, 0x0783818);
+				else
+					write32(INTEL_DISPLAY_B_PIPE_WATERMARK, 0x0783818);
+			}
+		} else {
+			write32(planeReg, (read32(planeReg) | DISPLAY_CONTROL_ENABLED)
+				& ~DISPLAY_CONTROL_TILE_MODE_MASK);
+
+			//Enable default display main watermarks
+			if (gInfo->shared_info->pch_info == INTEL_PCH_CPT) {
+				if (fPipeOffset == 0)
+					write32(INTEL_DISPLAY_A_PIPE_WATERMARK, 0x0783818);
+				else
+					write32(INTEL_DISPLAY_B_PIPE_WATERMARK, 0x0783818);
+			}
 		}
 	} else {
 		write32(planeReg, read32(planeReg) & ~DISPLAY_CONTROL_ENABLED);

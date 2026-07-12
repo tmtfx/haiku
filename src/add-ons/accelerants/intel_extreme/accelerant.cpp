@@ -9,6 +9,7 @@
 
 #include "accelerant_protos.h"
 #include "accelerant.h"
+#include "render.h"
 
 #include "utility.h"
 
@@ -522,6 +523,14 @@ intel_init_accelerant(int device)
 	init_lock(&info.engine_lock, "intel extreme engine");
 
 	setup_ring_buffer(info.primary_ring_buffer, "intel primary ring buffer");
+	
+	if (gInfo->shared_info->device_type.Generation() == 5) {
+		// Allocate batch buffer for faster 2D command submission
+		init_batch_buffer();
+
+		// Initialize render engine (3D pipeline for 2D ops)
+		render_init();
+	}
 
 	// Probe all ports
 	status = probe_ports();

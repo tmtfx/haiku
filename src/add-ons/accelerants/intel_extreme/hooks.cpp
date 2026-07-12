@@ -81,13 +81,18 @@ get_accelerant_hook(uint32 feature, void* data)
 		case B_SET_CURSOR_SHAPE:
 			if (gInfo->shared_info->cursor_memory != NULL)
 				return (void*)intel_set_cursor_shape;
+			return NULL;
+		case B_SET_CURSOR_BITMAP:
+			if (gInfo->shared_info->cursor_memory != NULL && gInfo->shared_info->device_type.InGroup(INTEL_GROUP_ILK))
+				return (void*)intel_set_cursor_bitmap;
+			return NULL;
 		case B_MOVE_CURSOR:
 			if (gInfo->shared_info->cursor_memory != NULL)
 				return (void*)intel_move_cursor;
+			return NULL;
 		case B_SHOW_CURSOR:
 			if (gInfo->shared_info->cursor_memory != NULL)
 				return (void*)intel_show_cursor;
-
 			return NULL;
 
 		/* engine/synchronization */
@@ -112,6 +117,8 @@ get_accelerant_hook(uint32 feature, void* data)
 		case B_INVERT_RECTANGLE:
 			return (void*)intel_invert_rectangle;
 		case B_FILL_SPAN:
+			if (gInfo->shared_info->device_type.InGroup(INTEL_GROUP_ILK)) 
+				return (void*)intel_fill_span;
 			return NULL;//(void*)intel_fill_span;
 
 		// overlay
@@ -128,7 +135,9 @@ get_accelerant_hook(uint32 feature, void* data)
 				|| gInfo->shared_info->device_type.IsModel(INTEL_MODEL_965M)
 				|| gInfo->shared_info->device_type.InGroup(INTEL_GROUP_G4x)
 				|| gInfo->shared_info->device_type.InGroup(INTEL_GROUP_PIN)
-				|| gInfo->shared_info->device_type.InGroup(INTEL_GROUP_ILK)
+				//|| gInfo->shared_info->device_type.InGroup(INTEL_GROUP_ILK)
+				// ILK (Ironlake/Gen5) removed: legacy overlay should work
+				// via MI_OVERLAY_FLIP, same as Gen3/Gen4.
 				|| gInfo->shared_info->device_type.InFamily(INTEL_FAMILY_SER5)
 				|| gInfo->shared_info->device_type.InFamily(INTEL_FAMILY_SOC0))
 				return NULL;
