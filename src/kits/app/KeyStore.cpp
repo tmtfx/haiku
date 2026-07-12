@@ -220,8 +220,9 @@ BKeyStore::GetEncryptedKey(const char* keyring, BKeyType type,
 	BMessage keyMessage;
 	if (reply.FindMessage("key", &keyMessage) != B_OK)
 		return B_ERROR;
-
-	return key.Unflatten(keyMessage);
+	result = key.Unflatten(keyMessage);
+	fprintf(stderr,"In GetEncryptedKey, Unflatten di KeyMessage ha ritornato %d", result);
+	return result;
 }
 
 
