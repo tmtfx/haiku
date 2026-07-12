@@ -480,8 +480,12 @@ KeyStoreServer::MessageReceived(BMessage* message)
 
 			// Decrypt in-place before returning to caller.
 			result = _DecryptKeyData(keyMessage);
-			if (result == B_OK)
+			if (result == B_OK) {
+				fprintf(stderr,"decifratura andata a buon fine, rispondo al mittente\n");
 				reply.AddMessage("key", &keyMessage);
+			} else {
+				fprintf(stderr, "decifratura fallita!!!\n");
+			}
 
 			break;
 		}
@@ -503,8 +507,10 @@ KeyStoreServer::MessageReceived(BMessage* message)
 
 			// Encrypt the key data with the session password.
 			result = _EncryptKeyData(keyMessage);
-			if (result != B_OK)
+			if (result != B_OK) {
+				fprintf(stderr,"cifratura della chiave fallita\n");
 				break;
+			}
 
 			BString secondaryIdentifier;
 			if (keyMessage.FindString("secondaryIdentifier",
