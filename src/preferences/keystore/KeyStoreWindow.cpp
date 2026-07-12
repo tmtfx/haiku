@@ -243,6 +243,19 @@ void KeyStoreWindow::_UpdateKeyDetails()
         details << B_TRANSLATE("Error loading key content: ") << strerror(err) << "\n";
     }
 
+    // Aggiungiamo l'elenco delle applicazioni autorizzate per questa keyring
+    details << "\n=== " << B_TRANSLATE("AUTHORIZED APPLICATIONS") << " ===\n";
+    uint32 appCookie = 0;
+    BString appSig;
+    bool hasApps = false;
+    while (store.GetNextApplication(keyringArg, appCookie, appSig) == B_OK) {
+        details << "  - " << appSig << "\n";
+        hasApps = true;
+    }
+    if (!hasApps) {
+        details << "  " << B_TRANSLATE("[No applications authorized yet]") << "\n";
+    }
+
     fDetailsView->SetText(details.String());
 }
 
