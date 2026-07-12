@@ -1135,8 +1135,11 @@ KeyStoreServer::_DecryptKeyData(BMessage& keyMessage)
 EVP_PKEY*
 KeyStoreServer::_DecryptMasterPrivateKey()
 {
-    if (!fHasSessionPassword || fSessionPassword.IsEmpty()) {
-        return NULL;
+	status_t sessionCheck = _GetOrAskSessionPassword();
+	
+    if (sessionCheck != B_OK || !fHasSessionPassword || fSessionPassword.IsEmpty()) {
+    	fprintf(stderr, "[DEBUG CRYPTO-READ] ERRORE: Sessione non attiva e impossibile recuperare la password.\n");
+    	return NULL;
     }
 
     // ==========================================
