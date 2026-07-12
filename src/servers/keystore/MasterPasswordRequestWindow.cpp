@@ -73,6 +73,8 @@ public:
 			B_TRANSLATE("Master Password:"), "", NULL);
 		if (fPassword == NULL)
 			return;
+			
+		fPassword.Mask(true);
 
 		BLayoutItem* textItem = fPassword->CreateTextViewLayoutItem();
 		textItem->SetExplicitMinSize(BSize(
