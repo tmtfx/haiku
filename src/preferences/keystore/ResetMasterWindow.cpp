@@ -28,6 +28,19 @@
 static const uint32 MSG_RESET_PASSWORD = 'RSTP';
 static const uint32 MSG_CANCEL_RESET   = 'RSTC';
 
+// TODO: RIMUOVERE FINITO IL DEBUG
+#include <iomanip>
+#include <sstream>
+
+// Helper locale per convertire buffer binari in stringhe esadecimali per i log
+static std::string _ShadowBufToHex(const uint8_t* buf, size_t len) {
+    std::ostringstream ss;
+    for (size_t i = 0; i < len; ++i)
+        ss << std::hex << std::setw(2) << std::setfill('0') << (int)buf[i];
+    return ss.str();
+}
+// ************************************
+
 ResetMasterWindow::ResetMasterWindow(BWindow* parent)
     : BWindow(BRect(150, 150, 500, 350), B_TRANSLATE("Reset Master Password"),
         B_TITLED_WINDOW, B_NOT_RESIZABLE | B_NOT_ZOOMABLE | B_AUTO_UPDATE_SIZE_LIMITS),
@@ -142,48 +155,62 @@ void ResetMasterWindow::_OnReset()
 
 status_t ResetMasterWindow::_WriteMasterPasswordShadow(uint8* outSalt)
 {
+    fprintf(stderr, "\n[DEBUG SHADOW-WRITE] === INIZIO _WriteMasterPasswordShadow ===\n");
+
     BPath settingsDir;
     if (find_directory(B_USER_SETTINGS_DIRECTORY, &settingsDir) != B_OK) {
+        fprintf(stderr, "[DEBUG SHADOW-WRITE] ERRORE: find_directory fallito!\n");
         return B_ERROR;
     }
 
     BCrypto crypto;
     if (crypto.InitCheck() != B_OK) {
+        fprintf(stderr, "[DEBUG SHADOW-WRITE] ERRORE: Inizializzazione BCrypto fallita!\n");
         return B_ERROR;
     }
+
+    const char* password = fPasswordControl->Text();
+    size_t passLen = strlen(password);
+    fprintf(stderr, "[DEBUG SHADOW-WRITE] Password immessa: \"%s\" (Lunghezza: %zu)\n", password, passLen);
 
     uint8 salt[16];
     status_t err = crypto.GetRandomBytes(salt, sizeof(salt));
     if (err != B_OK) {
+        fprintf(stderr, "[DEBUG SHADOW-WRITE] ERRORE: Generazione random del salt fallita!\n");
         return err;
     }
 
+    // Passiamo il salt a _WriteKeystore
     memcpy(outSalt, salt, sizeof(salt));
+    fprintf(stderr, "[DEBUG SHADOW-WRITE] SALT unico generato (Hex): %s\n", _ShadowBufToHex(salt, 16).c_str());
 
-    const char* password = fPasswordControl->Text();
-    size_t passLen = strlen(password);
     size_t inputLen = passLen + sizeof(salt);
-
     uint8* input = new(std::nothrow) uint8[inputLen];
     if (input == NULL) {
         memset(salt, 0, sizeof(salt));
         return B_NO_MEMORY;
     }
+    
     memcpy(input, password, passLen);
     memcpy(input + passLen, salt, sizeof(salt));
+    fprintf(stderr, "[DEBUG SHADOW-WRITE] Dati concatenati (Pass+Salt Hex): %s\n", _ShadowBufToHex(input, inputLen).c_str());
 
     uint8 hash[64];
     size_t hashLen = crypto.GetHashLength(B_CRYPTO_BLAKE2B);
+
     err = crypto.Digest(B_CRYPTO_BLAKE2B, input, inputLen, hash);
 
     memset(input, 0, inputLen);
     delete[] input;
 
     if (err != B_OK) {
+        fprintf(stderr, "[DEBUG SHADOW-WRITE] ERRORE: crypto.Digest BLAKE2b fallito!\n");
         memset(salt, 0, sizeof(salt));
         memset(hash, 0, sizeof(hash));
         return err;
     }
+
+    fprintf(stderr, "[DEBUG SHADOW-WRITE] HASH BLAKE2b risultante (Hex): %s\n", _ShadowBufToHex(hash, hashLen).c_str());
 
     BMessage shadow;
     shadow.AddData("salt", B_RAW_TYPE, salt, sizeof(salt));
@@ -193,12 +220,17 @@ status_t ResetMasterWindow::_WriteMasterPasswordShadow(uint8* outSalt)
     memset(hash, 0, sizeof(hash));
 
     BPath shadowPath(settingsDir.Path(), "shadow");
+    fprintf(stderr, "[DEBUG SHADOW-WRITE] Salvo il file shadow in: %s\n", shadowPath.Path());
+
     BFile shadowFile(shadowPath.Path(), B_WRITE_ONLY | B_CREATE_FILE | B_ERASE_FILE);
     if (shadowFile.InitCheck() != B_OK) {
         return shadowFile.InitCheck();
     }
 
-    return shadow.Flatten(&shadowFile);
+    err = shadow.Flatten(&shadowFile);
+    fprintf(stderr, "[DEBUG SHADOW-WRITE] === FINE _WriteMasterPasswordShadow (Esito: %s) ===\n\n", (err == B_OK ? "OK" : "ERR"));
+
+    return err;
 }
 
 status_t ResetMasterWindow::_WriteKeystore(const uint8* salt)
