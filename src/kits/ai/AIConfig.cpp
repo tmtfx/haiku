@@ -91,6 +91,7 @@ static bool _GetAPIKeyFromKeyStore(const char* pluginName, BString& out)
 {
     BKeyStore keyStore;
     BPasswordKey password;
+    password.SetTo("", B_KEY_PURPOSE_GENERIC, kAPIIdentifier, pluginName);
     status_t res = keyStore.GetEncryptedKey(kAIKeyring, B_KEY_TYPE_PASSWORD,
         kAPIIdentifier, pluginName, password);
     if (res != B_OK) return false;
