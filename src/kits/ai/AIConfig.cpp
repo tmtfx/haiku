@@ -103,23 +103,41 @@ static bool _GetAPIKeyFromKeyStore(const char* pluginName, BString& out)
 // Helper: store or remove API key
 static bool _StoreAPIKeyToKeyStore(const char* engine, const char* apiKey)
 {
+    fprintf(stderr, "Requested _StoreAPIKeyToKeyStore con motore %s e apiKey %s\n", engine, apiKey);
     BKeyStore keyStore;
     // If empty apiKey -> remove existing
     if (!apiKey || apiKey[0] == '\0') {
+    	fprintf(stderr,"Cancello la password visto che apiKey è vuoto\n");
         BPasswordKey existing;
         if (keyStore.GetEncryptedKey(kAIKeyring, B_KEY_TYPE_PASSWORD,
                 kAPIIdentifier, engine, existing) == B_OK) {
+            fprintf(stderr,"la chiave cifrata esiste, procedo a rimuovere...\n");
             status_t r = keyStore.RemoveKey(kAIKeyring, existing);
+            if (r == B_OK) {
+                fprintf(stderr,"chiave rimossa con successo\n");
+            } else {
+                fprintf(stderr, "impossibile rimuovere la chiave\n");
+            }
             return r == B_OK;
+        } else {
+            fprintf(stderr,"la chiave cifrata non esiste, non resta altro da fare, sicuramente non memorizzo una apiKey vuota\n");
         }
         return true; // nothing to remove
     }
-
+    
+    status_t r;
     // Remove existing if present
+    fprintf(stderr,"Cancello la password precedente, se esiste...\n");
     BPasswordKey existing;
     if (keyStore.GetEncryptedKey(kAIKeyring, B_KEY_TYPE_PASSWORD,
             kAPIIdentifier, engine, existing) == B_OK) {
-        keyStore.RemoveKey(kAIKeyring, existing);
+        fprintf(stderr,"la chiave cifrata esiste, procedo a rimuovere...\n");
+        r = keyStore.RemoveKey(kAIKeyring, existing);
+        if (r == B_OK) {
+                fprintf(stderr,"chiave rimossa con successo\n");
+        } else {
+                fprintf(stderr, "impossibile rimuovere la chiave\n");
+        }
     }
 
     // Ensure keyring exists (ignore error if already exists)
@@ -127,8 +145,18 @@ static bool _StoreAPIKeyToKeyStore(const char* engine, const char* apiKey)
 
     // Use BPasswordKey with purpose GENERIC to avoid implying web-only usage
     BPasswordKey pw;
-    pw.EncryptedSetTo(apiKey, B_KEY_PURPOSE_GENERIC, kAPIIdentifier, engine);
-    status_t r = keyStore.AddEncryptedKey(kAIKeyring, pw);
+    r = pw.EncryptedSetTo(apiKey, B_KEY_PURPOSE_GENERIC, kAPIIdentifier, engine);
+    if (r == B_OK) {
+                fprintf(stderr,"EncryptedSetTo andata a buon fine\n");
+    } else {
+                fprintf(stderr, "EncryptedSetTo ha fallito nel suo intento\n");
+    }
+    r = keyStore.AddEncryptedKey(kAIKeyring, pw);
+    if (r == B_OK) {
+                fprintf(stderr,"AddEncryptedKey andata a buon fine\n");
+    } else {
+                fprintf(stderr, "AddEncryptedKey ha fallito nel suo intento\n");
+    }
     return r == B_OK;
 }
 
@@ -235,17 +263,3 @@ bool SaveAISettings(const AISettings& settings)
 
     return true;
 }
-/*
-BString AISettingsToJSON(const AISettings& settings)
-{
-    // Minimal escaping not needed for simple keys; produce compact JSON
-    BString out;
-    out << "{";
-    out << "\"engine\":\"" << settings.engine << "\",";
-    out << "\"plugin\":\"" << settings.plugin << "\",";
-    out << "\"model\":\"" << settings.model << "\",";
-    out << "\"api_key\":\"" << settings.api_key << "\"";
-    out << "}";
-    return out;
-}
-*/
