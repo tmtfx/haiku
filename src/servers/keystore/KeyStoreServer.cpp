@@ -1005,9 +1005,20 @@ KeyStoreServer::_EncryptKeyData(BMessage& keyMessage)
 status_t
 KeyStoreServer::_DecryptKeyData(BMessage& keyMessage)
 {
+	fprintf(stderr, "[DEBUG SERVER] --- Entrato in _DecryptKeyData ---\n");
+	
 	bool encrypted = false;
-	if (keyMessage.FindBool("encrypted", &encrypted) != B_OK || !encrypted)
+	if (keyMessage.FindBool("encrypted", &encrypted) != B_OK || !encrypted) {
+		fprintf(stderr, "[DEBUG SERVER] Campo 'encrypted' ASSENTE nel BMessage della chiave!\n");
 		return B_OK; // not encrypted, nothing to do
+	}
+	
+	if (!encrypted) {
+        fprintf(stderr, "[DEBUG SERVER] Chiave non cifrata ('encrypted' = false), salto la decifratura.\n");
+        return B_OK; 
+    }
+    
+    fprintf(stderr, "[DEBUG SERVER] Rilevata chiave cifrata ('encrypted' = true). Inizio estrazione dati...\n");
 
 	const void* encData = NULL;
 	ssize_t encLen = 0;
@@ -1018,17 +1029,36 @@ KeyStoreServer::_DecryptKeyData(BMessage& keyMessage)
 			|| keyMessage.FindData("enc_nonce", B_RAW_TYPE,
 				&nonceData, &nonceLen) != B_OK
 			|| nonceLen != 16) {
+		fprintf(stderr, "[DEBUG SERVER] ERRORE: Impossibile trovare il campo 'data' raw nel messaggio!\n");
 		return B_BAD_DATA;
 	}
+	fprintf(stderr, "[DEBUG SERVER] Dati cifrati estratti. Lunghezza buffer: %" B_PRIdSSIZE " bytes\n", encLen);
+	
+	if (keyMessage.FindData("enc_nonce", B_RAW_TYPE, &nonceData, &nonceLen) != B_OK) {
+        fprintf(stderr, "[DEBUG SERVER] ERRORE: Impossibile trovare il campo 'enc_nonce' (IV)!\n");
+        return B_BAD_DATA;
+    }
+    fprintf(stderr, "[DEBUG SERVER] Nonce estratto. Lunghezza: %" B_PRIdSSIZE " bytes (Atteso: 16)\n", nonceLen);
+
+    if (nonceLen != 16) {
+        fprintf(stderr, "[DEBUG SERVER] ERRORE CRITICO: Lunghezza del nonce non valida (%" B_PRIdSSIZE " != 16)!\n", nonceLen);
+        return B_BAD_DATA;
+    }
+
+    fprintf(stderr, "[DEBUG SERVER] Derivazione della chiave di sessione dalla password master...\n");
 
 	uint8_t key[32];
 	status_t err = derive_session_key(fSessionPassword.String(),
 		fSessionPassword.Length(), (const uint8_t*)nonceData, key);
-	if (err != B_OK)
+	if (err != B_OK){
+		fprintf(stderr, "[DEBUG SERVER] ERRORE derivazione chiave (derive_session_key): %s (Codice: %d)\n", strerror(err), (int)err);
 		return err;
+	}
+	fprintf(stderr, "[DEBUG SERVER] Chiave di sessione derivata con successo.\n");
 
 	BCrypto crypto;
 	if (crypto.InitCheck() != B_OK) {
+		fprintf(stderr, "[DEBUG SERVER] ERRORE: Sottosistema BCrypto non inizializzato o fallito!\n");
 		secure_memzero_server(key, sizeof(key));
 		return B_ERROR;
 	}
@@ -1039,6 +1069,7 @@ KeyStoreServer::_DecryptKeyData(BMessage& keyMessage)
 
 	uint8_t* plainData = new(std::nothrow) uint8_t[encLen];
 	if (plainData == NULL) {
+		fprintf(stderr, "[DEBUG SERVER] ERRORE: Memoria insufficiente per allocare plainData!\n");
 		secure_memzero_server(key, sizeof(key));
 		return B_NO_MEMORY;
 	}
@@ -1047,6 +1078,7 @@ KeyStoreServer::_DecryptKeyData(BMessage& keyMessage)
 	uint8_t localIV[16];
 	memcpy(localIV, nonceData, 16);
 
+	fprintf(stderr, "[DEBUG SERVER] Esecuzione crypto.Decrypt in corso...\n");
 	ssize_t plainLen = crypto.Decrypt(key, sizeof(key),
 		//(const uint8_t*)nonceData, 16,
 		localIV, 16,
@@ -1056,19 +1088,28 @@ KeyStoreServer::_DecryptKeyData(BMessage& keyMessage)
 	secure_memzero_server(key, sizeof(key));
 
 	if (plainLen < 0) {
+		fprintf(stderr, "[DEBUG SERVER] L'ALGORITMO AES HA FALLITO! Errore di decifratura hardware/software (plainLen: %" B_PRIdSSIZE ")\n", plainLen);
 		secure_memzero_server(plainData, encLen);
 		delete[] plainData;
 		return B_BAD_DATA;
 	}
+	fprintf(stderr, "[DEBUG SERVER] DECIFRATURA AES OK! Lunghezza testo in chiaro decifrato: %" B_PRIdSSIZE " bytes\n", plainLen);
+	
+	if (plainLen > 0) {
+        fprintf(stderr, "[DEBUG SERVER] Anteprima testo decifrato (stringa): \"%s\"\n", (const char*)plainData);
+    }
 
 	// Replace with decrypted data; remove crypto metadata for the caller
 	keyMessage.RemoveName("data");
 	keyMessage.AddData("data", B_RAW_TYPE, plainData, plainLen);
 	keyMessage.RemoveName("enc_nonce");
 	keyMessage.SetBool("encrypted", false);
+	
+	fprintf(stderr, "[DEBUG SERVER] BMessage di risposta aggiornato (data reinserito, enc_nonce rimosso, encrypted = false).\n");
 
 	secure_memzero_server(plainData, encLen);
 	delete[] plainData;
+	fprintf(stderr, "[DEBUG SERVER] --- Fine _DecryptKeyData (Successo) ---\n");
 	return B_OK;
 }
 
