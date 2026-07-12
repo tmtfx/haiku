@@ -42,7 +42,7 @@ static std::string _ShadowBufToHex(const uint8_t* buf, size_t len) {
 // ************************************
 
 ResetMasterWindow::ResetMasterWindow(BWindow* parent)
-    : BWindow(BRect(150, 150, 500, 350), B_TRANSLATE("Reset Master Password"),
+    : BWindow(BRect(150, 150, 500, 400), B_TRANSLATE("Reset Master Password"),
         B_TITLED_WINDOW, B_NOT_RESIZABLE | B_NOT_ZOOMABLE | B_AUTO_UPDATE_SIZE_LIMITS),
       fParent(parent)
 {

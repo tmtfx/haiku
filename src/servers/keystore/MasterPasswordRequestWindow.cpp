@@ -133,7 +133,7 @@ private:
 
 MasterPasswordRequestWindow::MasterPasswordRequestWindow()
 	:
-	BWindow(BRect(50, 50, 100, 100),
+	BWindow(BRect(50, 50, 100, 160),
 		B_TRANSLATE_COMMENT("Master Password", "Window title"),
 		B_TITLED_WINDOW,
 		B_NOT_RESIZABLE | B_ASYNCHRONOUS_CONTROLS | B_NOT_ZOOMABLE

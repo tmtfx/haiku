@@ -217,7 +217,7 @@ private:
 };
 
 PrefletWindow::PrefletWindow()
-    : BWindow(BRect(100, 100, 750, 650), B_TRANSLATE("AI Preflet"), B_TITLED_WINDOW, B_AUTO_UPDATE_SIZE_LIMITS | B_QUIT_ON_WINDOW_CLOSE)
+    : BWindow(BRect(100, 100, 750, 750), B_TRANSLATE("AI Preflet"), B_TITLED_WINDOW, B_AUTO_UPDATE_SIZE_LIMITS | B_QUIT_ON_WINDOW_CLOSE)
 {
     // 1. Menu Selezione Tipo Engine (In alto)
     fEngineMenu = new BPopUpMenu("engines");
