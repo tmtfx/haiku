@@ -74,7 +74,7 @@ public:
 		if (fPassword == NULL)
 			return;
 			
-		fPassword.Mask(true);
+		fPassword->Mask(true);
 
 		BLayoutItem* textItem = fPassword->CreateTextViewLayoutItem();
 		textItem->SetExplicitMinSize(BSize(

@@ -3,9 +3,19 @@ SubDir HAIKU_TOP src preferences keystore ;
 UsePrivateHeaders preferences shared app interface ;
 UsePublicHeaders app interface support ;
 
+local cryptoLib = libcrypto_api.so ;
+SEARCH on $(cryptoLib) = /boot/system/lib ;
+
+local opensslLibs = libssl.so libcrypto.so ;
+SEARCH on $(opensslLibs) = /boot/system/develop/lib ;
+
+UseBuildFeatureHeaders openssl ;
+SubDirSysHdrs /boot/system/develop/headers ;
+
 Application KeyStore : 
     KeyStoreApp.cpp
     KeyStoreWindow.cpp
     PasswordWindow.cpp
-    : be localestub [ TargetLibstdc++ ] [ TargetLibsupc++ ] shared
+    ResetMasterWindow.cpp
+    : be localestub [ TargetLibstdc++ ] [ TargetLibsupc++ ] shared $(cryptoLib) $(opensslLibs)
 ;

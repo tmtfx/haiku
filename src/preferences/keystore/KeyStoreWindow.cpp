@@ -209,7 +209,7 @@ void KeyStoreWindow::_UpdateKeyDetails()
 
     fRemoveKeyButton->SetEnabled(true);
 
-    BKey key = keyItem->Key();
+    const BKey& key = keyItem->Key();
     BString keyringName = ringItem->Name();
     const char* keyringArg = (keyringName == B_TRANSLATE("Master")) ? NULL : keyringName.String();
 
@@ -288,7 +288,7 @@ void KeyStoreWindow::_RemoveSelectedKey()
     KeyItem* keyItem = dynamic_cast<KeyItem*>(fKeysList->ItemAt(keySel));
     if (!ringItem || !keyItem) return;
 
-    BKey key = keyItem->Key();
+    const BKey& key = keyItem->Key();
     BString keyringName = ringItem->Name();
     const char* keyringArg = (keyringName == B_TRANSLATE("Master")) ? NULL : keyringName.String();
 
