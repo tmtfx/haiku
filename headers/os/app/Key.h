@@ -117,6 +117,7 @@ public:
 									const char* secondaryIdentifier = NULL);
 
 			status_t			SetPassword(const char* password);
+			status_t			SetEncyptedPassword(const char* password);
 			const char*			Password() const;
 
 	virtual	void				PrintToStream();

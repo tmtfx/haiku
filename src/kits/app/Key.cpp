@@ -361,6 +361,15 @@ BPasswordKey::SetPassword(const char* password)
 	return SetData((const uint8*)password, strlen(password) + 1);
 }
 
+status_t
+BPasswordKey::SetEncryptedPassword(const char* password)
+{
+	status_t result = SetData((const uint8*)password, strlen(password) + 1);
+	if (result == B_OK)
+		SetEncrypted(true);
+	return result;
+}
+
 
 const char*
 BPasswordKey::Password() const
