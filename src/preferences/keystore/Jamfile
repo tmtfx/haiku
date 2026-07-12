@@ -1,0 +1,11 @@
+SubDir HAIKU_TOP src preferences keystore ;
+
+UsePrivateHeaders preferences shared app interface ;
+UsePublicHeaders app interface support ;
+
+Application KeyStore : 
+    KeyStoreApp.cpp
+    KeyStoreWindow.cpp
+    PasswordWindow.cpp
+    : be localestub [ TargetLibstdc++ ] [ TargetLibsupc++ ] shared
+;
