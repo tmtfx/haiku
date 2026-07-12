@@ -11,6 +11,9 @@
 #include <Messenger.h>
 #include <Roster.h>
 
+// TODO rimuovere dopo debug
+#include <cstdio>
+// ************************
 
 using namespace BPrivate;
 
