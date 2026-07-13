@@ -22,6 +22,8 @@
 #include <vector>
 #include <algorithm>
 
+#include <openssl/rand.h>
+
 #undef B_TRANSLATION_CONTEXT
 #define B_TRANSLATION_CONTEXT "ResetMasterWindow"
 
