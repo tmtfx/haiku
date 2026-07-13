@@ -6,6 +6,7 @@
  *		Axel Dörfler, axeld@pinc-software.de
  *		Alexander von Gluck IV, kallisti5@unixzen.com
  *		Adrien Destugues, pulkomandy@pulkomandy.tk
+ *		Fabio Tomat, f.t.public@gmail.com
  */
 
 
@@ -22,10 +23,14 @@
 #include <util/kernel_cpp.h>
 
 #include <vesa_info.h>
+#include <boot_item.h>
+
+#include <frame_buffer_console.h>
 
 #include "driver.h"
 #include "power.h"
 #include "utility.h"
+#include "intel_logo.h"
 
 
 #define TRACE_INTELEXTREME
@@ -38,6 +43,44 @@
 #define ERROR(x...) dprintf("intel_extreme: " x)
 #define CALLED(x...) TRACE("intel_extreme: CALLED %s\n", __PRETTY_FUNCTION__)
 
+
+static void
+draw_intel_logo(intel_info &info, struct frame_buffer_boot_info *bi)
+{
+	if (!bi)
+		return;
+
+	if (bi->depth != 32)
+		return;
+
+	uint32 screenWidth = bi->width;
+	uint32 screenHeight = bi->height;
+	uint32 bytesPerRow = bi->bytes_per_row ? bi->bytes_per_row : screenWidth * 4;
+	uint32 fbPitch = bytesPerRow / 4;
+
+	uint32 logoW = intel_logo_width;
+	uint32 logoH = intel_logo_height;
+	
+	int32 startX = (int32)((screenWidth - logoW) / 2);
+    if (startX < 0) startX = 0;
+
+    int32 startY = (int32)((screenHeight - logoH) / 2);
+    if (startY < 0) startY = 0;
+	uint8* fb = (uint8*)info.aperture_base;
+	// Se da problemi, non usare l'inizio assoluto dell'aperture, 
+	// usare l'indirizzo logico del FB del bootloader!
+	//uint8* fb = (uint8*)bi->frame_buffer;
+
+	for (uint32 y = 0; y < logoH && (startY + y) < screenHeight; y++) {
+		uint32 fbOffset = ((startY + y) * fbPitch + startX) * sizeof(uint32);
+		uint32 logoRowOffset = y * logoW;
+		uint32 remainingWidth = screenWidth - startX;
+		uint32 copyPixels = (logoW < remainingWidth) ? logoW : remainingWidth;
+		uint32 copySize = copyPixels * sizeof(uint32);
+
+		user_memcpy(fb + fbOffset, (void*)&intel_logo[logoRowOffset], copySize);
+	}
+}
 
 static void
 init_overlay_registers(overlay_registers* _registers)
@@ -600,6 +643,9 @@ status_t
 intel_extreme_init(intel_info &info)
 {
 	CALLED();
+	struct frame_buffer_boot_info* bi = (struct frame_buffer_boot_info*)get_boot_item(
+        FRAME_BUFFER_BOOT_INFO, NULL);
+
 	info.aperture = gGART->map_aperture(info.pci->bus, info.pci->device,
 		info.pci->function, 0, &info.aperture_base);
 	if (info.aperture < B_OK) {
@@ -848,9 +894,28 @@ intel_extreme_init(intel_info &info)
 		// TODO: set status page
 	}
 	if (hardwareCursor) {
-		intel_allocate_memory(info, B_PAGE_SIZE, 0, B_APERTURE_NEED_PHYSICAL,
+		//intel_allocate_memory(info, B_PAGE_SIZE, 0, B_APERTURE_NEED_PHYSICAL,
+		//	(addr_t*)&info.shared_info->cursor_memory,
+		//	&info.shared_info->physical_cursor_memory);
+		size_t cursorSize = B_PAGE_SIZE;
+		// ARGB/XRGB cursors are 64x64x4 bytes = 16KB.
+		if (info.device_type.Generation() >= 4)
+			cursorSize = 4 * B_PAGE_SIZE;
+		status_t cursorStatus = intel_allocate_memory(info, cursorSize, 0,
+			B_APERTURE_NEED_PHYSICAL,
 			(addr_t*)&info.shared_info->cursor_memory,
 			&info.shared_info->physical_cursor_memory);
+		if (cursorStatus == B_OK) {
+			info.shared_info->cursor_buffer_offset
+				= (addr_t)info.shared_info->cursor_memory - info.aperture_base;
+			ERROR("cursor: allocated %zu bytes at %p (phys=%" B_PRIxPHYSADDR ") offset=0x%" B_PRIx32 "\n",
+				cursorSize, info.shared_info->cursor_memory,
+				info.shared_info->physical_cursor_memory,
+				info.shared_info->cursor_buffer_offset);
+		} else {
+			ERROR("cursor: allocation failed: %s\n", strerror(cursorStatus));
+			info.shared_info->cursor_memory = NULL;
+		}
 	}
 
 	edid1_info* edidInfo = (edid1_info*)get_boot_item(VESA_EDID_BOOT_INFO,
@@ -917,6 +982,9 @@ intel_extreme_init(intel_info &info)
 		info.shared_info->hw_cdclk = 450000;
 	}
 	TRACE("%s: hw_cdclk: %" B_PRIu32 " kHz\n", __func__, info.shared_info->hw_cdclk);
+
+	draw_intel_logo(info, bi);
+	snooze(2000000);
 
 	TRACE("%s: completed successfully!\n", __func__);
 	return B_OK;
