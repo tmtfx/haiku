@@ -46,6 +46,7 @@
 #include <openssl/x509.h>
 #include <openssl/rsa.h>
 #include <openssl/err.h>
+#include <openssl/rand.h>
 
 #include <DiskDevice.h>
 #include <DiskDeviceRoster.h>
@@ -1457,7 +1458,7 @@ InstallerWindow::_WriteKeystore(const uint8* salt)
 	// ==========================================
     // 1. KDF MANUALE CON OPENSSL (1000 ROUND SHA256)
     // ==========================================
-    const char* password = fPasswordControl->Text();
+    const char* password = fMasterPassword1->Text();
     size_t passLen = strlen(password);
     size_t inputLen = passLen + 16;
 

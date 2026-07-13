@@ -18,11 +18,11 @@
 #include <openssl/x509.h>
 #include <openssl/rsa.h>
 #include <openssl/err.h>
+#include <openssl/rand.h>
 #include "crypto/BCrypto.h"
 #include <vector>
 #include <algorithm>
 
-#include <openssl/rand.h>
 
 #undef B_TRANSLATION_CONTEXT
 #define B_TRANSLATION_CONTEXT "ResetMasterWindow"
