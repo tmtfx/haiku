@@ -1132,7 +1132,7 @@ KeyStoreServer::_DecryptKeyData(BMessage& keyMessage)
     return result;
 }
 
-/* versione con BCrypto
+/* versione con BCrypto, non va, indagare
 EVP_PKEY*
 KeyStoreServer::_DecryptMasterPrivateKey()
 {
@@ -1289,7 +1289,6 @@ KeyStoreServer::_DecryptMasterPrivateKey()
 
     return privKey; 
 }*/
-#include <openssl/evp.h>
 
 EVP_PKEY*
 KeyStoreServer::_DecryptMasterPrivateKey()

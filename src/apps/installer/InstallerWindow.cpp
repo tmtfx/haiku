@@ -1200,7 +1200,7 @@ InstallerWindow::_WriteMasterPasswordShadow(uint8* outSalt)
     return err;
 }
 // 
-
+/* Con BCrypto, non funziona da capire dove
 status_t
 InstallerWindow::_WriteKeystore(const uint8* salt)
 {
@@ -1410,7 +1410,204 @@ InstallerWindow::_WriteKeystore(const uint8* salt)
 	delete[] attrData;
 
 	return B_OK;
+}*/
+status_t
+InstallerWindow::_WriteKeystore(const uint8* salt)
+{
+	fprintf(stderr, "[Keystore] Inizio procedura _WriteKeystore...\n");
+	// --- 1. Resolve destination mount point ---
+	PartitionMenuItem* dstItem
+		= (PartitionMenuItem*)fDestMenu->FindMarked();
+	if (dstItem == NULL){
+		fprintf(stderr, "[Keystore] ERRORE: dstItem è NULL (Nessuna partizione selezionata).\n");
+		return B_BAD_VALUE;
+	}
+
+	BDiskDeviceRoster roster;
+	BDiskDevice device;
+	BPartition* partition = NULL;
+
+	status_t err = roster.GetPartitionWithID(dstItem->ID(), &device, &partition);
+	if (err != B_OK){
+		fprintf(stderr, "[Keystore] ERRORE GetPartitionWithID: %s (0x%" B_PRIx32 ")\n", strerror(err), err);
+		return err;
+	}
+
+	BPath destRoot;
+	if (partition != NULL)
+		err = partition->GetMountPoint(&destRoot);
+	else
+		err = device.GetMountPoint(&destRoot);
+	if (err != B_OK){
+		fprintf(stderr, "[Keystore] ERRORE GetMountPoint: %s (0x%" B_PRIx32 ")\n", strerror(err), err);
+		return err;
+	}
+	fprintf(stderr, "[Keystore] Target mount point: %s\n", destRoot.Path());
+
+	// --- 2. Ensure keystore directory exists ---
+	BPath keystoreDir(destRoot.Path(), "home/config/settings/system/keystore");
+	err = create_directory(keystoreDir.Path(), 0755);
+	if (err != B_OK && err != B_FILE_EXISTS) {
+		fprintf(stderr, "[Keystore] ERRORE create_directory in %s: %s\n", keystoreDir.Path(), strerror(err));
+		return err;
+	}
+
+	BPath keyPath(keystoreDir.Path(), "master");
+	
+	// ==========================================
+    // 1. KDF MANUALE CON OPENSSL (1000 ROUND SHA256)
+    // ==========================================
+    const char* password = fPasswordControl->Text();
+    size_t passLen = strlen(password);
+    size_t inputLen = passLen + 16;
+
+    uint8* kdfInput = new(std::nothrow) uint8[inputLen];
+    if (kdfInput == NULL) return B_NO_MEMORY;
+    
+    memcpy(kdfInput, password, passLen);
+    memcpy(kdfInput + passLen, salt, 16);
+
+    uint8 aesKey[32];
+    unsigned int mdLen = 0;
+    
+    // Primo round SHA256
+    EVP_Digest(kdfInput, inputLen, aesKey, &mdLen, EVP_sha256(), NULL);
+    OPENSSL_cleanse(kdfInput, inputLen);
+    delete[] kdfInput;
+
+    // Restanti 999 round
+    for (int i = 1; i < 1000; i++) {
+        EVP_Digest(aesKey, 32, aesKey, &mdLen, EVP_sha256(), NULL);
+    }
+
+    // ==========================================
+    // 2. GENERAZIONE COPPIA DI CHIAVI RSA-2048
+    // ==========================================
+    EVP_PKEY* pkey = NULL;
+    EVP_PKEY_CTX* kctx = EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, NULL);
+    if (kctx == NULL
+            || EVP_PKEY_keygen_init(kctx) <= 0
+            || EVP_PKEY_CTX_set_rsa_keygen_bits(kctx, 2048) <= 0
+            || EVP_PKEY_keygen(kctx, &pkey) <= 0) {
+        EVP_PKEY_CTX_free(kctx);
+        OPENSSL_cleanse(aesKey, sizeof(aesKey));
+        return B_ERROR;
+    }
+    EVP_PKEY_CTX_free(kctx);
+
+    // Estrarre Chiave Pubblica in formato DER nudo
+    unsigned char* pubDer = NULL;
+    int pubLen = i2d_PUBKEY(pkey, &pubDer);
+    if (pubLen <= 0 || pubDer == NULL) {
+        EVP_PKEY_free(pkey);
+        OPENSSL_cleanse(aesKey, sizeof(aesKey));
+        return B_ERROR;
+    }
+
+    // Estrarre Chiave Privata in formato DER nudo
+    unsigned char* privDer = NULL;
+    int privLen = i2d_PrivateKey(pkey, &privDer);
+    EVP_PKEY_free(pkey);
+    if (privLen <= 0 || privDer == NULL) {
+        OPENSSL_free(pubDer);
+        OPENSSL_cleanse(aesKey, sizeof(aesKey));
+        return B_ERROR;
+    }
+
+    // ==========================================
+    // 3. CIFRATURA SIMMETRICA AES-256-CBC CON OPENSSL
+    // ==========================================
+    uint8 iv[16];
+    if (RAND_bytes(iv, sizeof(iv)) != 1) {
+        OPENSSL_cleanse(privDer, privLen);
+        OPENSSL_free(privDer);
+        OPENSSL_free(pubDer);
+        OPENSSL_cleanse(aesKey, sizeof(aesKey));
+        return B_ERROR;
+    }
+
+    // Allocazione buffer ciphertext (Dimensione massima = plaintext + blocco AES)
+    int maxEncLen = privLen + 16; 
+    uint8* encPriv = new(std::nothrow) uint8[maxEncLen];
+    if (encPriv == NULL) {
+        OPENSSL_cleanse(privDer, privLen);
+        OPENSSL_free(privDer);
+        OPENSSL_free(pubDer);
+        OPENSSL_cleanse(aesKey, sizeof(aesKey));
+        return B_NO_MEMORY;
+    }
+
+    EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+    int len = 0;
+    int encLen = 0;
+
+    EVP_EncryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, aesKey, iv);
+    EVP_CIPHER_CTX_set_padding(ctx, 1); // Abilita PKCS7
+
+    if (EVP_EncryptUpdate(ctx, encPriv, &len, privDer, privLen) != 1) {
+        fprintf(stderr, "[DEBUG WRITE] Errore in EncryptUpdate\n");
+    }
+    encLen = len;
+
+    if (EVP_EncryptFinal_ex(ctx, encPriv + len, &len) != 1) {
+        fprintf(stderr, "[DEBUG WRITE] Errore in EncryptFinal\n");
+        encLen = -1;
+    } else {
+        encLen += len;
+    }
+
+    EVP_CIPHER_CTX_free(ctx);
+    OPENSSL_cleanse(privDer, privLen);
+    OPENSSL_free(privDer);
+    OPENSSL_cleanse(aesKey, sizeof(aesKey));
+
+    if (encLen < 0) {
+        delete[] encPriv;
+        OPENSSL_free(pubDer);
+        return B_ERROR;
+    }
+
+    // ==========================================
+    // 4. SCRITTURA SU DISCO (FILE + ATTRIBUTO BFS)
+    // ==========================================
+    BFile keyFile(keyPath.Path(), B_READ_WRITE | B_CREATE_FILE | B_ERASE_FILE);
+    if (keyFile.InitCheck() != B_OK) {
+        err = keyFile.InitCheck();
+        OPENSSL_free(pubDer);
+        delete[] encPriv;
+        return err;
+    }
+
+    // Scrittura della chiave pubblica nel corpo del file
+    keyFile.Write(pubDer, pubLen);
+    OPENSSL_free(pubDer);
+
+    // Preparazione pacchetto BFS: IV (16) + Ciphertext (encLen)
+    size_t attrSize = sizeof(iv) + encLen;
+    uint8* attrData = new(std::nothrow) uint8[attrSize];
+    if (attrData == NULL) {
+        delete[] encPriv;
+        return B_NO_MEMORY;
+    }
+    
+    memcpy(attrData, iv, sizeof(iv));
+    memcpy(attrData + sizeof(iv), encPriv, encLen);
+    delete[] encPriv;
+
+    ssize_t attrWritten = keyFile.WriteAttr("crypto:private_key", B_RAW_TYPE, 0, attrData, attrSize);
+    if (attrWritten < 0) {
+        err = attrWritten;
+    } else {
+        err = B_OK;
+        fprintf(stderr, "[DEBUG WRITE] Scrittura completata. PrivKey DER puro cifrato!\n");
+    }
+
+    OPENSSL_cleanse(attrData, attrSize);
+    delete[] attrData;
+
+    return err;
 }
+
 
 bool
 InstallerWindow::QuitRequested()

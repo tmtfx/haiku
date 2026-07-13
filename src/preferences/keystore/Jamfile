@@ -15,7 +15,6 @@ SubDirSysHdrs /boot/system/develop/headers ;
 Application KeyStore : 
     KeyStoreApp.cpp
     KeyStoreWindow.cpp
-    PasswordWindow.cpp
     ResetMasterWindow.cpp
     : be localestub [ TargetLibstdc++ ] [ TargetLibsupc++ ] shared $(cryptoLib) $(opensslLibs)
 ;
