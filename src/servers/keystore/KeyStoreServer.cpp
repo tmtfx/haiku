@@ -493,7 +493,7 @@ KeyStoreServer::MessageReceived(BMessage* message)
 			}
 
 			BMessage keyMessage;
-			result = keyring->FindKey(identifier, secondaryIdentifier, true,
+			result = keyring->FindKey(identifier, secondaryIdentifier, false,
 				&keyMessage);
 			if (result != B_OK)
 				break;

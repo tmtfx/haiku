@@ -87,7 +87,7 @@ status_t AIGetPluginModels(const char* pluginName, BString& outJsonModels)
 }
 
 // Helper: read API key from KeyStore under keyring kAIKeyring with secondary=engine
-static bool _GetAPIKeyFromKeyStore(const char* pluginName, BString& out)
+/*static bool _GetAPIKeyFromKeyStore(const char* pluginName, BString& out)
 {
     BKeyStore keyStore;
     BPasswordKey password;
@@ -99,8 +99,22 @@ static bool _GetAPIKeyFromKeyStore(const char* pluginName, BString& out)
     if (!pwd) return false;
     out.SetTo(pwd);
     return true;
+}*/
+static bool _GetAPIKeyFromKeyStore(const char* pluginName, BString& out)
+{
+    BKeyStore keyStore;
+    BPasswordKey password;
+    // Identifier = pluginName, SecondaryIdentifier = kAPIIdentifier
+    password.SetTo("", B_KEY_PURPOSE_GENERIC, pluginName, kAPIIdentifier);
+    status_t res = keyStore.GetEncryptedKey(kAIKeyring, B_KEY_TYPE_PASSWORD,
+        pluginName, kAPIIdentifier, password);
+    if (res != B_OK) return false;
+    const char* pwd = password.Password();
+    if (!pwd) return false;
+    out.SetTo(pwd);
+    return true;
 }
-
+/*
 // Helper: store or remove API key
 static bool _StoreAPIKeyToKeyStore(const char* engine, const char* apiKey)
 {
@@ -164,7 +178,49 @@ static bool _StoreAPIKeyToKeyStore(const char* engine, const char* apiKey)
                 fprintf(stderr, "AddEncryptedKey ha fallito nel suo intento\n");
     }
     return r == B_OK;
+}*/
+static bool _StoreAPIKeyToKeyStore(const char* engine, const char* apiKey)
+{
+    fprintf(stderr, "Requested _StoreAPIKeyToKeyStore con motore %s e apiKey %s\n", engine, apiKey);
+    BKeyStore keyStore;
+    
+    // Se vuoto apiKey -> rimuovi esistente usando la nuova struttura
+    if (!apiKey || apiKey[0] == '\0') {
+        fprintf(stderr,"Cancello la password visto che apiKey è vuoto\n");
+        BPasswordKey existing;
+        existing.SetTo("", B_KEY_PURPOSE_GENERIC, engine, kAPIIdentifier);
+        if (keyStore.GetEncryptedKey(kAIKeyring, B_KEY_TYPE_PASSWORD,
+                engine, kAPIIdentifier, existing) == B_OK) {
+            fprintf(stderr,"la chiave cifrata esiste, procedo a rimuovere...\n");
+            status_t r = keyStore.RemoveKey(kAIKeyring, existing);
+            return r == B_OK;
+        }
+        return true; 
+    }
+    r = keyStore.AddEncryptedKey(kAIKeyring, pw);
+    status_t r;
+    // Rimuovi l'esistente se presente
+    BPasswordKey existing;
+    existing.SetTo("", B_KEY_PURPOSE_GENERIC, engine, kAPIIdentifier);
+    if (keyStore.GetEncryptedKey(kAIKeyring, B_KEY_TYPE_PASSWORD,
+            engine, kAPIIdentifier, existing) == B_OK) {
+        keyStore.RemoveKey(kAIKeyring, existing);
+    }
+
+    // Assicurati che il keyring esista
+    r = keyStore.AddKeyring(kAIKeyring);
+
+    // Crea la nuova chiave protetta invertendo gli ID
+    BPasswordKey pw;
+    r = pw.EncryptedSetTo(apiKey, B_KEY_PURPOSE_GENERIC, engine, kAPIIdentifier);
+    if (r != B_OK) {
+        fprintf(stderr, "EncryptedSetTo fallito\n");
+        return false;
+    }
+
+    return r == B_OK;
 }
+
 
 // Check whether an API key exists for the given engine
 bool HasAPIKey(const char* plugin)
@@ -189,7 +245,7 @@ bool RemoveAPIKey(const char* plugin)
 {
     return _StoreAPIKeyToKeyStore(plugin, "");
 }
-
+/*
 // Rotate (replace) the API key for engine with newKey
 bool RotateAPIKey(const char* engine, const char* newKey)
 {
@@ -205,6 +261,20 @@ bool RotateAPIKey(const char* engine, const char* newKey)
     ks.AddKeyring(kAIKeyring);
     BPasswordKey pw;
     pw.EncryptedSetTo(newKey, B_KEY_PURPOSE_GENERIC, kAPIIdentifier, engine);
+    return ks.AddEncryptedKey(kAIKeyring, pw) == B_OK;
+}*/
+bool RotateAPIKey(const char* engine, const char* newKey)
+{
+    if (!newKey) return false;
+    BKeyStore ks;
+    BPasswordKey existing;
+    if (ks.GetEncryptedKey(kAIKeyring, B_KEY_TYPE_PASSWORD, engine,
+            kAPIIdentifier, existing) == B_OK) {
+        ks.RemoveKey(kAIKeyring, existing);
+    }
+    ks.AddKeyring(kAIKeyring);
+    BPasswordKey pw;
+    pw.EncryptedSetTo(newKey, B_KEY_PURPOSE_GENERIC, engine, kAPIIdentifier);
     return ks.AddEncryptedKey(kAIKeyring, pw) == B_OK;
 }
 
