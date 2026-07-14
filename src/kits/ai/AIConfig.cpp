@@ -87,7 +87,7 @@ status_t AIGetPluginModels(const char* pluginName, BString& outJsonModels)
 }
 
 // Helper: read API key from KeyStore under keyring kAIKeyring with secondary=engine
-/*static bool _GetAPIKeyFromKeyStore(const char* pluginName, BString& out)
+static bool _GetAPIKeyFromKeyStore(const char* pluginName, BString& out)
 {
     BKeyStore keyStore;
     BPasswordKey password;
@@ -99,7 +99,8 @@ status_t AIGetPluginModels(const char* pluginName, BString& outJsonModels)
     if (!pwd) return false;
     out.SetTo(pwd);
     return true;
-}*/
+}
+/*
 static bool _GetAPIKeyFromKeyStore(const char* pluginName, BString& out)
 {
     BKeyStore keyStore;
@@ -113,8 +114,8 @@ static bool _GetAPIKeyFromKeyStore(const char* pluginName, BString& out)
     if (!pwd) return false;
     out.SetTo(pwd);
     return true;
-}
-/*
+}*/
+
 // Helper: store or remove API key
 static bool _StoreAPIKeyToKeyStore(const char* engine, const char* apiKey)
 {
@@ -161,7 +162,7 @@ static bool _StoreAPIKeyToKeyStore(const char* engine, const char* apiKey)
 
     // Ensure keyring exists (ignore error if already exists)
     r = keyStore.AddKeyring(kAIKeyring);
-    fprintf(stderr,"Aggiunta keyring (probabilmente esistente) ritorna %d", r);
+    fprintf(stderr,"Aggiunta keyring (probabilmente esistente) ritorna %d\n", r);
 
     // Use BPasswordKey with purpose GENERIC to avoid implying web-only usage
     BPasswordKey pw;
@@ -178,7 +179,8 @@ static bool _StoreAPIKeyToKeyStore(const char* engine, const char* apiKey)
                 fprintf(stderr, "AddEncryptedKey ha fallito nel suo intento\n");
     }
     return r == B_OK;
-}*/
+}
+/*
 static bool _StoreAPIKeyToKeyStore(const char* engine, const char* apiKey)
 {
     fprintf(stderr, "Requested _StoreAPIKeyToKeyStore con motore %s e apiKey %s\n", engine, apiKey);
@@ -219,7 +221,7 @@ static bool _StoreAPIKeyToKeyStore(const char* engine, const char* apiKey)
     }
 
     return r == B_OK;
-}
+}*/
 
 
 // Check whether an API key exists for the given engine
@@ -245,7 +247,7 @@ bool RemoveAPIKey(const char* plugin)
 {
     return _StoreAPIKeyToKeyStore(plugin, "");
 }
-/*
+
 // Rotate (replace) the API key for engine with newKey
 bool RotateAPIKey(const char* engine, const char* newKey)
 {
@@ -262,8 +264,8 @@ bool RotateAPIKey(const char* engine, const char* newKey)
     BPasswordKey pw;
     pw.EncryptedSetTo(newKey, B_KEY_PURPOSE_GENERIC, kAPIIdentifier, engine);
     return ks.AddEncryptedKey(kAIKeyring, pw) == B_OK;
-}*/
-bool RotateAPIKey(const char* engine, const char* newKey)
+}
+/*bool RotateAPIKey(const char* engine, const char* newKey)
 {
     if (!newKey) return false;
     BKeyStore ks;
@@ -276,7 +278,7 @@ bool RotateAPIKey(const char* engine, const char* newKey)
     BPasswordKey pw;
     pw.EncryptedSetTo(newKey, B_KEY_PURPOSE_GENERIC, engine, kAPIIdentifier);
     return ks.AddEncryptedKey(kAIKeyring, pw) == B_OK;
-}
+}*/
 
 bool LoadAISettings(AISettings& out)
 {
