@@ -36,12 +36,20 @@ typedef void* ai_plugin_t;
 
 using namespace BPrivate::Network;
 
+class SyncListener : public BUrlProtocolListener {
+public:
+    SyncListener() {}
+    virtual ~SyncListener() {}
+    bool CertificateVerificationFailed(BUrlRequest* request, BCertificate& certificate, const char* message) override {
+        return false; 
+    }
+};
+
 class StreamTarget : public BDataIO {
 public:
     StreamTarget(const char* notifyPath) {
         fFile.SetTo(notifyPath, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
         fBuffer.SetTo("");
-        fLastToken.SetTo("");
     }
 
     virtual ssize_t Write(const void* buffer, size_t size) override {
@@ -51,17 +59,28 @@ public:
 
         int32 currentPos = 0;
         while (true) {
-            int32 matchPos = fBuffer.FindFirst("\"text\": \"", currentPos);
+            int32 matchPos = fBuffer.FindFirst("\"text\":", currentPos);
             if (matchPos == B_ERROR) break;
             
-            matchPos += 9;
-            int32 endContent = fBuffer.FindFirst("\"", matchPos);
+            matchPos += 7; // after `"text":`
+            // Skip spaces or tabs
+            while (matchPos < fBuffer.Length() && (fBuffer.ByteAt(matchPos) == ' ' || fBuffer.ByteAt(matchPos) == '\t')) {
+                matchPos++;
+            }
+            if (matchPos >= fBuffer.Length()) break; // Wait for more data
+            if (fBuffer.ByteAt(matchPos) != '"') {
+                // Skip invalid formatting
+                currentPos = matchPos;
+                continue;
+            }
+            matchPos++; // skip opening double-quote
             
+            int32 endContent = fBuffer.FindFirst("\"", matchPos);
             while (endContent != B_ERROR && fBuffer.ByteAt(endContent - 1) == '\\') {
                 endContent = fBuffer.FindFirst("\"", endContent + 1);
             }
 
-            if (endContent == B_ERROR) break;
+            if (endContent == B_ERROR) break; // Wait for more data
 
             BString token;
             fBuffer.CopyInto(token, matchPos, endContent - matchPos);
@@ -71,14 +90,8 @@ public:
             token.ReplaceAll("\\\"", "\"");
             token.ReplaceAll("\\\\", "\\");
 
-            if (token.Length() > fLastToken.Length() && token.StartsWith(fLastToken)) {
-                BString diff;
-                token.CopyInto(diff, fLastToken.Length(), token.Length() - fLastToken.Length());
-                fFile.Write(diff.String(), diff.Length());
-                fLastToken = token;
-            } else if (!token.IsEmpty() && fLastToken.IsEmpty()) {
+            if (!token.IsEmpty()) {
                 fFile.Write(token.String(), token.Length());
-                fLastToken = token;
             }
             
             currentPos = endContent + 1;
@@ -93,10 +106,9 @@ public:
 private:
     BFile   fFile;
     BString fBuffer;
-    BString fLastToken;
 };
 
-class CompletionListener : public BUrlProtocolListener {
+class CompletionListener : public SyncListener {
 public:
     CompletionListener(const char* notifyPath) : fPath(notifyPath) {}
 
@@ -299,15 +311,6 @@ void BuildPayloadFromContext(const BMessage* config, const char* currentPrompt, 
 
     outPayload.Append("]}");
 }
-
-class SyncListener : public BUrlProtocolListener {
-public:
-    SyncListener() {}
-    virtual ~SyncListener() {}
-    bool CertificateVerificationFailed(BUrlRequest* request, BCertificate& certificate, const char* message) override {
-        return false; 
-    }
-};
 
 extern "C" ai_plugin_t ai_plugin_init(const BMessage* config)
 {
