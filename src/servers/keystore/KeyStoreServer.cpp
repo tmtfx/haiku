@@ -524,18 +524,18 @@ KeyStoreServer::MessageReceived(BMessage* message)
 				result = B_BAD_VALUE;
 				break;
 			}
+			
+			BString secondaryIdentifier;
+			if (keyMessage.FindString("secondaryIdentifier",
+					&secondaryIdentifier) != B_OK) {
+				secondaryIdentifier = "";
+			}
 
 			// Encrypt the key data with the session password.
 			result = _EncryptKeyData(keyMessage);
 			if (result != B_OK) {
 				fprintf(stderr,"cifratura della chiave fallita\n");
 				break;
-			}
-
-			BString secondaryIdentifier;
-			if (keyMessage.FindString("secondaryIdentifier",
-					&secondaryIdentifier) != B_OK) {
-				secondaryIdentifier = "";
 			}
 
 			result = keyring->AddKey(identifier, secondaryIdentifier, keyMessage);
