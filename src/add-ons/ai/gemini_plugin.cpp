@@ -870,10 +870,12 @@ static status_t gemini_stream_thread_func(void* data)
             // Sotto-caso B: Gemini ha terminato la catena e restituisce il testo finale
             else if (partZero.FindString("text", &textContent) == B_OK) {
                 fprintf(stderr, "[GEMINI MCP] Risposta testuale finale ricevuta.\n");
-                BFile streamFile(args->notify_path, B_WRITE_ONLY | B_OPEN_AT_END);
+                BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
                 if (streamFile.InitCheck() == B_OK) {
                     streamFile.Write(textContent, strlen(textContent));
-                }
+                } else {
+					fprintf(stderr, "[GEMINI MCP] ERRORE: Impossibile creare/aprire il file di notifica!\n");
+    			}
                 executionLoop = false; // Abbiamo il testo finale, usciamo dal loop!
             }
         } else {
@@ -883,7 +885,7 @@ static status_t gemini_stream_thread_func(void* data)
 
     // Scriviamo il terminatore ufficiale sul file tmp per svegliare il Watcher del server
     {
-        BFile streamFile(args->notify_path, B_WRITE_ONLY | B_OPEN_AT_END);
+        BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
         if (streamFile.InitCheck() == B_OK) {
             BString endMarker = "<<STREAM_END>>";
             streamFile.Write(endMarker.String(), endMarker.Length());
