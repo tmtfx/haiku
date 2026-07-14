@@ -146,7 +146,8 @@ static bool _StoreAPIKeyToKeyStore(const char* engine, const char* apiKey)
     }
 
     // Ensure keyring exists (ignore error if already exists)
-    keyStore.AddKeyring(kAIKeyring);
+    r = keyStore.AddKeyring(kAIKeyring);
+    fprintf(stderr,"Aggiunta keyring (probabilmente esistente) ritorna %d", r);
 
     // Use BPasswordKey with purpose GENERIC to avoid implying web-only usage
     BPasswordKey pw;
