@@ -377,11 +377,22 @@ public:
 				}
 
 				int32 mcpPermissions = 0;
-				if (msg->FindInt32("mcp_permissions", &mcpPermissions) != B_OK) {
-					if (availableGlobalSettings) {
-						mcpPermissions = globalSettings.mcp_permissions;
-					}
+				//if (msg->FindInt32("mcp_permissions", &mcpPermissions) != B_OK) {
+				//	if (availableGlobalSettings) {
+				//		mcpPermissions = globalSettings.mcp_permissions;
+				//	}
+				//}
+				if (availableGlobalSettings) {
+    				mcpPermissions = globalSettings.mcp_permissions;
 				}
+
+				// 3. (Opzionale) Se il client vuole auto-limitarsi ulteriormente, può farlo,
+				// ma non potrà MAI ottenere più permessi di quelli concessi dal server.
+				int32 clientRequestedPermissions = 0;
+				if (msg->FindInt32("mcp_permissions", &clientRequestedPermissions) == B_OK) {
+				    mcpPermissions &= clientRequestedPermissions; // Intersezione bit a bit
+				}
+
 				session.mcp_permissions = mcpPermissions;
 
 				// Recuperiamo le capabilities del plugin per attivare MCP se supportato

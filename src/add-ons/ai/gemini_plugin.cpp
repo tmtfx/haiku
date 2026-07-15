@@ -685,6 +685,25 @@ void ConvertBMessageToGeminiToolsJson(const BMessage* toolsMsg, BString& outJson
     
     outJson << "]";
 }
+
+static BString EscapeStringForJson(const char* input) {
+    if (!input) return "";
+    BString escaped;
+    const char* p = input;
+    while (*p) {
+        switch (*p) {
+            case '\\': escaped << "\\\\"; break;
+            case '"':  escaped << "\\\""; break;
+            case '\n': escaped << "\\n"; break;
+            case '\r': escaped << "\\r"; break;
+            case '\t': escaped << "\\t"; break;
+            default:   escaped << *p; break;
+        }
+        p++;
+    }
+    return escaped;
+}
+
 static status_t gemini_stream_thread_func(void* data)
 {
     fprintf(stderr, "[GEMINI STREAM WORKER] Thread avviato.\n");
@@ -903,7 +922,9 @@ static status_t gemini_stream_thread_func(void* data)
                             toolResultBuf = resStr;
                         } else {
                             // Se è testo semplice (o vuoto), lo incapsuliamo in un JSON pulito per Gemini
-                            toolResultBuf.SetToFormat("{\"output\":\"%s\"}", resStr);
+                            BString escapedRes = EscapeStringForJson(resStr);
+                            //toolResultBuf.SetToFormat("{\"output\":\"%s\"}", resStr);
+                            toolResultBuf.SetToFormat("{\"output\":\"%s\"}", escapedRes.String());
                         }
                     } else {
                         // Se il server ha risposto con una stringa vuota (come nel tuo caso!)
