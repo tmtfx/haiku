@@ -1,6 +1,7 @@
 // gemini_plugin.cpp
 // Plugin per il servizio Google Gemini AI su Haiku - Versione Stateless Concorrente.
 #include <os/ai/AIPlugin.h>
+#include <os/ai/AINetworkPlugin.h>
 #include <os/ai/AICommands.h>
 #include <stdlib.h>
 #include <string.h>
@@ -35,7 +36,7 @@
 typedef void* ai_plugin_t;
 
 using namespace BPrivate::Network;
-
+/*
 class SyncListener : public BUrlProtocolListener {
 public:
     SyncListener() {}
@@ -43,7 +44,7 @@ public:
     bool CertificateVerificationFailed(BUrlRequest* request, BCertificate& certificate, const char* message) override {
         return false; 
     }
-};
+};*/
 
 class StreamTarget : public BDataIO {
 public:
