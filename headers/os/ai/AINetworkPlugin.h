@@ -5,8 +5,16 @@
 #ifndef AI_NETWORK_PLUGIN_H
 #define AI_NETWORK_PLUGIN_H
 
+#include <Url.h>
 #include <UrlProtocolListener.h>
+#include <UrlRequest.h>
+#include <File.h>        // Risolve l'errore su BFile
+#include <String.h>      // Per BString
+#include <Message.h>     // Per BMessage
+#include <Messenger.h>   // Per BMessenger
+#include <stdlib.h>      // Per free()
 
+using namespace BPrivate::Network;
 class SyncListener : public BUrlProtocolListener {
 public:
     SyncListener() {}

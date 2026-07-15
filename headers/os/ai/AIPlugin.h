@@ -9,6 +9,9 @@
 #include <stdint.h>
 #include <SupportDefs.h>
 #include <Message.h>
+#include <Messenger.h>
+#include <stdlib.h>
+#include <new>
 
 enum capabilities {
     AI_CAP_STREAMING			= 1 << 0,
@@ -17,6 +20,45 @@ enum capabilities {
     AI_CAP_MCP					= 1 << 3
 };
 
+struct AIPluginHandle {
+    char* base_url;
+
+    // Costruttore per inizializzare comodamente a nullptr
+    AIPluginHandle() : base_url(nullptr) {}
+
+    // Un distruttore virtuale è FONDAMENTALE qui. 
+    // Permette di liberare la memoria correttamente anche se usiamo l'ereditarietà!
+    virtual ~AIPluginHandle() {
+        if (base_url) {
+            free(base_url);
+        }
+    }
+};
+
+struct AsyncArgs {
+    char* api_key;
+    char* model;
+    char* notify_path;
+    char* base_url;
+    BMessage* context_copy;
+    BMessenger server_messenger;
+
+    AsyncArgs()
+        : api_key(nullptr),
+          model(nullptr),
+          notify_path(nullptr),
+          base_url(nullptr),
+          context_copy(nullptr),
+          server_messenger() {}
+
+    virtual ~AsyncArgs() { // Un distruttore virtuale è sempre una buona pratica
+        if (api_key) free(api_key);
+        if (model) free(model);
+        if (notify_path) free(notify_path);
+        if (base_url) free(base_url);
+        delete context_copy;
+    }
+};
 
 #ifdef __cplusplus
 extern "C" {
