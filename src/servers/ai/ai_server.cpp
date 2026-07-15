@@ -919,6 +919,94 @@ public:
 				break;
 			}
 			case MSG_EXECUTE_TOOL:
+            {
+                BString contextId = msg->FindString("context_id");
+                BString toolName = msg->FindString("name");
+                if (toolName.IsEmpty()) {
+                    toolName = msg->FindString("tool_name");
+                }
+
+                BString argsJson = msg->FindString("args");
+                fprintf(stderr, "[AI_SERVER] Richiesta esecuzione tool '%s'\n", toolName.String());
+
+                BMessage reply(B_REPLY);
+                status_t resultStatus = B_ERROR;
+                BString resultOutput;
+
+                // 1. Recupero della sessione attiva
+                ClientSession* session = nullptr;
+                for (auto& pair : gSessions) { 
+                    if (pair.second.context_id == contextId) {
+                        session = &pair.second;
+                        break;
+                    }
+                }
+
+                if (session == nullptr) {
+                    reply.AddInt32("status", B_ENTRY_NOT_FOUND);
+                    reply.AddString("result", "{\"error\":\"Sessione non trovata\"}");
+                    msg->SendReply(&reply);
+                    break;
+                }
+
+                // 2. CONTROLLO DI SICUREZZA: Il tool è registrato (quindi autorizzato dalla Preflet)?
+                BMessage* foundTool = nullptr;
+                int32 toolCount = session->mpcManager.CountItems();
+                for (int32 i = 0; i < toolCount; i++) {
+                    BMessage* tool = (BMessage*)session->mpcManager.ItemAt(i);
+                    if (tool && tool->FindString("name") == toolName) {
+                        foundTool = tool;
+                        break;
+                    }
+                }
+
+                if (foundTool == nullptr) {
+                    reply.AddInt32("status", B_NAME_NOT_FOUND);
+                    reply.AddString("result", "{\"error\":\"Tool non consentito dalle impostazioni di sicurezza (Preflet)\"}");
+                    msg->SendReply(&reply);
+                    break;
+                }
+
+                // 3. ESTRAZIONE ROBUSTA DEGLI ARGOMENTI (Normalizzazione per l'esecutore)
+                BMessage arguments;
+                if (msg->FindMessage("arguments", &arguments) != B_OK) {
+                    // Se non è già un BMessage, decodifichiamo la stringa JSON argsJson
+                    if (!argsJson.IsEmpty()) {
+                        BString path, cmd, text, title, content, action, name, value, pattern;
+                        
+                        // Estraiamo con fallbacks per gestire le variazioni di naming dell'LLM
+                        if (ExtractStringFromJson(argsJson.String(), "path", path) || 
+                            ExtractStringFromJson(argsJson.String(), "directory", path)) {
+                            arguments.AddString("path", path);
+                        }
+                        if (ExtractStringFromJson(argsJson.String(), "cmd", cmd) || 
+                            ExtractStringFromJson(argsJson.String(), "command", cmd)) {
+                            arguments.AddString("cmd", cmd);
+                        }
+                        if (ExtractStringFromJson(argsJson.String(), "text", text)) arguments.AddString("text", text);
+                        if (ExtractStringFromJson(argsJson.String(), "title", title)) arguments.AddString("title", title);
+                        if (ExtractStringFromJson(argsJson.String(), "content", content)) arguments.AddString("content", content);
+                        if (ExtractStringFromJson(argsJson.String(), "action", action)) arguments.AddString("action", action);
+                        if (ExtractStringFromJson(argsJson.String(), "name", name)) arguments.AddString("name", name);
+                        if (ExtractStringFromJson(argsJson.String(), "value", value)) arguments.AddString("value", value);
+                        if (ExtractStringFromJson(argsJson.String(), "pattern", pattern)) arguments.AddString("pattern", pattern);
+                    }
+                }
+
+                // 4. DELEGA ALL'ESECUTORE CENTRALE (mcp_manager.cpp)
+                fprintf(stderr, "[AI_SERVER] Sicurezza superata. Delegando esecuzione a ExecuteLocalTool per: '%s'\n", toolName.String());
+                
+                resultOutput = ExecuteLocalTool(toolName.String(), arguments);
+                resultStatus = B_OK;
+
+                // 5. Risposta al plugin
+                reply.AddInt32("status", resultStatus);
+                reply.AddString("result", resultOutput);
+                msg->SendReply(&reply);
+                break;
+            }
+			/*
+			case MSG_EXECUTE_TOOL:
 			{
 				BString contextId = msg->FindString("context_id");
 				BString toolName = msg->FindString("name");
@@ -936,7 +1024,8 @@ public:
 					BMessage arguments;
 					if (msg->FindMessage("arguments", &arguments) == B_OK) {
 						argPath = arguments.FindString("path");
-						argCmd = arguments.FindString("cmd");
+						if (argPath.IsEmpty()) argPath = arguments.FindString("directory");
+						argCmd = arguments.FindString("cmd");if (argCmd.IsEmpty()) argCmd = arguments.FindString("command");
 					}
 				}
 
@@ -989,69 +1078,32 @@ public:
 						finalCommand = argCmd;
 					} else if (toolName == "list_directory") {
 						if (argPath.IsEmpty()) argPath = "/boot/home";
-						finalCommand.SetToFormat("%s \"%s\"", execTarget.String(), argPath.String());
-					} else {
+						BString binary = execTarget.IsEmpty() ? "/bin/ls -la" : execTarget;
+						finalCommand.SetToFormat("%s \"%s\"", binary.String(), argPath.String());					} else {
 						// es: get_system_info (uptime)
 						finalCommand = execTarget;
 					}
 
-					fprintf(stderr, "[AI_SERVER] Esecuzione comando reale: '%s'\n", finalCommand.String());
-					
-					FILE* pipe = popen(finalCommand.String(), "r");
-					if (pipe) {
-						char buffer[4096];
-						while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-							resultOutput << buffer;
-						}
-						pclose(pipe);
-						resultStatus = B_OK;
-					}
+					if (finalCommand.IsEmpty()) {
+                        resultOutput = "{\"error\":\"Comando di esecuzione vuoto o non valido\"}";
+                    } else {
+                        fprintf(stderr, "[AI_SERVER] Esecuzione comando reale: '%s'\n", finalCommand.String());
+                        
+                        FILE* pipe = popen(finalCommand.String(), "r");
+                        if (pipe) {
+                            char buffer[4096];
+                            while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+                                resultOutput << buffer;
+                            }
+                            pclose(pipe);
+                            resultStatus = B_OK;
+                        }
+                    }
 				}
 
 				reply.AddInt32("status", resultStatus);
 				reply.AddString("result", resultOutput);
 				msg->SendReply(&reply);
-				break;
-			}
-			/*{
-				const char* toolName = msg->FindString("tool_name");
-				const char* argsJson = msg->FindString("arguments");
-	
-				if (!toolName) {
-					BMessage reply;
-					reply.AddString("result", "{\"error\": \"Missing tool name\"}");
-					msg->SendReply(&reply);
-					break;
-				}
-
-				// Eseguiamo il tool (la funzione interna del tuo server che hai già scritto)
-				BString toolResult = ExecuteLocalTool(toolName, argsJson);
-	
-				// Rispondiamo al plugin con il risultato ottenuto
-				BMessage reply(B_REPLY);
-				reply.AddString("result", toolResult.String());
-				msg->SendReply(&reply);
-				break;
-			}*/
-			/*
-			case MSG_MCP_GET_TOOLS:
-			{
-				fprintf(stderr, "[AI_SERVER] Ricevuta richiesta MSG_MCP_GET_TOOLS (Formato Nativo Piatto).\n");
-				
-				// Inizializziamo la risposta specificando che si tratta di un B_REPLY di sistema
-				BMessage reply(B_REPLY);
-				
-				// Il manager scrive i singoli "tool" direttamente nella radice di reply
-				if (fMcpManager->GetToolsAsBMessage(&reply) != B_OK) {
-					fprintf(stderr, "[AI_SERVER] Avviso: Il gestore MCP non ha restituito tool o ha fallito.\n");
-					// reply rimarrà vuota, segnalando al plugin che non ci sono tool attivi
-				}
-
-				// Invio sincrono immediato
-				status_t err = msg->SendReply(&reply);
-				if (err != B_OK) {
-					fprintf(stderr, "[AI_SERVER] Errore critico SendReply: %s\n", strerror(err));
-				}
 				break;
 			}*/
 			case MSG_MCP_GET_TOOLS:

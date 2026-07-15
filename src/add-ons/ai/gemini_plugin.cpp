@@ -167,7 +167,7 @@ BString ExtractArgsJson(const BString& json, int32 functionCallPos) {
     return "{}";
 }
 
-void AppendToolCallToContext(BMessage* context, const char* name, const char* argsJson) {
+void AppendToolCallToContext(BMessage* context, const char* name, const char* argsJson, const char* thoughtSignature = nullptr) {
     BMessage messagesMsg;
     if (context->FindMessage("messages", &messagesMsg) != B_OK) {
         context->AddMessage("messages", &messagesMsg);
@@ -180,11 +180,15 @@ void AppendToolCallToContext(BMessage* context, const char* name, const char* ar
     toolCallMsg.AddString("name", name);
     toolCallMsg.AddString("args", argsJson);
     
+    // === NOVITÀ: Se c'è la firma del pensiero, la salviamo nel messaggio ===
+    if (thoughtSignature && strlen(thoughtSignature) > 0) {
+        toolCallMsg.AddString("thought_signature", thoughtSignature);
+    }
+    
     messagesMsg.AddMessage("msg", &toolCallMsg);
     context->RemoveName("messages");
     context->AddMessage("messages", &messagesMsg);
 }
-
 void AppendToolResponseToContext(BMessage* context, const char* name, const char* responseJson) {
     BMessage messagesMsg;
     if (context->FindMessage("messages", &messagesMsg) != B_OK) {
@@ -224,11 +228,34 @@ void BuildPayloadFromContext(const BMessage* config, const char* currentPrompt, 
                 // Storico di una chiamata a un tool fatta dall'LLM
                 const char* name = msgItem.FindString("name");
                 const char* args = msgItem.FindString("args");
+                
+                const char* thoughtSig = nullptr;
+                msgItem.FindString("thought_signature", &thoughtSig);
+                
                 if (!first) outPayload.Append(",");
                 
                 //outPayload.AppendFormat("{\"role\":\"model\",\"parts\":[{\"functionCall\":{\"name\":\"%s\",\"args\":%s}}]}", name, (args && args[0] != '\0') ? args : "{}");
                 BString tempCall;
-                tempCall.SetToFormat("{\"role\":\"model\",\"parts\":[{\"functionCall\":{\"name\":\"%s\",\"args\":%s}}]}", name, (args && args[0] != '\0') ? args : "{}");
+                if (thoughtSig && thoughtSig[0] != '\0') {
+                    // Inseriamo thought_signature nel part, come fratello di functionCall
+                    tempCall.SetToFormat(
+                        "{\"role\":\"model\",\"parts\":["
+                        "{\"functionCall\":{\"name\":\"%s\",\"args\":%s},\"thought_signature\":\"%s\"}"
+                        "]}", 
+                        name, 
+                        (args && args[0] != '\0') ? args : "{}", 
+                        thoughtSig
+                    );
+                } else {
+                    // Fallback standard senza firma
+                    tempCall.SetToFormat(
+                        "{\"role\":\"model\",\"parts\":["
+                        "{\"functionCall\":{\"name\":\"%s\",\"args\":%s}}"
+                        "]}", 
+                        name, 
+                        (args && args[0] != '\0') ? args : "{}"
+                    );
+                }
                 outPayload << tempCall;
                 first = false;
             } 
@@ -832,6 +859,19 @@ static status_t gemini_stream_thread_func(void* data)
             if (partZero.FindMessage("functionCall", &functionCall) == B_OK
                 && functionCall.FindString("name", &toolName) == B_OK) {
                 
+                // === NOVITÀ: Estraiamo la thought_signature inviata da Google ===
+                const char* thoughtSignature = nullptr;
+                if (partZero.FindString("thought_signature", &thoughtSignature) == B_OK) {
+                    // Caso 1: Trovato in partZero (snake_case)
+                } else if (partZero.FindString("thoughtSignature", &thoughtSignature) == B_OK) {
+                    // Caso 2: Trovato in partZero (camelCase)
+                } else if (functionCall.FindString("thought_signature", &thoughtSignature) == B_OK) {
+                    // Caso 3: Trovato in functionCall (snake_case)
+                } else {
+                    // Caso 4: Trovato in functionCall (camelCase) o non presente
+                    functionCall.FindString("thoughtSignature", &thoughtSignature);
+                }
+
                 int32 fCallPos = rawResponse.FindFirst("\"functionCall\"");
                 BString argsJson = ExtractArgsJson(rawResponse, fCallPos);
 
@@ -855,17 +895,27 @@ static status_t gemini_stream_thread_func(void* data)
                 
                 if (args->server_messenger.SendMessage(&reqExec, &replyExec) == B_OK) {
                     const char* resStr = replyExec.FindString("result");
-                    if (resStr) {
-                        toolResultBuf = resStr;
+                    if (resStr && strlen(resStr) > 0) {
+                        BString testStr(resStr);
+                        testStr.Trim();
+                        // Se la risposta è già un JSON valido (inizia con { o [), la teniamo così
+                        if (testStr.StartsWith("{") || testStr.StartsWith("[")) {
+                            toolResultBuf = resStr;
+                        } else {
+                            // Se è testo semplice (o vuoto), lo incapsuliamo in un JSON pulito per Gemini
+                            toolResultBuf.SetToFormat("{\"output\":\"%s\"}", resStr);
+                        }
                     } else {
-                        toolResultBuf = "{\"error\":\"Empty response from server\"}";
+                        // Se il server ha risposto con una stringa vuota (come nel tuo caso!)
+                        toolResultBuf = "{\"error\":\"Il comando sul server ha restituito una risposta vuota.\"}";
                     }
                 } else {
-                    toolResultBuf = "{\"error\":\"Tool execution failed via BMessenger IPC\"}";
+                    toolResultBuf = "{\"error\":\"Esecuzione dello strumento fallita via IPC BMessenger\"}";
                 }
 
                 // Aggiorniamo la history clonata in memoria per il prossimo turno del loop
-                AppendToolCallToContext(args->context_copy, toolName, argsJson.String());
+                //AppendToolCallToContext(args->context_copy, toolName, argsJson.String());
+                AppendToolCallToContext(args->context_copy, toolName, argsJson.String(), thoughtSignature);
                 AppendToolResponseToContext(args->context_copy, toolName, toolResultBuf.String());
                 
                 // Il loop continua (executionLoop = true), inviando il risultato a Gemini al prossimo ciclo
@@ -882,6 +932,27 @@ static status_t gemini_stream_thread_func(void* data)
                 executionLoop = false; // Abbiamo il testo finale, usciamo dal loop!
             }
         } else {
+        	// === RECUPERO E LOGGING DELL'ERRORE ===
+            fprintf(stderr, "[GEMINI STREAM WORKER] ERRORE: Risposta di rete non valida o priva di 'candidates'.\n");
+            fprintf(stderr, "[GEMINI STREAM WORKER] Risposta grezza ricevuta:\n%s\n", rawResponse.String());
+            
+            // Tentiamo di estrarre l'errore strutturato inviato da Google per mostrarlo in UI
+            BMessage errorObj;
+            if (parsedJson.FindMessage("error", &errorObj) == B_OK) {
+                const char* errMsg = nullptr;
+                errorObj.FindString("message", &errMsg);
+                if (errMsg) {
+                    fprintf(stderr, "[GEMINI STREAM WORKER] Dettaglio errore API di Google: %s\n", errMsg);
+                    
+                    // Scriviamo l'errore nel file temporaneo per mostrarlo nell'interfaccia utente
+                    BFile streamFile(args->notify_path, B_WRITE_ONLY | B_OPEN_AT_END);
+                    if (streamFile.InitCheck() == B_OK) {
+                        BString guiError;
+                        guiError.SetToFormat("\n[Errore API Gemini: %s]\n", errMsg);
+                        streamFile.Write(guiError.String(), guiError.Length());
+                    }
+                }
+            }
             executionLoop = false;
         }
     }

@@ -70,7 +70,7 @@ BString ExecuteLocalTool(const char* tool_name, const BMessage& arguments) {
 	if (name == "get_system_stats") {
 		result << "=== SYSTEM UPTIME ===\n" << RunSystemCommand("uptime") << "\n";
 		result << "=== DISK SPACE ===\n" << RunSystemCommand("df -h") << "\n";
-		result << "=== MEMORY ===\n" << RunSystemCommand("free -h") << "\n";
+		result << "=== MEMORY ===\n" << RunSystemCommand("sysinfo -mem") << "\n";
 	} 
 	else if (name == "show_alert_dialog") {
 		BString text = arguments.FindString("text");
