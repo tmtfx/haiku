@@ -1162,6 +1162,31 @@ static status_t gemini_stream_thread_func(void* data)
     
     executionLoop = true;
     while (executionLoop) {
+    	// =====================================================================
+        // NUOVO: CONTROLLO INTERRUZIONE PREVENTIVO VIA IPC
+        // =====================================================================
+        if (args->server_messenger.IsValid()) {
+            BMessage checkAbortMsg('CHAB'); // Un 'what' dedicato, es: MSG_CHECK_ABORT
+            const char* ctxId = nullptr;
+            if (args->context_copy) {
+                args->context_copy->FindString("context_id", &ctxId);
+            }
+            if (ctxId) {
+                checkAbortMsg.AddString("context_id", ctxId);
+            }
+            
+            BMessage abortReply;
+            if (args->server_messenger.SendMessage(&checkAbortMsg, &abortReply) == B_OK) {
+                int32 status = B_OK;
+                if (abortReply.FindInt32("status", &status) == B_OK && status == B_CANCELED) {
+                    fprintf(stderr, "[GEMINI STREAM WORKER] Rilevata interruzione asincrona dall'utente. Esco.\n");
+                    executionLoop = false;
+                    break;
+                }
+            }
+        }
+        // =====================================================================
+    	
         BString url;
         if (args->base_url && args->base_url[0] != '\0') {
             url << args->base_url;

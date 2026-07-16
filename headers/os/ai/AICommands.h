@@ -19,6 +19,8 @@ static const uint32 MSG_PING				= 'PING';
 // Comandi di Generazione / Inferenza
 static const uint32 MSG_GEN_SYNC			= 'GENS';
 static const uint32 MSG_GEN_ASYNC			= 'GENA';
+static const uint32 MSG_ABORT_SESSION		= 'ABRT';
+static const uint32 MSG_CHECK_ABORT			= 'CHAB';
 // Comandi di Impostazione/Recupero modelli
 static const uint32 MSG_LIST				= 'LIST';
 static const uint32 MSG_SET_MODEL			= 'SELM';

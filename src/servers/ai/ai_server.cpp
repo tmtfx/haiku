@@ -929,6 +929,44 @@ public:
 				msg->SendReply(&r);
 				break;
 			}
+			case MSG_ABORT_SESSION:
+			{
+			    BString contextId = msg->FindString("context_id");
+			    if (!contextId.IsEmpty()) {
+			        // Cerchiamo la sessione attiva
+			        for (auto& pair : gSessions) { 
+			            if (pair.second.context_id == contextId) {
+			                pair.second.abort_requested = true; // Attiviamo il Kill Switch!
+			                fprintf(stderr, "[AI_SERVER] [KILL SWITCH] Richiesta di interruzione ricevuta per la sessione: %s\n", contextId.String());
+
+			                BMessage reply(B_REPLY);
+			                reply.AddInt32("status", B_OK);
+			                msg->SendReply(&reply);
+			                break;
+			            }
+			        }
+			    }
+			    break;
+			}
+			case 'CHAB': // MSG_CHECK_ABORT
+			{
+			    BString contextId = msg->FindString("context_id");
+			    BMessage reply(B_REPLY);
+			    reply.AddInt32("status", B_OK); // Default: non interrotto
+    
+			    if (!contextId.IsEmpty()) {
+			        for (auto& pair : gSessions) { 
+			            if (pair.second.context_id == contextId) {
+			                if (pair.second.abort_requested) {
+			                    reply.AddInt32("status", B_CANCELED); // Segnala l'interruzione!
+			                }
+			                break;
+			            }
+			        }
+			    }
+			    msg->SendReply(&reply);
+			    break;
+			}
 			case MSG_EXECUTE_TOOL:
             {
                 BString contextId = msg->FindString("context_id");
@@ -959,6 +997,24 @@ public:
                     msg->SendReply(&reply);
                     break;
                 }
+                
+                // =========================================================================
+                // === INTEGRATIVE KILL SWITCH: INTERRUZIONE TRA UN COMANDO E L'ALTRO ===
+                // =========================================================================
+                if (session->abort_requested) {
+                    session->abort_requested = false; // Resettiamo il flag per le prossime chat
+
+                    fprintf(stderr, "[AI_SERVER] [KILL SWITCH] Loop interrotto dall'utente prima del tool '%s'!\n", toolName.String());
+
+                    // Ritorniamo un errore specifico (B_CANCELED / Canceled)
+                    reply.AddInt32("status", B_CANCELED);
+        
+                    // Risposta JSON che dice a Gemini che l'operazione è stata cancellata
+                    reply.AddString("result", "{\"error\":\"Interrotto: L'utente ha annullato l'esecuzione dei comandi in background.\"}");
+                    msg->SendReply(&reply);
+                    break; 
+                }
+                // =========================================================================
 
                 // 2. CONTROLLO DI SICUREZZA: Il tool è registrato (quindi autorizzato dalla Preflet)?
                 BMessage* foundTool = nullptr;
@@ -1003,6 +1059,117 @@ public:
                         if (ExtractStringFromJson(argsJson.String(), "pattern", pattern)) arguments.AddString("pattern", pattern);
                     }
                 }
+                
+                bool isCritical = false;
+                BString details = "";
+
+                if (toolName == "run_terminal_command") {
+                    isCritical = true;
+                    const char* cmdToRun = arguments.FindString("cmd");
+                    details.SetToFormat("Vuole eseguire il comando terminale:\n\n  \"%s\"", 
+                                        cmdToRun ? cmdToRun : "N/A");
+                } 
+                else if (toolName == "create_file") {
+                    isCritical = true;
+                    const char* filePath = arguments.FindString("path");
+                    details.SetToFormat("Vuole creare o sovrascrivere il file:\n\n  \"%s\"", 
+                                        filePath ? filePath : "N/A");
+                } 
+                else if (toolName == "make_directory") {
+                    isCritical = true;
+                    const char* filePath = arguments.FindString("path");
+                    details.SetToFormat("Vuole creare la cartella:\n\n  \"%s\"", 
+                                        filePath ? filePath : "N/A");
+                } 
+                else if (toolName == "delete_file") {
+                    isCritical = true;
+                    const char* filePath = arguments.FindString("path");
+                    details.SetToFormat("Vuole ELIMINARE definitivamente:\n\n  \"%s\"", 
+                                        filePath ? filePath : "N/A");
+                } 
+                else if (toolName == "open_document") {
+                    isCritical = true;
+                    const char* filePath = arguments.FindString("path");
+                    details.SetToFormat("Vuole aprire il documento o avviare l'applicazione:\n\n  \"%s\"", 
+                                        filePath ? filePath : "N/A");
+                } 
+                else if (toolName == "show_alert_dialog") {
+                    isCritical = true;
+                    const char* text = arguments.FindString("text");
+                    details.SetToFormat("Vuole mostrare un messaggio di avviso a schermo:\n\n  \"%s\"", 
+                                        text ? text : "N/A");
+                } 
+                else if (toolName == "manage_attribute") {
+                    // Questa è un'operazione BFS speciale: controlliamo l'azione richiesta!
+                    const char* action = arguments.FindString("action");
+                    if (action && strcmp(action, "write") == 0) {
+                        isCritical = true;
+                        const char* filePath = arguments.FindString("path");
+                        const char* attrName = arguments.FindString("name");
+                        const char* attrValue = arguments.FindString("value");
+                        details.SetToFormat(
+                            "Vuole scrivere l'attributo BFS '%s' con valore '%s'\n"
+                            "sul file:\n\n  \"%s\"", 
+                            attrName ? attrName : "N/A", 
+                            attrValue ? attrValue : "N/A", 
+                            filePath ? filePath : "N/A"
+                        );
+                    }
+                }
+                
+                if (isCritical) {
+                    BString alertText;
+                    alertText.SetToFormat(
+                        "L'assistente AI richiede l'autorizzazione per eseguire un'operazione critica.\n\n"
+                        "Strumento richiesto: %s\n"
+                        "%s\n\n"
+                        "Vuoi consentire questa operazione?",
+                        toolName.String(),
+                        details.String()
+                    );
+
+                    // Mostriamo il BAlert nativo di Haiku
+                    BAlert* safetyAlert = new BAlert(
+                        "Sicurezza AI (MCP)",
+                        alertText.String(),
+                        "Rifiuta",      // Pulsante 0 (Ritorna 0, mappato su ESC/Default)
+                        "Consenti",     // Pulsante 1 (Ritorna 1)
+                        "Interrompi Loop AI",
+                        B_WIDTH_AS_USUAL,
+                        B_WARNING_ALERT // Icona di pericolo gialla
+                    );
+                    
+                    safetyAlert->SetShortcut(0, B_ESCAPE); // Esc per rifiutare al volo
+                    
+                    int32 choice = safetyAlert->Go();
+                    if (choice == 2) {
+                        // L'utente vuole fermare l'intera catena di ragionamento dell'AI!
+                        fprintf(stderr, "[AI_SERVER] [SICUREZZA] INTERRUZIONE FORZATA richiesta dall'utente.\n");
+                        
+                        // 1. Impostiamo un flag di interruzione sulla sessione in modo che il thread del plugin 
+                        // sappia che non deve più elaborare ulteriori risposte o loop.
+                        session->abort_requested = true; 
+
+                        // 2. Rispondiamo con un errore fatale che costringe il client a chiudere la chiamata
+                        reply.AddInt32("status", B_CANCELED);
+                        reply.AddString("result", "{\"error\":\"Aborted: L'utente ha interrotto il loop di elaborazione dell'AI.\"}");
+                        msg->SendReply(&reply);
+                        break;
+                    }
+                    
+                    if (choice == 0) {
+                        // L'utente ha negato l'autorizzazione
+                        fprintf(stderr, "[AI_SERVER] [SICUREZZA] Accesso negato dall'utente per '%s'\n", toolName.String());
+                        
+                        reply.AddInt32("status", B_PERMISSION_DENIED);
+                        reply.AddString("result", "{\"error\":\"Errore: L'utente di Haiku ha negato l'autorizzazione per eseguire questa azione di scrittura/modifica.\"}");
+                        msg->SendReply(&reply);
+                        break;
+                    }
+                    
+                    fprintf(stderr, "[AI_SERVER] [SICUREZZA] Accesso consentito dall'utente per '%s'\n", toolName.String());
+                }
+
 
                 // 4. DELEGA ALL'ESECUTORE CENTRALE (mcp_manager.cpp)
                 fprintf(stderr, "[AI_SERVER] Sicurezza superata. Delegando esecuzione a ExecuteLocalTool per: '%s'\n", toolName.String());

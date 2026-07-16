@@ -34,6 +34,7 @@ struct ClientSession {
     uint32 mcp_permissions;
     
     BList mpcManager;	// lista di messaggi che contengono le operazioni che può fare l'mpc
+    volatile bool abort_requested = false;
 };
 
 struct PluginEntry {
