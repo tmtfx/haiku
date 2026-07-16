@@ -28,6 +28,7 @@
 #include <Entry.h>
 #include <Node.h>
 #include <File.h>
+#include <Alert.h>
 
 #include <os/ai/AIPlugin.h>
 #include <AIConfig.h>
@@ -1041,24 +1042,55 @@ public:
                     if (!argsJson.IsEmpty()) {
                         BString path, cmd, text, title, content, action, name, value, pattern;
                         
-                        // Estraiamo con fallbacks per gestire le variazioni di naming dell'LLM
-                        if (ExtractStringFromJson(argsJson.String(), "path", path) || 
-                            ExtractStringFromJson(argsJson.String(), "directory", path)) {
+                        // 1. I percorsi e i comandi/pattern non devono MAI interpretare i caratteri di controllo (SEMPRE false)
+                        if (ExtractStringFromJson(argsJson.String(), "path", path, false) || 
+                            ExtractStringFromJson(argsJson.String(), "directory", path, false)) {
                             arguments.AddString("path", path);
                         }
-                        if (ExtractStringFromJson(argsJson.String(), "cmd", cmd) || 
-                            ExtractStringFromJson(argsJson.String(), "command", cmd)) {
+                        if (ExtractStringFromJson(argsJson.String(), "cmd", cmd, false) || 
+                            ExtractStringFromJson(argsJson.String(), "command", cmd, false)) {
                             arguments.AddString("cmd", cmd);
                         }
-                        if (ExtractStringFromJson(argsJson.String(), "text", text)) arguments.AddString("text", text);
-                        if (ExtractStringFromJson(argsJson.String(), "title", title)) arguments.AddString("title", title);
-                        if (ExtractStringFromJson(argsJson.String(), "content", content)) arguments.AddString("content", content);
-                        if (ExtractStringFromJson(argsJson.String(), "action", action)) arguments.AddString("action", action);
-                        if (ExtractStringFromJson(argsJson.String(), "name", name)) arguments.AddString("name", name);
-                        if (ExtractStringFromJson(argsJson.String(), "value", value)) arguments.AddString("value", value);
-                        if (ExtractStringFromJson(argsJson.String(), "pattern", pattern)) arguments.AddString("pattern", pattern);
+                        if (ExtractStringFromJson(argsJson.String(), "pattern", pattern, false)) {
+                            arguments.AddString("pattern", pattern);
+                        }
+
+                        // 2. Gestione intelligente per la scrittura di file o attributi BFS
+                        // Se il tool scrive dati (create_file o manage_attribute con azione "write"), 
+                        // dobbiamo disattivare l'unescape per non storpiarli.
+                        bool preserveRawData = (toolName == "create_file" || toolName == "manage_attribute");
+                        bool unescapeContent = !preserveRawData;
+
+                        if (ExtractStringFromJson(argsJson.String(), "content", content, unescapeContent)) {
+                            arguments.AddString("content", content);
+                        }
+                        if (ExtractStringFromJson(argsJson.String(), "value", value, unescapeContent)) {
+                            arguments.AddString("value", value);
+                        }
+
+                        // 3. Campi testuali generici (es. show_alert_dialog) -> interpretazione attiva (SEMPRE true)
+                        if (ExtractStringFromJson(argsJson.String(), "text", text, true))       arguments.AddString("text", text);
+                        if (ExtractStringFromJson(argsJson.String(), "title", title, true))     arguments.AddString("title", title);
+                        if (ExtractStringFromJson(argsJson.String(), "action", action, true))   arguments.AddString("action", action);
+                        if (ExtractStringFromJson(argsJson.String(), "name", name, true))       arguments.AddString("name", name);
                     }
                 }
+                       
+//                        if (ExtractStringFromJson(argsJson.String(), "path", path) || 
+//                            ExtractStringFromJson(argsJson.String(), "directory", path)) {
+//                            arguments.AddString("path", path);
+//                        }
+//                        if (ExtractStringFromJson(argsJson.String(), "cmd", cmd) || 
+//                            ExtractStringFromJson(argsJson.String(), "command", cmd)) {
+//                            arguments.AddString("cmd", cmd);
+//                        }
+//                        if (ExtractStringFromJson(argsJson.String(), "text", text)) arguments.AddString("text", text);
+//                        if (ExtractStringFromJson(argsJson.String(), "title", title)) arguments.AddString("title", title);
+//                        if (ExtractStringFromJson(argsJson.String(), "content", content)) arguments.AddString("content", content);
+//                        if (ExtractStringFromJson(argsJson.String(), "action", action)) arguments.AddString("action", action);
+//                        if (ExtractStringFromJson(argsJson.String(), "name", name)) arguments.AddString("name", name);
+//                        if (ExtractStringFromJson(argsJson.String(), "value", value)) arguments.AddString("value", value);
+//                        if (ExtractStringFromJson(argsJson.String(), "pattern", pattern)) arguments.AddString("pattern", pattern);
                 
                 bool isCritical = false;
                 BString details = "";
