@@ -159,6 +159,59 @@ BString ExtractArgsJson(const BString& json, int32 functionCallPos) {
     }
     return "{}";
 }*/
+
+void SerializeBMessageToJson(const BMessage* msg, BString& outJson) {
+    outJson << "{";
+    bool first = true;
+    
+    char* field_name = nullptr;
+    uint32 field_code = 0;
+    int32 field_count = 0;
+    
+    for (int which = 0; msg->GetInfo(B_ANY_TYPE, which, 
+            (char**)&field_name, &field_code, &field_count) == B_OK; which++) {
+        
+        if (!first) outJson << ",";
+        first = false;
+        
+        outJson << "\"" << field_name << "\":";
+        
+        if (field_code == B_MESSAGE_TYPE) {
+            BMessage subMsg;
+            if (msg->FindMessage(field_name, &subMsg) == B_OK) {
+                BString subJson;
+                SerializeBMessageToJson(&subMsg, subJson);
+                outJson << subJson;
+            } else {
+                outJson << "{}";
+            }
+        } else if (field_code == B_STRING_TYPE || field_code == B_CHAR_TYPE) {
+            const char* strVal = msg->FindString(field_name);
+            if (strVal) {
+                BString escaped(strVal);
+                escaped.ReplaceAll("\\", "\\\\");
+                escaped.ReplaceAll("\"", "\\\"");
+                escaped.ReplaceAll("\n", "\\n");
+                escaped.ReplaceAll("\r", "\\r");
+                escaped.ReplaceAll("\t", "\\t");
+                outJson << "\"" << escaped << "\"";
+            } else {
+                outJson << "\"\"";
+            }
+        } else if (field_code == B_BOOL_TYPE) {
+            bool boolVal = false;
+            msg->FindBool(field_name, &boolVal);
+            outJson << (boolVal ? "true" : "false");
+        } else {
+            int32 intVal = 0;
+            msg->FindInt32(field_name, &intVal);
+            outJson << intVal;
+        }
+    }
+    
+    outJson << "}";
+}
+
 BString ExtractArgsJson(const BString& json, int32 functionCallPos) {
     int32 argsPos = json.FindFirst("\"args\"", functionCallPos);
     if (argsPos == B_ERROR) return "{}";
@@ -939,57 +992,7 @@ static status_t gemini_stream_thread_func(void* data)
 
     return B_OK;
 }*/
-void SerializeBMessageToJson(const BMessage* msg, BString& outJson) {
-    outJson << "{";
-    bool first = true;
-    
-    char* field_name = nullptr;
-    uint32 field_code = 0;
-    int32 field_count = 0;
-    
-    for (int which = 0; msg->GetInfo(B_ANY_TYPE, which, 
-            (char**)&field_name, &field_code, &field_count) == B_OK; which++) {
-        
-        if (!first) outJson << ",";
-        first = false;
-        
-        outJson << "\"" << field_name << "\":";
-        
-        if (field_code == B_MESSAGE_TYPE) {
-            BMessage subMsg;
-            if (msg->FindMessage(field_name, &subMsg) == B_OK) {
-                BString subJson;
-                SerializeBMessageToJson(&subMsg, subJson);
-                outJson << subJson;
-            } else {
-                outJson << "{}";
-            }
-        } else if (field_code == B_STRING_TYPE || field_code == B_CHAR_TYPE) {
-            const char* strVal = msg->FindString(field_name);
-            if (strVal) {
-                BString escaped(strVal);
-                escaped.ReplaceAll("\\", "\\\\");
-                escaped.ReplaceAll("\"", "\\\"");
-                escaped.ReplaceAll("\n", "\\n");
-                escaped.ReplaceAll("\r", "\\r");
-                escaped.ReplaceAll("\t", "\\t");
-                outJson << "\"" << escaped << "\"";
-            } else {
-                outJson << "\"\"";
-            }
-        } else if (field_code == B_BOOL_TYPE) {
-            bool boolVal = false;
-            msg->FindBool(field_name, &boolVal);
-            outJson << (boolVal ? "true" : "false");
-        } else {
-            int32 intVal = 0;
-            msg->FindInt32(field_name, &intVal);
-            outJson << intVal;
-        }
-    }
-    
-    outJson << "}";
-}
+
 /*
 void ConvertBMessageToGeminiToolsJson(const BMessage* toolsMsg, BString& outJson)
 {
