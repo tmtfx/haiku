@@ -136,6 +136,8 @@ struct GeminiAsyncArgs {
 */
 
 // Estrae in modo sicuro la sottostringa JSON dell'oggetto "args" bilanciando le parentesi graffe
+//versione buggata!!!
+/*
 BString ExtractArgsJson(const BString& json, int32 functionCallPos) {
     int32 argsPos = json.FindFirst("\"args\"", functionCallPos);
     if (argsPos == B_ERROR) return "{}";
@@ -152,6 +154,58 @@ BString ExtractArgsJson(const BString& json, int32 functionCallPos) {
                 BString result;
                 json.CopyInto(result, braceStart, i - braceStart + 1);
                 return result;
+            }
+        }
+    }
+    return "{}";
+}*/
+BString ExtractArgsJson(const BString& json, int32 functionCallPos) {
+    int32 argsPos = json.FindFirst("\"args\"", functionCallPos);
+    if (argsPos == B_ERROR) return "{}";
+    int32 braceStart = json.FindFirst("{", argsPos);
+    if (braceStart == B_ERROR) return "{}";
+    
+    int32 depth = 0;
+    bool inString = false;
+    
+    for (int32 i = braceStart; i < json.Length(); i++) {
+        char c = json.ByteAt(i);
+        
+        if (c == '"') {
+            // Controlliamo se la virgoletta è preceduta da un numero DISPARI di backslash
+            int32 backslashCount = 0;
+            for (int32 j = i - 1; j >= braceStart; j--) {
+                if (json.ByteAt(j) == '\\') {
+                    backslashCount++;
+                } else {
+                    break;
+                }
+            }
+            
+            // Se i backslash precedenti sono pari (o 0), la virgoletta definisce l'inizio/fine di una stringa JSON
+            if (backslashCount % 2 == 0) {
+                inString = !inString;
+            }
+        }
+        
+        // Calcoliamo la profondità delle graffe SOLO se non siamo dentro una stringa di testo
+        if (!inString) {
+            if (c == '{') {
+                depth++;
+            } else if (c == '}') {
+                depth--;
+                if (depth == 0) {
+                    BString result;
+                    json.CopyInto(result, braceStart, i - braceStart + 1);
+                    
+                    // Rimuoviamo i ritorni a capo reali e le tabulazioni strutturali 
+                    // che potrebbero spaccare il payload JSON durante la formattazione stringa successiva
+                    result.ReplaceAll("\n", " ");
+                    result.ReplaceAll("\r", " ");
+                    result.ReplaceAll("\t", " ");
+                    
+                    return result;
+                }
             }
         }
     }
@@ -198,7 +252,152 @@ void AppendToolResponseToContext(BMessage* context, const char* name, const char
     context->AddMessage("messages", &messagesMsg);
 }
 
+static BString EscapeStringForJson(const char* input) {
+    if (!input) return "";
+    BString escaped;
+    const char* p = input;
+    while (*p) {
+        switch (*p) {
+            case '\\': escaped << "\\\\"; break;
+            case '"':  escaped << "\\\""; break;
+            case '\n': escaped << "\\n"; break;
+            case '\r': escaped << "\\r"; break;
+            case '\t': escaped << "\\t"; break;
+            default:   escaped << *p; break;
+        }
+        p++;
+    }
+    return escaped;
+}
+
 // Funzione helper per iniettare l'intero storico dei messaggi salvato nel BMessage nel JSON di Gemini
+void BuildPayloadFromContext(const BMessage* config, const char* currentPrompt, BString& outPayload)
+{
+    outPayload.SetTo("{\"contents\":[");
+    bool first = true;
+
+    BMessage messagesMsg;
+    if (config && config->FindMessage("messages", &messagesMsg) == B_OK) {
+        BMessage msgItem;
+        int32 i = 0;
+        
+        while (messagesMsg.FindMessage("msg", i, &msgItem) == B_OK || 
+               messagesMsg.FindMessage(BString().SetToFormat("%d", i).String(), &msgItem) == B_OK) {
+            
+            const char* type = nullptr;
+            msgItem.FindString("type", &type);
+
+            if (type && strcmp(type, "functionCall") == 0) {
+                // Storico di una chiamata a un tool fatta dall'LLM
+                const char* name = msgItem.FindString("name");
+                const char* args = msgItem.FindString("args");
+                const char* thoughtSig = nullptr;
+                msgItem.FindString("thought_signature", &thoughtSig);
+                
+                if (!first) outPayload.Append(",");
+                
+                BString cleanArgs(args && args[0] != '\0' ? args : "{}");
+                // Assicuriamoci che i ritorni a capo reali non escapati dentro args (se presenti) 
+                // non spacchino la riga prima di arrivare a thought_signature
+                cleanArgs.ReplaceAll("\n", "\\n");
+                cleanArgs.ReplaceAll("\r", "\\r");
+                
+                BString tempCall;
+                if (thoughtSig && thoughtSig[0] != '\0') {
+                    // === FIX FONDAMENTALE: Applichiamo l'escape sul thought_signature ===
+                    BString escapedThought = EscapeStringForJson(thoughtSig);
+
+                    /*tempCall.SetToFormat(
+                        "{\"role\":\"model\",\"parts\":["
+                        "{\"functionCall\":{\"name\":\"%s\",\"args\":%s},\"thought_signature\":\"%s\"}"
+                        "]}", 
+                        name, 
+                        (args && args[0] != '\0') ? args : "{}", 
+                        escapedThought.String()
+                    );*/
+                    tempCall << "{\"role\":\"model\",\"parts\":[";
+                    tempCall << "{\"functionCall\":{\"name\":\"" << name << "\",\"args\":" << cleanArgs << "},";
+                    tempCall << "\"thought_signature\":\"" << escapedThought << "\"}";
+                    tempCall << "]}";
+                } else {
+                    tempCall.SetToFormat(
+                        "{\"role\":\"model\",\"parts\":["
+                        "{\"functionCall\":{\"name\":\"%s\",\"args\":%s}}"
+                        "]}", 
+                        name, 
+                        (args && args[0] != '\0') ? args : "{}"
+                    );
+                }
+                outPayload << tempCall;
+                first = false;
+            } 
+            else if (type && strcmp(type, "functionResponse") == 0) {
+                // Storico della risposta del sistema passata all'LLM
+                const char* name = msgItem.FindString("name");
+                const char* response = msgItem.FindString("response");
+                if (!first) outPayload.Append(",");
+                
+                BString formattedResponse;
+                BString respStr(response ? response : "");
+                respStr.Trim();
+                if (respStr.StartsWith("{") && respStr.EndsWith("}")) {
+                    formattedResponse = respStr;
+                } else {
+                    // Usiamo la funzione centralizzata anche qui
+                    BString escapedResp = EscapeStringForJson(respStr.String());
+                    formattedResponse.SetToFormat("{\"output\":\"%s\"}", escapedResp.String());
+                }
+                
+                BString tempCall;
+                tempCall.SetToFormat("{\"role\":\"function\",\"parts\":[{\"functionResponse\":{\"name\":\"%s\",\"response\":%s}}]}", name, formattedResponse.String());
+                outPayload << tempCall;
+                first = false;
+            } 
+            else {
+                // Messaggio standard di testo (User o Assistant)
+                const char* role = nullptr;
+                const char* content = nullptr;
+                msgItem.FindString("role", &role);
+                
+                if (msgItem.FindString("content", &content) != B_OK) {
+                    msgItem.FindString("text", &content);
+                }
+
+                if (role && content && content[0] != '\0') {
+                    if (!first) outPayload.Append(",");
+                    
+                    BString geminiRole = (strcmp(role, "assistant") == 0) ? "model" : "user";
+
+                    // Usiamo la funzione centralizzata
+                    BString escapedContent = EscapeStringForJson(content);
+
+                    BString objectStr;
+                    objectStr.SetToFormat("{\"role\":\"%s\",\"parts\":[{\"text\":\"%s\"}]}", 
+                                          geminiRole.String(), escapedContent.String());
+                    
+                    outPayload.Append(objectStr);
+                    first = false;
+                }
+            }
+            i++;
+        }
+    }
+
+    // Il prompt corrente viene aggiunto SEMPRE alla fine, se esiste
+    if (currentPrompt && currentPrompt[0] != '\0') {
+        if (!first) outPayload.Append(",");
+        
+        // Usiamo la funzione centralizzata
+        BString escapedPrompt = EscapeStringForJson(currentPrompt);
+        
+        BString objectStr;
+        objectStr.SetToFormat("{\"role\":\"user\",\"parts\":[{\"text\":\"%s\"}]}", escapedPrompt.String());
+        outPayload.Append(objectStr);
+    }
+
+    outPayload.Append("]}");
+}
+/*
 void BuildPayloadFromContext(const BMessage* config, const char* currentPrompt, BString& outPayload)
 {
     outPayload.SetTo("{\"contents\":[");
@@ -328,7 +527,7 @@ void BuildPayloadFromContext(const BMessage* config, const char* currentPrompt, 
     }
 
     outPayload.Append("]}");
-}
+}*/
 
 extern "C" ai_plugin_t ai_plugin_init(const BMessage* config)
 {
@@ -874,23 +1073,6 @@ void ConvertBMessageToGeminiToolsJson(const BMessage* toolsMsg, BString& outJson
     if (first) outJson.SetTo("");
 }
 
-static BString EscapeStringForJson(const char* input) {
-    if (!input) return "";
-    BString escaped;
-    const char* p = input;
-    while (*p) {
-        switch (*p) {
-            case '\\': escaped << "\\\\"; break;
-            case '"':  escaped << "\\\""; break;
-            case '\n': escaped << "\\n"; break;
-            case '\r': escaped << "\\r"; break;
-            case '\t': escaped << "\\t"; break;
-            default:   escaped << *p; break;
-        }
-        p++;
-    }
-    return escaped;
-}
 static status_t gemini_stream_thread_func(void* data)
 {
     fprintf(stderr, "[GEMINI STREAM WORKER] Thread avviato.\n");
@@ -1005,7 +1187,7 @@ static status_t gemini_stream_thread_func(void* data)
                 }
             }
         }*/
-        if (mcpActive && !replyTools.IsEmpty()) {
+        if (mcpActive) {
             BString geminiToolsJson;
             ConvertBMessageToGeminiToolsJson(&replyTools, geminiToolsJson);
 
