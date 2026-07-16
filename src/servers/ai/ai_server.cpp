@@ -1038,6 +1038,53 @@ public:
                 // 3. ESTRAZIONE ROBUSTA DEGLI ARGOMENTI (Normalizzazione per l'esecutore)
                 BMessage arguments;
                 if (msg->FindMessage("arguments", &arguments) != B_OK) {
+                    // FALLBACK RETROCOMPATIBILE: Se il client invia ancora la stringa JSON grezza
+                    if (!argsJson.IsEmpty()) {
+                        BString path, cmd, text, title, content, action, name, value, pattern;
+                        
+                        // 1. I percorsi e i comandi/pattern non devono MAI interpretare i caratteri di controllo (SEMPRE false)
+                        if (ExtractStringFromJson(argsJson.String(), "path", path, false) || 
+                            ExtractStringFromJson(argsJson.String(), "directory", path, false)) {
+                            arguments.AddString("path", path);
+                        }
+                        if (ExtractStringFromJson(argsJson.String(), "cmd", cmd, false) || 
+                            ExtractStringFromJson(argsJson.String(), "command", cmd, false)) {
+                            arguments.AddString("cmd", cmd);
+                        }
+                        if (ExtractStringFromJson(argsJson.String(), "pattern", pattern, false)) {
+                            arguments.AddString("pattern", pattern);
+                        }
+
+                        // 2. Gestione intelligente per la scrittura di file o attributi BFS
+                        bool preserveRawData = (toolName == "create_file" || toolName == "manage_attribute");
+                        bool unescapeContent = !preserveRawData;
+
+                        if (ExtractStringFromJson(argsJson.String(), "content", content, unescapeContent)) {
+                            arguments.AddString("content", content);
+                        }
+                        if (ExtractStringFromJson(argsJson.String(), "value", value, unescapeContent)) {
+                            arguments.AddString("value", value);
+                        }
+
+                        // 3. Campi testuali generici -> interpretazione attiva (SEMPRE true)
+                        if (ExtractStringFromJson(argsJson.String(), "text", text, true))       arguments.AddString("text", text);
+                        if (ExtractStringFromJson(argsJson.String(), "title", title, true))     arguments.AddString("title", title);
+                        if (ExtractStringFromJson(argsJson.String(), "action", action, true))   arguments.AddString("action", action);
+                        if (ExtractStringFromJson(argsJson.String(), "name", name, true))       arguments.AddString("name", name);
+                    }
+                } else {
+                    // ECCELLENTE: Il plugin ha inviato direttamente il BMessage analizzato in sicurezza.
+                    // I dati sono già perfetti in memoria. Applichiamo solo le normalizzazioni di naming dell'LLM.
+                    if (!arguments.HasString("path") && arguments.HasString("directory")) {
+                        arguments.AddString("path", arguments.FindString("directory"));
+                    }
+                    if (!arguments.HasString("cmd") && arguments.HasString("command")) {
+                        arguments.AddString("cmd", arguments.FindString("command"));
+                    }
+                }
+                /*
+                BMessage arguments;
+                if (msg->FindMessage("arguments", &arguments) != B_OK) {
                     // Se non è già un BMessage, decodifichiamo la stringa JSON argsJson
                     if (!argsJson.IsEmpty()) {
                         BString path, cmd, text, title, content, action, name, value, pattern;
@@ -1074,7 +1121,7 @@ public:
                         if (ExtractStringFromJson(argsJson.String(), "action", action, true))   arguments.AddString("action", action);
                         if (ExtractStringFromJson(argsJson.String(), "name", name, true))       arguments.AddString("name", name);
                     }
-                }
+                }*/
                        
 //                        if (ExtractStringFromJson(argsJson.String(), "path", path) || 
 //                            ExtractStringFromJson(argsJson.String(), "directory", path)) {

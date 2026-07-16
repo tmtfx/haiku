@@ -673,8 +673,38 @@ void ConvertBMessageToOpenAIToolsJson(const BMessage* toolsMsg, BString& outJson
         BMessage params;
         tool.FindMessage("parameters", &params);
         if (!params.IsEmpty()) {
+            BMessage requiredMsg;
+            BString reqFieldStr = "";
+            //
+            //if (params.FindMessage("required", &requiredMsg) == B_OK) {
+            //    const char* f = requiredMsg.FindString("0");
+            //    if (f) reqFieldStr = f;
+            //    params.RemoveName("required");
+            //}
+            const char* fStr = nullptr;
+            if (params.FindString("required", &fStr) == B_OK && fStr != nullptr) {
+                reqFieldStr = fStr;
+            } else if (params.FindMessage("required", &requiredMsg) == B_OK) {
+                const char* f = requiredMsg.FindString("0");
+                if (f) reqFieldStr = f;
+            }
+            params.RemoveName("required");
+
             BString jsonParams;
             SerializeBMessageToJson(&params, jsonParams);
+            
+            if (!reqFieldStr.IsEmpty()) {
+                int32 lastBrace = jsonParams.FindLast("}");
+                if (lastBrace != B_ERROR) {
+                    jsonParams.Truncate(lastBrace);
+                    jsonParams << ",\"required\":[\"" << reqFieldStr << "\"]}";
+                }
+            }
+
+            // === LOG DI DEBUG SPECIFICO ===
+            fprintf(stderr, "[DEBUG OpenAI TOOLS] Tool '%s' - jsonParams finale generato:\n%s\n", 
+                    name, jsonParams.String());
+
             outJson << ",\"parameters\":" << jsonParams;
         } else {
             outJson << ",\"parameters\":{\"type\":\"object\",\"properties\":{}}";
@@ -686,6 +716,9 @@ void ConvertBMessageToOpenAIToolsJson(const BMessage* toolsMsg, BString& outJson
     }
 
     outJson << "]";
+
+    // === LOG DEL PAYLOAD COMPLETO ===
+    fprintf(stderr, "[DEBUG OpenAI TOOLS] PAYLOAD STRUMENTI COMPLETO INVIATO ALL'API:\n%s\n", outJson.String());
 }
 
 void AppendToolCallToContext(BMessage* context, const char* name, const BMessage* argsMsg, const char* toolCallId) {
@@ -1302,41 +1335,7 @@ static status_t openai_stream_thread_func(void* data)
 
     // === CASO 1: MODALITÀ STANDARD (STREAMING NATIVO RETROCOMPATIBILE) ===
     if (!mcpActive) {
-        fprintf(stderr, "[OPENAI STREAM WORKER] Modalità Standard: Avvio Streaming Diretto.\n");
-        
-        BString url = (args->base_url && args->base_url[0] != '\0') ? args->base_url : "https://api.openai.com/v1/chat/completions";
-
-        BString payload;
-        BuildOpenAIPayload(args->context_copy, nullptr, payload, true);
-
-        {
-            StreamTarget streamTarget(args->notify_path);
-            CompletionListener listener(args->notify_path);
-            BUrl bUrl(url.String(), true);
-            BUrlRequest* req = BUrlProtocolRoster::MakeRequest(bUrl, &streamTarget, &listener, NULL);
-            if (req) {
-                BHttpRequest* http = dynamic_cast<BHttpRequest*>(req);
-                if (http) {
-                    http->SetMethod(B_HTTP_POST);
-                    BHttpHeaders headers;
-                    headers.AddHeader("Content-Type", "application/json");
-                    BString authHeader;
-                    authHeader << "Bearer " << args->api_key;
-                    headers.AddHeader("Authorization", authHeader.String());
-                    http->SetHeaders(headers);
-
-                    BMemoryIO* input = new BMemoryIO(payload.String(), payload.Length());
-                    http->AdoptInputData(input, payload.Length());
-                }
-                thread_id thread = req->Run();
-                if (thread >= 0) { 
-                    status_t rc; 
-                    wait_for_thread(thread, &rc); 
-                }
-                delete req;
-            }
-        }
-        goto thread_cleanup;
+        goto fallback_to_standard;
     }
 
     // === CASO 2: MODALITÀ MCP ATTIVA (LOOP STRUMENTI VIA IPC MESSENGER) ===
@@ -1423,6 +1422,26 @@ static status_t openai_stream_thread_func(void* data)
             fprintf(stderr, "[OPENAI STREAM WORKER] Fallito il parsing JSON della risposta di rete.\n");
             executionLoop = false;
             break;
+        }
+        
+        BMessage errorObj;
+        if (parsedJson.FindMessage("error", &errorObj) == B_OK) {
+            const char* errMsg = nullptr;
+            errorObj.FindString("message", &errMsg);
+            
+            // Se l'errore contiene la lamentela sui flag dei tool o sulle capability
+            if (errMsg && (BString(errMsg).FindFirst("tool choice") != B_ERROR || 
+                           BString(errMsg).FindFirst("tools") != B_ERROR)) {
+                
+                fprintf(stderr, "[OPENAI WORKER] Il server remoto rifiuta l'MCP. Errore: %s\n", errMsg);
+                fprintf(stderr, "[OPENAI WORKER] Disattivazione MCP forzata e passaggio alla Modalità Standard.\n");
+                
+                // 1. Disattiviamo i flag dell'MCP
+                mcpActive = false; 
+                executionLoop = false; // Rompiamo il loop MCP attuale
+                
+                goto fallback_to_standard;
+            }
         }
 
         BMessage choices, choiceZero, message, toolCalls, toolCallZero, functionObj;
@@ -1525,7 +1544,54 @@ static status_t openai_stream_thread_func(void* data)
             executionLoop = false;
         }
     }
+    goto thread_post_actions;
 
+ 
+    // =========================================================================
+    // === CASO 1: MODALITÀ STANDARD (STREAMING NATIVO RETROCOMPATIBILE) ===
+    // =========================================================================
+fallback_to_standard:
+{
+    fprintf(stderr, "[OPENAI STREAM WORKER] Modalità Standard: Avvio Streaming Diretto.\n");
+    
+    BString url = (args->base_url && args->base_url[0] != '\0') ? args->base_url : "https://api.openai.com/v1/chat/completions";
+
+    BString payload;
+    // Forziamo stream = true e non passiamo alcun tool
+    BuildOpenAIPayload(args->context_copy, nullptr, payload, true);
+
+    {
+        StreamTarget streamTarget(args->notify_path);
+        CompletionListener listener(args->notify_path);
+        BUrl bUrl(url.String(), true);
+        BUrlRequest* req = BUrlProtocolRoster::MakeRequest(bUrl, &streamTarget, &listener, NULL);
+        if (req) {
+            BHttpRequest* http = dynamic_cast<BHttpRequest*>(req);
+            if (http) {
+                http->SetMethod(B_HTTP_POST);
+                BHttpHeaders headers;
+                headers.AddHeader("Content-Type", "application/json");
+                BString authHeader;
+                authHeader << "Bearer " << args->api_key;
+                headers.AddHeader("Authorization", authHeader.String());
+                http->SetHeaders(headers);
+
+                BMemoryIO* input = new BMemoryIO(payload.String(), payload.Length());
+                http->AdoptInputData(input, payload.Length());
+            }
+            thread_id thread = req->Run();
+            if (thread >= 0) { 
+                status_t rc; 
+                wait_for_thread(thread, &rc); 
+            }
+            delete req;
+        }
+    }
+}
+// =========================================================================
+// === AZIONI POST-RISPOSTA (CONVERGENZA PER ENTRAMBI I FLUSSI) ===
+// =========================================================================
+thread_post_actions:
     // === GENERAZIONE TITOLO POST-RISPOSTA IN MODALITÀ ASINCRONA ===
     if (args->context_copy != nullptr && !args->context_copy->HasString("title")) {
         BMessage messagesMsg;
@@ -1568,7 +1634,6 @@ static status_t openai_stream_thread_func(void* data)
             fprintf(stderr, "[OPENAI ASYNC] Auto-titolo generato: '%s'\n", autoTitle.String());
         }
     }
-
     // Scriviamo il terminatore sul file per svegliare il server
     {
         BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);

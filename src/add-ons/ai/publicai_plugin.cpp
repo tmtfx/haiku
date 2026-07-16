@@ -1319,12 +1319,6 @@ extern "C" const char* get_plugin_name() {
     return "PublicAIPlugin";
 }
 
-/* --- VECCHIO CODICE COMMENTATO (Ora abilitiamo anche la flag AI_CAP_MCP) ---
 uint32 ai_plugin_get_capabilities() {
     return AI_CAP_STREAMING;
-}
-*/
-
-extern "C" uint32 ai_plugin_get_capabilities() {
-    return AI_CAP_STREAMING | AI_CAP_MCP;
 }
