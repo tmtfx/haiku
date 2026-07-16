@@ -7,6 +7,7 @@
 #include <string.h>
 #include <stdio.h>
 
+//verificare cosa rimuovere qua
 #include <Url.h>
 #include <UrlRequest.h>
 #include <UrlSynchronousRequest.h>
@@ -15,6 +16,7 @@
 #include <HttpHeaders.h>
 #include <HttpRequest.h>
 #include <HttpResult.h>
+// *****************************
 
 #include <DataIO.h>
 #include <String.h>

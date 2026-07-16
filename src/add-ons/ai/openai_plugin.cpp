@@ -2,6 +2,7 @@
 // Plugin per il servizio OpenAI AI su Haiku - Versione Stateless Concorrente Nattiva.
 
 #include <os/ai/AIPlugin.h>
+#include <os/ai/AINetworkPlugin.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -10,7 +11,7 @@
 #include <UrlProtocolRoster.h>
 #include <UrlRequest.h>
 #include <UrlSynchronousRequest.h>
-#include <UrlProtocolListener.h>
+//#include <UrlProtocolListener.h>
 #include <DataIO.h>
 #include <HttpHeaders.h>
 #include <HttpRequest.h>
@@ -23,6 +24,7 @@
 
 using namespace BPrivate::Network;
 
+/*
 class SyncListener : public BUrlProtocolListener {
 public:
     SyncListener() {}
@@ -34,7 +36,7 @@ public:
         return false;
     }
 };
-
+*/
 static bool json_extract_quoted_string(const BString& json, int32 start, BString& out)
 {
     out.SetTo("");
@@ -538,7 +540,7 @@ public:
 private:
     BFile fFile;
 };
-
+/*
 class CompletionListener : public BUrlProtocolListener {
 public:
     CompletionListener(const char* notifyPath) : fPath(notifyPath) {}
@@ -553,7 +555,7 @@ public:
 private:
     BString fPath;
 };
-
+*/
 struct OpenAIHandle {
     char* base_url;
 };
