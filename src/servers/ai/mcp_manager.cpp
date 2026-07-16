@@ -46,6 +46,20 @@ bool ExtractStringFromJson(const char* json, const char* key, BString& out) {
 	out.ReplaceAll("\\\"", "\"");
 	out.ReplaceAll("\\n", "\n");
 	out.ReplaceAll("\\t", "\t");
+	out.ReplaceAll("\\r", "\r");
+	
+	out.ReplaceAll("\\u003c", "<");
+    out.ReplaceAll("\\u003e", ">");
+    out.ReplaceAll("\\u0026", "&");
+    out.ReplaceAll("\\u0027", "'");
+    out.ReplaceAll("\\u003d", "=");
+    
+    // 3. Fix Virgolatature tipografiche distruttive per il compilatore C++
+    out.ReplaceAll("\\u201c", "\"");
+    out.ReplaceAll("\\u201d", "\"");
+    out.ReplaceAll("\\u2018", "'");
+    out.ReplaceAll("\\u2019", "'");
+	
 	return true;
 }
 
