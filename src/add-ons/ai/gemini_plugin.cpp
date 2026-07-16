@@ -212,7 +212,7 @@ BString ExtractArgsJson(const BString& json, int32 functionCallPos) {
     return "{}";
 }
 
-void AppendToolCallToContext(BMessage* context, const char* name, const char* argsJson, const char* thoughtSignature = nullptr) {
+void AppendToolCallToContext(BMessage* context, const char* name, const BMessage* argsMsg, const char* thoughtSignature = nullptr) {
     BMessage messagesMsg;
     if (context->FindMessage("messages", &messagesMsg) != B_OK) {
         context->AddMessage("messages", &messagesMsg);
@@ -223,7 +223,9 @@ void AppendToolCallToContext(BMessage* context, const char* name, const char* ar
     BMessage toolCallMsg;
     toolCallMsg.AddString("type", "functionCall");
     toolCallMsg.AddString("name", name);
-    toolCallMsg.AddString("args", argsJson);
+    if (argsMsg) {
+        toolCallMsg.AddMessage("args", argsMsg);
+    }
     
     // === NOVITÀ: Se c'è la firma del pensiero, la salviamo nel messaggio ===
     if (thoughtSignature && strlen(thoughtSignature) > 0) {
@@ -290,13 +292,20 @@ void BuildPayloadFromContext(const BMessage* config, const char* currentPrompt, 
             if (type && strcmp(type, "functionCall") == 0) {
                 // Storico di una chiamata a un tool fatta dall'LLM
                 const char* name = msgItem.FindString("name");
-                const char* args = msgItem.FindString("args");
                 const char* thoughtSig = nullptr;
                 msgItem.FindString("thought_signature", &thoughtSig);
                 
                 if (!first) outPayload.Append(",");
                 
-                BString cleanArgs(args && args[0] != '\0' ? args : "{}");
+                BString cleanArgs;
+                BMessage argsMsg;
+                if (msgItem.FindMessage("args", &argsMsg) == B_OK) {
+                    SerializeBMessageToJson(&argsMsg, cleanArgs);
+                } else {
+                    const char* argsStr = msgItem.FindString("args");
+                    cleanArgs = (argsStr && argsStr[0] != '\0' ? argsStr : "{}");
+                }
+                
                 // Assicuriamoci che i ritorni a capo reali non escapati dentro args (se presenti) 
                 // non spacchino la riga prima di arrivare a thought_signature
                 cleanArgs.ReplaceAll("\n", "\\n");
@@ -307,26 +316,14 @@ void BuildPayloadFromContext(const BMessage* config, const char* currentPrompt, 
                     // === FIX FONDAMENTALE: Applichiamo l'escape sul thought_signature ===
                     BString escapedThought = EscapeStringForJson(thoughtSig);
 
-                    /*tempCall.SetToFormat(
-                        "{\"role\":\"model\",\"parts\":["
-                        "{\"functionCall\":{\"name\":\"%s\",\"args\":%s},\"thought_signature\":\"%s\"}"
-                        "]}", 
-                        name, 
-                        (args && args[0] != '\0') ? args : "{}", 
-                        escapedThought.String()
-                    );*/
                     tempCall << "{\"role\":\"model\",\"parts\":[";
                     tempCall << "{\"functionCall\":{\"name\":\"" << name << "\",\"args\":" << cleanArgs << "},";
                     tempCall << "\"thought_signature\":\"" << escapedThought << "\"}";
                     tempCall << "]}";
                 } else {
-                    tempCall.SetToFormat(
-                        "{\"role\":\"model\",\"parts\":["
-                        "{\"functionCall\":{\"name\":\"%s\",\"args\":%s}}"
-                        "]}", 
-                        name, 
-                        (args && args[0] != '\0') ? args : "{}"
-                    );
+                    tempCall << "{\"role\":\"model\",\"parts\":[";
+                    tempCall << "{\"functionCall\":{\"name\":\"" << name << "\",\"args\":" << cleanArgs << "}}";
+                    tempCall << "]}";
                 }
                 outPayload << tempCall;
                 first = false;
@@ -1292,15 +1289,20 @@ static status_t gemini_stream_thread_func(void* data)
                     functionCall.FindString("thoughtSignature", &thoughtSignature);
                 }
 
-                int32 fCallPos = rawResponse.FindFirst("\"functionCall\"");
-                BString argsJson = ExtractArgsJson(rawResponse, fCallPos);
+                BMessage argsMsg;
+                BString argsJson;
+                if (functionCall.FindMessage("args", &argsMsg) == B_OK) {
+                    SerializeBMessageToJson(&argsMsg, argsJson);
+                } else {
+                    argsJson = "{}";
+                }
 
                 fprintf(stderr, "[GEMINI MCP] L'LLM richiede lo strumento: %s con argomenti: %s\n", toolName, argsJson.String());
 
                 // Invochiamo lo strumento mandando un messaggio sincrono all'ai_server
                 BMessage reqExec(MSG_EXECUTE_TOOL);
                 reqExec.AddString("name", toolName);
-                reqExec.AddString("args", argsJson.String());
+                reqExec.AddMessage("arguments", &argsMsg);
                 
                 const char* ctxId = nullptr;
                 if (args->context_copy) {
@@ -1334,7 +1336,7 @@ static status_t gemini_stream_thread_func(void* data)
                 }
 
                 // Aggiorniamo la history clonata in memoria per il prossimo turno del loop
-                AppendToolCallToContext(args->context_copy, toolName, argsJson.String(), thoughtSignature);
+                AppendToolCallToContext(args->context_copy, toolName, &argsMsg, thoughtSignature);
                 AppendToolResponseToContext(args->context_copy, toolName, toolResultBuf.String());
                 
             } 
@@ -1627,15 +1629,20 @@ static status_t gemini_stream_thread_func(void* data)
                     functionCall.FindString("thoughtSignature", &thoughtSignature);
                 }
 
-                int32 fCallPos = rawResponse.FindFirst("\"functionCall\"");
-                BString argsJson = ExtractArgsJson(rawResponse, fCallPos);
+                BMessage argsMsg;
+                BString argsJson;
+                if (functionCall.FindMessage("args", &argsMsg) == B_OK) {
+                    SerializeBMessageToJson(&argsMsg, argsJson);
+                } else {
+                    argsJson = "{}";
+                }
 
                 fprintf(stderr, "[GEMINI MCP] L'LLM richiede lo strumento: %s con argomenti: %s\n", toolName, argsJson.String());
 
                 // Invochiamo lo strumento mandando un messaggio sincrono all'ai_server
                 BMessage reqExec(MSG_EXECUTE_TOOL);
                 reqExec.AddString("name", toolName);
-                reqExec.AddString("args", argsJson.String());
+                reqExec.AddMessage("arguments", &argsMsg);
                 
                 const char* ctxId = nullptr;
                 if (args->context_copy) {
@@ -1672,7 +1679,7 @@ static status_t gemini_stream_thread_func(void* data)
 
                 // Aggiorniamo la history clonata in memoria per il prossimo turno del loop
                 //AppendToolCallToContext(args->context_copy, toolName, argsJson.String());
-                AppendToolCallToContext(args->context_copy, toolName, argsJson.String(), thoughtSignature);
+                AppendToolCallToContext(args->context_copy, toolName, &argsMsg, thoughtSignature);
                 AppendToolResponseToContext(args->context_copy, toolName, toolResultBuf.String());
                 
                 // Il loop continua (executionLoop = true), inviando il risultato a Gemini al prossimo ciclo
