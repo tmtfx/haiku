@@ -15,52 +15,54 @@
 #include <string.h>
 #include <vector>
 
-bool ExtractStringFromJson(const char* json, const char* key, BString& out) {
-	if (!json || !key) return false;
-	BString needle;
-	needle.SetToFormat("\"%s\"", key);
-	int32 pos = BString(json).FindFirst(needle);
-	if (pos == B_ERROR) return false;
-	
-	const char* p = json + pos + needle.Length();
-	while (*p && (*p == ' ' || *p == '\t' || *p == ':')) p++;
-	if (*p != '"') return false;
-	p++; // salta le virgolette aperte
-	
-	const char* q = p;
-	bool escaped = false;
-	while (*q) {
-		if (escaped) {
-			escaped = false;
-		} else if (*q == '\\') {
-			escaped = true;
-		} else if (*q == '"') {
-			break;
-		}
-		q++;
-	}
-	
-	out.SetTo(p, q - p);
-	// Unescape base
-	out.ReplaceAll("\\\\", "\\");
-	out.ReplaceAll("\\\"", "\"");
-	out.ReplaceAll("\\n", "\n");
-	out.ReplaceAll("\\t", "\t");
-	out.ReplaceAll("\\r", "\r");
-	
-	out.ReplaceAll("\\u003c", "<");
+bool ExtractStringFromJson(const char* json, const char* key, BString& out, bool unescapeControlChars) {
+    if (!json || !key) return false;
+    BString needle;
+    needle.SetToFormat("\"%s\"", key);
+    int32 pos = BString(json).FindFirst(needle);
+    if (pos == B_ERROR) return false;
+    
+    const char* p = json + pos + needle.Length();
+    while (*p && (*p == ' ' || *p == '\t' || *p == ':')) p++;
+    if (*p != '"') return false;
+    p++; // salta le virgolette aperte
+    
+    const char* q = p;
+    bool escaped = false;
+    while (*q) {
+        if (escaped) {
+            escaped = false;
+        } else if (*q == '\\') {
+            escaped = true;
+        } else if (*q == '"') {
+            break;
+        }
+        q++;
+    }
+    
+    out.SetTo(p, q - p);
+    
+    if (unescapeControlChars) {
+        out.ReplaceAll("\\n", "\n");
+        out.ReplaceAll("\\t", "\t");
+        out.ReplaceAll("\\r", "\r");
+    }
+    
+    out.ReplaceAll("\\\\", "\\");
+    out.ReplaceAll("\\\"", "\"");
+        
+    out.ReplaceAll("\\u003c", "<");
     out.ReplaceAll("\\u003e", ">");
     out.ReplaceAll("\\u0026", "&");
     out.ReplaceAll("\\u0027", "'");
     out.ReplaceAll("\\u003d", "=");
     
-    // 3. Fix Virgolatature tipografiche distruttive per il compilatore C++
     out.ReplaceAll("\\u201c", "\"");
     out.ReplaceAll("\\u201d", "\"");
     out.ReplaceAll("\\u2018", "'");
     out.ReplaceAll("\\u2019", "'");
-	
-	return true;
+    
+    return true;
 }
 
 BString RunSystemCommand(const char* command) {

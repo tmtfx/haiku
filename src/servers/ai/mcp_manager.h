@@ -14,7 +14,7 @@
 void PopulateMcpTools(BList& mpcManager, uint32 permissions);
 
 // Estrae una stringa da un payload JSON
-bool ExtractStringFromJson(const char* json, const char* key, BString& out);
+bool ExtractStringFromJson(const char* json, const char* key, BString& out, bool unescapeControlChars = true);
 
 // Esegue uno specifico strumento locale in sicurezza e ne restituisce il risultato
 BString ExecuteLocalTool(const char* toolName, const BMessage& arguments);
