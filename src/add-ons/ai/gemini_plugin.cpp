@@ -385,7 +385,7 @@ extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
     config->FindString("api_key", &apiKey);
     config->FindString("model_name", &model);
 
-    if (!model || model[0] == '\0') model = "gemini-2.5-flash";
+    if (!model || model[0] == '\0') model = "gemini-3.5-flash";
     
     if (!apiKey || apiKey[0] == '\0') {
         fprintf(stderr, "[GEMINI PLUGIN] ERRORE CRITICO: api_key non trovata o vuota nel BMessage!\n");
@@ -488,6 +488,19 @@ extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
             response_buf[copy_len] = '\0';
             extractedSuccessfully = true;
             fprintf(stderr, "[GEMINI PLUGIN] Testo estratto con successo dal JSON.\n");
+            
+            if (!config->HasString("title") && prompt != nullptr) {
+                BString autoTitle(prompt);
+                autoTitle.Trim();
+                if (autoTitle.Length() > 30) {
+                    autoTitle.Truncate(30);
+                    autoTitle << "...";
+                }
+                config->RemoveName("title");
+                config->AddString("title", autoTitle.String());
+            
+                // TODO: Qui notifichi l'applicazione principale (se necessario) che il BMessage config è aggiornato
+            }
         }
     }
 
@@ -781,7 +794,7 @@ void SerializeBMessageToJson(const BMessage* msg, BString& outJson) {
     
     outJson << "}";
 }
-
+/*
 void ConvertBMessageToGeminiToolsJson(const BMessage* toolsMsg, BString& outJson)
 {
     outJson = "[";
@@ -816,6 +829,49 @@ void ConvertBMessageToGeminiToolsJson(const BMessage* toolsMsg, BString& outJson
     }
     
     outJson << "]";
+}*/
+void ConvertBMessageToGeminiToolsJson(const BMessage* toolsMsg, BString& outJson)
+{
+    outJson = "[{\"functionDeclarations\":["; // Involucro Gemini
+
+    BMessage tool;
+    int32 i = 0;
+    bool first = true;
+
+    while (toolsMsg->FindMessage("tool", i, &tool) == B_OK) {
+        if (!first) outJson << ",";
+        first = false;
+
+        const char* name = tool.FindString("name");
+        const char* desc = tool.FindString("description");
+
+        BString escapedDesc(desc ? desc : "");
+        escapedDesc.ReplaceAll("\\", "\\\\");
+        escapedDesc.ReplaceAll("\"","\\\"");
+        escapedDesc.ReplaceAll("\n", "\\n");
+        escapedDesc.ReplaceAll("\r", "\\r");
+        escapedDesc.ReplaceAll("\t", "\\t");
+
+        outJson << "{";
+        outJson << "\"name\":\"" << name << "\",";
+        outJson << "\"description\":\"" << escapedDesc << "\"";
+
+        BMessage params;
+        tool.FindMessage("parameters", &params);
+        if (!params.IsEmpty()) {
+            BString jsonParams;
+            SerializeBMessageToJson(&params, jsonParams);
+            outJson << ",\"parameters\":" << jsonParams;
+        } else {
+            outJson << ",\"parameters\":{\"type\":\"OBJECT\",\"properties\":{}}";
+        }
+
+        outJson << "}";
+        i++;
+    }
+
+    outJson << "]}]"; // Chiusura involucro Gemini
+    if (first) outJson.SetTo("");
 }
 
 static BString EscapeStringForJson(const char* input) {
@@ -934,7 +990,7 @@ static status_t gemini_stream_thread_func(void* data)
 
         BString payload;
         BuildPayloadFromContext(args->context_copy, nullptr, payload);
-
+/*
         if (mcpActive) {
             if (payload.EndsWith("}")) {
                 payload.Truncate(payload.Length() - 1);
@@ -946,6 +1002,22 @@ static status_t gemini_stream_thread_func(void* data)
                     payload << ",\"tools\":[{\"functionDeclarations\":" << geminiToolsJson << "}]}";
                 } else {
                     payload << "}";
+                }
+            }
+        }*/
+        if (mcpActive && !replyTools.IsEmpty()) {
+            BString geminiToolsJson;
+            ConvertBMessageToGeminiToolsJson(&replyTools, geminiToolsJson);
+
+            if (geminiToolsJson.Length() > 0) {
+                // Invece di fare Truncate(length - 1) sperando che l'ultimo carattere sia '}', 
+                // cerchiamo l'ultima parentesi di chiusura reale dell'oggetto root.
+                int32 lastCloseBrace = payload.FindLast("}");
+                if (lastCloseBrace != B_ERROR) {
+                    // Tagliamo la stringa esattamente all'ultima graffa di chiusura globale
+                    payload.Truncate(lastCloseBrace);
+                    // Iniettiamo i tool a livello radice e richiudiamo in sicurezza
+                    payload << ",\"tools\":" << geminiToolsJson << "}";
                 }
             }
         }
@@ -1091,6 +1163,54 @@ static status_t gemini_stream_thread_func(void* data)
                 }
             }
             executionLoop = false;
+        }
+    }
+    // =========================================================================
+    // === GENERAZIONE TITOLO POST-RISPOSTA IN MODALITÀ ASINCRONA (MCP) ===
+    // =========================================================================
+    if (args->context_copy != nullptr && !args->context_copy->HasString("title")) {
+        BMessage messagesMsg;
+        const char* firstPromptText = nullptr;
+
+        // Recuperiamo l'ultimo prompt reale inviato dall'utente nello storico dei messaggi
+        if (args->context_copy->FindMessage("messages", &messagesMsg) == B_OK) {
+            int32 msgCount = 0;
+            BMessage msgItem;
+            
+            while (messagesMsg.FindMessage("msg", msgCount, &msgItem) == B_OK || 
+                   messagesMsg.FindMessage(BString().SetToFormat("%d", msgCount).String(), &msgItem) == B_OK) {
+                
+                const char* role = msgItem.FindString("role");
+                const char* content = msgItem.FindString("content");
+                if (!content) msgItem.FindString("text", &content);
+                
+                if (role && strcmp(role, "user") == 0 && content && content[0] != '\0') {
+                    firstPromptText = content; // Sovrascrive fino a beccare l'ultimo
+                }
+                msgCount++;
+            }
+        }
+
+        // Se abbiamo trovato il testo del prompt originario utente, generiamo l'auto-titolo
+        if (firstPromptText && firstPromptText[0] != '\0') {
+            BString autoTitle(firstPromptText);
+            autoTitle.Trim();
+            if (autoTitle.Length() > 30) {
+                autoTitle.Truncate(30);
+                autoTitle << "...";
+            }
+            
+            // 1. Aggiorniamo la copia locale del thread
+            args->context_copy->RemoveName("title");
+            args->context_copy->AddString("title", autoTitle.String());
+            
+            // 2. Notifichiamo la finestra/applicazione principale via IPC BMessenger 
+            if (args->server_messenger.IsValid()) {
+                BMessage titleUpdateMsg('UTIT'); // Assicurati che 'UTIT' sia l'ID che si aspetta la tua app
+                titleUpdateMsg.AddString("title", autoTitle.String());
+                args->server_messenger.SendMessage(&titleUpdateMsg);
+            }
+            fprintf(stderr, "[GEMINI ASYNC] Auto-titolo generato post-risposta: '%s'\n", autoTitle.String());
         }
     }
 
