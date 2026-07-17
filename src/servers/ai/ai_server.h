@@ -2,11 +2,16 @@
  * Copyright 2026, Fabio Tomat <f.t.public@gmail.com>
  * All rights reserved. Distributed under the terms of the MIT license.
  */
-#ifndef _H
-#define _H
+#ifndef _AI_SERVER_H
+#define _AI_SERVER_H
 
 #include <vector>
+#include <string>
 #include <SupportDefs.h>
+#include <String.h>
+#include <Messenger.h>
+#include <List.h>
+#include <os/ai/AIPlugin.h>
 
 struct ChatMessage {
     BString role;    // "user" o "assistant" (o "system")
@@ -35,6 +40,7 @@ struct ClientSession {
     
     BList mpcManager;	// lista di messaggi che contengono le operazioni che può fare l'mpc
     volatile bool abort_requested = false;
+    BMessenger client_target; // Messenger del client per notifiche in tempo reale (ad es. esecuzione tool)
 };
 
 struct PluginEntry {
@@ -52,4 +58,4 @@ struct PluginEntry {
     status_t (*set_model)(ai_plugin_t, const char*);
 };
 
-#endif // _H
+#endif // _AI_SERVER_H

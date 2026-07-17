@@ -585,6 +585,10 @@ public:
 				int32 sessionID = -1;
 				msg->FindInt32("session_id", &sessionID);
 
+				if (sessionID != -1 && gSessions.count(sessionID) > 0) {
+					gSessions[sessionID].client_target = target;
+				}
+
 				PluginEntry* p = nullptr;
 				BString pluginName;
 				BString modelName;
@@ -1185,9 +1189,17 @@ public:
                         // sappia che non deve più elaborare ulteriori risposte o loop.
                         session->abort_requested = true; 
 
-                        // 2. Rispondiamo con un errore fatale che costringe il client a chiudere la chiamata
+                        // 2. Notifichiamo il client dell'interruzione forzata
+                        if (session->client_target.IsValid()) {
+                            BMessage notifyMsg(MSG_AI_RESPONSE);
+                            notifyMsg.AddString("partial", "\n🛑 [Loop di elaborazione INTERROTTO dall'utente]\n");
+                            notifyMsg.AddBool("complete", false);
+                            session->client_target.SendMessage(&notifyMsg);
+                        }
+
+                        // 3. Rispondiamo con un errore fatale che costringe il client a chiudere la chiamata
                         reply.AddInt32("status", B_CANCELED);
-                        reply.AddString("result", "{\"error\":\"Aborted: L'utente ha interrotto il loop di elaborazione dell'AI.\"}");
+                        reply.AddString("result", "{\"error\":\"Aborted: L'utente ha interrotto le operazioni di elaborazione dell'AI.\"}");
                         msg->SendReply(&reply);
                         break;
                     }
@@ -1196,6 +1208,16 @@ public:
                         // L'utente ha negato l'autorizzazione
                         fprintf(stderr, "[AI_SERVER] [SICUREZZA] Accesso negato dall'utente per '%s'\n", toolName.String());
                         
+                        // Notifichiamo il client del rifiuto
+                        if (session->client_target.IsValid()) {
+                            BString refuseNotify;
+                            refuseNotify.SetToFormat("\n❌ [Esecuzione %s RIFIUTATA dall'utente]\n", toolName.String());
+                            BMessage notifyMsg(MSG_AI_RESPONSE);
+                            notifyMsg.AddString("partial", refuseNotify.String());
+                            notifyMsg.AddBool("complete", false);
+                            session->client_target.SendMessage(&notifyMsg);
+                        }
+
                         reply.AddInt32("status", B_PERMISSION_DENIED);
                         reply.AddString("result", "{\"error\":\"Errore: L'utente di Haiku ha negato l'autorizzazione per eseguire questa azione di scrittura/modifica.\"}");
                         msg->SendReply(&reply);
@@ -1205,6 +1227,56 @@ public:
                     fprintf(stderr, "[AI_SERVER] [SICUREZZA] Accesso consentito dall'utente per '%s'\n", toolName.String());
                 }
 
+                // --- NOTIFICA AL CLIENT DELL'ESECUZIONE IN TEMPO REALE ---
+                if (session && session->client_target.IsValid()) {
+                    BString notificationText;
+                    if (toolName == "run_terminal_command") {
+                        const char* cmdToRun = arguments.FindString("cmd");
+                        notificationText.SetToFormat("\n⚙️ [Esecuzione comando terminale: %s]\n", cmdToRun ? cmdToRun : "");
+                    } else if (toolName == "create_file") {
+                        const char* filePath = arguments.FindString("path");
+                        notificationText.SetToFormat("\n📝 [Creazione file: %s]\n", filePath ? filePath : "");
+                    } else if (toolName == "make_directory") {
+                        const char* filePath = arguments.FindString("path");
+                        notificationText.SetToFormat("\n📁 [Creazione cartella: %s]\n", filePath ? filePath : "");
+                    } else if (toolName == "delete_file") {
+                        const char* filePath = arguments.FindString("path");
+                        notificationText.SetToFormat("\n🗑️ [Eliminazione: %s]\n", filePath ? filePath : "");
+                    } else if (toolName == "open_document") {
+                        const char* filePath = arguments.FindString("path");
+                        notificationText.SetToFormat("\n🚀 [Apertura documento/app: %s]\n", filePath ? filePath : "");
+                    } else if (toolName == "show_alert_dialog") {
+                        const char* text = arguments.FindString("text");
+                        notificationText.SetToFormat("\n💬 [Mostra avviso: %s]\n", text ? text : "");
+                    } else if (toolName == "manage_attribute") {
+                        const char* action = arguments.FindString("action");
+                        const char* filePath = arguments.FindString("path");
+                        const char* attrName = arguments.FindString("name");
+                        notificationText.SetToFormat("\n🏷️ [Gestione attributo BFS '%s' (%s) su: %s]\n", 
+                            attrName ? attrName : "N/A", action ? action : "read", filePath ? filePath : "N/A");
+                    } else if (toolName == "read_file") {
+                        const char* filePath = arguments.FindString("path");
+                        notificationText.SetToFormat("\n📖 [Lettura file: %s]\n", filePath ? filePath : "");
+                    } else if (toolName == "list_directory") {
+                        const char* filePath = arguments.FindString("path");
+                        notificationText.SetToFormat("\n📂 [Elenco cartella: %s]\n", filePath ? filePath : "");
+                    } else if (toolName == "search_text") {
+                        const char* pattern = arguments.FindString("pattern");
+                        const char* filePath = arguments.FindString("path");
+                        notificationText.SetToFormat("\n🔍 [Ricerca pattern '%s' in: %s]\n", pattern ? pattern : "", filePath ? filePath : "");
+                    } else if (toolName == "get_system_stats") {
+                        notificationText = "\n📊 [Lettura statistiche di sistema]\n";
+                    } else {
+                        notificationText.SetToFormat("\n⚙️ [Esecuzione strumento: %s]\n", toolName.String());
+                    }
+
+                    if (!notificationText.IsEmpty()) {
+                        BMessage notifyMsg(MSG_AI_RESPONSE);
+                        notifyMsg.AddString("partial", notificationText.String());
+                        notifyMsg.AddBool("complete", false);
+                        session->client_target.SendMessage(&notifyMsg);
+                    }
+                }
 
                 // 4. DELEGA ALL'ESECUTORE CENTRALE (mcp_manager.cpp)
                 fprintf(stderr, "[AI_SERVER] Sicurezza superata. Delegando esecuzione a ExecuteLocalTool per: '%s'\n", toolName.String());
