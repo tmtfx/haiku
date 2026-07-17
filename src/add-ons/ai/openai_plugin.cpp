@@ -557,9 +557,11 @@ private:
     BString fPath;
 };
 */
+/* usiamo la generica Handle in AIPlugin.h
 struct OpenAIHandle {
     char* base_url;
 };
+*/
 
 /*
 struct OpenAIAsyncArgs {
@@ -969,25 +971,16 @@ static void BuildOpenAIPayload(const BMessage* chatContext, const char* explicit
 
 // --- INTERFACCIA C PUBBLICA ---
 
-extern "C" ai_plugin_t ai_plugin_init(const BMessage* config)
+extern "C" ai_plugin_t ai_plugin_init(void)
 {
-    OpenAIHandle* h = (OpenAIHandle*)malloc(sizeof(OpenAIHandle));
-    if (!h) return nullptr;
-    h->base_url = nullptr;
-    
-    const char* url = nullptr;
-    if (config && config->FindString("base_url", &url) == B_OK) {
-        h->base_url = dupstr_or_null(url);
-    }
+    AIPluginHandle* h = new(std::nothrow) AIPluginHandle();
     return (ai_plugin_t)h;
 }
 
 extern "C" void ai_plugin_free(ai_plugin_t handle)
 {
-    OpenAIHandle* h = (OpenAIHandle*)handle;
-    if (!h) return;
-    if (h->base_url) free(h->base_url);
-    free(h);
+    AIPluginHandle* h = (AIPluginHandle*)handle;
+    delete h;
 }
 
 extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
@@ -996,7 +989,7 @@ extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
                                              size_t response_len,
                                              BMessage* config)
 {
-    OpenAIHandle* h = (OpenAIHandle*)handle;
+    AIPluginHandle* h = (AIPluginHandle*)handle;
     if (!config || !response_buf || response_len == 0) return B_ERROR;
     
     
@@ -1244,7 +1237,7 @@ cleanup:
 
 extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle, const char* prompt, BMessage* config)
 {
-    OpenAIHandle* h = (OpenAIHandle*)handle;
+    AIPluginHandle* h = (AIPluginHandle*)handle;
     if (!config) return B_ERROR;
     
     const char* apiKey = nullptr;
@@ -1651,7 +1644,7 @@ thread_cleanup:
 
 extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle, const char* prompt, BMessage* config)
 {
-    OpenAIHandle* h = (OpenAIHandle*)handle;
+    AIPluginHandle* h = (AIPluginHandle*)handle;
     if (!config) return B_ERROR;
     
     const char* apiKey = nullptr;

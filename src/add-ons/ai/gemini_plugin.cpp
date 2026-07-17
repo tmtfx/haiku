@@ -579,18 +579,11 @@ void BuildPayloadFromContext(const BMessage* config, const char* currentPrompt, 
     outPayload.Append("]}");
 }*/
 
-extern "C" ai_plugin_t ai_plugin_init(const BMessage* config)
+extern "C" ai_plugin_t ai_plugin_init(void)
 {
     // Usiamo 'new' (con std::nothrow per evitare eccezioni in caso di RAM esaurita)
     // per creare l'oggetto e attivare il costruttore che azzera base_url
     AIPluginHandle* h = new(std::nothrow) AIPluginHandle();
-    if (!h) return nullptr;
-    
-    const char* url = nullptr;
-    if (config && config->FindString("base_url", &url) == B_OK) {
-        h->base_url = url ? strdup(url) : nullptr;
-    }
-    
     return (ai_plugin_t)h;
 }
 
@@ -599,18 +592,7 @@ extern "C" void ai_plugin_free(ai_plugin_t handle)
     AIPluginHandle* h = (AIPluginHandle*)handle;
     delete h;
 }
-extern "C" status_t ai_plugin_update_config(ai_plugin_t handle, const BMessage* config)
-{
-    AIPluginHandle* h = (AIPluginHandle*)handle;
-    if (!h || !config) return B_BAD_VALUE;
-    
-    const char* url = nullptr;
-    if (config->FindString("base_url", &url) == B_OK) {
-        if (h->base_url) free(h->base_url);
-        h->base_url = url ? strdup(url) : nullptr;
-    }
-    return B_OK;
-}
+
 extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
                                              const char* prompt,
                                              char* response_buf,

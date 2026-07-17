@@ -121,9 +121,11 @@ private:
 };
 */
 
+/* usiamo la generica Handle in AIPlugin.h
 struct DeepSeekHandle {
     char* base_url;
 };
+*/
 
 /*
 struct DeepSeekAsyncArgs {
@@ -544,25 +546,21 @@ BuildPayloadFromContext(const BMessage* config, const char* currentPrompt,
     outPayload.Append("\n  ]\n}");
 }
 
-extern "C" ai_plugin_t ai_plugin_init(const BMessage* settingsMsg)
+extern "C" ai_plugin_t ai_plugin_init(void)
 {
-    DeepSeekHandle* handle = (DeepSeekHandle*)malloc(sizeof(DeepSeekHandle));
+    /*AIPluginHandle* handle = (AIPluginHandle*)malloc(sizeof(DeepSeekHandle));
     if (!handle)
         return nullptr;
 
     handle->base_url = nullptr;
-    if (settingsMsg) {
-        const char* url = nullptr;
-        if (settingsMsg->FindString("base_url", &url) == B_OK && url && url[0] != '\0')
-            handle->base_url = dupstr_or_null(url);
-    }
-
-    return (ai_plugin_t)handle;
+    return (ai_plugin_t)handle;*/
+    AIPluginHandle* h = new(std::nothrow) AIPluginHandle();
+    return (ai_plugin_t)h;
 }
 
 extern "C" void ai_plugin_free(ai_plugin_t handle)
 {
-    DeepSeekHandle* deepseek = (DeepSeekHandle*)handle;
+    AIPluginHandle* deepseek = (AIPluginHandle*)handle;
     if (!deepseek)
         return;
 
@@ -606,7 +604,7 @@ extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
         return B_BAD_VALUE;
     }
 
-    DeepSeekHandle* deepseek = (DeepSeekHandle*)handle;
+    AIPluginHandle* deepseek = (AIPluginHandle*)handle;
     BString url = (deepseek && deepseek->base_url && deepseek->base_url[0] != '\0')
         ? deepseek->base_url : DEFAULT_DEEPSEEK_URL;
     if (!url.EndsWith("/"))
@@ -1112,7 +1110,7 @@ thread_cleanup:
 extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle,
     const char* prompt, BMessage* contextMsg)
 {
-    DeepSeekHandle* deepseek = (DeepSeekHandle*)handle;
+    AIPluginHandle* deepseek = (AIPluginHandle*)handle;
     if (!contextMsg)
         return B_BAD_VALUE;
 
@@ -1174,7 +1172,7 @@ extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle,
 extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle,
     const char* prompt, BMessage* contextMsg)
 {
-    DeepSeekHandle* deepseek = (DeepSeekHandle*)handle;
+    AIPluginHandle* deepseek = (AIPluginHandle*)handle;
     if (!contextMsg)
         return B_BAD_VALUE;
 

@@ -67,7 +67,7 @@ extern "C" {
 // Opaque handle for plugin instance
 typedef void* ai_plugin_t;
 
-ai_plugin_t ai_plugin_init(const BMessage* settingsMsg);
+ai_plugin_t ai_plugin_init(void);
 
 // Free plugin instance
 void ai_plugin_free(ai_plugin_t handle);

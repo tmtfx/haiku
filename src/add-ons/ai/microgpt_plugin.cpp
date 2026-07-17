@@ -48,31 +48,10 @@ static bool file_exists(const std::string& path) {
     return (stat(path.c_str(), &st) == 0) && S_ISREG(st.st_mode);
 }
 
-extern "C" ai_plugin_t ai_plugin_init(const char* config_json) {
+extern "C" ai_plugin_t ai_plugin_init(void) {
     MicrogptHandle* h = new MicrogptHandle();
     h->loaded_model = NULL;
     h->organelle = NULL;
-    // parse config_json minimally for "model_dir":"..."
-    if (config_json) {
-        const char* p = strstr(config_json, "\"model_dir\"");
-        if (p) {
-            const char* colon = strchr(p, ':');
-            if (colon) {
-                const char* quote = strchr(colon, '"');
-                if (quote) {
-                    ++quote;
-                    const char* end = strchr(quote, '"');
-                    if (end) {
-                        h->model_dir.assign(quote, end - quote);
-                    }
-                }
-            }
-        }
-    }
-    if (h->model_dir.empty()) {
-        // fallback: bundled demo models dir inside the tree
-        h->model_dir = "third_party/microgpt-c/models";
-    }
     return (ai_plugin_t)h;
 }
 
@@ -233,35 +212,25 @@ extern "C" int ai_plugin_generate_text_async(ai_plugin_t handle, const char* pro
     return 0;
 }
 
-extern "C" int ai_plugin_list_models(ai_plugin_t handle, char* out_buf, size_t out_len) {
-    if (!handle || !out_buf) return -1;
-    MicrogptHandle* h = (MicrogptHandle*)handle;
-    std::vector<std::string> models = scan_models(h->model_dir.c_str());
-    // Also try fallback path if none found
+extern "C" status_t ai_plugin_list_models(const BMessage* settingsMsg, char* out_buf, size_t out_len) {
+    if (!out_buf) return B_BAD_VALUE;
+    const char* model_dir = "third_party/microgpt-c/models";
+    if (settingsMsg) {
+        settingsMsg->FindString("model_dir", &model_dir);
+    }
+    std::vector<std::string> models = scan_models(model_dir);
     if (models.empty()) {
         models = scan_models("/boot/home/config/non-packaged/add-ons/ai/models");
     }
-    // Build a simple JSON array
-    size_t used = 0;
-    int r = snprintf(out_buf + used, (out_len > used ? out_len - used : 0), "[");
-    if (r < 0) return -1;
-    used += (size_t)r;
+    std::string out = "[";
     for (size_t i = 0; i < models.size(); ++i) {
-        const char* sep = (i == 0) ? "" : ", ";
-        int n = snprintf(out_buf + used, (out_len > used ? out_len - used : 0), "%s\"%s\"", sep, models[i].c_str());
-        if (n < 0) return -1;
-        used += (size_t)n;
-        if (used >= out_len) break;
+        if (i) out += ",";
+        out += "\"" + models[i] + "\"";
     }
-    if (used < out_len) {
-        int n = snprintf(out_buf + used, out_len > used ? out_len - used : 0, "]");
-        if (n < 0) return -1;
-        used += (size_t)n;
-    } else {
-        // truncated, ensure NUL
-        out_buf[out_len - 1] = '\0';
-    }
-    return 0;
+    out += "]";
+    strncpy(out_buf, out.c_str(), out_len);
+    out_buf[out_len - 1] = '\0';
+    return B_OK;
 }
 
 extern "C" int ai_plugin_set_model(ai_plugin_t handle, const char* model_name) {
@@ -427,42 +396,7 @@ extern "C" int ai_plugin_set_model(ai_plugin_t handle, const char* model_name) {
     return 0;
 }
 
-extern "C" int ai_plugin_update_config(ai_plugin_t handle, const char* config_json) {
-    if (!handle) return -1;
-    MicrogptHandle* h = (MicrogptHandle*)handle;
-    if (!config_json) return -1;
-    // parse model_dir if present
-    const char* p = strstr(config_json, "\"model_dir\"");
-    if (p) {
-        const char* colon = strchr(p, ':');
-        if (colon) {
-            const char* quote = strchr(colon, '"');
-            if (quote) {
-                ++quote;
-                const char* end = strchr(quote, '"');
-                if (end) {
-                    h->model_dir.assign(quote, end - quote);
-                }
-            }
-        }
-    }
-    // parse notify_path if present (for async streaming)
-    const char* n = strstr(config_json, "\"notify_path\"");
-    if (n) {
-        const char* colon = strchr(n, ':');
-        if (colon) {
-            const char* quote = strchr(colon, '"');
-            if (quote) {
-                ++quote;
-                const char* end = strchr(quote, '"');
-                if (end) {
-                    h->notify_path.assign(quote, end - quote);
-                }
-            }
-        }
-    }
-    return 0;
-}
+
 extern "C" const char* get_plugin_name() {
     return "Micro GPT-c";
 }

@@ -27,9 +27,11 @@ using namespace BPrivate::Network;
 #define DEFAULT_ANTHROPIC_URL   "https://api.anthropic.com"
 #define DEFAULT_ANTHROPIC_MODEL "claude-3-5-sonnet-20241022"
 
+/* usiamo la generica Handle in AIPlugin.h
 struct AnthropicHandle {
 	char* base_url;
 };
+*/
 
 /*
 struct AnthropicAsyncArgs {
@@ -1155,29 +1157,23 @@ thread_cleanup:
 
 
 extern "C" ai_plugin_t
-ai_plugin_init(const BMessage* settingsMsg)
+ai_plugin_init(void)
 {
-	AnthropicHandle* handle = (AnthropicHandle*)malloc(sizeof(AnthropicHandle));
+	/*AIPluginHandle* handle = (AIPluginHandle*)malloc(sizeof(AnthropicHandle));
 	if (handle == NULL)
 		return NULL;
 
 	handle->base_url = NULL;
-	if (settingsMsg != NULL) {
-		const char* baseUrl = NULL;
-		if (settingsMsg->FindString("base_url", &baseUrl) == B_OK
-			&& baseUrl != NULL && baseUrl[0] != '\0') {
-			handle->base_url = dupstr_or_null(baseUrl);
-		}
-	}
-
-	return (ai_plugin_t)handle;
+	return (ai_plugin_t)handle;*/
+	AIPluginHandle* h = new(std::nothrow) AIPluginHandle();
+    return (ai_plugin_t)h;
 }
 
 
 extern "C" void
 ai_plugin_free(ai_plugin_t handle)
 {
-	AnthropicHandle* typedHandle = (AnthropicHandle*)handle;
+	AIPluginHandle* typedHandle = (AIPluginHandle*)handle;
 	if (typedHandle == NULL)
 		return;
 
@@ -1217,7 +1213,7 @@ ai_plugin_generate_text_sync(ai_plugin_t handle, const char* prompt,
 		return B_BAD_VALUE;
 	}
 
-	AnthropicHandle* typedHandle = (AnthropicHandle*)handle;
+	AIPluginHandle* typedHandle = (AIPluginHandle*)handle;
 	BString url = BuildMessagesUrl(typedHandle != NULL ? typedHandle->base_url : NULL);
 
 	BString payload;
@@ -1305,7 +1301,7 @@ extern "C" status_t
 ai_plugin_generate_text_async(ai_plugin_t handle, const char* prompt,
 	BMessage* contextMsg)
 {
-	AnthropicHandle* typedHandle = (AnthropicHandle*)handle;
+	AIPluginHandle* typedHandle = (AIPluginHandle*)handle;
 	if (contextMsg == NULL)
 		return B_BAD_VALUE;
 
@@ -1354,7 +1350,7 @@ extern "C" status_t
 ai_plugin_generate_text_async(ai_plugin_t handle, const char* prompt,
 	BMessage* contextMsg)
 {
-	AnthropicHandle* typedHandle = (AnthropicHandle*)handle;
+	AIPluginHandle* typedHandle = (AIPluginHandle*)handle;
 	if (contextMsg == NULL)
 		return B_BAD_VALUE;
 

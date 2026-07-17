@@ -50,8 +50,6 @@ struct PluginEntry {
     uint32 (*get_capabilities)(void);
     status_t (*list_models)(const BMessage*, char*, size_t);
     status_t (*set_model)(ai_plugin_t, const char*);
-    status_t (*update_config)(ai_plugin_t, const BMessage*);
-    
 };
 
 #endif // _H

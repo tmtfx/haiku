@@ -25,9 +25,11 @@ using namespace BPrivate::Network;
 #define DEFAULT_OLLAMA_URL   "http://localhost:11434"
 #define DEFAULT_OLLAMA_MODEL "llama3"
 
+/* usiamo la generica Handle in AIPlugin.h
 struct OllamaHandle {
 	char* base_url;
 };
+*/
 
 struct OllamaAsyncArgs {
 	char* model;
@@ -471,30 +473,17 @@ ollama_stream_thread_func(void* data)
 }
 
 
-extern "C" ai_plugin_t
-ai_plugin_init(const BMessage* settingsMsg)
+extern "C" ai_plugin_t ai_plugin_init(void)
 {
-	OllamaHandle* handle = (OllamaHandle*)malloc(sizeof(OllamaHandle));
-	if (handle == NULL)
-		return NULL;
-
-	handle->base_url = NULL;
-	if (settingsMsg != NULL) {
-		const char* baseUrl = NULL;
-		if (settingsMsg->FindString("base_url", &baseUrl) == B_OK
-			&& baseUrl != NULL && baseUrl[0] != '\0') {
-			handle->base_url = dupstr_or_null(baseUrl);
-		}
-	}
-
-	return (ai_plugin_t)handle;
+	AIPluginHandle* handle = new(std::nothrow) AIPluginHandle();
+    return (ai_plugin_t)handle;
 }
 
 
 extern "C" void
 ai_plugin_free(ai_plugin_t handle)
 {
-	OllamaHandle* typedHandle = (OllamaHandle*)handle;
+	AIPluginHandle* typedHandle = (AIPluginHandle*)handle;
 	if (typedHandle == NULL)
 		return;
 
@@ -518,7 +507,7 @@ ai_plugin_generate_text_sync(ai_plugin_t handle, const char* prompt,
 	if (response_buf == NULL || response_len == 0)
 		return B_BAD_VALUE;
 
-	OllamaHandle* typedHandle = (OllamaHandle*)handle;
+	AIPluginHandle* typedHandle = (AIPluginHandle*)handle;
 	BString url = BuildChatUrl(typedHandle != NULL ? typedHandle->base_url : NULL);
 
 	BString payload;
@@ -589,7 +578,7 @@ extern "C" status_t
 ai_plugin_generate_text_async(ai_plugin_t handle, const char* prompt,
 	BMessage* contextMsg)
 {
-	OllamaHandle* typedHandle = (OllamaHandle*)handle;
+	AIPluginHandle* typedHandle = (AIPluginHandle*)handle;
 	if (contextMsg == NULL)
 		return B_BAD_VALUE;
 

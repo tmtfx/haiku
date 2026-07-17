@@ -125,9 +125,11 @@ private:
 };
 */
 
+/* usiamo la generica Handle in AIPlugin.h
 struct PublicAIHandle {
     char* base_url;
 };
+*/
 
 /* --- VECCHIO CODICE COMMENTATO (Ora usiamo AsyncArgs globale da AIPlugin.h) ---
 struct PublicAIAsyncArgs {
@@ -529,28 +531,16 @@ static void BuildPublicAIPayload(const BMessage* chatContext, const char* explic
 // INTERFACCIA SDK PLUGIN C-LINKAGE
 // ============================================================================
 
-extern "C" ai_plugin_t ai_plugin_init(const BMessage* settingsMsg)
+extern "C" ai_plugin_t ai_plugin_init(void)
 {
-    PublicAIHandle* h = (PublicAIHandle*)malloc(sizeof(PublicAIHandle));
-    if (!h) return nullptr;
-    h->base_url = nullptr;
-    
-    if (settingsMsg) {
-        const char* url = nullptr;
-        // Estraiamo "base_url" direttamente dal messaggio nativo
-        if (settingsMsg->FindString("base_url", &url) == B_OK && url[0] != '\0') {
-            h->base_url = dupstr_or_null(url);
-        }
-    }
-    return (ai_plugin_t)h;
+    AIPluginHandle* handle = new(std::nothrow) AIPluginHandle();
+    return (ai_plugin_t)handle;
 }
 
 extern "C" void ai_plugin_free(ai_plugin_t handle)
 {
-    PublicAIHandle* h = (PublicAIHandle*)handle;
-    if (!h) return;
-    if (h->base_url) free(h->base_url);
-    free(h);
+    AIPluginHandle* h = (AIPluginHandle*)handle;
+    delete h;
 }
 
 extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
@@ -560,7 +550,7 @@ extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
                                              BMessage* config)
 {
     fprintf(stderr, "[PUBLICAI PLUGIN] === INIZIO generate_text_sync ===\n");
-    PublicAIHandle* h = (PublicAIHandle*)handle;
+    AIPluginHandle* h = (AIPluginHandle*)handle;
     if (!config) {
         fprintf(stderr, "[PUBLICAI PLUGIN] ERRORE: il puntatore BMessage* config è NULL!\n");
         return B_ERROR;
@@ -1103,7 +1093,7 @@ thread_cleanup:
 /* --- VECCHIO CODICE COMMENTATO (Adattamento ai_plugin_generate_text_async precedente) ---
 extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle, const char* prompt, BMessage* config)
 {
-    PublicAIHandle* h = (PublicAIHandle*)handle;
+    AIPluginHandle* h = (AIPluginHandle*)handle;
     if (!config) return B_ERROR;
     
     const char* apiKeyBuf = nullptr;
@@ -1151,7 +1141,7 @@ extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle, const char
 
 extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle, const char* prompt, BMessage* config)
 {
-    PublicAIHandle* h = (PublicAIHandle*)handle;
+    AIPluginHandle* h = (AIPluginHandle*)handle;
     if (!config) return B_ERROR;
     
     const char* apiKey = nullptr;

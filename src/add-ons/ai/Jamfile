@@ -49,7 +49,8 @@ Addon GeminiPlugin : gemini_plugin.cpp : be libai_api.so libbnetapi.so libnetser
             [ TargetLibsupc++ ] <$(TARGET_PACKAGING_ARCH)>libshared.a $(TARGET_NETWORK_LIBS) ;
 AddPluginTypeAttribute GeminiPlugin : remote ;
 
-Addon HuggingFacePlugin : huggingface_plugin.cpp : be ai_api network ;
+Addon HuggingFacePlugin : huggingface_plugin.cpp : be libai_api.so libbnetapi.so libnetservices.a [ TargetLibstdc++ ]
+            [ TargetLibsupc++ ] <$(TARGET_PACKAGING_ARCH)>libshared.a $(TARGET_NETWORK_LIBS) ;
 AddPluginTypeAttribute HuggingFacePlugin : remote ;
 
 Addon AnthropicPlugin : anthropic_plugin.cpp : be libai_api.so libbnetapi.so libnetservices.a [ TargetLibstdc++ ]

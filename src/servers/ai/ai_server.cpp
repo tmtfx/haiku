@@ -102,7 +102,7 @@ static void load_plugins(const char* dirpath)
 			continue;
 		}
 
-		auto init = (ai_plugin_t (*)(const BMessage*)) dlsym(h, "ai_plugin_init");
+		auto init = (ai_plugin_t (*)(void)) dlsym(h, "ai_plugin_init");
 		auto fin = (void (*)(ai_plugin_t)) dlsym(h, "ai_plugin_free");
 		if (!init || !fin) {
 			fprintf(stderr, "ai_server: [LOADER] '%s' manca di simboli obbligatori (init/free)\n", name);
@@ -115,7 +115,7 @@ static void load_plugins(const char* dirpath)
 		auto get_cap = (uint32 (*)(void)) dlsym(h, "ai_plugin_get_capabilities");
 		auto list_models = (status_t (*)(const BMessage*, char*, size_t)) dlsym(h, "ai_plugin_list_models");
 		auto set_model = (status_t (*)(ai_plugin_t, const char*)) dlsym(h, "ai_plugin_set_model");
-		auto update_cfg = (status_t (*)(ai_plugin_t, const BMessage*)) dlsym(h, "ai_plugin_update_config");
+
 		const char* (*get_name)(void) = (const char* (*)(void))dlsym(h, "get_plugin_name");
 
 		AISettings s;
@@ -129,7 +129,7 @@ static void load_plugins(const char* dirpath)
 		configMsg.AddString("api_key", s.api_key.String());
 
 		// 3. Inizializziamo l'istanza passando il puntatore al BMessage
-		ai_plugin_t inst = init(&configMsg);
+		ai_plugin_t inst = init();
 		if (!inst) {
 			fprintf(stderr, "ai_server: [LOADER] Inizializzazione istanza fallita per '%s'\n", name);
 			dlclose(h);
@@ -159,17 +159,14 @@ static void load_plugins(const char* dirpath)
 		e.get_capabilities = get_cap; // Aggiornato con il nuovo puntatore
 		e.list_models = list_models;
 		e.set_model = set_model;
-		e.update_config = update_cfg;
+
 		if (get_name != nullptr) {
 			e.name = get_name();
 		} else {
 			e.name = path.Leaf();
 		}
 		
-		// 4. Aggiorna la configurazione del plugin usando il BMessage nativo
-		if (e.update_config) {
-			e.update_config(e.instance, &configMsg);
-		}
+
 		
 		if (s.plugin == e.name) {
 			if (e.set_model && s.model.Length() > 0) {
@@ -1511,31 +1508,60 @@ public:
 
 				// 1. Carichiamo le impostazioni globali aggiornate dal server
 				if (LoadAISettings(s)) {
-					// 2. Prepariamo il BMessage nativo di configurazione globale
-					BMessage globalConfig('AISC');
-					globalConfig.AddString("plugin", s.plugin.String());
-					globalConfig.AddString("model_name", s.model.String());
-					
-					// Recuperiamo anche la chiave globale aggiornata dal KeyStore se serve al plugin
 					BString apiKey;
 					GetPluginAPIKey(s.plugin.String(), apiKey);
-					globalConfig.AddString("api_key", apiKey.String());
-					
-					// Se hai un base_url globale salvato nella struttura delle impostazioni:
-					// globalConfig.AddString("base_url", s.base_url.String());
 
-					// 3. Notifichiamo il plugin attivo del cambio di configurazione al volo
+					// 2. Controlliamo le sessioni attive per verificare quali usano il plugin da applicare
+					// e se hanno useCustomAPIKey impostato a false.
+					for (auto& pair : gSessions) {
+						ClientSession& session = pair.second;
+						if (session.plugin_name == s.plugin && !session.useCustomAPIKey) {
+							// Recuperiamo il titolo della chat per mostrarlo nel BAlert
+							BString chatTitle = "Nuova Conversazione";
+							BMessage chatContext;
+							if (load_or_create_chat_context(session.context_id.String(), &chatContext) == B_OK) {
+								chatContext.FindString("title", &chatTitle);
+							}
+
+							BString alertText;
+							alertText.SetToFormat(
+								"La sessione attiva \"%s\" sta usando il plugin \"%s\".\n\n"
+								"La configurazione globale è stata aggiornata.\n"
+								"Vuoi applicare il nuovo modello \"%s\" e la nuova configurazione a questa sessione?",
+								chatTitle.String(),
+								s.plugin.String(),
+								s.model.String()
+							);
+
+							BAlert* alert = new BAlert(
+								"Aggiorna Sessione AI",
+								alertText.String(),
+								"No",
+								"Sì",
+								nullptr,
+								B_WIDTH_AS_USUAL,
+								B_INFO_ALERT
+							);
+
+							if (alert->Go() == 1) {
+								session.model_name = s.model;
+								session.custom_api_key = apiKey;
+
+								// Aggiorniamo anche il file di contesto salvato su disco
+								if (load_or_create_chat_context(session.context_id.String(), &chatContext) == B_OK) {
+									chatContext.RemoveName("model_name");
+									chatContext.AddString("model_name", s.model.String());
+									save_chat_context(session.context_id.String(), &chatContext);
+								}
+								applied++;
+							}
+						}
+					}
+
+					// Notifichiamo il plugin attivo del cambio di modello al volo
 					for (auto &pe : gPlugins) {
 						if (s.plugin == pe.name) {
-							if (pe.update_config) {
-								// Passiamo il BMessage nativo!
-								if (pe.update_config(pe.instance, &globalConfig) == B_OK) {
-									applied++;
-								}
-							}
-							
-							// Mantengo il fallback legacy su set_model solo se il plugin non ha update_config
-							if (!pe.update_config && pe.set_model && s.model.Length() > 0) {
+							if (pe.set_model && s.model.Length() > 0) {
 								pe.set_model(pe.instance, s.model.String());
 								applied++;
 							}
