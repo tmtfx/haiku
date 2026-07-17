@@ -274,11 +274,6 @@ public:
 		fprintf(stderr, "ai_server: ReadyToRun() - Avvio scansione dei plugin...\n");
 		BPath pth;
 		
-		if (find_directory(B_SYSTEM_ADDONS_DIRECTORY, &pth) == B_OK) {
-			fprintf(stderr, "Ricerca Plugins nella cartella di sistema degli addons\n");
-			pth.Append("ai");
-			load_plugins(pth.Path());
-		}
 		if (find_directory(B_USER_NONPACKAGED_ADDONS_DIRECTORY, &pth) == B_OK) {
 			fprintf(stderr, "Ricerca Plugins nella cartella utente degli addons\n");
 			pth.Append("ai");
@@ -286,6 +281,11 @@ public:
 		}
 		if (find_directory(B_SYSTEM_NONPACKAGED_ADDONS_DIRECTORY, &pth) == B_OK) {
 			fprintf(stderr, "Ricerca Plugins nella cartella di sistema non impacchettata degli addons\n");
+			pth.Append("ai");
+			load_plugins(pth.Path());
+		}
+		if (find_directory(B_SYSTEM_ADDONS_DIRECTORY, &pth) == B_OK) {
+			fprintf(stderr, "Ricerca Plugins nella cartella di sistema degli addons\n");
 			pth.Append("ai");
 			load_plugins(pth.Path());
 		}
@@ -946,7 +946,7 @@ public:
 			    }
 			    break;
 			}
-			case 'CHAB': // MSG_CHECK_ABORT
+			case MSG_CHECK_ABORT:
 			{
 			    BString contextId = msg->FindString("context_id");
 			    BMessage reply(B_REPLY);
@@ -1078,64 +1078,7 @@ public:
                     if (!arguments.HasString("cmd") && arguments.HasString("command")) {
                         arguments.AddString("cmd", arguments.FindString("command"));
                     }
-                }
-                /*
-                BMessage arguments;
-                if (msg->FindMessage("arguments", &arguments) != B_OK) {
-                    // Se non è già un BMessage, decodifichiamo la stringa JSON argsJson
-                    if (!argsJson.IsEmpty()) {
-                        BString path, cmd, text, title, content, action, name, value, pattern;
-                        
-                        // 1. I percorsi e i comandi/pattern non devono MAI interpretare i caratteri di controllo (SEMPRE false)
-                        if (ExtractStringFromJson(argsJson.String(), "path", path, false) || 
-                            ExtractStringFromJson(argsJson.String(), "directory", path, false)) {
-                            arguments.AddString("path", path);
-                        }
-                        if (ExtractStringFromJson(argsJson.String(), "cmd", cmd, false) || 
-                            ExtractStringFromJson(argsJson.String(), "command", cmd, false)) {
-                            arguments.AddString("cmd", cmd);
-                        }
-                        if (ExtractStringFromJson(argsJson.String(), "pattern", pattern, false)) {
-                            arguments.AddString("pattern", pattern);
-                        }
-
-                        // 2. Gestione intelligente per la scrittura di file o attributi BFS
-                        // Se il tool scrive dati (create_file o manage_attribute con azione "write"), 
-                        // dobbiamo disattivare l'unescape per non storpiarli.
-                        bool preserveRawData = (toolName == "create_file" || toolName == "manage_attribute");
-                        bool unescapeContent = !preserveRawData;
-
-                        if (ExtractStringFromJson(argsJson.String(), "content", content, unescapeContent)) {
-                            arguments.AddString("content", content);
-                        }
-                        if (ExtractStringFromJson(argsJson.String(), "value", value, unescapeContent)) {
-                            arguments.AddString("value", value);
-                        }
-
-                        // 3. Campi testuali generici (es. show_alert_dialog) -> interpretazione attiva (SEMPRE true)
-                        if (ExtractStringFromJson(argsJson.String(), "text", text, true))       arguments.AddString("text", text);
-                        if (ExtractStringFromJson(argsJson.String(), "title", title, true))     arguments.AddString("title", title);
-                        if (ExtractStringFromJson(argsJson.String(), "action", action, true))   arguments.AddString("action", action);
-                        if (ExtractStringFromJson(argsJson.String(), "name", name, true))       arguments.AddString("name", name);
-                    }
-                }*/
-                       
-//                        if (ExtractStringFromJson(argsJson.String(), "path", path) || 
-//                            ExtractStringFromJson(argsJson.String(), "directory", path)) {
-//                            arguments.AddString("path", path);
-//                        }
-//                        if (ExtractStringFromJson(argsJson.String(), "cmd", cmd) || 
-//                            ExtractStringFromJson(argsJson.String(), "command", cmd)) {
-//                            arguments.AddString("cmd", cmd);
-//                        }
-//                        if (ExtractStringFromJson(argsJson.String(), "text", text)) arguments.AddString("text", text);
-//                        if (ExtractStringFromJson(argsJson.String(), "title", title)) arguments.AddString("title", title);
-//                        if (ExtractStringFromJson(argsJson.String(), "content", content)) arguments.AddString("content", content);
-//                        if (ExtractStringFromJson(argsJson.String(), "action", action)) arguments.AddString("action", action);
-//                        if (ExtractStringFromJson(argsJson.String(), "name", name)) arguments.AddString("name", name);
-//                        if (ExtractStringFromJson(argsJson.String(), "value", value)) arguments.AddString("value", value);
-//                        if (ExtractStringFromJson(argsJson.String(), "pattern", pattern)) arguments.AddString("pattern", pattern);
-                
+                }  
                 bool isCritical = false;
                 BString details = "";
 
@@ -1259,107 +1202,6 @@ public:
                 msg->SendReply(&reply);
                 break;
             }
-			/*
-			case MSG_EXECUTE_TOOL:
-			{
-				BString contextId = msg->FindString("context_id");
-				BString toolName = msg->FindString("name");
-				if (toolName.IsEmpty()) {
-					toolName = msg->FindString("tool_name");
-				}
-
-				BString argPath;
-				BString argCmd;
-				BString argsJson = msg->FindString("args");
-				if (!argsJson.IsEmpty()) {
-					ExtractStringFromJson(argsJson.String(), "path", argPath);
-					ExtractStringFromJson(argsJson.String(), "cmd", argCmd);
-				} else {
-					BMessage arguments;
-					if (msg->FindMessage("arguments", &arguments) == B_OK) {
-						argPath = arguments.FindString("path");
-						if (argPath.IsEmpty()) argPath = arguments.FindString("directory");
-						argCmd = arguments.FindString("cmd");if (argCmd.IsEmpty()) argCmd = arguments.FindString("command");
-					}
-				}
-
-				fprintf(stderr, "[AI_SERVER] Richiesta esecuzione tool '%s'\n", toolName.String());
-
-				BMessage reply(B_REPLY);
-				status_t resultStatus = B_ERROR;
-				BString resultOutput;
-
-				ClientSession* session = nullptr;
-				for (auto& pair : gSessions) { 
-					if (pair.second.context_id == contextId) {
-						session = &pair.second;
-						break;
-					}
-				}
-
-				if (session == nullptr) {
-					reply.AddInt32("status", B_ENTRY_NOT_FOUND);
-					reply.AddString("result", "{\"error\":\"Session not found\"}");
-					msg->SendReply(&reply);
-					break;
-				}
-
-				// Estraiamo il tool dalla BList mpcManager della sessione
-				BMessage* foundTool = nullptr;
-				int32 toolCount = session->mpcManager.CountItems();
-				for (int32 i = 0; i < toolCount; i++) {
-					BMessage* tool = (BMessage*)session->mpcManager.ItemAt(i);
-					if (tool && tool->FindString("name") == toolName) {
-						foundTool = tool;
-						break;
-					}
-				}
-
-				if (foundTool == nullptr) {
-					reply.AddInt32("status", B_NAME_NOT_FOUND);
-					reply.AddString("result", "{\"error\":\"Tool not found or not permitted in this session\"}");
-					msg->SendReply(&reply);
-					break;
-				}
-
-				// Logica privata di esecuzione
-				int32 execType = foundTool->FindInt32("exec_type");
-				BString execTarget = foundTool->FindString("exec_target");
-
-				if (execType == 1) { // Comando Terminale
-					BString finalCommand;
-					if (toolName == "run_command") {
-						finalCommand = argCmd;
-					} else if (toolName == "list_directory") {
-						if (argPath.IsEmpty()) argPath = "/boot/home";
-						BString binary = execTarget.IsEmpty() ? "/bin/ls -la" : execTarget;
-						finalCommand.SetToFormat("%s \"%s\"", binary.String(), argPath.String());					} else {
-						// es: get_system_info (uptime)
-						finalCommand = execTarget;
-					}
-
-					if (finalCommand.IsEmpty()) {
-                        resultOutput = "{\"error\":\"Comando di esecuzione vuoto o non valido\"}";
-                    } else {
-                        fprintf(stderr, "[AI_SERVER] Esecuzione comando reale: '%s'\n", finalCommand.String());
-                        
-                        FILE* pipe = popen(finalCommand.String(), "r");
-                        if (pipe) {
-                            char buffer[4096];
-                            while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-                                resultOutput << buffer;
-                            }
-                            pclose(pipe);
-                            resultStatus = B_OK;
-                        }
-                    }
-				}
-
-				reply.AddInt32("status", resultStatus);
-				reply.AddString("result", resultOutput);
-				msg->SendReply(&reply);
-				break;
-			}*/
 			case MSG_MCP_GET_TOOLS:
 			{
 				// Estraiamo il context_id per capire quale sessione sta chiedendo i tool
