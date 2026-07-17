@@ -1333,6 +1333,75 @@ public:
 				}
 				break;
 			}
+			case MSG_SET_MCP_PERMISSIONS: {
+				int32 sessionID = -1;
+				uint32 permissions = 0;
+				msg->FindInt32("session_id", &sessionID);
+				msg->FindUInt32("permissions", &permissions);
+
+				BMessage reply(B_REPLY);
+				status_t status = B_BAD_VALUE;
+				if (sessionID != -1 && gSessions.count(sessionID) > 0) {
+					ClientSession& session = gSessions[sessionID];
+					
+					// Sicurezza: i permessi impostati dall'app non possono superare quelli globali della Preflet
+					//AISettings globalSettings;
+					//if (LoadAISettings(globalSettings)) {
+					//	permissions &= globalSettings.mcp_permissions;
+					//}
+					
+					session.mcp_permissions = permissions;
+
+					// Svuotiamo i vecchi tool memorizzati in mpcManager
+					for (int32 i = 0; i < session.mpcManager.CountItems(); i++) {
+						delete (BMessage*)session.mpcManager.ItemAt(i);
+					}
+					session.mpcManager.MakeEmpty();
+
+					// Ripopoliamo se il plugin supporta MCP
+					PluginEntry* p = nullptr;
+					for (auto& pe : gPlugins) {
+						if (pe.name == session.plugin_name) {
+							p = &pe;
+							break;
+						}
+					}
+
+					uint32 caps = 0;
+					if (p && p->get_capabilities != nullptr) {
+						caps = p->get_capabilities();
+					}
+
+					if (caps & AI_CAP_MCP) {
+						PopulateMcpTools(session.mpcManager, session.mcp_permissions);
+						fprintf(stderr, "ai_server: Permessi MCP aggiornati dinamicamente per sessione %" B_PRId32 ". Popolati %" B_PRId32 " tool con permessi %" B_PRIu32 "\n",
+							sessionID, session.mpcManager.CountItems(), session.mcp_permissions);
+					} else {
+						fprintf(stderr, "ai_server: Permessi MCP aggiornati per sessione %" B_PRId32 " ma il plugin '%s' non supporta MCP.\n",
+							sessionID, session.plugin_name.String());
+					}
+					status = B_OK;
+				}
+				reply.AddInt32("status", status);
+				msg->SendReply(&reply);
+				break;
+			}
+			case MSG_GET_MCP_PERMISSIONS: {
+				int32 sessionID = -1;
+				msg->FindInt32("session_id", &sessionID);
+
+				BMessage reply(B_REPLY);
+				uint32 permissions = 0;
+				status_t status = B_BAD_VALUE;
+				if (sessionID != -1 && gSessions.count(sessionID) > 0) {
+					permissions = gSessions[sessionID].mcp_permissions;
+					status = B_OK;
+				}
+				reply.AddInt32("status", status);
+				reply.AddUInt32("permissions", permissions);
+				msg->SendReply(&reply);
+				break;
+			}
 			case MSG_SET_MODEL: {
 				// Questo case ora serve solo se l'applicazione vuole sovrascrivere dinamicamente 
 				// il modello memorizzato nella *Sessione* del server, senza toccare lo stato del plugin.

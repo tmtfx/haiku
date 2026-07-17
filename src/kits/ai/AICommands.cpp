@@ -423,3 +423,42 @@ AIEngine::GetAllSessions(BList& outSessionsList)
 
     return B_OK;
 }
+
+status_t AIEngine::SetMCPPermissions(uint32 permissions)
+{
+	BMessenger server(kServerSignature);
+    if (!server.IsValid())
+        return B_SERVER_NOT_FOUND;
+    BMessage request(MSG_SET_MCP_PERMISSIONS);
+    request.AddUInt32("permissions", permissions);
+    request.AddInt32("session_id", fSessionID);
+    BMessage reply;
+
+    status_t err = server.SendMessage(&request, &reply, 2000000, 2000000);
+    if (err != B_OK) return err;
+    
+    reply.FindInt32("status", &err);
+    
+    return err;
+}
+
+uint32 AIEngine::GetMCPPermissions()
+{
+	BMessenger server(kServerSignature);
+    if (!server.IsValid())
+        return B_SERVER_NOT_FOUND;
+    BMessage request(MSG_GET_MCP_PERMISSIONS);
+    request.AddInt32("session_id", fSessionID);
+    BMessage reply;
+
+    status_t err = server.SendMessage(&request, &reply, 2000000, 2000000);
+    if (err != B_OK) {
+    	fprintf(stderr, "Error asking permissions to ai_server");
+    	return 0;
+    }
+    
+    uint32 perm = 0;
+    if (reply.FindUInt32("permissions", &perm))
+    	return perm;
+    return 0;
+}

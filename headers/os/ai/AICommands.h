@@ -39,8 +39,11 @@ static const uint32 MSG_GET_REMOTE_CTX_ID	= 'GRCX'; // Recupera remote_id del co
 static const uint32 MSG_DELETE_REMOTE_CTX	= 'DRCX'; // Elimina contesto remoto
 static const uint32 MSG_SET_REMOTE_CTX		= 'SRCX'; // Abilita/disabilita contesto remoto per una sessione
 // MCP
-static const uint32 MSG_EXECUTE_TOOL		= 'EXTL';
-static const uint32 MSG_MCP_GET_TOOLS		= 'MGTL';
+static const uint32 MSG_EXECUTE_TOOL		= 'EXTL'; // Esegue il tool
+static const uint32 MSG_MCP_GET_TOOLS		= 'MGTL'; // Ottieni i tool disponibili
+static const uint32 MSG_SET_MCP_PERMISSIONS	= 'S_MP'; // Imposta i permessi mcp per la sessione
+static const uint32 MSG_GET_MCP_PERMISSIONS	= 'G_MP'; // Ottieni i permessi mcp per la sessione
+
 struct AISessionInfo {
     int32 session_id;
     BString context_id;
@@ -79,6 +82,8 @@ public:
     void        SetPlugin(const char* pluginName);
     void        SetModel(const char* modelName);
     void        SetApiKey(const char* apiKey);
+    status_t	SetMCPPermissions(uint32 permissions);
+    uint32		GetMCPPermissions();
     
     static uint32		GetPluginCapabilities(const char* pluginName);
     static status_t		GetAllSessions(BList& outSessionsList);
