@@ -8,7 +8,8 @@
 enum ai_mcp_permissions {
     AI_PERM_SYSTEM_INFO     = 1 << 0,  // Permesso per recuperare info di sistema
     AI_PERM_FILE_SYSTEM     = 1 << 1,  // Permesso per leggere directory / file system
-    AI_PERM_RUN_COMMANDS    = 1 << 2   // Permesso per eseguire comandi generali (da usare con cautela)
+    AI_PERM_RUN_COMMANDS    = 1 << 2,  // Permesso per eseguire comandi generali (da usare con cautela)
+    AI_PERM_SYSTEM_DEFAULT  = 0xFFFFFFFF // Usa le impostazioni globali della preflet
 };
 
 struct AISettings {

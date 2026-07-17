@@ -70,7 +70,7 @@ AIEngine::AIEngine(const char* pluginName, const char* modelName, const char* ap
     msg.AddString("plugin", fPlugin);
     msg.AddString("model", fModel);
     if (fApiKey.Length() > 0) msg.AddString("api_key", fApiKey);
-    if (mcpPermissions != 0) {
+    if (mcpPermissions != AI_PERM_SYSTEM_DEFAULT) {
         msg.AddInt32("mcp_permissions", (int32)mcpPermissions);
     } else {
         AISettings settings;
@@ -104,7 +104,7 @@ AIEngine::AIEngine(const char* contextID, const char* pluginName, const char* mo
     msg.AddString("model", fModel);
     msg.AddString("context_id", fContextID);
     if (fApiKey.Length() > 0) msg.AddString("api_key", fApiKey);
-    if (mcpPermissions != 0) {
+    if (mcpPermissions != AI_PERM_SYSTEM_DEFAULT) {
         msg.AddInt32("mcp_permissions", (int32)mcpPermissions);
     } else {
         AISettings settings;
@@ -389,7 +389,7 @@ AIEngine::GetPluginCapabilities(const char* pluginName)
 AIEngine::GetAllSessions(BList& outSessionsList)
 {
     // Per sicurezza, svuotiamo la lista passata (occhio ai memory leak se conteneva già roba)
-    // In alternativa, assumiamo che sia vuota. Qui la popoliamo e basta.
+    // In alternativa, assumiamo che sia vuota. Aqui la popoliamo e basta.
     
     BMessenger server(kServerSignature);
     if (!server.IsValid())
