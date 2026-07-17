@@ -165,6 +165,22 @@ static void load_plugins(const char* dirpath)
 		} else {
 			e.name = path.Leaf();
 		}
+
+		// Evita caricamento di duplicati con lo stesso nome
+		bool duplicate = false;
+		for (const auto& existing : gPlugins) {
+			if (existing.name == e.name) {
+				duplicate = true;
+				break;
+			}
+		}
+
+		if (duplicate) {
+			fprintf(stderr, "ai_server: [LOADER] Plugin con nome '%s' gia' caricato. Scarto duplicato '%s'\n", e.name.String(), name);
+			fin(inst);
+			dlclose(h);
+			continue;
+		}
 		
 
 		
