@@ -54,10 +54,10 @@ static bool _has_shared_object_suffix(const char* name) {
 
 static void load_plugins(const char* dirpath)
 {
-	fprintf(stderr, "ai_server: [LOADER] Scansione directory: %s\n", dirpath);
+	fprintf(stderr, "ai_server: [LOADER] Scanning directory: %s\n", dirpath);
 	BDirectory dir(dirpath);
 	if (dir.InitCheck() != B_OK) {
-		fprintf(stderr, "ai_server: [LOADER] Impossibile aprire directory: %s\n", dirpath);
+		fprintf(stderr, "ai_server: [LOADER] Unable opening directory: %s\n", dirpath);
 		return;
 	}
 
@@ -87,25 +87,25 @@ static void load_plugins(const char* dirpath)
 			if (bytesRead > 0) {
 				typeBuffer[bytesRead] = '\0';
 				pType = typeBuffer;
-				fprintf(stderr, "ai_server: [LOADER] File '%s' ha attributo AI:plugin_type = '%s'\n", name, pType.String());
+				fprintf(stderr, "ai_server: [LOADER] File '%s' has attribute AI:plugin_type = '%s'\n", name, pType.String());
 			} else {
-				fprintf(stderr, "ai_server: [LOADER] File '%s' ATTENZIONE: nessun attributo AI:plugin_type trovato. Uso fallback: '%s'\n", name, pType.String());
+				fprintf(stderr, "ai_server: [LOADER] File '%s' WARNING: no attribute AI:plugin_type found. Using fallback: '%s'\n", name, pType.String());
 			}
 		} else {
-			fprintf(stderr, "ai_server: [LOADER] Errore BNode InitCheck per file '%s'\n", name);
+			fprintf(stderr, "ai_server: [LOADER] Error BNode InitCheck for file '%s'\n", name);
 		}
 		// -----------------------------
 
 		void* h = dlopen(path.Path(), RTLD_NOW);
 		if (!h) {
-			fprintf(stderr, "ai_server: [LOADER] dlopen fallito per '%s': %s\n", name, dlerror());
+			fprintf(stderr, "ai_server: [LOADER] dlopen failed for '%s': %s\n", name, dlerror());
 			continue;
 		}
 
 		auto init = (ai_plugin_t (*)(void)) dlsym(h, "ai_plugin_init");
 		auto fin = (void (*)(ai_plugin_t)) dlsym(h, "ai_plugin_free");
 		if (!init || !fin) {
-			fprintf(stderr, "ai_server: [LOADER] '%s' manca di simboli obbligatori (init/free)\n", name);
+			fprintf(stderr, "ai_server: [LOADER] '%s' missing mandatory symbols (init/free)\n", name);
 			dlclose(h);
 			continue;
 		}
@@ -131,7 +131,7 @@ static void load_plugins(const char* dirpath)
 		// 3. Inizializziamo l'istanza passando il puntatore al BMessage
 		ai_plugin_t inst = init();
 		if (!inst) {
-			fprintf(stderr, "ai_server: [LOADER] Inizializzazione istanza fallita per '%s'\n", name);
+			fprintf(stderr, "ai_server: [LOADER] Instance initialization failed for '%s'\n", name);
 			dlclose(h);
 			continue;
 		}
@@ -143,7 +143,7 @@ static void load_plugins(const char* dirpath)
 
 		// Il plugin è valido se espone ALMENO una capacità nel bitmask, OPPURE se permette il listing dei modelli
 		if (caps == 0 && !list_models) {
-			fprintf(stderr, "ai_server: [LOADER] '%s' non dichiara capacità e non elenca modelli, scartato\n", name);
+			fprintf(stderr, "ai_server: [LOADER] '%s' is not declaring capacities and is not listing models, dismissed\n", name);
 			fin(inst);
 			dlclose(h);
 			continue;
@@ -176,7 +176,7 @@ static void load_plugins(const char* dirpath)
 		}
 
 		if (duplicate) {
-			fprintf(stderr, "ai_server: [LOADER] Plugin con nome '%s' gia' caricato. Scarto duplicato '%s'\n", e.name.String(), name);
+			fprintf(stderr, "ai_server: [LOADER] A plugin with name '%s' is already loaded. Dismissing duplicate '%s'\n", e.name.String(), name);
 			fin(inst);
 			dlclose(h);
 			continue;
@@ -267,7 +267,7 @@ status_t load_or_create_chat_context(const char* contextID, BMessage* outContext
 	// Il contesto non esiste: lo inizializziamo con i metadati di base
 	outContext->MakeEmpty();
 	outContext->AddString("context_id", contextID);
-	outContext->AddString("title", "Nuova Conversazione");
+	outContext->AddString("title", "New chat");
 	outContext->AddString("plugin_name", defaultPlugin);
 	outContext->AddString("model_name", defaultModel);
 	outContext->AddString("remote_id", ""); // Vuoto di default (modalità locale)
@@ -277,6 +277,32 @@ status_t load_or_create_chat_context(const char* contextID, BMessage* outContext
 	outContext->AddMessage("messages", &emptyHistory);
 	
 	return save_chat_context(contextID, outContext);
+}
+
+static bool check_update_context_title(BMessage* chatContext){
+	bool tosave=false;
+	BString title;
+	chatContext->FindString("title", &title);
+	if (title == "New chat") {
+		BMessage historyMsg;
+		if (chatContext->FindMessage("messages", &historyMsg) == B_OK) {
+			BMessage firstMsg;
+			if (historyMsg.FindMessage("msg", 0, &firstMsg) == B_OK) {
+				BString content;
+				if (firstMsg.FindString("content", &content) == B_OK && !content.IsEmpty()) {
+					title = content;
+					if (title.Length() > 30) {
+						title.Truncate(30);
+						title.Append("...");
+					}
+					chatContext->RemoveName("title");
+					chatContext->AddString("title", title.String());
+					tosave=true;
+				}
+			}
+		}
+	}
+	return tosave;
 }
 
 class AIServerApp : public BApplication {
@@ -485,33 +511,16 @@ public:
 					BString modelName;
 					BString remoteId;
 
-					chatContext.FindString("title", &title);
+					
 					chatContext.FindString("plugin_name", &pluginName);
 					chatContext.FindString("model_name", &modelName);
 					chatContext.FindString("remote_id", &remoteId);
 
-					// 3. Se il titolo è rimasto quello di default, proviamo a generarne uno euristico
-					if (title == "Nuova Conversazione") {
-						BMessage historyMsg;
-						if (chatContext.FindMessage("messages", &historyMsg) == B_OK) {
-							BMessage firstMsg;
-							// Vediamo se c'è almeno un messaggio per estrarre il titolo
-							if (historyMsg.FindMessage("msg", 0, &firstMsg) == B_OK) {
-								BString content;
-								if (firstMsg.FindString("content", &content) == B_OK && !content.IsEmpty()) {
-									title = content;
-									if (title.Length() > 30) {
-										title.Truncate(30);
-										title.Append("...");
-									}
-									// Aggiorniamo il file su disco così la generazione è persistente
-									chatContext.RemoveName("title");
-									chatContext.AddString("title", title.String());
-									save_chat_context(contextID.String(), &chatContext);
-								}
-							}
-						}
+					if (check_update_context_title(&chatContext)) {
+						save_chat_context(contextID.String(), &chatContext);
 					}
+
+					chatContext.FindString("title", &title);
 
 					// Impacchettiamo i dati reali del file per il client
 					reply.AddInt32("status", B_OK);
@@ -546,7 +555,7 @@ public:
 
 					// Recuperiamo il titolo dal file di contesto usando la logica che hai già
 					BMessage chatContext;
-					BString title = "Nuova Conversazione";
+					BString title = "New chat";
 					BString remoteId;
 					
 					if (load_or_create_chat_context(session.context_id.String(), &chatContext) == B_OK) {
@@ -779,6 +788,7 @@ public:
 											save_chat_context(contextID.String(), chatContext);
 										}
 									} else {
+										check_update_context_title(chatContext);
 										append_message_to_context(chatContext, "assistant", fullResponseAccumulator.String());
 										save_chat_context(contextID.String(), chatContext);
 									}
@@ -914,6 +924,8 @@ public:
 				if (p->generate_sync) {
 					rc = p->generate_sync(p->instance, prompt, response, sizeof(response), &chatContext);
 				}
+				
+				check_update_context_title(&chatContext);
 
 				BMessage r('RESP');
 				if (rc == 0) {
@@ -1516,7 +1528,7 @@ public:
 						ClientSession& session = pair.second;
 						if (session.plugin_name == s.plugin && !session.useCustomAPIKey) {
 							// Recuperiamo il titolo della chat per mostrarlo nel BAlert
-							BString chatTitle = "Nuova Conversazione";
+							BString chatTitle = "New chat";
 							BMessage chatContext;
 							if (load_or_create_chat_context(session.context_id.String(), &chatContext) == B_OK) {
 								chatContext.FindString("title", &chatTitle);
