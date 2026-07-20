@@ -143,7 +143,14 @@ extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
     if (url.back() != '/') url += "/";
     url += "models/" + model;
 
-    std::string payload = std::string("{\"inputs\":\"") + prompt + "\"}";
+    BString finalPrompt;
+    const char* systemPrompt = nullptr;
+    if (contextMsg && contextMsg->FindString("system_prompt", &systemPrompt) == B_OK && systemPrompt && systemPrompt[0] != '\0') {
+        finalPrompt << systemPrompt << "\n\n" << prompt;
+    } else {
+        finalPrompt = prompt;
+    }
+    std::string payload = std::string("{\"inputs\":\"") + finalPrompt.String() + "\"}";
 
     BMallocIO* out = new BMallocIO();
     BUrlRequest* req = BUrlProtocolRoster::MakeRequest(BUrl(url.c_str(), true), out, NULL, NULL);
@@ -219,7 +226,14 @@ extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle,
     if (url.back() != '/') url += "/";
     url += "models/" + model;
 
-    std::string payload = std::string("{\"inputs\":\"") + prompt + "\"}";
+    BString finalPrompt2;
+    const char* systemPrompt2 = nullptr;
+    if (contextMsg && contextMsg->FindString("system_prompt", &systemPrompt2) == B_OK && systemPrompt2 && systemPrompt2[0] != '\0') {
+        finalPrompt2 << systemPrompt2 << "\n\n" << prompt;
+    } else {
+        finalPrompt2 = prompt;
+    }
+    std::string payload = std::string("{\"inputs\":\"") + finalPrompt2.String() + "\"}";
 
     FILE* f = fopen(notifyPath, "w+");
     if (!f) return B_ERROR;

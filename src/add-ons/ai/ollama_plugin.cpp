@@ -293,6 +293,16 @@ BuildPayloadFromContext(const BMessage* config, const char* currentPrompt,
 	outPayload << ",\"messages\":[";
 
 	bool first = true;
+	const char* systemPrompt = NULL;
+	if (config != NULL) {
+		config->FindString("system_prompt", &systemPrompt);
+	}
+	if (systemPrompt != NULL && systemPrompt[0] != '\0') {
+		outPayload << "{\"role\":\"system\",\"content\":\"";
+		AppendEscapedJsonString(outPayload, systemPrompt);
+		outPayload << "\"}";
+		first = false;
+	}
 	BMessage messages;
 	if (config != NULL && config->FindMessage("messages", &messages) == B_OK) {
 		BMessage turn;

@@ -43,6 +43,9 @@ static const uint32 MSG_EXECUTE_TOOL		= 'EXTL'; // Esegue il tool
 static const uint32 MSG_MCP_GET_TOOLS		= 'MGTL'; // Ottieni i tool disponibili
 static const uint32 MSG_SET_MCP_PERMISSIONS	= 'S_MP'; // Imposta i permessi mcp per la sessione
 static const uint32 MSG_GET_MCP_PERMISSIONS	= 'G_MP'; // Ottieni i permessi mcp per la sessione
+// System Prompt
+static const uint32 MSG_SET_SYSTEM_PROMPT	= 'SSPR'; // Imposta il prompt di sistema per un contesto
+static const uint32 MSG_GET_SYSTEM_PROMPT	= 'GSPR'; // Ottiene il prompt di sistema corrente
 
 struct AISessionInfo {
     int32 session_id;
@@ -72,6 +75,10 @@ public:
     status_t	SetContext(const char* contextID);
     status_t    GetContextID(BString& outContextID) const;
     status_t    GetTitle(BString& outTitle) const;
+
+    // System Prompt
+    status_t    SetSystemPrompt(const char* systemPrompt);
+    status_t    GetSystemPrompt(BString& outSystemPrompt) const;
 
     // Remote context
     void        EnableRemoteContext(bool enable);

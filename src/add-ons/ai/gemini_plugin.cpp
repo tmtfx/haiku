@@ -445,7 +445,20 @@ void BuildPayloadFromContext(const BMessage* config, const char* currentPrompt, 
         outPayload.Append(objectStr);
     }
 
-    outPayload.Append("]}");
+    outPayload.Append("]");
+    
+    BString systemPrompt;
+    if (config) {
+        const char* sys = nullptr;
+        if (config->FindString("system_prompt", &sys) == B_OK && sys != nullptr) {
+            systemPrompt = sys;
+        }
+    }
+    
+    if (systemPrompt.Length() > 0) {
+        outPayload << ",\"systemInstruction\":{\"parts\":[{\"text\":\"" << EscapeStringForJson(systemPrompt.String()) << "\"}]}";
+    }
+    outPayload.Append("}");
 }
 /*
 void BuildPayloadFromContext(const BMessage* config, const char* currentPrompt, BString& outPayload)
