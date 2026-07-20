@@ -353,6 +353,44 @@ status_t AIEngine::GetTitle(BString& outTitle) const
     return B_OK;
 }
 
+status_t
+AIEngine::SetSystemPrompt(const char* systemPrompt)
+{
+    BMessage msg(MSG_SET_SYSTEM_PROMPT);
+    msg.AddInt32("session_id", fSessionID);
+    msg.AddString("context_id", fContextID);
+    msg.AddString("system_prompt", systemPrompt ? systemPrompt : "");
+
+    BMessage reply;
+    status_t rc = _TalkToServer(&msg, reply);
+    if (rc == B_OK) {
+        int32 status = B_ERROR;
+        if (reply.FindInt32("status", &status) == B_OK) {
+            return status;
+        }
+    }
+    return rc;
+}
+
+status_t
+AIEngine::GetSystemPrompt(BString& outSystemPrompt) const
+{
+    BMessage msg(MSG_GET_SYSTEM_PROMPT);
+    msg.AddInt32("session_id", fSessionID);
+    msg.AddString("context_id", fContextID);
+
+    BMessage reply;
+    status_t rc = const_cast<AIEngine*>(this)->_TalkToServer(&msg, reply);
+    if (rc == B_OK) {
+        const char* systemPrompt = nullptr;
+        if (reply.FindString("system_prompt", &systemPrompt) == B_OK) {
+            outSystemPrompt.SetTo(systemPrompt);
+            return B_OK;
+        }
+    }
+    return rc;
+}
+
 
 /*static*/ uint32
 AIEngine::GetPluginCapabilities(const char* pluginName)

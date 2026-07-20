@@ -444,6 +444,15 @@ BuildPayloadFromContext(const BMessage* config, const char* currentPrompt,
 
     outPayload.Append("  \"messages\": [\n");
     bool first = true;
+    const char* systemPrompt = nullptr;
+    if (config) {
+        config->FindString("system_prompt", &systemPrompt);
+    }
+    if (systemPrompt && systemPrompt[0] != '\0') {
+        BString escapedSystem = EscapeStringForJson(systemPrompt);
+        outPayload << "    {\"role\": \"system\", \"content\": \"" << escapedSystem << "\"\}";
+        first = false;
+    }
 
     BMessage messagesMsg;
     if (config && config->FindMessage("messages", &messagesMsg) == B_OK) {

@@ -1669,6 +1669,64 @@ public:
 				msg->SendReply(&reply);
 				break;
 			}
+			case MSG_SET_SYSTEM_PROMPT: {
+				int32 sessionID = -1;
+				BString contextID;
+				BString systemPrompt;
+				
+				msg->FindInt32("session_id", &sessionID);
+				msg->FindString("context_id", &contextID);
+				msg->FindString("system_prompt", &systemPrompt);
+				
+				if (contextID.IsEmpty() && sessionID != -1 && gSessions.count(sessionID) > 0) {
+					contextID = gSessions[sessionID].context_id;
+				}
+				
+				BMessage reply(B_REPLY);
+				if (!contextID.IsEmpty()) {
+					BMessage ctx;
+					if (load_or_create_chat_context(contextID.String(), &ctx) == B_OK) {
+						ctx.RemoveName("system_prompt");
+						if (systemPrompt.Length() > 0) {
+							ctx.AddString("system_prompt", systemPrompt.String());
+						}
+						status_t saveErr = save_chat_context(contextID.String(), &ctx);
+						reply.AddInt32("status", saveErr);
+					} else {
+						reply.AddInt32("status", B_ERROR);
+					}
+				} else {
+					reply.AddInt32("status", B_BAD_VALUE);
+				}
+				msg->SendReply(&reply);
+				break;
+			}
+			case MSG_GET_SYSTEM_PROMPT: {
+				int32 sessionID = -1;
+				BString contextID;
+				
+				msg->FindInt32("session_id", &sessionID);
+				msg->FindString("context_id", &contextID);
+				
+				if (contextID.IsEmpty() && sessionID != -1 && gSessions.count(sessionID) > 0) {
+					contextID = gSessions[sessionID].context_id;
+				}
+				
+				BMessage reply(B_REPLY);
+				BString systemPrompt = "";
+				if (!contextID.IsEmpty()) {
+					BMessage ctx;
+					if (load_or_create_chat_context(contextID.String(), &ctx) == B_OK) {
+						const char* sys = nullptr;
+						if (ctx.FindString("system_prompt", &sys) == B_OK && sys) {
+							systemPrompt = sys;
+						}
+					}
+				}
+				reply.AddString("system_prompt", systemPrompt.String());
+				msg->SendReply(&reply);
+				break;
+			}
 			default:
 				BApplication::MessageReceived(msg);
 				break;
