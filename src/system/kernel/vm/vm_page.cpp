@@ -97,7 +97,7 @@ int32 gMappedPagesCount;
 
 static VMPageQueue sFreePageQueue;
 static VMPageQueue sClearPageQueue;
-static ModifiedPageQueue sModifiedPageQueue;
+static ModifiedPageQueue sDefaultModifiedPageQueue;
 static VMPageQueue sInactivePageQueue;
 static VMPageQueue sActivePageQueue;
 static VMPageQueue sCachedPageQueue;
@@ -720,23 +720,8 @@ dump_page_list(int argc, char **argv)
 static int
 find_page(int argc, char **argv)
 {
-	struct vm_page *page;
 	addr_t address;
 	int32 index = 1;
-	int i;
-
-	struct {
-		const char*	name;
-		VMPageQueue*	queue;
-	} pageQueueInfos[] = {
-		{ "free",		&sFreePageQueue },
-		{ "clear",		&sClearPageQueue },
-		{ "modified",	&sModifiedPageQueue },
-		{ "active",		&sActivePageQueue },
-		{ "inactive",	&sInactivePageQueue },
-		{ "cached",		&sCachedPageQueue },
-		{ NULL, NULL }
-	};
 
 	if (argc < 2
 		|| strlen(argv[index]) <= 2
@@ -747,9 +732,26 @@ find_page(int argc, char **argv)
 	}
 
 	address = strtoul(argv[index], NULL, 0);
-	page = (vm_page*)address;
+	struct vm_page *page = (vm_page*)address;
 
-	for (i = 0; pageQueueInfos[i].name; i++) {
+	struct {
+		const char*	name;
+		VMPageQueue*	queue;
+	} pageQueueInfos[] = {
+		{ "free",		&sFreePageQueue },
+		{ "clear",		&sClearPageQueue },
+		{ "modified-default", &sDefaultModifiedPageQueue },
+		{ "modified-cache", page->Cache() != NULL ? page->Cache()->ModifiedQueue() : NULL },
+		{ "active",		&sActivePageQueue },
+		{ "inactive",	&sInactivePageQueue },
+		{ "cached",		&sCachedPageQueue },
+		{ NULL, NULL }
+	};
+
+	for (int i = 0; pageQueueInfos[i].name; i++) {
+		if (pageQueueInfos[i].queue == NULL)
+			continue;
+
 		VMPageQueue::Iterator it = pageQueueInfos[i].queue->GetIterator();
 		while (vm_page* p = it.Next()) {
 			if (p == page) {
@@ -970,8 +972,8 @@ dump_page_queue(int argc, char **argv)
 		queue = &sFreePageQueue;
 	else if (!strcmp(argv[1], "clear"))
 		queue = &sClearPageQueue;
-	else if (!strcmp(argv[1], "modified"))
-		queue = &sModifiedPageQueue;
+	else if (!strcmp(argv[1], "modified-default"))
+		queue = &sDefaultModifiedPageQueue;
 	else if (!strcmp(argv[1], "active"))
 		queue = &sActivePageQueue;
 	else if (!strcmp(argv[1], "inactive"))
@@ -1106,9 +1108,9 @@ dump_page_stats(int argc, char **argv)
 		sFreePageQueue.Count());
 	kprintf("clear queue: %p, count = %" B_PRIuPHYSADDR "\n", &sClearPageQueue,
 		sClearPageQueue.Count());
-	kprintf("modified queue: %p, count = %" B_PRIuPHYSADDR " (%" B_PRId32
+	kprintf("modified-default queue: %p, count = %" B_PRIuPHYSADDR " (%" B_PRId32
 		" temporary, %" B_PRIuPHYSADDR " swappable, " "inactive: %"
-		B_PRIuPHYSADDR ")\n", &sModifiedPageQueue, sModifiedPageQueue.Count(),
+		B_PRIuPHYSADDR ")\n", &sDefaultModifiedPageQueue, sDefaultModifiedPageQueue.Count(),
 		sModifiedTemporaryPages, swappableModified, swappableModifiedInactive);
 	kprintf("active queue: %p, count = %" B_PRIuPHYSADDR "\n",
 		&sActivePageQueue, sActivePageQueue.Count());
@@ -1460,6 +1462,13 @@ unreserve_pages(uint32 count)
 }
 
 
+ModifiedPageQueue*
+vm_page_default_modified_queue()
+{
+	return &sDefaultModifiedPageQueue;
+}
+
+
 static VMPageQueue*
 page_queue_for(vm_page* page, uint8 state)
 {
@@ -1469,7 +1478,12 @@ page_queue_for(vm_page* page, uint8 state)
 		case PAGE_STATE_INACTIVE:
 			return &sInactivePageQueue;
 		case PAGE_STATE_MODIFIED:
-			return &sModifiedPageQueue;
+		{
+			VMPageQueue* queue = page->Cache()->ModifiedQueue();
+			if (queue != NULL)
+				return queue;
+			return &sDefaultModifiedPageQueue;
+		}
 		case PAGE_STATE_CACHED:
 			return &sCachedPageQueue;
 		case PAGE_STATE_FREE:
@@ -1876,7 +1890,7 @@ free_cached_page(vm_page *page, bool dontWait)
 static uint32
 free_cached_pages(uint32 pagesToFree, bool dontWait)
 {
-	vm_page marker;
+	vm_page marker(-1);
 	init_page_marker(marker);
 	forbid_page_faults();
 
@@ -2007,12 +2021,13 @@ full_scan_inactive_pages(page_stats& pageStats, int32 despairLevel)
 	// scale only when things get desperate.
 	uint32 maxToFlush = despairLevel <= 1 ? 32 : 10000;
 
-	vm_page marker;
+	vm_page marker(-1);
 	init_page_marker(marker);
 
 	VMPageQueue& queue = sInactivePageQueue;
 	InterruptsSpinLocker queueLocker(queue.GetLock());
 	uint32 maxToScan = queue.Count();
+	ModifiedPageQueue* modifiedQueue = NULL;
 
 	vm_page* nextPage = queue.Head();
 
@@ -2091,6 +2106,15 @@ full_scan_inactive_pages(page_stats& pageStats, int32 despairLevel)
 			pagesToFree--;
 			pagesToCached++;
 		} else if (maxToFlush > 0) {
+			if (pagesToModified != 0 && modifiedQueue != cache->ModifiedQueue()) {
+				// This page has a different modified queue than the previous one(s).
+				// Wake up the previous queue before switching.
+				if (modifiedQueue == NULL)
+					modifiedQueue = &sDefaultModifiedPageQueue;
+				modifiedQueue->NotifyWriter();
+				modifiedQueue = cache->ModifiedQueue();
+			}
+
 			set_page_state(page, PAGE_STATE_MODIFIED);
 			maxToFlush--;
 			pagesToModified++;
@@ -2116,15 +2140,18 @@ full_scan_inactive_pages(page_stats& pageStats, int32 despairLevel)
 		pagesToModified, pagesToActive);
 
 	// wake up the page writer, if we tossed it some pages
-	if (pagesToModified > 0)
-		sModifiedPageQueue.NotifyWriter();
+	if (pagesToModified > 0) {
+		if (modifiedQueue == NULL)
+			modifiedQueue = &sDefaultModifiedPageQueue;
+		modifiedQueue->NotifyWriter();
+	}
 }
 
 
 static void
 full_scan_active_pages(page_stats& pageStats, int32 despairLevel)
 {
-	vm_page marker;
+	vm_page marker(-1);
 	init_page_marker(marker);
 
 	VMPageQueue& queue = sActivePageQueue;
@@ -2434,7 +2461,7 @@ vm_page_init(kernel_args *args)
 	TRACE(("vm_page_init: entry\n"));
 
 	// init page queues
-	sModifiedPageQueue.Init();
+	sDefaultModifiedPageQueue.Init();
 	sInactivePageQueue.Init();
 	sActivePageQueue.Init();
 	sCachedPageQueue.Init();
@@ -2453,7 +2480,7 @@ vm_page_init(kernel_args *args)
 
 	// initialize the free page table
 	for (uint32 i = 0; i < sNumPages; i++) {
-		sPages[i].Init(sPhysicalPageOffset + i);
+		new(&sPages[i]) vm_page(sPhysicalPageOffset + i);
 		sFreePageQueue.Append(&sPages[i]);
 
 #if VM_PAGE_ALLOCATION_TRACKING_AVAILABLE
@@ -2594,7 +2621,7 @@ vm_page_init_post_thread(kernel_args *args)
 	resume_thread(thread);
 
 	// start page writer
-	sModifiedPageQueue.StartWriter();
+	sDefaultModifiedPageQueue.StartWriter("default");
 
 	// start page daemon
 
@@ -2687,6 +2714,9 @@ vm_page_allocate_page(vm_page_reservation* reservation, uint32 flags)
 {
 	uint32 pageState = flags & VM_PAGE_ALLOC_STATE;
 	ASSERT(pageState != PAGE_STATE_FREE && pageState != PAGE_STATE_CLEAR);
+
+	ASSERT(pageState != PAGE_STATE_MODIFIED);
+		// as we can't determine which modified queue it belongs in
 
 	ASSERT(reservation->count > 0);
 	reservation->count--;
@@ -3139,8 +3169,8 @@ vm_page_free_etc(VMCache* cache, vm_page* page,
 	PAGE_ASSERT(page, page->State() != PAGE_STATE_FREE
 		&& page->State() != PAGE_STATE_CLEAR);
 
-	if (page->State() == PAGE_STATE_MODIFIED && (cache != NULL && cache->temporary))
-		atomic_add(&sModifiedTemporaryPages, -1);
+	PAGE_ASSERT(page, page->State() != PAGE_STATE_MODIFIED);
+		// as we can't determine which modified queue it's in
 
 	free_page(page, false);
 	if (reservation == NULL)
@@ -3231,7 +3261,7 @@ vm_page_get_stats(system_info *info)
 	// modified queue count is therefore split into temporary and non-temporary
 	// counts that are then added to the corresponding number.
 	page_num_t modifiedNonTemporaryPages
-		= (sModifiedPageQueue.Count() - sModifiedTemporaryPages);
+		= (ModifiedPageQueue::GlobalModifiedCount() - sModifiedTemporaryPages);
 
 	info->max_pages = vm_page_num_pages();
 	info->cached_pages = sCachedPageQueue.Count() + modifiedNonTemporaryPages

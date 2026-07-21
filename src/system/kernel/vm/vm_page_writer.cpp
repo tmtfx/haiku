@@ -46,6 +46,13 @@
 	// the maximum I/O priority shall be reached when this many pages need to
 	// be written
 
+#define PAGES_FLUSH_DURATION_LOCAL_QUOTA		(3 * 1000 * 1000)
+#define PAGES_FLUSH_DURATION_GLOBAL_QUOTA		(5 * 1000 * 1000)
+	// target maximum time needed to write out all modified pages, in one & all queues
+
+int64 ModifiedPageQueue::sGlobalModifiedCount = 0;
+bigtime_t ModifiedPageQueue::sGlobalEstimatedWriteDuration = 0;
+
 
 #if PAGE_WRITER_TRACING
 
@@ -537,7 +544,6 @@ ModifiedPageQueue::_PageWriter()
 	uint32 writtenPages = 0;
 	bigtime_t lastWrittenTime = 0;
 	bigtime_t pageCollectionTime = 0;
-	bigtime_t pageWritingTime = 0;
 #endif
 
 	PageWriterRun run;
@@ -548,11 +554,11 @@ ModifiedPageQueue::_PageWriter()
 
 	page_num_t pagesSinceLastSuccessfulWrite = 0;
 
-	while (true) {
-// TODO: Maybe wait shorter when memory is low!
+	while (fWriterThread >= 0) {
 		if (queue.Count() < kNumPages) {
-			fPageWriterCondition.Wait(3000000, true);
-				// all 3 seconds when no one triggers us
+			// wait the full amount when no one triggers us
+			if (!fPageWriterCondition.Wait(PAGES_FLUSH_DURATION_LOCAL_QUOTA, true))
+				continue;
 		}
 
 		page_num_t modifiedPages = queue.Count();
@@ -586,10 +592,6 @@ ModifiedPageQueue::_PageWriter()
 
 		uint32 numPages = 0;
 		run.PrepareNextRun();
-
-		// TODO: make this laptop friendly, too (ie. only start doing
-		// something if someone else did something or there is really
-		// enough to do).
 
 		// collect pages to be written
 #ifdef TRACE_VM_PAGE_WRITER
@@ -652,14 +654,8 @@ ModifiedPageQueue::_PageWriter()
 			}
 
 			run.AddPage(page);
-				// TODO: We're possibly adding pages of different caches and
-				// thus maybe of different underlying file systems here. This
-				// is a potential problem for loop file systems/devices, since
-				// we could mark a page busy that would need to be accessed
-				// when writing back another page, thus causing a deadlock.
 
 			DEBUG_PAGE_ACCESS_END(page);
-
 			//dprintf("write page %p, cache %p (%ld)\n", page, page->cache, page->cache->ref_count);
 			TPW(WritePage(page));
 
@@ -696,17 +692,15 @@ ModifiedPageQueue::_PageWriter()
 			continue;
 
 		// write pages to disk and do all the cleanup
-#ifdef TRACE_VM_PAGE_WRITER
-		pageWritingTime -= system_time();
-#endif
+		bigtime_t runStart = system_time();
 		uint32 failedPages = run.Go();
-#ifdef TRACE_VM_PAGE_WRITER
-		pageWritingTime += system_time();
 
+#ifdef TRACE_VM_PAGE_WRITER
 		// debug output only...
 		writtenPages += numPages;
 		if (writtenPages >= 1024) {
 			bigtime_t now = system_time();
+			bigtime pageWritingTime = now - runStart;
 			TRACE(("page writer: wrote 1024 pages (total: %" B_PRIu64 " ms, "
 				"collect: %" B_PRIu64 " ms, write: %" B_PRIu64 " ms)\n",
 				(now - lastWrittenTime) / 1000,
@@ -723,6 +717,12 @@ ModifiedPageQueue::_PageWriter()
 			pagesSinceLastSuccessfulWrite += modifiedPages - maxPagesToSee;
 		else
 			pagesSinceLastSuccessfulWrite = 0;
+
+		if (failedPages == 0 && numPages >= 8)
+			fLastAveragePageWriteDuration = (system_time() - runStart) / numPages;
+
+		if (!IsOverQuota())
+			fUnderQuotaCondition.NotifyAll();
 	}
 
 	return B_OK;
@@ -734,7 +734,6 @@ ModifiedPageQueue::_WriterThreadEntry(void* _this)
 {
 	return ((ModifiedPageQueue*)_this)->_PageWriter();
 }
-
 
 
 //	#pragma mark - private kernel API
@@ -909,15 +908,88 @@ vm_page_schedule_write_page_range(struct VMCache *cache, uint32 firstPage,
 }
 
 
-status_t
-ModifiedPageQueue::StartWriter()
+ModifiedPageQueue::~ModifiedPageQueue()
 {
-	fPageWriterCondition.Init("page writer");
+	thread_id writerThread = fWriterThread;
+	if (writerThread < 0)
+		return;
 
-	fWriterThread = spawn_kernel_thread(&_WriterThreadEntry, "page writer",
+	fWriterThread = -1;
+	fPageWriterCondition.WakeUp();
+	wait_for_thread(writerThread, NULL);
+}
+
+
+status_t
+ModifiedPageQueue::StartWriter(const char* name)
+{
+	char threadName[B_OS_NAME_LENGTH];
+	snprintf(threadName, sizeof(threadName), "page writer: %s", name);
+
+	fPageWriterCondition.Init(threadName);
+	fUnderQuotaCondition.Init(this, "ModifiedPageQueue");
+	fLastAveragePageWriteDuration = 0;
+
+	fWriterThread = spawn_kernel_thread(&_WriterThreadEntry, threadName,
 		B_NORMAL_PRIORITY + 1, this);
 	if (fWriterThread < 0)
 		return fWriterThread;
 
 	return resume_thread(fWriterThread);
+}
+
+
+bool
+ModifiedPageQueue::IsOverQuota(page_num_t additionalPages)
+{
+	InterruptsSpinLocker _(fLock);
+
+	bigtime_t estimatedWriteDuration = (fCount * fLastAveragePageWriteDuration);
+	if ((int64)fCount != fLastReportedModifiedCount
+			|| estimatedWriteDuration != fLastReportedEstimatedWriteDuration) {
+		atomic_add64(&sGlobalModifiedCount, fCount - fLastReportedModifiedCount);
+		fLastReportedModifiedCount = fCount;
+
+		atomic_add64(&sGlobalEstimatedWriteDuration,
+			estimatedWriteDuration - fLastReportedEstimatedWriteDuration);
+		fLastReportedEstimatedWriteDuration = estimatedWriteDuration;
+	}
+
+	bigtime_t additionalPagesDuration = fLastAveragePageWriteDuration * additionalPages;
+	if ((estimatedWriteDuration + additionalPagesDuration)
+			> PAGES_FLUSH_DURATION_LOCAL_QUOTA)
+		return true;
+
+	return ((atomic_get64(&sGlobalEstimatedWriteDuration) + additionalPagesDuration)
+		> PAGES_FLUSH_DURATION_GLOBAL_QUOTA);
+}
+
+
+status_t
+ModifiedPageQueue::WaitIfOverQuota(page_num_t additionalPages,
+	bigtime_t timeout, uint32 flags)
+{
+	if ((flags & B_RELATIVE_TIMEOUT) != 0) {
+		// Convert to an absolute timeout, so that we can wait multiple times if needed.
+		timeout += system_time();
+		flags = (flags & ~B_RELATIVE_TIMEOUT) | B_ABSOLUTE_TIMEOUT;
+	}
+
+	while (IsOverQuota(additionalPages)) {
+		ConditionVariableEntry waitEntry;
+		fUnderQuotaCondition.Add(&waitEntry);
+
+		if (!IsOverQuota(additionalPages))
+			return B_OK;
+
+		fPageWriterCondition.WakeUp();
+		status_t status = waitEntry.Wait(flags, timeout);
+		if (status != B_OK)
+			return status;
+
+		// The queue itself is now under-quota, but it may still be over
+		// when considering additionalPages. So, we loop again.
+	}
+
+	return B_OK;
 }

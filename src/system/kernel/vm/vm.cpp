@@ -2205,9 +2205,10 @@ vm_create_null_area(team_id team, const char* name, void** address,
 	The vnode has to be marked busy when calling this function.
 */
 status_t
-vm_create_vnode_cache(struct vnode* vnode, struct VMCache** cache)
+vm_create_vnode_cache(struct vnode *vnode, ModifiedPageQueue* queue,
+	VMCache **cache)
 {
-	return VMCacheFactory::CreateVnodeCache(*cache, vnode);
+	return VMCacheFactory::CreateVnodeCache(*cache, vnode, queue);
 }
 
 
@@ -5078,7 +5079,7 @@ lock_memory_etc(team_id team, void* address, size_t numBytes, uint32 flags)
 
 	// compute the page protection that is required
 	bool isUser = IS_USER_ADDRESS(address);
-	bool writable = (flags & B_READ_DEVICE) == 0;
+	bool writable = (flags & B_READ_DEVICE) != 0;
 	uint32 requiredProtection = PAGE_PRESENT
 		| B_KERNEL_READ_AREA | (isUser ? B_READ_AREA : 0);
 	if (writable)
@@ -5237,7 +5238,7 @@ unlock_memory_etc(team_id team, void* address, size_t numBytes, uint32 flags)
 
 	// compute the page protection that is required
 	bool isUser = IS_USER_ADDRESS(address);
-	bool writable = (flags & B_READ_DEVICE) == 0;
+	bool writable = (flags & B_READ_DEVICE) != 0;
 	uint32 requiredProtection = PAGE_PRESENT
 		| B_KERNEL_READ_AREA | (isUser ? B_READ_AREA : 0);
 	if (writable)

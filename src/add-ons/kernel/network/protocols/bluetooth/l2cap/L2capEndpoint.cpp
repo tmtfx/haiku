@@ -11,7 +11,6 @@
 #include <NetBufferUtilities.h>
 
 #include "L2capEndpointManager.h"
-#include "l2cap_address.h"
 #include "l2cap_signal.h"
 #include <btDebug.h>
 
@@ -275,7 +274,7 @@ L2capEndpoint::Connect(const struct sockaddr* _address)
 		return EAFNOSUPPORT;
 
 	TRACE("l2cap: connect(\"%s\")\n",
-		ConstSocketAddress(&gL2capAddressModule, _address).AsString().Data());
+		ConstSocketAddress(AddressModule(), _address).AsString().Data());
 	MutexLocker _(fLock);
 
 	status_t status;
@@ -305,8 +304,9 @@ L2capEndpoint::Connect(const struct sockaddr* _address)
 	if (hid <= 0)
 		return ENETUNREACH;
 
-	TRACE("l2cap: %" B_PRId32 " for route %s\n", hid,
-		bdaddrUtils::ToString(address->l2cap_bdaddr).String());
+	TRACE("l2cap: %" B_PRId32 " for route %02X:%02X:%02X:%02X:%02X:%02X\n", hid,
+		address->l2cap_bdaddr.b[5], address->l2cap_bdaddr.b[4], address->l2cap_bdaddr.b[3],
+		address->l2cap_bdaddr.b[2], address->l2cap_bdaddr.b[1], address->l2cap_bdaddr.b[0]);
 
 	fConnection = btCoreData->ConnectionByDestination(
 		address->l2cap_bdaddr, hid);
@@ -398,7 +398,7 @@ L2capEndpoint::ReadData(size_t numBytes, uint32 flags, net_buffer** _buffer)
 }
 
 
-ssize_t
+status_t
 L2capEndpoint::SendData(net_buffer* buffer)
 {
 	CALLED();
@@ -410,36 +410,17 @@ L2capEndpoint::SendData(net_buffer* buffer)
 	if (fState != OPEN)
 		return ENOTCONN;
 
-	ssize_t sent = 0;
-	while (buffer != NULL) {
-		net_buffer* current = buffer;
-		buffer = NULL;
-		if (current->size > fChannelConfig.outgoing_mtu) {
-			// Break up into MTU-sized chunks.
-			buffer = gBufferModule->split(current, fChannelConfig.outgoing_mtu);
-			if (buffer == NULL) {
-				if (sent > 0) {
-					gBufferModule->free(current);
-					return sent;
-				}
-				return ENOMEM;
-			}
-		}
+	if (buffer->size > fChannelConfig.outgoing_mtu)
+		return EMSGSIZE;
 
-		const size_t bufferSize = current->size;
-		status_t status = gStackModule->fifo_enqueue_buffer(&fSendQueue, current);
-		if (status != B_OK) {
-			gBufferModule->free(current);
-			return sent;
-		}
-
-		sent += bufferSize;
-	}
+	status_t status = gStackModule->fifo_enqueue_buffer(&fSendQueue, buffer);
+	if (status != B_OK)
+		return status;
 
 	if (!gStackModule->is_timer_active(&fSendTimer))
 		gStackModule->set_timer(&fSendTimer, 0);
 
-	return sent;
+	return B_OK;
 }
 
 
@@ -866,6 +847,9 @@ L2capEndpoint::_MarkClosed()
 	ASSERT_LOCKED_MUTEX(&fLock);
 
 	fState = CLOSED;
+
+	socket->error = ENOTCONN;
+	gSocketModule->notify(socket, B_SELECT_ERROR, ENOTCONN);
 
 	gL2capEndpointManager.UnbindFromChannel(this);
 }

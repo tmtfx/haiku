@@ -4769,10 +4769,14 @@ vfs_get_vnode_cache(struct vnode* vnode, VMCache** _cache, bool allocate)
 			bool wasBusy = vnode->IsBusy();
 			vnode->SetBusy(true);
 
+			ModifiedPageQueue* queue = NULL;
+			if (vnode->mount->partition != NULL)
+				queue = vnode->mount->partition->Device()->ModifiedQueue();
+
 			vnode->Unlock();
 			rw_lock_read_unlock(&sVnodeLock);
 
-			status = vm_create_vnode_cache(vnode, &vnode->cache);
+			status = vm_create_vnode_cache(vnode, queue, &vnode->cache);
 
 			rw_lock_read_lock(&sVnodeLock);
 			vnode->Lock();
@@ -7576,6 +7580,7 @@ fs_mount(char* path, const char* device, const char* fsName, uint32 flags,
 			return B_ERROR;
 		}
 	}
+	PartitionRegistrar diskDeviceRegistrar(diskDevice, true);
 	DeviceWriteLocker writeLocker(diskDevice, true);
 
 	if (partition != NULL) {
@@ -7789,7 +7794,7 @@ fs_mount(char* path, const char* device, const char* fsName, uint32 flags,
 	}
 
 	// supply the partition (if any) with the mount ID and mark it mounted
-	if (partition) {
+	if (partition != NULL) {
 		partition->SetVolumeID(mount->id);
 
 		// keep a partition reference as long as the partition is mounted
@@ -7868,11 +7873,12 @@ fs_unmount(char* path, dev_t mountID, uint32 flags, bool kernel)
 			return B_ERROR;
 		}
 		diskDevice = ddm->WriteLockDevice(partition->Device()->ID());
-		if (!diskDevice) {
+		if (diskDevice == NULL) {
 			TRACE(("fs_unmount(): Failed to lock disk device!\n"));
 			return B_ERROR;
 		}
 	}
+	PartitionRegistrar diskDeviceRegistrar(diskDevice, true);
 	DeviceWriteLocker writeLocker(diskDevice, true);
 
 	// make sure, that the partition is not busy
