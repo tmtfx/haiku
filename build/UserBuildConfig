@@ -1,3 +1,7 @@
+HAIKU_ROOT_USER_NAME = guybrush ;
+HAIKU_ROOT_USER_REAL_NAME = "Guybrush Threepwood" ;
+HAIKU_IMAGE_HOST_NAME = WhydahGally ;
+
 AddFilesToHaikuImage home : /boot/home/Musiche/The\ Frico\ Shanty.mp3 ;
 AddFilesToHaikuImage home : /boot/home/Musiche/The\ Frico\ Shanty.txt ;
 AddFilesToHaikuImage home : /boot/home/Progjets/hpkgs/moeca-1.1-1-x86_64.hpkg ;
