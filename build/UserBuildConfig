@@ -1,5 +1,6 @@
 AddFilesToHaikuImage home : /boot/home/Musiche/The\ Frico\ Shanty.mp3 ;
 AddFilesToHaikuImage home : /boot/home/Musiche/The\ Frico\ Shanty.txt ;
+AddFilesToHaikuImage home : /boot/home/Progjets/hpkgs/moeca-1.1-1-x86_64.hpkg ;
 
 AddFilesToHaikuImage system packages : /boot/home/Progjets/hpkgs/adwaita_icon_theme_legacy-46.2-1-any.hpkg ;
 AddFilesToHaikuImage system packages : /boot/home/Progjets/hpkgs/adwaita_icon_theme-49.0-1-any.hpkg ;
@@ -54,3 +55,4 @@ AddFilesToHaikuImage system packages : /boot/home/Progjets/hpkgs/xz_utils-5.8.3-
 AddFilesToHaikuImage system packages : /boot/home/Progjets/hpkgs/zlib_devel-1.3.2-1-x86_64.hpkg ;
 AddFilesToHaikuImage system packages : /boot/home/Progjets/hpkgs/zlib-1.3.2-1-x86_64.hpkg ;
 AddFilesToHaikuImage system packages : /boot/home/Progjets/hpkgs/minimiser.hpkg ;
+AddFilesToHaikuImage system packages : /boot/home/Progjets/hpkgs/tm2-1.0.0~git-1-x86_64.hpkg ;
