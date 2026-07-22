@@ -162,6 +162,43 @@ ProposeDisplayMode(display_mode *target, const display_mode *low,
 }
 
 
+static void
+CalculateTridentPLL(uint32 clock, uint8& sr19, uint8& sr1a)
+{
+	double target = clock; // in kHz
+	double f_ref = 14318.18; // kHz
+	double best_error = 1e10;
+	uint32 best_n = 0;
+	uint32 best_m = 0;
+	uint32 best_p = 0;
+
+	for (uint32 p = 0; p <= 3; p++) {
+		uint32 div = 1 << p;
+		for (uint32 m = 2; m <= 65; m++) {
+			double n_approx = target * m * div / f_ref;
+			uint32 n_round = (uint32)(n_approx + 0.5);
+			if (n_round < 4 || n_round > 255)
+				continue;
+
+			double actual = f_ref * n_round / (m * div);
+			double error = actual - target;
+			if (error < 0)
+				error = -error;
+
+			if (error < best_error) {
+				best_error = error;
+				best_n = n_round;
+				best_m = m;
+				best_p = p;
+			}
+		}
+	}
+
+	sr19 = (uint8)best_n;
+	sr1a = (uint8)((best_p << 6) | ((best_m - 2) & 0x3F));
+}
+
+
 status_t 
 SetDisplayMode(display_mode* pMode)
 {
@@ -199,7 +236,139 @@ SetDisplayMode(display_mode* pMode)
 		mode.timing.h_display, mode.timing.v_display,
 		mode.virtual_width, mode.virtual_height, mode.bpp);
 
+	// Let's program the hardware registers!
+
+	// 1. Unlock CRTC registers (especially 0-7) and Trident extensions
+	write_crtc_reg(0x11, read_crtc_reg(0x11) & ~0x80); // Unlock CR0-7
+	write_seq_reg(0x0B, 0x0B);                         // Unlock Sequencer extensions (SR0B)
+	write_crtc_reg(0x39, 0x80);                        // Unlock CRTC extensions (CR39)
+
+	// 2. Program Pixel Clock (PLL)
+	uint8 sr19 = 0, sr1a = 0;
+	CalculateTridentPLL(mode.timing.pixel_clock, sr19, sr1a);
+	write_seq_reg(0x19, sr19);
+	write_seq_reg(0x1A, sr1a);
+
+	// Select programmable clock (Clock 2) in Misc Output
+	uint8 misc = read_vga_reg(0x3CC);
+	misc |= 0x2B; // enable VGA, select color emulation
+	misc &= ~0x0C; // clear clock bits
+	misc |= 0x08;  // Clock 2 (programmable)
+	write_vga_reg(0x3C2, misc);
+
+	// 3. Calculate and set standard VGA timing values
+	uint8 crtc[25];
+	int h_total = (mode.timing.h_total / 8) - 5;
+	int h_display = (mode.timing.h_display / 8) - 1;
+	int h_sync_start = (mode.timing.h_sync_start / 8);
+	int h_sync_end = (mode.timing.h_sync_end / 8);
+	int h_blank_start = h_display + 1;
+	int h_blank_end = h_total;
+
+	int v_total = mode.timing.v_total - 2;
+	int v_display = mode.timing.v_display - 1;
+	int v_sync_start = mode.timing.v_sync_start;
+	int v_sync_end = mode.timing.v_sync_end;
+	int v_blank_start = v_display;
+	int v_blank_end = v_total;
+
+	crtc[0x00] = h_total & 0xFF;
+	crtc[0x01] = h_display & 0xFF;
+	crtc[0x02] = h_blank_start & 0xFF;
+	crtc[0x03] = (h_blank_end & 0x1F) | 0x80;
+	crtc[0x04] = h_sync_start & 0xFF;
+	crtc[0x05] = ((h_sync_end & 0x1F) | ((h_blank_end & 0x20) << 2));
+	crtc[0x06] = v_total & 0xFF;
+	crtc[0x07] = (((v_total & 0x100) >> 8)
+		| ((v_display & 0x100) >> 7)
+		| ((v_sync_start & 0x100) >> 6)
+		| ((v_blank_start & 0x100) >> 5)
+		| 0x10
+		| ((v_total & 0x200) >> 4)
+		| ((v_display & 0x200) >> 3)
+		| ((v_sync_start & 0x200) >> 2));
+	crtc[0x08] = 0x00;
+	crtc[0x09] = ((v_blank_start & 0x200) >> 4) | 0x40;
+	crtc[0x0a] = 0x00;
+	crtc[0x0b] = 0x00;
+	crtc[0x0c] = 0x00;
+	crtc[0x0d] = 0x00;
+	crtc[0x0e] = 0x00;
+	crtc[0x0f] = 0x00;
+	crtc[0x10] = v_sync_start & 0xFF;
+	crtc[0x11] = (v_sync_end & 0x0F) | 0x20;
+	crtc[0x12] = v_display & 0xFF;
+	crtc[0x13] = (mode.bytesPerRow / 8) & 0xFF;
+	crtc[0x14] = 0x00;
+	crtc[0x15] = v_blank_start & 0xFF;
+	crtc[0x16] = v_blank_end & 0xFF;
+	crtc[0x17] = 0xE3;
+	crtc[0x18] = 0xFF;
+
+	for (int i = 0; i < 25; i++) {
+		write_crtc_reg(i, crtc[i]);
+	}
+
+	// 4. Program standard Sequencer Registers
+	write_seq_reg(0x00, 0x03); // Reset
+	write_seq_reg(0x01, 0x01); // 8-dot clock, normal display
+	write_seq_reg(0x02, 0x0F); // Enable write to all planes
+	write_seq_reg(0x03, 0x00);
+	write_seq_reg(0x04, 0x0E); // Chain-4 mode, linear addressing
+
+	// 5. Program standard Graphics Controller Registers
+	write_vga_reg(0x3CE, 0x00); write_vga_reg(0x3CF, 0x00);
+	write_vga_reg(0x3CE, 0x01); write_vga_reg(0x3CF, 0x00);
+	write_vga_reg(0x3CE, 0x02); write_vga_reg(0x3CF, 0x00);
+	write_vga_reg(0x3CE, 0x03); write_vga_reg(0x3CF, 0x00);
+	write_vga_reg(0x3CE, 0x04); write_vga_reg(0x3CF, 0x00);
+	write_vga_reg(0x3CE, 0x05); write_vga_reg(0x3CF, 0x40); // 256-color graphics mode
+	write_vga_reg(0x3CE, 0x06); write_vga_reg(0x3CF, 0x05); // Graphics mode, map to A000-BFFF
+	write_vga_reg(0x3CE, 0x07); write_vga_reg(0x3CF, 0x0F);
+	write_vga_reg(0x3CE, 0x08); write_vga_reg(0x3CF, 0xFF);
+
+	// 6. Program standard Attribute Controller Registers
+	read_vga_reg(0x3DA); // Reset AC flip-flop
+	for (uint8 i = 0; i < 16; i++) {
+		write_vga_reg(0x3C0, i);
+		write_vga_reg(0x3C0, i);
+	}
+	write_vga_reg(0x3C0, 0x10); write_vga_reg(0x3C0, 0x41); // Graphics, color mode
+	write_vga_reg(0x3C0, 0x11); write_vga_reg(0x3C0, 0x00);
+	write_vga_reg(0x3C0, 0x12); write_vga_reg(0x3C0, 0x0F);
+	write_vga_reg(0x3C0, 0x13); write_vga_reg(0x3C0, 0x00);
+	write_vga_reg(0x3C0, 0x14); write_vga_reg(0x3C0, 0x00);
+
+	read_vga_reg(0x3DA);
+	write_vga_reg(0x3C0, 0x20); // Enable display output
+
+	// 7. Enable Linear Frame Buffer on Trident
+	uint8 sr21 = read_seq_reg(0x21);
+	sr21 |= 0x20; // LFB Enable
+	write_seq_reg(0x21, sr21);
+
+	// 8. Configure pixel formatting (color depth) on Trident SR11
+	uint8 sr11 = 0;
+	switch (mode.bpp) {
+		case 8:  sr11 = 0x00; break;
+		case 16: sr11 = 0x40; break; // RGB 565
+		case 32: sr11 = 0x80; break; // RGB 32
+	}
+	write_seq_reg(0x11, sr11);
+
+	// 9. Configure Screen Pitch (Offset) in CR13 and CR1E
+	uint32 offset = mode.bytesPerRow / 8;
+	write_crtc_reg(0x13, offset & 0xFF);
+	uint8 cr1e = read_crtc_reg(0x1E);
+	cr1e &= ~0x30;
+	cr1e |= ((offset >> 8) & 0x03) << 4;
+	write_crtc_reg(0x1E, cr1e);
+
 	si.displayMode = mode;
+
+	// Place cursor pattern at the end of the frame buffer
+	si.maxFrameBufferSize = si.videoMemSize;
+	si.cursorOffset = si.maxFrameBufferSize - 4096;
 
 	TRACE("SetDisplayMode() done\n");
 	return B_OK;

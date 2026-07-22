@@ -54,6 +54,17 @@ get_accelerant_hook(uint32 feature, void* data)
 		case B_WAIT_ENGINE_IDLE:		return (void*)WaitEngineIdle;
 		case B_GET_SYNC_TOKEN:			return (void*)GetSyncToken;
 		case B_SYNC_TO_TOKEN:			return (void*)SyncToToken;
+
+		// Overlay
+		case B_OVERLAY_COUNT:				return (void*)trident_overlay_count;
+		case B_OVERLAY_SUPPORTED_SPACES:	return (void*)trident_overlay_supported_spaces;
+		case B_OVERLAY_SUPPORTED_FEATURES:	return (void*)trident_overlay_supported_features;
+		case B_ALLOCATE_OVERLAY_BUFFER:		return (void*)trident_allocate_overlay_buffer;
+		case B_RELEASE_OVERLAY_BUFFER:		return (void*)trident_release_overlay_buffer;
+		case B_GET_OVERLAY_CONSTRAINTS:		return (void*)trident_get_overlay_constraints;
+		case B_ALLOCATE_OVERLAY:			return (void*)trident_allocate_overlay;
+		case B_RELEASE_OVERLAY:				return (void*)trident_release_overlay;
+		case B_CONFIGURE_OVERLAY:			return (void*)trident_configure_overlay;
 	}
 
 	return NULL;

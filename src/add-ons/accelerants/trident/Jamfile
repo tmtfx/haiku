@@ -10,6 +10,7 @@ Addon trident.accelerant :
 	engine.cpp
 	hooks.cpp
 	mode.cpp
+	overlay.cpp
 
 	: be libaccelerantscommon.a
 ;

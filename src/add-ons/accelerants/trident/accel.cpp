@@ -69,6 +69,9 @@ InitAccelerant(int fileDesc)
 
 		TRACE("Vendor ID: 0x%X, Device ID: 0x%X\n", si.vendorID, si.deviceID);
 
+		si.maxFrameBufferSize = si.videoMemSize;
+		si.cursorOffset = si.maxFrameBufferSize - 4096;
+
 		if (si.bAccelerantInUse) {
 			result = B_NOT_ALLOWED;
 		} else {

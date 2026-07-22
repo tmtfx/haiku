@@ -10,6 +10,7 @@
 
 
 #include "DriverInterface.h"
+#include <video_overlay.h>
 
 
 #undef TRACE
@@ -38,6 +39,44 @@ struct AccelerantInfo {
 };
 
 extern AccelerantInfo gInfo;
+
+
+// VGA MMIO offset and helper definitions
+#define TRIDENT_MMIO_VGA 0x1F000
+
+#define INREG8(addr)        *((volatile uint8*)(gInfo.regs + (uint32)(addr)))
+#define INREG16(addr)       *((volatile uint16*)(gInfo.regs + (uint32)(addr)))
+#define INREG32(addr)       *((volatile uint32*)(gInfo.regs + (uint32)(addr)))
+
+#define OUTREG8(addr, val)   *((volatile uint8*)(gInfo.regs + (uint32)(addr))) = (uint8)(val)
+#define OUTREG16(addr, val)  *((volatile uint16*)(gInfo.regs + (uint32)(addr))) = (uint16)(val)
+#define OUTREG32(addr, val)  *((volatile uint32*)(gInfo.regs + (uint32)(addr))) = (uint32)(val)
+
+inline uint8 read_reg8(uint32 offset) { return INREG8(offset); }
+inline void write_reg8(uint32 offset, uint8 value) { OUTREG8(offset, value); }
+
+inline uint8 read_vga_reg(uint32 port) { return read_reg8(TRIDENT_MMIO_VGA + port); }
+inline void write_vga_reg(uint32 port, uint8 value) { write_reg8(TRIDENT_MMIO_VGA + port, value); }
+
+inline uint8 read_crtc_reg(uint8 index) {
+	write_vga_reg(0x3D4, index);
+	return read_vga_reg(0x3D5);
+}
+
+inline void write_crtc_reg(uint8 index, uint8 value) {
+	write_vga_reg(0x3D4, index);
+	write_vga_reg(0x3D5, value);
+}
+
+inline uint8 read_seq_reg(uint8 index) {
+	write_vga_reg(0x3C4, index);
+	return read_vga_reg(0x3C5);
+}
+
+inline void write_seq_reg(uint8 index, uint8 value) {
+	write_vga_reg(0x3C4, index);
+	write_vga_reg(0x3C5, value);
+}
 
 
 #if defined(__cplusplus)
@@ -82,6 +121,17 @@ status_t SetCursorBitmap(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y
 uint32   GetCursorBits(void);
 void	 MoveCursor(uint16 x, uint16 y);
 void	 ShowCursor(bool bShow);
+
+// Overlay Hook Declarations
+uint32 trident_overlay_count(const display_mode* dm);
+const uint32* trident_overlay_supported_spaces(const display_mode* dm);
+uint32 trident_overlay_supported_features(uint32 a_color_space);
+const overlay_buffer* trident_allocate_overlay_buffer(color_space cs, uint16 width, uint16 height);
+status_t trident_release_overlay_buffer(const overlay_buffer* ob);
+status_t trident_get_overlay_constraints(const display_mode* dm, const overlay_buffer* ob, overlay_constraints* oc);
+overlay_token trident_allocate_overlay(void);
+status_t trident_release_overlay(overlay_token ot);
+status_t trident_configure_overlay(overlay_token ot, const overlay_buffer* ob, const overlay_window* ow, const overlay_view* ov);
 
 #if defined(__cplusplus)
 }
