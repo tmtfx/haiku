@@ -4,7 +4,9 @@ Device drivers
 .. toctree::
    :maxdepth: 2
 
+   /drivers/basics
    /drivers/disk/ioctls
+   /drivers/network
    /drivers/intel_extreme/generations
 
 Bus drivers

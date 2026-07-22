@@ -29,6 +29,7 @@ extern "C" {
 #include <vm/VMCache.h>
 #include <vm/VMAddressSpace.h>
 #include <vm/vm_page.h>
+#include "vm/VMAnonymousCache.h"
 #include "VMVirtualAddressSpace.h"
 
 #include <paging/nested/X86VMTranslationMapEPT.h>
@@ -65,6 +66,32 @@ haiku_get_xsave_mask()
 		return IA32_XCR0_X87 | IA32_XCR0_SSE;
 
 	return 0;
+}
+
+
+extern "C" void
+haiku_curthread_save_fpu()
+{
+#if KDEBUG
+	uint32 sseControl;
+	asm volatile("stmxcsr %0" : "=m" (sseControl));
+	if ((sseControl & ~0x3F) != 0x1F80) {
+		cpu_status status = disable_interrupts();
+		dprintf("nvmm: curthread_save_fpu: non-default MXCSR\n");
+		restore_interrupts(status);
+	}
+#endif
+}
+
+
+extern "C" void
+haiku_curthread_restore_fpu()
+{
+	// Haiku allows FPU usage in the kernel, so saving/restoring the overall
+	// FPU state isn't needed. However, on x86, MXCSR is callee-saved, so we
+	// have to reset it when "restoring" state.
+	uint32 sseControl = 0x1F80;
+	asm volatile("ldmxcsr %0" : : "m" (sseControl));
 }
 
 
@@ -425,7 +452,7 @@ os_vmspace_fault(os_vmspace_t *vm, vaddr_t va, vm_prot_t prot)
 	vm->address_space->ReadUnlock();
 
 	status_t status = vm_soft_fault(vm->address_space, va,
-		prot & PROT_WRITE, prot & PROT_EXEC, true, NULL);
+		(prot & PROT_WRITE) != 0, (prot & PROT_EXEC) != 0, true, NULL);
 
 	return status != B_OK;
 }
@@ -466,7 +493,7 @@ os_vmobj_create(voff_t size)
 	if (size % PAGE_SIZE != 0)
 		numPages++;
 
-	// TODO: We can't enable swapping unless A/D bits are supported.
+	// TODO: We can't enable swapping unless we know A/D bits are supported.
 	status_t status = VMCacheFactory::CreateAnonymousCache(ret->cache, false,
 		numPages, 0, false, 0);
 	if (status != B_OK) {
@@ -554,7 +581,8 @@ os_vmobj_map(os_vmmap_t *map, vaddr_t *addr, vsize_t size, os_vmobj_t *vmobj,
 	if (status != B_OK)
 		return status;
 
-	uint32 wiring = wired ? B_FULL_LOCK : B_NO_LOCK;
+	uint32 wiring = (wired || dynamic_cast<VMAnonymousCache*>(vmobj->cache) == NULL) ?
+		B_FULL_LOCK : B_NO_LOCK;
 	uint32 flags = fixed ? CREATE_AREA_UNMAP_ADDRESS_RANGE : 0;
 	bool kernel = false;
 	if (addressSpace == VMAddressSpace::Kernel())
