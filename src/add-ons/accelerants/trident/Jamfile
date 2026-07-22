@@ -1,0 +1,15 @@
+SubDir HAIKU_TOP src add-ons accelerants trident ;
+
+UsePrivateHeaders graphics ;
+UsePrivateHeaders [ FDirName graphics trident ] ;
+UsePrivateHeaders [ FDirName graphics common ] ;
+
+Addon trident.accelerant :
+	accel.cpp
+	cursor.cpp
+	engine.cpp
+	hooks.cpp
+	mode.cpp
+
+	: be libaccelerantscommon.a
+;

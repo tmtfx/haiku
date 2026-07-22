@@ -1,0 +1,9 @@
+SubDir HAIKU_TOP src add-ons kernel drivers graphics trident ;
+
+UsePrivateHeaders [ FDirName graphics trident ] ;
+UsePrivateHeaders [ FDirName graphics common ] ;
+UsePrivateHeaders graphics kernel ;
+
+KernelAddon trident :
+	driver.cpp
+;
