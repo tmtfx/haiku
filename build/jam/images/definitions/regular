@@ -191,6 +191,7 @@ SYSTEM_ADD_ONS_ACCELERANTS += [ FFilterByBuildFeatures
 		radeon_hd.accelerant
 		s3.accelerant
 		sm750.accelerant
+		trident.accelerant
 		via.accelerant
 	}@ # x86,x86_64
 	x86 @{
@@ -322,6 +323,7 @@ SYSTEM_ADD_ONS_DRIVERS_GRAPHICS += [ FFilterByBuildFeatures
 		radeon_hd
 		s3
 		sm750
+		trident
 		via
 	}@ # x86,x86_64
 	x86 @{
