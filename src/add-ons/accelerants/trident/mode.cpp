@@ -581,11 +581,11 @@ SetDisplayMode(display_mode* pMode)
 	debug_printf("Trident_REG: MiscOut Old=0x%02X, Write=0x%02X, Readback=0x%02X\n",
 		old_misc, tridentReg->tridentRegsClock[0x00], new_misc);
 
-	// Keep extended registers fully unlocked to allow subsequent SetDisplayMode calls to succeed via MMIO
+	// Protect
 	OUTB(0x3C4, Protection);
-	OUTB(0x3C5, 0x92);
+	OUTB(0x3C5, tridentReg->tridentRegs3C4[Protection]);
 
-	OUTW(0x3C4, (0x80 << 8) | NewMode1);
+	OUTW(0x3C4, ((tridentReg->tridentRegs3C4[NewMode1] ^ 0x02) << 8) | NewMode1);
 
 	si.displayMode = mode;
 
