@@ -275,10 +275,13 @@ SetDisplayMode(display_mode* pMode)
 	// Unlock CyberBlade/Blade3D-specific registers (SR11 = 0x92)
 	write_seq_reg(0x11, 0x92);
 
-	// Unlock Extended CRTC registers (CR39 = 0x80)
-	write_crtc_reg(0x39, 0x80);
+	// Unlock Extended CRTC registers CR30-CR3F (CR3E = 0x80)
+	write_crtc_reg(0x3E, 0x80);
 
-	debug_printf("Trident_ACC: Extended registers unlocked\n");
+	// Ensure PCIReg is unlocked / MMIO is enabled (CR39 = 0x01 or CR39 | 0x01)
+	write_crtc_reg(0x39, read_crtc_reg(0x39) | 0x01);
+
+	debug_printf("Trident_ACC: Extended sequencer and CRTC registers unlocked\n");
 
 	// 2. Program Pixel Clock (PLL)
 	uint32 clock = mode.timing.pixel_clock;
@@ -489,6 +492,9 @@ SetDisplayMode(display_mode* pMode)
 	write_seq_reg(0x0D, 0x20); // NewMode2
 	write_seq_reg(0x0E, 0xC0); // NewMode1
 	write_seq_reg(0x11, 0x92); // Protection
+
+	// Lock Extended CRTC registers
+	write_crtc_reg(0x3E, 0x00); // Lock CR30-CR3F
 
 	si.displayMode = mode;
 
