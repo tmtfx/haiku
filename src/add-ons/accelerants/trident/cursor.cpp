@@ -199,11 +199,13 @@ SetCursorBitmap(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
 void
 MoveCursor(uint16 xPos, uint16 yPos)
 {
+	SharedInfo& si = *gInfo.sharedInfo;
+
 	write_crtc_reg(0x39, 0x87);
 
-	// In Haiku, MoveCursor is called with coordinates already adjusted for the hotspot
-	int16 x = (int16)xPos;
-	int16 y = (int16)yPos;
+	// In Haiku, MoveCursor is called with coordinates of the mouse tip (hotspot needs to be subtracted)
+	int16 x = (int16)xPos - (int16)si.cursorHotX;
+	int16 y = (int16)yPos - (int16)si.cursorHotY;
 	uint8 preset_x = 0;
 	uint8 preset_y = 0;
 
