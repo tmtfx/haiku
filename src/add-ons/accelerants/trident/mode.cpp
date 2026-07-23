@@ -261,54 +261,23 @@ SetDisplayMode(display_mode* pMode)
 		mode.timing.h_display, mode.timing.v_display,
 		mode.virtual_width, mode.virtual_height, mode.bpp, mode.bytesPerRow);
 
-	// Let's program the hardware registers!
+	// Local structure to hold registers matching the X.org layout
+	TridentRegRec regRec = {};
+	TridentRegPtr tridentReg = &regRec;
 
-	// 1. Unlock CRTC registers (especially CR0-7) and Trident extended features
-	write_crtc_reg(0x11, read_crtc_reg(0x11) & ~0x80); // Unlock CR0-CR07
-	
-	// Toggle Trident "New Mode" - MUST READ from port 0x3C5 at index 0x0B
-	read_seq_reg(0x0B);
-
-	// Unlock Extended Sequencer registers (SR0E = 0x80)
-	write_seq_reg(0x0E, 0x80);
-
-	// Unlock CyberBlade/Blade3D-specific registers (SR11 = 0x92)
-	write_seq_reg(0x11, 0x92);
-
-	// Unlock Extended CRTC registers CR30-CR3F (CR39 = 0x80)
-	write_crtc_reg(0x39, 0x80);
-
-	debug_printf("Trident_ACC: Extended sequencer and CRTC registers unlocked\n");
-
-	// 2. Program Pixel Clock (PLL)
+	int offset = 0;
 	uint32 clock = mode.timing.pixel_clock;
-	if (mode.bpp == 32)
-		clock *= 2; // clock is doubled for 32bpp modes
 
-	uint8 sr19 = 0, sr1a = 0;
-	CalculateTridentPLL(clock, sr19, sr1a);
-	write_seq_reg(0x19, sr19);
-	write_seq_reg(0x1A, sr1a);
+	// 1. Initialize register structure unprotect and default settings (TridentInit)
+	tridentReg->tridentRegs3x4[PixelBusReg] = 0x00;
+	tridentReg->tridentRegsDAC[0x00] = 0x00;
+	tridentReg->tridentRegs3C4[NewMode2] = 0x20;
+	tridentReg->tridentRegs3CE[MiscExtFunc] = read_vga_reg(0x3CF) & 0xF0;
+	tridentReg->tridentRegs3x4[GraphEngReg] = 0x00;
+	tridentReg->tridentRegs3x4[PreEndControl] = 0;
+	tridentReg->tridentRegs3x4[PreEndFetch] = 0;
 
-	debug_printf("Trident_ACC: PLL calculated for clock %u kHz: SR19 = 0x%02X, SR1A = 0x%02X\n",
-		clock, sr19, sr1a);
-
-	// Select programmable clock (Clock 2) in Misc Output
-	uint8 misc = read_vga_reg(0x3CC);
-	misc |= 0x2B; // enable VGA, select color emulation
-	misc &= ~0x0C; // clear clock bits
-	misc |= 0x08;  // Clock 2 (programmable)
-	write_vga_reg(0x3C2, misc);
-
-	// 3. Calculate and set standard VGA timing values
-	uint8 crtc[25];
-	int h_total = (mode.timing.h_total / 8) - 5;
-	int h_display = (mode.timing.h_display / 8) - 1;
-	int h_sync_start = (mode.timing.h_sync_start / 8);
-	int h_sync_end = (mode.timing.h_sync_end / 8);
-	int h_blank_start = h_display + 1;
-	int h_blank_end = h_total;
-
+	// Program CR27 (CRTHiOrd) for high-order vertical timing bits
 	int v_total = mode.timing.v_total - 2;
 	int v_display = mode.timing.v_display - 1;
 	int v_sync_start = mode.timing.v_sync_start;
@@ -316,8 +285,103 @@ SetDisplayMode(display_mode* pMode)
 	int v_blank_start = v_display;
 	int v_blank_end = v_total;
 
-	debug_printf("Trident_ACC: Standard timings calculated: HTotal=%d, HDisplay=%d, VTotal=%d, VDisplay=%d\n",
-		h_total, h_display, v_total, v_display);
+	tridentReg->tridentRegs3x4[CRTHiOrd] = (((v_blank_end - 1) & 0x400) >> 4)
+		| (((v_total - 2) & 0x400) >> 3)
+		| ((v_sync_start & 0x400) >> 5)
+		| (((v_display - 1) & 0x400) >> 6)
+		| 0x08;
+
+	// Program CR2B (HorizOverflow) for high-order horizontal timing bits
+	tridentReg->tridentRegs3x4[HorizOverflow] = ((mode.timing.h_total & 0x800) >> 11)
+		| (((mode.timing.h_display + 1) & 0x800) >> 7);
+
+	// PreEndControl & PreEndFetch calculation
+	int mul = mode.bpp >> 3;
+	if (!mul) mul = 1;
+	int val = (mode.timing.h_display * mul / 8) + 16;
+	tridentReg->tridentRegs3x4[PreEndControl] = ((val >> 8) < 2 ? 2 : 0) | ((val >> 8) & 0x01);
+	tridentReg->tridentRegs3x4[PreEndFetch] = val & 0xff;
+
+	// Chipset specific: Blade3D timing registers
+	tridentReg->tridentRegs3x4[RAMDACTiming] = read_crtc_reg(RAMDACTiming) | 0x0F;
+	tridentReg->tridentRegs3CE[MiscExtFunc] |= 0x10;
+	if (!tridentReg->tridentRegs3x4[PreEndControl])
+		tridentReg->tridentRegs3x4[PreEndControl] = 0x01;
+	if (!tridentReg->tridentRegs3x4[PreEndFetch])
+		tridentReg->tridentRegs3x4[PreEndFetch] = 0xFF;
+
+	// BPP specific registers
+	switch (mode.bpp) {
+		case 8:
+			tridentReg->tridentRegs3CE[MiscExtFunc] |= 0x02;
+			offset = mode.virtual_width >> 3;
+			break;
+		case 16:
+			tridentReg->tridentRegs3CE[MiscExtFunc] |= 0x02;
+			offset = mode.virtual_width >> 2;
+			tridentReg->tridentRegsDAC[0x00] = 0x30;
+			tridentReg->tridentRegs3x4[PixelBusReg] = 0x05; // 0x04 | 0x01
+			break;
+		case 32:
+			tridentReg->tridentRegs3CE[MiscExtFunc] |= 0x02;
+			tridentReg->tridentRegs3CE[MiscExtFunc] |= 0x08; // clock divisor by 2
+			clock *= 2; // clock is doubled for 32bpp modes
+			offset = mode.virtual_width >> 1;
+			tridentReg->tridentRegs3x4[PixelBusReg] = 0x09;
+			tridentReg->tridentRegsDAC[0x00] = 0xD0;
+			break;
+	}
+	tridentReg->tridentRegs3x4[Offset] = offset & 0xFF;
+
+	// Set clock registers
+	uint8 clk_a = 0, clk_b = 0;
+	CalculateTridentPLL(clock, clk_a, clk_b);
+	tridentReg->tridentRegsClock[0x00] = (read_vga_reg(0x3CC) & 0xF3) | 0x08;
+	tridentReg->tridentRegsClock[0x01] = clk_a;
+	tridentReg->tridentRegsClock[0x02] = clk_b;
+
+	tridentReg->tridentRegs3C4[NewMode1] = 0xC0;
+	tridentReg->tridentRegs3C4[Protection] = 0x92;
+
+	// Linear frame buffer mapping
+	tridentReg->tridentRegs3x4[LinearAddReg] = 0x20; // Enable Linear frame buffer
+
+	tridentReg->tridentRegs3x4[CRTCModuleTest] = 0x80; // No interlace
+	tridentReg->tridentRegs3x4[InterfaceSel] = read_crtc_reg(InterfaceSel) | 0x40;
+	tridentReg->tridentRegs3x4[Performance] = read_crtc_reg(Performance) | 0x10;
+	tridentReg->tridentRegs3x4[DRAMControl] = read_crtc_reg(DRAMControl) | 0x10;
+
+	// AddColReg (overflow bits of offset)
+	tridentReg->tridentRegs3x4[AddColReg] = read_crtc_reg(AddColReg) & 0xEF;
+	tridentReg->tridentRegs3x4[AddColReg] |= (offset & 0x100) >> 4;
+	tridentReg->tridentRegs3x4[AddColReg] &= 0xDF;
+	tridentReg->tridentRegs3x4[AddColReg] |= (offset & 0x200) >> 4;
+
+	// Accel / Bus
+	tridentReg->tridentRegs3x4[GraphEngReg] |= 0x80; // MMIO accel enable
+	tridentReg->tridentRegs3CE[MiscIntContReg] = read_vga_reg(0x3CF) | 0x04;
+
+	// PCI Burst
+	tridentReg->tridentRegs3x4[PCIReg] = read_crtc_reg(PCIReg) & 0xF9; // Clear bursts first
+	tridentReg->tridentRegs3x4[PCIReg] |= 0x06; // Enable PCI bursts
+
+	// Video Thresholds
+	tridentReg->tridentRegs3C4[SSetup] = read_seq_reg(SSetup) | 0x04;
+	tridentReg->tridentRegs3C4[SKey] = 0x00;
+	tridentReg->tridentRegs3C4[SPKey] = 0xC0;
+	tridentReg->tridentRegs3C4[Threshold] = read_seq_reg(Threshold);
+	if (mode.bpp > 16) {
+		tridentReg->tridentRegs3C4[Threshold] = (tridentReg->tridentRegs3C4[Threshold] & 0xF0) | 0x02;
+	}
+
+	// 2. Program standard VGA timing values
+	uint8 crtc[25];
+	int h_total = (mode.timing.h_total / 8) - 5;
+	int h_display = (mode.timing.h_display / 8) - 1;
+	int h_sync_start = (mode.timing.h_sync_start / 8);
+	int h_sync_end = (mode.timing.h_sync_end / 8);
+	int h_blank_start = h_display + 1;
+	int h_blank_end = h_total;
 
 	crtc[0x00] = h_total & 0xFF;
 	crtc[0x01] = h_display & 0xFF;
@@ -352,18 +416,21 @@ SetDisplayMode(display_mode* pMode)
 	crtc[0x17] = 0xE3;
 	crtc[0x18] = 0xFF;
 
+	// Unlock CRTC registers (especially CR0-7)
+	write_crtc_reg(0x11, read_crtc_reg(0x11) & ~0x80);
+
 	for (int i = 0; i < 25; i++) {
 		write_crtc_reg(i, crtc[i]);
 	}
 
-	// 4. Program standard Sequencer Registers
+	// 3. Program standard Sequencer Registers
 	write_seq_reg(0x00, 0x03); // Reset
 	write_seq_reg(0x01, 0x01); // 8-dot clock, normal display
 	write_seq_reg(0x02, 0x0F); // Enable write to all planes
 	write_seq_reg(0x03, 0x00);
 	write_seq_reg(0x04, 0x0E); // Chain-4 mode, linear addressing
 
-	// 5. Program standard Graphics Controller Registers
+	// 4. Program standard Graphics Controller Registers
 	write_vga_reg(0x3CE, 0x00); write_vga_reg(0x3CF, 0x00);
 	write_vga_reg(0x3CE, 0x01); write_vga_reg(0x3CF, 0x00);
 	write_vga_reg(0x3CE, 0x02); write_vga_reg(0x3CF, 0x00);
@@ -373,11 +440,8 @@ SetDisplayMode(display_mode* pMode)
 	write_vga_reg(0x3CE, 0x06); write_vga_reg(0x3CF, 0x05); // Graphics mode, map to A000-BFFF
 	write_vga_reg(0x3CE, 0x07); write_vga_reg(0x3CF, 0x0F);
 	write_vga_reg(0x3CE, 0x08); write_vga_reg(0x3CF, 0xFF);
-	// Program MiscExtFunc (index 0x0F): configure clocks and multiplex path
-	write_vga_reg(0x3CE, 0x0F); write_vga_reg(0x3CF, (mode.bpp == 32) ? 0x1A : 0x12);
 
-	// 6. Program standard Attribute Controller Registers and write Palette Mask
-	// Always reset AC flip-flop and re-enable display output to avoid black screen
+	// 5. Program standard Attribute Controller Registers
 	(void)read_vga_reg(0x3DA); // Reset AC flip-flop to Index mode
 	for (uint8 i = 0; i < 16; i++) {
 		write_vga_reg(0x3C0, i);
@@ -395,104 +459,67 @@ SetDisplayMode(display_mode* pMode)
 	// Ensure standard VGA palette mask is fully open on the physical RAMDAC port (0x3C6)
 	write_reg8(0x3C6, 0xFF);
 
-	debug_printf("Trident_ACC: Standard Attribute Controller programmed, PAS enabled\n");
+	// 6. Restore / write Trident extended registers (TridentRestore)
+	// Unprotect
+	OUTB(0x3C4, Protection);
+	OUTB(0x3C5, 0x92);
 
-	// 7. Enable Linear Frame Buffer on Trident via LinearAddReg (CR21 bit 5)
-	uint8 cr21 = read_crtc_reg(0x21);
-	cr21 |= 0x20; // LFB Linear Addressing Enable
-	write_crtc_reg(0x21, cr21);
+	// Goto New Mode
+	OUTB(0x3C4, 0x0B);
+	(void)INB(0x3C5);
 
-	// 8. Configure RAMDACTiming (CR25)
-	write_crtc_reg(0x25, read_crtc_reg(0x25) | 0x0F);
+	// Unprotect registers
+	OUTW(0x3C4, ((0xC0 ^ 0x02) << 8) | NewMode1);
 
-	// 9. Configure Performance (CR2F)
-	write_crtc_reg(0x2F, read_crtc_reg(0x2F) | 0x10);
-
-	// 10. Configure DRAMControl (CR3A)
-	write_crtc_reg(0x3A, read_crtc_reg(0x3A) | 0x10);
-
-	// 11. Configure InterfaceSel (CR2A)
-	write_crtc_reg(0x2A, read_crtc_reg(0x2A) | 0x40);
-
-	// 12. Configure New32 (CR23) for 32bpp modes
-	if (mode.bpp == 32) {
-		write_crtc_reg(0x23, read_crtc_reg(0x23) | 0x80);
-	} else {
-		write_crtc_reg(0x23, read_crtc_reg(0x23) & ~0x80);
-	}
-
-	// 13. Configure Trident Pixel Bus Register (CR38) to multiplex pixel stream
-	// 8bpp: 0x00, 16bpp: 0x05, 32bpp: 0x29
-	uint8 cr38 = 0x00;
-	switch (mode.bpp) {
-		case 8:  cr38 = 0x00; break;
-		case 16: cr38 = 0x05; break;
-		case 32: cr38 = 0x29; break;
-	}
-	write_crtc_reg(0x38, cr38);
-
-	// 14. Configure RAMDAC Command register via physical port 0x3C6 (5-read sequence)
-	// 8bpp: 0x00, 16bpp: 0x30, 32bpp: 0xD0
-	uint8 dac_cmd = 0x00;
-	switch (mode.bpp) {
-		case 8:  dac_cmd = 0x00; break;
-		case 16: dac_cmd = 0x30; break;
-		case 32: dac_cmd = 0xD0; break;
-	}
-	// 5-read sequence directly on the RAMDAC I/O mapping registers at 0x3C8/0x3C6
+	// Restore RAMDAC extended command register at physical port 0x3C6
 	volatile uint8 dummy;
-	dummy = read_reg8(0x3C8);
-	dummy = read_reg8(0x3C6);
-	dummy = read_reg8(0x3C6);
-	dummy = read_reg8(0x3C6);
-	dummy = read_reg8(0x3C6);
-	write_reg8(0x3C6, dac_cmd);
-	dummy = read_reg8(0x3C8); // Reset state machine of DAC to standard mode!
+	dummy = INB(0x3C8);
+	dummy = INB(0x3C6);
+	dummy = INB(0x3C6);
+	dummy = INB(0x3C6);
+	dummy = INB(0x3C6);
+	OUTB(0x3C6, tridentReg->tridentRegsDAC[0x00]);
+	dummy = INB(0x3C8);
 	(void)dummy;
 
-	debug_printf("Trident_ACC: Color depth configured. PixelBus = 0x%02X, DAC Cmd = 0x%02X\n",
-		cr38, dac_cmd);
+	// Restore extended registers
+	OUTW_3x4(CRTCModuleTest);
+	OUTW_3x4(LinearAddReg);
+	OUTW_3C4(NewMode2);
+	OUTW_3x4(CursorControl);
+	OUTW_3x4(CRTHiOrd);
+	OUTW_3x4(HorizOverflow);
+	OUTW_3x4(AddColReg);
+	OUTW_3x4(GraphEngReg);
+	OUTW_3x4(Performance);
+	OUTW_3x4(InterfaceSel);
+	OUTW_3x4(DRAMControl);
+	OUTW_3x4(PixelBusReg);
+	OUTW_3x4(PCIReg);
+	OUTW_3x4(PCIRetry);
+	OUTW_3CE(MiscIntContReg);
+	OUTW_3CE(MiscExtFunc);
+	OUTW_3x4(Offset);
 
-	// 15. Configure Screen Pitch (Offset) in CR13 and CR29 (preserving other CR29 bits)
-	uint32 offset = mode.bytesPerRow / 8;
-	write_crtc_reg(0x13, offset & 0xFF);
+	OUTW_3C4(Threshold);
+	OUTW_3C4(SSetup);
+	OUTW_3C4(SKey);
+	OUTW_3C4(SPKey);
+	OUTW_3x4(PreEndControl);
+	OUTW_3x4(PreEndFetch);
 
-	uint8 cr29 = read_crtc_reg(0x29);
-	cr29 &= ~0x30; // Clear bits 4 and 5 of CR29
-	if (offset & (1 << 8)) cr29 |= (1 << 4); // Offset bit 8 maps to CR29 bit 4
-	if (offset & (1 << 9)) cr29 |= (1 << 5); // Offset bit 9 maps to CR29 bit 5
-	write_crtc_reg(0x29, cr29);
+	OUTW_3x4(RAMDACTiming);
 
-	debug_printf("Trident_ACC: Pitch Offset configured: Offset=%d (CR13=0x%02X, CR29=0x%02X)\n",
-		offset, offset & 0xFF, cr29);
+	// Restore clock
+	OUTW(0x3C4, (tridentReg->tridentRegsClock[0x01]) << 8 | ClockLow);
+	OUTW(0x3C4, (tridentReg->tridentRegsClock[0x02]) << 8 | ClockHigh);
+	OUTB(0x3C2, tridentReg->tridentRegsClock[0x00]);
 
-	// 16. Configure CR27 (CRTHiOrd) for high-order vertical timing bits
-	uint8 cr27 = 0x08; // default bit 3 must be set
-	if ((v_blank_end - 1) & 0x400) cr27 |= (1 << 6);
-	if ((v_total - 2) & 0x400)     cr27 |= (1 << 7);
-	if (v_sync_start & 0x400)      cr27 |= (1 << 5);
-	if ((v_display - 1) & 0x400)   cr27 |= (1 << 4);
-	write_crtc_reg(0x27, cr27);
+	// Protect
+	OUTB(0x3C4, Protection);
+	OUTB(0x3C5, tridentReg->tridentRegs3C4[Protection]);
 
-	// Configure CR2B (HorizOverflow) for high-order horizontal timing bits
-	uint8 cr2b = 0x00;
-	if (mode.timing.h_total & 0x800) cr2b |= (1 << 0);
-	if (mode.timing.h_display & 0x800) cr2b |= (1 << 4);
-	write_crtc_reg(0x2B, cr2b);
-
-	// Configure CR1E (CRTCModuleTest)
-	write_crtc_reg(0x1E, 0x80);
-
-	debug_printf("Trident_ACC: Extended overflows configured: CR27=0x%02X, CR2B=0x%02X\n",
-		cr27, cr2b);
-
-	// 17. Protect and lock the extended sequencer and CRTC registers
-	write_seq_reg(0x0D, 0x20); // NewMode2
-	write_seq_reg(0x0E, 0xC0); // NewMode1
-	write_seq_reg(0x11, 0x92); // Protection
-
-	// Lock Extended CRTC registers
-	write_crtc_reg(0x39, 0x01); // Re-lock CRTC extensions, keep MMIO active
+	OUTW(0x3C4, ((tridentReg->tridentRegs3C4[NewMode1] ^ 0x02) << 8) | NewMode1);
 
 	si.displayMode = mode;
 
