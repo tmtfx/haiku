@@ -754,6 +754,12 @@ device_ioctl(void* dev, uint32 msg, void* buf, size_t len)
 				DisableVBI();
 			return B_OK;
 		}
+
+		case TRIDENT_ENABLE_MMIO:
+		{
+			EnableMMIO(di);
+			return B_OK;
+		}
 	}
 
 	return B_DEV_INVALID_IOCTL;

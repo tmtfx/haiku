@@ -501,6 +501,9 @@ SetDisplayMode(display_mode* pMode)
 
 	debug_printf("Trident_ACC: Standard Attribute Controller programmed, PAS enabled\n");
 
+	// Re-enable MMIO decoder via kernel ioctl (since standard VGA writes may have disabled it)
+	ioctl(gInfo.deviceFileDesc, TRIDENT_ENABLE_MMIO);
+
 	// 6. Restore / write Trident extended registers (TridentRestore)
 	// Unprotect
 	OUTB(0x3C4, Protection);
