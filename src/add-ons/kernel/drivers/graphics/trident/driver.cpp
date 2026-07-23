@@ -135,31 +135,45 @@ DisableVBI()
 }
 
 
+inline void
+outb(uint16 port, uint8 value)
+{
+	__asm__ __volatile__ ("outb %0, %1" : : "a"(value), "Nd"(port));
+}
+
+inline uint8
+inb(uint16 port)
+{
+	uint8 value;
+	__asm__ __volatile__ ("inb %1, %0" : "=a"(value) : "Nd"(port));
+	return value;
+}
+
 static void
 EnableMMIO(DeviceInfo& di)
 {
-	// Toggle Trident "New Mode" via PIO Port 0x3C4
-	gPCI->write_io_8(0x3C4, 0x0B);
-	(void)gPCI->read_io_8(0x3C5);
+	// Toggle Trident "New Mode" via legacy Port 0x3C4
+	outb(0x3C4, 0x0B);
+	(void)inb(0x3C5);
 
 	// Unlock Extended Sequencer registers (SR0E = 0x80)
-	gPCI->write_io_8(0x3C4, 0x0E);
-	gPCI->write_io_8(0x3C5, 0x80);
+	outb(0x3C4, 0x0E);
+	outb(0x3C5, 0x80);
 
 	// Unlock CyberBlade/Blade3D-specific registers (SR11 = 0x92)
-	gPCI->write_io_8(0x3C4, 0x11);
-	gPCI->write_io_8(0x3C5, 0x92);
+	outb(0x3C4, 0x11);
+	outb(0x3C5, 0x92);
 
 	// Read current CR39 (PCIReg) and set Bit 0 to enable hardware-level MMIO
-	gPCI->write_io_8(0x3D4, 0x39);
-	uint8 pciReg = gPCI->read_io_8(0x3D5);
-	gPCI->write_io_8(0x3D5, pciReg | 0x01); // Enable MMIO decoder
+	outb(0x3D4, 0x39);
+	uint8 pciReg = inb(0x3D5);
+	outb(0x3D5, pciReg | 0x01); // Enable MMIO decoder
 
 	// Protect extended sequencer registers
-	gPCI->write_io_8(0x3C4, 0x0E);
-	gPCI->write_io_8(0x3C5, 0xC0);
-	gPCI->write_io_8(0x3C4, 0x11);
-	gPCI->write_io_8(0x3C5, 0x92);
+	outb(0x3C4, 0x0E);
+	outb(0x3C5, 0xC0);
+	outb(0x3C4, 0x11);
+	outb(0x3C5, 0x92);
 }
 
 
