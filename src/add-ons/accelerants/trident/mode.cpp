@@ -58,6 +58,27 @@ IsModeUsable(display_mode* mode)
 	if (mode->timing.pixel_clock > maxPixelClock)
 		return false;
 
+	// Enforce hardware-supported resolutions and depths from the user manual
+	uint32 w = mode->timing.h_display;
+	uint32 h = mode->timing.v_display;
+
+	if (w == 640 && h == 480) {
+		// Supports 8, 16, 32
+	} else if (w == 800 && h == 600) {
+		// Supports 8, 16, 32
+	} else if (w == 1024 && h == 768) {
+		// Supports 8, 16, 32
+	} else if (w == 1280 && h == 1024) {
+		if (bitsPerPixel == 32)
+			return false; // only 8bit and 16bit supported
+	} else if (w == 1600 && h == 1200) {
+		if (bitsPerPixel == 32)
+			return false; // only 8bit and 16bit supported
+	} else {
+		// Other non-standard resolutions (e.g., 1366x768) are not hardware supported
+		return false;
+	}
+
 	return true;
 }
 
@@ -168,34 +189,38 @@ CalculateTridentPLL(uint32 clock, uint8& sr19, uint8& sr1a)
 	double target = clock; // in kHz
 	double f_ref = 14318.18; // kHz
 	double best_error = 1e10;
-	uint32 best_n = 0;
-	uint32 best_m = 0;
+	uint32 best_reg_n = 0;
+	uint32 best_reg_m = 0;
 	uint32 best_p = 0;
 
 	for (uint32 p = 0; p <= 3; p++) {
 		uint32 div = 1 << p;
-		for (uint32 m = 2; m <= 65; m++) {
-			double n_approx = target * m * div / f_ref;
-			uint32 n_round = (uint32)(n_approx + 0.5);
-			if (n_round < 4 || n_round > 255)
+		for (uint32 m_reg = 0; m_reg <= 63; m_reg++) {
+			uint32 m_hw = m_reg + 2; // actual denominator is M_reg + 2
+			// target = f_ref * (N_reg + 8) / (m_hw * div)
+			double n_approx = target * m_hw * div / f_ref;
+			int32 n_reg = (int32)(n_approx + 0.5) - 8; // subtract 8 to get register value
+
+			if (n_reg < 0 || n_reg > 255)
 				continue;
 
-			double actual = f_ref * n_round / (m * div);
+			uint32 n_hw = n_reg + 8;
+			double actual = f_ref * n_hw / (m_hw * div);
 			double error = actual - target;
 			if (error < 0)
 				error = -error;
 
 			if (error < best_error) {
 				best_error = error;
-				best_n = n_round;
-				best_m = m;
+				best_reg_n = n_reg;
+				best_reg_m = m_reg;
 				best_p = p;
 			}
 		}
 	}
 
-	sr19 = (uint8)best_n;
-	sr1a = (uint8)((best_p << 6) | ((best_m - 2) & 0x3F));
+	sr19 = (uint8)best_reg_n;
+	sr1a = (uint8)((best_p << 6) | (best_reg_m & 0x3F));
 }
 
 
@@ -226,8 +251,10 @@ SetDisplayMode(display_mode* pMode)
 	if (ProposeDisplayMode(&mode, pMode, pMode) != B_OK)
 		return B_BAD_VALUE;
 
+	// Align virtual width to a multiple of 8 pixels to prevent line skewing
+	mode.virtual_width = (mode.timing.h_display + 7) & ~7;
 	int bytesPerPixel = (mode.bpp + 7) / 8;
-	mode.bytesPerRow = mode.timing.h_display * bytesPerPixel;
+	mode.bytesPerRow = mode.virtual_width * bytesPerPixel;
 
 	if (!IsThereEnoughFBMemory(&mode, mode.bpp))
 		return B_NO_MEMORY;
@@ -244,8 +271,12 @@ SetDisplayMode(display_mode* pMode)
 	write_crtc_reg(0x39, 0x80);                        // Unlock CRTC extensions (CR39)
 
 	// 2. Program Pixel Clock (PLL)
+	uint32 clock = mode.timing.pixel_clock;
+	if (mode.bpp == 32)
+		clock *= 2; // clock is doubled for 32bpp modes
+
 	uint8 sr19 = 0, sr1a = 0;
-	CalculateTridentPLL(mode.timing.pixel_clock, sr19, sr1a);
+	CalculateTridentPLL(clock, sr19, sr1a);
 	write_seq_reg(0x19, sr19);
 	write_seq_reg(0x1A, sr1a);
 
@@ -326,8 +357,11 @@ SetDisplayMode(display_mode* pMode)
 	write_vga_reg(0x3CE, 0x06); write_vga_reg(0x3CF, 0x05); // Graphics mode, map to A000-BFFF
 	write_vga_reg(0x3CE, 0x07); write_vga_reg(0x3CF, 0x0F);
 	write_vga_reg(0x3CE, 0x08); write_vga_reg(0x3CF, 0xFF);
+	// Program MiscExtFunc (index 0x0F): configure clocks and multiplex path
+	write_vga_reg(0x3CE, 0x0F); write_vga_reg(0x3CF, (mode.bpp == 32) ? 0x1A : 0x12);
 
-	// 6. Program standard Attribute Controller Registers
+	// 6. Program standard Attribute Controller Registers and write Palette Mask
+	write_vga_reg(0x3C6, 0xFF); // Ensure palette mask is fully open
 	read_vga_reg(0x3DA); // Reset AC flip-flop
 	for (uint8 i = 0; i < 16; i++) {
 		write_vga_reg(0x3C0, i);
@@ -347,21 +381,31 @@ SetDisplayMode(display_mode* pMode)
 	sr21 |= 0x20; // LFB Enable
 	write_seq_reg(0x21, sr21);
 
-	// 8. Configure pixel formatting (color depth) on Trident SR11
-	uint8 sr11 = 0;
+	// 8. Configure Trident Pixel Mode Register (SR11) for color depth and graphics mode
+	uint8 sr11 = 0x10; // enable graphics mode (bit 4)
 	switch (mode.bpp) {
-		case 8:  sr11 = 0x00; break;
-		case 16: sr11 = 0x40; break; // RGB 565
-		case 32: sr11 = 0x80; break; // RGB 32
+		case 8:  sr11 |= 0x00; break; // 8 bpp
+		case 16: sr11 |= 0x02; break; // 16 bpp
+		case 32: sr11 |= 0x04; break; // 32 bpp
 	}
 	write_seq_reg(0x11, sr11);
 
-	// 9. Configure Screen Pitch (Offset) in CR13 and CR1E
+	// Configure Trident Pixel Bus Register (CR38) to multiplex pixel stream
+	uint8 cr38 = 0x00;
+	switch (mode.bpp) {
+		case 8:  cr38 = 0x00; break;
+		case 16: cr38 = 0x05; break;
+		case 32: cr38 = 0x09; break;
+	}
+	write_crtc_reg(0x38, cr38);
+
+	// 9. Configure Screen Pitch (Offset) in CR13 and CR1E (preserving other CR1E bits)
 	uint32 offset = mode.bytesPerRow / 8;
 	write_crtc_reg(0x13, offset & 0xFF);
 	uint8 cr1e = read_crtc_reg(0x1E);
-	cr1e &= ~0x30;
-	cr1e |= ((offset >> 8) & 0x03) << 4;
+	cr1e &= ~0x30; // Clear bits 4 and 5 of CR1E
+	if (offset & (1 << 8)) cr1e |= (1 << 5); // Offset bit 8 maps to CR1E bit 5
+	if (offset & (1 << 9)) cr1e |= (1 << 4); // Offset bit 9 maps to CR1E bit 4
 	write_crtc_reg(0x1E, cr1e);
 
 	si.displayMode = mode;
