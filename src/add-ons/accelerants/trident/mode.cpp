@@ -265,10 +265,20 @@ SetDisplayMode(display_mode* pMode)
 
 	// Let's program the hardware registers!
 
-	// 1. Unlock CRTC registers (especially 0-7) and Trident extensions
-	write_crtc_reg(0x11, read_crtc_reg(0x11) & ~0x80); // Unlock CR0-7
-	write_seq_reg(0x0B, 0x0B);                         // Unlock Sequencer extensions (SR0B)
-	write_crtc_reg(0x39, 0x80);                        // Unlock CRTC extensions (CR39)
+	// 1. Unlock CRTC registers (especially CR0-7) and Trident extended features
+	write_crtc_reg(0x11, read_crtc_reg(0x11) & ~0x80); // Unlock CR0-CR07
+	
+	// Toggle Trident "New Mode" - MUST READ from port 0x3C5 at index 0x0B
+	read_seq_reg(0x0B);
+
+	// Unlock Extended Sequencer registers (SR0E = 0x80)
+	write_seq_reg(0x0E, 0x80);
+
+	// Unlock CyberBlade/Blade3D-specific registers (SR11 = 0x92)
+	write_seq_reg(0x11, 0x92);
+
+	// Unlock Extended CRTC registers (CR39 = 0x80)
+	write_crtc_reg(0x39, 0x80);
 
 	// 2. Program Pixel Clock (PLL)
 	uint32 clock = mode.timing.pixel_clock;
@@ -361,7 +371,6 @@ SetDisplayMode(display_mode* pMode)
 	write_vga_reg(0x3CE, 0x0F); write_vga_reg(0x3CF, (mode.bpp == 32) ? 0x1A : 0x12);
 
 	// 6. Program standard Attribute Controller Registers and write Palette Mask
-	write_vga_reg(0x3C6, 0xFF); // Ensure palette mask is fully open
 	read_vga_reg(0x3DA); // Reset AC flip-flop
 	for (uint8 i = 0; i < 16; i++) {
 		write_vga_reg(0x3C0, i);
@@ -376,37 +385,72 @@ SetDisplayMode(display_mode* pMode)
 	read_vga_reg(0x3DA);
 	write_vga_reg(0x3C0, 0x20); // Enable display output
 
-	// 7. Enable Linear Frame Buffer on Trident
-	uint8 sr21 = read_seq_reg(0x21);
-	sr21 |= 0x20; // LFB Enable
-	write_seq_reg(0x21, sr21);
+	// 7. Enable Linear Frame Buffer on Trident via LinearAddReg (CR21 bit 5)
+	uint8 cr21 = read_crtc_reg(0x21);
+	cr21 |= 0x20; // LFB Linear Addressing Enable
+	write_crtc_reg(0x21, cr21);
 
-	// 8. Configure Trident Pixel Mode Register (SR11) for color depth and graphics mode
-	uint8 sr11 = 0x10; // enable graphics mode (bit 4)
-	switch (mode.bpp) {
-		case 8:  sr11 |= 0x00; break; // 8 bpp
-		case 16: sr11 |= 0x02; break; // 16 bpp
-		case 32: sr11 |= 0x04; break; // 32 bpp
+	// 8. Configure RAMDACTiming (CR25)
+	write_crtc_reg(0x25, read_crtc_reg(0x25) | 0x0F);
+
+	// 9. Configure Performance (CR2F)
+	write_crtc_reg(0x2F, read_crtc_reg(0x2F) | 0x10);
+
+	// 10. Configure DRAMControl (CR3A)
+	write_crtc_reg(0x3A, read_crtc_reg(0x3A) | 0x10);
+
+	// 11. Configure InterfaceSel (CR2A)
+	write_crtc_reg(0x2A, read_crtc_reg(0x2A) | 0x40);
+
+	// 12. Configure New32 (CR23) for 32bpp modes
+	if (mode.bpp == 32) {
+		write_crtc_reg(0x23, read_crtc_reg(0x23) | 0x80);
+	} else {
+		write_crtc_reg(0x23, read_crtc_reg(0x23) & ~0x80);
 	}
-	write_seq_reg(0x11, sr11);
 
-	// Configure Trident Pixel Bus Register (CR38) to multiplex pixel stream
+	// 13. Configure Trident Pixel Bus Register (CR38) to multiplex pixel stream
+	// 8bpp: 0x00, 16bpp: 0x05, 32bpp: 0x29
 	uint8 cr38 = 0x00;
 	switch (mode.bpp) {
 		case 8:  cr38 = 0x00; break;
 		case 16: cr38 = 0x05; break;
-		case 32: cr38 = 0x09; break;
+		case 32: cr38 = 0x29; break;
 	}
 	write_crtc_reg(0x38, cr38);
 
-	// 9. Configure Screen Pitch (Offset) in CR13 and CR1E (preserving other CR1E bits)
+	// 14. Configure RAMDAC Command register via port 0x3C6 (5-read sequence)
+	// 8bpp: 0x00, 16bpp: 0x30, 32bpp: 0xD0
+	uint8 dac_cmd = 0x00;
+	switch (mode.bpp) {
+		case 8:  dac_cmd = 0x00; break;
+		case 16: dac_cmd = 0x30; break;
+		case 32: dac_cmd = 0xD0; break;
+	}
+	// 5-read sequence to write to RAMDAC extended command register
+	(void)read_vga_reg(0x3C8);
+	(void)read_vga_reg(0x3C6);
+	(void)read_vga_reg(0x3C6);
+	(void)read_vga_reg(0x3C6);
+	(void)read_vga_reg(0x3C6);
+	write_vga_reg(0x3C6, dac_cmd);
+
+	// 15. Configure Screen Pitch (Offset) in CR13 and CR29 (preserving other CR29 bits)
 	uint32 offset = mode.bytesPerRow / 8;
 	write_crtc_reg(0x13, offset & 0xFF);
-	uint8 cr1e = read_crtc_reg(0x1E);
-	cr1e &= ~0x30; // Clear bits 4 and 5 of CR1E
-	if (offset & (1 << 8)) cr1e |= (1 << 5); // Offset bit 8 maps to CR1E bit 5
-	if (offset & (1 << 9)) cr1e |= (1 << 4); // Offset bit 9 maps to CR1E bit 4
-	write_crtc_reg(0x1E, cr1e);
+
+	uint8 cr29 = read_crtc_reg(0x29);
+	cr29 &= ~0x30; // Clear bits 4 and 5 of CR29
+	if (offset & (1 << 8)) cr29 |= (1 << 4); // Offset bit 8 maps to CR29 bit 4
+	if (offset & (1 << 9)) cr29 |= (1 << 5); // Offset bit 9 maps to CR29 bit 5
+	write_crtc_reg(0x29, cr29);
+
+	// 16. Configure CRTCModuleTest (CR1E) based on interlace
+	write_crtc_reg(0x1E, 0x80); // No interlace
+
+	// 17. Re-protect the extended sequencer registers
+	write_seq_reg(0x0E, 0xC0);
+	write_seq_reg(0x11, 0x92);
 
 	si.displayMode = mode;
 

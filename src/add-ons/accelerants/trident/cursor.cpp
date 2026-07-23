@@ -39,15 +39,14 @@ SetCursorShape(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
 	write_crtc_reg(0x39, 0x80);
 
 	// Initialize the 1024-byte cursor pattern buffer to transparent (AND=1, XOR=0)
-	// Each row is 16 bytes: 4 blocks of 4 bytes (2 bytes AND, 2 bytes XOR)
+	// Trident uses 32-bit interleaved (dword) AND/XOR masks:
+	// Each row of 16 bytes is: AND (4 bytes), XOR (4 bytes), AND (4 bytes), XOR (4 bytes)
 	for (int y = 0; y < 64; y++) {
 		uint8* row = dest + y * 16;
-		for (int block = 0; block < 4; block++) {
-			row[block * 4 + 0] = 0xFF; // AND byte 0
-			row[block * 4 + 1] = 0xFF; // AND byte 1
-			row[block * 4 + 2] = 0x00; // XOR byte 0
-			row[block * 4 + 3] = 0x00; // XOR byte 1
-		}
+		memset(row + 0, 0xFF, 4);  // AND block 0 (pixels 0-31)
+		memset(row + 4, 0x00, 4);  // XOR block 0 (pixels 0-31)
+		memset(row + 8, 0xFF, 4);  // AND block 1 (pixels 32-63)
+		memset(row + 12, 0x00, 4); // XOR block 1 (pixels 32-63)
 	}
 
 	uint32 stride = (width + 7) / 8;
@@ -61,23 +60,27 @@ SetCursorShape(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
 			bool and_bit = (andMask[src_byte] >> src_bit) & 1;
 			bool xor_bit = (xorMask[src_byte] >> src_bit) & 1;
 
-			int block = x / 16;
-			int byte_offset = (x % 16) / 8;
+			int and_byte_idx, xor_byte_idx;
 			int bit_shift = 7 - (x % 8);
 
-			int and_idx = block * 4 + byte_offset;
-			int xor_idx = block * 4 + byte_offset + 2;
+			if (x < 32) {
+				and_byte_idx = x / 8;
+				xor_byte_idx = (x / 8) + 4;
+			} else {
+				and_byte_idx = ((x - 32) / 8) + 8;
+				xor_byte_idx = ((x - 32) / 8) + 12;
+			}
 
 			if (and_bit) {
-				row[and_idx] |= (1 << bit_shift);
+				row[and_byte_idx] |= (1 << bit_shift);
 			} else {
-				row[and_idx] &= ~(1 << bit_shift);
+				row[and_byte_idx] &= ~(1 << bit_shift);
 			}
 
 			if (xor_bit) {
-				row[xor_idx] |= (1 << bit_shift);
+				row[xor_byte_idx] |= (1 << bit_shift);
 			} else {
-				row[xor_idx] &= ~(1 << bit_shift);
+				row[xor_byte_idx] &= ~(1 << bit_shift);
 			}
 		}
 	}
@@ -123,12 +126,10 @@ SetCursorBitmap(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
 	// Initialize the 1024-byte cursor pattern buffer to transparent (AND=1, XOR=0)
 	for (int y = 0; y < 64; y++) {
 		uint8* row = dest + y * 16;
-		for (int block = 0; block < 4; block++) {
-			row[block * 4 + 0] = 0xFF; // AND byte 0
-			row[block * 4 + 1] = 0xFF; // AND byte 1
-			row[block * 4 + 2] = 0x00; // XOR byte 0
-			row[block * 4 + 3] = 0x00; // XOR byte 1
-		}
+		memset(row + 0, 0xFF, 4);  // AND block 0 (pixels 0-31)
+		memset(row + 4, 0x00, 4);  // XOR block 0 (pixels 0-31)
+		memset(row + 8, 0xFF, 4);  // AND block 1 (pixels 32-63)
+		memset(row + 12, 0x00, 4); // XOR block 1 (pixels 32-63)
 	}
 
 	if (colorSpace == B_RGBA32 || colorSpace == B_RGB32) {
@@ -146,23 +147,27 @@ SetCursorBitmap(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
 				if (a < 128)
 					continue; // Keep transparent (AND=1, XOR=0)
 
-				int block = x / 16;
-				int byte_offset = (x % 16) / 8;
+				int and_byte_idx, xor_byte_idx;
 				int bit_shift = 7 - (x % 8);
 
-				int and_idx = block * 4 + byte_offset;
-				int xor_idx = block * 4 + byte_offset + 2;
+				if (x < 32) {
+					and_byte_idx = x / 8;
+					xor_byte_idx = (x / 8) + 4;
+				} else {
+					and_byte_idx = ((x - 32) / 8) + 8;
+					xor_byte_idx = ((x - 32) / 8) + 12;
+				}
 
 				// Opaque pixel (AND=0)
-				row[and_idx] &= ~(1 << bit_shift);
+				row[and_byte_idx] &= ~(1 << bit_shift);
 
 				uint32 luma = (r + g + b) / 3;
 				if (luma > 128) {
 					// White (AND=0, XOR=1)
-					row[xor_idx] |= (1 << bit_shift);
+					row[xor_byte_idx] |= (1 << bit_shift);
 				} else {
 					// Black (AND=0, XOR=0)
-					row[xor_idx] &= ~(1 << bit_shift);
+					row[xor_byte_idx] &= ~(1 << bit_shift);
 				}
 			}
 		}
@@ -212,7 +217,7 @@ MoveCursor(uint16 xPos, uint16 yPos)
 		y = 0;
 	}
 
-	// Write preset offsets
+	// Write preset offsets (CR46, CR47)
 	write_crtc_reg(0x46, preset_x);
 	write_crtc_reg(0x47, preset_y);
 
