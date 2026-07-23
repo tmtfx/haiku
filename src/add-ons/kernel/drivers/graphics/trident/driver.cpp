@@ -135,6 +135,34 @@ DisableVBI()
 }
 
 
+static void
+EnableMMIO(DeviceInfo& di)
+{
+	// Toggle Trident "New Mode" via PIO Port 0x3C4
+	gPCI->write_io_8(0x3C4, 0x0B);
+	(void)gPCI->read_io_8(0x3C5);
+
+	// Unlock Extended Sequencer registers (SR0E = 0x80)
+	gPCI->write_io_8(0x3C4, 0x0E);
+	gPCI->write_io_8(0x3C5, 0x80);
+
+	// Unlock CyberBlade/Blade3D-specific registers (SR11 = 0x92)
+	gPCI->write_io_8(0x3C4, 0x11);
+	gPCI->write_io_8(0x3C5, 0x92);
+
+	// Read current CR39 (PCIReg) and set Bit 0 to enable hardware-level MMIO
+	gPCI->write_io_8(0x3D4, 0x39);
+	uint8 pciReg = gPCI->read_io_8(0x3D5);
+	gPCI->write_io_8(0x3D5, pciReg | 0x01); // Enable MMIO decoder
+
+	// Protect extended sequencer registers
+	gPCI->write_io_8(0x3C4, 0x0E);
+	gPCI->write_io_8(0x3C5, 0xC0);
+	gPCI->write_io_8(0x3C4, 0x11);
+	gPCI->write_io_8(0x3C5, 0x92);
+}
+
+
 static status_t
 MapDevice(DeviceInfo& di)
 {
@@ -205,6 +233,9 @@ MapDevice(DeviceInfo& di)
 		si.regsArea = -1;
 		return si.videoMemArea;
 	}
+
+	// Enable hardware-level MMIO decoder on the Trident card
+	EnableMMIO(di);
 
 	TRACE("Video memory mapped at area: %d, addr: 0x%" B_PRIXADDR "\n",
 		si.videoMemArea, (addr_t)(si.videoMemAddr));

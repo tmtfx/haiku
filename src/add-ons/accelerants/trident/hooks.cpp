@@ -65,6 +65,11 @@ get_accelerant_hook(uint32 feature, void* data)
 		case B_ALLOCATE_OVERLAY:			return (void*)trident_allocate_overlay;
 		case B_RELEASE_OVERLAY:				return (void*)trident_release_overlay;
 		case B_CONFIGURE_OVERLAY:			return (void*)trident_configure_overlay;
+
+		// DPMS
+		case B_DPMS_CAPABILITIES:			return (void*)trident_dpms_capabilities;
+		case B_DPMS_MODE:					return (void*)trident_dpms_mode;
+		case B_SET_DPMS_MODE:				return (void*)trident_set_dpms_mode;
 	}
 
 	return NULL;

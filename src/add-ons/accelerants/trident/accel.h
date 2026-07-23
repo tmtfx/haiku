@@ -133,6 +133,11 @@ overlay_token trident_allocate_overlay(void);
 status_t trident_release_overlay(overlay_token ot);
 status_t trident_configure_overlay(overlay_token ot, const overlay_buffer* ob, const overlay_window* ow, const overlay_view* ov);
 
+// DPMS Hook Declarations
+uint32 trident_dpms_mode(void);
+uint32 trident_dpms_capabilities(void);
+status_t trident_set_dpms_mode(uint32 mode);
+
 #if defined(__cplusplus)
 }
 #endif

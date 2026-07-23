@@ -108,6 +108,8 @@ struct SharedInfo {
 	uint16	cursorHotY;
 
 	DisplayModeEx displayMode;
+	uint32	dpmsMode;
+
 	int32	commonCmd;
 
 	edid1_info	edidInfo;

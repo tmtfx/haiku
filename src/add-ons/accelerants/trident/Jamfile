@@ -11,6 +11,7 @@ Addon trident.accelerant :
 	hooks.cpp
 	mode.cpp
 	overlay.cpp
+	power.cpp
 
 	: be libaccelerantscommon.a
 ;
