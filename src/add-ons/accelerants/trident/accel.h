@@ -78,6 +78,16 @@ inline void write_seq_reg(uint8 index, uint8 value) {
 	write_vga_reg(0x3C5, value);
 }
 
+inline uint8 read_gfx_reg(uint8 index) {
+	write_vga_reg(0x3CE, index);
+	return read_vga_reg(0x3CF);
+}
+
+inline void write_gfx_reg(uint8 index, uint8 value) {
+	write_vga_reg(0x3CE, index);
+	write_vga_reg(0x3CF, value);
+}
+
 
 #include "trident_regs.h"
 

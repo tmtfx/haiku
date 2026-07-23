@@ -310,7 +310,7 @@ SetDisplayMode(display_mode* pMode)
 	tridentReg->tridentRegs3x4[PixelBusReg] = 0x00;
 	tridentReg->tridentRegsDAC[0x00] = 0x00;
 	tridentReg->tridentRegs3C4[NewMode2] = 0x20;
-	tridentReg->tridentRegs3CE[MiscExtFunc] = read_vga_reg(0x3CF) & 0xF0;
+	tridentReg->tridentRegs3CE[MiscExtFunc] = read_gfx_reg(MiscExtFunc) & 0xF0;
 	tridentReg->tridentRegs3x4[GraphEngReg] = 0x00;
 	tridentReg->tridentRegs3x4[PreEndControl] = 0;
 	tridentReg->tridentRegs3x4[PreEndFetch] = 0;

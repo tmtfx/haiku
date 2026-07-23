@@ -175,12 +175,6 @@ EnableMMIO(DeviceInfo& di)
 	outb(vgaIOBase, 0x39);
 	uint8 readback = inb(vgaIOBase + 1);
 	dprintf("Trident: EnableMMIO: CR39 write=0x81, readback=0x%02X (I/O Port Base=0x%04X)\n", readback, vgaIOBase);
-
-	// Protect extended sequencer registers
-	outb(0x3C4, 0x0E);
-	outb(0x3C5, 0xC0);
-	outb(0x3C4, 0x11);
-	outb(0x3C5, 0x92);
 }
 
 
