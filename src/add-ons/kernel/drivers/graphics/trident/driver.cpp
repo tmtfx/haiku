@@ -204,6 +204,18 @@ MapDevice(DeviceInfo& di)
 
 	if (regAreaSize == 0)
 		regAreaSize = 128 * 1024; // fallback to 128KB if undetected
+		
+	dprintf("Trident 9880 Driver Debug:\n");
+	dprintf("  BAR 0 (Framebuffer): Base = 0x%08" B_PRIx32 ", Size = %" B_PRIu32 " KB (%" B_PRIu32 " MB)\n", 
+			videoRamAddr, videoRamSize / 1024, videoRamSize / (1024 * 1024));
+
+	dprintf("  BAR 1 (MMIO Regs)  : Base = 0x%08" B_PRIx32 ", Size = %" B_PRIu32 " KB (%" B_PRIu32 " Bytes)\n", 
+			regsBase, regAreaSize / 1024, regAreaSize);
+
+	// Verifica dei flag PCI (Memoria vs I/O e Prefetchable)
+	dprintf("  BAR 0 Flags: 0x%02X, BAR 1 Flags: 0x%02X\n",
+			pciInfo.u.h0.base_register_flags[0],
+			pciInfo.u.h0.base_register_flags[1]);
 
 	// Map MMIO
 	sprintf(areaName, DEVICE_FORMAT " regs",
