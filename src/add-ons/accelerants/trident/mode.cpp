@@ -296,6 +296,9 @@ SetDisplayMode(display_mode* pMode)
 		mode.timing.h_display, mode.timing.v_display,
 		mode.virtual_width, mode.virtual_height, mode.bpp, mode.bytesPerRow);
 
+	// Enable MMIO at the very start of SetDisplayMode so we can read the original registers correctly
+	ioctl(gInfo.deviceFileDesc, TRIDENT_ENABLE_MMIO);
+
 	// Local structure to hold registers matching the X.org layout
 	TridentRegRec regRec = {};
 	TridentRegPtr tridentReg = &regRec;
