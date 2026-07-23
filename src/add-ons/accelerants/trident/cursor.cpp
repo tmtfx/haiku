@@ -11,6 +11,18 @@
 #include <string.h>
 
 
+// Logging helper for CRTC cursor register writes
+static inline void
+write_crtc_reg_logged(const char* name, uint8 index, uint8 value)
+{
+	uint8 old_val = read_crtc_reg(index);
+	write_crtc_reg(index, value);
+	uint8 new_val = read_crtc_reg(index);
+	debug_printf("Trident_CUR: CR%02X (%s) Old=0x%02X, Write=0x%02X, Readback=0x%02X\n",
+		index, name, old_val, value, new_val);
+}
+
+
 extern "C" {
 
 uint32
@@ -35,8 +47,11 @@ SetCursorShape(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
 	if (!dest)
 		return B_NO_INIT;
 
+	debug_printf("Trident_CUR: SetCursorShape starting. Width=%d, Height=%d, HotX=%d, HotY=%d, Offset=%u\n",
+		width, height, hot_x, hot_y, si.cursorOffset);
+
 	// Ensure CRTC registers remain unlocked with MMIO active (CR39 = 0x87)
-	write_crtc_reg(0x39, 0x87);
+	write_crtc_reg_logged("PCIReg", 0x39, 0x87);
 
 	// Initialize the 1024-byte cursor pattern buffer to transparent (AND=1, XOR=0)
 	// Trident uses 32-bit interleaved (dword) AND/XOR masks:
@@ -87,17 +102,17 @@ SetCursorShape(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
 
 	// Set cursor base address registers CR44, CR45 (CursorLocLow, CursorLocHigh)
 	uint32 addr = si.cursorOffset / 1024;
-	write_crtc_reg(0x44, addr & 0xFF);
-	write_crtc_reg(0x45, (addr >> 8) & 0xFF);
+	write_crtc_reg_logged("CursorLocLow", 0x44, addr & 0xFF);
+	write_crtc_reg_logged("CursorLocHigh", 0x45, (addr >> 8) & 0xFF);
 
 	// Set cursor colors: Background to Black (CR4C-CR4F), Foreground to White (CR48-CR4B)
 	for (int i = 0; i < 4; i++) {
-		write_crtc_reg(0x48 + i, 0xFF); // FG
-		write_crtc_reg(0x4C + i, 0x00); // BG
+		write_crtc_reg_logged("CursorFG", 0x48 + i, 0xFF);
+		write_crtc_reg_logged("CursorBG", 0x4C + i, 0x00);
 	}
 
 	// Enable cursor (CR50: Bit 0=Enable, Bit 6=64x64, Bit 7=Windows/X11 mode)
-	write_crtc_reg(0x50, 0xC1);
+	write_crtc_reg_logged("CursorControl", 0x50, 0xC1);
 
 	// Update cursor position
 	MoveCursor(si.cursorHotX, si.cursorHotY);
@@ -121,7 +136,11 @@ SetCursorBitmap(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
 	if (!dest)
 		return B_NO_INIT;
 
-	write_crtc_reg(0x39, 0x87);
+	debug_printf("Trident_CUR: SetCursorBitmap starting. Space=0x%X, Width=%d, Height=%d, HotX=%d, HotY=%d, Offset=%u\n",
+		colorSpace, width, height, hot_x, hot_y, si.cursorOffset);
+
+	// Ensure CRTC registers remain unlocked with MMIO active (CR39 = 0x87)
+	write_crtc_reg_logged("PCIReg", 0x39, 0x87);
 
 	// Initialize the 1024-byte cursor pattern buffer to transparent (AND=1, XOR=0)
 	for (int y = 0; y < 64; y++) {
@@ -161,6 +180,7 @@ SetCursorBitmap(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
 				// Opaque pixel (AND=0)
 				row[and_byte_idx] &= ~(1 << bit_shift);
 
+				// Render 2 colors based on luma and alpha
 				uint32 luma = (r + g + b) / 3;
 				if (luma > 128) {
 					// White (AND=0, XOR=1)
@@ -172,22 +192,23 @@ SetCursorBitmap(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
 			}
 		}
 	} else {
+		debug_printf("Trident_CUR: SetCursorBitmap UNSUPPORTED color space: 0x%X\n", colorSpace);
 		return B_BAD_VALUE;
 	}
 
 	// Set cursor base address registers CR44, CR45 (CursorLocLow, CursorLocHigh)
 	uint32 addr = si.cursorOffset / 1024;
-	write_crtc_reg(0x44, addr & 0xFF);
-	write_crtc_reg(0x45, (addr >> 8) & 0xFF);
+	write_crtc_reg_logged("CursorLocLow", 0x44, addr & 0xFF);
+	write_crtc_reg_logged("CursorLocHigh", 0x45, (addr >> 8) & 0xFF);
 
 	// Set cursor colors: Background to Black (CR4C-CR4F), Foreground to White (CR48-CR4B)
 	for (int i = 0; i < 4; i++) {
-		write_crtc_reg(0x48 + i, 0xFF); // FG
-		write_crtc_reg(0x4C + i, 0x00); // BG
+		write_crtc_reg_logged("CursorFG", 0x48 + i, 0xFF);
+		write_crtc_reg_logged("CursorBG", 0x4C + i, 0x00);
 	}
 
 	// Enable cursor (CR50: Bit 0=Enable, Bit 6=64x64, Bit 7=Windows/X11 mode)
-	write_crtc_reg(0x50, 0xC1);
+	write_crtc_reg_logged("CursorControl", 0x50, 0xC1);
 
 	// Update cursor position
 	MoveCursor(si.cursorHotX, si.cursorHotY);
@@ -201,7 +222,7 @@ MoveCursor(uint16 xPos, uint16 yPos)
 {
 	SharedInfo& si = *gInfo.sharedInfo;
 
-	write_crtc_reg(0x39, 0x87);
+	write_crtc_reg_logged("PCIReg", 0x39, 0x87);
 
 	// In Haiku, MoveCursor is called with coordinates of the mouse tip (hotspot needs to be subtracted)
 	int16 x = (int16)xPos - (int16)si.cursorHotX;
@@ -219,23 +240,23 @@ MoveCursor(uint16 xPos, uint16 yPos)
 	}
 
 	// Write preset offsets (CR46, CR47)
-	write_crtc_reg(0x46, preset_x);
-	write_crtc_reg(0x47, preset_y);
+	write_crtc_reg_logged("PresetX", 0x46, preset_x);
+	write_crtc_reg_logged("PresetY", 0x47, preset_y);
 
 	// Write X position (CR40, CR41)
-	write_crtc_reg(0x40, x & 0xFF);
-	write_crtc_reg(0x41, (x >> 8) & 0xFF);
+	write_crtc_reg_logged("PosXLow", 0x40, x & 0xFF);
+	write_crtc_reg_logged("PosXHigh", 0x41, (x >> 8) & 0xFF);
 
 	// Write Y position (CR42, CR43)
-	write_crtc_reg(0x42, y & 0xFF);
-	write_crtc_reg(0x43, (y >> 8) & 0xFF);
+	write_crtc_reg_logged("PosYLow", 0x42, y & 0xFF);
+	write_crtc_reg_logged("PosYHigh", 0x43, (y >> 8) & 0xFF);
 }
 
 
 void
 ShowCursor(bool bShow)
 {
-	write_crtc_reg(0x39, 0x87);
+	write_crtc_reg_logged("PCIReg", 0x39, 0x87);
 
 	uint8 ctrl = read_crtc_reg(0x50);
 	if (bShow) {
@@ -243,7 +264,7 @@ ShowCursor(bool bShow)
 	} else {
 		ctrl &= ~0x01;
 	}
-	write_crtc_reg(0x50, ctrl);
+	write_crtc_reg_logged("CursorControl", 0x50, ctrl);
 }
 
 } // extern "C"
