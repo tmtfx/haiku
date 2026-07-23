@@ -31,6 +31,7 @@ get_accelerant_hook(uint32 feature, void* data)
 		case B_PROPOSE_DISPLAY_MODE:	return (void*)ProposeDisplayMode;
 		case B_SET_DISPLAY_MODE:		return (void*)SetDisplayMode;
 		case B_GET_DISPLAY_MODE:		return (void*)GetDisplayMode;
+		case B_SET_INDEXED_COLORS:		return (void*)trident_set_indexed_colors;
 #ifdef __HAIKU__
 		case B_GET_PREFERRED_DISPLAY_MODE: return (void*)GetPreferredDisplayMode;
 		case B_GET_EDID_INFO:			return (void*)GetEdidInfo;

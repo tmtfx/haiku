@@ -138,6 +138,9 @@ uint32 trident_dpms_mode(void);
 uint32 trident_dpms_capabilities(void);
 status_t trident_set_dpms_mode(uint32 mode);
 
+// Palette Hook Declarations
+void trident_set_indexed_colors(uint count, uint8 first, uint8* color_data, uint32 flags);
+
 #if defined(__cplusplus)
 }
 #endif

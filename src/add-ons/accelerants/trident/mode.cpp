@@ -620,3 +620,27 @@ GetEdidInfo(void* info, size_t size, uint32* _version)
 	return B_OK;
 }
 #endif
+
+
+extern "C" void
+trident_set_indexed_colors(uint count, uint8 first, uint8* color_data, uint32 flags)
+{
+	(void)flags;
+
+	if (first + count > 256)
+		count = 256 - first;
+
+	// Write starting index to 0x3C8 (mapped directly on BAR 1)
+	write_reg8(0x3C8, first);
+
+	for (uint i = 0; i < count; i++) {
+		uint8 r = color_data[i * 3 + 0];
+		uint8 g = color_data[i * 3 + 1];
+		uint8 b = color_data[i * 3 + 2];
+
+		// VGA DAC expects 6 bits per component
+		write_reg8(0x3C9, r >> 2);
+		write_reg8(0x3C9, g >> 2);
+		write_reg8(0x3C9, b >> 2);
+	}
+}
