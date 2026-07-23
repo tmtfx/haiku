@@ -35,8 +35,8 @@ SetCursorShape(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
 	if (!dest)
 		return B_NO_INIT;
 
-	// Unlock CRTC extended registers
-	write_crtc_reg(0x39, 0x80);
+	// Ensure CRTC registers remain unlocked with MMIO active (CR39 = 0x87)
+	write_crtc_reg(0x39, 0x87);
 
 	// Initialize the 1024-byte cursor pattern buffer to transparent (AND=1, XOR=0)
 	// Trident uses 32-bit interleaved (dword) AND/XOR masks:
@@ -121,7 +121,7 @@ SetCursorBitmap(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
 	if (!dest)
 		return B_NO_INIT;
 
-	write_crtc_reg(0x39, 0x80);
+	write_crtc_reg(0x39, 0x87);
 
 	// Initialize the 1024-byte cursor pattern buffer to transparent (AND=1, XOR=0)
 	for (int y = 0; y < 64; y++) {
@@ -199,12 +199,11 @@ SetCursorBitmap(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
 void
 MoveCursor(uint16 xPos, uint16 yPos)
 {
-	SharedInfo& si = *gInfo.sharedInfo;
+	write_crtc_reg(0x39, 0x87);
 
-	write_crtc_reg(0x39, 0x80);
-
-	int16 x = (int16)xPos - (int16)si.cursorHotX;
-	int16 y = (int16)yPos - (int16)si.cursorHotY;
+	// In Haiku, MoveCursor is called with coordinates already adjusted for the hotspot
+	int16 x = (int16)xPos;
+	int16 y = (int16)yPos;
 	uint8 preset_x = 0;
 	uint8 preset_y = 0;
 
@@ -234,7 +233,7 @@ MoveCursor(uint16 xPos, uint16 yPos)
 void
 ShowCursor(bool bShow)
 {
-	write_crtc_reg(0x39, 0x80);
+	write_crtc_reg(0x39, 0x87);
 
 	uint8 ctrl = read_crtc_reg(0x50);
 	if (bShow) {
