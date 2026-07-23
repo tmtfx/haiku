@@ -275,11 +275,8 @@ SetDisplayMode(display_mode* pMode)
 	// Unlock CyberBlade/Blade3D-specific registers (SR11 = 0x92)
 	write_seq_reg(0x11, 0x92);
 
-	// Unlock Extended CRTC registers CR30-CR3F (CR3E = 0x80)
-	write_crtc_reg(0x3E, 0x80);
-
-	// Ensure PCIReg is unlocked / MMIO is enabled (CR39 = 0x01 or CR39 | 0x01)
-	write_crtc_reg(0x39, read_crtc_reg(0x39) | 0x01);
+	// Unlock Extended CRTC registers CR30-CR3F (CR39 = 0x80)
+	write_crtc_reg(0x39, 0x80);
 
 	debug_printf("Trident_ACC: Extended sequencer and CRTC registers unlocked\n");
 
@@ -395,7 +392,8 @@ SetDisplayMode(display_mode* pMode)
 	(void)read_vga_reg(0x3DA); // Reset AC flip-flop to Index mode
 	write_vga_reg(0x3C0, 0x20); // Enable display output (PAS bit = 1)
 
-	write_vga_reg(0x3C6, 0xFF); // Ensure palette mask is fully open
+	// Ensure standard VGA palette mask is fully open on the physical RAMDAC port (0x3C6)
+	write_reg8(0x3C6, 0xFF);
 
 	debug_printf("Trident_ACC: Standard Attribute Controller programmed, PAS enabled\n");
 
@@ -433,7 +431,7 @@ SetDisplayMode(display_mode* pMode)
 	}
 	write_crtc_reg(0x38, cr38);
 
-	// 14. Configure RAMDAC Command register via port 0x3C6 (5-read sequence)
+	// 14. Configure RAMDAC Command register via physical port 0x3C6 (5-read sequence)
 	// 8bpp: 0x00, 16bpp: 0x30, 32bpp: 0xD0
 	uint8 dac_cmd = 0x00;
 	switch (mode.bpp) {
@@ -441,15 +439,15 @@ SetDisplayMode(display_mode* pMode)
 		case 16: dac_cmd = 0x30; break;
 		case 32: dac_cmd = 0xD0; break;
 	}
-	// 5-read sequence to write to RAMDAC extended command register
+	// 5-read sequence directly on the RAMDAC I/O mapping registers at 0x3C8/0x3C6
 	volatile uint8 dummy;
-	dummy = read_vga_reg(0x3C8);
-	dummy = read_vga_reg(0x3C6);
-	dummy = read_vga_reg(0x3C6);
-	dummy = read_vga_reg(0x3C6);
-	dummy = read_vga_reg(0x3C6);
-	write_vga_reg(0x3C6, dac_cmd);
-	dummy = read_vga_reg(0x3C8); // Reset state machine of DAC to standard mode!
+	dummy = read_reg8(0x3C8);
+	dummy = read_reg8(0x3C6);
+	dummy = read_reg8(0x3C6);
+	dummy = read_reg8(0x3C6);
+	dummy = read_reg8(0x3C6);
+	write_reg8(0x3C6, dac_cmd);
+	dummy = read_reg8(0x3C8); // Reset state machine of DAC to standard mode!
 	(void)dummy;
 
 	debug_printf("Trident_ACC: Color depth configured. PixelBus = 0x%02X, DAC Cmd = 0x%02X\n",
@@ -488,13 +486,13 @@ SetDisplayMode(display_mode* pMode)
 	debug_printf("Trident_ACC: Extended overflows configured: CR27=0x%02X, CR2B=0x%02X\n",
 		cr27, cr2b);
 
-	// 17. Protect and lock the extended sequencer registers
+	// 17. Protect and lock the extended sequencer and CRTC registers
 	write_seq_reg(0x0D, 0x20); // NewMode2
 	write_seq_reg(0x0E, 0xC0); // NewMode1
 	write_seq_reg(0x11, 0x92); // Protection
 
 	// Lock Extended CRTC registers
-	write_crtc_reg(0x3E, 0x00); // Lock CR30-CR3F
+	write_crtc_reg(0x39, 0x01); // Re-lock CRTC extensions, keep MMIO active
 
 	si.displayMode = mode;
 
