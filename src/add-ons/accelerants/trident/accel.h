@@ -42,7 +42,7 @@ extern AccelerantInfo gInfo;
 
 
 // VGA MMIO offset and helper definitions
-#define TRIDENT_MMIO_VGA 0x1F000
+#define TRIDENT_MMIO_VGA 0x00000
 
 #define INREG8(addr)        *((volatile uint8*)(gInfo.regs + (uint32)(addr)))
 #define INREG16(addr)       *((volatile uint16*)(gInfo.regs + (uint32)(addr)))
