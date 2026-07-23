@@ -193,7 +193,16 @@ CalculateTridentPLL(uint32 clock, uint8& sr19, uint8& sr1a)
 	uint32 best_reg_m = 0;
 	uint32 best_p = 0;
 
-	for (uint32 p = 0; p <= 3; p++) {
+	// Enforce the standard VCO operating constraints of the PLL to keep the loop stable
+	uint32 startk, endk = 2;
+	if (clock >= 100000)
+		startk = 0;
+	else if (clock >= 50000)
+		startk = 1;
+	else
+		startk = 2;
+
+	for (uint32 p = startk; p <= endk; p++) {
 		uint32 div = 1 << p;
 		for (uint32 m_reg = 0; m_reg <= 63; m_reg++) {
 			uint32 m_hw = m_reg + 2; // actual denominator is M_reg + 2
@@ -370,20 +379,8 @@ SetDisplayMode(display_mode* pMode)
 	// Program MiscExtFunc (index 0x0F): configure clocks and multiplex path
 	write_vga_reg(0x3CE, 0x0F); write_vga_reg(0x3CF, (mode.bpp == 32) ? 0x1A : 0x12);
 
-	// 6. Program standard Attribute Controller Registers and write Palette Mask
-	read_vga_reg(0x3DA); // Reset AC flip-flop
-	for (uint8 i = 0; i < 16; i++) {
-		write_vga_reg(0x3C0, i);
-		write_vga_reg(0x3C0, i);
-	}
-	write_vga_reg(0x3C0, 0x10); write_vga_reg(0x3C0, 0x41); // Graphics, color mode
-	write_vga_reg(0x3C0, 0x11); write_vga_reg(0x3C0, 0x00);
-	write_vga_reg(0x3C0, 0x12); write_vga_reg(0x3C0, 0x0F);
-	write_vga_reg(0x3C0, 0x13); write_vga_reg(0x3C0, 0x00);
-	write_vga_reg(0x3C0, 0x14); write_vga_reg(0x3C0, 0x00);
-
-	read_vga_reg(0x3DA);
-	write_vga_reg(0x3C0, 0x20); // Enable display output
+	// 6. Abilitazione maschera palette standard VGA
+	write_vga_reg(0x3C6, 0xFF);
 
 	// 7. Enable Linear Frame Buffer on Trident via LinearAddReg (CR21 bit 5)
 	uint8 cr21 = read_crtc_reg(0x21);
@@ -428,12 +425,15 @@ SetDisplayMode(display_mode* pMode)
 		case 32: dac_cmd = 0xD0; break;
 	}
 	// 5-read sequence to write to RAMDAC extended command register
-	(void)read_vga_reg(0x3C8);
-	(void)read_vga_reg(0x3C6);
-	(void)read_vga_reg(0x3C6);
-	(void)read_vga_reg(0x3C6);
-	(void)read_vga_reg(0x3C6);
+	volatile uint8 dummy;
+	dummy = read_vga_reg(0x3C8);
+	dummy = read_vga_reg(0x3C6);
+	dummy = read_vga_reg(0x3C6);
+	dummy = read_vga_reg(0x3C6);
+	dummy = read_vga_reg(0x3C6);
 	write_vga_reg(0x3C6, dac_cmd);
+	dummy = read_vga_reg(0x3C8); // Reset state machine of DAC to standard mode!
+	(void)dummy;
 
 	// 15. Configure Screen Pitch (Offset) in CR13 and CR29 (preserving other CR29 bits)
 	uint32 offset = mode.bytesPerRow / 8;
@@ -445,12 +445,27 @@ SetDisplayMode(display_mode* pMode)
 	if (offset & (1 << 9)) cr29 |= (1 << 5); // Offset bit 9 maps to CR29 bit 5
 	write_crtc_reg(0x29, cr29);
 
-	// 16. Configure CRTCModuleTest (CR1E) based on interlace
-	write_crtc_reg(0x1E, 0x80); // No interlace
+	// 16. Configure CR27 (CRTHiOrd) for high-order vertical timing bits
+	uint8 cr27 = 0x08; // default bit 3 must be set
+	if ((v_blank_end - 1) & 0x400) cr27 |= (1 << 6);
+	if ((v_total - 2) & 0x400)     cr27 |= (1 << 7);
+	if (v_sync_start & 0x400)      cr27 |= (1 << 5);
+	if ((v_display - 1) & 0x400)   cr27 |= (1 << 4);
+	write_crtc_reg(0x27, cr27);
 
-	// 17. Re-protect the extended sequencer registers
-	write_seq_reg(0x0E, 0xC0);
-	write_seq_reg(0x11, 0x92);
+	// Configure CR2B (HorizOverflow) for high-order horizontal timing bits
+	uint8 cr2b = 0x00;
+	if (mode.timing.h_total & 0x800) cr2b |= (1 << 0);
+	if (mode.timing.h_display & 0x800) cr2b |= (1 << 4);
+	write_crtc_reg(0x2B, cr2b);
+
+	// Configure CR1E (CRTCModuleTest)
+	write_crtc_reg(0x1E, 0x80);
+
+	// 17. Protect and lock the extended sequencer registers
+	write_seq_reg(0x0D, 0x20); // NewMode2
+	write_seq_reg(0x0E, 0xC0); // NewMode1
+	write_seq_reg(0x11, 0x92); // Protection
 
 	si.displayMode = mode;
 
