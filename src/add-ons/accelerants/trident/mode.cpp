@@ -14,6 +14,41 @@
 #include <unistd.h>
 
 
+// Redefine standard X.org macros to log everything before and after writes
+#undef OUTW_3C4
+#undef OUTW_3CE
+#undef OUTW_3x4
+
+#define OUTW_3C4(reg) \
+	do { \
+		uint8 old_val = read_seq_reg(reg); \
+		write_seq_reg(reg, tridentReg->tridentRegs3C4[reg]); \
+		uint8 new_val = read_seq_reg(reg); \
+		debug_printf("Trident_REG: SR%02X Old=0x%02X, Write=0x%02X, Readback=0x%02X\n", \
+			reg, old_val, tridentReg->tridentRegs3C4[reg], new_val); \
+	} while (0)
+
+#define OUTW_3CE(reg) \
+	do { \
+		write_vga_reg(0x3CE, reg); \
+		uint8 old_val = read_vga_reg(0x3CF); \
+		write_vga_reg(0x3CF, tridentReg->tridentRegs3CE[reg]); \
+		write_vga_reg(0x3CE, reg); \
+		uint8 new_val = read_vga_reg(0x3CF); \
+		debug_printf("Trident_REG: GR%02X Old=0x%02X, Write=0x%02X, Readback=0x%02X\n", \
+			reg, old_val, tridentReg->tridentRegs3CE[reg], new_val); \
+	} while (0)
+
+#define OUTW_3x4(reg) \
+	do { \
+		uint8 old_val = read_crtc_reg(reg); \
+		write_crtc_reg(reg, tridentReg->tridentRegs3x4[reg]); \
+		uint8 new_val = read_crtc_reg(reg); \
+		debug_printf("Trident_REG: CR%02X Old=0x%02X, Write=0x%02X, Readback=0x%02X\n", \
+			reg, old_val, tridentReg->tridentRegs3x4[reg], new_val); \
+	} while (0)
+
+
 static bool
 IsThereEnoughFBMemory(const display_mode* mode, uint32 bitsPerPixel)
 {
@@ -442,6 +477,7 @@ SetDisplayMode(display_mode* pMode)
 	write_vga_reg(0x3CE, 0x08); write_vga_reg(0x3CF, 0xFF);
 
 	// 5. Program standard Attribute Controller Registers
+	// Always reset AC flip-flop and re-enable display output to avoid black screen
 	(void)read_vga_reg(0x3DA); // Reset AC flip-flop to Index mode
 	for (uint8 i = 0; i < 16; i++) {
 		write_vga_reg(0x3C0, i);
@@ -459,6 +495,8 @@ SetDisplayMode(display_mode* pMode)
 	// Ensure standard VGA palette mask is fully open on the physical RAMDAC port (0x3C6)
 	write_reg8(0x3C6, 0xFF);
 
+	debug_printf("Trident_ACC: Standard Attribute Controller programmed, PAS enabled\n");
+
 	// 6. Restore / write Trident extended registers (TridentRestore)
 	// Unprotect
 	OUTB(0x3C4, Protection);
@@ -474,15 +512,24 @@ SetDisplayMode(display_mode* pMode)
 	// Restore RAMDAC extended command register at physical port 0x3C6
 	volatile uint8 dummy;
 	dummy = INB(0x3C8);
-	dummy = INB(0x3C6);
-	dummy = INB(0x3C6);
-	dummy = INB(0x3C6);
-	dummy = INB(0x3C6);
+	uint8 r_0 = INB(0x3C6);
+	uint8 r_1 = INB(0x3C6);
+	uint8 r_2 = INB(0x3C6);
+	uint8 r_3 = INB(0x3C6);
+	uint8 r_4 = INB(0x3C6); // old DAC command
 	OUTB(0x3C6, tridentReg->tridentRegsDAC[0x00]);
+	
+	// Read back to verify
+	dummy = INB(0x3C8);
+	(void)INB(0x3C6); (void)INB(0x3C6); (void)INB(0x3C6); (void)INB(0x3C6);
+	uint8 r_back = INB(0x3C6);
 	dummy = INB(0x3C8);
 	(void)dummy;
 
-	// Restore extended registers
+	debug_printf("Trident_REG: DAC Command Old=0x%02X, Write=0x%02X, Readback=0x%02X (four dummy reads were: 0x%02X, 0x%02X, 0x%02X, 0x%02X)\n",
+		r_4, tridentReg->tridentRegsDAC[0x00], r_back, r_0, r_1, r_2, r_3);
+
+	// Restore extended registers with active readback logging
 	OUTW_3x4(CRTCModuleTest);
 	OUTW_3x4(LinearAddReg);
 	OUTW_3C4(NewMode2);
@@ -511,9 +558,22 @@ SetDisplayMode(display_mode* pMode)
 	OUTW_3x4(RAMDACTiming);
 
 	// Restore clock
+	uint8 old_clk_low = read_seq_reg(ClockLow);
+	uint8 old_clk_high = read_seq_reg(ClockHigh);
 	OUTW(0x3C4, (tridentReg->tridentRegsClock[0x01]) << 8 | ClockLow);
 	OUTW(0x3C4, (tridentReg->tridentRegsClock[0x02]) << 8 | ClockHigh);
+	uint8 new_clk_low = read_seq_reg(ClockLow);
+	uint8 new_clk_high = read_seq_reg(ClockHigh);
+	debug_printf("Trident_REG: Clock Low Old=0x%02X, Write=0x%02X, Readback=0x%02X\n",
+		old_clk_low, tridentReg->tridentRegsClock[0x01], new_clk_low);
+	debug_printf("Trident_REG: Clock High Old=0x%02X, Write=0x%02X, Readback=0x%02X\n",
+		old_clk_high, tridentReg->tridentRegsClock[0x02], new_clk_high);
+
+	uint8 old_misc = read_vga_reg(0x3CC);
 	OUTB(0x3C2, tridentReg->tridentRegsClock[0x00]);
+	uint8 new_misc = read_vga_reg(0x3CC);
+	debug_printf("Trident_REG: MiscOut Old=0x%02X, Write=0x%02X, Readback=0x%02X\n",
+		old_misc, tridentReg->tridentRegsClock[0x00], new_misc);
 
 	// Protect
 	OUTB(0x3C4, Protection);
