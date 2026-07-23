@@ -61,10 +61,10 @@ SetCursorShape(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
 	// Each row of 16 bytes is: AND (4 bytes), XOR (4 bytes), AND (4 bytes), XOR (4 bytes)
 	for (int y = 0; y < 64; y++) {
 		uint8* row = dest + y * 16;
-		memset(row + 0, 0xFF, 4);  // AND block 0 (pixels 0-31)
-		memset(row + 4, 0x00, 4);  // XOR block 0 (pixels 0-31)
-		memset(row + 8, 0xFF, 4);  // AND block 1 (pixels 32-63)
-		memset(row + 12, 0x00, 4); // XOR block 1 (pixels 32-63)
+		memset(row + 0, 0x00, 4);  // AND block 0 (pixels 0-31) ex 0xFF
+		memset(row + 4, 0xFF, 4);  // XOR block 0 (pixels 0-31) ex 0x00
+		memset(row + 8, 0x00, 4);  // AND block 1 (pixels 32-63) ex 0xFF
+		memset(row + 12, 0xFF, 4); // XOR block 1 (pixels 32-63) ex 0x00
 	}
 
 	uint32 stride = (width + 7) / 8;
@@ -88,7 +88,7 @@ SetCursorShape(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
 				and_byte_idx = ((x - 32) / 8) + 8;
 				xor_byte_idx = ((x - 32) / 8) + 12;
 			}
-
+/*
 			if (and_bit) {
 				row[and_byte_idx] |= (1 << bit_shift);
 			} else {
@@ -99,6 +99,25 @@ SetCursorShape(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
 				row[xor_byte_idx] |= (1 << bit_shift);
 			} else {
 				row[xor_byte_idx] &= ~(1 << bit_shift);
+			}
+			*/
+			if (and_bit && !xor_bit) {
+				// Trasparente: AND = 0, XOR = 1
+				row[and_byte_idx] &= ~(1 << bit_shift);
+				row[xor_byte_idx] |= (1 << bit_shift);
+			} else if (!and_bit && !xor_bit) {
+				// Nero: AND = 1, XOR = 0
+				row[and_byte_idx] |= (1 << bit_shift);
+				row[xor_byte_idx] &= ~(1 << bit_shift);
+			} else if (!and_bit && xor_bit) {
+				// Bianco: AND = 0, XOR = 0
+				row[and_byte_idx] &= ~(1 << bit_shift);
+				row[xor_byte_idx] &= ~(1 << bit_shift);
+			} else {
+				// Caso limite (AND=1, XOR=1, inversione del pixel sottostante):
+				// Se la scheda lo supporta come XOR, la combinazione hardware standard è (1, 1)
+				row[and_byte_idx] |= (1 << bit_shift);
+				row[xor_byte_idx] |= (1 << bit_shift);
 			}
 		}
 	}
@@ -151,10 +170,10 @@ SetCursorBitmap(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
 	// Initialize the 1024-byte cursor pattern buffer to transparent (AND=1, XOR=0)
 	for (int y = 0; y < 64; y++) {
 		uint8* row = dest + y * 16;
-		memset(row + 0, 0xFF, 4);  // AND block 0 (pixels 0-31)
-		memset(row + 4, 0x00, 4);  // XOR block 0 (pixels 0-31)
-		memset(row + 8, 0xFF, 4);  // AND block 1 (pixels 32-63)
-		memset(row + 12, 0x00, 4); // XOR block 1 (pixels 32-63)
+		memset(row + 0, 0x00, 4);  // AND block 0 (pixels 0-31) ex 0xFF
+		memset(row + 4, 0xFF, 4);  // XOR block 0 (pixels 0-31) ex 0x00
+		memset(row + 8, 0x00, 4);  // AND block 1 (pixels 32-63)
+		memset(row + 12, 0xFF, 4); // XOR block 1 (pixels 32-63)
 	}
 
 	if (colorSpace == B_RGBA32 || colorSpace == B_RGB32) {
@@ -184,15 +203,21 @@ SetCursorBitmap(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
 				}
 
 				// Opaque pixel (AND=0)
-				row[and_byte_idx] &= ~(1 << bit_shift);
+				// row[and_byte_idx] &= ~(1 << bit_shift);
 
 				// Render 2 colors based on luma and alpha
 				uint32 luma = (r + g + b) / 3;
 				if (luma > 128) {
 					// White (AND=0, XOR=1)
-					row[xor_byte_idx] |= (1 << bit_shift);
+					// row[xor_byte_idx] |= (1 << bit_shift);
+					// Bianco: AND = 0, XOR = 0
+					row[and_byte_idx] &= ~(1 << bit_shift);
+					row[xor_byte_idx] &= ~(1 << bit_shift);
 				} else {
 					// Black (AND=0, XOR=0)
+					// row[xor_byte_idx] &= ~(1 << bit_shift);
+					// Nero: AND = 1, XOR = 0
+					row[and_byte_idx] |= (1 << bit_shift);
 					row[xor_byte_idx] &= ~(1 << bit_shift);
 				}
 			}
