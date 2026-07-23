@@ -193,16 +193,7 @@ CalculateTridentPLL(uint32 clock, uint8& sr19, uint8& sr1a)
 	uint32 best_reg_m = 0;
 	uint32 best_p = 0;
 
-	// Enforce the standard VCO operating constraints of the PLL to keep the loop stable
-	uint32 startk, endk = 2;
-	if (clock >= 100000)
-		startk = 0;
-	else if (clock >= 50000)
-		startk = 1;
-	else
-		startk = 2;
-
-	for (uint32 p = startk; p <= endk; p++) {
+	for (uint32 p = 0; p <= 3; p++) {
 		uint32 div = 1 << p;
 		for (uint32 m_reg = 0; m_reg <= 63; m_reg++) {
 			uint32 m_hw = m_reg + 2; // actual denominator is M_reg + 2
@@ -236,8 +227,6 @@ CalculateTridentPLL(uint32 clock, uint8& sr19, uint8& sr1a)
 status_t 
 SetDisplayMode(display_mode* pMode)
 {
-	TRACE("SetDisplayMode() begin\n");
-
 	SharedInfo& si = *gInfo.sharedInfo;
 	DisplayModeEx mode;
 	(display_mode&)mode = *pMode;
@@ -268,9 +257,9 @@ SetDisplayMode(display_mode* pMode)
 	if (!IsThereEnoughFBMemory(&mode, mode.bpp))
 		return B_NO_MEMORY;
 
-	TRACE("Set display mode: %dx%d virtual size: %dx%d color depth: %d bpp\n",
+	debug_printf("Trident_ACC: SetDisplayMode starting for %dx%d, virtual %dx%d, %d bpp, bytesPerRow %d\n",
 		mode.timing.h_display, mode.timing.v_display,
-		mode.virtual_width, mode.virtual_height, mode.bpp);
+		mode.virtual_width, mode.virtual_height, mode.bpp, mode.bytesPerRow);
 
 	// Let's program the hardware registers!
 
@@ -289,6 +278,8 @@ SetDisplayMode(display_mode* pMode)
 	// Unlock Extended CRTC registers (CR39 = 0x80)
 	write_crtc_reg(0x39, 0x80);
 
+	debug_printf("Trident_ACC: Extended registers unlocked\n");
+
 	// 2. Program Pixel Clock (PLL)
 	uint32 clock = mode.timing.pixel_clock;
 	if (mode.bpp == 32)
@@ -298,6 +289,9 @@ SetDisplayMode(display_mode* pMode)
 	CalculateTridentPLL(clock, sr19, sr1a);
 	write_seq_reg(0x19, sr19);
 	write_seq_reg(0x1A, sr1a);
+
+	debug_printf("Trident_ACC: PLL calculated for clock %u kHz: SR19 = 0x%02X, SR1A = 0x%02X\n",
+		clock, sr19, sr1a);
 
 	// Select programmable clock (Clock 2) in Misc Output
 	uint8 misc = read_vga_reg(0x3CC);
@@ -321,6 +315,9 @@ SetDisplayMode(display_mode* pMode)
 	int v_sync_end = mode.timing.v_sync_end;
 	int v_blank_start = v_display;
 	int v_blank_end = v_total;
+
+	debug_printf("Trident_ACC: Standard timings calculated: HTotal=%d, HDisplay=%d, VTotal=%d, VDisplay=%d\n",
+		h_total, h_display, v_total, v_display);
 
 	crtc[0x00] = h_total & 0xFF;
 	crtc[0x01] = h_display & 0xFF;
@@ -379,8 +376,25 @@ SetDisplayMode(display_mode* pMode)
 	// Program MiscExtFunc (index 0x0F): configure clocks and multiplex path
 	write_vga_reg(0x3CE, 0x0F); write_vga_reg(0x3CF, (mode.bpp == 32) ? 0x1A : 0x12);
 
-	// 6. Abilitazione maschera palette standard VGA
-	write_vga_reg(0x3C6, 0xFF);
+	// 6. Program standard Attribute Controller Registers and write Palette Mask
+	// Always reset AC flip-flop and re-enable display output to avoid black screen
+	(void)read_vga_reg(0x3DA); // Reset AC flip-flop to Index mode
+	for (uint8 i = 0; i < 16; i++) {
+		write_vga_reg(0x3C0, i);
+		write_vga_reg(0x3C0, i); // write 1:1 palette indices
+	}
+	write_vga_reg(0x3C0, 0x10); write_vga_reg(0x3C0, 0x41); // Graphics, color mode
+	write_vga_reg(0x3C0, 0x11); write_vga_reg(0x3C0, 0x00);
+	write_vga_reg(0x3C0, 0x12); write_vga_reg(0x3C0, 0x0F);
+	write_vga_reg(0x3C0, 0x13); write_vga_reg(0x3C0, 0x00);
+	write_vga_reg(0x3C0, 0x14); write_vga_reg(0x3C0, 0x00);
+
+	(void)read_vga_reg(0x3DA); // Reset AC flip-flop to Index mode
+	write_vga_reg(0x3C0, 0x20); // Enable display output (PAS bit = 1)
+
+	write_vga_reg(0x3C6, 0xFF); // Ensure palette mask is fully open
+
+	debug_printf("Trident_ACC: Standard Attribute Controller programmed, PAS enabled\n");
 
 	// 7. Enable Linear Frame Buffer on Trident via LinearAddReg (CR21 bit 5)
 	uint8 cr21 = read_crtc_reg(0x21);
@@ -435,6 +449,9 @@ SetDisplayMode(display_mode* pMode)
 	dummy = read_vga_reg(0x3C8); // Reset state machine of DAC to standard mode!
 	(void)dummy;
 
+	debug_printf("Trident_ACC: Color depth configured. PixelBus = 0x%02X, DAC Cmd = 0x%02X\n",
+		cr38, dac_cmd);
+
 	// 15. Configure Screen Pitch (Offset) in CR13 and CR29 (preserving other CR29 bits)
 	uint32 offset = mode.bytesPerRow / 8;
 	write_crtc_reg(0x13, offset & 0xFF);
@@ -444,6 +461,9 @@ SetDisplayMode(display_mode* pMode)
 	if (offset & (1 << 8)) cr29 |= (1 << 4); // Offset bit 8 maps to CR29 bit 4
 	if (offset & (1 << 9)) cr29 |= (1 << 5); // Offset bit 9 maps to CR29 bit 5
 	write_crtc_reg(0x29, cr29);
+
+	debug_printf("Trident_ACC: Pitch Offset configured: Offset=%d (CR13=0x%02X, CR29=0x%02X)\n",
+		offset, offset & 0xFF, cr29);
 
 	// 16. Configure CR27 (CRTHiOrd) for high-order vertical timing bits
 	uint8 cr27 = 0x08; // default bit 3 must be set
@@ -462,6 +482,9 @@ SetDisplayMode(display_mode* pMode)
 	// Configure CR1E (CRTCModuleTest)
 	write_crtc_reg(0x1E, 0x80);
 
+	debug_printf("Trident_ACC: Extended overflows configured: CR27=0x%02X, CR2B=0x%02X\n",
+		cr27, cr2b);
+
 	// 17. Protect and lock the extended sequencer registers
 	write_seq_reg(0x0D, 0x20); // NewMode2
 	write_seq_reg(0x0E, 0xC0); // NewMode1
@@ -473,7 +496,9 @@ SetDisplayMode(display_mode* pMode)
 	si.maxFrameBufferSize = si.videoMemSize;
 	si.cursorOffset = si.maxFrameBufferSize - 4096;
 
-	TRACE("SetDisplayMode() done\n");
+	debug_printf("Trident_ACC: SetDisplayMode completed successfully. Cursor offset: %u\n",
+		si.cursorOffset);
+
 	return B_OK;
 }
 
