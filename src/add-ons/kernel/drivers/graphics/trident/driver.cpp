@@ -152,6 +152,8 @@ inb(uint16 port)
 static void
 EnableMMIO(DeviceInfo& di)
 {
+	uint16 vgaIOBase = (inb(0x3CC) & 0x01) ? 0x3D4 : 0x3B4;
+
 	// Toggle Trident "New Mode" via legacy Port 0x3C4
 	outb(0x3C4, 0x0B);
 	(void)inb(0x3C5);
@@ -164,10 +166,15 @@ EnableMMIO(DeviceInfo& di)
 	outb(0x3C4, 0x11);
 	outb(0x3C5, 0x92);
 
-	// Read current CR39 (PCIReg) and set Bit 0 to enable hardware-level MMIO
-	outb(0x3D4, 0x39);
-	uint8 pciReg = inb(0x3D5);
-	outb(0x3D5, pciReg | 0x01); // Enable MMIO decoder
+	// Enable hardware-level MMIO decoder on the Trident card (CR39 = 0x81)
+	// Writing 0x81 simultaneously unlocks CRTC extensions (0x80) and enables MMIO (0x01)
+	outb(vgaIOBase, 0x39);
+	outb(vgaIOBase + 1, 0x81);
+
+	// Readback and log to verify
+	outb(vgaIOBase, 0x39);
+	uint8 readback = inb(vgaIOBase + 1);
+	dprintf("Trident: EnableMMIO: CR39 write=0x81, readback=0x%02X (I/O Port Base=0x%04X)\n", readback, vgaIOBase);
 
 	// Protect extended sequencer registers
 	outb(0x3C4, 0x0E);
@@ -191,15 +198,15 @@ MapDevice(DeviceInfo& di)
 		| PCI_command_io | PCI_command_memory | PCI_command_master);
 
 	// BAR 0 is Frame Buffer
-	uint32 videoRamAddr = pciInfo.u.h0.base_registers[0];
+	uint32 videoRamAddr = pciInfo.u.h0.base_registers[0] & ~0x0F;
 	uint32 videoRamSize = pciInfo.u.h0.base_register_sizes[0];
-	si.videoMemPCI = pciInfo.u.h0.base_registers_pci[0];
+	si.videoMemPCI = pciInfo.u.h0.base_registers_pci[0] & ~0x0F;
 
 	if (videoRamSize == 0)
 		videoRamSize = 8 * 1024 * 1024; // fallback to 8MB if undetected
 
-	// BAR 1 is MMIO registers
-	uint32 regsBase = pciInfo.u.h0.base_registers[1];
+	// BAR 1 is MMIO registers - mask lower 14 bits to align to 16KB and strip PCI status flags, matching X.org exactly
+	uint32 regsBase = pciInfo.u.h0.base_registers[1] & 0xFFFFC000;
 	uint32 regAreaSize = pciInfo.u.h0.base_register_sizes[1];
 
 	if (regAreaSize == 0)

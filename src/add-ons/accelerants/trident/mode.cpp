@@ -345,6 +345,10 @@ SetDisplayMode(display_mode* pMode)
 	if (!tridentReg->tridentRegs3x4[PreEndFetch])
 		tridentReg->tridentRegs3x4[PreEndFetch] = 0xFF;
 
+	// Disable stretching/scaler by default
+	tridentReg->tridentRegs3CE[VertStretch] = 0x00;
+	tridentReg->tridentRegs3CE[HorStretch] = 0x00;
+
 	// BPP specific registers
 	switch (mode.bpp) {
 		case 8:
@@ -546,6 +550,8 @@ SetDisplayMode(display_mode* pMode)
 	OUTW_3x4(PCIRetry);
 	OUTW_3CE(MiscIntContReg);
 	OUTW_3CE(MiscExtFunc);
+	OUTW_3CE(VertStretch);
+	OUTW_3CE(HorStretch);
 	OUTW_3x4(Offset);
 
 	OUTW_3C4(Threshold);
