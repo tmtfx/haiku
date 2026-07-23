@@ -50,6 +50,9 @@ SetCursorShape(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
 	debug_printf("Trident_CUR: SetCursorShape starting. Width=%d, Height=%d, HotX=%d, HotY=%d, Offset=%u\n",
 		width, height, hot_x, hot_y, si.cursorOffset);
 
+	// Re-enable MMIO decoder via kernel ioctl (since standard VGA writes may have disabled it)
+	ioctl(gInfo.deviceFileDesc, TRIDENT_ENABLE_MMIO);
+
 	// Ensure CRTC registers remain unlocked with MMIO active (CR39 = 0x87)
 	write_crtc_reg_logged("PCIReg", 0x39, 0x87);
 
@@ -139,6 +142,9 @@ SetCursorBitmap(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
 	debug_printf("Trident_CUR: SetCursorBitmap starting. Space=0x%X, Width=%d, Height=%d, HotX=%d, HotY=%d, Offset=%u\n",
 		colorSpace, width, height, hot_x, hot_y, si.cursorOffset);
 
+	// Re-enable MMIO decoder via kernel ioctl (since standard VGA writes may have disabled it)
+	ioctl(gInfo.deviceFileDesc, TRIDENT_ENABLE_MMIO);
+
 	// Ensure CRTC registers remain unlocked with MMIO active (CR39 = 0x87)
 	write_crtc_reg_logged("PCIReg", 0x39, 0x87);
 
@@ -222,6 +228,9 @@ MoveCursor(uint16 xPos, uint16 yPos)
 {
 	SharedInfo& si = *gInfo.sharedInfo;
 
+	// Re-enable MMIO decoder via kernel ioctl (since standard VGA writes may have disabled it)
+	ioctl(gInfo.deviceFileDesc, TRIDENT_ENABLE_MMIO);
+
 	write_crtc_reg_logged("PCIReg", 0x39, 0x87);
 
 	// In Haiku, MoveCursor is called with coordinates of the mouse tip (hotspot needs to be subtracted)
@@ -256,6 +265,9 @@ MoveCursor(uint16 xPos, uint16 yPos)
 void
 ShowCursor(bool bShow)
 {
+	// Re-enable MMIO decoder via kernel ioctl (since standard VGA writes may have disabled it)
+	ioctl(gInfo.deviceFileDesc, TRIDENT_ENABLE_MMIO);
+
 	write_crtc_reg_logged("PCIReg", 0x39, 0x87);
 
 	uint8 ctrl = read_crtc_reg(0x50);
