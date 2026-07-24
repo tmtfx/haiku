@@ -11,7 +11,6 @@
 
 
 #include "accel.h"
-#include "trident_regs.h"
 #include <string.h>
 #include <video_overlay.h>
 #include <unistd.h>
@@ -199,13 +198,10 @@ trident_release_overlay(overlay_token ot)
 	ioctl(gInfo.deviceFileDesc, TRIDENT_ENABLE_MMIO);
 
 	// Ensure CRTC registers remain unlocked with MMIO active (CR39 = 0x87)
-	//write_crtc_reg_logged("PCIReg", 0x39, 0x87);
-	write_crtc_reg(PCIReg, 0x87);
+	write_crtc_reg_logged("PCIReg", 0x39, 0x87);
 
-	// Disable Trident video overlay (BES)
-	uint8 cr70 = read_crtc_reg(0x70); // 0x70
-	cr70 &= ~0x01; // Disable BES overlay
-	write_crtc_reg_logged("BESControl", 0x70, cr70); // 0x70
+	// Disable Trident video overlay (BES control register CR8E = 0x00)
+	write_crtc_reg_logged("BESControl", 0x8E, 0x00);
 
 	return B_OK;
 }
@@ -224,44 +220,51 @@ trident_configure_overlay(overlay_token ot, const overlay_buffer* ob,
 	ioctl(gInfo.deviceFileDesc, TRIDENT_ENABLE_MMIO);
 
 	// Ensure CRTC registers remain unlocked with MMIO active (CR39 = 0x87)
-	//write_crtc_reg_logged("PCIReg", 0x39, 0x87);
-	write_crtc_reg(PCIReg, 0x87);
-	
+	write_crtc_reg_logged("PCIReg", 0x39, 0x87);
 
 	if (!ob || !ow || !ov) {
 		// Disable BES overlay
-		uint8 cr70 = read_crtc_reg(0x70);
-		cr70 &= ~0x01;
-		write_crtc_reg_logged("BESControl", 0x70, cr70);
+		write_crtc_reg_logged("BESControl", 0x8E, 0x00);
 		return B_OK;
 	}
 
 	SharedInfo& si = *gInfo.sharedInfo;
 	uint32 buffer_offset = (uint32)((addr_t)ob->buffer - (addr_t)si.videoMemAddr);
 
-	// Set overlay buffer address (expressed in double words)
-	uint32 dword_addr = buffer_offset / 4;
-	write_crtc_reg_logged("OverlayAddrLow", 0x7C, dword_addr & 0xFF);
-	write_crtc_reg_logged("OverlayAddrMid", 0x7D, (dword_addr >> 8) & 0xFF);
-	write_crtc_reg_logged("OverlayAddrHigh", 0x7E, (dword_addr >> 16) & 0xFF);
+	// 1. Write buffer address/offset to registers CR92, CR93, CR94 (expressed in bytes)
+	write_crtc_reg_logged("OverlayAddrLow", 0x92, buffer_offset & 0xFF);
+	write_crtc_reg_logged("OverlayAddrMid", 0x93, (buffer_offset >> 8) & 0xFF);
+	write_crtc_reg_logged("OverlayAddrHigh", 0x94, (buffer_offset >> 16) & 0x0F);
 
-	// Write coordinates to CRTC extension registers
-	write_crtc_reg_logged("HStartLow", 0x71, ow->h_start & 0xFF);
-	write_crtc_reg_logged("HStartHigh", 0x72, (ow->h_start >> 8) & 0xFF);
-	write_crtc_reg_logged("VStartLow", 0x73, ow->v_start & 0xFF);
-	write_crtc_reg_logged("VStartHigh", 0x74, (ow->v_start >> 8) & 0xFF);
+	// 2. Write active line width (pitch) to registers CR90, CR91 (expressed in bytes)
+	write_crtc_reg_logged("OverlayPitchLow", 0x90, ob->bytes_per_row & 0xFF);
+	write_crtc_reg_logged("OverlayPitchHigh", 0x91, (ob->bytes_per_row >> 8) & 0xFF);
 
-	uint16 right = ow->h_start + ow->width;
-	uint16 bottom = ow->v_start + ow->height;
-	write_crtc_reg_logged("HEndLow", 0x75, right & 0xFF);
-	write_crtc_reg_logged("HEndHigh", 0x76, (right >> 8) & 0xFF);
-	write_crtc_reg_logged("VEndLow", 0x77, bottom & 0xFF);
-	write_crtc_reg_logged("VEndHigh", 0x78, (bottom >> 8) & 0xFF);
+	// 3. Write coordinates to CRTC extension registers (X1=CR86-87, Y1=CR88-89, X2=CR8A-8B, Y2=CR8C-8D)
+	uint16 tx1 = ow->h_start;
+	uint16 ty1 = ow->v_start;
+	uint16 tx2 = ow->h_start + ow->width;
+	uint16 ty2 = ow->v_start + ow->height;
 
-	// Enable video overlay (BES bit 0 = 1, YUV format select bit 1 = 1)
-	uint8 cr70 = read_crtc_reg(0x70);
-	cr70 |= 0x03;
-	write_crtc_reg_logged("BESControl", 0x70, cr70);
+	write_crtc_reg_logged("HStartLow", 0x86, tx1 & 0xFF);
+	write_crtc_reg_logged("HStartHigh", 0x87, (tx1 >> 8) & 0xFF);
+	write_crtc_reg_logged("VStartLow", 0x88, ty1 & 0xFF);
+	write_crtc_reg_logged("VStartHigh", 0x89, (ty1 >> 8) & 0xFF);
+
+	write_crtc_reg_logged("HEndLow", 0x8A, tx2 & 0xFF);
+	write_crtc_reg_logged("HEndHigh", 0x8B, (tx2 >> 8) & 0xFF);
+	write_crtc_reg_logged("VEndLow", 0x8C, ty2 & 0xFF);
+	write_crtc_reg_logged("VEndHigh", 0x8D, (ty2 >> 8) & 0xFF);
+
+	// 4. Reset zoom scaling registers CR80-CR83 to 0x00 (1:1 scale) for overlay stability
+	write_crtc_reg_logged("HZoomLow", 0x80, 0x00);
+	write_crtc_reg_logged("HZoomHigh", 0x81, 0x00);
+	write_crtc_reg_logged("VZoomLow", 0x82, 0x00);
+	write_crtc_reg_logged("VZoomHigh", 0x83, 0x00);
+
+	// 5. Enable video overlay: write 0x94 to BES control register CR8E
+	// Value 0x94 corresponds to the official X.org YUV/RGB overlay enable parameters
+	write_crtc_reg_logged("BESControl", 0x8E, 0x94);
 
 	return B_OK;
 }
