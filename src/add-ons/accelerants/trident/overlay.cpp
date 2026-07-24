@@ -11,6 +11,7 @@
 
 
 #include "accel.h"
+#include "trident_regs.h"
 #include <string.h>
 #include <video_overlay.h>
 #include <unistd.h>
@@ -198,12 +199,13 @@ trident_release_overlay(overlay_token ot)
 	ioctl(gInfo.deviceFileDesc, TRIDENT_ENABLE_MMIO);
 
 	// Ensure CRTC registers remain unlocked with MMIO active (CR39 = 0x87)
-	write_crtc_reg_logged("PCIReg", 0x39, 0x87);
+	//write_crtc_reg_logged("PCIReg", 0x39, 0x87);
+	write_crtc_reg(PCIReg, 0x87);
 
 	// Disable Trident video overlay (BES)
-	uint8 cr70 = read_crtc_reg(0x70);
+	uint8 cr70 = read_crtc_reg(0x70); // 0x70
 	cr70 &= ~0x01; // Disable BES overlay
-	write_crtc_reg_logged("BESControl", 0x70, cr70);
+	write_crtc_reg_logged("BESControl", 0x70, cr70); // 0x70
 
 	return B_OK;
 }
@@ -222,7 +224,9 @@ trident_configure_overlay(overlay_token ot, const overlay_buffer* ob,
 	ioctl(gInfo.deviceFileDesc, TRIDENT_ENABLE_MMIO);
 
 	// Ensure CRTC registers remain unlocked with MMIO active (CR39 = 0x87)
-	write_crtc_reg_logged("PCIReg", 0x39, 0x87);
+	//write_crtc_reg_logged("PCIReg", 0x39, 0x87);
+	write_crtc_reg(PCIReg, 0x87);
+	
 
 	if (!ob || !ow || !ov) {
 		// Disable BES overlay
