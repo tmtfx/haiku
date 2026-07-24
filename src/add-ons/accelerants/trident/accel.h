@@ -95,6 +95,7 @@ inline void write_gfx_reg(uint8 index, uint8 value) {
 #include "trident_regs.h"
 
 // Redefine standard X.org macros to use Haiku accelerant MMIO
+/*
 #undef OUTB
 #undef INB
 #undef OUTW
@@ -104,18 +105,7 @@ inline void write_gfx_reg(uint8 index, uint8 value) {
 #undef INB_3x4
 #undef INB_3C4
 #undef INB_3CE
-
-#define OUTB(port, val)      write_vga_reg(port, val)
-#define OUTW(port, val)      write_vga_reg(port, (val) & 0xFF); write_vga_reg((port) + 1, ((val) >> 8) & 0xFF)
-#define INB(port)            read_vga_reg(port)
-
-#define OUTW_3C4(reg)        write_seq_reg(reg, tridentReg->tridentRegs3C4[reg])
-#define OUTW_3CE(reg)        write_vga_reg(0x3CE, reg); write_vga_reg(0x3CF, tridentReg->tridentRegs3CE[reg])
-#define OUTW_3x4(reg)        write_crtc_reg(reg, tridentReg->tridentRegs3x4[reg])
-
-#define INB_3x4(reg)         tridentReg->tridentRegs3x4[reg] = read_crtc_reg(reg)
-#define INB_3C4(reg)         tridentReg->tridentRegs3C4[reg] = read_seq_reg(reg)
-#define INB_3CE(reg)         write_vga_reg(0x3CE, reg); tridentReg->tridentRegs3CE[reg] = read_vga_reg(0x3CF)
+*/
 
 struct TridentRegRec {
 	uint8 tridentRegs3C4[32];

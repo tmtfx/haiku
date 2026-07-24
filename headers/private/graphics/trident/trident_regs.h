@@ -20,6 +20,7 @@
  * PERFORMANCE OF THIS SOFTWARE.
  *
  * Author:  Alan Hourihane, alanh@fairlite.demon.co.uk
+ * Edited for Haiku: Fabio Tomat, f.t.public@gmail.com
  */
 
 #define DEBUG 1
@@ -265,6 +266,22 @@
 #define BLADE_GE_STATUS		0x2120
 #define BLADE_XP_GER_OPERMODE	0x2125
 
+
+// Redefine standard X.org macros to use Haiku accelerant MMIO
+#define OUTB(port, val)      write_vga_reg(port, val)
+#define OUTW(port, val)      write_vga_reg(port, (val) & 0xFF); write_vga_reg((port) + 1, ((val) >> 8) & 0xFF)
+#define INB(port)            read_vga_reg(port)
+
+#define OUTW_3C4(reg)        write_seq_reg(reg, tridentReg->tridentRegs3C4[reg])
+#define OUTW_3CE(reg)        write_vga_reg(0x3CE, reg); write_vga_reg(0x3CF, tridentReg->tridentRegs3CE[reg])
+#define OUTW_3x4(reg)        write_crtc_reg(reg, tridentReg->tridentRegs3x4[reg])
+
+#define INB_3x4(reg)         tridentReg->tridentRegs3x4[reg] = read_crtc_reg(reg)
+#define INB_3C4(reg)         tridentReg->tridentRegs3C4[reg] = read_seq_reg(reg)
+#define INB_3CE(reg)         write_vga_reg(0x3CE, reg); tridentReg->tridentRegs3CE[reg] = read_vga_reg(0x3CF)
+
+
+/*
 #define REPLICATE(r)						\
 {								\
 	if (pScrn->bitsPerPixel == 16) {			\
@@ -285,9 +302,10 @@
 			TGUI_DSTCLIP_XY(4095,2047);	\
 		}					\
 	}
-
+*/
 
 /* Merge XY */
+/*
 #define XY_MERGE(x,y) \
 		((((CARD32)(y)&0xFFFF) << 16) | ((CARD32)(x) & 0xffff))
 #define XP_XY_MERGE(y,x) \
@@ -298,7 +316,9 @@
 
 #define TRIDENT_READ_REG(r) \
         MMIO_IN32(pTrident->IOBase,(r))
+*/
 
+/*
 #define OUTB(addr, data) \
 do { \
 	if (IsPciCard && UseMMIO) { \
@@ -363,7 +383,9 @@ do { \
 	MMIO_OUT16(pTrident->IOBase, GER_OPERMODE, (c))
 #define BLADE_XP_OPERMODE(c) \
 	MMIO_OUT8(pTrident->IOBase, BLADE_XP_GER_OPERMODE, (c))
+*/
 /* XXX */
+/*
 #define OLDTGUI_OPERMODE(c) \
 	{ \
 		MMIO_OUT16(pTrident->IOBase, OLDGER_MWIDTH, \
@@ -440,8 +462,9 @@ do { \
 		OLDTGUISync(); \
 		MMIO_OUT32(pTrident->IOBase, OLDGER_COMMAND, (c)); \
 	} while (0)
-
+*/
 /* Cyber FP support */
+/*
 #define SHADOW_ENABLE(oldval) \
         do {\
 	       OUTB(0x3CE, CyberControl); \
@@ -453,3 +476,4 @@ do { \
                OUTB(0x3CE, CyberControl); \
 	       OUTB(0x3CF,val); \
         } while (0);
+*/
