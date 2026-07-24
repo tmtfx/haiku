@@ -68,10 +68,12 @@ trident_set_dpms_mode(uint32 mode)
 	ioctl(gInfo.deviceFileDesc, TRIDENT_ENABLE_MMIO);
 
 	// Unlock CRTC registers with MMIO enabled (CR39 = 0x87)
-	write_crtc_reg_logged("PCIReg", 0x39, 0x87);
+	//write_crtc_reg_logged("PCIReg", 0x39, 0x87);
+	write_crtc_reg(PCIReg, 0x87);
 
 	// Unlock DPMS registers (SR0E = 0xC2)
-	write_seq_reg_logged("NewMode1", 0x0E, 0xC2);
+	//write_seq_reg_logged("NewMode1", 0x0E, 0xC2);
+	write_seq_reg(NewMode1, 0xC2); //0x0E
 
 	// Read/Write PMCont via physical DAC ports 0x3C8 / 0x3C6 (BAR 1 base offset 0!)
 	write_reg8(0x3C8, 0x04);
@@ -114,13 +116,14 @@ trident_set_dpms_mode(uint32 mode)
 	write_reg8(0x3C6, pmCont);
 	uint8 new_pmCont = read_reg8(0x3C6);
 
-	debug_printf("Trident_PWR: DPMSCont (GR23) Old=0x%02X, Write=0x%02X, Readback=0x%02X\n",
-		old_dpmsCont, dpmsCont, new_dpmsCont);
-	debug_printf("Trident_PWR: PMCont (0x3C6) Old=0x%02X, Write=0x%02X, Readback=0x%02X\n",
-		old_pmCont, pmCont, new_pmCont);
+	//debug_printf("Trident_PWR: DPMSCont (GR23) Old=0x%02X, Write=0x%02X, Readback=0x%02X\n",
+	//	old_dpmsCont, dpmsCont, new_dpmsCont);
+	//debug_printf("Trident_PWR: PMCont (0x3C6) Old=0x%02X, Write=0x%02X, Readback=0x%02X\n",
+	//	old_pmCont, pmCont, new_pmCont);
 
 	// Keep registers unlocked for multi-call stability
-	write_seq_reg_logged("NewMode1", 0x0E, 0x80);
+	//write_seq_reg_logged("NewMode1", 0x0E, 0x80);
+	write_seq_reg(NewMode1, 0x80);
 
 	si.dpmsMode = mode;
 	return B_OK;
