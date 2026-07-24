@@ -12,7 +12,14 @@
 
 #include "accel.h"
 #include <string.h>
+#include "trident_regs.h"
 
+/*
+ * color space for hardware cursor:
+ * Transparent: AND = 0, XOR = 1
+ * White:		AND = 1, XOR = 1
+ * Black:		AND = 1, XOR = 0
+ */
 
 // Logging helper for CRTC cursor register writes
 static inline void
@@ -57,7 +64,8 @@ SetCursorShape(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
 	ioctl(gInfo.deviceFileDesc, TRIDENT_ENABLE_MMIO);
 
 	// Ensure CRTC registers remain unlocked with MMIO active (CR39 = 0x87)
-	write_crtc_reg_logged("PCIReg", 0x39, 0x87);
+	//write_crtc_reg_logged("PCIReg", 0x39, 0x87);
+	write_crtc_reg(PCIReg, 0x87); // 0x39
 
 	// Initialize the 1024-byte cursor pattern buffer to transparent (AND=1, XOR=0)
 	// Trident uses 32-bit interleaved (dword) AND/XOR masks:
@@ -91,19 +99,7 @@ SetCursorShape(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
 				and_byte_idx = ((x - 32) / 8) + 8;
 				xor_byte_idx = ((x - 32) / 8) + 12;
 			}
-/*
-			if (and_bit) {
-				row[and_byte_idx] |= (1 << bit_shift);
-			} else {
-				row[and_byte_idx] &= ~(1 << bit_shift);
-			}
 
-			if (xor_bit) {
-				row[xor_byte_idx] |= (1 << bit_shift);
-			} else {
-				row[xor_byte_idx] &= ~(1 << bit_shift);
-			}
-			*/
 			if (and_bit && !xor_bit) {
 				// Trasparente: AND = 0, XOR = 1
 				row[and_byte_idx] &= ~(1 << bit_shift);
@@ -113,31 +109,35 @@ SetCursorShape(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
 				row[and_byte_idx] |= (1 << bit_shift);
 				row[xor_byte_idx] &= ~(1 << bit_shift);
 			} else if (!and_bit && xor_bit) {
-				// Bianco: AND = 0, XOR = 0
-				row[and_byte_idx] &= ~(1 << bit_shift);
-				row[xor_byte_idx] &= ~(1 << bit_shift);
-			} else {
-				// Caso limite (AND=1, XOR=1, inversione del pixel sottostante):
-				// Se la scheda lo supporta come XOR, la combinazione hardware standard è (1, 1)
+				// Bianco: AND = 1, XOR = 1
 				row[and_byte_idx] |= (1 << bit_shift);
 				row[xor_byte_idx] |= (1 << bit_shift);
+			} else {
+				// Caso limite (AND=0, XOR=0, inversione del pixel sottostante) se la scheda lo supporta
+				row[and_byte_idx] &= ~ (1 << bit_shift);
+				row[xor_byte_idx] &= ~ (1 << bit_shift);
 			}
 		}
 	}
 
 	// Set cursor base address registers CR44, CR45 (CursorLocLow, CursorLocHigh)
 	uint32 addr = si.cursorOffset / 1024;
-	write_crtc_reg_logged("CursorLocLow", 0x44, addr & 0xFF);
-	write_crtc_reg_logged("CursorLocHigh", 0x45, (addr >> 8) & 0xFF);
+	//write_crtc_reg_logged("CursorLocLow", 0x44, addr & 0xFF);
+	write_crtc_reg(CursorLocLow, addr & 0xFF); // 0x44
+	//write_crtc_reg_logged("CursorLocHigh", 0x45, (addr >> 8) & 0xFF);
+	write_crtc_reg(CursorLocHigh, (addr >> 8) & 0xFF); // 0x45
 
 	// Set cursor colors: Background to Black (CR4C-CR4F), Foreground to White (CR48-CR4B)
 	for (int i = 0; i < 4; i++) {
-		write_crtc_reg_logged("CursorFG", 0x48 + i, 0xFF);
-		write_crtc_reg_logged("CursorBG", 0x4C + i, 0x00);
+		//write_crtc_reg_logged("CursorFG", 0x48 + i, 0xFF);
+		write_crtc_reg(CursorFG1 + i, 0xFF); // 0x48, 0x49, ... 
+		//write_crtc_reg_logged("CursorBG", 0x4C + i, 0x00);
+		write_crtc_reg(CursorBG1 + i, 0x00); // 0x4C, 0x4D, ...
 	}
 
 	// Enable cursor (CR50: Bit 0=Enable, Bit 6=64x64, Bit 7=Windows/X11 mode)
-	write_crtc_reg_logged("CursorControl", 0x50, 0xC1);
+	//write_crtc_reg_logged("CursorControl", 0x50, 0xC1);
+	write_crtc_reg(CursorControl, 0xC1); // 0x50
 
 	// Update cursor position
 	MoveCursor(si.cursorHotX, si.cursorHotY);
@@ -168,7 +168,8 @@ SetCursorBitmap(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
 	ioctl(gInfo.deviceFileDesc, TRIDENT_ENABLE_MMIO);
 
 	// Ensure CRTC registers remain unlocked with MMIO active (CR39 = 0x87)
-	write_crtc_reg_logged("PCIReg", 0x39, 0x87);
+	//write_crtc_reg_logged("PCIReg", 0x39, 0x87);
+	write_crtc_reg(PCIReg, 0x87); // 0x39
 
 	// Initialize the 1024-byte cursor pattern buffer to transparent (AND=1, XOR=0)
 	for (int y = 0; y < 64; y++) {
@@ -192,7 +193,7 @@ SetCursorBitmap(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
 				uint8 a = (colorSpace == B_RGBA32) ? pixel[3] : 255;
 
 				if (a < 128)
-					continue; // Keep transparent (AND=1, XOR=0)
+					continue; // Keep transparent (AND=0, XOR=1)
 
 				int and_byte_idx, xor_byte_idx;
 				int bit_shift = 7 - (x % 8);
@@ -205,21 +206,14 @@ SetCursorBitmap(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
 					xor_byte_idx = ((x - 32) / 8) + 12;
 				}
 
-				// Opaque pixel (AND=0)
-				// row[and_byte_idx] &= ~(1 << bit_shift);
-
 				// Render 2 colors based on luma and alpha
 				uint32 luma = (r + g + b) / 3;
 				if (luma > 128) {
-					// White (AND=0, XOR=1)
-					// row[xor_byte_idx] |= (1 << bit_shift);
-					// Bianco: AND = 0, XOR = 0
-					row[and_byte_idx] &= ~(1 << bit_shift);
-					row[xor_byte_idx] &= ~(1 << bit_shift);
+					// White (AND=1, XOR=1)
+					row[and_byte_idx] |= (1 << bit_shift);
+					row[xor_byte_idx] |= (1 << bit_shift);
 				} else {
-					// Black (AND=0, XOR=0)
-					// row[xor_byte_idx] &= ~(1 << bit_shift);
-					// Nero: AND = 1, XOR = 0
+					// Black (AND=1, XOR=0)
 					row[and_byte_idx] |= (1 << bit_shift);
 					row[xor_byte_idx] &= ~(1 << bit_shift);
 				}
@@ -232,17 +226,22 @@ SetCursorBitmap(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
 
 	// Set cursor base address registers CR44, CR45 (CursorLocLow, CursorLocHigh)
 	uint32 addr = si.cursorOffset / 1024;
-	write_crtc_reg_logged("CursorLocLow", 0x44, addr & 0xFF);
-	write_crtc_reg_logged("CursorLocHigh", 0x45, (addr >> 8) & 0xFF);
+	//write_crtc_reg_logged("CursorLocLow", 0x44, addr & 0xFF);
+	write_crtc_reg(CursorLocLow, addr & 0xFF); // 0x44
+	//write_crtc_reg_logged("CursorLocHigh", 0x45, (addr >> 8) & 0xFF);
+	write_crtc_reg(CursorLocHigh, (addr >> 8) & 0xFF); // 0x45
 
 	// Set cursor colors: Background to Black (CR4C-CR4F), Foreground to White (CR48-CR4B)
 	for (int i = 0; i < 4; i++) {
-		write_crtc_reg_logged("CursorFG", 0x48 + i, 0xFF);
-		write_crtc_reg_logged("CursorBG", 0x4C + i, 0x00);
+		//write_crtc_reg_logged("CursorFG", 0x48 + i, 0xFF);
+		write_crtc_reg(CursorFG1 + i, 0xFF); // 0x48, 0x49, ...
+		//write_crtc_reg_logged("CursorBG", 0x4C + i, 0x00);
+		write_crtc_reg(CursorBG1 + i, 0x00); // 0x4C, 0x4D, ...
 	}
 
 	// Enable cursor (CR50: Bit 0=Enable, Bit 6=64x64, Bit 7=Windows/X11 mode)
-	write_crtc_reg_logged("CursorControl", 0x50, 0xC1);
+	//write_crtc_reg_logged("CursorControl", 0x50, 0xC1);
+	write_crtc_reg(CursorControl, 0xC1); // 0x50
 
 	// Update cursor position
 	MoveCursor(si.cursorHotX, si.cursorHotY);
@@ -259,7 +258,8 @@ MoveCursor(uint16 xPos, uint16 yPos)
 	// Re-enable MMIO decoder via kernel ioctl (since standard VGA writes may have disabled it)
 	ioctl(gInfo.deviceFileDesc, TRIDENT_ENABLE_MMIO);
 
-	write_crtc_reg_logged("PCIReg", 0x39, 0x87);
+	//write_crtc_reg_logged("PCIReg", 0x39, 0x87);
+	write_crtc_reg(PCIReg, 0x87); // 0x39
 
 	// In Haiku, MoveCursor is called with coordinates of the mouse tip (hotspot needs to be subtracted)
 	int16 x = (int16)xPos - (int16)si.cursorHotX;
@@ -277,16 +277,22 @@ MoveCursor(uint16 xPos, uint16 yPos)
 	}
 
 	// Write preset offsets (CR46, CR47)
-	write_crtc_reg_logged("PresetX", 0x46, preset_x);
-	write_crtc_reg_logged("PresetY", 0x47, preset_y);
+	//write_crtc_reg_logged("PresetX", 0x46, preset_x);
+	write_crtc_reg(CursorXOffset, preset_x); // 0x46
+	//write_crtc_reg_logged("PresetY", 0x47, preset_y);
+	write_crtc_reg(CursorYOffset, preset_y); // 0x47
 
 	// Write X position (CR40, CR41)
-	write_crtc_reg_logged("PosXLow", 0x40, x & 0xFF);
-	write_crtc_reg_logged("PosXHigh", 0x41, (x >> 8) & 0xFF);
+	//write_crtc_reg_logged("PosXLow", 0x40, x & 0xFF);
+	write_crtc_reg(CursorXLow, x & 0xFF); // 0x40
+	//write_crtc_reg_logged("PosXHigh", 0x41, (x >> 8) & 0xFF);
+	write_crtc_reg(CursorXHigh, (x >> 8) & 0xFF); // 0x41
 
 	// Write Y position (CR42, CR43)
-	write_crtc_reg_logged("PosYLow", 0x42, y & 0xFF);
-	write_crtc_reg_logged("PosYHigh", 0x43, (y >> 8) & 0xFF);
+	//write_crtc_reg_logged("PosYLow", 0x42, y & 0xFF);
+	write_crtc_reg(CursorYLow, y & 0xFF); // 0x42
+	//write_crtc_reg_logged("PosYHigh", 0x43, (y >> 8) & 0xFF);
+	write_crtc_reg(CursorYHigh, (y >> 8) & 0xFF); // 0x43
 }
 
 
@@ -296,15 +302,17 @@ ShowCursor(bool bShow)
 	// Re-enable MMIO decoder via kernel ioctl (since standard VGA writes may have disabled it)
 	ioctl(gInfo.deviceFileDesc, TRIDENT_ENABLE_MMIO);
 
-	write_crtc_reg_logged("PCIReg", 0x39, 0x87);
+	//write_crtc_reg_logged("PCIReg", 0x39, 0x87);
+	write_crtc_reg(PCIReg, 0x87); // 0x39
 
-	uint8 ctrl = read_crtc_reg(0x50);
+	uint8 ctrl = read_crtc_reg(CursorControl);
 	if (bShow) {
 		ctrl |= 0x01;
 	} else {
 		ctrl &= ~0x01;
 	}
-	write_crtc_reg_logged("CursorControl", 0x50, ctrl);
+	//write_crtc_reg_logged("CursorControl", 0x50, ctrl);
+	write_crtc_reg(CursorControl, ctrl); // 0x50
 }
 
 } // extern "C"
