@@ -12,6 +12,7 @@
 
 #include <Accelerant.h>
 #include "accel.h"
+#include "trident_regs.h"
 #include <unistd.h>
 
 
