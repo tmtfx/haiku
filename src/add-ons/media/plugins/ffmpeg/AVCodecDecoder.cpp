@@ -483,7 +483,9 @@ AVCodecDecoder::_NegotiateVideoOutputFormat(media_format* inOutFormat)
 		return B_ERROR;
 	}
 	fCodecInitDone = true;
-
+// ===============================================================================================
+/* commented, because we want to use sws for color space conversion but still using hardware 
+ * overlay if available with other formats
 #if USE_SWS_FOR_COLOR_SPACE_CONVERSION
 	fOutputColorSpace = B_RGB32;
 #else
@@ -495,6 +497,14 @@ AVCodecDecoder::_NegotiateVideoOutputFormat(media_format* inOutFormat)
 	else
 		fOutputColorSpace = B_RGB32;
 #endif
+*/
+	color_space requestedSpace = inOutFormat->u.raw_video.display.format;
+	if (requestedSpace == B_YCbCr422 || requestedSpace == B_RGB16 || requestedSpace == B_RGB15) {
+		fOutputColorSpace = requestedSpace;
+	} else {
+		fOutputColorSpace = B_RGB32;
+	}
+// ================================================================================================
 
 #if USE_SWS_FOR_COLOR_SPACE_CONVERSION
 	if (fSwsContext != NULL)
