@@ -1,8 +1,11 @@
 /*
+ * Copyright 1992-2003, Alan Hourihane. All rights reserved.
  * Copyright 2026, Gemini CLI. All rights reserved.
  * Distributed under the terms of the MIT License.
  *
  * Authors:
+ *		Alan Hourihane <alanh@fairlite.demon.co.uk>
+ *		Fabio Tomat <f.t.public@gmail.com>
  *		Gemini CLI <gemini-cli@google.com>
  */
 
@@ -10,6 +13,7 @@
 #include "accel.h"
 #include <string.h>
 #include <video_overlay.h>
+#include <unistd.h>
 
 
 #define MAX_OVERLAY_BUFFERS 4
@@ -22,6 +26,18 @@ struct trident_overlay_buffer {
 
 static trident_overlay_buffer sOverlayBuffers[MAX_OVERLAY_BUFFERS];
 static int32 sOverlayToken = 0;
+
+
+// Helper logging function for CRTC overlay register writes
+static inline void
+write_crtc_reg_logged(const char* name, uint8 index, uint8 value)
+{
+	uint8 old_val = read_crtc_reg(index);
+	write_crtc_reg(index, value);
+	uint8 new_val = read_crtc_reg(index);
+	debug_printf("Trident_OVL: CR%02X (%s) Old=0x%02X, Write=0x%02X, Readback=0x%02X\n",
+		index, name, old_val, value, new_val);
+}
 
 
 extern "C" {
@@ -175,11 +191,20 @@ status_t
 trident_release_overlay(overlay_token ot)
 {
 	(void)ot;
+
+	debug_printf("Trident_OVL: trident_release_overlay called\n");
+
+	// Re-enable MMIO decoder via kernel ioctl (since standard VGA writes may have disabled it)
+	ioctl(gInfo.deviceFileDesc, TRIDENT_ENABLE_MMIO);
+
+	// Ensure CRTC registers remain unlocked with MMIO active (CR39 = 0x87)
+	write_crtc_reg_logged("PCIReg", 0x39, 0x87);
+
 	// Disable Trident video overlay (BES)
-	write_crtc_reg(0x39, 0x80); // Unlock CRTC
 	uint8 cr70 = read_crtc_reg(0x70);
 	cr70 &= ~0x01; // Disable BES overlay
-	write_crtc_reg(0x70, cr70);
+	write_crtc_reg_logged("BESControl", 0x70, cr70);
+
 	return B_OK;
 }
 
@@ -191,13 +216,19 @@ trident_configure_overlay(overlay_token ot, const overlay_buffer* ob,
 	(void)ot;
 	(void)ov;
 
-	write_crtc_reg(0x39, 0x80); // Unlock CRTC
+	debug_printf("Trident_OVL: trident_configure_overlay started. Ob=0x%" B_PRIXADDR "\n", (addr_t)ob);
+
+	// Re-enable MMIO decoder via kernel ioctl (since standard VGA writes may have disabled it)
+	ioctl(gInfo.deviceFileDesc, TRIDENT_ENABLE_MMIO);
+
+	// Ensure CRTC registers remain unlocked with MMIO active (CR39 = 0x87)
+	write_crtc_reg_logged("PCIReg", 0x39, 0x87);
 
 	if (!ob || !ow || !ov) {
 		// Disable BES overlay
 		uint8 cr70 = read_crtc_reg(0x70);
 		cr70 &= ~0x01;
-		write_crtc_reg(0x70, cr70);
+		write_crtc_reg_logged("BESControl", 0x70, cr70);
 		return B_OK;
 	}
 
@@ -206,27 +237,27 @@ trident_configure_overlay(overlay_token ot, const overlay_buffer* ob,
 
 	// Set overlay buffer address (expressed in double words)
 	uint32 dword_addr = buffer_offset / 4;
-	write_crtc_reg(0x7C, dword_addr & 0xFF);
-	write_crtc_reg(0x7D, (dword_addr >> 8) & 0xFF);
-	write_crtc_reg(0x7E, (dword_addr >> 16) & 0xFF);
+	write_crtc_reg_logged("OverlayAddrLow", 0x7C, dword_addr & 0xFF);
+	write_crtc_reg_logged("OverlayAddrMid", 0x7D, (dword_addr >> 8) & 0xFF);
+	write_crtc_reg_logged("OverlayAddrHigh", 0x7E, (dword_addr >> 16) & 0xFF);
 
 	// Write coordinates to CRTC extension registers
-	write_crtc_reg(0x71, ow->h_start & 0xFF);
-	write_crtc_reg(0x72, (ow->h_start >> 8) & 0xFF);
-	write_crtc_reg(0x73, ow->v_start & 0xFF);
-	write_crtc_reg(0x74, (ow->v_start >> 8) & 0xFF);
+	write_crtc_reg_logged("HStartLow", 0x71, ow->h_start & 0xFF);
+	write_crtc_reg_logged("HStartHigh", 0x72, (ow->h_start >> 8) & 0xFF);
+	write_crtc_reg_logged("VStartLow", 0x73, ow->v_start & 0xFF);
+	write_crtc_reg_logged("VStartHigh", 0x74, (ow->v_start >> 8) & 0xFF);
 
 	uint16 right = ow->h_start + ow->width;
 	uint16 bottom = ow->v_start + ow->height;
-	write_crtc_reg(0x75, right & 0xFF);
-	write_crtc_reg(0x76, (right >> 8) & 0xFF);
-	write_crtc_reg(0x77, bottom & 0xFF);
-	write_crtc_reg(0x78, (bottom >> 8) & 0xFF);
+	write_crtc_reg_logged("HEndLow", 0x75, right & 0xFF);
+	write_crtc_reg_logged("HEndHigh", 0x76, (right >> 8) & 0xFF);
+	write_crtc_reg_logged("VEndLow", 0x77, bottom & 0xFF);
+	write_crtc_reg_logged("VEndHigh", 0x78, (bottom >> 8) & 0xFF);
 
 	// Enable video overlay (BES bit 0 = 1, YUV format select bit 1 = 1)
 	uint8 cr70 = read_crtc_reg(0x70);
 	cr70 |= 0x03;
-	write_crtc_reg(0x70, cr70);
+	write_crtc_reg_logged("BESControl", 0x70, cr70);
 
 	return B_OK;
 }
