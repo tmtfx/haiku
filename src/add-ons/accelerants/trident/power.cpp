@@ -110,12 +110,12 @@ trident_set_dpms_mode(uint32 mode)
 	// Write back the new DPMSCont to Graphics Controller index 0x23
 	write_vga_reg(0x3CE, 0x23);
 	write_vga_reg(0x3CF, dpmsCont);
-	uint8 new_dpmsCont = read_vga_reg(0x3CF);
+	//uint8 new_dpmsCont = read_vga_reg(0x3CF);
 
 	// Write back the new PMCont directly to physical BAR 1 offset 0x3C6
 	write_reg8(0x3C8, 0x04);
 	write_reg8(0x3C6, pmCont);
-	uint8 new_pmCont = read_reg8(0x3C6);
+	//uint8 new_pmCont = read_reg8(0x3C6);
 
 	//debug_printf("Trident_PWR: DPMSCont (GR23) Old=0x%02X, Write=0x%02X, Readback=0x%02X\n",
 	//	old_dpmsCont, dpmsCont, new_dpmsCont);
