@@ -1,8 +1,11 @@
 /*
+ * Copyright 1992-2003, Alan Hourihane. All rights reserved.
  * Copyright 2026, Gemini CLI. All rights reserved.
  * Distributed under the terms of the MIT License.
  *
  * Authors:
+ *		Alan Hourihane <alanh@fairlite.demon.co.uk>
+ *		Fabio Tomat <f.t.public@gmail.com>
  *		Gemini CLI <gemini-cli@google.com>
  */
 
