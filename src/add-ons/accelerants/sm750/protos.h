@@ -60,7 +60,7 @@ const uint32 *sm750_overlay_supported_spaces(const display_mode *dm);
 void sm750_get_overlay_constraints(const display_mode *dm, const overlay_buffer *ob, overlay_constraints *oc);
 overlay_buffer *sm750_allocate_overlay_buffer(color_space cs, uint16 width, uint16 height);
 status_t sm750_release_overlay_buffer(const overlay_buffer *buffer);
-status_t sm750_allocate_overlay(overlay_token *token);
+overlay_token sm750_allocate_overlay(void);
 status_t sm750_release_overlay(overlay_token token);
 status_t sm750_configure_overlay_api(overlay_token token, const overlay_buffer *buffer, const overlay_window *window, const overlay_view *view);
 uint32 sm750_overlay_supported_features(uint32 space);

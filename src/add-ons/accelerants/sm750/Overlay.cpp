@@ -316,20 +316,20 @@ sm750_release_overlay_buffer(const overlay_buffer *buffer)
     return B_ERROR;
 }
 
-status_t
+overlay_token
 sm750_allocate_overlay(void)//overlay_token *token)
 {
 	CALLED();
 	shared_info *si = gInfo->si;
     if (atomic_test_and_set(&si->overlay_in_use, 1, 0) != 0) {
-        return B_BUSY; 
+        return NULL; 
     }
 
     si->overlay.overlay_token++;
     //*token = (overlay_token)si->overlay.overlay_token;
     overlay_token token = (overlay_token)si->overlay.overlay_token;
     
-    debug_printf("SM750_ACC: Overlay allocated. Token ID: %ld\n", (uintptr_t)*token);
+    debug_printf("SM750_ACC: Overlay allocated. Token ID: %p\n", token);
     //return B_OK;
     return token;
 }
