@@ -34,13 +34,13 @@ sm750_get_edid_info(void* info, size_t size, uint32* _version)
     
     if (!found && si->card_info.has_edid_vesa) {
     	edid_decode(&gInfo->edid_vesa_info, &si->vesa_edid_raw);
-        debug_printf("SM750_ACC: I2C fallito, fornisco EDID VESA di backup.\n");
+        debug_printf("SM750_ACC: I2C failed, providing a backup VESA EDID.\n");
         *target = gInfo->edid_vesa_info;
         found = true;
     }
 
     if (!found) {
-        debug_printf("SM750_ACC: Nessun EDID trovato (I2C fallito e niente VESA).\n");
+        debug_printf("SM750_ACC: No EDIDs found (I2C failed and no VESA EDID).\n");
         return B_ERROR;
     }
 
@@ -51,7 +51,7 @@ sm750_get_edid_info(void* info, size_t size, uint32* _version)
     if (_version != NULL)
         *_version = EDID_VERSION_1;
 
-    debug_printf("SM750_ACC: EDID info fornito correttamente al sistema.\n");
+    //debug_printf("SM750_ACC: EDID info fornito correttamente al sistema.\n");
     return B_OK;
 }
 
@@ -148,6 +148,7 @@ sm750_set_fb_addr(uint32 offset, bool is_panel)
 
     // 2. Controllo Limiti (Safe Guard per 16MB)
     if (offset >= (16 * 1024 * 1024)) {
+    	debug_printf("SM750_ACC: TODO: use real size");
         debug_printf("SM750_ACC: ERROR - FB Address 0x%08x fuori dai 16MB!\n", offset);
         return B_BAD_VALUE;
     }
@@ -350,7 +351,7 @@ sm750_set_display_mode(display_mode *mode)
 status_t
 sm750_get_frame_buffer_config(frame_buffer_config *config)
 {
-	debug_printf("SM750_ACC: chiamata a sm750_get_frame_buffer_config\n");
+	//debug_printf("SM750_ACC: chiamata a sm750_get_frame_buffer_config\n");
 	if (!config) return B_BAD_VALUE;
 	
     shared_info *si = gInfo->si;
@@ -362,8 +363,8 @@ sm750_get_frame_buffer_config(frame_buffer_config *config)
 
         *config = si->fbc2;
     }
-    debug_printf("SM750_ACC: dw_config ptr=%p, dma=%p, row_bytes=%" B_PRIu32 " (IsPanel: %d)\n",
-        config->frame_buffer, config->frame_buffer_dma, config->bytes_per_row, si->card_info.is_panel);
+    //debug_printf("SM750_ACC: dw_config ptr=%p, dma=%p, row_bytes=%" B_PRIu32 " (IsPanel: %d)\n",
+    //    config->frame_buffer, config->frame_buffer_dma, config->bytes_per_row, si->card_info.is_panel);
     
     
     return B_OK;
@@ -388,7 +389,7 @@ sm750_get_mode_list(display_mode* dm)
     shared_info *si = gInfo->si;
     
     if (si->mode_count == 0 || gInfo->mode_list == NULL) {
-        debug_printf("SM750_ACC: ERROR - Nessun modo trovato!\n");
+        debug_printf("SM750_ACC: ERROR - No modes found!\n");
         return B_ERROR;
     }
 
@@ -444,7 +445,7 @@ sm750_propose_display_mode(display_mode *target, const display_mode *low, const 
         case B_RGB16: bytesPerPixel = 2; break;
         case B_CMAP8: bytesPerPixel = 1; break;
         default: 
-            debug_printf("SM750: Formato colore 0x%x non riconosciuto!\n", target->space);
+            debug_printf("SM750: colorspace 0x%x not recognized!\n", target->space);
             return B_BAD_VALUE;
     }
     
@@ -481,7 +482,7 @@ sm750_set_indexed_colors(uint32 count, uint8 first, uint8 *color_data, uint32 fl
 
     volatile uint8* regs = (volatile uint8*)gInfo->regs;
     
-    debug_printf("SM750_ACC: Aggiornamento palette: %u colori a partire da %u\n", count, first);
+    //debug_printf("SM750_ACC: Aggiornamento palette: %u colori a partire da %u\n", count, first);
     
     // Iteriamo sui colori passati da Haiku
     for (uint32 i = 0; i < count; i++) {

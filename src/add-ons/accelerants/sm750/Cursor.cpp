@@ -68,7 +68,7 @@ status_t
 sm750_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
     const uint8* andMask, const uint8* xorMask)
 {
-	CALLED();
+	//CALLED();
     if (width > 64 || height > 64)
         return B_BAD_VALUE;
 
@@ -141,7 +141,7 @@ status_t
 sm750_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
     color_space colorSpace, uint16 bytesPerRow, const uint8* bitmapData)
 {
-	CALLED();
+	//CALLED();
 	(void)colorSpace;
 	// TODO: if the mouse flickers bit 31 of SM750_DISP_PANEL_CUR_ADDR should be set 0
 	//       while changing the bitmap

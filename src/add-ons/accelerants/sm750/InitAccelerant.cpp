@@ -57,7 +57,7 @@ static status_t init_vram_manager(shared_info* si)
         si->cursor.vram_offset = cursorOffset;
         si->cursor.block_id = cursorBlockID;
         si->mem_mgr = local_mem_mgr;
-        debug_printf("SM750_ACC: Cursor dinamically allocated at offset 0x%x\n", cursorOffset);
+        //debug_printf("SM750_ACC: Cursor dinamically allocated at offset 0x%x\n", cursorOffset);
     } else {
         debug_printf("SM750_ACC ERROR: Unable to allocate memory for the cursor!\n");
     }
@@ -263,21 +263,6 @@ static status_t init_common(int fd,bool isClone) {
         return B_ERROR;
     }
     
-    /* Clone the Framebuffer (BAR0) for accelerant local use */
-    //void* fb_ptr = NULL;
-    //gInfo->fb_area = clone_area("sm750 fb user", &fb_ptr,
-    //    B_ANY_ADDRESS, B_READ_AREA | B_WRITE_AREA, gInfo->si->fb_area);
-    
-    //if (gInfo->fb_area < 0) {
-    //    delete_area(gInfo->regs_area);
-    //    delete_area(gInfo->shared_info_area);
-    //    return gInfo->fb_area;
-    //}
-
-    /* save virtual pointer LOCALLY */
-    //gInfo->framebuffer = (uint8*)fb_ptr;
-    //debug_printf("SM750_ACC: AccelerantInfo framebuffer ptr=%p\n",gInfo->framebuffer);
-    
     if (!isClone) {
         // --- MEMORY MANAGER INITIALIZATION ---
         if (init_vram_manager(si) != B_OK) {
@@ -288,11 +273,11 @@ static status_t init_common(int fd,bool isClone) {
 
         status_t result = si->engine.lock.Init("SM750 2D engine lock");
 		if (result == B_OK) {
-			// abilitiamo l'overlay
+			// nothing for now
 		}
 		if (si->card_info.has_edid_vesa) {
             edid_decode(&gInfo->edid_vesa_info, &si->vesa_edid_raw);
-            debug_printf("SM750_ACC: EDID VESA decoded\n");
+            //debug_printf("SM750_ACC: EDID VESA decoded\n");
         }
         create_mode_list();
         
@@ -317,7 +302,7 @@ static status_t init_common(int fd,bool isClone) {
             gInfo);
         if (gInfo->vblank_thread >= 0) {
             resume_thread(gInfo->vblank_thread);
-            debug_printf("SM750_ACC: VBlank service thread started (ID: %" B_PRId32 ")\n", gInfo->vblank_thread);
+            //debug_printf("SM750_ACC: VBlank service thread started (ID: %" B_PRId32 ")\n", gInfo->vblank_thread);
         } else {
             debug_printf("SM750_ACC: ERROR spawn_thread failed!\n");
         }
@@ -390,7 +375,7 @@ status_t sm750_clone_accelerant(void* info)
 }
 
 status_t sm750_get_accelerant_device_info(accelerant_device_info *adi) {
-	CALLED();
+	//CALLED();
     adi->version = 1;
     strcpy(adi->name, "Silicon Motion SM750");
     strcpy(adi->chipset, "SM750");
@@ -433,7 +418,7 @@ void sm750_uninit_accelerant(void) {
 }
 
 void* get_accelerant_hook(uint32 feature, void* data) {
-	debug_printf("SM750_ACC: Request 0x%x\n", feature);
+	//debug_printf("SM750_ACC: Request 0x%x\n", feature);
     switch (feature) {
         case B_INIT_ACCELERANT:             return (void*)sm750_init_accelerant;
         case B_ACCELERANT_CLONE_INFO_SIZE:  return (void*)sm750_accelerant_clone_info_size;

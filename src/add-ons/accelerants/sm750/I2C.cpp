@@ -392,7 +392,7 @@ static status_t sm750_read_edid_I2C(uint8* buffer) {
 	// --- VERIFICA FINALE ---
 	// L'EDID standard inizia sempre con 00 FF FF FF FF FF FF 00
 	if (buffer[0] == 0x00 && buffer[1] == 0xFF && buffer[2] == 0xFF) {
-		debug_printf("SM750_ACC: EDID letto con successo! Header valido.\n");
+		//debug_printf("SM750_ACC: EDID letto con successo! Header valido.\n");
 		goto finalize;
 	}
 	
@@ -448,7 +448,7 @@ status_t
 sm750_read_edid(uint8* buffer)
 {
     // Tentativo 1: I2C Hardware
-    debug_printf("SM750_ACC: Trying to read EDID via Hardware I2C...\n");
+    //debug_printf("SM750_ACC: Trying to read EDID via Hardware I2C...\n");
     status_t status = sm750_read_edid_I2C(buffer);
 
     if (status != B_OK) {

@@ -18,7 +18,7 @@ extern accelerant_info *gInfo;
 static void
 sm750_set_video_scale(const overlay_window *window, const overlay_buffer *buffer)
 {
-	CALLED();
+//	CALLED();
     vuint32 *regs = gInfo->regs;
     
     uint32 srcW = buffer->width;
@@ -59,7 +59,7 @@ sm750_set_video_scale(const overlay_window *window, const overlay_buffer *buffer
 uint32 
 sm750_overlay_count(const display_mode *dm)
 {
-	CALLED();
+//	CALLED();
     // SM750 has 1 video layer and 1 alpha video layer (we probably would use it for 32 bit alphablended cursor)
     // Let's return 1
     return 1;
@@ -68,8 +68,8 @@ sm750_overlay_count(const display_mode *dm)
 const uint32 *
 sm750_overlay_supported_spaces(const display_mode *dm)
 {
-	CALLED();
-	debug_printf("SM750_ACC: sm750_overlay_supported_spaces chiamato (dm: %p)\n", dm);
+//	CALLED();
+//	debug_printf("SM750_ACC: sm750_overlay_supported_spaces chiamato (dm: %p)\n", dm);
     static const uint32 spaces[] = {
         B_YCbCr422,	// YUY2 (most common)
         B_RGB16,	// RGB 5:6:5
@@ -82,16 +82,16 @@ void
 sm750_get_overlay_constraints(const display_mode *dm, const overlay_buffer *ob,
     overlay_constraints *oc)
 {
-	CALLED();
+//	CALLED();
 	if (dm == NULL) {
-        debug_printf("SM750_ACC: ATTENZIONE! display_mode è NULL in constraints\n");
+        //debug_printf("SM750_ACC: ATTENZIONE! display_mode è NULL in constraints\n");
         return;
     }
     if (!oc) {
-    	debug_printf("SM750_ACC: Richista overlay constraints con oc NULL");
+    	//debug_printf("SM750_ACC: Richista overlay constraints con oc NULL");
     	return;
     }
-    debug_printf("SM750_ACC: Constraints per buffer %p\n", ob);
+    //debug_printf("SM750_ACC: Constraints per buffer %p\n", ob);
     oc->view.width_alignment = 1;//7      // Algnment to 8 pixels
     oc->view.height_alignment = 0;
     oc->window.width_alignment = 1;//7
@@ -121,7 +121,7 @@ sm750_get_overlay_constraints(const display_mode *dm, const overlay_buffer *ob,
 overlay_buffer *
 sm750_allocate_overlay_buffer(color_space cs, uint16 width, uint16 height)
 {
-	CALLED();
+//	CALLED();
     shared_info *si = gInfo->si;
     
     // Look for a free slot in myBuffer array
@@ -148,8 +148,7 @@ sm750_allocate_overlay_buffer(color_space cs, uint16 width, uint16 height)
     uint32 available_vram = mem_get_free_memory((mem_info*)si->mem_mgr);
 
     if (size > available_vram) {
-        debug_printf("SM750_ACC: Overlay too big! Free RAM heap: %u, Needed: %u\n", 
-                  available_vram, size);
+        debug_printf("SM750_ACC: Overlay too big! Free RAM heap: %u, Needed: %u\n", available_vram, size);
         return NULL;
     }
     
@@ -170,10 +169,8 @@ sm750_allocate_overlay_buffer(color_space cs, uint16 width, uint16 height)
 	ob->buffer = (void *)((addr_t)si->framebuffer + alignedOffset);
     ob->buffer_dma = (void *)(addr_t)alignedOffset;
     
-    //debug_printf("SM750_ACC: Buffer allocato con INGANNO (16-bit). Aligned Offset: 0x%08x, Pitch: %u\n", 
-    //             (uint32)(addr_t)ob->buffer_dma, alignedPitch);
-    if (ob) debug_printf("SM750_ACC: Buffer allocated. Original offset: 0x%08x, Aligned: 0x%08x, Pitch: %u\n", 
-                 offset, (uint32)(addr_t)ob->buffer_dma, alignedPitch);
+    //if (ob) debug_printf("SM750_ACC: Buffer allocated. Original offset: 0x%08x, Aligned: 0x%08x, Pitch: %u\n", 
+    //             offset, (uint32)(addr_t)ob->buffer_dma, alignedPitch);
 
     // Save blockID
     si->overlay.myBufferBlockID[slot] = blockID;
@@ -184,12 +181,12 @@ sm750_allocate_overlay_buffer(color_space cs, uint16 width, uint16 height)
 void
 sm750_configure_overlay(const overlay_window *window, const overlay_buffer *buffer)
 {
-	CALLED();
+//	CALLED();
 	
 	vuint32 *regs = gInfo->regs;
 	
 	if (buffer == NULL || window == NULL) {
-		debug_printf("SM750_ACC: Rilevato buffer/window NULL, spengo il piano video.\n");
+		//debug_printf("SM750_ACC: Rilevato buffer/window NULL, spengo il piano video.\n");
         uint32 control = SM750_REG32(SM750_DISP_PANEL_VIDEO_DISP_CTRL);
         control &= ~(1 << 2); // Disabilita Video Plane (Bit 2)
         SM750_WREG32(SM750_DISP_PANEL_VIDEO_DISP_CTRL, control);
@@ -249,8 +246,7 @@ sm750_configure_overlay(const overlay_window *window, const overlay_buffer *buff
     
     // Mask as datasheet wants (10 bit for field: 29:20 e 13:4)
     uint32 fbWidthReg = ((windowWidthUnits & 0x3FF) << 20) | ((fbPitchUnits & 0x3FF) << 4);
-    debug_printf("SM750_ACC: FB_WIDTH Reg (0x44): 0x%08x (WinUnits: %u, PitchUnits: %u)\n", 
-                 fbWidthReg, windowWidthUnits, fbPitchUnits);
+    //debug_printf("SM750_ACC: FB_WIDTH Reg (0x44): 0x%08x (WinUnits: %u, PitchUnits: %u)\n", fbWidthReg, windowWidthUnits, fbPitchUnits);
 
     SM750_WREG32(SM750_DISP_PANEL_VIDEO_FB_WIDTH, fbWidthReg);
     //SM750_WREG32(SM750_DISP_PANEL_VIDEO_FB_WIDTH, (pitchIn128BitUnits << 20) | (pitchIn128BitUnits << 4));
@@ -280,11 +276,11 @@ sm750_configure_overlay(const overlay_window *window, const overlay_buffer *buff
     // YUV constants initialization (Color Space Conversion)
     //SM750_WREG32(SM750_DISP_PANEL_VIDEO_YUV_CONST, 0x00531515);
     uint32 csc_video = SM750_REG32(SM750_DISP_PANEL_VIDEO_YUV_CONST);
-    debug_printf("SM750_ACC: YUV constants(Color Space Conversion) 0x%08x\n", csc_video);
+    //debug_printf("SM750_ACC: YUV constants(Color Space Conversion) 0x%08x\n", csc_video);
 
     // Control Register Configuration (0x080040)
     uint32 control = SM750_REG32(SM750_DISP_PANEL_VIDEO_DISP_CTRL);
-    debug_printf("SM750_ACC: old value for video control register: 0x%08x\n", control);
+    //debug_printf("SM750_ACC: old value for video control register: 0x%08x\n", control);
     
     control = 0;
 
@@ -326,15 +322,15 @@ sm750_configure_overlay(const overlay_window *window, const overlay_buffer *buff
 
     // Ensure Force Scale 1/2 are off
     //control &= ~((1 << 11) | (1 << 10));
-    debug_printf("SM750_ACC: new video control register: 0x%08x\n", control);
-
+    
+    //debug_printf("SM750_ACC: new video control register: 0x%08x\n", control);
     SM750_WREG32(SM750_DISP_PANEL_VIDEO_DISP_CTRL, control);
 }
 
 status_t
 sm750_release_overlay_buffer(const overlay_buffer *buffer)
 {
-	CALLED();
+	//CALLED();
 	if (buffer == NULL)
         return B_BAD_VALUE;
         
@@ -353,27 +349,25 @@ sm750_release_overlay_buffer(const overlay_buffer *buffer)
 }
 
 overlay_token
-sm750_allocate_overlay(void)//overlay_token *token)
+sm750_allocate_overlay(void)
 {
-	CALLED();
+	//CALLED();
 	shared_info *si = gInfo->si;
     if (atomic_test_and_set(&si->overlay_in_use, 1, 0) != 0) {
         return NULL; 
     }
 
     si->overlay.overlay_token++;
-    //*token = (overlay_token)si->overlay.overlay_token;
     overlay_token token = (overlay_token)si->overlay.overlay_token;
     
-    debug_printf("SM750_ACC: Overlay allocated. Token ID: %p\n", token);
-    //return B_OK;
+    //debug_printf("SM750_ACC: Overlay allocated. Token ID: %p\n", token);
     return token;
 }
 
 status_t
 sm750_release_overlay(overlay_token token)
 {
-	CALLED();
+	//CALLED();
 	if (token != (overlay_token)gInfo->si->overlay.overlay_token) {
         return B_BAD_VALUE;
     }
@@ -388,10 +382,9 @@ sm750_release_overlay(overlay_token token)
     gInfo->si->overlay.overlay_token = 0;
     atomic_set(&gInfo->si->overlay_in_use, 0);
     
-	// Breve attesa per completare lo svuotamento della FIFO hardware
     snooze(10000); // 10ms
 
-    debug_printf("SM750_ACC: Overlay released and hardware off.\n");
+    //debug_printf("SM750_ACC: Overlay released and hardware off.\n");
     return B_OK;
 }
 
@@ -399,7 +392,7 @@ status_t
 sm750_configure_overlay_api(overlay_token token, const overlay_buffer *buffer,
     const overlay_window *window, const overlay_view *view)
 {
-	CALLED();
+	//CALLED();
 	if (token != (overlay_token)gInfo->si->overlay.overlay_token) {
         return B_BAD_VALUE;
     }
@@ -421,7 +414,7 @@ sm750_configure_overlay_api(overlay_token token, const overlay_buffer *buffer,
 uint32
 sm750_overlay_supported_features(uint32 space)
 {
-	CALLED();
+	//CALLED();
     // The SM750 is special: the video layer supports YUYV but doesn't have color keying.
     // The alpha video layer has color keying but not YUYV format.
     // B_OVERLAY_COLOR_KEY | // Transparency via color (essential)

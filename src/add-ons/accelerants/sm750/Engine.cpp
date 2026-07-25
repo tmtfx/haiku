@@ -122,7 +122,7 @@ void sm750_program_pll(uint32 target_khz, bool is_panel)
 
 status_t sm750_move_display_area(uint16 h_display_start, uint16 v_display_start)
 {
-	CALLED();
+	//CALLED();
     shared_info *si = gInfo->si;
     
     uint32 bytes_per_pixel = (si->dm.space == B_RGB32) ? 4 : 2;
@@ -159,7 +159,7 @@ uint32 sm750_accelerant_engine_count(void) {
 
 status_t sm750_acquire_engine(uint32 capabilities, uint32 max_priority, 
                                sync_token *st, engine_token **et) {
-    CALLED();
+    //CALLED();
     // 1. Acquisizione ultra-veloce
     if (gInfo->si->engine.lock.Acquire() != B_OK)
 		return B_ERROR;
@@ -174,7 +174,7 @@ status_t sm750_acquire_engine(uint32 capabilities, uint32 max_priority,
 }
 
 void sm750_release_engine(engine_token *et, sync_token *st) {
-    CALLED();
+    //CALLED();
     // Se l'App Server ha chiesto un token per il lavoro appena finito, lo generiamo
     if (st) sm750_get_sync_token(et, st);
     
@@ -184,7 +184,7 @@ void sm750_release_engine(engine_token *et, sync_token *st) {
 }
 
 void sm750_wait_engine_idle(void) {
-    CALLED();
+    //CALLED();
     vuint32 *regs = gInfo->regs;
     // Bit 31: 0 = Idle, 1 = Busy
     //while (SM750_REG32(SM750_2D_CONTROL) & (1U << 31)) {
@@ -203,7 +203,7 @@ void sm750_wait_engine_idle(void) {
     }
 }
 status_t sm750_get_sync_token(engine_token *et, sync_token *st) {
-    CALLED();
+    //CALLED();
     // Il sync_token serve a Haiku per sapere a che punto è il lavoro.
     // Per ora usiamo un contatore semplice: ogni volta che rilasciamo il motore,
     // diciamo che il "tempo" è andato avanti.
@@ -213,7 +213,7 @@ status_t sm750_get_sync_token(engine_token *et, sync_token *st) {
 }
 
 status_t sm750_sync_to_token(sync_token *st) {
-	CALLED();
+	//CALLED();
 	// TODO
     // Quando Haiku ci passa un token e dice "Sincronizzati", 
     // l'unico modo sicuro che abbiamo (per ora) è aspettare che l'engine sia IDLE.
@@ -253,7 +253,7 @@ void sm750_init_2d_engine(uint32 width, uint32 space) {
 }*/
 
 void sm750_init_2d_engine(display_mode *mode) {
-	CALLED();
+	//CALLED();
     vuint32 *regs = gInfo->regs;
     // USIAMO LA LARGHEZZA VIRTUALE (fondamentale per l'allineamento VRAM)
     uint32 width = mode->virtual_width; 
@@ -327,7 +327,7 @@ void sm750_init_2d_engine(display_mode *mode) {
 void sm750_fill_rectangle(engine_token *et, uint32 color, 
     fill_rect_params *params, uint32 count)
 {
-	CALLED();
+	//CALLED();
 	if (et == NULL) return;
 	// 1. ACQUISIAMO IL LOCK (Essenziale per Haiku)
     gInfo->si->engine.lock.Lock();
@@ -365,7 +365,7 @@ void sm750_fill_rectangle(engine_token *et, uint32 color,
 }
 
 void sm750_screen_to_screen_blit(engine_token *et, blit_params *p, uint32 count) {
-	CALLED();
+	//CALLED();
 	if (et == NULL) return;
 	// 1. ACQUISIAMO IL LOCK (Essenziale per Haiku)
     gInfo->si->engine.lock.Lock();
@@ -400,7 +400,7 @@ void sm750_screen_to_screen_blit(engine_token *et, blit_params *p, uint32 count)
     gInfo->si->engine.lock.Release();
 }
 void sm750_invert_rectangle(engine_token *et, fill_rect_params *list, uint32 count) {
-	CALLED();
+	//CALLED();
     if (et == NULL) return;
     
     // Protezione col Benaphore
@@ -435,7 +435,7 @@ void sm750_invert_rectangle(engine_token *et, fill_rect_params *list, uint32 cou
     gInfo->si->engine.lock.Release();
 }
 void sm750_fill_span(engine_token *et, uint32 color, uint16 *spans, uint32 count) {
-	CALLED();
+	//CALLED();
     if (et == NULL) return;
 
     gInfo->si->engine.lock.Lock();
@@ -473,7 +473,7 @@ int32 sm750_vblank_service_thread(void *arg)
     shared_info *si = ai->si;
     vuint32* regs = ai->regs; // Per le macro
     
-    debug_printf("SM750_ACC: Thread vblank in ascolto su SEM ID: %d\n", si->vblank_sem);
+    //debug_printf("SM750_ACC: Thread vblank in ascolto su SEM ID: %d\n", si->vblank_sem);
 
     while (atomic_get(&si->irq_enabled) > 0) {
     	//status_t err = acquire_sem(si->vblank_sem);
