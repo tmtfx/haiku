@@ -16,9 +16,12 @@
 #include <drivers/bios.h>
 #endif
 #include <malloc.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <graphic_driver.h>
+
+#include <driver_settings.h>
 
 #include <boot_item.h>
 #include <frame_buffer_console.h>
@@ -69,6 +72,14 @@ struct DeviceInfo {
 };
 
 
+static trident_settings current_settings = {    
+    "trident.accelerant",	// accelerant filename
+    false,					// dumprom, function still not integrated
+    0,						// memory, override builtin memory size detection in MB
+    true,					// hardcursor, if true use on-chip hardware cursor
+    2,						// cursorbits, number of bits used to draw bitmap cursor
+};
+
 static Benaphore		gLock;
 static DeviceInfo		gDeviceInfo[MAX_DEVICES];
 static char*			gDeviceNames[MAX_DEVICES + 1];
@@ -98,6 +109,93 @@ static device_hooks gDeviceHooks =
 	NULL
 };
 
+/*
+static void
+draw_logo(DeviceInfo& di)
+{
+    SharedInfo& si = *(di.sharedInfo);
+    
+    if (si.videoMemArea < 0)
+        return;
+
+    // Retrieve framebuffer info from bootloader
+    struct frame_buffer_boot_info* bi = (struct frame_buffer_boot_info*)get_boot_item(
+        FRAME_BUFFER_BOOT_INFO, NULL);
+    
+    if (!bi)
+        return;
+
+    // s3_logo array is 32-bit (RGBA/RGB32). 
+    if (bi->depth != 32)
+        return;
+
+    uint32 screenWidth = bi->width;
+    uint32 screenHeight = bi->height;
+    
+    uint32 bytesPerRow = bi->bytes_per_row;
+    if (bytesPerRow == 0)
+        bytesPerRow = screenWidth * 4;
+
+    uint32 fbPitch = bytesPerRow / 4;
+
+    uint32 logoW = s3_logo_width;   // 640
+    uint32 logoH = s3_logo_height;  // 240
+
+    // Centering
+    int32 startX = (int32)((screenWidth - logoW) / 2);
+	if (startX < 0) startX = 0;
+    int32 startY = (int32)((screenHeight - logoH) / 2);
+	if (startY < 0) startY = 0;
+
+	uint8* fb = (uint8*)si.videoMemAddr;
+	if (fb == NULL) {
+		fb = (uint8*)bi->frame_buffer;
+	}
+	if (fb == NULL)
+		return;
+
+    // Draw kernel space
+	//
+	//uint32* fb = (uint32*)si.videoMemAddr;
+    //for (uint32 y = 0; y < logoH && (startY + (int32)y) < (int32)screenHeight; y++) {
+    //    for (uint32 x = 0; x < logoW && (startX + (int32)x) < (int32)screenWidth; x++) {
+    //        uint32 fbIndex = (uint32)((startY + (int32)y) * (int32)fbPitch + (startX + (int32)x));
+    //        fb[fbIndex] = s3_logo[y * logoW + x];
+    //    }
+    //}
+	for (uint32 y = 0; y < logoH && (startY + y) < screenHeight; y++) {
+		uint32 fbOffset = ((startY + y) * fbPitch + startX) * sizeof(uint32);
+		uint32 logoRowOffset = y * logoW;
+		uint32 remainingWidth = screenWidth - startX;
+		uint32 copyPixels = (logoW < remainingWidth) ? logoW : remainingWidth;
+		uint32 copySize = copyPixels * sizeof(uint32);
+
+		user_memcpy(fb + fbOffset, (void*)&s3_logo[logoRowOffset], copySize);
+	}
+}
+*/
+static void
+load_settings(void)
+{
+    void* handle = load_driver_settings("trident");
+    if (handle != NULL) {
+        
+        current_settings.hardcursor = get_driver_boolean_parameter(
+            handle, "hardcursor", current_settings.hardcursor, current_settings.hardcursor);
+
+        const char* value_str = get_driver_parameter(handle, "cursorbits", "2", "2"); //default HC bits on Trident
+        if (value_str != nullptr) {
+            current_settings.cursorbits = (uint32)atoi(value_str);
+        }
+        
+        value_str = get_driver_parameter(handle, "memory", "0", "0");
+        if (value_str != nullptr) {
+            current_settings.memory = (uint32)atoi(value_str);
+        }
+        
+        unload_driver_settings(handle);
+    }
+}
 
 static inline uint32
 GetPCI(pci_info& info, uint8 offset, uint8 size)
@@ -198,12 +296,15 @@ MapDevice(DeviceInfo& di)
 	uint32 videoRamAddr = pciInfo.u.h0.base_registers[0] & ~0x0F;
 	uint32 videoRamSize = pciInfo.u.h0.base_register_sizes[0];
 	si.videoMemPCI = pciInfo.u.h0.base_registers_pci[0] & ~0x0F;
-
+	
+	if (si.settings.memory > 0)
+		videoRamSize = si.settings.memory * 1024 * 1024;
 	if (videoRamSize == 0)
 		videoRamSize = 8 * 1024 * 1024; // fallback to 8MB if undetected
 
 	// BAR 1 is MMIO registers - mask lower 14 bits to align to 16KB and strip PCI status flags, matching X.org exactly
-	uint32 regsBase = pciInfo.u.h0.base_registers[1] & 0xFFFFC000;
+	//uint32 regsBase = pciInfo.u.h0.base_registers[1] & 0xFFFFC000;
+	uint32 regsBase = pciInfo.u.h0.base_registers[1] & ~0x0F;
 	uint32 regAreaSize = pciInfo.u.h0.base_register_sizes[1];
 
 	if (regAreaSize == 0)
@@ -380,6 +481,10 @@ InitDevice(DeviceInfo& di)
 		return di.sharedArea;
 
 	SharedInfo& si = *(di.sharedInfo);
+	load_settings();
+    memcpy(&si.settings, &current_settings, sizeof(trident_settings));
+    si.bDisableHdwCursor = !si.settings.hardcursor;
+    
 
 	struct frame_buffer_boot_info* bi = (struct frame_buffer_boot_info*)get_boot_item(
 		FRAME_BUFFER_BOOT_INFO, NULL);
@@ -408,6 +513,9 @@ InitDevice(DeviceInfo& di)
 	}
 
 	InitInterruptHandler(di);
+	
+	//draw_logo(di);
+	//snooze(2000000);
 
 	return B_OK;
 }

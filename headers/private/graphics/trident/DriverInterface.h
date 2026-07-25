@@ -72,6 +72,13 @@ struct DisplayModeEx : display_mode {
 	uint32	bytesPerRow;
 };
 
+typedef struct {
+	char	accelerant[B_FILE_NAME_LENGTH];
+	bool	dumprom;
+	uint32 	memory;		/* Forza riconoscimento memoria */
+	bool	hardcursor;
+	uint32	cursorbits;
+} trident_settings;
 
 struct SharedInfo {
 	// Device ID info
@@ -125,8 +132,8 @@ struct SharedInfo {
 	uint32	boot_width;
 	uint32	boot_height;
 	uint32	boot_depth;
+	trident_settings settings;
 };
-
 
 struct TridentGetPrivateData {
 	uint32	magic;

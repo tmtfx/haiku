@@ -13,6 +13,7 @@
 extern "C" void* 
 get_accelerant_hook(uint32 feature, void* data)
 {
+	SharedInfo& si = *gInfo.sharedInfo;
 	(void)data;
 
 	switch (feature) {
@@ -42,11 +43,11 @@ get_accelerant_hook(uint32 feature, void* data)
 		case B_GET_TIMING_CONSTRAINTS:	return (void*)GetTimingConstraints;
 
 		// Cursor
-		case B_SET_CURSOR_SHAPE:		return (void*)SetCursorShape;
-		case B_MOVE_CURSOR:				return (void*)MoveCursor;
-		case B_SHOW_CURSOR:				return (void*)ShowCursor;
-		case B_SET_CURSOR_BITMAP:		return (void*)SetCursorBitmap;
-		case B_GET_CURSOR_BITS:			return (void*)GetCursorBits;
+		case B_SET_CURSOR_SHAPE:		return (void*)(si.bDisableHdwCursor ? NULL : SetCursorShape);
+		case B_MOVE_CURSOR:				return (void*)(si.bDisableHdwCursor ? NULL : MoveCursor);
+		case B_SHOW_CURSOR:				return (void*)(si.bDisableHdwCursor ? NULL : ShowCursor);
+		case B_SET_CURSOR_BITMAP:		return (void*)(si.bDisableHdwCursor ? NULL : SetCursorBitmap);
+		case B_GET_CURSOR_BITS:			return (void*)(si.bDisableHdwCursor ? NULL : GetCursorBits);
 
 		// Engine Management
 		case B_ACCELERANT_ENGINE_COUNT:	return (void*)AccelerantEngineCount;

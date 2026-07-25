@@ -38,7 +38,9 @@ extern "C" {
 uint32
 GetCursorBits(void)
 {
-	return 2;
+	SharedInfo& si = *gInfo.sharedInfo;
+	
+	return si.settings.cursorbits;
 }
 
 
@@ -244,12 +246,90 @@ SetCursorBitmap(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
 	write_crtc_reg(CursorControl, 0xC1); // 0x50
 
 	// Update cursor position
-	MoveCursor(si.cursorHotX, si.cursorHotY);
+	//MoveCursor(si.cursorHotX, si.cursorHotY);
 
 	return B_OK;
 }
 
+// like S3 did
+void
+MoveCursor(uint16 xPos, uint16 yPos)
+{
+	int x = xPos;		// use signed int's since chip specific functions
+	int y = yPos;		// need signed int to determine if cursor off screen
 
+	SharedInfo& si = *gInfo.sharedInfo;
+	DisplayModeEx& dm = si.displayMode;
+
+	uint16 hds = dm.h_display_start;	// current horizontal starting pixel
+	uint16 vds = dm.v_display_start;	// current vertical starting line
+
+	// Clamp cursor to virtual display.
+	if (x >= dm.virtual_width)
+		x = dm.virtual_width - 1;
+	if (y >= dm.virtual_height)
+		y = dm.virtual_height - 1;
+
+	// Adjust h/v display start to move cursor onto screen.
+	if (x >= (dm.timing.h_display + hds))
+		hds = x - dm.timing.h_display + 1;
+	else if (x < hds)
+		hds = x;
+
+	if (y >= (dm.timing.v_display + vds))
+		vds = y - dm.timing.v_display + 1;
+	else if (y < vds)
+		vds = y;
+
+	// Reposition the desktop on the display if required.
+	if (hds != dm.h_display_start || vds != dm.v_display_start)
+		MoveDisplay(hds, vds);
+
+	// Put cursor in correct physical position.
+	x -= (hds + si.cursorHotX);
+	y -= (vds + si.cursorHotY);
+	
+	uint8 preset_x = 0;
+	uint8 preset_y = 0;
+
+	if (x < 0) {
+		preset_x = -x;
+		x = 0;
+	}
+	if (y < 0) {
+		preset_y = -y;
+		y = 0;
+	}
+
+
+
+// SCRITTURA EFFETTIVA NELLA SCHEDA
+	// Re-enable MMIO decoder via kernel ioctl (since standard VGA writes may have disabled it)
+	ioctl(gInfo.deviceFileDesc, TRIDENT_ENABLE_MMIO);
+
+	//write_crtc_reg_logged("PCIReg", 0x39, 0x87);
+	write_crtc_reg(PCIReg, 0x87); // 0x39
+	
+	// Write preset offsets (CR46, CR47)
+	//write_crtc_reg_logged("PresetX", 0x46, preset_x);
+	write_crtc_reg(CursorXOffset, preset_x); // 0x46
+	//write_crtc_reg_logged("PresetY", 0x47, preset_y);
+	write_crtc_reg(CursorYOffset, preset_y); // 0x47
+
+	// Write X position (CR40, CR41)
+	//write_crtc_reg_logged("PosXLow", 0x40, x & 0xFF);
+	write_crtc_reg(CursorXLow, x & 0xFF); // 0x40
+	//write_crtc_reg_logged("PosXHigh", 0x41, (x >> 8) & 0xFF);
+	write_crtc_reg(CursorXHigh, (x >> 8) & 0xFF); // 0x41
+
+	// Write Y position (CR42, CR43)
+	//write_crtc_reg_logged("PosYLow", 0x42, y & 0xFF);
+	write_crtc_reg(CursorYLow, y & 0xFF); // 0x42
+	//write_crtc_reg_logged("PosYHigh", 0x43, (y >> 8) & 0xFF);
+	write_crtc_reg(CursorYHigh, (y >> 8) & 0xFF); // 0x43
+}
+
+/*
 void
 MoveCursor(uint16 xPos, uint16 yPos)
 {
@@ -287,13 +367,16 @@ MoveCursor(uint16 xPos, uint16 yPos)
 	write_crtc_reg(CursorXLow, x & 0xFF); // 0x40
 	//write_crtc_reg_logged("PosXHigh", 0x41, (x >> 8) & 0xFF);
 	write_crtc_reg(CursorXHigh, (x >> 8) & 0xFF); // 0x41
+	
+	
 
 	// Write Y position (CR42, CR43)
 	//write_crtc_reg_logged("PosYLow", 0x42, y & 0xFF);
 	write_crtc_reg(CursorYLow, y & 0xFF); // 0x42
 	//write_crtc_reg_logged("PosYHigh", 0x43, (y >> 8) & 0xFF);
 	write_crtc_reg(CursorYHigh, (y >> 8) & 0xFF); // 0x43
-}
+	
+}*/
 
 
 void
