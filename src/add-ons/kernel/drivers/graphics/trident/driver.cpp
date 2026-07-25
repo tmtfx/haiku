@@ -27,6 +27,7 @@
 #include <frame_buffer_console.h>
 
 #include "DriverInterface.h"
+#include "trident_logo.h"
 
 
 #undef TRACE
@@ -109,9 +110,8 @@ static device_hooks gDeviceHooks =
 	NULL
 };
 
-/*
-static void
-draw_logo(DeviceInfo& di)
+
+static void draw_logo(DeviceInfo& di)
 {
     SharedInfo& si = *(di.sharedInfo);
     
@@ -125,7 +125,6 @@ draw_logo(DeviceInfo& di)
     if (!bi)
         return;
 
-    // s3_logo array is 32-bit (RGBA/RGB32). 
     if (bi->depth != 32)
         return;
 
@@ -138,8 +137,8 @@ draw_logo(DeviceInfo& di)
 
     uint32 fbPitch = bytesPerRow / 4;
 
-    uint32 logoW = s3_logo_width;   // 640
-    uint32 logoH = s3_logo_height;  // 240
+    uint32 logoW = kBitmapWidth;   // 800
+    uint32 logoH = kBitmapHeight;  // 436
 
     // Centering
     int32 startX = (int32)((screenWidth - logoW) / 2);
@@ -154,26 +153,24 @@ draw_logo(DeviceInfo& di)
 	if (fb == NULL)
 		return;
 
-    // Draw kernel space
-	//
-	//uint32* fb = (uint32*)si.videoMemAddr;
-    //for (uint32 y = 0; y < logoH && (startY + (int32)y) < (int32)screenHeight; y++) {
-    //    for (uint32 x = 0; x < logoW && (startX + (int32)x) < (int32)screenWidth; x++) {
-    //        uint32 fbIndex = (uint32)((startY + (int32)y) * (int32)fbPitch + (startX + (int32)x));
-    //        fb[fbIndex] = s3_logo[y * logoW + x];
-    //    }
-    //}
 	for (uint32 y = 0; y < logoH && (startY + y) < screenHeight; y++) {
-		uint32 fbOffset = ((startY + y) * fbPitch + startX) * sizeof(uint32);
-		uint32 logoRowOffset = y * logoW;
-		uint32 remainingWidth = screenWidth - startX;
-		uint32 copyPixels = (logoW < remainingWidth) ? logoW : remainingWidth;
-		uint32 copySize = copyPixels * sizeof(uint32);
+        // Offset di destinazione nel framebuffer (in byte)
+        uint32 fbOffset = ((startY + y) * fbPitch + startX) * sizeof(uint32);
+        
+        // Offset di origine nell'array kTridentBits (in byte, 4 byte per pixel)
+        uint32 logoRowOffset = y * logoW * 4;
+        
+        uint32 remainingWidth = screenWidth - startX;
+        uint32 copyPixels = (logoW < remainingWidth) ? logoW : remainingWidth;
+        
+        // Dimensione totale del blocco da copiare in byte per la riga
+        uint32 copySize = copyPixels * 4; 
 
-		user_memcpy(fb + fbOffset, (void*)&s3_logo[logoRowOffset], copySize);
-	}
+        // Copia sicura dalla memoria kernel allo spazio del framebuffer
+        user_memcpy(fb + fbOffset, (void*)&kTridentBits[logoRowOffset], copySize);
+    }
 }
-*/
+
 static void
 load_settings(void)
 {
@@ -516,8 +513,8 @@ InitDevice(DeviceInfo& di)
 
 	InitInterruptHandler(di);
 	
-	//draw_logo(di);
-	//snooze(2000000);
+	draw_logo(di);
+	snooze(2000000);
 
 	return B_OK;
 }
