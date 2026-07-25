@@ -7,6 +7,9 @@
  *		Alan Hourihane <alanh@fairlite.demon.co.uk>
  *		Fabio Tomat <f.t.public@gmail.com>
  *		Gemini CLI <gemini-cli@google.com>
+ *
+ * Due to missing specs it was impossible to handle correct overlay regs
+ * thus overlay is disabled in hooks
  */
 
 
@@ -17,6 +20,8 @@
 
 
 #define MAX_OVERLAY_BUFFERS 4
+
+#define CALLED() debug_printf("Trident_OVL: CALLED %s\n", __FUNCTION__)
 
 struct trident_overlay_buffer {
 	overlay_buffer	buffer;
@@ -45,6 +50,7 @@ extern "C" {
 uint32
 trident_overlay_count(const display_mode* dm)
 {
+	CALLED();
 	(void)dm;
 	return 1;
 }
@@ -53,6 +59,8 @@ trident_overlay_count(const display_mode* dm)
 const uint32*
 trident_overlay_supported_spaces(const display_mode* dm)
 {
+	CALLED();
+
 	(void)dm;
 	static const uint32 kSupportedSpaces[] = {
 		B_YCbCr422,
@@ -67,6 +75,8 @@ trident_overlay_supported_spaces(const display_mode* dm)
 uint32
 trident_overlay_supported_features(uint32 a_color_space)
 {
+	CALLED();
+
 	(void)a_color_space;
 	return B_OVERLAY_COLOR_KEY
 		| B_OVERLAY_HORIZONTAL_FILTERING
@@ -77,6 +87,8 @@ trident_overlay_supported_features(uint32 a_color_space)
 const overlay_buffer*
 trident_allocate_overlay_buffer(color_space cs, uint16 width, uint16 height)
 {
+	CALLED();
+
 	SharedInfo& si = *gInfo.sharedInfo;
 	uint32 bytesPerPixel = 2;
 
@@ -135,6 +147,8 @@ trident_allocate_overlay_buffer(color_space cs, uint16 width, uint16 height)
 status_t
 trident_release_overlay_buffer(const overlay_buffer* ob)
 {
+	CALLED();
+
 	if (!ob)
 		return B_BAD_VALUE;
 
@@ -152,6 +166,8 @@ status_t
 trident_get_overlay_constraints(const display_mode* dm, const overlay_buffer* ob,
 	overlay_constraints* oc)
 {
+	CALLED();
+
 	if (!dm || !ob || !oc)
 		return B_BAD_VALUE;
 
@@ -182,6 +198,8 @@ trident_get_overlay_constraints(const display_mode* dm, const overlay_buffer* ob
 overlay_token
 trident_allocate_overlay(void)
 {
+	CALLED();
+
 	sOverlayToken++;
 	return (overlay_token)(addr_t)sOverlayToken;
 }
@@ -190,9 +208,9 @@ trident_allocate_overlay(void)
 status_t
 trident_release_overlay(overlay_token ot)
 {
-	(void)ot;
+	CALLED();
 
-	debug_printf("Trident_OVL: trident_release_overlay called\n");
+	(void)ot;
 
 	// Re-enable MMIO decoder via kernel ioctl (since standard VGA writes may have disabled it)
 	ioctl(gInfo.deviceFileDesc, TRIDENT_ENABLE_MMIO);
