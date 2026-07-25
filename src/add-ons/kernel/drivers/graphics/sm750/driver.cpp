@@ -92,12 +92,14 @@ map_videomem(void **out_virt, phys_addr_t phys, uint32 size, const char *name)
         &virt);
     */
     area_id area = map_physical_memory(name, phys, size, B_ANY_KERNEL_BLOCK_ADDRESS|B_WRITE_COMBINING_MEMORY,
-        B_READ_AREA + B_WRITE_AREA,
+        //B_READ_AREA + B_WRITE_AREA,
+        B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA,
         &virt);
     if (area < B_OK) {
         area = map_physical_memory(name, phys, size, 
             B_ANY_KERNEL_BLOCK_ADDRESS,
-            B_READ_AREA + B_WRITE_AREA,
+            //B_READ_AREA + B_WRITE_AREA,
+            B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA,
             &virt);
     }
 
