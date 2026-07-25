@@ -500,8 +500,10 @@ AVCodecDecoder::_NegotiateVideoOutputFormat(media_format* inOutFormat)
 */
 	color_space requestedSpace = inOutFormat->u.raw_video.display.format;
 	if (requestedSpace == B_YCbCr422 || requestedSpace == B_RGB16 || requestedSpace == B_RGB15) {
+		debug_printf("Negotiation output colorspace format: %d\n", requestedSpace);
 		fOutputColorSpace = requestedSpace;
 	} else {
+		debug_printf("fallback to B_RGB32\n");
 		fOutputColorSpace = B_RGB32;
 	}
 // ================================================================================================
