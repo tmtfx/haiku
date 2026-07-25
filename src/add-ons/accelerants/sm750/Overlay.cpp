@@ -69,8 +69,8 @@ const uint32 *
 sm750_overlay_supported_spaces(const display_mode *dm)
 {
 	CALLED();
+	debug_printf("SM750_ACC: sm750_overlay_supported_spaces chiamato (dm: %p)\n", dm);
     static const uint32 spaces[] = {
-    	//B_RGB32,       // L'esca per far triggerare il Media Kit
         B_YCbCr422,	// YUY2 (most common)
         B_RGB16,	// RGB 5:6:5
         0
@@ -170,10 +170,10 @@ sm750_allocate_overlay_buffer(color_space cs, uint16 width, uint16 height)
 	ob->buffer = (void *)((addr_t)si->framebuffer + alignedOffset);
     ob->buffer_dma = (void *)(addr_t)alignedOffset;
     
-    debug_printf("SM750_ACC: Buffer allocato con INGANNO (16-bit). Aligned Offset: 0x%08x, Pitch: %u\n", 
-                 (uint32)(addr_t)ob->buffer_dma, alignedPitch);
-    //if (ob) debug_printf("SM750_ACC: Buffer allocated. Original offset: 0x%08x, Aligned: 0x%08x\n", 
-    //             offset, (uint32)(addr_t)ob->buffer_dma);
+    //debug_printf("SM750_ACC: Buffer allocato con INGANNO (16-bit). Aligned Offset: 0x%08x, Pitch: %u\n", 
+    //             (uint32)(addr_t)ob->buffer_dma, alignedPitch);
+    if (ob) debug_printf("SM750_ACC: Buffer allocated. Original offset: 0x%08x, Aligned: 0x%08x, Pitch: %u\n", 
+                 offset, (uint32)(addr_t)ob->buffer_dma, alignedPitch);
 
     // Save blockID
     si->overlay.myBufferBlockID[slot] = blockID;
@@ -249,29 +249,28 @@ sm750_configure_overlay(const overlay_window *window, const overlay_buffer *buff
     // Control Register Configuration (0x080040)
     uint32 control = SM750_REG32(SM750_DISP_PANEL_VIDEO_DISP_CTRL);
     debug_printf("SM750_ACC: old value for video control register: 0x%08x\n", control);
-    /*
+    
     control = 0;
 
     uint32 format = 0;
     switch (buffer->space) {
         case B_YCbCr422: format = 3; break; // YUYV
         case B_RGB16:    format = 1; break; // 16bpp 5:6:5
-        case B_RGB32:
         default:
             debug_printf("SM750_ACC: Format %d not supported by hardware! Force YUV.\n", buffer->space);
             format = 3; 
             break;
     }
     control |= (format & 0x3);
-    */
-    control = 0; // Resettiamo a zero per sicurezza
+    
+    //control = 0; // Resettiamo a zero per sicurezza
     
     // Ignoriamo quello che c'è scritto in buffer->space. 
     // Diciamo all'hardware che il buffer contiene pixel RGB16 (Formato = 1)
-    uint32 format = 1; 
+    //uint32 format = 1; 
     
-    debug_printf("SM750_ACC: HACK! Forzato formato hardware video a RGB16 (1)\n");
-    control |= (format & 0x3);
+    //debug_printf("SM750_ACC: HACK! Forzato formato hardware video a RGB16 (1)\n");
+    //control |= (format & 0x3);
 
     // Enable Video Plane
     control |= (1 << 2);
@@ -318,7 +317,7 @@ sm750_release_overlay_buffer(const overlay_buffer *buffer)
 }
 
 status_t
-sm750_allocate_overlay(overlay_token *token)
+sm750_allocate_overlay(void)//overlay_token *token)
 {
 	CALLED();
 	shared_info *si = gInfo->si;
@@ -327,10 +326,12 @@ sm750_allocate_overlay(overlay_token *token)
     }
 
     si->overlay.overlay_token++;
-    *token = (overlay_token)si->overlay.overlay_token;
+    //*token = (overlay_token)si->overlay.overlay_token;
+    overlay_token token = (overlay_token)si->overlay.overlay_token;
     
     debug_printf("SM750_ACC: Overlay allocated. Token ID: %ld\n", (uintptr_t)*token);
-    return B_OK;
+    //return B_OK;
+    return token;
 }
 
 status_t
