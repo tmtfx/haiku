@@ -104,7 +104,7 @@ enum {
 };
 
 /* Max overlay buffers per SM750 */
-#define MAXBUFFERS 3
+#define MAXBUFFERS 4
 
 typedef struct {
 	uint16 slopspace;
