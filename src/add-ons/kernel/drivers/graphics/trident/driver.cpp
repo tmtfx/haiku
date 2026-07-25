@@ -274,8 +274,8 @@ EnableMMIO(DeviceInfo& di)
 
 	// Readback and log to verify
 	outb(vgaIOBase, 0x39);
-	uint8 readback = inb(vgaIOBase + 1);
-	dprintf("Trident: EnableMMIO: CR39 write=0x81, readback=0x%02X (I/O Port Base=0x%04X)\n", readback, vgaIOBase);
+	//uint8 readback = inb(vgaIOBase + 1);
+	//dprintf("Trident: EnableMMIO: CR39 write=0x81, readback=0x%02X (I/O Port Base=0x%04X)\n", readback, vgaIOBase);
 }
 
 
@@ -347,6 +347,7 @@ MapDevice(DeviceInfo& di)
 		videoRamSize,
 		B_ANY_KERNEL_BLOCK_ADDRESS | B_WRITE_COMBINING_MEMORY,
 		B_READ_AREA + B_WRITE_AREA,
+		//B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA,
 		(void**)(&(si.videoMemAddr)));
 
 	if (si.videoMemArea < 0) {
@@ -356,6 +357,7 @@ MapDevice(DeviceInfo& di)
 			videoRamSize,
 			B_ANY_KERNEL_BLOCK_ADDRESS,
 			B_READ_AREA + B_WRITE_AREA,
+			//B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA,
 			(void**)(&(si.videoMemAddr)));
 	}
 

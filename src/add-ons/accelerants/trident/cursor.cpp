@@ -59,8 +59,8 @@ SetCursorShape(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
 	if (!dest)
 		return B_NO_INIT;
 
-	debug_printf("Trident_CUR: SetCursorShape starting. Width=%d, Height=%d, HotX=%d, HotY=%d, Offset=%u\n",
-		width, height, hot_x, hot_y, si.cursorOffset);
+	//debug_printf("Trident_CUR: SetCursorShape starting. Width=%d, Height=%d, HotX=%d, HotY=%d, Offset=%u\n",
+	//	width, height, hot_x, hot_y, si.cursorOffset);
 
 	// Re-enable MMIO decoder via kernel ioctl (since standard VGA writes may have disabled it)
 	ioctl(gInfo.deviceFileDesc, TRIDENT_ENABLE_MMIO);
@@ -163,8 +163,8 @@ SetCursorBitmap(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
 	if (!dest)
 		return B_NO_INIT;
 
-	debug_printf("Trident_CUR: SetCursorBitmap starting. Space=0x%X, Width=%d, Height=%d, HotX=%d, HotY=%d, Offset=%u\n",
-		colorSpace, width, height, hot_x, hot_y, si.cursorOffset);
+	//debug_printf("Trident_CUR: SetCursorBitmap starting. Space=0x%X, Width=%d, Height=%d, HotX=%d, HotY=%d, Offset=%u\n",
+	//	colorSpace, width, height, hot_x, hot_y, si.cursorOffset);
 
 	// Re-enable MMIO decoder via kernel ioctl (since standard VGA writes may have disabled it)
 	ioctl(gInfo.deviceFileDesc, TRIDENT_ENABLE_MMIO);
