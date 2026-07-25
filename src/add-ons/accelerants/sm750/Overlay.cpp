@@ -275,7 +275,8 @@ sm750_configure_overlay(const overlay_window *window, const overlay_buffer *buff
     
     // YUV constants initialization (Color Space Conversion)
     //SM750_WREG32(SM750_DISP_PANEL_VIDEO_YUV_CONST, 0x00531515);
-    uint32 csc_video = SM750_REG32(SM750_DISP_PANEL_VIDEO_YUV_CONST);
+    
+    //uint32 csc_video = SM750_REG32(SM750_DISP_PANEL_VIDEO_YUV_CONST);
     //debug_printf("SM750_ACC: YUV constants(Color Space Conversion) 0x%08x\n", csc_video);
 
     // Control Register Configuration (0x080040)

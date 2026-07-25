@@ -65,7 +65,7 @@ GetEdidFromBIOS(edid1_raw* edidRaw)
     bios_regs regs = {};
     regs.eax = 0x4f15; // VBE Function: Report DDC Capabilities
     regs.ebx = 0;
-    dprintf("SM750: Check DDC Capabilities EAX=0x%x, EBX=0x%x\n", regs.eax, regs.ebx);
+    //dprintf("SM750: Check DDC Capabilities EAX=0x%x, EBX=0x%x\n", regs.eax, regs.ebx);
     
     status = biosModule->interrupt(state, 0x10, &regs);
     
@@ -86,7 +86,7 @@ GetEdidFromBIOS(edid1_raw* edidRaw)
             
             if (status == B_OK && (regs.eax & 0xffff) == 0x4f) {
                 memcpy(edidRaw, edid, sizeof(edid1_raw));
-                dprintf("SM750: EDID correctly read through BIOS interrupt!\n");
+                //dprintf("SM750: EDID correctly read through BIOS interrupt!\n");
             } else {
                 dprintf("SM750: BIOS failed reading the EDID (EAX=0x%x)\n", regs.eax);
                 status = B_NOT_SUPPORTED;
@@ -170,7 +170,7 @@ static status_t create_mode_list(shared_info* si) {
     si->mode_count = count;
     si->mode_list_area = m_area;
 
-    dprintf("SM750: create_mode_list completed. # of Modes: %u\n", count);
+    //dprintf("SM750: create_mode_list completed. # of Modes: %u\n", count);
     return B_OK;
 }
 
