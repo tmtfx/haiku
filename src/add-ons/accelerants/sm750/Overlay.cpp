@@ -185,11 +185,47 @@ void
 sm750_configure_overlay(const overlay_window *window, const overlay_buffer *buffer)
 {
 	CALLED();
-    vuint32 *regs = gInfo->regs;
+	
+	vuint32 *regs = gInfo->regs;
+	
+	if (buffer == NULL || window == NULL) {
+		debug_printf("SM750_ACC: Rilevato buffer/window NULL, spengo il piano video.\n");
+        uint32 control = SM750_REG32(SM750_DISP_PANEL_VIDEO_DISP_CTRL);
+        control &= ~(1 << 2); // Disabilita Video Plane (Bit 2)
+        SM750_WREG32(SM750_DISP_PANEL_VIDEO_DISP_CTRL, control);
+        return;
+    }
+    
+    if (buffer->buffer_dma == NULL)
+        return;
 
     // Buffer address (Offset VRAM)
     uint32 bufferOffset = (uint32)(addr_t)buffer->buffer_dma;
-    SM750_WREG32(SM750_DISP_PANEL_VIDEO_FB0_ADDR, bufferOffset & 0x03FFFFF0);
+    uint32 targetAddr = bufferOffset & 0x03FFFFF0;
+    // OTTIMIZZAZIONE: Se l'indirizzo del buffer è identico al precedente 
+    // e lo scaling/finestra non cambiano drasticamente, possiamo evitare 
+    // di ricalcolare e riscrivere tutti i registri ad ogni singolo frame.
+    // (Verifichiamo direttamente sul registro hardware se sta già puntando lì)
+    uint32 currentAddr = SM750_REG32(SM750_DISP_PANEL_VIDEO_FB0_ADDR);
+    
+    if (currentAddr == targetAddr) {
+    	// Il buffer è lo stesso, aggiorniamo solo le coordinate della finestra 
+        // nel caso si stia muovendo o ridimensionando, saltando il resto se immobile.
+        uint32 top = (uint32)window->v_start;
+        uint32 left = (uint32)window->h_start;
+        uint32 bottom = top + window->height;
+        uint32 right = left + window->width;
+
+        uint32 topLeft = ((top & 0x7FF) << 16) | (left & 0x7FF);
+        uint32 bottomRight = ((bottom & 0x7FF) << 16) | (right & 0x7FF);
+        
+        SM750_WREG32(SM750_DISP_PANEL_VIDEO_PL_TL_POS, topLeft);
+        SM750_WREG32(SM750_DISP_PANEL_VIDEO_PL_BR_POS, bottomRight);
+        sm750_set_video_scale(window, buffer);
+        return;
+    }
+    
+    SM750_WREG32(SM750_DISP_PANEL_VIDEO_FB0_ADDR, targetAddr);
     
     // End calculation: beginning + (Pitch * height) - 1
     uint32 bufferSize = buffer->bytes_per_row * buffer->height;
@@ -348,9 +384,12 @@ sm750_release_overlay(overlay_token token)
     uint32 control = SM750_REG32(SM750_DISP_PANEL_VIDEO_DISP_CTRL);
     control &= ~(1 << 2); // Disable Video Plane
     SM750_WREG32(SM750_DISP_PANEL_VIDEO_DISP_CTRL, control);
-
+    
     gInfo->si->overlay.overlay_token = 0;
     atomic_set(&gInfo->si->overlay_in_use, 0);
+    
+	// Breve attesa per completare lo svuotamento della FIFO hardware
+    snooze(10000); // 10ms
 
     debug_printf("SM750_ACC: Overlay released and hardware off.\n");
     return B_OK;
