@@ -859,6 +859,58 @@ device_ioctl(void* dev, uint32 msg, void* buf, size_t len)
 			return B_OK;
 		}
 
+		case TRIDENT_GET_PIO:
+		{
+			TridentGetSetPIO gsp;
+			if (user_memcpy(&gsp, buf, sizeof(TridentGetSetPIO)) != B_OK)
+				return B_BAD_ADDRESS;
+
+			if (gsp.magic == TRIDENT_PRIVATE_DATA_MAGIC) {
+				switch (gsp.size) {
+					case 1:
+						gsp.value = gPCI->read_io_8(gsp.offset);
+						break;
+					case 2:
+						gsp.value = gPCI->read_io_16(gsp.offset);
+						break;
+					case 4:
+						gsp.value = gPCI->read_io_32(gsp.offset);
+						break;
+					default:
+						return B_ERROR;
+				}
+				if (user_memcpy(buf, &gsp, sizeof(TridentGetSetPIO)) != B_OK)
+					return B_BAD_ADDRESS;
+				return B_OK;
+			}
+			break;
+		}
+
+		case TRIDENT_SET_PIO:
+		{
+			TridentGetSetPIO gsp;
+			if (user_memcpy(&gsp, buf, sizeof(TridentGetSetPIO)) != B_OK)
+				return B_BAD_ADDRESS;
+
+			if (gsp.magic == TRIDENT_PRIVATE_DATA_MAGIC) {
+				switch (gsp.size) {
+					case 1:
+						gPCI->write_io_8(gsp.offset, gsp.value);
+						break;
+					case 2:
+						gPCI->write_io_16(gsp.offset, gsp.value);
+						break;
+					case 4:
+						gPCI->write_io_32(gsp.offset, gsp.value);
+						break;
+					default:
+						return B_ERROR;
+				}
+				return B_OK;
+			}
+			break;
+		}
+
 		case TRIDENT_ENABLE_MMIO:
 		{
 			EnableMMIO(di);

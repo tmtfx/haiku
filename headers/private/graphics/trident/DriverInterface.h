@@ -52,13 +52,22 @@ struct Benaphore {
 
 #define TRIDENT_PRIVATE_DATA_MAGIC	0x9880
 
-
 enum {
 	TRIDENT_GET_PRIVATE_DATA = B_DEVICE_OP_CODES_END + 1,
 	TRIDENT_DEVICE_NAME,
 	TRIDENT_GET_EDID,
 	TRIDENT_RUN_INTERRUPTS,
+	TRIDENT_GET_PIO,
+	TRIDENT_SET_PIO,
 	TRIDENT_ENABLE_MMIO,
+};
+
+
+struct TridentGetSetPIO {
+	uint32	magic;
+	uint16	offset;
+	uint8	size;
+	uint32	value;
 };
 
 

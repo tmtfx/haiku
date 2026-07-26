@@ -222,6 +222,31 @@ ProposeDisplayMode(display_mode *target, const display_mode *low,
 
 
 static void
+WriteClockReg(uint16 port, uint8 value)
+{
+	// Write via MMIO
+	write_reg8(port, value);
+
+	// Also write via PIO for maximum compatibility and safety
+	TridentGetSetPIO gsp;
+	gsp.magic = TRIDENT_PRIVATE_DATA_MAGIC;
+	gsp.offset = port;
+	gsp.size = 1;
+	gsp.value = value;
+	ioctl(gInfo.deviceFileDesc, TRIDENT_SET_PIO, &gsp, sizeof(gsp));
+}
+
+
+static uint8
+ReadClockReg(uint16 port)
+{
+	// Attempt MMIO read first
+	uint8 val = read_reg8(port);
+	return val;
+}
+
+
+static void
 CalculateTridentPLL(uint32 clock, uint8& sr19, uint8& sr1a)
 {
 	double target = clock; // in kHz
@@ -381,7 +406,15 @@ SetDisplayMode(display_mode* pMode)
 	// Set clock registers
 	uint8 clk_a = 0, clk_b = 0;
 	CalculateTridentPLL(clock, clk_a, clk_b);
-	tridentReg->tridentRegsClock[0x00] = (read_vga_reg(0x3CC) & 0xF3) | 0x08;
+
+	// Determine Miscellaneous Output Register sync polarities deterministically
+	uint8 misc = 0x23; // default: color emulation, ram enable, clock 0
+	if (!(mode.timing.flags & B_POSITIVE_HSYNC))
+		misc |= 0x40; // negative hsync
+	if (!(mode.timing.flags & B_POSITIVE_VSYNC))
+		misc |= 0x80; // negative vsync
+
+	tridentReg->tridentRegsClock[0x00] = (misc & 0xF3) | 0x08; // select external clock (clock 2)
 	tridentReg->tridentRegsClock[0x01] = clk_a;
 	tridentReg->tridentRegsClock[0x02] = clk_b;
 
@@ -572,20 +605,20 @@ SetDisplayMode(display_mode* pMode)
 
 	OUTW_3x4(RAMDACTiming);
 
-	// Restore clock
-	uint8 old_clk_low = read_seq_reg(ClockLow);
-	uint8 old_clk_high = read_seq_reg(ClockHigh);
-	OUTW(0x3C4, (tridentReg->tridentRegsClock[0x01]) << 8 | ClockLow);
-	OUTW(0x3C4, (tridentReg->tridentRegsClock[0x02]) << 8 | ClockHigh);
-	uint8 new_clk_low = read_seq_reg(ClockLow);
-	uint8 new_clk_high = read_seq_reg(ClockHigh);
+	// Restore clock via dedicated clock synthesizer ports at 0x43C8 and 0x43C9 (NewClockCode)
+	uint8 old_clk_low = ReadClockReg(0x43C8);
+	uint8 old_clk_high = ReadClockReg(0x43C9);
+	WriteClockReg(0x43C8, tridentReg->tridentRegsClock[0x01]);
+	WriteClockReg(0x43C9, tridentReg->tridentRegsClock[0x02]);
+	uint8 new_clk_low = ReadClockReg(0x43C8);
+	uint8 new_clk_high = ReadClockReg(0x43C9);
 	debug_printf("Trident_REG: Clock Low Old=0x%02X, Write=0x%02X, Readback=0x%02X\n",
 		old_clk_low, tridentReg->tridentRegsClock[0x01], new_clk_low);
 	debug_printf("Trident_REG: Clock High Old=0x%02X, Write=0x%02X, Readback=0x%02X\n",
 		old_clk_high, tridentReg->tridentRegsClock[0x02], new_clk_high);
 
 	uint8 old_misc = read_vga_reg(0x3CC);
-	OUTB(0x3C2, tridentReg->tridentRegsClock[0x00]);
+	WriteClockReg(0x3C2, tridentReg->tridentRegsClock[0x00]); // also use WriteClockReg for MiscOut to ensure it's written via both MMIO and PIO
 	uint8 new_misc = read_vga_reg(0x3CC);
 	debug_printf("Trident_REG: MiscOut Old=0x%02X, Write=0x%02X, Readback=0x%02X\n",
 		old_misc, tridentReg->tridentRegsClock[0x00], new_misc);
