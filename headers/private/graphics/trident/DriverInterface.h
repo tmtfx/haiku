@@ -57,8 +57,8 @@ enum {
 	TRIDENT_DEVICE_NAME,
 	TRIDENT_GET_EDID,
 	TRIDENT_RUN_INTERRUPTS,
-	TRIDENT_GET_PIO,
-	TRIDENT_SET_PIO,
+	TRIDENT_GET_PIO, // UNUSED
+	TRIDENT_SET_PIO, // UNUSED
 	TRIDENT_ENABLE_MMIO,
 };
 
@@ -68,7 +68,7 @@ struct TridentGetSetPIO {
 	uint16	offset;
 	uint8	size;
 	uint32	value;
-};
+}; // UNUSED
 
 
 enum ChipType {

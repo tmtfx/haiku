@@ -220,7 +220,7 @@ ProposeDisplayMode(display_mode *target, const display_mode *low,
 	return B_BAD_VALUE;
 }
 
-
+/*
 static void
 WriteClockReg(uint16 port, uint8 value)
 {
@@ -244,7 +244,7 @@ ReadClockReg(uint16 port)
 	uint8 val = read_reg8(port);
 	return val;
 }
-
+*/
 
 static void
 CalculateTridentPLL(uint32 clock, uint8& sr19, uint8& sr1a)
@@ -606,28 +606,34 @@ SetDisplayMode(display_mode* pMode)
 	OUTW_3x4(RAMDACTiming);
 
 	// Restore clock via dedicated clock synthesizer ports at 0x43C8 and 0x43C9 (NewClockCode)
-	uint8 old_clk_low = ReadClockReg(0x43C8);
-	uint8 old_clk_high = ReadClockReg(0x43C9);
-	WriteClockReg(0x43C8, tridentReg->tridentRegsClock[0x01]);
-	WriteClockReg(0x43C9, tridentReg->tridentRegsClock[0x02]);
-	uint8 new_clk_low = ReadClockReg(0x43C8);
-	uint8 new_clk_high = ReadClockReg(0x43C9);
+	// TmTFx: NO this is not for CYBERBLADE 3D chipsets look at trident_dac.c
+	uint8 old_clk_low = read_seq_reg(ClockLow);
+	uint8 old_clk_high = read_seq_reg(ClockHigh);
+
+	OUTW(0x3C4, (tridentReg->tridentRegsClock[0x01]) << 8 | ClockLow);
+	OUTW(0x3C4, (tridentReg->tridentRegsClock[0x02]) << 8 | ClockHigh);
+
+	uint8 new_clk_low = read_seq_reg(ClockLow);
+	uint8 new_clk_high = read_seq_reg(ClockHigh);
+
 	debug_printf("Trident_REG: Clock Low Old=0x%02X, Write=0x%02X, Readback=0x%02X\n",
-		old_clk_low, tridentReg->tridentRegsClock[0x01], new_clk_low);
+			old_clk_low, tridentReg->tridentRegsClock[0x01], new_clk_low);
 	debug_printf("Trident_REG: Clock High Old=0x%02X, Write=0x%02X, Readback=0x%02X\n",
-		old_clk_high, tridentReg->tridentRegsClock[0x02], new_clk_high);
+			old_clk_high, tridentReg->tridentRegsClock[0x02], new_clk_high);
 
+	// Scrittura finale di MiscOut (0x3C2)
 	uint8 old_misc = read_vga_reg(0x3CC);
-	WriteClockReg(0x3C2, tridentReg->tridentRegsClock[0x00]); // also use WriteClockReg for MiscOut to ensure it's written via both MMIO and PIO
+	OUTB(0x3C2, tridentReg->tridentRegsClock[0x00]);
 	uint8 new_misc = read_vga_reg(0x3CC);
+
 	debug_printf("Trident_REG: MiscOut Old=0x%02X, Write=0x%02X, Readback=0x%02X\n",
-		old_misc, tridentReg->tridentRegsClock[0x00], new_misc);
+			old_misc, tridentReg->tridentRegsClock[0x00], new_misc);
 
-	// Keep extended registers fully unlocked to allow subsequent SetDisplayMode calls to succeed via MMIO
+	// Protect / Lock registri
 	OUTB(0x3C4, Protection);
-	OUTB(0x3C5, 0x92);
+	OUTB(0x3C5, tridentReg->tridentRegs3C4[Protection]);
 
-	OUTW(0x3C4, (0x80 << 8) | NewMode1);
+	OUTW(0x3C4, ((tridentReg->tridentRegs3C4[NewMode1] ^ 0x02) << 8) | NewMode1);
 
 	si.displayMode = mode;
 
