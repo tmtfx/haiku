@@ -581,8 +581,10 @@ os_vmobj_map(os_vmmap_t *map, vaddr_t *addr, vsize_t size, os_vmobj_t *vmobj,
 	if (status != B_OK)
 		return status;
 
-	uint32 wiring = (wired || dynamic_cast<VMAnonymousCache*>(vmobj->cache) == NULL) ?
-		B_FULL_LOCK : B_NO_LOCK;
+	uint32 wiring = B_LAZY_LOCK;
+	if (!wired && dynamic_cast<VMAnonymousCache*>(vmobj->cache) != NULL)
+		wiring = B_NO_LOCK;
+
 	uint32 flags = fixed ? CREATE_AREA_UNMAP_ADDRESS_RANGE : 0;
 	bool kernel = false;
 	if (addressSpace == VMAddressSpace::Kernel())
