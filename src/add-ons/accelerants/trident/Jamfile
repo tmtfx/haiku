@@ -9,6 +9,7 @@ Addon trident.accelerant :
 	cursor.cpp
 	engine.cpp
 	hooks.cpp
+	i2c.cpp
 	mode.cpp
 	overlay.cpp
 	power.cpp

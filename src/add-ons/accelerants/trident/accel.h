@@ -184,5 +184,9 @@ void trident_set_indexed_colors(uint count, uint8 first, uint8* color_data, uint
 }
 #endif
 
+#if defined(__cplusplus)
+struct edid1_info;
+bool GetEdidInfoI2C(struct edid1_info* edid);
+#endif
 
 #endif	// TRIDENT_ACCEL_H
