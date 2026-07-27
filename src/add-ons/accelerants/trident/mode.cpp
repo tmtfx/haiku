@@ -144,6 +144,8 @@ GetI2CSignals(void* cookie, int* clock, int* data)
 	uint8 value = read_crtc_reg(I2C);
 	*clock = (value & 0x02) != 0;
 	*data = (value & 0x01) != 0;
+	debug_printf("Trident_I2C: READ CR%02X=0x%02X -> SCL(clock)=%d, SDA(data)=%d\n",
+		I2C, value, *clock, *data);
 	return B_OK;
 }
 
@@ -158,7 +160,11 @@ SetI2CSignals(void* cookie, int clock, int data)
 	if (data)
 		value |= 1;
 
+	uint8 old_val = read_crtc_reg(I2C);
 	write_crtc_reg(I2C, value);
+	uint8 new_val = read_crtc_reg(I2C);
+	debug_printf("Trident_I2C: WRITE CR%02X Target=0x%02X (SCL=%d, SDA=%d) | Old=0x%02X -> Readback=0x%02X\n",
+		I2C, value, clock, data, old_val, new_val);
 	return B_OK;
 }
 
@@ -173,10 +179,16 @@ GetEdidInfoI2C(edid1_info* edid)
 	ddc2_init_timing(&bus);
 
 	uint8 oldI2C = read_crtc_reg(I2C);
+	debug_printf("Trident_I2C: --- START Dynamic EDID I2C Read (Original CR%02X = 0x%02X) ---\n", 
+		I2C, oldI2C);
 
 	bool success = (ddc2_read_edid1(&bus, edid, NULL, NULL) == B_OK);
 
 	write_crtc_reg(I2C, oldI2C);
+	
+	debug_printf("Trident_I2C: --- END EDID I2C Read Result = %s (Restored CR%02X = 0x%02X) ---\n",
+		success ? "SUCCESS" : "FAILED", I2C, read_crtc_reg(I2C));
+
 	return success;
 }
 
