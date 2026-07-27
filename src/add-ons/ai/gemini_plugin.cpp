@@ -21,6 +21,7 @@
 #include <DataIO.h>
 #include <String.h>
 #include <File.h>
+#include <Alert.h>
 #include <OS.h>
 #include <Messenger.h>
 #include <Message.h>
@@ -1360,6 +1361,15 @@ static status_t gemini_stream_thread_func(void* data)
                 errorObj.FindString("message", &errMsg);
                 if (errMsg) {
                     fprintf(stderr, "[GEMINI STREAM WORKER] Dettaglio errore API di Google: %s\n", errMsg);
+                    BAlert* errAlert = new BAlert(
+                        "Google API Error",
+                        errMsg,
+                        "OK",      // Pulsante 0 (Ritorna 0, mappato su ESC/Default)
+                        NULL,     // Pulsante 1 (Ritorna 1), magare copiare in clipboard
+                        NULL,
+                        B_WIDTH_AS_USUAL,
+                        B_WARNING_ALERT // Icona di pericolo gialla
+                    );
                     
                     BFile streamFile(args->notify_path, B_WRITE_ONLY | B_OPEN_AT_END);
                     if (streamFile.InitCheck() == B_OK) {
@@ -1367,6 +1377,7 @@ static status_t gemini_stream_thread_func(void* data)
                         guiError.SetToFormat("\n[Errore API Gemini: %s]\n", errMsg);
                         streamFile.Write(guiError.String(), guiError.Length());
                     }
+                    errAlert->Go();
                 }
             }
             executionLoop = false;
