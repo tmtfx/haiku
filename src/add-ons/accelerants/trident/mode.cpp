@@ -16,6 +16,7 @@
 #include <string.h>
 #include <unistd.h>
 
+bool enable_log = false;
 
 // Redefine standard X.org macros to log everything before and after writes
 #undef OUTW_3C4
@@ -24,31 +25,44 @@
 
 #define OUTW_3C4(reg) \
 	do { \
-		uint8 old_val = read_seq_reg(reg); \
-		write_seq_reg(reg, tridentReg->tridentRegs3C4[reg]); \
-		uint8 new_val = read_seq_reg(reg); \
-		debug_printf("Trident_REG: SR%02X Old=0x%02X, Write=0x%02X, Readback=0x%02X\n", \
-			reg, old_val, tridentReg->tridentRegs3C4[reg], new_val); \
+		if (enable_log) { \
+			uint8 old_val = read_seq_reg(reg); \
+			write_seq_reg(reg, tridentReg->tridentRegs3C4[reg]); \
+			uint8 new_val = read_seq_reg(reg); \
+			debug_printf("Trident_REG: SR%02X Old=0x%02X, Write=0x%02X, Readback=0x%02X\n", \
+				reg, old_val, tridentReg->tridentRegs3C4[reg], new_val); \
+		} else { \
+			write_seq_reg(reg, tridentReg->tridentRegs3C4[reg]); \
+		} \
 	} while (0)
 
 #define OUTW_3CE(reg) \
 	do { \
-		write_vga_reg(0x3CE, reg); \
-		uint8 old_val = read_vga_reg(0x3CF); \
-		write_vga_reg(0x3CF, tridentReg->tridentRegs3CE[reg]); \
-		write_vga_reg(0x3CE, reg); \
-		uint8 new_val = read_vga_reg(0x3CF); \
-		debug_printf("Trident_REG: GR%02X Old=0x%02X, Write=0x%02X, Readback=0x%02X\n", \
-			reg, old_val, tridentReg->tridentRegs3CE[reg], new_val); \
+		if (enable_log) { \
+			write_vga_reg(0x3CE, reg); \
+			uint8 old_val = read_vga_reg(0x3CF); \
+			write_vga_reg(0x3CF, tridentReg->tridentRegs3CE[reg]); \
+			write_vga_reg(0x3CE, reg); \
+			uint8 new_val = read_vga_reg(0x3CF); \
+			debug_printf("Trident_REG: GR%02X Old=0x%02X, Write=0x%02X, Readback=0x%02X\n", \
+				reg, old_val, tridentReg->tridentRegs3CE[reg], new_val); \
+		} else { \
+			write_vga_reg(0x3CE, reg); \
+			write_vga_reg(0x3CF, tridentReg->tridentRegs3CE[reg]); \
+		} \
 	} while (0)
 
 #define OUTW_3x4(reg) \
 	do { \
-		uint8 old_val = read_crtc_reg(reg); \
-		write_crtc_reg(reg, tridentReg->tridentRegs3x4[reg]); \
-		uint8 new_val = read_crtc_reg(reg); \
-		debug_printf("Trident_REG: CR%02X Old=0x%02X, Write=0x%02X, Readback=0x%02X\n", \
-			reg, old_val, tridentReg->tridentRegs3x4[reg], new_val); \
+		if (enable_log) { \
+			uint8 old_val = read_crtc_reg(reg); \
+			write_crtc_reg(reg, tridentReg->tridentRegs3x4[reg]); \
+			uint8 new_val = read_crtc_reg(reg); \
+			debug_printf("Trident_REG: CR%02X Old=0x%02X, Write=0x%02X, Readback=0x%02X\n", \
+				reg, old_val, tridentReg->tridentRegs3x4[reg], new_val); \
+		} else { \
+			write_crtc_reg(reg, tridentReg->tridentRegs3x4[reg]); \
+		} \
 	} while (0)
 
 
@@ -180,9 +194,10 @@ ProposeDisplayMode(display_mode *target, const display_mode *low,
 	(void)low;
 	(void)high;
 
-	TRACE("ProposeDisplayMode() %dx%d, pixel clock: %d kHz, space: 0x%X\n",
-		target->timing.h_display, target->timing.v_display,
-		target->timing.pixel_clock, target->space);
+	if (enable_log)
+		debug_printf("ProposeDisplayMode() %dx%d, pixel clock: %d kHz, space: 0x%X\n",
+			target->timing.h_display, target->timing.v_display,
+			target->timing.pixel_clock, target->space);
 
 	SharedInfo& si = *(gInfo.sharedInfo);
 
@@ -320,9 +335,10 @@ SetDisplayMode(display_mode* pMode)
 	if (!IsThereEnoughFBMemory(&mode, mode.bpp))
 		return B_NO_MEMORY;
 
-	debug_printf("Trident_ACC: SetDisplayMode starting for %dx%d, virtual %dx%d, %d bpp, bytesPerRow %d\n",
-		mode.timing.h_display, mode.timing.v_display,
-		mode.virtual_width, mode.virtual_height, mode.bpp, mode.bytesPerRow);
+	if (enable_log)
+		debug_printf("Trident_ACC: SetDisplayMode starting for %dx%d, virtual %dx%d, %d bpp, bytesPerRow %d\n",
+			mode.timing.h_display, mode.timing.v_display,
+			mode.virtual_width, mode.virtual_height, mode.bpp, mode.bytesPerRow);
 
 	// Enable MMIO at the very start of SetDisplayMode so we can read the original registers correctly
 	ioctl(gInfo.deviceFileDesc, TRIDENT_ENABLE_MMIO);
@@ -406,9 +422,10 @@ SetDisplayMode(display_mode* pMode)
 	// Set clock registers
 	uint8 clk_a = 0, clk_b = 0;
 	CalculateTridentPLL(clock, clk_a, clk_b);
+	// tridentReg->tridentRegsClock[0x00] = (read_vga_reg(0x3CC) & 0xF3) | 0x08;
 
 	// Determine Miscellaneous Output Register sync polarities deterministically
-	uint8 misc = 0x23; // default: color emulation, ram enable, clock 0
+	uint8 misc = 0x23; // default: color emulation, ram enable, clock 0 <- should it be read_vga_reg(0x3CC) & 0xF3 ?
 	if (!(mode.timing.flags & B_POSITIVE_HSYNC))
 		misc |= 0x40; // negative hsync
 	if (!(mode.timing.flags & B_POSITIVE_VSYNC))
@@ -538,7 +555,8 @@ SetDisplayMode(display_mode* pMode)
 	// Ensure standard VGA palette mask is fully open on the physical RAMDAC port (0x3C6)
 	write_reg8(0x3C6, 0xFF);
 
-	debug_printf("Trident_ACC: Standard Attribute Controller programmed, PAS enabled\n");
+	if (enable_log)
+		debug_printf("Trident_ACC: Standard Attribute Controller programmed, PAS enabled\n");
 
 	// Re-enable MMIO decoder via kernel ioctl (since standard VGA writes may have disabled it)
 	ioctl(gInfo.deviceFileDesc, TRIDENT_ENABLE_MMIO);
@@ -572,8 +590,9 @@ SetDisplayMode(display_mode* pMode)
 	dummy = INB(0x3C8);
 	(void)dummy;
 
-	debug_printf("Trident_REG: DAC Command Old=0x%02X, Write=0x%02X, Readback=0x%02X (four dummy reads were: 0x%02X, 0x%02X, 0x%02X, 0x%02X)\n",
-		r_4, tridentReg->tridentRegsDAC[0x00], r_back, r_0, r_1, r_2, r_3);
+	if (enable_log)
+		debug_printf("Trident_REG: DAC Command Old=0x%02X, Write=0x%02X, Readback=0x%02X (four dummy reads were: 0x%02X, 0x%02X, 0x%02X, 0x%02X)\n",
+			r_4, tridentReg->tridentRegsDAC[0x00], r_back, r_0, r_1, r_2, r_3);
 
 	// Restore extended registers with active readback logging
 	OUTW_3x4(CRTCModuleTest);
@@ -616,9 +635,11 @@ SetDisplayMode(display_mode* pMode)
 	uint8 new_clk_low = read_seq_reg(ClockLow);
 	uint8 new_clk_high = read_seq_reg(ClockHigh);
 
-	debug_printf("Trident_REG: Clock Low Old=0x%02X, Write=0x%02X, Readback=0x%02X\n",
+	if (enable_log)
+		debug_printf("Trident_REG: Clock Low Old=0x%02X, Write=0x%02X, Readback=0x%02X\n",
 			old_clk_low, tridentReg->tridentRegsClock[0x01], new_clk_low);
-	debug_printf("Trident_REG: Clock High Old=0x%02X, Write=0x%02X, Readback=0x%02X\n",
+	if (enable_log)
+		debug_printf("Trident_REG: Clock High Old=0x%02X, Write=0x%02X, Readback=0x%02X\n",
 			old_clk_high, tridentReg->tridentRegsClock[0x02], new_clk_high);
 
 	// Scrittura finale di MiscOut (0x3C2)
@@ -626,13 +647,16 @@ SetDisplayMode(display_mode* pMode)
 	OUTB(0x3C2, tridentReg->tridentRegsClock[0x00]);
 	uint8 new_misc = read_vga_reg(0x3CC);
 
-	debug_printf("Trident_REG: MiscOut Old=0x%02X, Write=0x%02X, Readback=0x%02X\n",
+	if (enable_log)
+		debug_printf("Trident_REG: MiscOut Old=0x%02X, Write=0x%02X, Readback=0x%02X\n",
 			old_misc, tridentReg->tridentRegsClock[0x00], new_misc);
 
 	// Protect / Lock registri
 	OUTB(0x3C4, Protection);
+	//OUTB(0x3C5, 0x92);
 	OUTB(0x3C5, tridentReg->tridentRegs3C4[Protection]);
 
+	//OUTW(0x3C4, (0x80 << 8) | NewMode1);
 	OUTW(0x3C4, ((tridentReg->tridentRegs3C4[NewMode1] ^ 0x02) << 8) | NewMode1);
 
 	si.displayMode = mode;
@@ -641,8 +665,9 @@ SetDisplayMode(display_mode* pMode)
 	si.maxFrameBufferSize = si.videoMemSize;
 	si.cursorOffset = si.maxFrameBufferSize - 4096;
 
-	debug_printf("Trident_ACC: SetDisplayMode completed successfully. Cursor offset: %u\n",
-		si.cursorOffset);
+	if (enable_log)
+		debug_printf("Trident_ACC: SetDisplayMode completed successfully. Cursor offset: %u\n",
+			si.cursorOffset);
 
 	return B_OK;
 }
