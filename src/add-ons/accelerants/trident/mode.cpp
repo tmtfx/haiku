@@ -15,6 +15,8 @@
 #include <create_display_modes.h>
 #include <string.h>
 #include <unistd.h>
+#include <ddc.h>
+#include <edid.h>
 
 bool enable_log = false;
 
@@ -135,6 +137,50 @@ IsModeUsable(display_mode* mode)
 }
 
 
+static status_t
+GetI2CSignals(void* cookie, int* clock, int* data)
+{
+	(void)cookie;
+	uint8 value = read_crtc_reg(I2C);
+	*clock = (value & 0x02) != 0;
+	*data = (value & 0x01) != 0;
+	return B_OK;
+}
+
+
+static status_t
+SetI2CSignals(void* cookie, int clock, int data)
+{
+	(void)cookie;
+	uint8 value = 0x0C;
+	if (clock)
+		value |= 2;
+	if (data)
+		value |= 1;
+
+	write_crtc_reg(I2C, value);
+	return B_OK;
+}
+
+
+static bool
+GetEdidInfoI2C(edid1_info* edid)
+{
+	i2c_bus bus;
+	bus.cookie = NULL;
+	bus.set_signals = &SetI2CSignals;
+	bus.get_signals = &GetI2CSignals;
+	ddc2_init_timing(&bus);
+
+	uint8 oldI2C = read_crtc_reg(I2C);
+
+	bool success = (ddc2_read_edid1(&bus, edid, NULL, NULL) == B_OK);
+
+	write_crtc_reg(I2C, oldI2C);
+	return success;
+}
+
+
 status_t
 CreateModeList(void)
 {
@@ -142,12 +188,19 @@ CreateModeList(void)
 
 	si.bHaveEDID = false;
 
-	// Attempt to get EDID info from the driver
-	edid1_raw rawEdid;
-	if (ioctl(gInfo.deviceFileDesc, TRIDENT_GET_EDID, &rawEdid, sizeof(rawEdid)) == B_OK) {
-		if (rawEdid.version.version == 1 && rawEdid.version.revision <= 4) {
-			edid_decode(&si.edidInfo, &rawEdid);
-			si.bHaveEDID = true;
+	// Try reading via I2C dynamically first!
+	if (GetEdidInfoI2C(&si.edidInfo)) {
+		si.bHaveEDID = true;
+		TRACE("CreateModeList(): Successfully retrieved EDID via I2C\n");
+	} else {
+		TRACE("CreateModeList(): Dynamic I2C EDID failed, falling back to driver BIOS/bootloader EDID\n");
+		// Attempt to get EDID info from the driver
+		edid1_raw rawEdid;
+		if (ioctl(gInfo.deviceFileDesc, TRIDENT_GET_EDID, &rawEdid, sizeof(rawEdid)) == B_OK) {
+			if (rawEdid.version.version == 1 && rawEdid.version.revision <= 4) {
+				edid_decode(&si.edidInfo, &rawEdid);
+				si.bHaveEDID = true;
+			}
 		}
 	}
 
@@ -775,11 +828,21 @@ GetEdidInfo(void* info, size_t size, uint32* _version)
 {
 	SharedInfo& si = *gInfo.sharedInfo;
 
-	if (!si.bHaveEDID)
-		return B_ERROR;
-
 	if (size < sizeof(struct edid1_info))
 		return B_BUFFER_OVERFLOW;
+
+	// Try reading via I2C dynamically first!
+	edid1_info edid;
+	if (GetEdidInfoI2C(&edid)) {
+		si.edidInfo = edid;
+		si.bHaveEDID = true;
+		TRACE("GetEdidInfo(): Successfully retrieved EDID dynamically via I2C\n");
+	} else {
+		TRACE("GetEdidInfo(): Failed to retrieve EDID dynamically via I2C, falling back to cached EDID\n");
+	}
+
+	if (!si.bHaveEDID)
+		return B_ERROR;
 
 	memcpy(info, &si.edidInfo, sizeof(struct edid1_info));
 	*_version = EDID_VERSION_1;
