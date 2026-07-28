@@ -23,6 +23,7 @@
 #include <new>
 #include <string.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <cstring>
 
 #include <crypto/BCrypto.h>
@@ -79,6 +80,16 @@ static std::string _BufToHex(const uint8_t* buf, size_t len) {
     for (size_t i = 0; i < len; ++i)
         ss << std::hex << std::setw(2) << std::setfill('0') << (int)buf[i];
     return ss.str();
+}
+
+static void LogDebug(const char* format, ...) {
+    FILE* f = fopen("/boot/home/keystore_debug.log", "a");
+    if (f == NULL) return;
+    va_list args;
+    va_start(args, format);
+    vfprintf(f, format, args);
+    va_end(args);
+    fclose(f);
 }
 // ********************************
 
@@ -925,13 +936,6 @@ KeyStoreServer::_GetSalt(uint8* saltOut)
 	return B_OK;
 }
 
-//static const uint8 kEmptyStringBlake2b[32] = {
-//    0x0e, 0x57, 0x51, 0xc0, 0x26, 0xe5, 0x43, 0xb2,
-//    0xe8, 0xab, 0x2d, 0x12, 0xb1, 0x34, 0xd4, 0xfe,
-//    0x80, 0x6e, 0xc6, 0xb4, 0x16, 0x04, 0xfe, 0x6b,
-//    0x4e, 0xd9, 0x5b, 0xcf, 0x5f, 0x2e, 0x82, 0x51
-//};
-
 static const uint8 kEmptyStringBlake2b64[64] = {
     0x0e, 0x57, 0x51, 0xc0, 0x26, 0xe5, 0x43, 0xb2,
     0xe8, 0xab, 0x2d, 0x12, 0xb1, 0x34, 0xd4, 0xfe,
@@ -946,6 +950,7 @@ static const uint8 kEmptyStringBlake2b64[64] = {
 status_t
 KeyStoreServer::_GetOrAskSessionPassword()
 {
+	LogDebug("[DEBUG] Inizio _GetOrAskSessionPassword, fHasSessionPassword: %d\n", fHasSessionPassword);
 	if (fHasSessionPassword)
 		return B_OK;
 
@@ -953,50 +958,86 @@ KeyStoreServer::_GetOrAskSessionPassword()
 	// Se la password è vuota, l'hash memorizzato in shadow coincide con blake2b(salt).
 	BPath settingsDir;
 	if (find_directory(B_USER_SETTINGS_DIRECTORY, &settingsDir) == B_OK) {
+		LogDebug("[DEBUG] settingsDir: %s\n", settingsDir.Path());
 		BPath shadowPath(settingsDir.Path(), "shadow");
 		BFile shadowFile(shadowPath.Path(), B_READ_ONLY);
 		if (shadowFile.InitCheck() == B_OK) {
+			LogDebug("[DEBUG] shadow file trovato\n");
 			BMessage shadowMsg;
 			if (shadowMsg.Unflatten(&shadowFile) == B_OK) {
+				LogDebug("[DEBUG] shadow unflattened\n");
 				const void* shadowSalt = NULL;
 				ssize_t saltLen = 0;
 				const void* shadowHash = NULL;
 				ssize_t hashLen = 0;
 				if (shadowMsg.FindData("salt", B_RAW_TYPE, &shadowSalt, &saltLen) == B_OK && saltLen == 16 &&
 					shadowMsg.FindData("hash", B_RAW_TYPE, &shadowHash, &hashLen) == B_OK && hashLen == 64) {
+					LogDebug("[DEBUG] salt e hash trovati in shadow. saltLen: %zd, hashLen: %zd\n", saltLen, hashLen);
+					
+					char saltHex[33];
+					for (int i = 0; i < 16; i++) sprintf(saltHex + i*2, "%02x", ((const uint8*)shadowSalt)[i]);
+					char hashHex[129];
+					for (int i = 0; i < 64; i++) sprintf(hashHex + i*2, "%02x", ((const uint8*)shadowHash)[i]);
+					LogDebug("[DEBUG] shadow salt: %s\n", saltHex);
+					LogDebug("[DEBUG] shadow hash: %s\n", hashHex);
 					
 					BCrypto crypto;
 					if (crypto.InitCheck() == B_OK) {
 						uint8 computedHash[64];
 						if (crypto.Digest(B_CRYPTO_BLAKE2B, shadowSalt, 16, computedHash) == B_OK) {
+							char compHex[129];
+							for (int i = 0; i < 64; i++) sprintf(compHex + i*2, "%02x", computedHash[i]);
+							LogDebug("[DEBUG] computed hash: %s\n", compHex);
+							
 							if (memcmp(computedHash, shadowHash, 64) == 0) {
-								printf("No password, hard-masking...\n");
+								LogDebug("[DEBUG] Match! Password vuota rilevata. Imposto fSessionPassword = \"\"\n");
 								fSessionPassword = "";
 								fHasSessionPassword = true;
 								return B_OK;
+							} else {
+								LogDebug("[DEBUG] Hash NON corrisponde.\n");
 							}
+						} else {
+							LogDebug("[DEBUG] Digest BLAKE2B fallito\n");
 						}
+					} else {
+						LogDebug("[DEBUG] BCrypto InitCheck fallito\n");
 					}
+				} else {
+					LogDebug("[DEBUG] Campi shadow non validi o mancanti\n");
 				}
+			} else {
+				LogDebug("[DEBUG] Unflatten fallito\n");
 			}
+		} else {
+			LogDebug("[DEBUG] InitCheck shadowFile fallito: %d\n", shadowFile.InitCheck());
 		}
+	} else {
+		LogDebug("[DEBUG] find_directory settings fallito\n");
 	}
 
 	MasterPasswordRequestWindow* window
 		= new(std::nothrow) MasterPasswordRequestWindow();
-	if (window == NULL)
+	if (window == NULL) {
+		LogDebug("[DEBUG] Impossibile creare MasterPasswordRequestWindow\n");
 		return B_NO_MEMORY;
-
+	}
+	
 	BString password;
 	status_t result = window->RequestPassword(password);
-	if (result != B_OK)
+	if (result != B_OK) {
+		LogDebug("[DEBUG] RequestPassword fallito con codice: %d\n", result);
 		return result;
+	}
 
-	if (password.IsEmpty())
+	if (password.IsEmpty()) {
+		LogDebug("[DEBUG] Password inserita vuota da finestra, ritorno errore\n");
 		return B_BAD_VALUE;
-
+	}
+	
 	fSessionPassword = password;
 	fHasSessionPassword = true;
+	LogDebug("[DEBUG] Password impostata da finestra: %s\n", fSessionPassword.String());
 	return B_OK;
 }
 
@@ -1208,172 +1249,14 @@ KeyStoreServer::_DecryptKeyData(BMessage& keyMessage)
     return result;
 }
 
-/* versione con BCrypto, non va, indagare
 EVP_PKEY*
 KeyStoreServer::_DecryptMasterPrivateKey()
 {
-	status_t sessionCheck = _GetOrAskSessionPassword();
-	
-    if (sessionCheck != B_OK || !fHasSessionPassword || fSessionPassword.IsEmpty()) {
-    	fprintf(stderr, "[DEBUG CRYPTO-READ] ERRORE: Sessione non attiva e impossibile recuperare la password.\n");
-    	return NULL;
-    }
-
-    // ==========================================
-    // LIVELLO 1: Recupero Salt dallo Shadow per KDF
-    // ==========================================
-    BPath settingsDir;
-    if (find_directory(B_USER_SETTINGS_DIRECTORY, &settingsDir) != B_OK) {
-        fprintf(stderr, "[DEBUG MASTER] ERRORE: find_directory per B_USER_SETTINGS_DIRECTORY fallita.\n");
-        return NULL;
-    }
-    
-    BPath shadowPath(settingsDir.Path(), "shadow");
-    BFile shadowFile(shadowPath.Path(), B_READ_ONLY);
-    status_t fileErr = shadowFile.InitCheck();
-    if (fileErr != B_OK) {
-        fprintf(stderr, "[DEBUG MASTER] ERRORE: Apertura shadow file '%s' fallita con errore: %d\n", shadowPath.Path(), fileErr);
-        return NULL;
-    }
-
-    BMessage shadowMsg;
-    status_t unflattenErr = shadowMsg.Unflatten(&shadowFile);
-    if (unflattenErr != B_OK) {
-        fprintf(stderr, "[DEBUG MASTER] ERRORE: Unflatten dello shadow message fallito: %d\n", unflattenErr);
-        return NULL;
-    }
-
-    const void* shadowSalt = NULL;
-    ssize_t saltLen = 0;
-    // Estraiamo il Salt dall'unico BMessage dello shadow
-    if (shadowMsg.FindData("salt", B_RAW_TYPE, &shadowSalt, &saltLen) != B_OK) {
-        fprintf(stderr, "[DEBUG MASTER] ERRORE: Campo 'salt' non trovato nello shadow message.\n");
-        return NULL;
-    }
-    if (saltLen != 16) {
-        fprintf(stderr, "[DEBUG MASTER] ERRORE: Lunghezza del salt errata. Attesi 16, trovati %" B_PRIdSSIZE "\n", saltLen);
-        return NULL;
-    }
-
-    // Rigeneriamo la chiave AES-256 usando Password + Salt (1000 round SHA256)
-    BCrypto crypto;
-    if (crypto.InitCheck() != B_OK) {
-        fprintf(stderr, "[DEBUG MASTER] ERRORE: Inizializzazione BCrypto fallita.\n");
-        return NULL;
-    }
-
-    size_t passLen = fSessionPassword.Length();
-    size_t inputLen = passLen + 16;
-    uint8_t* kdfInput = new(std::nothrow) uint8_t[inputLen];
-    if (kdfInput == NULL) return NULL;
-
-    memcpy(kdfInput, fSessionPassword.String(), passLen);
-    memcpy(kdfInput + passLen, shadowSalt, 16);
-
-    uint8_t aesKey[32];
-    status_t err = crypto.Digest(B_CRYPTO_SHA256, kdfInput, inputLen, aesKey);
-    secure_memzero_server(kdfInput, inputLen);
-    delete[] kdfInput;
-    if (err != B_OK) {
-        fprintf(stderr, "[DEBUG MASTER] ERRORE: Primo round di Digest fallito: %d\n", err);
-        return NULL;
-    }
-
-    for (int i = 1; i < 1000; i++) {
-        if (crypto.Digest(B_CRYPTO_SHA256, aesKey, 32, aesKey) != B_OK) {
-            fprintf(stderr, "[DEBUG MASTER] ERRORE: Iterazione %d del Digest fallita.\n", i);
-            return NULL;
-        }
-    }
-
-    // ==========================================
-    // LIVELLO 2: Estrazione e Decifratura della Privata RSA
-    // ==========================================
-    BPath keyPath(settingsDir.Path(), "system/keystore/master");
-    BFile keyFile(keyPath.Path(), B_READ_ONLY);
-    fileErr = keyFile.InitCheck();
-    if (fileErr != B_OK) {
-        fprintf(stderr, "[DEBUG MASTER] ERRORE: Apertura file master '%s' fallita con errore: %d\n", keyPath.Path(), fileErr);
-        return NULL;
-    }
-    
-    attr_info attrInfo;
-    if (keyFile.GetAttrInfo("crypto:private_key", &attrInfo) != B_OK) {
-        fprintf(stderr, "[DEBUG MASTER] ERRORE: Attributo BFS 'crypto:private_key' non trovato sul file master.\n");
-        return NULL;
-    }
-
-    uint8_t* attrData = new(std::nothrow) uint8_t[attrInfo.size];
-    if (attrData == NULL) {
-        fprintf(stderr, "[DEBUG MASTER] ERRORE: Memoria insufficiente per attrData (dimensione: %" B_PRIdOFF ").\n", attrInfo.size);
-        return NULL;
-    }
-
-    if (keyFile.ReadAttr("crypto:private_key", B_RAW_TYPE, 0, attrData, attrInfo.size) != attrInfo.size) {
-        fprintf(stderr, "[DEBUG MASTER] ERRORE: Lettura dell'attributo 'crypto:private_key' incompleta o fallita.\n");
-        delete[] attrData;
-        return NULL;
-    }
-
-    // Separizziamo l'IV casuale (primi 16 byte) dal payload cifrato (il resto dell'attributo)
-    uint8_t iv[16];
-    memcpy(iv, attrData, 16);
-    size_t encPrivLen = attrInfo.size - 16;
-    uint8_t* encPriv = attrData + 16;
-
-    crypto.SetAlgorithm(B_CRYPTO_AES);
-    crypto.SetMode(B_CRYPTO_MODE_CBC);
-    crypto.SetPadding(true, B_CRYPTO_PKCS7);
-
-    uint8_t* privDer = new(std::nothrow) uint8_t[encPrivLen];
-    if (privDer == NULL) {
-        fprintf(stderr, "[DEBUG MASTER] ERRORE: Memoria insufficiente per buffer privDer.\n");
-        delete[] attrData;
-        return NULL;
-    }
-
-    // Decifriamo l'RSA privata nativa in formato DER
-    ssize_t privLen = crypto.Decrypt(aesKey, sizeof(aesKey), iv, sizeof(iv), encPriv, encPrivLen, privDer, encPrivLen);
-    
-    secure_memzero_server(aesKey, sizeof(aesKey));
-    delete[] attrData;
-
-    if (privLen < 0) {
-    	fprintf(stderr, "[DEBUG MASTER] ERRORE: Decrypt simmetrico fallito (chiave errata o dati corrotti), codice: %" B_PRIdSSIZE "\n", privLen);
-        secure_memzero_server(privDer, encPrivLen);
-        delete[] privDer;
-        return NULL; 
-    }
-    
-	if (privLen > 0) {
-        fprintf(stderr, "[DEBUG CRYPTO-HEX] Primi 4 byte decifrati (DER?): %02x %02x %02x %02x\n", 
-            privDer[0], privDer[1], privDer[2], privDer[3]);
-    }
-
-    // Convertiamo l'array DER nell'oggetto OpenSSL d2i_PrivateKey pronto per l'uso volatile
-    const unsigned char* p = privDer;
-    //EVP_PKEY* privKey = d2i_PrivateKey(EVP_PKEY_RSA, NULL, &p, privLen);
-    EVP_PKEY* privKey = d2i_AutoPrivateKey(NULL, &p, privLen);
-    
-    if (privKey == NULL) {
-        fprintf(stderr, "[DEBUG MASTER] ERRORE: d2i_PrivateKey fallito. I dati decifrati non sono una chiave RSA DER valida.\n");
-        // OpenSSL error stack log se necessario
-    }
-    
-    secure_memzero_server(privDer, privLen);
-    delete[] privDer;
-
-    return privKey; 
-}*/
-
-EVP_PKEY*
-KeyStoreServer::_DecryptMasterPrivateKey()
-{
+	LogDebug("[DEBUG] Inizio _DecryptMasterPrivateKey\n");
     status_t sessionCheck = _GetOrAskSessionPassword();
     
-    //if (sessionCheck != B_OK || !fHasSessionPassword || fSessionPassword.IsEmpty()) {
     if (sessionCheck != B_OK || !fHasSessionPassword) {
-        fprintf(stderr, "[DEBUG MASTER] ERRORE: Sessione non attiva.\n");
+        LogDebug("[DEBUG] Sessione non sbloccata. sessionCheck: %d, fHasSessionPassword: %d\n", sessionCheck, fHasSessionPassword);
         return NULL;
     }
 
@@ -1381,14 +1264,26 @@ KeyStoreServer::_DecryptMasterPrivateKey()
     // LIVELLO 1: Recupero Salt dallo Shadow per KDF
     // ==========================================
     uint8 shadowSalt[16];
-    if (_GetSalt(shadowSalt) != B_OK) return NULL;
+    status_t saltResult = _GetSalt(shadowSalt);
+    if (saltResult != B_OK) {
+        LogDebug("[DEBUG] _GetSalt fallito con errore: %d\n", saltResult);
+        return NULL;
+    }
+    
+    char saltHex[33];
+    for (int i = 0; i < 16; i++) sprintf(saltHex + i*2, "%02x", shadowSalt[i]);
+    LogDebug("[DEBUG] Salt letto per KDF: %s\n", saltHex);
 
     BPath settingsDir;
-    if (find_directory(B_USER_SETTINGS_DIRECTORY, &settingsDir) != B_OK) return NULL;
+    if (find_directory(B_USER_SETTINGS_DIRECTORY, &settingsDir) != B_OK) {
+        LogDebug("[DEBUG] find_directory settings fallito\n");
+        return NULL;
+    }
 
     // Rigeneriamo la chiave AES-256 (1000 round SHA256 manuali con OpenSSL)
     size_t passLen = fSessionPassword.Length();
     size_t inputLen = passLen + 16;
+    LogDebug("[DEBUG] passLen: %zu, inputLen: %zu\n", passLen, inputLen);
     uint8_t* kdfInput = new(std::nothrow) uint8_t[inputLen];
     if (kdfInput == NULL) return NULL;
 
@@ -1408,20 +1303,32 @@ KeyStoreServer::_DecryptMasterPrivateKey()
         EVP_Digest(aesKey, 32, aesKey, &mdLen, EVP_sha256(), NULL);
     }
 
+    char aesKeyHex[65];
+    for (int i = 0; i < 32; i++) sprintf(aesKeyHex + i*2, "%02x", aesKey[i]);
+    LogDebug("[DEBUG] aesKey derivata: %s\n", aesKeyHex);
+
     // ==========================================
     // LIVELLO 2: Estrazione e Decifratura OpenSSL Nativa
     // ==========================================
     BPath keyPath(settingsDir.Path(), "system/keystore/master");
     BFile keyFile(keyPath.Path(), B_READ_ONLY);
-    if (keyFile.InitCheck() != B_OK) return NULL;
+    if (keyFile.InitCheck() != B_OK) {
+        LogDebug("[DEBUG] Apertura master file fallita: %s\n", strerror(keyFile.InitCheck()));
+        return NULL;
+    }
 
     attr_info attrInfo;
-    if (keyFile.GetAttrInfo("crypto:private_key", &attrInfo) != B_OK) return NULL;
+    if (keyFile.GetAttrInfo("crypto:private_key", &attrInfo) != B_OK) {
+        LogDebug("[DEBUG] GetAttrInfo fallito\n");
+        return NULL;
+    }
+    LogDebug("[DEBUG] Dimensione attributo crypto:private_key: %lld\n", attrInfo.size);
 
     uint8_t* attrData = new(std::nothrow) uint8_t[attrInfo.size];
     if (attrData == NULL) return NULL;
 
     if (keyFile.ReadAttr("crypto:private_key", B_RAW_TYPE, 0, attrData, attrInfo.size) != attrInfo.size) {
+        LogDebug("[DEBUG] ReadAttr fallito\n");
         delete[] attrData;
         return NULL;
     }
@@ -1430,6 +1337,11 @@ KeyStoreServer::_DecryptMasterPrivateKey()
     memcpy(iv, attrData, 16);
     size_t encPrivLen = attrInfo.size - 16;
     uint8_t* encPriv = attrData + 16;
+    
+    char ivHex[33];
+    for (int i = 0; i < 16; i++) sprintf(ivHex + i*2, "%02x", iv[i]);
+    LogDebug("[DEBUG] IV letto: %s\n", ivHex);
+    LogDebug("[DEBUG] encPrivLen: %zu\n", encPrivLen);
 
     uint8_t* privDer = new(std::nothrow) uint8_t[encPrivLen];
     if (privDer == NULL) {
@@ -1447,12 +1359,12 @@ KeyStoreServer::_DecryptMasterPrivateKey()
     EVP_CIPHER_CTX_set_padding(ctx, 1); 
 
     if (EVP_DecryptUpdate(ctx, privDer, &len, encPriv, encPrivLen) != 1) {
-        fprintf(stderr, "[DEBUG TEST-OPENSSL] ERRORE in DecryptUpdate\n");
+        LogDebug("[DEBUG] Errore in DecryptUpdate\n");
     }
     privLen = len;
 
     if (EVP_DecryptFinal_ex(ctx, privDer + len, &len) != 1) {
-        fprintf(stderr, "[DEBUG TEST-OPENSSL] ERRORE in DecryptFinal (Padding non valido! Chiave errata?)\n");
+        LogDebug("[DEBUG] Errore in DecryptFinal (Padding non valido! Chiave errata?)\n");
         privLen = -1;
     } else {
         privLen += len;
@@ -1463,18 +1375,25 @@ KeyStoreServer::_DecryptMasterPrivateKey()
     delete[] attrData;
 
     if (privLen < 0) {
+        LogDebug("[DEBUG] Decrypt fallito, ritorno NULL\n");
         secure_memzero_server(privDer, encPrivLen);
         delete[] privDer;
         return NULL;
     }
 
-    fprintf(stderr, "[DEBUG TEST-OPENSSL] Decifrato con successo. Output len: %d\n", privLen);
-    fprintf(stderr, "[DEBUG TEST-OPENSSL] Primi 4 byte: %02x %02x %02x %02x\n", 
-            privDer[0], privDer[1], privDer[2], privDer[3]);
+    LogDebug("[DEBUG] Decifrato con successo! Output len: %d\n", privLen);
+    char derHex[13];
+    for (int i = 0; i < 4 && i < privLen; i++) sprintf(derHex + i*2, "%02x", privDer[i]);
+    LogDebug("[DEBUG] Primi byte decifrati: %s\n", derHex);
 
     // Proviamo a ricostruire la chiave
     const unsigned char* p = privDer;
     EVP_PKEY* privKey = d2i_PrivateKey(EVP_PKEY_RSA, NULL, &p, privLen);
+    if (privKey == NULL) {
+        LogDebug("[DEBUG] d2i_PrivateKey fallito\n");
+    } else {
+        LogDebug("[DEBUG] EVP_PKEY ricostruito con successo!\n");
+    }
 
     secure_memzero_server(privDer, privLen);
     delete[] privDer;
