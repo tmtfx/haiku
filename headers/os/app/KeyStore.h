@@ -52,6 +52,11 @@ public:
 									BKeyType type, const char* identifier,
 									const char* secondaryIdentifier,
 									BKey& key);
+			status_t			GetEncryptedKey(const char* keyring,
+									BKeyType type, const char* identifier,
+									const char* secondaryIdentifier,
+									bool secondaryIdentifierOptional,
+									BKey& key);
 			status_t			AddEncryptedKey(const BKey& key);
 			status_t			AddEncryptedKey(const char* keyring,
 									const BKey& key);

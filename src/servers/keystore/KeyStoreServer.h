@@ -58,6 +58,7 @@ private:
 
 		// Session password: cached in RAM on first encrypted-key access.
 		// Cleared when the server shuts down.
+		const void*					_GetSalt();
 		status_t					_GetOrAskSessionPassword();
 		status_t					_EncryptKeyData(BMessage& keyMessage);
 		status_t					_DecryptKeyData(BMessage& keyMessage);

@@ -23,6 +23,7 @@
 #include <new>
 #include <string.h>
 #include <stdio.h>
+#include <cstring>
 
 #include <crypto/BCrypto.h>
 #include <crypto/BCryptoDefs.h>
@@ -898,7 +899,43 @@ secure_memzero_server(void* p, size_t n)
 	volatile unsigned char* cp = (volatile unsigned char*)p;
 	while (n--) *cp++ = 0;
 }
+const void*
+KeyStoreServer::_GetSalt(){
+	BPath settingsDir;
+    if (find_directory(B_USER_SETTINGS_DIRECTORY, &settingsDir) != B_OK) return NULL;
+    
+    BPath shadowPath(settingsDir.Path(), "shadow");
+    BFile shadowFile(shadowPath.Path(), B_READ_ONLY);
+    if (shadowFile.InitCheck() != B_OK) return NULL;
 
+    BMessage shadowMsg;
+    if (shadowMsg.Unflatten(&shadowFile) != B_OK) return NULL;
+
+    const void* shadowSalt = NULL;
+    ssize_t saltLen = 0;
+    if (shadowMsg.FindData("salt", B_RAW_TYPE, &shadowSalt, &saltLen) != B_OK || saltLen != 16) {
+        return NULL;
+    }
+    return shadowSalt;
+}
+
+//static const uint8 kEmptyStringBlake2b[32] = {
+//    0x0e, 0x57, 0x51, 0xc0, 0x26, 0xe5, 0x43, 0xb2,
+//    0xe8, 0xab, 0x2d, 0x12, 0xb1, 0x34, 0xd4, 0xfe,
+//    0x80, 0x6e, 0xc6, 0xb4, 0x16, 0x04, 0xfe, 0x6b,
+//    0x4e, 0xd9, 0x5b, 0xcf, 0x5f, 0x2e, 0x82, 0x51
+//};
+
+static const uint8 kEmptyStringBlake2b64[64] = {
+    0x0e, 0x57, 0x51, 0xc0, 0x26, 0xe5, 0x43, 0xb2,
+    0xe8, 0xab, 0x2d, 0x12, 0xb1, 0x34, 0xd4, 0xfe,
+    0x80, 0x6e, 0xc6, 0xb4, 0x16, 0x04, 0xfe, 0x6b,
+    0x4e, 0xd9, 0x5b, 0xcf, 0x5f, 0x2e, 0x82, 0x51,
+    0xb6, 0x37, 0xc3, 0x89, 0x82, 0xbf, 0xbf, 0x3f,
+    0x07, 0x5d, 0x0f, 0x63, 0xb1, 0xb5, 0x96, 0xf4,
+    0xd9, 0x30, 0xed, 0x9b, 0x95, 0x60, 0x11, 0xc2,
+    0x30, 0xbd, 0xad, 0x69, 0x02, 0x9d, 0x65, 0x96
+};
 
 status_t
 KeyStoreServer::_GetOrAskSessionPassword()
@@ -906,6 +943,21 @@ KeyStoreServer::_GetOrAskSessionPassword()
 	if (fHasSessionPassword)
 		return B_OK;
 
+	// Qui bisogna fare un controllo: se hash in shadow è quello della password vuota ""
+	// impostare fSessionPassword = "" e fHasSessionPassword = true poi ritornare B_OK;
+	// si userà mascheramento forte senza cifratura... non il massimo ma almeno è qualcosa
+	const void* shadowSalt = _GetSalt();
+	if (shadowSalt == NULL)
+		return B_BAD_VALUE;
+	else {
+		if (memcmp(shadowSalt, kEmptyStringBlake2b64, sizeof(kEmptyStringBlake2b64)) == 0) {
+			printf("No password, hard-masking...");
+			fSessionPassword = "";
+			fHasSessionPassword = true;
+			return B_OK;
+		}
+	}
+	
 	MasterPasswordRequestWindow* window
 		= new(std::nothrow) MasterPasswordRequestWindow();
 	if (window == NULL)
@@ -1295,7 +1347,8 @@ KeyStoreServer::_DecryptMasterPrivateKey()
 {
     status_t sessionCheck = _GetOrAskSessionPassword();
     
-    if (sessionCheck != B_OK || !fHasSessionPassword || fSessionPassword.IsEmpty()) {
+    //if (sessionCheck != B_OK || !fHasSessionPassword || fSessionPassword.IsEmpty()) {
+    if (sessionCheck != B_OK || !fHasSessionPassword) {
         fprintf(stderr, "[DEBUG MASTER] ERRORE: Sessione non attiva.\n");
         return NULL;
     }
@@ -1303,9 +1356,10 @@ KeyStoreServer::_DecryptMasterPrivateKey()
     // ==========================================
     // LIVELLO 1: Recupero Salt dallo Shadow per KDF
     // ==========================================
+    const void* shadowSalt = _GetSalt();
     BPath settingsDir;
     if (find_directory(B_USER_SETTINGS_DIRECTORY, &settingsDir) != B_OK) return NULL;
-    
+    /*
     BPath shadowPath(settingsDir.Path(), "shadow");
     BFile shadowFile(shadowPath.Path(), B_READ_ONLY);
     if (shadowFile.InitCheck() != B_OK) return NULL;
@@ -1317,7 +1371,8 @@ KeyStoreServer::_DecryptMasterPrivateKey()
     ssize_t saltLen = 0;
     if (shadowMsg.FindData("salt", B_RAW_TYPE, &shadowSalt, &saltLen) != B_OK || saltLen != 16) {
         return NULL;
-    }
+    }*/
+    if (shadowSalt == NULL) return NULL;
 
     // Rigeneriamo la chiave AES-256 (1000 round SHA256 manuali con OpenSSL)
     size_t passLen = fSessionPassword.Length();

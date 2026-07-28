@@ -77,6 +77,9 @@ BKeyStore::GetKey(const char* keyring, BKeyType type, const char* identifier,
 	const char* secondaryIdentifier, bool secondaryIdentifierOptional,
 	BKey& key)
 {
+	if (type == B_KEY_TYPE_PASSWORD ) {
+		return GetEncryptedKey(keyring, type, identifier, secondaryIdentifier, secondaryIdentifierOptional, key);
+	}
 	BMessage message(KEY_STORE_GET_KEY);
 	message.AddString("keyring", keyring);
 	message.AddUInt32("type", type);
@@ -110,6 +113,10 @@ BKeyStore::AddKey(const char* keyring, const BKey& key)
 	BMessage keyMessage;
 	if (key.Flatten(keyMessage) != B_OK)
 		return B_BAD_VALUE;
+	
+	if (key.Type() == B_KEY_TYPE_PASSWORD ) {
+		return AddEncryptedKey(keyring, key);
+	}
 
 	BMessage message(KEY_STORE_ADD_KEY);
 	message.AddString("keyring", keyring);
@@ -204,16 +211,25 @@ BKeyStore::GetEncryptedKey(const char* keyring, BKeyType type,
 	return GetEncryptedKey(keyring, type, identifier, NULL, key);
 }
 
-
 status_t
 BKeyStore::GetEncryptedKey(const char* keyring, BKeyType type,
 	const char* identifier, const char* secondaryIdentifier, BKey& key)
+{
+	return GetEncryptedKey(keyring, type, identifier, secondaryIdentifier, 
+						false, key);
+}
+
+status_t
+BKeyStore::GetEncryptedKey(const char* keyring, BKeyType type,
+	const char* identifier, const char* secondaryIdentifier, 
+	bool secondaryIdentifierOptional, BKey& key)
 {
 	BMessage message(KEY_STORE_GET_ENCRYPTED_KEY);
 	message.AddString("keyring", keyring);
 	message.AddUInt32("type", type);
 	message.AddString("identifier", identifier);
 	message.AddString("secondaryIdentifier", secondaryIdentifier);
+	message.AddBool("secondaryIdentifierOptional", secondaryIdentifierOptional);
 
 	BMessage reply;
 	status_t result = _SendKeyMessage(message, &reply);
@@ -224,7 +240,7 @@ BKeyStore::GetEncryptedKey(const char* keyring, BKeyType type,
 	if (reply.FindMessage("key", &keyMessage) != B_OK)
 		return B_ERROR;
 	result = key.Unflatten(keyMessage);
-	fprintf(stderr,"In GetEncryptedKey, Unflatten di KeyMessage ha ritornato %d", result);
+	//fprintf(stderr,"In GetEncryptedKey, Unflatten di KeyMessage ha ritornato %d", result);
 	return result;
 }
 
