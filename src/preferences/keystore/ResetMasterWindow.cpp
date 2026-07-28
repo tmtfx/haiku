@@ -109,12 +109,12 @@ void ResetMasterWindow::_OnReset()
     BString password = fPasswordControl->Text();
     BString confirm = fConfirmControl->Text();
 
-    if (password.IsEmpty()) {
-        BAlert* alert = new BAlert(B_TRANSLATE("Error"),
-            B_TRANSLATE("Password cannot be empty!"), B_TRANSLATE("OK"));
-        alert->Go();
-        return;
-    }
+    //if (password.IsEmpty()) {
+    //    BAlert* alert = new BAlert(B_TRANSLATE("Error"),
+    //        B_TRANSLATE("Password cannot be empty!"), B_TRANSLATE("OK"));
+    //    alert->Go();
+    //    return;
+    //}
 
     if (password != confirm) {
         BAlert* alert = new BAlert(B_TRANSLATE("Error"),
