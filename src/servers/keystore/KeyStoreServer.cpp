@@ -899,24 +899,30 @@ secure_memzero_server(void* p, size_t n)
 	volatile unsigned char* cp = (volatile unsigned char*)p;
 	while (n--) *cp++ = 0;
 }
-const void*
-KeyStoreServer::_GetSalt(){
+status_t
+KeyStoreServer::_GetSalt(uint8* saltOut)
+{
 	BPath settingsDir;
-    if (find_directory(B_USER_SETTINGS_DIRECTORY, &settingsDir) != B_OK) return NULL;
-    
-    BPath shadowPath(settingsDir.Path(), "shadow");
-    BFile shadowFile(shadowPath.Path(), B_READ_ONLY);
-    if (shadowFile.InitCheck() != B_OK) return NULL;
+	if (find_directory(B_USER_SETTINGS_DIRECTORY, &settingsDir) != B_OK)
+		return B_ERROR;
 
-    BMessage shadowMsg;
-    if (shadowMsg.Unflatten(&shadowFile) != B_OK) return NULL;
+	BPath shadowPath(settingsDir.Path(), "shadow");
+	BFile shadowFile(shadowPath.Path(), B_READ_ONLY);
+	if (shadowFile.InitCheck() != B_OK)
+		return shadowFile.InitCheck();
 
-    const void* shadowSalt = NULL;
-    ssize_t saltLen = 0;
-    if (shadowMsg.FindData("salt", B_RAW_TYPE, &shadowSalt, &saltLen) != B_OK || saltLen != 16) {
-        return NULL;
-    }
-    return shadowSalt;
+	BMessage shadowMsg;
+	if (shadowMsg.Unflatten(&shadowFile) != B_OK)
+		return B_ERROR;
+
+	const void* shadowSalt = NULL;
+	ssize_t saltLen = 0;
+	if (shadowMsg.FindData("salt", B_RAW_TYPE, &shadowSalt, &saltLen) != B_OK || saltLen != 16) {
+		return B_BAD_VALUE;
+	}
+
+	memcpy(saltOut, shadowSalt, 16);
+	return B_OK;
 }
 
 //static const uint8 kEmptyStringBlake2b[32] = {
@@ -943,21 +949,39 @@ KeyStoreServer::_GetOrAskSessionPassword()
 	if (fHasSessionPassword)
 		return B_OK;
 
-	// Qui bisogna fare un controllo: se hash in shadow è quello della password vuota ""
-	// impostare fSessionPassword = "" e fHasSessionPassword = true poi ritornare B_OK;
-	// si userà mascheramento forte senza cifratura... non il massimo ma almeno è qualcosa
-	const void* shadowSalt = _GetSalt();
-	if (shadowSalt == NULL)
-		return B_BAD_VALUE;
-	else {
-		if (memcmp(shadowSalt, kEmptyStringBlake2b64, sizeof(kEmptyStringBlake2b64)) == 0) {
-			printf("No password, hard-masking...");
-			fSessionPassword = "";
-			fHasSessionPassword = true;
-			return B_OK;
+	// Verifichiamo se l'utente ha configurato una password vuota all'installazione (oscuramento).
+	// Se la password è vuota, l'hash memorizzato in shadow coincide con blake2b(salt).
+	BPath settingsDir;
+	if (find_directory(B_USER_SETTINGS_DIRECTORY, &settingsDir) == B_OK) {
+		BPath shadowPath(settingsDir.Path(), "shadow");
+		BFile shadowFile(shadowPath.Path(), B_READ_ONLY);
+		if (shadowFile.InitCheck() == B_OK) {
+			BMessage shadowMsg;
+			if (shadowMsg.Unflatten(&shadowFile) == B_OK) {
+				const void* shadowSalt = NULL;
+				ssize_t saltLen = 0;
+				const void* shadowHash = NULL;
+				ssize_t hashLen = 0;
+				if (shadowMsg.FindData("salt", B_RAW_TYPE, &shadowSalt, &saltLen) == B_OK && saltLen == 16 &&
+					shadowMsg.FindData("hash", B_RAW_TYPE, &shadowHash, &hashLen) == B_OK && hashLen == 64) {
+					
+					BCrypto crypto;
+					if (crypto.InitCheck() == B_OK) {
+						uint8 computedHash[64];
+						if (crypto.Digest(B_CRYPTO_BLAKE2B, shadowSalt, 16, computedHash) == B_OK) {
+							if (memcmp(computedHash, shadowHash, 64) == 0) {
+								printf("No password, hard-masking...\n");
+								fSessionPassword = "";
+								fHasSessionPassword = true;
+								return B_OK;
+							}
+						}
+					}
+				}
+			}
 		}
 	}
-	
+
 	MasterPasswordRequestWindow* window
 		= new(std::nothrow) MasterPasswordRequestWindow();
 	if (window == NULL)
@@ -1356,23 +1380,11 @@ KeyStoreServer::_DecryptMasterPrivateKey()
     // ==========================================
     // LIVELLO 1: Recupero Salt dallo Shadow per KDF
     // ==========================================
-    const void* shadowSalt = _GetSalt();
+    uint8 shadowSalt[16];
+    if (_GetSalt(shadowSalt) != B_OK) return NULL;
+
     BPath settingsDir;
     if (find_directory(B_USER_SETTINGS_DIRECTORY, &settingsDir) != B_OK) return NULL;
-    /*
-    BPath shadowPath(settingsDir.Path(), "shadow");
-    BFile shadowFile(shadowPath.Path(), B_READ_ONLY);
-    if (shadowFile.InitCheck() != B_OK) return NULL;
-
-    BMessage shadowMsg;
-    if (shadowMsg.Unflatten(&shadowFile) != B_OK) return NULL;
-
-    const void* shadowSalt = NULL;
-    ssize_t saltLen = 0;
-    if (shadowMsg.FindData("salt", B_RAW_TYPE, &shadowSalt, &saltLen) != B_OK || saltLen != 16) {
-        return NULL;
-    }*/
-    if (shadowSalt == NULL) return NULL;
 
     // Rigeneriamo la chiave AES-256 (1000 round SHA256 manuali con OpenSSL)
     size_t passLen = fSessionPassword.Length();
