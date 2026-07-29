@@ -1,4 +1,6 @@
 /*
+	Copyright 2001  Ani Joshi <ajoshi@unixbox.com>
+	from XFree86 4.x driver for S3 chipsets
 	Copyright 2026, Haiku, Inc. All Rights Reserved.
 	Distributed under the terms of the MIT License.
 
