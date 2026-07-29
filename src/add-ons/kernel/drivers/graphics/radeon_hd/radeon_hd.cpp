@@ -853,7 +853,7 @@ radeon_hd_init(radeon_info &info)
 	AreaKeeper frambufferMapper;
 	info.framebuffer_area = frambufferMapper.Map("radeon hd frame buffer",
 		fbAddr, info.shared_info->frame_buffer_size * 1024,
-		B_ANY_KERNEL_ADDRESS, B_READ_AREA | B_WRITE_AREA,
+		B_ANY_KERNEL_ADDRESS, B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA,
 		(void**)&info.shared_info->frame_buffer);
 
 	if (frambufferMapper.InitCheck() < B_OK) {
