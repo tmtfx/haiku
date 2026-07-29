@@ -135,7 +135,8 @@ MasterPasswordRequestWindow::MasterPasswordRequestWindow()
 	:
 	BWindow(BRect(50, 50, 100, 160),
 		B_TRANSLATE_COMMENT("Master Password", "Window title"),
-		B_TITLED_WINDOW,
+		B_TITLED_WINDOW_LOOK,
+        B_MODAL_ALL_WINDOW_FEEL,
 		B_NOT_RESIZABLE | B_ASYNCHRONOUS_CONTROLS | B_NOT_ZOOMABLE
 			| B_NOT_MINIMIZABLE | B_AUTO_UPDATE_SIZE_LIMITS
 			| B_CLOSE_ON_ESCAPE),
