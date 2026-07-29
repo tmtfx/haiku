@@ -690,7 +690,8 @@ MapDevice(DeviceInfo& di)
 		videoRamAddr,
 		videoRamSize,
 		B_ANY_KERNEL_BLOCK_ADDRESS | B_WRITE_COMBINING_MEMORY,
-		B_READ_AREA + B_WRITE_AREA,
+		//B_READ_AREA + B_WRITE_AREA,
+		B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA,
 		(void**)&(si.videoMemAddr));
 
 	if (si.videoMemArea < 0) {
@@ -700,7 +701,8 @@ MapDevice(DeviceInfo& di)
 			videoRamAddr,
 			videoRamSize,
 			B_ANY_KERNEL_BLOCK_ADDRESS,
-			B_READ_AREA + B_WRITE_AREA,
+			//B_READ_AREA + B_WRITE_AREA,
+			B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA,
 			(void**)&(si.videoMemAddr));
 	}
 
