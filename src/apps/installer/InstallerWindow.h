@@ -44,11 +44,11 @@ public:
 		bool					Visible() const;
 		void					SetVisible(bool visible);
 
-protected:
-	virtual	void				DrawAfterChildren(BRect updateRect);
+//protected:
+//	virtual	void				DrawAfterChildren(BRect updateRect);
 
-private:
-		bool					fVisible;
+//private:
+//		bool					fVisible;
 };
 
 

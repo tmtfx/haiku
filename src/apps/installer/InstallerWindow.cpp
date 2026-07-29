@@ -180,12 +180,14 @@ LogoView::_Init()
 
 PasswordTC::PasswordTC(const char* label, BMessage* modificationMessage)
 	:
-	BTextControl(label, "", modificationMessage),
-	fVisible(false)
+	BTextControl(label, "", modificationMessage)//, fVisible(false)
 {
 }
 
 
+
+// Test Decommentare se non funziona bene
+/*
 bool
 PasswordTC::Visible() const
 {
@@ -199,10 +201,10 @@ PasswordTC::SetVisible(bool visible)
 	fVisible = visible;
 	Invalidate();
 }
-
-
-void
-PasswordTC::DrawAfterChildren(BRect /*updateRect*/)
+*/
+//void
+//PasswordTC::DrawAfterChildren(BRect /*updateRect*/)
+/*
 {
 	if (fVisible)
 		return;
@@ -243,7 +245,7 @@ PasswordTC::DrawAfterChildren(BRect /*updateRect*/)
 	SetHighColor(textColor);
 	SetFont(&font);
 	DrawString(masked.String(), drawPoint);
-}
+}*/
 
 // #pragma mark -
 
@@ -256,232 +258,6 @@ layout_item_for(BView* view)
 	return layout->ItemAt(index);
 }
 
-/*
-InstallerWindow::InstallerWindow()
-	:
-	BWindow(BRect(-2400, -2000, -1800, -1800),
-		B_TRANSLATE_SYSTEM_NAME("Installer"), B_TITLED_WINDOW,
-		B_NOT_ZOOMABLE | B_AUTO_UPDATE_SIZE_LIMITS),
-	fEncouragedToSetupPartitions(false),
-	fDriveSetupLaunched(false),
-	fBootManagerLaunched(false),
-	fInstallStatus(kReadyForInstall),
-	fWorkerThread(new WorkerThread(this)),
-	fCopyEngineCancelSemaphore(-1)
-{
-	if (!be_roster->IsRunning(kTrackerSignature))
-		SetWorkspaces(B_ALL_WORKSPACES);
-
-	LogoView* logoView = new LogoView();
-
-	rgb_color baseColor = ui_color(B_DOCUMENT_TEXT_COLOR);
-	fStatusView = new BTextView("statusView", be_plain_font, &baseColor,
-		B_WILL_DRAW);
-	fStatusView->SetViewUIColor(B_DOCUMENT_BACKGROUND_COLOR);
-	fStatusView->MakeEditable(false);
-	fStatusView->MakeSelectable(false);
-
-	BSize logoSize = logoView->MinSize();
-	logoView->SetExplicitMaxSize(logoSize);
-
-	// In the status view, make sure that we can display 5 lines of text of ~28 characters each
-	font_height height;
-	fStatusView->GetFontHeight(&height);
-	float fontHeight = height.ascent + height.descent + height.leading;
-	fStatusView->SetExplicitMinSize(BSize(fStatusView->StringWidth("W") * 28,
-		fontHeight * 5 + 8));
-
-	// Create a group view with a white background since the logo and status text won't have the
-	// same height, this background will show in the remaining space
-	fLogoGroup = new BGroupView(B_HORIZONTAL, 10);
-	fLogoGroup->SetViewUIColor(B_DOCUMENT_BACKGROUND_COLOR);
-	fLogoGroup->GroupLayout()->SetInsets(0, 0, 10, 0);
-	fLogoGroup->AddChild(logoView);
-	fLogoGroup->AddChild(fStatusView);
-
-	fDestMenu = new BPopUpMenu(B_TRANSLATE("scanning" B_UTF8_ELLIPSIS),
-		true, false);
-	fSrcMenu = new BPopUpMenu(B_TRANSLATE("scanning" B_UTF8_ELLIPSIS),
-		true, false);
-
-	fSrcMenuField = new BMenuField("srcMenuField",
-		B_TRANSLATE("Install from:"), fSrcMenu);
-	fSrcMenuField->SetAlignment(B_ALIGN_RIGHT);
-
-	fDestMenuField = new BMenuField("destMenuField", B_TRANSLATE("Onto:"),
-		fDestMenu);
-	fDestMenuField->SetAlignment(B_ALIGN_RIGHT);
-
-	//fPasswordTC = new PasswordTC(B_TRANSLATE("Password:"),
-	//	new BMessage(PASSWORD_UPDATED));
-
-	fPackagesSwitch = new PaneSwitch("options_button");
-	fPackagesSwitch->SetLabels(B_TRANSLATE("Hide optional packages"),
-		B_TRANSLATE("Show optional packages"));
-	fPackagesSwitch->SetMessage(new BMessage(SHOW_BOTTOM_MESSAGE));
-	fPackagesSwitch->SetExplicitMaxSize(BSize(B_SIZE_UNLIMITED,
-		B_SIZE_UNSET));
-	fPackagesSwitch->SetExplicitAlignment(BAlignment(B_ALIGN_LEFT,
-		B_ALIGN_TOP));
-
-	fPackagesView = new PackagesView("packages_view");
-	BScrollView* packagesScrollView = new BScrollView("packagesScroll",
-		fPackagesView, B_WILL_DRAW, false, true);
-
-	const char* requiredDiskSpaceString
-		= B_TRANSLATE("Additional disk space required: 0.0 KiB");
-	fSizeView = new BStringView("size_view", requiredDiskSpaceString);
-	fSizeView->SetAlignment(B_ALIGN_RIGHT);
-	fSizeView->SetExplicitAlignment(
-		BAlignment(B_ALIGN_RIGHT, B_ALIGN_TOP));
-
-	fProgressBar = new BStatusBar("progress",
-		B_TRANSLATE("Install progress:  "));
-	fProgressBar->SetMaxValue(100.0);
-
-	fBeginButton = new BButton("begin_button", B_TRANSLATE("Begin"),
-		new BMessage(BEGIN_MESSAGE));
-	fBeginButton->MakeDefault(true);
-	fBeginButton->SetEnabled(false);
-
-	fLaunchDriveSetupButton = new BButton("setup_button",
-		B_TRANSLATE("Set up partitions" B_UTF8_ELLIPSIS),
-		new BMessage(LAUNCH_DRIVE_SETUP));
-
-	fLaunchBootManagerItem = new BMenuItem(B_TRANSLATE("Set up boot menu" B_UTF8_ELLIPSIS),
-		new BMessage(LAUNCH_BOOTMAN));
-	fLaunchBootManagerItem->SetEnabled(false);
-
-	fMakeBootableItem = new BMenuItem(B_TRANSLATE("Write boot sector"),
-		new BMessage(MSG_WRITE_BOOT_SECTOR));
-	fMakeBootableItem->SetEnabled(false);
-
-	fEFILoaderMenu = new BMenu(B_TRANSLATE("Install EFI loader"));
-
-	BMenuBar* mainMenu = new BMenuBar("main menu");
-	BMenu* toolsMenu = new BMenu(B_TRANSLATE("Tools"));
-	toolsMenu->AddItem(fLaunchBootManagerItem);
-	toolsMenu->AddItem(fMakeBootableItem);
-	toolsMenu->AddItem(fEFILoaderMenu);
-	mainMenu->AddItem(toolsMenu);
-
-	BGroupView* packagesGroup = new BGroupView(B_VERTICAL, B_USE_ITEM_SPACING);
-	packagesGroup->AddChild(fPackagesSwitch);
-	packagesGroup->AddChild(packagesScrollView);
-	packagesGroup->AddChild(fProgressBar);
-	packagesGroup->AddChild(fSizeView);
-
-	BLayoutBuilder::Group<>(this, B_VERTICAL, 0)
-		.Add(mainMenu)
-		.Add(fLogoGroup)
-		.Add(new BSeparatorView(B_HORIZONTAL, B_PLAIN_BORDER))
-		.AddGroup(B_VERTICAL, B_USE_ITEM_SPACING)
-			.SetInsets(B_USE_WINDOW_SPACING)
-			.AddGrid(new BGridView(B_USE_ITEM_SPACING, B_USE_ITEM_SPACING))
-				.AddMenuField(fSrcMenuField, 0, 0)
-				.AddMenuField(fDestMenuField, 0, 1)
-				.AddGlue(2, 0, 1, 2)
-				//.Add(fPasswordTC, 0, 2, 3)
-				.Add(BSpaceLayoutItem::CreateVerticalStrut(5), 0, 3, 3)
-			.End()
-			.Add(packagesGroup)
-			.AddGroup(B_HORIZONTAL, B_USE_WINDOW_SPACING)
-				.Add(fLaunchDriveSetupButton)
-				.AddGlue()
-				.Add(fBeginButton)
-			.End()
-		.End()
-	.End();
-
-	// Make the optional packages and progress bar invisible on start
-	fPackagesLayoutItem = layout_item_for(packagesScrollView);
-	fPkgSwitchLayoutItem = layout_item_for(fPackagesSwitch);
-	fSizeViewLayoutItem = layout_item_for(fSizeView);
-	fProgressLayoutItem = layout_item_for(fProgressBar);
-
-	fPackagesLayoutItem->SetVisible(false);
-	fSizeViewLayoutItem->SetVisible(false);
-	fProgressLayoutItem->SetVisible(false);
-	//fPasswordLayoutItem = layout_item_for(fPasswordTC);
-	//fPasswordLayoutItem->SetVisible(false);
-
-	// --- Master password overlay (shown after installation completes) ---
-	BFont titleFont(be_bold_font);
-	titleFont.SetSize(titleFont.Size() * 1.8f);
-
-	BStringView* mpTitle = new BStringView("mpTitle",
-		B_TRANSLATE("Insert Master Password"));
-	mpTitle->SetFont(&titleFont);
-	mpTitle->SetExplicitAlignment(
-		BAlignment(B_ALIGN_HORIZONTAL_CENTER, B_ALIGN_VERTICAL_UNSET));
-
-	fMasterPassword1 = new PasswordTC(B_TRANSLATE("Password:"),
-		new BMessage(PASSWORD_UPDATED));
-	fMasterPassword2 = new PasswordTC(B_TRANSLATE("Repeat Password:"),
-		new BMessage(PASSWORD_UPDATED));
-
-	BButton* mpShow1 = new BButton("mpShow1", B_TRANSLATE("Show"),
-		new BMessage(MASTER_PASSWORD_SHOW));
-	BButton* mpShow2 = new BButton("mpShow2", B_TRANSLATE("Show"),
-		new BMessage(MASTER_PASSWORD_SHOW));
-	BButton* mpSave  = new BButton("mpSave",  B_TRANSLATE("Save"),
-		new BMessage(MASTER_PASSWORD_SAVE));
-
-	fMasterPasswordView = new BGroupView("masterPasswordView", B_VERTICAL, 0);
-	fMasterPasswordView->SetViewUIColor(B_PANEL_BACKGROUND_COLOR);
-
-	BLayoutBuilder::Group<>(fMasterPasswordView->GroupLayout())
-		.SetInsets(B_USE_WINDOW_SPACING)
-		.AddGlue()
-		.AddGroup(B_HORIZONTAL)
-			.AddGlue()
-			.Add(mpTitle)
-			.AddGlue()
-		.End()
-		.AddStrut(B_USE_ITEM_SPACING)
-		.AddGroup(B_HORIZONTAL)
-			.AddGlue()
-			.AddGrid(B_USE_ITEM_SPACING, B_USE_ITEM_SPACING)
-				.Add(fMasterPassword1, 0, 0)
-				.Add(mpShow1,          1, 0)
-				.Add(fMasterPassword2, 0, 1)
-				.Add(mpShow2,          1, 1)
-			.End()
-			.AddGlue()
-		.End()
-		.AddGlue()
-		.AddGroup(B_HORIZONTAL)
-			.AddGlue()
-			.Add(mpSave)
-		.End()
-	.End();
-
-	AddChild(fMasterPasswordView);
-	fMasterPasswordView->MoveTo(Bounds().LeftTop());
-	fMasterPasswordView->ResizeTo(Bounds().Width(), Bounds().Height());
-	fMasterPasswordView->Hide();
-
-	// finish creating window
-	if (!be_roster->IsRunning(kDeskbarSignature))
-		SetFlags(Flags() | B_NOT_MINIMIZABLE);
-
-	CenterOnScreen();
-	Show();
-
-	// Register to receive notifications when apps launch or quit...
-	be_roster->StartWatching(this);
-	// ... and check the two we are interested in.
-	fDriveSetupLaunched = be_roster->IsRunning(kDriveSetupSignature);
-	fBootManagerLaunched = be_roster->IsRunning(kBootManagerSignature);
-
-	if (Lock()) {
-		fLaunchDriveSetupButton->SetEnabled(!fDriveSetupLaunched);
-		fLaunchBootManagerItem->SetEnabled(!fBootManagerLaunched);
-		Unlock();
-	}
-
-	PostMessage(START_SCAN);
-}*/
 InstallerWindow::InstallerWindow()
     :
     BWindow(BRect(-2400, -2000, -1800, -1800),
@@ -492,8 +268,8 @@ InstallerWindow::InstallerWindow()
     fBootManagerLaunched(false),
     fInstallStatus(kReadyForInstall),
     fWorkerThread(new WorkerThread(this)),
-    fCardLayout(NULL), // <--- Mettilo PRIMA del semaforo
-    fCopyEngineCancelSemaphore(-1)// Inizializzalo a NULL nel costruttore
+    fCardLayout(NULL),
+    fCopyEngineCancelSemaphore(-1)
 {
     if (!be_roster->IsRunning(kTrackerSignature))
         SetWorkspaces(B_ALL_WORKSPACES);
@@ -640,11 +416,9 @@ InstallerWindow::InstallerWindow()
     mpTitle->SetExplicitAlignment(
         BAlignment(B_ALIGN_HORIZONTAL_CENTER, B_ALIGN_VERTICAL_UNSET));
 
-	//fMasterPassword1 = new PasswordTC(B_TRANSLATE("Password:"),
 	fMasterPassword1 = new BTextControl(B_TRANSLATE("Password:"), "",
         new BMessage(PASSWORD_UPDATED));
 	fMasterPassword1->Mask(true);
-    //fMasterPassword2 = new PasswordTC(B_TRANSLATE("Repeat Password:"),
 	fMasterPassword2 = new BTextControl(B_TRANSLATE("Repeat Password:"), "",
         new BMessage(PASSWORD_UPDATED));
 	fMasterPassword2->Mask(true);
@@ -932,6 +706,7 @@ InstallerWindow::MessageReceived(BMessage *msg)
             // Invece di ResizeTo e Show manuali, diciamo al layout di mostrare la carta 1
             if (fCardLayout != NULL) {
                 fCardLayout->SetVisibleItem(1);
+                fBeginButton->SetEnabled(false);
             }
 			break;
 		}
@@ -1062,6 +837,7 @@ InstallerWindow::MessageReceived(BMessage *msg)
 			
 			if (fCardLayout != NULL) {
                 fCardLayout->SetVisibleItem(0);
+                fBeginButton->SetEnabled(true);
             }
 			break;
 		}
