@@ -10,6 +10,7 @@ Addon s3.accelerant :
 	engine.cpp
 	hooks.cpp
 	mode.cpp
+	overlay.cpp
 	register_io.cpp
 	
 	savage_cursor.cpp

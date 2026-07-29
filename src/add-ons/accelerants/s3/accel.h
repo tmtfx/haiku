@@ -12,6 +12,7 @@
 
 #include "DriverInterface.h"
 #include "register_io.h"
+#include <video_overlay.h>
 
 
 
@@ -154,6 +155,17 @@ void	 Virge_FillRectangle(engine_token* et, uint32 color, fill_rect_params* list
 void	 Virge_FillSpan(engine_token* et, uint32 color, uint16* list, uint32 count);
 void	 Virge_InvertRectangle(engine_token* et, fill_rect_params* list, uint32 count);
 void	 Virge_ScreenToScreenBlit(engine_token* et, blit_params* list, uint32 count);
+
+// Overlay
+uint32 S3_OverlayCount(const display_mode* dm);
+const uint32* S3_OverlaySpacesSupported(const display_mode* dm);
+uint32 S3_OverlaySupportedFeatures(uint32 a_color_space);
+const overlay_buffer* S3_AllocateOverlayBuffer(color_space cs, uint16 width, uint16 height);
+status_t S3_ReleaseOverlayBuffer(const overlay_buffer* ob);
+status_t S3_GetOverlayConstraints(const display_mode* dm, const overlay_buffer* ob, overlay_constraints* oc);
+overlay_token S3_AllocateOverlay(void);
+status_t S3_ReleaseOverlay(overlay_token ot);
+status_t S3_ConfigureOverlay(overlay_token ot, const overlay_buffer* ob, const overlay_window* ow, const overlay_view* ov);
 
 #if defined(__cplusplus)
 }

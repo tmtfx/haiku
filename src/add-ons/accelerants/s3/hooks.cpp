@@ -77,6 +77,17 @@ get_accelerant_hook(uint32 feature, void* data)
 			return (void*)(si.bDisableAccelDraw ? NULL : gInfo.InvertRectangle);
 		case B_FILL_SPAN:
 			return (void*)(si.bDisableAccelDraw ? NULL : gInfo.FillSpan);
+
+		// Overlay
+		case B_OVERLAY_COUNT:				return (void*)S3_OverlayCount;
+		case B_OVERLAY_SUPPORTED_SPACES:	return (void*)S3_OverlaySpacesSupported;
+		case B_OVERLAY_SUPPORTED_FEATURES:	return (void*)S3_OverlaySupportedFeatures;
+		case B_ALLOCATE_OVERLAY_BUFFER:		return (void*)S3_AllocateOverlayBuffer;
+		case B_RELEASE_OVERLAY_BUFFER:		return (void*)S3_ReleaseOverlayBuffer;
+		case B_GET_OVERLAY_CONSTRAINTS:		return (void*)S3_GetOverlayConstraints;
+		case B_ALLOCATE_OVERLAY:			return (void*)S3_AllocateOverlay;
+		case B_RELEASE_OVERLAY:				return (void*)S3_ReleaseOverlay;
+		case B_CONFIGURE_OVERLAY:			return (void*)S3_ConfigureOverlay;
 	}
 
 	return NULL;	// Return null pointer for any feature not handled above
