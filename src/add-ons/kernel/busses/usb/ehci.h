@@ -38,11 +38,6 @@ typedef struct isochronous_transfer_data {
 	// linked to each other in a queue like in every other
 	// transfer type
 	ehci_itd **					descriptors;
-	// For full/low-speed devices behind a high-speed hub the transfer uses
-	// split-transaction siTDs instead of iTDs. is_split selects which array
-	// (descriptors above, or sitd_descriptors) is populated for this transfer.
-	bool						is_split;
-	ehci_sitd **				sitd_descriptors;
 	uint16						last_to_process;
 	bool						incoming;
 	bool						is_active;
@@ -196,8 +191,7 @@ static int32						FinishIsochronousThread(void *data);
 		size_t						ReadActualLength(ehci_qtd *topDescriptor,
 										bool *nextDataToggle);
 		size_t						WriteIsochronousDescriptorChain(
-										Transfer *transfer, void *bufferLog,
-										size_t bufferSize);
+										isochronous_transfer_data *transfer);
 		size_t						ReadIsochronousDescriptorChain(
 										isochronous_transfer_data *transfer);
 
@@ -242,7 +236,6 @@ inline	uint32						ReadCapReg32(uint32 reg);
 		sem_id						fCleanupSem;
 		thread_id					fCleanupThread;
 		bool						fStopThreads;
-		int32						fHostSystemError;
 		int32						fNextStartingFrame;
 
 		// fFrameBandwidth[n] holds the available bandwidth

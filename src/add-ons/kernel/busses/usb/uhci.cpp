@@ -1257,11 +1257,6 @@ UHCI::SubmitIsochronous(Transfer *transfer)
 	Pipe *pipe = transfer->TransferPipe();
 	bool directionIn = (pipe->Direction() == Pipe::In);
 	usb_isochronous_data *isochronousData = transfer->IsochronousData();
-	if (isochronousData->packet_count == 0) {
-		TRACE_ERROR("isochronous packet_count should not be zero\n");
-		return B_BAD_VALUE;
-	}
-
 	size_t packetSize = transfer->DataLength();
 	size_t restSize = packetSize % isochronousData->packet_count;
 	packetSize /= isochronousData->packet_count;

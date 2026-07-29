@@ -210,13 +210,8 @@ PhysicalMemoryAllocator::Allocate(size_t size, void **logicalAddress,
 		TRACE_ERROR(("PMA: found no free slot to store %ld bytes, waiting\n",
 			size));
 
-		if (entry.Wait(B_RELATIVE_TIMEOUT, 1 * 1000 * 1000) == B_TIMED_OUT) {
-			// Re-acquire the lock to drop our waiter count before giving up.
-			// Otherwise Deallocate() keeps signalling a waiter that is gone.
-			if (locker.Lock())
-				fMemoryWaitersCount--;
+		if (entry.Wait(B_RELATIVE_TIMEOUT, 1 * 1000 * 1000) == B_TIMED_OUT)
 			break;
-		}
 
 		if (!locker.Lock())
 			return B_ERROR;
@@ -269,17 +264,15 @@ PhysicalMemoryAllocator::Deallocate(size_t size, void *logicalAddress,
 		return B_BAD_VALUE;
 	}
 
-	MutexLocker _(&fLock);
-	if (!_.IsLocked())
-		return B_ERROR;
-
 	TRACE(("PMA: will use array %ld (index: %ld) to deallocate %ld bytes\n", arrayToUse, index, size));
-	// Check the slot is really allocated while holding the lock, so we don't
-	// race a concurrent Allocate() reusing the same slot.
 	if (fArray[arrayToUse][index] == 0) {
 		TRACE_ERROR(("PMA: address was not allocated!\n"));
 		return B_BAD_VALUE;
 	}
+
+	MutexLocker _(&fLock);
+	if (!_.IsLocked())
+		return B_ERROR;
 
 	// clear upwards to the smallest block
 	uint32 fillSize = 1;

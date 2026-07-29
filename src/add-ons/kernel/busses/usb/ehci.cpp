@@ -342,7 +342,6 @@ EHCI::EHCI(pci_info *info, pci_device_module_info* pci, pci_device* device, Stac
 		fCleanupSem(-1),
 		fCleanupThread(-1),
 		fStopThreads(false),
-		fHostSystemError(0),
 		fNextStartingFrame(-1),
 		fFrameBandwidth(NULL),
 		fFirstIsochronousTransfer(NULL),
@@ -1245,19 +1244,6 @@ EHCI::SubmitIsochronous(Transfer *transfer)
 
 	memset(bufferLog, 0, dataLength);
 
-	// For outbound transfers, fill the DMA buffer with the user data now,
-	// before the iTDs are linked into the schedule (the controller may start
-	// reading them as soon as they are linked).
-	if (!directionIn) {
-		result = transfer->PrepareKernelAccess();
-		if (result != B_OK) {
-			fStack->FreeChunk(bufferLog, bufferPhy, dataLength);
-			delete[] isoRequest;
-			return result;
-		}
-		WriteIsochronousDescriptorChain(transfer, bufferLog, dataLength);
-	}
-
 	phys_addr_t currentPhy = bufferPhy;
 	uint32 frameCount = 0;
 	while (dataLength > 0) {
@@ -1629,14 +1615,8 @@ EHCI::Interrupt()
 		result = B_INVOKE_SCHEDULER;
 	}
 
-	if (status & EHCI_USBSTS_HOSTSYSERR) {
+	if (status & EHCI_USBSTS_HOSTSYSERR)
 		TRACE_ERROR("host system error!\n");
-		// Set with a barrier so the finisher thread reliably observes it.
-		atomic_set(&fHostSystemError, 1);
-		// Wake isochronous finisher so it can abort gracefully
-		release_sem_etc(fFinishIsochronousTransfersSem, 1,
-			B_DO_NOT_RESCHEDULE);
-	}
 
 	WriteOpReg(EHCI_USBSTS, status);
 	release_spinlock(&lock);
@@ -1731,8 +1711,6 @@ EHCI::AddPendingIsochronousTransfer(Transfer *transfer, ehci_itd **isoRequest,
 
 	data->transfer = transfer;
 	data->descriptors = isoRequest;
-	data->is_split = false;
-	data->sitd_descriptors = NULL;
 	data->last_to_process = lastIndex;
 	data->incoming = directionIn;
 	data->is_active = true;
@@ -2152,25 +2130,6 @@ EHCI::FinishIsochronousTransfers()
 		// Go to sleep if there are no isochronous transfers to process
 		if (acquire_sem(fFinishIsochronousTransfersSem) != B_OK)
 			return;
-
-		// Check for host system error before processing descriptors.
-		// After HSE, DMA memory may be corrupted and accessing iTD
-		// fields can cause a General Protection Exception panic.
-		if (atomic_get(&fHostSystemError) != 0) {
-			TRACE_ERROR("host system error detected, cancelling "
-				"isochronous transfers\n");
-			if (LockIsochronous()) {
-				isochronous_transfer_data *transfer
-					= fFirstIsochronousTransfer;
-				while (transfer != NULL) {
-					transfer->is_active = false;
-					transfer = transfer->link;
-				}
-				UnlockIsochronous();
-			}
-			atomic_set(&fHostSystemError, 0);
-			continue;
-		}
 
 		bool transferDone = false;
 
@@ -3075,37 +3034,10 @@ EHCI::ReadActualLength(ehci_qtd *topDescriptor, bool *nextDataToggle)
 
 
 size_t
-EHCI::WriteIsochronousDescriptorChain(Transfer *transfer, void *bufferLog,
-	size_t bufferSize)
+EHCI::WriteIsochronousDescriptorChain(isochronous_transfer_data *transfer)
 {
-	// Unlike the read path this runs at submit time, before the descriptors
-	// are linked into the periodic schedule, so there is no
-	// isochronous_transfer_data yet. Copy the outbound data from the transfer
-	// vectors into the contiguous DMA buffer the iTDs point at.
-	generic_io_vec *vector = transfer->Vector();
-	size_t vectorCount = transfer->VectorCount();
-	const bool physical = transfer->IsPhysical();
-	size_t vectorIndex = 0;
-	size_t vectorOffset = 0;
-	size_t bufferOffset = 0;
-
-	while (bufferOffset < bufferSize && vectorIndex < vectorCount) {
-		size_t length = min_c(bufferSize - bufferOffset,
-			vector[vectorIndex].length - vectorOffset);
-		status_t status = generic_memcpy(
-			(generic_addr_t)bufferLog + bufferOffset, false,
-			vector[vectorIndex].base + vectorOffset, physical, length);
-		ASSERT_ALWAYS(status == B_OK);
-
-		bufferOffset += length;
-		vectorOffset += length;
-		if (vectorOffset >= vector[vectorIndex].length) {
-			vectorIndex++;
-			vectorOffset = 0;
-		}
-	}
-
-	return bufferOffset;
+	// TODO implement
+	return 0;
 }
 
 

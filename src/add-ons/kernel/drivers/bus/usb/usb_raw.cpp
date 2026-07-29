@@ -123,11 +123,8 @@ usb_raw_device_removed(void *cookie)
 		}
 	}
 	gDeviceCount--;
+	mutex_unlock(&gDeviceListLock);
 
-	// Mark the device gone and, if no handle is still open, free it while we
-	// still hold gDeviceListLock. open() and free() update reference_count
-	// under the same lock, so doing this here avoids racing a half-removed
-	// device.
 	device->device = 0;
 	if (device->reference_count == 0) {
 		mutex_lock(&device->lock);
@@ -135,8 +132,6 @@ usb_raw_device_removed(void *cookie)
 		delete_sem(device->notify);
 		free(device);
 	}
-
-	mutex_unlock(&gDeviceListLock);
 
 	return B_OK;
 }

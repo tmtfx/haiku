@@ -170,18 +170,22 @@ typedef struct ehci_itd {
 
 
 // Split Transaction Isochronous Transfer Descriptors (siTD, EHCI Spec 3.3)
-// DW1-DW3 are 32-bit register words: program them via the EHCI_SITD_* shifts
-// and masks below. (The previous byte-field layout did not match the
-// little-endian hardware bit fields and was never wired up.)
 typedef struct ehci_sitd {
 	// Hardware Part
-	uint32		next_phy;			// DW0
-	uint32		endpoint_caps;		// DW1 device/endpoint/hub/port/direction
-	uint32		uframe_mask;		// DW2 S-mask and C-mask
-	uint32		transfer_state;		// DW3 status, total bytes, IOC
-	uint32		buffer_phy[2];		// DW4, DW5 (DW5 also holds T-P/T-count)
-	uint32		back_phy;			// DW6 back pointer
-	uint32		ext_buffer_phy[2];	// high 32 bits of DW4/DW5 (64-bit)
+	uint32		next_phy;
+	uint8		port_number;
+	uint8		hub_address;
+	uint8		endpoint;
+	uint8		device_address;
+	uint16		reserved1;
+	uint8		cmask;
+	uint8		smask;
+	uint16		transfer_length;
+	uint8		cprogmask;
+	uint8		status;
+	uint32		buffer_phy[2];
+	uint32		back_phy;
+	uint32		ext_buffer_phy[2];
 
 	// Software Part
 	uint32		this_phy;
@@ -190,48 +194,6 @@ typedef struct ehci_sitd {
 	size_t		buffer_size;
 	void		*buffer_log;
 } _PACKED ehci_sitd;
-
-// siTD hardware DWord fields (EHCI 1.0 spec section 3.4)
-// DW1 endpoint_caps:
-#define EHCI_SITD_ADDRESS_SHIFT		0
-#define EHCI_SITD_ADDRESS_MASK		0x7f
-#define EHCI_SITD_ENDPOINT_SHIFT	8
-#define EHCI_SITD_ENDPOINT_MASK		0x0f
-#define EHCI_SITD_HUB_SHIFT			16
-#define EHCI_SITD_HUB_MASK			0x7f
-#define EHCI_SITD_PORT_SHIFT		24
-#define EHCI_SITD_PORT_MASK			0x7f
-#define EHCI_SITD_DIRECTION_IN		(1U << 31)
-// DW2 uframe_mask:
-#define EHCI_SITD_SMASK_SHIFT		0
-#define EHCI_SITD_SMASK_MASK		0xff
-#define EHCI_SITD_CMASK_SHIFT		8
-#define EHCI_SITD_CMASK_MASK		0xff
-// DW3 transfer_state:
-#define EHCI_SITD_STATUS_SHIFT		0
-#define EHCI_SITD_STATUS_MASK		0xff
-#define EHCI_SITD_STATUS_ACTIVE		(1 << 7)	// Active
-#define EHCI_SITD_STATUS_ERR		(1 << 6)	// TT error handshake
-#define EHCI_SITD_STATUS_BUFFER		(1 << 5)	// Data Buffer Error
-#define EHCI_SITD_STATUS_BABBLE		(1 << 4)	// Babble Detected
-#define EHCI_SITD_STATUS_TERROR		(1 << 3)	// Transaction Error
-#define EHCI_SITD_STATUS_MISSED		(1 << 2)	// Missed Micro-Frame
-#define EHCI_SITD_STATUS_SPLIT		(1 << 1)	// Split Transaction State
-#define EHCI_SITD_CPROGMASK_SHIFT	8
-#define EHCI_SITD_CPROGMASK_MASK	0xff
-#define EHCI_SITD_TLENGTH_SHIFT		16
-#define EHCI_SITD_TLENGTH_MASK		0x3ff
-#define EHCI_SITD_PAGESELECT		(1U << 30)	// P (page select)
-#define EHCI_SITD_IOC				(1U << 31)	// Interrupt On Complete
-// DW5 buffer_phy[1] low bits:
-#define EHCI_SITD_TCOUNT_SHIFT		0
-#define EHCI_SITD_TCOUNT_MASK		0x07
-#define EHCI_SITD_TPOSITION_SHIFT	3
-#define EHCI_SITD_TPOSITION_MASK	0x03
-#define EHCI_SITD_TP_ALL			0
-#define EHCI_SITD_TP_BEGIN			1
-#define EHCI_SITD_TP_MID			2
-#define EHCI_SITD_TP_END			3
 
 // Queue Element Transfer Descriptors (qTD, EHCI Spec 3.5)
 typedef struct ehci_qtd {
