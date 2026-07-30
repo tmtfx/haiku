@@ -29,6 +29,7 @@ KernelAddon crypto :
     AESNI.cpp
     #x86CPUDigest.cpp
     x86CPURNG.cpp
+    SoftCPURNG.cpp
     SoftCrypto.cpp
     soft_gcm.cpp
     soft_aes.cpp

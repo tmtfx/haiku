@@ -14,6 +14,7 @@
 #include "PadLock.h"
 #include "AESNI.h"
 #include "x86CPURNG.h"
+#include "SoftCPURNG.h"
 #include "SoftCrypto.h"
 #include "SoftDigest.h"
 #include "x86CPUDigest.h"
@@ -38,6 +39,7 @@ crypto_std_ops(int op, ...)
                 return status;
 			BInitPadLockRNG();
 			BInitx86CPURNG();
+			BInitSoftCPURNG();
 			BInitPadLockCrypto();
 			BInitAESNICrypto();
 			BInitSoftCrypto();
