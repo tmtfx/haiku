@@ -71,6 +71,11 @@
 #include <Locale.h>
 #include <LocaleRoster.h>
 
+#include <MediaFile.h>
+#include <MediaTrack.h>
+#include <Bitmap.h>
+#include "FricoVideoView.h"
+
 #include "HyperTextActions.h"
 #include "HyperTextView.h"
 #include "Utilities.h"
@@ -98,6 +103,7 @@ static const float kSysInfoMinHeight = 193.0f;
 static const float kDraggerMargin = 6.0f;
 
 static const int32 kMsgScrollCreditsView = 'mviv';
+static const int32 kMsgTriggerFricoVideo = 'fvic';
 
 static int ignored_pages(system_info*);
 static int max_pages(system_info*);
@@ -193,6 +199,7 @@ public:
 	virtual	BSize			MaxSize();
 
 	virtual void			Draw(BRect updateRect);
+	virtual void			MouseDown(BPoint where);
 
 private:
 			BBitmap*		fLogo;
@@ -330,6 +337,7 @@ private:
 			CropView*		_CreateCreditsView();
 			status_t		_GetLicensePath(const char* license,
 								BPath& path);
+			void			_ShowFricoVideo();
 			void			_AddCopyrightsFromAttribute();
 			void			_AddPackageCredit(const PackageCredit& package);
 			void			_AddPackageCreditEntries();
@@ -339,6 +347,7 @@ private:
 			LogoView*		fLogoView;
 			SysInfoView*	fSysInfoView;
 			HyperTextView*	fCreditsView;
+			FricoVideoView* fVideoView;
 
 			bigtime_t		fLastActionTime;
 			BMessageRunner*	fScrollRunner;
@@ -455,6 +464,28 @@ LogoView::~LogoView()
 	delete fLogo;
 }
 
+void
+LogoView::MouseDown(BPoint point)
+{
+	BMessage* currentMessage = Window()->CurrentMessage();
+	int32 calls = 0;
+	int32 modifiers = 0;
+
+	if (currentMessage) {
+		currentMessage->FindInt32("clicks", &calls);
+		currentMessage->FindInt32("modifiers", &modifiers);
+	}
+
+	// Verifica se è un doppio click E se il tasto Option/Win è premuto
+	if (calls == 2 && (modifiers & B_OPTION_KEY) != 0) {
+		// Invia un messaggio alla BWindow (AboutWindow) per attivare l'Easter Egg!
+		Window()->PostMessage(kMsgTriggerFricoVideo);
+		return;
+	}
+
+	// Comportamento di default
+	BView::MouseDown(point);
+}
 
 BSize
 LogoView::MinSize()
@@ -1184,6 +1215,7 @@ AboutView::AboutView()
 	fLogoView(NULL),
 	fSysInfoView(NULL),
 	fCreditsView(NULL),
+	fVideoView(NULL),
 	fLastActionTime(system_time()),
 	fScrollRunner(NULL),
 	fCachedMinWidth(kSysInfoMinWidth),
@@ -1199,6 +1231,11 @@ AboutView::AboutView()
 	fHaikuYellowColor = mix_color(fTextColor, kIdealHaikuYellow, 191);
 	fBeOSRedColor = mix_color(fTextColor, kIdealBeOSRed, 191);
 	fBeOSBlueColor = mix_color(fTextColor, kIdealBeOSBlue, 191);
+	
+	fVideoView = new FricoVideoView("FricoVideo");
+	fVideoView->Hide();
+
+	BView* creditsContainer = _CreateCreditsView();
 
 	SetLayout(new BGroupLayout(B_HORIZONTAL, 0));
 	BLayoutBuilder::Group<>((BGroupLayout*)GetLayout())
@@ -1207,7 +1244,8 @@ AboutView::AboutView()
 			.Add(_CreateSysInfoView())
 			.AddGlue()
 			.End()
-		.Add(_CreateCreditsView())
+		.Add(creditsContainer)
+		.Add(fVideoView)
 		.End();
 }
 
@@ -1345,7 +1383,9 @@ AboutView::MessageReceived(BMessage* message)
 
 			break;
 		}
-
+		case kMsgTriggerFricoVideo:
+			_ShowFricoVideo();
+			break;
 		case 'eegg':
 		{
 			printf("Easter egg\n");
@@ -1359,6 +1399,32 @@ AboutView::MessageReceived(BMessage* message)
 	}
 }
 
+void
+AboutView::_ShowFricoVideo()
+{
+	BPath path;
+	find_directory(B_SYSTEM_DATA_DIRECTORY, &path);
+	path.Append("artwork/Pirates_love_Skardy.webm");
+	
+	BEntry entry(path.Path(), true);
+	if (entry.InitCheck()!= B_OK || !entry.Exists()) {
+		debug_printf("I miss you\n");
+		return;
+	}
+	
+	if (fVideoView == NULL || !fVideoView->IsHidden())
+		return;
+
+	// Nascondiamo i crediti (il layout li rimuoverà dallo spazio visivo)
+	if (fCreditsView != NULL && !fCreditsView->IsHidden())
+		fCreditsView->Hide();
+
+	// Mostriamo il video (il layout gli assegnerà automaticamente lo spazio lasciato dai crediti)
+	fVideoView->Show();
+
+	// Avviamo la riproduzione
+	fVideoView->PlayVideo(path.Path());
+}
 
 void
 AboutView::AddCopyrightEntry(const char* name, const char* text,

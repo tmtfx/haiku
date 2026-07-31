@@ -4,10 +4,11 @@ UsePrivateHeaders app interface libroot shared ;
 
 Application AboutSystem :
 	AboutSystem.cpp
+	FricoVideoView.cpp
 	HyperTextActions.cpp
 	HyperTextView.cpp
 	Utilities.cpp
-	: [ TargetLibstdc++ ] be translation localestub
+	: [ TargetLibstdc++ ] be translation media localestub
 	: AboutSystem.rdef
 ;
 
