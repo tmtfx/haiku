@@ -203,6 +203,10 @@ public:
 
 private:
 			BBitmap*		fLogo;
+			bigtime_t		kTimeGoal;
+			uint32			fTileClickCount;
+			bool			fEnableEEgg;
+			bigtime_t		fLastTileClick;
 };
 
 
@@ -438,7 +442,11 @@ AboutWindow::QuitRequested()
 
 LogoView::LogoView()
 	:
-	BView("logo", B_WILL_DRAW)
+	BView("logo", B_WILL_DRAW),
+	kTimeGoal(500000),
+	fTileClickCount(0),
+	fEnableEEgg(true),
+	fLastTileClick(0)
 {
 	SetDrawingMode(B_OP_OVER);
 
@@ -465,8 +473,34 @@ LogoView::~LogoView()
 }
 
 void
-LogoView::MouseDown(BPoint point)
+LogoView::MouseDown(BPoint where)
 {
+	if (fEnableEEgg) {
+		BRect tile(32.0, 36.0, 138.0, 102.0);
+		where.PrintToStream();
+		if (!tile.Contains(where)) {
+			BView::MouseDown(where);
+			return;
+		}
+	
+		bigtime_t now = system_time();
+		if (now - fLastTileClick > kTimeGoal)
+			fTileClickCount = 0;
+		fLastTileClick = now;
+		fTileClickCount++;
+	
+		if (fTileClickCount >= 2) {
+			fTileClickCount = 0;
+			Window()->PostMessage(kMsgTriggerFricoVideo);
+			debug_printf("mandato richiesta frico video");
+			fEnableEEgg = false;
+			return;
+		}
+	}
+	
+	BView::MouseDown(where);
+	
+	/*
 	BMessage* currentMessage = Window()->CurrentMessage();
 	int32 calls = 0;
 	int32 modifiers = 0;
@@ -481,10 +515,11 @@ LogoView::MouseDown(BPoint point)
 		// Invia un messaggio alla BWindow (AboutWindow) per attivare l'Easter Egg!
 		Window()->PostMessage(kMsgTriggerFricoVideo);
 		return;
-	}
+	}*/
+	
 
 	// Comportamento di default
-	BView::MouseDown(point);
+	
 }
 
 BSize
