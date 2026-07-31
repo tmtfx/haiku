@@ -1,0 +1,377 @@
+build/BuildConfig
+build/UserBuildConfig
+build/haiku-revision
+build/jam/BuildSetup
+build/jam/DefaultBuildProfiles
+build/jam/images/definitions/minimum
+build/jam/images/definitions/regular
+build/jam/packages/Haiku
+data/artwork/GET\ HAIKU\ -\ download\ box
+data/artwork/GET\ HAIKU\ -\ download\ box\ 2
+data/artwork/GET\ HAIKU\ -\ download\ box\ beta
+data/artwork/H\ square\ -\ black\ on\ white
+data/artwork/H\ square\ -\ white\ on\ blue
+data/artwork/HAIKU\ Background Leaf
+data/artwork/HAIKU\ Background Leaf\ -\ outline
+data/artwork/HAIKU\ Background Leaf\ -\ outline.png
+data/artwork/HAIKU\ Leaf
+data/artwork/HAIKU\ alpha\ 2\ logo\ -\ white\ on\ blue\ -\ big
+data/artwork/HAIKU\ alpha\ logo\ -\ white\ on\ blue\ -\ big
+data/artwork/HAIKU\ logo\ -\ black\ on\ transparent\ -\ big.png
+data/artwork/HAIKU\ logo\ -\ black\ on\ transparent\ -\ installer
+data/artwork/HAIKU\ logo\ -\ black\ on\ transparent\ -\ installer\ -\ development.png
+data/artwork/HAIKU\ logo\ -\ black\ on\ transparent\ -\ installer.png
+data/artwork/HAIKU\ logo\ -\ black\ on\ transparent\ -\ tiny\ -\ versioned.png
+data/artwork/HAIKU\ logo\ -\ black\ on\ transparent\ -\ tiny.png
+data/artwork/HAIKU\ logo\ -\ black\ on\ white\ -\ big
+data/artwork/HAIKU\ logo\ -\ black\ on\ white\ -\ big.png
+data/artwork/HAIKU\ logo\ -\ black\ on\ white\ -\ normal
+data/artwork/HAIKU\ logo\ -\ black\ on\ white\ -\ normal.png
+data/artwork/HAIKU\ logo\ -\ black\ on\ white\ -\ tiny
+data/artwork/HAIKU\ logo\ -\ black\ on\ white\ -\ tiny\ -\ versioned
+data/artwork/HAIKU\ logo\ -\ black\ on\ white\ -\ tiny\ -\ versioned.png
+data/artwork/HAIKU\ logo\ -\ black\ on\ white\ -\ tiny.png
+data/artwork/HAIKU\ logo\ -\ black.svg
+data/artwork/HAIKU\ logo\ -\ deskbar
+data/artwork/HAIKU\ logo\ -\ website
+data/artwork/HAIKU\ logo\ -\ website.png
+data/artwork/HAIKU\ logo\ -\ welcome
+data/artwork/HAIKU\ logo\ -\ white\ on\ black\ -\ big
+data/artwork/HAIKU\ logo\ -\ white\ on\ black\ -\ big.png
+data/artwork/HAIKU\ logo\ -\ white\ on\ black\ -\ normal
+data/artwork/HAIKU\ logo\ -\ white\ on\ black\ -\ normal.png
+data/artwork/HAIKU\ logo\ -\ white\ on\ black\ -\ tiny
+data/artwork/HAIKU\ logo\ -\ white\ on\ black\ -\ tiny.png
+data/artwork/HAIKU\ logo\ -\ white\ on\ blue\ -\ big
+data/artwork/HAIKU\ logo\ -\ white\ on\ blue\ -\ big.png
+data/artwork/HAIKU\ logo\ -\ white\ on\ blue\ -\ normal
+data/artwork/HAIKU\ logo\ -\ white\ on\ blue\ -\ normal.png
+data/artwork/HAIKU\ logo\ -\ white\ on\ blue\ -\ tiny
+data/artwork/HAIKU\ logo\ -\ white\ on\ blue\ -\ tiny.png
+data/artwork/HAIKU\ logo\ -\ white\ on\ transparent\ -\ big.png
+data/artwork/HAIKU\ logo\ -\ white\ on\ transparent\ -\ installer
+data/artwork/HAIKU\ logo\ -\ white\ on\ transparent\ -\ installer\ -\ development.png
+data/artwork/HAIKU\ logo\ -\ white\ on\ transparent\ -\ installer.png
+data/artwork/HAIKU\ logo\ -\ white\ on\ transparent\ -\ small.png
+data/artwork/HAIKU\ logo\ -\ white\ on\ transparent\ -\ tiny\ -\ versioned
+data/artwork/HAIKU\ logo\ -\ white\ on\ transparent\ -\ tiny\ -\ versioned.png
+data/artwork/HAIKU\ logo\ -\ white\ on\ transparent\ -\ tiny.png
+data/artwork/HAIKU\ logo\ -\ white.svg
+data/artwork/HAIKU\ square\ -\ white\ on\ blue
+data/artwork/HAIKU\ square\ -\ white\ on\ blue.png
+data/artwork/Mixed\ Leaf\ Background
+data/artwork/Pirati_del_frico_dev.png
+data/artwork/ReadMe
+data/artwork/Walter logo orig.png
+data/artwork/Walter logo.png
+data/artwork/boot_splash/Pirati_del_frico_dev_small.png
+data/artwork/boot_splash/splash_icons
+data/artwork/boot_splash/splash_icons.png
+data/artwork/boot_splash/splash_icons_orig
+data/artwork/boot_splash/splash_icons_orig.png
+data/artwork/boot_splash/splash_logo
+data/artwork/boot_splash/splash_logo-alpha.png
+data/artwork/boot_splash/splash_logo-beta1.png
+data/artwork/boot_splash/splash_logo-beta2.png
+data/artwork/boot_splash/splash_logo-development.png
+data/artwork/boot_splash/splash_logo-rc1.png
+data/artwork/boot_splash/splash_logo-rc2.png
+data/artwork/boot_splash/splash_logo-rc3.png
+data/artwork/boot_splash/splash_logo-release.xcf
+data/artwork/boot_splash/splash_logo-release1.png
+data/artwork/boot_splash/splash_logo-versioned
+data/artwork/boot_splash/splash_logo.png
+data/artwork/deskbar_leaf.png
+data/artwork/deskbar_leaf_small.png
+docs/develop/kernel/usb_roadmap.md
+headers/os/add-ons/graphics/Accelerant.h
+headers/os/ai/AICommands.h
+headers/os/ai/AIConfig.h
+headers/os/ai/AINetworkPlugin.h
+headers/os/ai/AIPlugin.h
+headers/os/app/Key.h
+headers/os/app/KeyStore.h
+headers/os/crypto/BCrypto.h
+headers/os/crypto/BCryptoDefs.h
+headers/os/interface/TextControl.h
+headers/private/app/KeyStoreDefs.h
+headers/private/app/ServerProtocol.h
+headers/private/crypto/BCryptoKernelInternal.h
+headers/private/graphics/ati/ati_logo.h
+headers/private/graphics/intel_extreme/intel_logo.h
+headers/private/graphics/matrox/matrox_logo.h
+headers/private/graphics/radeon_hd/radeon_hd_logo.h
+headers/private/graphics/s3/DriverInterface.h
+headers/private/graphics/s3/common_modes.h
+headers/private/graphics/s3/s3_logo.h
+headers/private/graphics/sm750/DriverInterface.h
+headers/private/graphics/sm750/common_modes.h
+headers/private/graphics/sm750/memory_manager.h
+headers/private/graphics/sm750/old_sm750_logo.h
+headers/private/graphics/sm750/professional_sm750_logo.h
+headers/private/graphics/sm750/sm750_logo.h
+headers/private/graphics/sm750/sm750_macros.h
+headers/private/graphics/trident/DriverInterface.h
+headers/private/graphics/trident/trident_logo.h
+headers/private/graphics/trident/trident_regs.h
+headers/private/graphics/vesa/vesa_logo.h
+headers/private/kernel/boot/images.h
+src/add-ons/Jamfile
+src/add-ons/accelerants/Jamfile
+src/add-ons/accelerants/ati/accelerant.h
+src/add-ons/accelerants/ati/cursor.cpp
+src/add-ons/accelerants/ati/hooks.cpp
+src/add-ons/accelerants/ati/mach64_cursor.cpp
+src/add-ons/accelerants/ati/mach64_init.cpp
+src/add-ons/accelerants/ati/rage128_cursor.cpp
+src/add-ons/accelerants/ati/rage128_init.cpp
+src/add-ons/accelerants/matrox/Cursor.c
+src/add-ons/accelerants/matrox/GetAccelerantHook.c
+src/add-ons/accelerants/matrox/InitAccelerant.c
+src/add-ons/accelerants/matrox/ProposeDisplayMode.c
+src/add-ons/accelerants/matrox/SetDisplayMode.c
+src/add-ons/accelerants/matrox/be_driver_proto.h
+src/add-ons/accelerants/matrox/engine/mga_crtc2.c
+src/add-ons/accelerants/matrox/engine/mga_dac.c
+src/add-ons/accelerants/matrox/engine/mga_general.c
+src/add-ons/accelerants/radeon_hd/Jamfile
+src/add-ons/accelerants/radeon_hd/accelerant.cpp
+src/add-ons/accelerants/radeon_hd/accelerant.h
+src/add-ons/accelerants/radeon_hd/accelerant_protos.h
+src/add-ons/accelerants/radeon_hd/cursor.cpp
+src/add-ons/accelerants/radeon_hd/hooks.cpp
+src/add-ons/accelerants/s3/Jamfile
+src/add-ons/accelerants/s3/accel.h
+src/add-ons/accelerants/s3/cursor.cpp
+src/add-ons/accelerants/s3/hooks.cpp
+src/add-ons/accelerants/s3/mode.cpp
+src/add-ons/accelerants/s3/overlay.cpp
+src/add-ons/accelerants/s3/savage_cursor.cpp
+src/add-ons/accelerants/s3/trio64_cursor.cpp
+src/add-ons/accelerants/s3/virge_cursor.cpp
+src/add-ons/accelerants/s3/virge_init.cpp
+src/add-ons/accelerants/sm750/Cursor.cpp
+src/add-ons/accelerants/sm750/DisplayModes.cpp
+src/add-ons/accelerants/sm750/Engine.cpp
+src/add-ons/accelerants/sm750/I2C.cpp
+src/add-ons/accelerants/sm750/InitAccelerant.cpp
+src/add-ons/accelerants/sm750/Jamfile
+src/add-ons/accelerants/sm750/Overlay.cpp
+src/add-ons/accelerants/sm750/Power.cpp
+src/add-ons/accelerants/sm750/memory_manager.c
+src/add-ons/accelerants/sm750/protos.h
+src/add-ons/accelerants/trident/Jamfile
+src/add-ons/accelerants/trident/accel.cpp
+src/add-ons/accelerants/trident/accel.h
+src/add-ons/accelerants/trident/cursor.cpp
+src/add-ons/accelerants/trident/engine.cpp
+src/add-ons/accelerants/trident/hooks.cpp
+src/add-ons/accelerants/trident/i2c.cpp
+src/add-ons/accelerants/trident/mode.cpp
+src/add-ons/accelerants/trident/overlay.cpp
+src/add-ons/accelerants/trident/power.cpp
+src/add-ons/ai/Jamfile
+src/add-ons/ai/anthropic_plugin.cpp
+src/add-ons/ai/deepseek_plugin.cpp
+src/add-ons/ai/gemini_plugin.cpp
+src/add-ons/ai/huggingface_plugin.cpp
+src/add-ons/ai/microgpt_plugin.cpp
+src/add-ons/ai/mistral_plugin.cpp
+src/add-ons/ai/ollama_plugin.cpp
+src/add-ons/ai/openai_plugin.cpp
+src/add-ons/ai/publicai_plugin.cpp
+src/add-ons/kernel/drivers/Jamfile
+src/add-ons/kernel/drivers/crypto/AESNI.cpp
+src/add-ons/kernel/drivers/crypto/AESNI.h
+src/add-ons/kernel/drivers/crypto/BCryptoAlgorithm.h
+src/add-ons/kernel/drivers/crypto/BCryptoCPU.cpp
+src/add-ons/kernel/drivers/crypto/BCryptoCPU.h
+src/add-ons/kernel/drivers/crypto/BCryptoCore.cpp
+src/add-ons/kernel/drivers/crypto/BCryptoCore.h
+src/add-ons/kernel/drivers/crypto/BCryptoDevice.cpp
+src/add-ons/kernel/drivers/crypto/BCryptoDevice.h
+src/add-ons/kernel/drivers/crypto/BCryptoEntropy.cpp
+src/add-ons/kernel/drivers/crypto/BCryptoEntropy.h
+src/add-ons/kernel/drivers/crypto/CryptoDevice.cpp
+src/add-ons/kernel/drivers/crypto/CryptoDevice.h
+src/add-ons/kernel/drivers/crypto/HybridB2Digest.cpp
+src/add-ons/kernel/drivers/crypto/HybridB2Digest.h
+src/add-ons/kernel/drivers/crypto/HybridSHADigest.cpp
+src/add-ons/kernel/drivers/crypto/HybridSHADigest.h
+src/add-ons/kernel/drivers/crypto/Jamfile
+src/add-ons/kernel/drivers/crypto/PadLock.cpp
+src/add-ons/kernel/drivers/crypto/PadLock.h
+src/add-ons/kernel/drivers/crypto/PadLockRNG.cpp
+src/add-ons/kernel/drivers/crypto/PadLockRNG.h
+src/add-ons/kernel/drivers/crypto/SoftCPURNG.cpp
+src/add-ons/kernel/drivers/crypto/SoftCPURNG.h
+src/add-ons/kernel/drivers/crypto/SoftCrypto.cpp
+src/add-ons/kernel/drivers/crypto/SoftCrypto.h
+src/add-ons/kernel/drivers/crypto/SoftCryptoEngines.h
+src/add-ons/kernel/drivers/crypto/SoftCryptoPriv.h
+src/add-ons/kernel/drivers/crypto/SoftDigest.cpp
+src/add-ons/kernel/drivers/crypto/SoftDigest.h
+src/add-ons/kernel/drivers/crypto/crypto_module.cpp
+src/add-ons/kernel/drivers/crypto/hybrid_blake_opt.cpp
+src/add-ons/kernel/drivers/crypto/hybrid_blake_opt.h
+src/add-ons/kernel/drivers/crypto/hybrid_sha_opt.cpp
+src/add-ons/kernel/drivers/crypto/hybrid_sha_opt.h
+src/add-ons/kernel/drivers/crypto/soft_aes.cpp
+src/add-ons/kernel/drivers/crypto/soft_aes.h
+src/add-ons/kernel/drivers/crypto/soft_blake.cpp
+src/add-ons/kernel/drivers/crypto/soft_blake.h
+src/add-ons/kernel/drivers/crypto/soft_chacha20.cpp
+src/add-ons/kernel/drivers/crypto/soft_chacha20.h
+src/add-ons/kernel/drivers/crypto/soft_gcm.cpp
+src/add-ons/kernel/drivers/crypto/soft_sha.cpp
+src/add-ons/kernel/drivers/crypto/soft_sha.h
+src/add-ons/kernel/drivers/crypto/x86CPUDigest.cpp
+src/add-ons/kernel/drivers/crypto/x86CPUDigest.h
+src/add-ons/kernel/drivers/crypto/x86CPUDigest_cr4.cpp
+src/add-ons/kernel/drivers/crypto/x86CPURNG.cpp
+src/add-ons/kernel/drivers/crypto/x86CPURNG.h
+src/add-ons/kernel/drivers/graphics/Jamfile
+src/add-ons/kernel/drivers/graphics/ati/driver.cpp
+src/add-ons/kernel/drivers/graphics/framebuffer/framebuffer.cpp
+src/add-ons/kernel/drivers/graphics/framebuffer/framebuffer_logo.h
+src/add-ons/kernel/drivers/graphics/intel_extreme/intel_extreme.cpp
+src/add-ons/kernel/drivers/graphics/matrox/Jamfile
+src/add-ons/kernel/drivers/graphics/matrox/driver.c
+src/add-ons/kernel/drivers/graphics/radeon_hd/radeon_hd.cpp
+src/add-ons/kernel/drivers/graphics/s3/driver.cpp
+src/add-ons/kernel/drivers/graphics/sm750/Jamfile
+src/add-ons/kernel/drivers/graphics/sm750/driver.cpp
+src/add-ons/kernel/drivers/graphics/sm750/init.c
+src/add-ons/kernel/drivers/graphics/sm750/sm750.settings
+src/add-ons/kernel/drivers/graphics/trident/Jamfile
+src/add-ons/kernel/drivers/graphics/trident/driver.cpp
+src/add-ons/kernel/drivers/graphics/trident/trident.settings
+src/add-ons/kernel/drivers/graphics/vesa/vesa.cpp
+src/add-ons/media/plugins/ffmpeg/AVCodecDecoder.cpp
+src/add-ons/media/plugins/ffmpeg/ColorConversionTable.h
+src/apps/Jamfile
+src/apps/deskbar/BarApp.cpp
+src/apps/deskbar/BarMenuBar.cpp
+src/apps/deskbar/BarMenuBar.h
+src/apps/deskbar/BarMenuTitle.cpp
+src/apps/deskbar/BarMenuTitle.h
+src/apps/deskbar/BarView.cpp
+src/apps/deskbar/BarView.h
+src/apps/deskbar/BarWindow.cpp
+src/apps/deskbar/Jamfile
+src/apps/deskbar/PreferencesWindow.cpp
+src/apps/deskbar/PreferencesWindow.h
+src/apps/deskbar/ScreenCornerSelector.cpp
+src/apps/deskbar/ScreenCornerSelector.h
+src/apps/deskbar/StatusView.cpp
+src/apps/deskbar/deskbar_leaf_small.rdef
+src/apps/deskbar/icons.rdef
+src/apps/deskbar/icons_originale.rdef
+src/apps/installer/EULAWindow.cpp
+src/apps/installer/InstallerWindow.cpp
+src/apps/installer/InstallerWindow.h
+src/apps/installer/Jamfile
+src/apps/installer/WorkerThread.cpp
+src/apps/spielbar/App.cpp
+src/apps/spielbar/App.rdef
+src/apps/spielbar/Jamfile
+src/kits/Jamfile
+src/kits/ai/AICommands.cpp
+src/kits/ai/AIConfig.cpp
+src/kits/ai/AIPlugin.cpp
+src/kits/ai/Jamfile
+src/kits/app/Key.cpp
+src/kits/app/KeyStore.cpp
+src/kits/crypto/BCrypto.cpp
+src/kits/crypto/Jamfile
+src/kits/interface/TextControl.cpp
+src/kits/interface/TextInput.cpp
+src/kits/interface/TextInput.h
+src/kits/network/libnetapi/Jamfile
+src/kits/network/libnetapi/SecureSocket.cpp
+src/kits/network/libnetservices/BackupGeolocation.cpp
+src/kits/network/libnetservices/Geolocation.cpp
+src/preferences/AI/AI.rdef
+src/preferences/AI/Jamfile
+src/preferences/AI/LICENSE
+src/preferences/AI/PrefletWindow.cpp
+src/preferences/AI/PrefletWindow.h
+src/preferences/AI/preflet.cpp
+src/preferences/Jamfile
+src/preferences/keystore/Jamfile
+src/preferences/keystore/KeyStoreApp.cpp
+src/preferences/keystore/KeyStoreWindow.cpp
+src/preferences/keystore/KeyStoreWindow.h
+src/preferences/keystore/ResetMasterWindow.cpp
+src/preferences/keystore/ResetMasterWindow.h
+src/preferences/screen/Constants.h
+src/preferences/screen/Jamfile
+src/preferences/screen/ScreenSettings.cpp
+src/preferences/screen/ScreenSettings.h
+src/preferences/screen/ScreenWindow.cpp
+src/preferences/screen/ScreenWindow.h
+src/servers/Jamfile
+src/servers/ai/Jamfile
+src/servers/ai/LICENSE
+src/servers/ai/ai_server.cpp
+src/servers/ai/ai_server.h
+src/servers/ai/ai_server.rdef
+src/servers/ai/mcp_manager.cpp
+src/servers/ai/mcp_manager.h
+src/servers/app/AppServer.cpp
+src/servers/app/drawing/HWInterface.cpp
+src/servers/app/drawing/HWInterface.h
+src/servers/app/drawing/interface/local/AccelerantHWInterface.cpp
+src/servers/app/drawing/interface/local/AccelerantHWInterface.h
+src/servers/keystore/Jamfile
+src/servers/keystore/KeyStoreServer.cpp
+src/servers/keystore/KeyStoreServer.h
+src/servers/keystore/Keyring.cpp
+src/servers/keystore/MasterPasswordRequestWindow.cpp
+src/servers/keystore/MasterPasswordRequestWindow.h
+src/servers/keystore/aes.h
+src/servers/keystore/aes_compat.c
+src/tests/kits/Jamfile
+src/tests/kits/ai/Jamfile
+src/tests/kits/ai/test_async_request.cpp
+src/tests/kits/ai/test_ollama_request.cpp
+src/tests/kits/ai/test_sync_default.cpp
+src/tests/kits/ai/test_sync_opt_params.cpp
+src/tests/kits/crypto/BCryptoGCM-oneshot-decrypt.cpp
+src/tests/kits/crypto/BCryptoGCM-oneshot-encrypt.cpp
+src/tests/kits/crypto/BasicCryptoAES_GCM_16byte.cpp
+src/tests/kits/crypto/BasicCryptoAES_GCM_complex.cpp
+src/tests/kits/crypto/BasicCryptoAES_GCM_empty.cpp
+src/tests/kits/crypto/BasicCryptoAES_GCM_singlechar.cpp
+src/tests/kits/crypto/BasicCryptoAES_GCM_validator_16byte.js
+src/tests/kits/crypto/BasicCryptoAES_GCM_validator_complex.js
+src/tests/kits/crypto/BasicCryptoAES_GCM_validator_empty.js
+src/tests/kits/crypto/BasicCryptoAES_GCM_validator_single.js
+src/tests/kits/crypto/BasicDigestBlakes.cpp
+src/tests/kits/crypto/BasicDigestSHA256.cpp
+src/tests/kits/crypto/ChaCha20Test.cpp
+src/tests/kits/crypto/CryptoBench.cpp
+src/tests/kits/crypto/CryptoBench2.cpp
+src/tests/kits/crypto/CryptoInfo.cpp
+src/tests/kits/crypto/CryptoRandomTest.cpp
+src/tests/kits/crypto/CryptoTool-AESGCM.cpp
+src/tests/kits/crypto/CryptoTool-FullRAM.cpp
+src/tests/kits/crypto/CryptoTool-Stream.cpp
+src/tests/kits/crypto/DigestBenchBlake2b.cpp
+src/tests/kits/crypto/DigestBenchBlake2s.cpp
+src/tests/kits/crypto/DigestBenchSHA256-FullRam.cpp
+src/tests/kits/crypto/DigestBenchSHA256-Streaming.cpp
+src/tests/kits/crypto/DigestBenchSHA256.cpp
+src/tests/kits/crypto/GCMFileEncryptor.cpp
+src/tests/kits/crypto/Round-Trip.cpp
+src/tests/kits/crypto/bcrypto_tool.cpp
+src/tests/kits/crypto/bcrypto_tool_padding.cpp
+src/tests/kits/crypto/compiler
+src/tests/kits/crypto/gcm_openssl_file_test.cpp
+src/tests/kits/crypto/haiku_sha256.cpp
+src/tests/kits/crypto/smalldata_test.cpp
+src/tests/kits/crypto/test_data.enc
+src/tests/kits/crypto/test_data.txt
+src/tests/kits/crypto/verify_GCM.js
+src/tests/kits/crypto/verify_Streaming_GCM.cpp
+src/tests/kits/crypto/verify_streamedGCM.js
