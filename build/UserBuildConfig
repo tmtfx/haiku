@@ -1,10 +1,11 @@
 HAIKU_ROOT_USER_NAME = guybrush ;
 HAIKU_ROOT_USER_REAL_NAME = "Guybrush Threepwood" ;
-HAIKU_IMAGE_HOST_NAME = WhydahGally ;
+HAIKU_IMAGE_HOST_NAME = TheHoleInTheCheese ;
 
 AddFilesToHaikuImage home : /boot/home/Musiche/The\ Frico\ Shanty.mp3 ;
 AddFilesToHaikuImage home : /boot/home/Musiche/The\ Frico\ Shanty.txt ;
 AddFilesToHaikuImage home : /boot/home/Progjets/hpkgs/moeca-1.1-1-x86_64.hpkg ;
+AddFilesToHaikuImage system share : /boot/home/Musiche/Pirates_love_Skardy.webm ;
 
 AddFilesToHaikuImage system packages : /boot/home/Progjets/hpkgs/adwaita_icon_theme_legacy-46.2-1-any.hpkg ;
 AddFilesToHaikuImage system packages : /boot/home/Progjets/hpkgs/adwaita_icon_theme-49.0-1-any.hpkg ;
