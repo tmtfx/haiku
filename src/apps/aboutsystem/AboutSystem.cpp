@@ -455,7 +455,7 @@ LogoView::LogoView()
 	if (bgColor.IsLight())
 		fLogo = BTranslationUtils::GetBitmap(B_PNG_FORMAT, "logo.png");
 	else
-		fLogo = BTranslationUtils::GetBitmap(B_PNG_FORMAT, "logo_dark.png");
+		fLogo = BTranslationUtils::GetBitmap(B_PNG_FORMAT, "logo.png"); //logo_dark
 #else
 	fLogo = BTranslationUtils::GetBitmap(B_PNG_FORMAT, "walter_logo.png");
 #endif
@@ -476,8 +476,7 @@ void
 LogoView::MouseDown(BPoint where)
 {
 	if (fEnableEEgg) {
-		BRect tile(32.0, 36.0, 138.0, 102.0);
-		where.PrintToStream();
+		BRect tile(134.0, 72.0, 240.0, 138.0);
 		if (!tile.Contains(where)) {
 			BView::MouseDown(where);
 			return;
@@ -491,8 +490,7 @@ LogoView::MouseDown(BPoint where)
 	
 		if (fTileClickCount >= 2) {
 			fTileClickCount = 0;
-			Window()->PostMessage(kMsgTriggerFricoVideo);
-			debug_printf("mandato richiesta frico video");
+			BMessenger(this).SendMessage(kMsgTriggerFricoVideo);
 			fEnableEEgg = false;
 			return;
 		}
@@ -1438,18 +1436,17 @@ void
 AboutView::_ShowFricoVideo()
 {
 	BPath path;
-	find_directory(B_SYSTEM_DATA_DIRECTORY, &path);
-	path.Append("artwork/Pirates_love_Skardy.webm");
-	
+	//find_directory(B_SYSTEM_DATA_DIRECTORY, &path);
+	//path.Append("Pirates_love_Skardy.webm");
+	find_directory(B_USER_DIRECTORY, &path);
+	path.Append("Musiche/Pirates_love_Skardy.webm");
 	BEntry entry(path.Path(), true);
-	if (entry.InitCheck()!= B_OK || !entry.Exists()) {
-		debug_printf("I miss you\n");
+	if (entry.InitCheck()!= B_OK || !entry.Exists())
 		return;
-	}
 	
 	if (fVideoView == NULL || !fVideoView->IsHidden())
 		return;
-
+	
 	// Nascondiamo i crediti (il layout li rimuoverà dallo spazio visivo)
 	if (fCreditsView != NULL && !fCreditsView->IsHidden())
 		fCreditsView->Hide();
