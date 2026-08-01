@@ -7,8 +7,6 @@
 #include <MediaFile.h>
 #include <MediaTrack.h>
 #include <SoundPlayer.h>
-#include <Locker.h>
-#include <Autolock.h>
 
 enum {
     MSG_NEXT_FRAME = 'fnnf'
@@ -35,18 +33,17 @@ private:
     static void _AudioCallback(void* cookie, void* buffer, size_t size,
                                const media_raw_audio_format& format);
 
-    BMediaFile*		fVideoMediaFile;
-    BMediaTrack*	fVideoTrack;
-    BMediaFile*     fAudioMediaFile;
-    BMediaTrack*	fAudioTrack;
-    BBitmap*		fCurrentFrame;
+    BMediaFile*     fMediaFile;
+    BMediaTrack*    fVideoTrack;
+    BMediaTrack*    fAudioTrack;
+    BBitmap*        fCurrentFrame;
 
-    BSoundPlayer*	fSoundPlayer;
-    BMessageRunner*	fRunner;
-    bigtime_t		fFrameDelay;
+    BSoundPlayer*   fSoundPlayer;
+    BMessageRunner* fRunner;
+    bigtime_t       fFrameDelay;
 
-    bool			fUseOverlay;
-    rgb_color		fOverlayKeyColor;
+    bool            fUseOverlay;
+    rgb_color       fOverlayKeyColor;
 };
 
 #endif // FRICO_VIDEO_VIEW_H
