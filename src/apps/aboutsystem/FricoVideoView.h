@@ -43,6 +43,9 @@ private:
     bigtime_t       fFrameDelay;
 
     bool            fUseOverlay;
+    uint8*  fAudioBuffer;
+    size_t  fAudioBufferPos;
+    size_t  fAudioBufferSize;
     rgb_color       fOverlayKeyColor;
 };
 

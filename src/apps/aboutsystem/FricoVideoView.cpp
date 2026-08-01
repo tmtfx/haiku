@@ -17,7 +17,10 @@ FricoVideoView::FricoVideoView(const char* name)
     fSoundPlayer(NULL),
     fRunner(NULL),
     fFrameDelay(40000),
-    fUseOverlay(false)
+    fUseOverlay(false),
+    fAudioBuffer(NULL),
+    fAudioBufferPos(0),
+    fAudioBufferSize(0)
 {
     SetViewUIColor(B_PANEL_BACKGROUND_COLOR);
     fOverlayKeyColor = (rgb_color){ 255, 0, 255, 255 }; // Magenta key di fallback
@@ -312,10 +315,9 @@ FricoVideoView::Draw(BRect updateRect)
     }
 }
 
-
 /*static*/ void
 FricoVideoView::_AudioCallback(void* cookie, void* buffer, size_t size,
-    const media_raw_audio_format& /*format*/)
+    const media_raw_audio_format& format)
 {
     FricoVideoView* self = static_cast<FricoVideoView*>(cookie);
     if (self->fAudioTrack == NULL) {
@@ -323,14 +325,47 @@ FricoVideoView::_AudioCallback(void* cookie, void* buffer, size_t size,
         return;
     }
 
-    int64 frameCount = 0;
-    media_header header;
-    status_t err = self->fAudioTrack->ReadFrames(buffer, &frameCount, &header);
+    uint8* dest = static_cast<uint8*>(buffer);
+    size_t bytesNeeded = size;
 
-    if (err != B_OK) {
-        // Fine traccia: riavvolgi per il loop
-        int64 frame = 0;
-        self->fAudioTrack->SeekToFrame(&frame);
-        memset(buffer, 0, size);
+    while (bytesNeeded > 0) {
+        int64 framesRead = 0;
+        media_header header;
+
+        // Dimensione approssimativa in byte per frame audio raw
+        size_t frameSize = (format.format & media_raw_audio_format::B_AUDIO_SIZE_MASK) 
+                            * format.channel_count;
+        if (frameSize == 0) 
+            frameSize = 4; // Fallback di sicurezza (es. 16-bit stereo)
+
+        int64 maxFramesToRead = bytesNeeded / frameSize;
+        if (maxFramesToRead == 0)
+            maxFramesToRead = 1;
+
+        status_t err = self->fAudioTrack->ReadFrames(dest, &framesRead, &header);
+
+        size_t bytesRead = framesRead * frameSize;
+
+        if (err != B_OK || bytesRead == 0) {
+            // Fine dello stream audio: riavvolgi la traccia e azzera il resto del buffer
+            int64 frame = 0;
+            self->fAudioTrack->SeekToFrame(&frame);
+            
+            // Riavvolgi anche il video per mantenere il synchro di loop!
+            if (self->fVideoTrack != NULL) {
+                int64 vframe = 0;
+                self->fVideoTrack->SeekToFrame(&vframe);
+            }
+
+            memset(dest, 0, bytesNeeded);
+            break;
+        }
+
+        if (bytesRead > bytesNeeded)
+            bytesRead = bytesNeeded;
+
+        dest += bytesRead;
+        bytesNeeded -= bytesRead;
     }
 }
+
