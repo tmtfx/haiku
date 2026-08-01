@@ -10,8 +10,9 @@
 FricoVideoView::FricoVideoView(const char* name)
     :
     BView(name, B_WILL_DRAW | B_FULL_UPDATE_ON_RESIZE),
-    fMediaFile(NULL),
+    fVideoMediaFile(NULL),
     fVideoTrack(NULL),
+    fAudioMediaFile(NULL),
     fAudioTrack(NULL),
     fCurrentFrame(NULL),
     fSoundPlayer(NULL),
@@ -63,20 +64,57 @@ void
 FricoVideoView::PlayVideo(const char* path)
 {
     StopVideo();
-
+    
     entry_ref ref;
     if (get_ref_for_path(path, &ref) != B_OK)
         return;
 
-    fMediaFile = new BMediaFile(&ref);
-    if (fMediaFile->InitCheck() != B_OK) {
+    // --- 1. APRIAMO IL FILE PER IL VIDEO ---
+    fVideoMediaFile = new BMediaFile(&ref);
+    if (fVideoMediaFile->InitCheck() == B_OK) {
+        int32 numTracks = fVideoMediaFile->CountTracks();
+        for (int32 i = 0; i < numTracks; i++) {
+            BMediaTrack* track = fVideoMediaFile->TrackAt(i);
+            if (track == NULL)
+                continue;
+
+            media_format format;
+            if (track->EncodedFormat(&format) == B_OK
+                && (format.type == B_MEDIA_RAW_VIDEO || format.type == B_MEDIA_ENCODED_VIDEO)) {
+                fVideoTrack = track;
+                break;
+            }
+            fVideoMediaFile->ReleaseTrack(track);
+        }
+    }
+
+    if (fVideoTrack == NULL) {
         StopVideo();
         return;
     }
+    
+    // --- 2. APRIAMO UN'ISTANZA SEPARATA DEL FILE PER L'AUDIO ---
+    fAudioMediaFile = new BMediaFile(&ref);
+    if (fAudioMediaFile->InitCheck() == B_OK) {
+        int32 numTracks = fAudioMediaFile->CountTracks();
+        for (int32 i = 0; i < numTracks; i++) {
+            BMediaTrack* track = fAudioMediaFile->TrackAt(i);
+            if (track == NULL)
+                continue;
 
-    int32 numTracks = fMediaFile->CountTracks();
+            media_format format;
+            if (track->EncodedFormat(&format) == B_OK
+                && (format.type == B_MEDIA_RAW_AUDIO || format.type == B_MEDIA_ENCODED_AUDIO)) {
+                fAudioTrack = track;
+                break;
+            }
+            fAudioMediaFile->ReleaseTrack(track);
+        }
+    }
+
+/*    int32 numTracks = fVideoMediaFile->CountTracks();
     for (int32 i = 0; i < numTracks; i++) {
-        BMediaTrack* track = fMediaFile->TrackAt(i);
+        BMediaTrack* track = fVideoMediaFile->TrackAt(i);
         if (track == NULL)
             continue;
 
@@ -91,17 +129,17 @@ FricoVideoView::PlayVideo(const char* path)
                     || format.type == B_MEDIA_ENCODED_AUDIO)) {
                 fAudioTrack = track;
             } else {
-                fMediaFile->ReleaseTrack(track);
+                fVideoMediaFile->ReleaseTrack(track);
             }
         } else {
-            fMediaFile->ReleaseTrack(track);
+            fVideoMediaFile->ReleaseTrack(track);
         }
     }
 
     if (fVideoTrack == NULL) {
         StopVideo();
         return;
-    }
+    }*/
 
     // 1. Chiediamo al MediaKit il formato RAW YUV422 (YUY2) nativo per l'Overlay HW
     media_format decodedFormat = {};
@@ -173,7 +211,7 @@ FricoVideoView::PlayVideo(const char* path)
             }
         }
     }
-
+    
     BMessage msg(MSG_NEXT_FRAME);
     fRunner = new BMessageRunner(BMessenger(this), &msg, fFrameDelay);
 }
@@ -182,7 +220,7 @@ FricoVideoView::PlayVideo(const char* path)
 void
 FricoVideoView::_DecodeNextFrame()
 {
-    if (fVideoTrack == NULL || fCurrentFrame == NULL)
+	if (fVideoTrack == NULL || fCurrentFrame == NULL)
         return;
 
     int64 frameCount = 0;
@@ -217,19 +255,19 @@ FricoVideoView::StopVideo()
         delete fSoundPlayer;
         fSoundPlayer = NULL;
     }
-
+    
     if (fUseOverlay) {
         ClearViewOverlay();
         fUseOverlay = false;
     }
 
-    if (fMediaFile != NULL) {
+    if (fVideoMediaFile != NULL) {
         if (fVideoTrack != NULL)
-            fMediaFile->ReleaseTrack(fVideoTrack);
+            fVideoMediaFile->ReleaseTrack(fVideoTrack);
         if (fAudioTrack != NULL)
-            fMediaFile->ReleaseTrack(fAudioTrack);
-        delete fMediaFile;
-        fMediaFile = NULL;
+            fVideoMediaFile->ReleaseTrack(fAudioTrack);
+        delete fVideoMediaFile;
+        fVideoMediaFile = NULL;
         fVideoTrack = NULL;
         fAudioTrack = NULL;
     }
@@ -317,20 +355,18 @@ FricoVideoView::Draw(BRect updateRect)
 FricoVideoView::_AudioCallback(void* cookie, void* buffer, size_t size,
     const media_raw_audio_format& /*format*/)
 {
+	memset(buffer, 0, size);
     FricoVideoView* self = static_cast<FricoVideoView*>(cookie);
-    if (self->fAudioTrack == NULL) {
-        memset(buffer, 0, size);
+    if (self == NULL || self->fAudioTrack == NULL)
         return;
-    }
 
     int64 frameCount = 0;
     media_header header;
     status_t err = self->fAudioTrack->ReadFrames(buffer, &frameCount, &header);
 
-    if (err != B_OK) {
+    if (err != B_OK || frameCount < 1) {
         // Fine traccia: riavvolgi per il loop
         int64 frame = 0;
         self->fAudioTrack->SeekToFrame(&frame);
-        memset(buffer, 0, size);
     }
 }
