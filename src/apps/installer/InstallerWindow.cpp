@@ -82,7 +82,41 @@ const uint32 ENCOURAGE_DRIVESETUP = 'iENC';
 const uint32 PASSWORD_UPDATED       = 'PSWU';
 const uint32 MASTER_PASSWORD_SHOW   = 'MPSH';
 const uint32 MASTER_PASSWORD_SAVE   = 'MPSV';
+const uint32 kGoToMP2 = 'GTP2';
+const uint32 kGoToSave = 'GTBS';
 
+class PasswordTC : public BTextControl {
+public:
+								PasswordTC(const char *label, const char *initialText, BMessage *message, bool confirmation);
+	virtual						~PasswordTC();
+	virtual void				KeyDown(const char* bytes,int32	numBytes);
+private:
+	bool		fConfirmation;
+};
+
+PasswordTC::PasswordTC(const char *label, const char *initialText, BMessage *message, bool confirmation)
+	:
+	BTextControl(label, initialText, message),
+	fConfirmation(confirmation)
+{
+}
+
+PasswordTC::~PasswordTC()
+{
+}
+void
+PasswordTC::KeyDown(const char* bytes,int32	numBytes)
+{
+	if (bytes[0] == B_ENTER) {
+		if (!fConfirmation){
+			BMessenger(this).SendMessage(kGoToMP2); // focus on Master Password 2
+		} else {
+			BMessenger(this).SendMessage(kGoToSave); // focus on Button Save
+		}
+	} else {
+        BTextControl::KeyDown(bytes, numBytes);
+    }
+}
 
 class LogoView : public BView {
 public:
@@ -175,77 +209,6 @@ LogoView::_Init()
 	fLogo = BTranslationUtils::GetBitmap(B_PNG_FORMAT, "walter_logo.png");
 #endif
 }
-
-
-
-PasswordTC::PasswordTC(const char* label, BMessage* modificationMessage)
-	:
-	BTextControl(label, "", modificationMessage)//, fVisible(false)
-{
-}
-
-
-
-// Test Decommentare se non funziona bene
-/*
-bool
-PasswordTC::Visible() const
-{
-	return fVisible;
-}
-
-
-void
-PasswordTC::SetVisible(bool visible)
-{
-	fVisible = visible;
-	Invalidate();
-}
-*/
-//void
-//PasswordTC::DrawAfterChildren(BRect /*updateRect*/)
-/*
-{
-	if (fVisible)
-		return;
-
-	BTextView* tv = TextView();
-	BRect tvFrame = tv->Frame();
-
-	// Cover the BTextView content area with its own background colour,
-	// hiding whatever the BTextView just drew (real characters).
-	SetHighColor(tv->ViewColor());
-	FillRect(tvFrame);
-
-	int32 len = tv->TextLength();
-	if (len == 0)
-		return;
-
-	// Build the masked display string.
-	BString masked;
-	masked.Append('*', len);
-
-	// Use the BTextView's font and text colour so the '*' glyphs look
-	// identical to what the real text would have looked like.
-	BFont font;
-	rgb_color textColor;
-	tv->GetFontAndColor(0, &font, &textColor);
-
-	font_height fh;
-	font.GetHeight(&fh);
-
-	// PointAt(0) returns the upper-left corner of the first character
-	// in BTextView coordinates; add ascent to land on the baseline.
-	BPoint origin = tv->PointAt(0);
-	BPoint drawPoint(
-		tvFrame.left + origin.x,
-		tvFrame.top  + origin.y + fh.ascent
-	);
-
-	SetHighColor(textColor);
-	SetFont(&font);
-	DrawString(masked.String(), drawPoint);
-}*/
 
 // #pragma mark -
 
@@ -416,18 +379,18 @@ InstallerWindow::InstallerWindow()
     mpTitle->SetExplicitAlignment(
         BAlignment(B_ALIGN_HORIZONTAL_CENTER, B_ALIGN_VERTICAL_UNSET));
 
-	fMasterPassword1 = new BTextControl(B_TRANSLATE("Password:"), "",
-        new BMessage(PASSWORD_UPDATED));
+	fMasterPassword1 = new PasswordTC(B_TRANSLATE("Password:"), "",
+        new BMessage(PASSWORD_UPDATED),false);
 	fMasterPassword1->Mask(true);
-	fMasterPassword2 = new BTextControl(B_TRANSLATE("Repeat Password:"), "",
-        new BMessage(PASSWORD_UPDATED));
+	fMasterPassword2 = new PasswordTC(B_TRANSLATE("Repeat Password:"), "",
+        new BMessage(PASSWORD_UPDATED),true);
 	fMasterPassword2->Mask(true);
 
     BButton* mpShow1 = new BButton("mpShow1", B_TRANSLATE("Show"),
         new BMessage(MASTER_PASSWORD_SHOW));
     BButton* mpShow2 = new BButton("mpShow2", B_TRANSLATE("Show"),
         new BMessage(MASTER_PASSWORD_SHOW));
-    BButton* mpSave  = new BButton("mpSave",  B_TRANSLATE("Save"),
+    mpSave  = new BButton("mpSave",  B_TRANSLATE("Save"),
         new BMessage(MASTER_PASSWORD_SAVE));
 
     fMasterPasswordView = new BGroupView("masterPasswordView", B_VERTICAL, 0);
@@ -707,6 +670,7 @@ InstallerWindow::MessageReceived(BMessage *msg)
             if (fCardLayout != NULL) {
                 fCardLayout->SetVisibleItem(1);
                 fBeginButton->SetEnabled(false);
+                fMasterPassword1->MakeFocus(true);
             }
 			break;
 		}
@@ -840,6 +804,14 @@ InstallerWindow::MessageReceived(BMessage *msg)
                 fBeginButton->SetEnabled(true);
             }
 			break;
+		}
+		case kGoToMP2:
+		{
+			fMasterPassword2->MakeFocus(true);
+		}
+		case kGoToSave:
+		{
+			mpSave->MakeFocus(true);
 		}
 
 		default:

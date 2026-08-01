@@ -37,21 +37,6 @@ enum InstallStatus {
 	kCancelled
 };
 
-class PasswordTC : public BTextControl { //dynamic layout version
-public:
-								PasswordTC(const char* label,
-									BMessage* modificationMessage);
-		bool					Visible() const;
-		void					SetVisible(bool visible);
-
-//protected:
-//	virtual	void				DrawAfterChildren(BRect updateRect);
-
-//private:
-//		bool					fVisible;
-};
-
-
 class InstallerWindow : public BWindow {
 public:
 								InstallerWindow();
@@ -109,6 +94,7 @@ private:
 			BGroupView*			fMasterPasswordView;
 			BTextControl*			fMasterPassword1;
 			BTextControl*			fMasterPassword2;
+			BButton*			mpSave;
 
 			bool				fEncouragedToSetupPartitions;
 
