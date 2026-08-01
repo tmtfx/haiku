@@ -74,6 +74,8 @@
 #include <MediaFile.h>
 #include <MediaTrack.h>
 #include <Bitmap.h>
+
+#include <CardLayout.h>
 #include "FricoVideoView.h"
 
 #include "HyperTextActions.h"
@@ -352,6 +354,7 @@ private:
 			SysInfoView*	fSysInfoView;
 			HyperTextView*	fCreditsView;
 			FricoVideoView* fVideoView;
+			BCardLayout* 	fCardLayout;
 
 			bigtime_t		fLastActionTime;
 			BMessageRunner*	fScrollRunner;
@@ -1269,6 +1272,14 @@ AboutView::AboutView()
 	fVideoView->Hide();
 
 	BView* creditsContainer = _CreateCreditsView();
+	
+	fCardLayout = new BCardLayout();
+	BView* rightStackView = new BView("rightStack", 0);
+    rightStackView->SetLayout(fCardLayout);
+    
+    fCardLayout->AddView(creditsContainer);
+    fCardLayout->AddView(fVideoView);
+    fCardLayout->SetVisibleItem(0);
 
 	SetLayout(new BGroupLayout(B_HORIZONTAL, 0));
 	BLayoutBuilder::Group<>((BGroupLayout*)GetLayout())
@@ -1277,8 +1288,9 @@ AboutView::AboutView()
 			.Add(_CreateSysInfoView())
 			.AddGlue()
 			.End()
-		.Add(creditsContainer)
-		.Add(fVideoView)
+		//.Add(creditsContainer)
+		//.Add(fVideoView)
+		.Add(rightStackView)
 		.End();
 }
 
@@ -1444,15 +1456,21 @@ AboutView::_ShowFricoVideo()
 	if (entry.InitCheck()!= B_OK || !entry.Exists())
 		return;
 	
-	if (fVideoView == NULL || !fVideoView->IsHidden())
+	if (fVideoView == NULL )//|| !fVideoView->IsHidden())
 		return;
-	
+	fCardLayout->SetVisibleItem(1);
 	// Nascondiamo i crediti (il layout li rimuoverà dallo spazio visivo)
-	if (fCreditsView != NULL && !fCreditsView->IsHidden())
-		fCreditsView->Hide();
+	//if (fCreditsView != NULL && !fCreditsView->IsHidden()){
+	//	fCreditsView->Hide();
+	//	BScrollBar* scrollBar = fCreditsView->ScrollBar(B_VERTICAL);
+	//	scrollBar->Hide();
+	//}
 
 	// Mostriamo il video (il layout gli assegnerà automaticamente lo spazio lasciato dai crediti)
-	fVideoView->Show();
+	//fVideoView->Show();
+	////float x=-fCreditsView->Bounds().Width();
+	////debug_printf("provo a spostare a sinistra di %f",x);
+	////fVideoView->MoveBy(x,0);
 
 	// Avviamo la riproduzione
 	fVideoView->PlayVideo(path.Path());
