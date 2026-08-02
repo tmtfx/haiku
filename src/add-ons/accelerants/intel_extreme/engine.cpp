@@ -90,7 +90,7 @@ QueueCommands::PutWaitFor(uint32 event)
 	Write(COMMAND_NOOP);
 }
 
-
+/*
 void
 QueueCommands::PutOverlayFlip(uint32 mode, bool updateCoefficients)
 {
@@ -106,6 +106,27 @@ QueueCommands::PutOverlayFlip(uint32 mode, bool updateCoefficients)
 		registers = gInfo->shared_info->overlay_offset;
 
 	Write(registers | (updateCoefficients ? OVERLAY_UPDATE_COEFFICIENTS : 0));
+}*/
+void
+QueueCommands::PutOverlayFlip(uint32 mode, bool updateCoefficients)
+{
+    MakeSpace(2);
+
+    Write(COMMAND_OVERLAY_FLIP | mode);
+
+    uint32 registers;
+    if (intel_uses_physical_overlay(*gInfo->shared_info))
+        registers = gInfo->shared_info->physical_overlay_registers;
+    else
+        registers = gInfo->shared_info->overlay_offset;
+
+    // Mascheriamo gli ultimi bit dell'indirizzo per sicurezza (deve essere allineato)
+    registers &= ~0x3f; // Assicura allineamento a 64-byte boundary
+
+    if (updateCoefficients)
+        registers |= OVERLAY_UPDATE_COEFFICIENTS;
+
+    Write(registers);
 }
 
 

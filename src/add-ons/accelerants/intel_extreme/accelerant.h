@@ -48,7 +48,8 @@ struct accelerant_info {
 	struct overlay_registers* overlay_registers;
 	overlay*		current_overlay;
 	overlay_view	last_overlay_view;
-	overlay_frame	last_overlay_frame;
+	//overlay_frame	last_overlay_frame;
+	overlay_window  last_overlay_window;
 	uint32			last_horizontal_overlay_scale;
 	uint32			last_vertical_overlay_scale;
 	uint32			overlay_position_buffer_offset;
@@ -70,6 +71,15 @@ struct accelerant_info {
 	int				device;
 	uint8			head_mode;
 	bool			is_clone;
+	
+	int32			overlay_window_left;
+	int32			overlay_window_top;
+	uint32			overlay_window_width;
+	uint32			overlay_window_height;
+	uint32			overlay_source_width;
+	uint32			overlay_source_height;
+	uint32			overlay_source_bytes_per_row;
+	
 };
 
 

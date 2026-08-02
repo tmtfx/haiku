@@ -499,6 +499,7 @@ AVCodecDecoder::_NegotiateVideoOutputFormat(media_format* inOutFormat)
 #endif
 */
 /* questo per la mia sm750 */
+
 	color_space requestedSpace = inOutFormat->u.raw_video.display.format;
 	if (requestedSpace == B_YCbCr422 || requestedSpace == B_RGB16) {
 		debug_printf("Negotiation output colorspace format: %d\n", requestedSpace);
@@ -507,8 +508,10 @@ AVCodecDecoder::_NegotiateVideoOutputFormat(media_format* inOutFormat)
 		debug_printf("fallback to B_RGB32\n");
 		fOutputColorSpace = B_RGB32;
 	}
-	
+
 	//fOutputColorSpace = inOutFormat->u.raw_video.display.format;
+	//debug_printf("Negotiation output colorspace format: %d\n", fOutputColorSpace);
+	
 // ================================================================================================
 
 #if USE_SWS_FOR_COLOR_SPACE_CONVERSION

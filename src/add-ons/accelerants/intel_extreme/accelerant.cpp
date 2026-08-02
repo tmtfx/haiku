@@ -132,7 +132,14 @@ init_common(int device, bool isClone)
 		gInfo->overlay_registers = (struct overlay_registers*)
 			(gInfo->shared_info->graphics_memory
 			+ gInfo->shared_info->overlay_offset);
+	} else {
+		gInfo->overlay_registers = NULL;
 	}
+	
+	debug_printf("Intel OVERLAY INIT DBG: gfx_mem=%p, offset=0x%" B_PRIx32 " -> overlay_regs=%p\n",
+    gInfo->shared_info->graphics_memory,
+    gInfo->shared_info->overlay_offset,
+    gInfo->overlay_registers);
 
 	if (gInfo->shared_info->device_type.InGroup(INTEL_GROUP_96x)) {
 		// allocate some extra memory for the 3D context
@@ -542,6 +549,9 @@ intel_init_accelerant(int device)
 		uninit_common();
 		return status;
 	}
+	
+	memset(&gInfo->last_overlay_view, 0, sizeof(overlay_view));
+    memset(&gInfo->last_overlay_window, 0, sizeof(overlay_window));
 
 	disable_fences();
 

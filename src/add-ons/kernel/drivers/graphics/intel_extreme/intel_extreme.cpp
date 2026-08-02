@@ -30,7 +30,10 @@
 #include "driver.h"
 #include "power.h"
 #include "utility.h"
-#include "intel_logo.h"
+#include "intel_logo.h" 
+
+//rimuovere dopo debug overlay
+#include <cstddef>
 
 
 #define TRACE_INTELEXTREME
@@ -880,6 +883,13 @@ intel_extreme_init(intel_info &info)
 			info.shared_info->overlay_offset, info.overlay_registers,
 			info.aperture_base, info.shared_info->physical_overlay_registers);
 		init_overlay_registers(info.overlay_registers);
+		dprintf("=== INTEL STRUCT OFFSET CHECK ===\n");
+        dprintf("  offsetof(buffer_rgb0)     = 0x%zx\n", 
+            offsetof(struct overlay_registers, buffer_rgb0));
+        dprintf("  offsetof(window_left)     = 0x%zx\n", 
+            offsetof(struct overlay_registers, window_left));
+        dprintf("  sizeof(overlay_registers) = %zu bytes\n", 
+            sizeof(struct overlay_registers));
 	} else {
 		ERROR("error: could not allocate overlay memory! %s\n",
 			strerror(status));

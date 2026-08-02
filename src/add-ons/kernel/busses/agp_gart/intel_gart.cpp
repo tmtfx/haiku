@@ -785,17 +785,18 @@ intel_map(intel_info &info)
 	ERROR("GMR base = 0x%" B_PRIxPHYSADDR "\n", info.aperture_physical_base);
 
 	AreaKeeper apertureMapper;
+	dprintf("Intel_extreme: Using cloneable intel graphics aperture");
 	info.aperture_area = apertureMapper.Map("intel graphics aperture",
 		info.aperture_physical_base, info.aperture_size,
 		B_ANY_KERNEL_BLOCK_ADDRESS | B_WRITE_COMBINING_MEMORY,
-		B_READ_AREA | B_WRITE_AREA, (void**)&info.aperture_base);
+		B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA , (void**)&info.aperture_base);
 	if (apertureMapper.InitCheck() < B_OK) {
 		// try again without write combining
 		ERROR("enabling write combined mode failed.\n");
 
 		info.aperture_area = apertureMapper.Map("intel graphics aperture",
 			info.aperture_physical_base, info.aperture_size,
-			B_ANY_KERNEL_BLOCK_ADDRESS, B_READ_AREA | B_WRITE_AREA,
+			B_ANY_KERNEL_BLOCK_ADDRESS, B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA,
 			(void**)&info.aperture_base);
 	}
 	if (apertureMapper.InitCheck() < B_OK) {
