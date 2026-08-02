@@ -13,7 +13,7 @@ Addon intel_extreme.accelerant :
 	hooks.cpp
 	memory.cpp
 	mode.cpp
-	overlay.cpp
+	overlay_legacy.cpp
 #	overlay_3d_i965.cpp
 	pll.cpp
 	# classes
