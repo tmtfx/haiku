@@ -116,12 +116,18 @@ get_accelerant_hook(uint32 feature, void* data)
 
 		// overlay
 		case B_OVERLAY_COUNT:
-			return (void*)intel_overlay_count;
+			if (gInfo->shared_info->device_type.Generation() < 4)
+				return (void*)legacy_overlay_count;
+			return NULL;
 		case B_OVERLAY_SUPPORTED_SPACES:
-			return (void*)intel_overlay_supported_spaces;
+			if (gInfo->shared_info->device_type.Generation() < 4)
+				return (void*)legacy_overlay_supported_spaces;
+			return NULL;
 		case B_OVERLAY_SUPPORTED_FEATURES:
-			return (void*)intel_overlay_supported_features;
-		case B_ALLOCATE_OVERLAY_BUFFER:
+			if (gInfo->shared_info->device_type.Generation() < 4)
+				return (void*)legacy_overlay_supported_features;
+			return NULL;
+		case B_ALLOCATE_OVERLAY_BUFFER:{
 			// TODO: overlay doesn't seem to work on these chips
 			if (gInfo->shared_info->device_type.InGroup(INTEL_GROUP_91x)
 				|| gInfo->shared_info->device_type.InGroup(INTEL_GROUP_94x)
@@ -132,18 +138,30 @@ get_accelerant_hook(uint32 feature, void* data)
 				|| gInfo->shared_info->device_type.InFamily(INTEL_FAMILY_SER5)
 				|| gInfo->shared_info->device_type.InFamily(INTEL_FAMILY_SOC0))
 				return NULL;
-
-			return (void*)intel_allocate_overlay_buffer;
+			if (gInfo->shared_info->device_type.Generation() < 4)
+				return (void*)legacy_allocate_overlay_buffer;
+			return NULL;
+		}
 		case B_RELEASE_OVERLAY_BUFFER:
-			return (void*)intel_release_overlay_buffer;
+			if (gInfo->shared_info->device_type.Generation() < 4)
+				return (void*)legacy_release_overlay_buffer;
+			return NULL;
 		case B_GET_OVERLAY_CONSTRAINTS:
-			return (void*)intel_get_overlay_constraints;
+			if (gInfo->shared_info->device_type.Generation() < 4)
+				return (void*)legacy_get_overlay_constraints;
+			return NULL;
 		case B_ALLOCATE_OVERLAY:
-			return (void*)intel_allocate_overlay;
+			if (gInfo->shared_info->device_type.Generation() < 4)
+				return (void*)legacy_allocate_overlay;
+			return NULL;
 		case B_RELEASE_OVERLAY:
-			return (void*)intel_release_overlay;
+			if (gInfo->shared_info->device_type.Generation() < 4)
+				return (void*)legacy_release_overlay;
+			return NULL;
 		case B_CONFIGURE_OVERLAY:
-			return (void*)intel_configure_overlay;
+			if (gInfo->shared_info->device_type.Generation() < 4)
+				return (void*)legacy_configure_overlay;
+			return NULL;
 	}
 
 	return NULL;
