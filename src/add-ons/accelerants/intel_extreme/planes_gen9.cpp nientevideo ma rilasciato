@@ -1,0 +1,320 @@
+/*
+ * Copyright 2026, Haiku, Inc. All Rights Reserved.
+ * Distributed under the terms of the MIT License.
+ *
+ * Supporto Hardware Planes (Gen9+ Skylake / Gemini Lake / Ice Lake)
+ */
+
+#include "accelerant.h"
+#include "accelerant_protos.h"
+#include <graphic_driver.h>
+#include <Debug.h>
+#include <cstring>
+#include <SupportDefs.h>
+
+#include "Pipes.h"
+
+// --- REGISTRI PLANE SKL/GLK/ICL ---
+#define SKL_PLANE_CTL_1_A           0x70180
+#define SKL_PLANE_STRIDE_1_A        0x70188
+#define SKL_PLANE_POS_1_A           0x7018C
+#define SKL_PLANE_SIZE_1_A          0x70190
+#define SKL_PLANE_SURF_1_A          0x7019C
+#define SKL_PLANE_OFFSET_1_A        0x701A4
+
+// Control Bits per PLANE_CTL
+#define PLANE_ENABLE                (1u << 31)
+#define PLANE_FORMAT_YUV420_8BPC    (0xCu << 24) // NV12 / YUV420
+#define PLANE_FORMAT_RGB_8888       (0x4u << 24)
+#define PLANE_YUV_RANGE_CORRECTION  (1u << 21)
+#define PLANE_CTL_TILED_LINEAR      (0u << 10)   // 00b = Linear Framebuffer
+
+// Macro per calcolare l'offset preciso (Pipe 0..2, Plane 1..4)
+// Plane 1 = 0x70180 (Primary GUI), Plane 2 = 0x70280 (Sprite/Overlay), Plane 3 = 0x70380
+#define SKL_PLANE_OFFSET(pipe, plane) \
+    (((pipe) * 0x1000) + (((plane) - 1) * 0x100))
+
+#define SKL_PLANE_CTL_REG(pipe, plane)     (SKL_PLANE_CTL_1_A + SKL_PLANE_OFFSET(pipe, plane))
+#define SKL_PLANE_STRIDE_REG(pipe, plane)  (SKL_PLANE_STRIDE_1_A + SKL_PLANE_OFFSET(pipe, plane))
+#define SKL_PLANE_POS_REG(pipe, plane)     (SKL_PLANE_POS_1_A + SKL_PLANE_OFFSET(pipe, plane))
+#define SKL_PLANE_SIZE_REG(pipe, plane)    (SKL_PLANE_SIZE_1_A + SKL_PLANE_OFFSET(pipe, plane))
+#define SKL_PLANE_SURF_REG(pipe, plane)    (SKL_PLANE_SURF_1_A + SKL_PLANE_OFFSET(pipe, plane))
+#define SKL_PLANE_OFF_REG(pipe, plane)     (SKL_PLANE_OFFSET_1_A + SKL_PLANE_OFFSET(pipe, plane))
+
+
+// --- CONFIGURAZIONE REGISTRI PLANE MODERN (SKL / GLK / ICL) ---
+status_t
+gen9_configure_overlay(overlay_token overlayToken,
+    const overlay_buffer* buffer, const overlay_window* window,
+    const overlay_view* view)
+{
+    debug_printf("\n======================================================\n");
+    debug_printf("[Gen9+ Overlay] CALLED gen9_configure_overlay\n");
+
+    if (buffer == NULL || window == NULL || view == NULL) {
+        debug_printf("[Gen9+ Overlay] ERROR: Null arguments! buffer=%p, window=%p, view=%p\n",
+            buffer, window, view);
+        return B_BAD_VALUE;
+    }
+
+    uintptr_t tokenVal = (uintptr_t)overlayToken;
+    if (tokenVal == 0) {
+        debug_printf("[Gen9+ Overlay] ERROR: Invalid overlay token (0)\n");
+        return B_BAD_VALUE;
+    }
+
+    // Token 1 -> Plane 2 (Plane 1 è il Primary Desktop Plane su Gen9+)
+    uint32 planeIndex = (uint32)tokenVal + 1; 
+    uint32 pipeIndex = 0;
+
+    debug_printf("[Gen9+ Overlay] Target HW: Pipe %u, Plane %u (Token: %lu)\n",
+        pipeIndex, planeIndex, (unsigned long)tokenVal);
+
+    // Formato Colore
+    uint32 planeCtl = PLANE_ENABLE | PLANE_CTL_TILED_LINEAR;
+    const char* spaceStr = "UNKNOWN";
+
+    switch (buffer->space) {
+        case B_RGB32:
+            planeCtl |= PLANE_FORMAT_RGB_8888;
+            spaceStr = "B_RGB32";
+            break;
+        case B_YCbCr422:
+            planeCtl |= PLANE_FORMAT_YUV420_8BPC | PLANE_YUV_RANGE_CORRECTION;
+            spaceStr = "B_YCbCr422";
+            break;
+        default:
+            planeCtl |= PLANE_FORMAT_YUV420_8BPC | PLANE_YUV_RANGE_CORRECTION;
+            spaceStr = "DEFAULT (YUV420)";
+            break;
+    }
+
+    uint32 pos = ((uint32)window->v_start << 16) | ((uint32)window->h_start & 0xFFFF);
+    uint32 size = (((uint32)window->height - 1) << 16) | (((uint32)window->width - 1) & 0xFFFF);
+    uint32 strideInUnits = (buffer->bytes_per_row + 63) / 64;
+
+    struct overlay* overlay = (struct overlay*)buffer;
+    uint32 bufferOffset = overlay->buffer_offset;
+
+    uint32 regCtl    = SKL_PLANE_CTL_REG(pipeIndex, planeIndex);
+    uint32 regStride = SKL_PLANE_STRIDE_REG(pipeIndex, planeIndex);
+    uint32 regPos    = SKL_PLANE_POS_REG(pipeIndex, planeIndex);
+    uint32 regSize   = SKL_PLANE_SIZE_REG(pipeIndex, planeIndex);
+    uint32 regOff    = SKL_PLANE_OFF_REG(pipeIndex, planeIndex);
+    uint32 regSurf   = SKL_PLANE_SURF_REG(pipeIndex, planeIndex);
+
+    debug_printf("[Gen9+ Overlay] INPUT GEOMETRY:\n");
+    debug_printf("  -> Window: Pos(%d, %d), Size(%u x %u)\n", 
+        window->h_start, window->v_start, window->width, window->height);
+    debug_printf("  -> View:   Pos(%d, %d), Size(%u x %u)\n", 
+        view->h_start, view->v_start, view->width, view->height);
+    debug_printf("  -> Buffer: Space=%s, Pitch=%u bytes (Stride Reg Unit=%u)\n", 
+        spaceStr, buffer->bytes_per_row, strideInUnits);
+    debug_printf("  -> Memory: Buffer Ptr=%p, HW Offset=0x%08x\n", 
+        buffer->buffer, bufferOffset);
+
+    debug_printf("[Gen9+ Overlay] WRITING HW REGISTERS:\n");
+    debug_printf("  -> Reg CTL    [0x%08x] = 0x%08x\n", regCtl, planeCtl);
+    debug_printf("  -> Reg STRIDE [0x%08x] = %u\n", regStride, strideInUnits);
+    debug_printf("  -> Reg POS    [0x%08x] = 0x%08x\n", regPos, pos);
+    debug_printf("  -> Reg SIZE   [0x%08x] = 0x%08x\n", regSize, size);
+
+    write32(regCtl, planeCtl);
+    write32(regStride, strideInUnits);
+    write32(regPos, pos);
+    write32(regSize, size);
+    write32(regOff, 0);
+
+    asm volatile("mfence" ::: "memory");
+
+    debug_printf("  -> TRIGGER SURF [0x%08x] = 0x%08x\n", regSurf, bufferOffset);
+    write32(regSurf, bufferOffset);
+
+    debug_printf("[Gen9+ Overlay] CONFIGURE SUCCESSFUL\n");
+    debug_printf("======================================================\n\n");
+
+    return B_OK;
+}
+
+// --- ALLOCAZIONE BUFFER OVERLAY / PLANE ---
+const overlay_buffer*
+gen9_allocate_overlay_buffer(color_space space, uint16 width, uint16 height)
+{
+    debug_printf("[Gen9+ Overlay] CALLED gen9_allocate_overlay_buffer (w=%u, h=%u, space=0x%" B_PRIx32 ")\n",
+        width, height, space);
+
+    uint32 bytesPerPixel = (space == B_RGB32) ? 4 : 2;
+    uint32 bytesPerRow = (width * bytesPerPixel + 63) & ~63; // Align to 64 bytes
+    size_t size = bytesPerRow * height;
+
+    struct overlay* overlay = (struct overlay*)calloc(1, sizeof(struct overlay));
+    if (overlay == NULL) {
+        debug_printf("[Gen9+ Overlay] ERROR: Failed to allocate struct overlay\n");
+        return NULL;
+    }
+
+    status_t status = intel_allocate_memory(size, 0, overlay->buffer_base);
+    if (status < B_OK) {
+        debug_printf("[Gen9+ Overlay] ERROR: intel_allocate_memory failed (size=%" B_PRIuSIZE ", err=%" B_PRIx32 ")\n",
+            size, status);
+        free(overlay);
+        return NULL;
+    }
+
+    overlay->buffer_offset = overlay->buffer_base 
+        - (addr_t)gInfo->shared_info->graphics_memory;
+
+    overlay->buffer.space = space;
+    overlay->buffer.width = width;
+    overlay->buffer.height = height;
+    overlay->buffer.bytes_per_row = bytesPerRow;
+    overlay->buffer.buffer = (uint8*)overlay->buffer_base;
+    overlay->buffer.buffer_dma = (uint8*)gInfo->shared_info->physical_graphics_memory 
+        + overlay->buffer_offset;
+
+    debug_printf("[Gen9+ Overlay] ALLOCATED BUFFER SUCCESS:\n");
+    debug_printf("  -> Base Base    = 0x%" B_PRIxADDR "\n", overlay->buffer_base);
+    debug_printf("  -> HW Offset    = 0x%" B_PRIx32 "\n", overlay->buffer_offset);
+    debug_printf("  -> User Virt Ptr= %p\n", overlay->buffer.buffer);
+    debug_printf("  -> Phys DMA Ptr = %p\n", overlay->buffer.buffer_dma);
+    debug_printf("  -> BytesPerRow  = %" B_PRIu32 "\n", bytesPerRow);
+
+    return &overlay->buffer;
+}
+
+status_t
+gen9_release_overlay_buffer(const overlay_buffer* buffer)
+{
+    debug_printf("[Gen9+ Overlay] CALLED gen9_release_overlay_buffer (%p)\n", buffer);
+
+    if (buffer == NULL || buffer->buffer == NULL)
+        return B_BAD_VALUE;
+
+    struct overlay* overlay = (struct overlay*)buffer;
+    if (overlay->buffer_base != 0) {
+        debug_printf("  -> Freeing graphics memory at 0x%" B_PRIxADDR "\n", overlay->buffer_base);
+        intel_free_memory(overlay->buffer_base);
+    }
+
+    free(overlay);
+    return B_OK;
+}
+
+
+// --- GESTIONE OVERLAY SESSION ---
+overlay_token
+gen9_allocate_overlay(void)
+{
+    debug_printf("[Gen9+ Overlay] CALLED gen9_allocate_overlay\n");
+
+    for (uint32 i = 0; i < 4; i++) {
+        uint32 mask = (1u << i);
+        uint32 prev = atomic_or(&gInfo->shared_info->overlay_channel_used, mask);
+        if ((prev & mask) == 0) {
+            overlay_token tok = (overlay_token)(uintptr_t)(i + 1);
+            debug_printf("  -> Allocated Channel Token #%lu\n", (unsigned long)(uintptr_t)tok);
+            return tok;
+        }
+    }
+
+    debug_printf("[Gen9+ Overlay] ERROR: No free overlay channels available!\n");
+    return NULL;
+}
+
+status_t
+gen9_release_overlay(overlay_token overlayToken)
+{
+    debug_printf("[Gen9+ Overlay] CALLED gen9_release_overlay (Token: %p)\n", overlayToken);
+
+    if (overlayToken == 0)
+        return B_BAD_VALUE;
+
+    uintptr_t t = (uintptr_t)overlayToken;
+    uint32 idx = (uint32)(t - 1);
+
+    uint32 pipeIndex = 0;
+    uint32 planeIndex = idx + 2;
+
+    uint32 regCtl  = SKL_PLANE_CTL_REG(pipeIndex, planeIndex);
+    uint32 regSurf = SKL_PLANE_SURF_REG(pipeIndex, planeIndex);
+
+    debug_printf("  -> Disabling HW Plane %u on Pipe %u (CTL: 0x%08x, SURF: 0x%08x)\n",
+        planeIndex, pipeIndex, regCtl, regSurf);
+
+    write32(regCtl, 0);
+    asm volatile("mfence" ::: "memory");
+    write32(regSurf, 0);
+
+    uint32 mask = ~(1u << idx);
+    atomic_and(&gInfo->shared_info->overlay_channel_used, mask);
+
+    debug_printf("  -> Overlay Channel Token #%lu released successfully.\n", (unsigned long)t);
+    return B_OK;
+}
+
+
+// --- HOOKS & CONSTRAINTS ---
+uint32
+gen9_overlay_count(const display_mode* mode)
+{
+    debug_printf("[Gen9+ Overlay] CALLED gen9_overlay_count -> Returning 3\n");
+    return 3;
+}
+
+const uint32*
+gen9_overlay_supported_spaces(const display_mode* mode)
+{
+    debug_printf("[Gen9+ Overlay] CALLED gen9_overlay_supported_spaces\n");
+    static const uint32 spaces[] = {
+        B_YCbCr422,
+        B_RGB32,
+        0
+    };
+    return spaces;
+}
+
+uint32
+gen9_overlay_supported_features(uint32 colorSpace)
+{
+    debug_printf("[Gen9+ Overlay] CALLED gen9_overlay_supported_features\n");
+    return B_OVERLAY_COLOR_KEY
+        | B_OVERLAY_HORIZONTAL_FILTERING
+        | B_OVERLAY_VERTICAL_FILTERING
+        | B_OVERLAY_HORIZONTAL_MIRRORING;
+}
+
+status_t
+gen9_get_overlay_constraints(const display_mode* mode,
+    const overlay_buffer* buffer, overlay_constraints* constraints)
+{
+    debug_printf("[Gen9+ Overlay] CALLED gen9_get_overlay_constraints\n");
+    if (buffer == NULL || constraints == NULL)
+        return B_BAD_VALUE;
+
+    constraints->view.h_alignment = 2;
+    constraints->view.v_alignment = 1;
+    constraints->view.width_alignment = 2;
+    constraints->view.height_alignment = 1;
+
+    constraints->view.width.min = 16;
+    constraints->view.height.min = 16;
+    constraints->view.width.max = 4096;
+    constraints->view.height.max = 4096;
+
+    constraints->window.h_alignment = 1;
+    constraints->window.v_alignment = 1;
+    constraints->window.width_alignment = 1;
+    constraints->window.height_alignment = 1;
+
+    constraints->window.width.min = 16;
+    constraints->window.height.min = 16;
+    constraints->window.width.max = 4096;
+    constraints->window.height.max = 4096;
+
+    constraints->h_scale.min = 0.125f;
+    constraints->h_scale.max = 3.0f;
+    constraints->v_scale.min = 0.125f;
+    constraints->v_scale.max = 3.0f;
+
+    return B_OK;
+}

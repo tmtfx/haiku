@@ -2,7 +2,7 @@
  * Copyright 2026, Haiku, Inc. All Rights Reserved.
  * Distributed under the terms of the MIT License.
  *
- * Supporto Hardware Planes (Gen9+ Skylake / Gemini Lake / Ice Lake)
+ * Supporto Hardware Planes Unificato (Gen9+ Skylake / Gemini Lake / Ice Lake)
  */
 
 #include "accelerant.h"
@@ -10,212 +10,129 @@
 #include <graphic_driver.h>
 #include <Debug.h>
 #include <cstring>
+#include <SupportDefs.h>
 
 #include "Pipes.h"
 
-// --- REGISTRI PLANE SKL/GLK/ICL (Pipe A / Plane 1) ---
-// Per Pipe B/C o altri Plane si applicano gli offset relativi (+0x100 per plane, +0x1000 per pipe)
-#define SKL_PLANE_CTL_1_A           0x70180
-#define SKL_PLANE_STRIDE_1_A        0x70188
-#define SKL_PLANE_POS_1_A           0x7018C
-#define SKL_PLANE_SIZE_1_A          0x70190
-#define SKL_PLANE_SURF_1_A          0x7019C
-#define SKL_PLANE_OFFSET_1_A        0x701A4
+// --- REGISTRI BASE PLANE SKL/GLK/ICL ---
+#define SKL_PLANE_CTL_1_A            0x70180
+#define SKL_PLANE_STRIDE_1_A         0x70188
+#define SKL_PLANE_POS_1_A            0x7018C
+#define SKL_PLANE_SIZE_1_A           0x70190
+#define SKL_PLANE_SURF_1_A           0x7019C
+#define SKL_PLANE_OFFSET_1_A         0x701A4
 
 // Control Bits per PLANE_CTL
-#define PLANE_ENABLE                (1 << 31)
-#define PLANE_FORMAT_YUV420_8BPC    (0xC << 24) // NV12
-#define PLANE_FORMAT_RGB_8888       (0x4 << 24)
-#define PLANE_YUV_RANGE_CORRECTION  (1 << 21)
+#define PLANE_ENABLE                 (1u << 31)
+#define PLANE_FORMAT_RGB_8888        (0x4u << 24)
+#define PLANE_FORMAT_YUV420_8BPC     (0xCu << 24) // NV12 / YUV420
+#define PLANE_YUV_RANGE_CORRECTION   (1u << 21)
+#define PLANE_CTL_TILED_LINEAR       (0u << 10)   // Linear Framebuffer
+#define SKL_PLANE_CTL_ALPHA_DISABLE  (1u << 4)    // Forza 100% opaco su RGB
 
-// Macro base per Skylake/GLK/ICL Planes
-#define SKL_PLANE_CTL_BASE(pipe)      (0x70180 + ((pipe) * 0x1000))
-#define SKL_PLANE_STRIDE_BASE(pipe)   (0x70188 + ((pipe) * 0x1000))
-#define SKL_PLANE_POS_BASE(pipe)      (0x7018C + ((pipe) * 0x1000))
-#define SKL_PLANE_SIZE_BASE(pipe)     (0x70190 + ((pipe) * 0x1000))
-#define SKL_PLANE_SURF_BASE(pipe)     (0x7019C + ((pipe) * 0x1000))
-#define SKL_PLANE_OFFSET_BASE(pipe)   (0x701A4 + ((pipe) * 0x1000))
+// Macro per calcolare l'offset del Plane (Plane 1 = GUI, Plane 2 = Overlay/Sprite)
+#define SKL_PLANE_OFFSET(pipe, plane) \
+    (((pipe) * 0x1000) + (((plane) - 1) * 0x100))
 
-// --- CONFIGURAZIONE REGISTRI PLANE MODERN (SKL / GLK / ICL) ---
+#define SKL_PLANE_CTL_REG(pipe, plane)     (SKL_PLANE_CTL_1_A + SKL_PLANE_OFFSET(pipe, plane))
+#define SKL_PLANE_STRIDE_REG(pipe, plane)  (SKL_PLANE_STRIDE_1_A + SKL_PLANE_OFFSET(pipe, plane))
+#define SKL_PLANE_POS_REG(pipe, plane)     (SKL_PLANE_POS_1_A + SKL_PLANE_OFFSET(pipe, plane))
+#define SKL_PLANE_SIZE_REG(pipe, plane)    (SKL_PLANE_SIZE_1_A + SKL_PLANE_OFFSET(pipe, plane))
+#define SKL_PLANE_SURF_REG(pipe, plane)    (SKL_PLANE_SURF_1_A + SKL_PLANE_OFFSET(pipe, plane))
+#define SKL_PLANE_OFF_REG(pipe, plane)     (SKL_PLANE_OFFSET_1_A + SKL_PLANE_OFFSET(pipe, plane))
+// --- CONFIGURAZIONE REGISTRI PLANE MODERN ---
+#define SKL_PLANE_COLOR_CTL_REG(pipe, plane)  (0x701CC + (plane - 1) * 0x100 + pipe * 0x1000)
+#define SKL_PLANE_BUF_CFG_REG(pipe, plane)    (0x7017C + (plane - 1) * 0x4 + pipe * 0x1000)
+
+extern "C" {
+
 status_t
 gen9_configure_overlay(overlay_token overlayToken,
-    const overlay_buffer* buffer, const overlay_window* window,
-    const overlay_view* view)
+	const overlay_buffer* buffer, const overlay_window* window,
+	const overlay_view* view)
 {
-    if (buffer == NULL || window == NULL || view == NULL)
-        return B_BAD_VALUE;
+	if (buffer == NULL || window == NULL || view == NULL)
+		return B_BAD_VALUE;
 
-    // Recuperiamo la pipe attiva
-    uint32 pipeIndex = 0; // o gInfo->shared_info->active_pipe
+	uintptr_t tokenVal = (uintptr_t)overlayToken;
+	if (tokenVal == 0)
+		return B_BAD_VALUE;
 
-    uint32 planeCtl = PLANE_ENABLE;
-    switch (buffer->space) {
-        case B_RGB32:
-            planeCtl |= PLANE_FORMAT_RGB_8888;
-            break;
-        case B_YCbCr422:
-        default:
-            planeCtl |= PLANE_FORMAT_YUV420_8BPC | PLANE_YUV_RANGE_CORRECTION;
-            break;
-    }
+	// Plane 2 (Universal Plane/Overlay) su Pipe A (0)
+	uint32 planeIndex = (uint32)tokenVal + 1; 
+	uint32 pipeIndex = 0; 
 
-    uint32 pos = (window->v_start << 16) | (window->h_start & 0xFFFF);
-    uint32 size = ((window->height - 1) << 16) | ((window->width - 1) & 0xFFFF);
-    uint32 stride = buffer->bytes_per_row / 64; // Gen9+ misura lo stride in blocchi da 64 byte
+	// 1. CONFIGURAZIONE PLANE_CTL
+	// Bit 31: Enable Plane
+	// Bit 10: Tiled Linear
+	// Bit 4:  Alpha Disable (Opaque)
+	uint32 planeCtl = (1u << 31) | (1u << 4);
 
-    // Scrittura sui registri del Plane per la Pipe corretta
-    write32(SKL_PLANE_CTL_BASE(pipeIndex), planeCtl);
-    write32(SKL_PLANE_STRIDE_BASE(pipeIndex), stride);
-    write32(SKL_PLANE_POS_BASE(pipeIndex), pos);
-    write32(SKL_PLANE_SIZE_BASE(pipeIndex), size);
-    write32(SKL_PLANE_OFFSET_BASE(pipeIndex), 0);
+	switch (buffer->space) {
+		case B_RGB32:
+			// Bit 27:24 = 0x4 -> Direct Color / RGB 8888 (xRGB/RGBA)
+			planeCtl |= (0x4u << 24);
+			break;
 
-    // =========================================================================
-    // CALCOLO OFFSET SICURO (Senza fare il cast a struct overlay*)
-    // =========================================================================
-    uint32 bufferOffset = (addr_t)buffer->buffer - (addr_t)gInfo->shared_info->graphics_memory;
+		case B_YCbCr420:
+		case B_YCbCr422:
+		default:
+			// Bit 27:24 = 0x1 -> YUV420 8bpc
+			// Bit 28:    Correction Range YUV
+			planeCtl |= (0x1u << 24) | (1u << 28);
+			break;
+	}
 
-    // Assicura che le scritture MMIO precedenti siano scritte in memoria prima del trigger
-    asm volatile("mfence" ::: "memory");
+	// 2. CONFIGURAZIONE GEOMETRIA (POS & SIZE)
+	// POS: Y (v_start) nei 16 bit ALTI, X (h_start) nei 16 bit BASSI
+	uint32 pos = ((uint32)window->v_start << 16) | ((uint32)window->h_start & 0xFFFF);
 
-    // SURFACE REGISTER TRIGGER:
-    // La scrittura in PLANE_SURF fa scattare il latch dei registri al VBLANK
-    write32(SKL_PLANE_SURF_BASE(pipeIndex), bufferOffset);
+	// SIZE: Height - 1 nei 16 bit ALTI, Width - 1 nei 16 bit BASSI
+	uint32 size = (((uint32)window->height - 1) << 16) | (((uint32)window->width - 1) & 0xFFFF);
 
-    return B_OK;
+	// 3. CALCOLO STRIDE (Unità di 64 byte per Gen9)
+	uint32 strideInUnits = (buffer->bytes_per_row + 63) / 64;
+
+	// 4. CALCOLO OFFSET MEMORIA MMIO
+	uint32 bufferOffset = (addr_t)buffer->buffer - (addr_t)gInfo->shared_info->graphics_memory;
+
+	// 5. INDIRIZZI DEI REGISTRI MMIO
+	uint32 regCtl    = SKL_PLANE_CTL_REG(pipeIndex, planeIndex);
+	uint32 regStride = SKL_PLANE_STRIDE_REG(pipeIndex, planeIndex);
+	uint32 regPos    = SKL_PLANE_POS_REG(pipeIndex, planeIndex);
+	uint32 regSize   = SKL_PLANE_SIZE_REG(pipeIndex, planeIndex);
+	uint32 regOff    = SKL_PLANE_OFF_REG(pipeIndex, planeIndex);
+	uint32 regSurf   = SKL_PLANE_SURF_REG(pipeIndex, planeIndex);
+
+	// Log diagnostico scannabile
+	debug_printf("\n[Gen9+ Overlay] >>> CONFIGURING PLANE %" PRIu32 " <<<", planeIndex);
+	debug_printf("\n[Gen9+ Overlay] CTL: 0x%08" PRIx32 " | POS: 0x%08" PRIx32 " | SIZE: 0x%08" PRIx32, planeCtl, pos, size);
+	debug_printf("\n[Gen9+ Overlay] STRIDE: %" PRIu32 " | SURF: 0x%08" PRIx32 "\n", strideInUnits, bufferOffset);
+
+	// 6. SCRITTURA ORDINATA NEI REGISTRI
+	write32(regCtl, planeCtl);
+	write32(regStride, strideInUnits);
+	write32(regPos, pos);
+	write32(regSize, size);
+	write32(regOff, 0);
+
+	// Barrier di memoria hardware per garantire il completamento delle scritture prima del trigger
+	asm volatile("mfence" ::: "memory");
+
+	// SCRITTURA FINALE: SURF fa scattare l'update al prossimo VBLANK (Latch Hardware)
+	write32(regSurf, bufferOffset);
+
+	return B_OK;
 }
 
-// --- PROTOTIPI INTERNI PER HOOKS ---
-
-uint32
-gen9_overlay_count(const display_mode* mode)
-{
-    // Supportare fino a 4 hardware planes per Gen9+ (IceLake / GeminiLake / Skylake)
-    // Questo permette ai player/video di usare più overlay simultanei.
-    return 4;
-}
-
-const uint32*
-gen9_overlay_supported_spaces(const display_mode* mode)
-{
-    static const uint32 spaces[] = {
-        B_YCbCr422,
-        B_RGB32,
-        0
-    };
-    return spaces;
-}
-
-// --- CONSTRAINTS GEOMETRICI PER GEN9+ PLANES ---
-status_t
-gen9_get_overlay_constraints(const display_mode* mode,
-    const overlay_buffer* buffer, overlay_constraints* constraints)
-{
-    if (buffer == NULL || constraints == NULL)
-        return B_BAD_VALUE;
-
-    // Vincoli per Plane SKL/GLK/ICL:
-    // Allineamento indirizzo memoria a 4KB (page boundary)
-    constraints->view.h_alignment = 2;
-    constraints->view.v_alignment = 1;
-    constraints->view.width_alignment = 2;
-    constraints->view.height_alignment = 1;
-
-    // Limiti di risoluzione sorgente (fino a 4096 per Gen9+)
-    constraints->view.width.min = 16;
-    constraints->view.height.min = 16;
-    constraints->view.width.max = 4096;
-    constraints->view.height.max = 4096;
-
-    // Finestra di destinazione sul display
-    constraints->window.h_alignment = 1;
-    constraints->window.v_alignment = 1;
-    constraints->window.width_alignment = 1;
-    constraints->window.height_alignment = 1;
-
-    constraints->window.width.min = 16;
-    constraints->window.height.min = 16;
-    constraints->window.width.max = 4096;
-    constraints->window.height.max = 4096;
-
-    // Fattori di scala gestiti dallo Scaler Hardware dedicato dei Plane
-    constraints->h_scale.min = 0.125f;  // Downscale max 8x
-    constraints->h_scale.max = 3.0f;    // Upscale max 3x
-    constraints->v_scale.min = 0.125f;
-    constraints->v_scale.max = 3.0f;
-
-    return B_OK;
-}
 
 // --- ALLOCAZIONE BUFFER OVERLAY / PLANE ---
-/*
-status_t
-gen9_allocate_overlay_buffer(color_space colorSpace, uint16 width,
-    uint16 height, overlay_buffer** _buffer) // NOTA: doppio puntatore o riempimento
-{
-    // Se l'hook Haiku usa la firma standard con overlay_buffer* buffer:
-    if (buffer == NULL)
-        return B_BAD_VALUE;
-
-    uint32 bytesPerPixel = (colorSpace == B_RGB32) ? 4 : 2;
-    uint32 bytesPerRow = (width * bytesPerPixel + 63) & ~63;
-    size_t size = bytesPerRow * height;
-
-    struct overlay* overlay = (struct overlay*)calloc(1, sizeof(struct overlay));
-    if (overlay == NULL)
-        return B_NO_MEMORY;
-
-    // Inizializza la parte 'buffer' (primo membro di struct overlay)
-    overlay->buffer.space = colorSpace;
-    overlay->buffer.width = width;
-    overlay->buffer.height = height;
-    overlay->buffer.bytes_per_row = bytesPerRow;
-
-    status_t status = intel_allocate_memory(size, 0, overlay->buffer_base);
-    if (status < B_OK) {
-        free(overlay);
-        return status;
-    }
-
-    overlay->buffer_offset = overlay->buffer_base
-        - (addr_t)gInfo->shared_info->graphics_memory;
-
-    overlay->buffer.buffer = (uint8*)overlay->buffer_base;
-    overlay->buffer.buffer_dma = (uint8*)gInfo->shared_info->physical_graphics_memory
-        + overlay->buffer_offset;
-
-    // COPIA I DATI:
-    // Se l'API dell'accelerant passa 'overlay_buffer* buffer', copia la parte buffer
-    // MA memorizza il puntatore all'overlay allocato dentro le variabili shared_info
-    // oppure assicurati che 'buffer' ritornato all'app_server sia compatibile.
-    *buffer = overlay->buffer;
-
-    return B_OK;
-}
-
-status_t
-gen9_release_overlay_buffer(const overlay_buffer* buffer)
-{
-    if (buffer == NULL)
-        return B_BAD_VALUE;
-
-    // Il puntatore passato è in realtà un struct overlay allocato da allocate_overlay_buffer
-    struct overlay* overlay = (struct overlay*)buffer;
-
-    if (overlay->buffer_base != 0)
-        intel_free_memory(overlay->buffer_base);
-
-    // Non toccare gInfo->current_overlay: non lo usiamo per la gestione multi-overlay
-    free(overlay);
-
-    return B_OK;
-}*/
 const overlay_buffer*
 gen9_allocate_overlay_buffer(color_space space, uint16 width, uint16 height)
 {
     uint32 bytesPerPixel = (space == B_RGB32) ? 4 : 2;
-    uint32 bytesPerRow = (width * bytesPerPixel + 63) & ~63;
-    size_t size = bytesPerRow * height;
+    uint32 bytesPerRow = (width * bytesPerPixel + 63) & ~63; 
+    size_t size = (bytesPerRow * height + 4095) & ~4095;
 
     struct overlay* overlay = (struct overlay*)calloc(1, sizeof(struct overlay));
     if (overlay == NULL)
@@ -238,71 +155,128 @@ gen9_allocate_overlay_buffer(color_space space, uint16 width, uint16 height)
     overlay->buffer.buffer_dma = (uint8*)gInfo->shared_info->physical_graphics_memory 
         + overlay->buffer_offset;
 
-    // Ritorna il puntatore alla struct overlay (che inizia con 'buffer')
     return &overlay->buffer;
 }
+
 status_t
 gen9_release_overlay_buffer(const overlay_buffer* buffer)
 {
     if (buffer == NULL || buffer->buffer == NULL)
         return B_BAD_VALUE;
 
-    // Libera la memoria grafica associata al buffer
     intel_free_memory((addr_t)buffer->buffer);
-
     return B_OK;
 }
+
+
 // --- GESTIONE OVERLAY SESSION ---
 overlay_token
 gen9_allocate_overlay(void)
 {
-    // Cerca uno slot libero (1..4)
     for (uint32 i = 0; i < 4; i++) {
         uint32 mask = (1u << i);
         uint32 prev = atomic_or(&gInfo->shared_info->overlay_channel_used, mask);
         if ((prev & mask) == 0) {
-            // Ritorna il token associato allo slot (es. 1, 2, 3, 4)
             return (overlay_token)(uintptr_t)(i + 1);
         }
     }
-
-    return NULL; // Nessun overlay disponibile
+    return NULL;
 }
-
 status_t
 gen9_release_overlay(overlay_token overlayToken)
 {
-    // Validazione token e rilascio corrispondente slot
-    if (overlayToken == 0)
-        return B_BAD_VALUE;
+	if (overlayToken == 0)
+		return B_BAD_VALUE;
 
-    uintptr_t t = (uintptr_t)overlayToken;
-    if (t == 0 || t > 4)
-        return B_BAD_VALUE;
+	uintptr_t t = (uintptr_t)overlayToken;
+	
+	// Presumendo che i token partano da 1 (es. Channel 0 -> Token 1):
+	uint32 idx = (uint32)(t - 1);
+	uint32 pipeIndex = 0;
+	uint32 planeIndex = idx + 2; // Plane 2, 3...
 
-    uint32 idx = (uint32)(t - 1);
-    uint32 mask = ~(1u << idx);
+	debug_printf("\n[Gen9+ Overlay] >>> RELEASING OVERLAY (Token %" PRIuPTR " -> Plane %" PRIu32 ") <<<\n", t, planeIndex);
 
-    // Disabilita il plane hardware relativo
-    write32(SKL_PLANE_CTL_1_A + idx * 0x100, 0);
-    write32(SKL_PLANE_SURF_1_A + idx * 0x100, 0);
+	uint32 regCtl  = SKL_PLANE_CTL_REG(pipeIndex, planeIndex);
+	uint32 regSurf = SKL_PLANE_SURF_REG(pipeIndex, planeIndex);
 
-    // reset overlay state similmente a legacy
-    memset(&gInfo->last_overlay_view, 0, sizeof(gInfo->last_overlay_view));
-    memset(&gInfo->last_overlay_window, 0, sizeof(gInfo->last_overlay_window));
-    gInfo->last_vertical_overlay_scale = 0;
-    gInfo->last_horizontal_overlay_scale = 0;
+	// 1. Spegni il Plane (ENABLE = 0)
+	write32(regCtl, 0);
 
-    atomic_and(&gInfo->shared_info->overlay_channel_used, mask);
+	// 2. Memory Barrier
+	asm volatile("mfence" ::: "memory");
 
-    return B_OK;
+	// 3. Latch hardware al VBLANK
+	write32(regSurf, 0);
+
+	// 4. Libera la maschera atomica del canale
+	uint32 mask = ~(1u << idx);
+	atomic_and(&gInfo->shared_info->overlay_channel_used, mask);
+
+	return B_OK;
+}
+
+
+// --- HOOKS & CONSTRAINTS ---
+uint32
+gen9_overlay_count(const display_mode* mode)
+{
+    return 3;
+}
+
+const uint32*
+gen9_overlay_supported_spaces(const display_mode* mode)
+{
+    static const uint32 kSupportedSpaces[] = {
+        B_YCbCr422,
+        B_RGB32,
+        0
+    };
+    return kSupportedSpaces;
 }
 
 uint32
 gen9_overlay_supported_features(uint32 colorSpace)
 {
-	return B_OVERLAY_COLOR_KEY
-		| B_OVERLAY_HORIZONTAL_FILTERING
-		| B_OVERLAY_VERTICAL_FILTERING
-		| B_OVERLAY_HORIZONTAL_MIRRORING;
+    return B_OVERLAY_COLOR_KEY
+        | B_OVERLAY_HORIZONTAL_FILTERING
+        | B_OVERLAY_VERTICAL_FILTERING
+        | B_OVERLAY_HORIZONTAL_MIRRORING;
 }
+
+status_t
+gen9_get_overlay_constraints(const display_mode* mode,
+    const overlay_buffer* buffer, overlay_constraints* constraints)
+{
+    if (buffer == NULL || constraints == NULL)
+        return B_BAD_VALUE;
+
+    constraints->view.h_alignment = 2;
+    constraints->view.v_alignment = 1;
+    constraints->view.width_alignment = 2;
+    constraints->view.height_alignment = 1;
+
+    constraints->view.width.min = 16;
+    constraints->view.height.min = 16;
+    constraints->view.width.max = 4096;
+    constraints->view.height.max = 4096;
+
+    constraints->window.h_alignment = 1;
+    constraints->window.v_alignment = 1;
+    constraints->window.width_alignment = 1;
+    constraints->window.height_alignment = 1;
+
+    constraints->window.width.min = 16;
+    constraints->window.height.min = 16;
+    constraints->window.width.max = 4096;
+    constraints->window.height.max = 4096;
+
+    constraints->h_scale.min = 0.125f;
+    constraints->h_scale.max = 3.0f;
+    constraints->v_scale.min = 0.125f;
+    constraints->v_scale.max = 3.0f;
+
+    return B_OK;
+}
+
+} // extern "C"
