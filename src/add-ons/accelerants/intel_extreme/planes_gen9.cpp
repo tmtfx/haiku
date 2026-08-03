@@ -71,6 +71,7 @@ gen9_configure_overlay(overlay_token overlayToken,
 
     // SURFACE REGISTER TRIGGER:
     // Questa scrittura fa il latch hardware al VBLANK successivo
+    // Usiamo direttamente la struct overlay passata nel buffer
     struct overlay* overlay = (struct overlay*)buffer;
     write32(SKL_PLANE_SURF_BASE(pipeIndex), overlay->buffer_offset);
 
@@ -82,9 +83,9 @@ gen9_configure_overlay(overlay_token overlayToken,
 uint32
 gen9_overlay_count(const display_mode* mode)
 {
-    // Per ora ritorniamo 1 se vogliamo abilitare il driver sui plane moderni,
-    // oppure 0 se siamo in fase di testing/fallback.
-    return 1;
+    // Supportare fino a 4 hardware planes per Gen9+ (IceLake / GeminiLake / Skylake)
+    // Questo permette ai player/video di usare più overlay simultanei.
+    return 4;
 }
 
 const uint32*
@@ -153,15 +154,34 @@ gen9_allocate_overlay_buffer(color_space colorSpace, uint16 width,
 
     size_t size = bytesPerRow * height;
 
-    // Allocazione nella memoria grafica condivisa
-    // NOTA: Usa la funzione di allocazione gInfo / sharedInfo del tuo driver
-    buffer->space = colorSpace;
-    buffer->width = width;
-    buffer->height = height;
-    buffer->bytes_per_row = bytesPerRow;
+    // Creiamo la struttura di overlay e allociamo memoria grafica
+    struct overlay* overlay = (struct overlay*)malloc(sizeof(struct overlay));
+    if (overlay == NULL)
+        return B_NO_MEMORY;
 
-    // TODO: Assegna offset di memoria ring/framebuffer
-    // buffer->buffer_offset = allocated_offset;
+    overlay->buffer.space = colorSpace;
+    overlay->buffer.width = width;
+    overlay->buffer.height = height;
+    overlay->buffer.bytes_per_row = bytesPerRow;
+
+    status_t status = intel_allocate_memory(size, 0, overlay->buffer_base);
+    if (status < B_OK) {
+        free(overlay);
+        return status;
+    }
+
+    overlay->buffer_offset = overlay->buffer_base
+        - (addr_t)gInfo->shared_info->graphics_memory;
+
+    overlay->buffer.buffer = (uint8*)overlay->buffer_base;
+    overlay->buffer.buffer_dma = (uint8*)gInfo->shared_info->physical_graphics_memory
+        + overlay->buffer_offset;
+
+    // Copia i dati nella struttura fornita dal chiamante
+    *buffer = overlay->buffer;
+
+    // Non memorizzare globalmente l'overlay: il buffer passato viene usato
+    // direttamente dal chiamante quando richiesto.
 
     return B_OK;
 }
@@ -172,7 +192,15 @@ gen9_release_overlay_buffer(const overlay_buffer* buffer)
     if (buffer == NULL)
         return B_BAD_VALUE;
 
-    // Libera il buffer allocato precedentemente
+    // Il puntatore passato è in realtà un struct overlay allocato da allocate_overlay_buffer
+    struct overlay* overlay = (struct overlay*)buffer;
+
+    if (overlay->buffer_base != 0)
+        intel_free_memory(overlay->buffer_base);
+
+    // Non toccare gInfo->current_overlay: non lo usiamo per la gestione multi-overlay
+    free(overlay);
+
     return B_OK;
 }
 
@@ -183,15 +211,48 @@ gen9_allocate_overlay(overlay_token* overlayToken)
     if (overlayToken == NULL)
         return B_BAD_VALUE;
 
-    *overlayToken = (overlay_token)1; // Token arbitrario per il Plane 1
-    return B_OK;
+    // cerchiamo uno slot libero tra 4 overlay (bitmask su shared_info->overlay_channel_used)
+    for (uint32 i = 0; i < 4; i++) {
+        uint32 mask = (1u << i);
+        uint32 prev = atomic_or(&gInfo->shared_info->overlay_channel_used, mask);
+        if ((prev & mask) == 0) {
+            // abbiamo prenotato lo slot i
+            *overlayToken = (overlay_token)(uintptr_t)(i + 1);
+            // aggiorniamo il contatore token come nelle implementazioni legacy
+            ++gInfo->shared_info->overlay_token;
+            return B_OK;
+        }
+    }
+
+    // nessuno slot libero
+    return B_BUSY;
 }
 
 status_t
 gen9_release_overlay(overlay_token overlayToken)
 {
-    // Spegne il plane e libera il token
-    write32(SKL_PLANE_CTL_1_A, 0); // Disabilita Plane
-    write32(SKL_PLANE_SURF_1_A, 0); // Flush
+    // Validazione token e rilascio corrispondente slot
+    if (overlayToken == 0)
+        return B_BAD_VALUE;
+
+    uintptr_t t = (uintptr_t)overlayToken;
+    if (t == 0 || t > 4)
+        return B_BAD_VALUE;
+
+    uint32 idx = (uint32)(t - 1);
+    uint32 mask = ~(1u << idx);
+
+    // Disabilita il plane hardware relativo
+    write32(SKL_PLANE_CTL_1_A + idx * 0x100, 0);
+    write32(SKL_PLANE_SURF_1_A + idx * 0x100, 0);
+
+    // reset overlay state similmente a legacy
+    memset(&gInfo->last_overlay_view, 0, sizeof(gInfo->last_overlay_view));
+    memset(&gInfo->last_overlay_window, 0, sizeof(gInfo->last_overlay_window));
+    gInfo->last_vertical_overlay_scale = 0;
+    gInfo->last_horizontal_overlay_scale = 0;
+
+    atomic_and(&gInfo->shared_info->overlay_channel_used, mask);
+
     return B_OK;
 }
