@@ -78,34 +78,34 @@ void intel_fill_span(engine_token* engineToken, uint32 color, uint16* list,
 	uint32 count);
 
 // overlay
-uint32 intel_overlay_count(const display_mode* mode);
-const uint32* intel_overlay_supported_spaces(const display_mode* mode);
-uint32 intel_overlay_supported_features(uint32 colorSpace);
-const overlay_buffer* intel_allocate_overlay_buffer(color_space space,
-	uint16 width, uint16 height);
-status_t intel_release_overlay_buffer(const overlay_buffer* buffer);
-status_t intel_get_overlay_constraints(const display_mode* mode,
+uint32 legacy_overlay_count(const display_mode* mode);
+const uint32* legacy_overlay_supported_spaces(const display_mode* mode);
+uint32 legacy_overlay_supported_features(uint32 colorSpace);
+status_t legacy_get_overlay_constraints(const display_mode* mode,
 	const overlay_buffer* buffer, overlay_constraints* constraints);
-overlay_token intel_allocate_overlay(void);
-status_t intel_release_overlay(overlay_token overlayToken);
-status_t intel_configure_overlay(overlay_token overlayToken,
+const overlay_buffer* legacy_allocate_overlay_buffer(color_space space,
+	uint16 width, uint16 height);
+status_t legacy_release_overlay_buffer(const overlay_buffer* buffer);
+
+overlay_token legacy_allocate_overlay(void);
+status_t legacy_release_overlay(overlay_token overlayToken);
+status_t legacy_configure_overlay(overlay_token overlayToken,
 	const overlay_buffer* buffer, const overlay_window* window,
 	const overlay_view* view);
-status_t i965_configure_overlay(overlay_token overlayToken,
-	const overlay_buffer* buffer, const overlay_window* window,
-	const overlay_view* view);
-status_t gen9_configure_overlay(overlay_token overlayToken,
-    const overlay_buffer* buffer, const overlay_window* window,
-    const overlay_view* view);
-uint32 gen9_overlay_count(const display_mode* mode);
-const uint32* gen9_overlay_supported_spaces(const display_mode* mode);
-status_t gen9_get_overlay_constraints(const display_mode* mode,
-    const overlay_buffer* buffer, overlay_constraints* constraints);
-status_t gen9_allocate_overlay_buffer(color_space colorSpace, uint16 width,
-    uint16 height, overlay_buffer* buffer);
-status_t gen9_release_overlay_buffer(const overlay_buffer* buffer);
-status_t gen9_allocate_overlay(overlay_token* overlayToken);
-status_t gen9_release_overlay(overlay_token overlayToken);
+uint32                gen9_overlay_count(const display_mode* mode);
+const uint32*         gen9_overlay_supported_spaces(const display_mode* mode);
+uint32                gen9_overlay_supported_features(uint32 colorSpace);
+status_t              gen9_get_overlay_constraints(const display_mode* mode,
+                          const overlay_buffer* buffer, overlay_constraints* constraints);
+const overlay_buffer* gen9_allocate_overlay_buffer(color_space space,
+                          uint16 width, uint16 height);
+status_t              gen9_release_overlay_buffer(const overlay_buffer* buffer);
+
+overlay_token         gen9_allocate_overlay(void);
+status_t              gen9_release_overlay(overlay_token overlayToken);
+status_t              gen9_configure_overlay(overlay_token overlayToken,
+                          const overlay_buffer* buffer, const overlay_window* window,
+                          const overlay_view* view);
 
 #ifdef __cplusplus
 }

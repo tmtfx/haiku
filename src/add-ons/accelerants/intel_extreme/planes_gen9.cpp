@@ -8,7 +8,8 @@
 #include "accelerant.h"
 #include "accelerant_protos.h"
 #include <graphic_driver.h>
-#include <debug.h>
+#include <Debug.h>
+#include <cstring>
 
 #include "Pipes.h"
 
@@ -44,7 +45,7 @@ gen9_configure_overlay(overlay_token overlayToken,
     if (buffer == NULL || window == NULL || view == NULL)
         return B_BAD_VALUE;
 
-    // Recuperiamo la pipe attiva (default Pipe A = 0 se non specificata)
+    // Recuperiamo la pipe attiva
     uint32 pipeIndex = 0; // o gInfo->shared_info->active_pipe
 
     uint32 planeCtl = PLANE_ENABLE;
@@ -60,20 +61,26 @@ gen9_configure_overlay(overlay_token overlayToken,
 
     uint32 pos = (window->v_start << 16) | (window->h_start & 0xFFFF);
     uint32 size = ((window->height - 1) << 16) | ((window->width - 1) & 0xFFFF);
-    uint32 stride = buffer->bytes_per_row / 64; // Gen9 misura lo stride in blocchi da 64 byte
+    uint32 stride = buffer->bytes_per_row / 64; // Gen9+ misura lo stride in blocchi da 64 byte
 
-    // Scrittura sui registri calcolati per la Pipe corretta
+    // Scrittura sui registri del Plane per la Pipe corretta
     write32(SKL_PLANE_CTL_BASE(pipeIndex), planeCtl);
     write32(SKL_PLANE_STRIDE_BASE(pipeIndex), stride);
     write32(SKL_PLANE_POS_BASE(pipeIndex), pos);
     write32(SKL_PLANE_SIZE_BASE(pipeIndex), size);
     write32(SKL_PLANE_OFFSET_BASE(pipeIndex), 0);
 
+    // =========================================================================
+    // CALCOLO OFFSET SICURO (Senza fare il cast a struct overlay*)
+    // =========================================================================
+    uint32 bufferOffset = (addr_t)buffer->buffer - (addr_t)gInfo->shared_info->graphics_memory;
+
+    // Assicura che le scritture MMIO precedenti siano scritte in memoria prima del trigger
+    asm volatile("mfence" ::: "memory");
+
     // SURFACE REGISTER TRIGGER:
-    // Questa scrittura fa il latch hardware al VBLANK successivo
-    // Usiamo direttamente la struct overlay passata nel buffer
-    struct overlay* overlay = (struct overlay*)buffer;
-    write32(SKL_PLANE_SURF_BASE(pipeIndex), overlay->buffer_offset);
+    // La scrittura in PLANE_SURF fa scattare il latch dei registri al VBLANK
+    write32(SKL_PLANE_SURF_BASE(pipeIndex), bufferOffset);
 
     return B_OK;
 }
@@ -115,10 +122,10 @@ gen9_get_overlay_constraints(const display_mode* mode,
     constraints->view.height_alignment = 1;
 
     // Limiti di risoluzione sorgente (fino a 4096 per Gen9+)
-    constraints->view.min_width = 16;
-    constraints->view.min_height = 16;
-    constraints->view.max_width = 4096;
-    constraints->view.max_height = 4096;
+    constraints->view.width.min = 16;
+    constraints->view.height.min = 16;
+    constraints->view.width.max = 4096;
+    constraints->view.height.max = 4096;
 
     // Finestra di destinazione sul display
     constraints->window.h_alignment = 1;
@@ -126,10 +133,10 @@ gen9_get_overlay_constraints(const display_mode* mode,
     constraints->window.width_alignment = 1;
     constraints->window.height_alignment = 1;
 
-    constraints->window.min_width = 16;
-    constraints->window.min_height = 16;
-    constraints->window.max_width = 4096;
-    constraints->window.max_height = 4096;
+    constraints->window.width.min = 16;
+    constraints->window.height.min = 16;
+    constraints->window.width.max = 4096;
+    constraints->window.height.max = 4096;
 
     // Fattori di scala gestiti dallo Scaler Hardware dedicato dei Plane
     constraints->h_scale.min = 0.125f;  // Downscale max 8x
@@ -141,24 +148,24 @@ gen9_get_overlay_constraints(const display_mode* mode,
 }
 
 // --- ALLOCAZIONE BUFFER OVERLAY / PLANE ---
+/*
 status_t
 gen9_allocate_overlay_buffer(color_space colorSpace, uint16 width,
-    uint16 height, overlay_buffer* buffer)
+    uint16 height, overlay_buffer** _buffer) // NOTA: doppio puntatore o riempimento
 {
+    // Se l'hook Haiku usa la firma standard con overlay_buffer* buffer:
     if (buffer == NULL)
         return B_BAD_VALUE;
 
-    // Calcolo bytes_per_row basato sul formato (allineato a 64 byte per il Ring/Plane)
     uint32 bytesPerPixel = (colorSpace == B_RGB32) ? 4 : 2;
     uint32 bytesPerRow = (width * bytesPerPixel + 63) & ~63;
-
     size_t size = bytesPerRow * height;
 
-    // Creiamo la struttura di overlay e allociamo memoria grafica
-    struct overlay* overlay = (struct overlay*)malloc(sizeof(struct overlay));
+    struct overlay* overlay = (struct overlay*)calloc(1, sizeof(struct overlay));
     if (overlay == NULL)
         return B_NO_MEMORY;
 
+    // Inizializza la parte 'buffer' (primo membro di struct overlay)
     overlay->buffer.space = colorSpace;
     overlay->buffer.width = width;
     overlay->buffer.height = height;
@@ -177,11 +184,11 @@ gen9_allocate_overlay_buffer(color_space colorSpace, uint16 width,
     overlay->buffer.buffer_dma = (uint8*)gInfo->shared_info->physical_graphics_memory
         + overlay->buffer_offset;
 
-    // Copia i dati nella struttura fornita dal chiamante
+    // COPIA I DATI:
+    // Se l'API dell'accelerant passa 'overlay_buffer* buffer', copia la parte buffer
+    // MA memorizza il puntatore all'overlay allocato dentro le variabili shared_info
+    // oppure assicurati che 'buffer' ritornato all'app_server sia compatibile.
     *buffer = overlay->buffer;
-
-    // Non memorizzare globalmente l'overlay: il buffer passato viene usato
-    // direttamente dal chiamante quando richiesto.
 
     return B_OK;
 }
@@ -202,30 +209,64 @@ gen9_release_overlay_buffer(const overlay_buffer* buffer)
     free(overlay);
 
     return B_OK;
-}
-
-// --- GESTIONE OVERLAY SESSION ---
-status_t
-gen9_allocate_overlay(overlay_token* overlayToken)
+}*/
+const overlay_buffer*
+gen9_allocate_overlay_buffer(color_space space, uint16 width, uint16 height)
 {
-    if (overlayToken == NULL)
+    uint32 bytesPerPixel = (space == B_RGB32) ? 4 : 2;
+    uint32 bytesPerRow = (width * bytesPerPixel + 63) & ~63;
+    size_t size = bytesPerRow * height;
+
+    struct overlay* overlay = (struct overlay*)calloc(1, sizeof(struct overlay));
+    if (overlay == NULL)
+        return NULL;
+
+    status_t status = intel_allocate_memory(size, 0, overlay->buffer_base);
+    if (status < B_OK) {
+        free(overlay);
+        return NULL;
+    }
+
+    overlay->buffer_offset = overlay->buffer_base 
+        - (addr_t)gInfo->shared_info->graphics_memory;
+
+    overlay->buffer.space = space;
+    overlay->buffer.width = width;
+    overlay->buffer.height = height;
+    overlay->buffer.bytes_per_row = bytesPerRow;
+    overlay->buffer.buffer = (uint8*)overlay->buffer_base;
+    overlay->buffer.buffer_dma = (uint8*)gInfo->shared_info->physical_graphics_memory 
+        + overlay->buffer_offset;
+
+    // Ritorna il puntatore alla struct overlay (che inizia con 'buffer')
+    return &overlay->buffer;
+}
+status_t
+gen9_release_overlay_buffer(const overlay_buffer* buffer)
+{
+    if (buffer == NULL || buffer->buffer == NULL)
         return B_BAD_VALUE;
 
-    // cerchiamo uno slot libero tra 4 overlay (bitmask su shared_info->overlay_channel_used)
+    // Libera la memoria grafica associata al buffer
+    intel_free_memory((addr_t)buffer->buffer);
+
+    return B_OK;
+}
+// --- GESTIONE OVERLAY SESSION ---
+overlay_token
+gen9_allocate_overlay(void)
+{
+    // Cerca uno slot libero (1..4)
     for (uint32 i = 0; i < 4; i++) {
         uint32 mask = (1u << i);
         uint32 prev = atomic_or(&gInfo->shared_info->overlay_channel_used, mask);
         if ((prev & mask) == 0) {
-            // abbiamo prenotato lo slot i
-            *overlayToken = (overlay_token)(uintptr_t)(i + 1);
-            // aggiorniamo il contatore token come nelle implementazioni legacy
-            ++gInfo->shared_info->overlay_token;
-            return B_OK;
+            // Ritorna il token associato allo slot (es. 1, 2, 3, 4)
+            return (overlay_token)(uintptr_t)(i + 1);
         }
     }
 
-    // nessuno slot libero
-    return B_BUSY;
+    return NULL; // Nessun overlay disponibile
 }
 
 status_t
@@ -255,4 +296,13 @@ gen9_release_overlay(overlay_token overlayToken)
     atomic_and(&gInfo->shared_info->overlay_channel_used, mask);
 
     return B_OK;
+}
+
+uint32
+gen9_overlay_supported_features(uint32 colorSpace)
+{
+	return B_OVERLAY_COLOR_KEY
+		| B_OVERLAY_HORIZONTAL_FILTERING
+		| B_OVERLAY_VERTICAL_FILTERING
+		| B_OVERLAY_HORIZONTAL_MIRRORING;
 }

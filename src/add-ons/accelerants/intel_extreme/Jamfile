@@ -14,6 +14,7 @@ Addon intel_extreme.accelerant :
 	memory.cpp
 	mode.cpp
 	overlay_legacy.cpp
+	planes_gen9.cpp
 #	overlay_3d_i965.cpp
 	pll.cpp
 	# classes
