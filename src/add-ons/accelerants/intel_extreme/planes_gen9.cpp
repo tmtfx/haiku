@@ -60,7 +60,14 @@ gen9_configure_overlay(overlay_token overlayToken,
 
 	// Plane 2 (Universal Plane/Overlay) su Pipe A (0)
 	uint32 planeIndex = (uint32)tokenVal + 1; 
-	uint32 pipeIndex = 0; 
+	// Choose the first enabled pipe (array index maps to pipe 0=A,1=B,...)
+	uint32 pipeIndex = 0;
+	for (uint32 _p = 0; _p < gInfo->pipe_count; _p++) {
+		if (gInfo->pipes[_p] && gInfo->pipes[_p]->IsEnabled()) {
+			pipeIndex = _p;
+			break;
+		}
+	}
 
 	// 1. CONFIGURAZIONE PLANE_CTL
 	// Start with alpha/linear defaults but DO NOT enable yet — enable after programming SURF/OFF
@@ -202,6 +209,12 @@ gen9_release_overlay(overlay_token overlayToken)
 	// Presumendo che i token partano da 1 (es. Channel 0 -> Token 1):
 	uint32 idx = (uint32)(t - 1);
 	uint32 pipeIndex = 0;
+	for (uint32 _p = 0; _p < gInfo->pipe_count; _p++) {
+		if (gInfo->pipes[_p] && gInfo->pipes[_p]->IsEnabled()) {
+			pipeIndex = _p;
+			break;
+		}
+	}
 	uint32 planeIndex = idx + 2; // Plane 2, 3...
 
 	debug_printf("\n[Gen9+ Overlay] >>> RELEASING OVERLAY (Token %" PRIuPTR " -> Plane %" PRIu32 ") <<<\n", t, planeIndex);
