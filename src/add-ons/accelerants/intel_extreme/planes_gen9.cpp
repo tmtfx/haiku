@@ -63,23 +63,20 @@ gen9_configure_overlay(overlay_token overlayToken,
 	uint32 pipeIndex = 0; 
 
 	// 1. CONFIGURAZIONE PLANE_CTL
-	// Bit 31: Enable Plane
-	// Bit 10: Tiled Linear
-	// Bit 4:  Alpha Disable (Opaque)
-	uint32 planeCtl = (1u << 31) | (1u << 4);
+	// Start with alpha/linear defaults but DO NOT enable yet — enable after programming SURF/OFF
+	uint32 planeCtl = SKL_PLANE_CTL_ALPHA_DISABLE | PLANE_CTL_TILED_LINEAR;
 
 	switch (buffer->space) {
 		case B_RGB32:
-			// Bit 27:24 = 0x4 -> Direct Color / RGB 8888 (xRGB/RGBA)
-			planeCtl |= (0x4u << 24);
+			// Direct Color / RGB 8888 (xRGB/RGBA)
+			planeCtl |= PLANE_FORMAT_RGB_8888;
 			break;
 
 		case B_YCbCr420:
 		case B_YCbCr422:
 		default:
-			// Bit 27:24 = 0x1 -> YUV420 8bpc
-			// Bit 28:    Correction Range YUV
-			planeCtl |= (0x1u << 24) | (1u << 28);
+			// YUV420 8bpc with range correction
+			planeCtl |= PLANE_FORMAT_YUV420_8BPC | PLANE_YUV_RANGE_CORRECTION;
 			break;
 	}
 
@@ -110,17 +107,28 @@ gen9_configure_overlay(overlay_token overlayToken,
 	debug_printf("\n[Gen9+ Overlay] STRIDE: %" PRIu32 " | SURF: 0x%08" PRIx32 "\n", strideInUnits, bufferOffset);
 
 	// 6. SCRITTURA ORDINATA NEI REGISTRI
-	write32(regCtl, planeCtl);
+	// Program non-latched registers first
 	write32(regStride, strideInUnits);
 	write32(regPos, pos);
 	write32(regSize, size);
-	write32(regOff, 0);
+	// regOff must point to buffer offset (not zero)
+	write32(regOff, bufferOffset);
+
+	// Configure buffer/colour control registers explicitly (safe defaults)
+	write32(SKL_PLANE_BUF_CFG_REG(pipeIndex, planeIndex), 0);
+	write32(SKL_PLANE_COLOR_CTL_REG(pipeIndex, planeIndex), 0);
 
 	// Barrier di memoria hardware per garantire il completamento delle scritture prima del trigger
 	asm volatile("mfence" ::: "memory");
 
 	// SCRITTURA FINALE: SURF fa scattare l'update al prossimo VBLANK (Latch Hardware)
 	write32(regSurf, bufferOffset);
+
+	// Ensure SURF write is visible before enabling the plane
+	asm volatile("mfence" ::: "memory");
+
+	// Abilita la plane (ENABLE = 1) solo ora
+	write32(regCtl, planeCtl | PLANE_ENABLE);
 
 	return B_OK;
 }
@@ -221,7 +229,7 @@ gen9_release_overlay(overlay_token overlayToken)
 uint32
 gen9_overlay_count(const display_mode* mode)
 {
-    return 3;
+    return 4;
 }
 
 const uint32*
