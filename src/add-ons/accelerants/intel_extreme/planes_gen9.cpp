@@ -91,7 +91,8 @@ gen9_configure_overlay(overlay_token overlayToken,
 	uint32 strideInUnits = (buffer->bytes_per_row + 63) / 64;
 
 	// 4. CALCOLO OFFSET MEMORIA MMIO
-	uint32 bufferOffset = (addr_t)buffer->buffer - (addr_t)gInfo->shared_info->graphics_memory;
+	// Use physical offset relative to physical_graphics_memory for SURF/OFF
+	uint32 physOffset = (addr_t)buffer->buffer_dma - (addr_t)gInfo->shared_info->physical_graphics_memory;
 
 	// 5. INDIRIZZI DEI REGISTRI MMIO
 	uint32 regCtl    = SKL_PLANE_CTL_REG(pipeIndex, planeIndex);
@@ -104,15 +105,15 @@ gen9_configure_overlay(overlay_token overlayToken,
 	// Log diagnostico scannabile
 	debug_printf("\n[Gen9+ Overlay] >>> CONFIGURING PLANE %" PRIu32 " <<<", planeIndex);
 	debug_printf("\n[Gen9+ Overlay] CTL: 0x%08" PRIx32 " | POS: 0x%08" PRIx32 " | SIZE: 0x%08" PRIx32, planeCtl, pos, size);
-	debug_printf("\n[Gen9+ Overlay] STRIDE: %" PRIu32 " | SURF: 0x%08" PRIx32 "\n", strideInUnits, bufferOffset);
+	debug_printf("\n[Gen9+ Overlay] STRIDE: %" PRIu32 " | SURF physOffset: 0x%08" PRIx32 "\n", strideInUnits, physOffset);
 
 	// 6. SCRITTURA ORDINATA NEI REGISTRI
 	// Program non-latched registers first
 	write32(regStride, strideInUnits);
 	write32(regPos, pos);
 	write32(regSize, size);
-	// regOff must point to buffer offset (not zero)
-	write32(regOff, bufferOffset);
+	// regOff = low 12 bits offset within page, regSurf = page frame number (>>12)
+	write32(regOff, physOffset & 0xFFF);
 
 	// Configure buffer/colour control registers explicitly (safe defaults)
 	write32(SKL_PLANE_BUF_CFG_REG(pipeIndex, planeIndex), 0);
@@ -122,7 +123,7 @@ gen9_configure_overlay(overlay_token overlayToken,
 	asm volatile("mfence" ::: "memory");
 
 	// SCRITTURA FINALE: SURF fa scattare l'update al prossimo VBLANK (Latch Hardware)
-	write32(regSurf, bufferOffset);
+	write32(regSurf, physOffset >> 12);
 
 	// Ensure SURF write is visible before enabling the plane
 	asm volatile("mfence" ::: "memory");
