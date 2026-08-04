@@ -109,10 +109,23 @@ gen9_configure_overlay(overlay_token overlayToken,
 	uint32 regOff    = SKL_PLANE_OFF_REG(pipeIndex, planeIndex);
 	uint32 regSurf   = SKL_PLANE_SURF_REG(pipeIndex, planeIndex);
 
-	// Log diagnostico scannabile
-	debug_printf("\n[Gen9+ Overlay] >>> CONFIGURING PLANE %" PRIu32 " <<<", planeIndex);
-	debug_printf("\n[Gen9+ Overlay] CTL: 0x%08" PRIx32 " | POS: 0x%08" PRIx32 " | SIZE: 0x%08" PRIx32, planeCtl, pos, size);
-	debug_printf("\n[Gen9+ Overlay] STRIDE: %" PRIu32 " | SURF physOffset: 0x%08" PRIx32 "\n", strideInUnits, physOffset);
+
+	// Log diagnostico scannabile: dump valori prima
+	uint32 oldCtl = read32(SKL_PLANE_CTL_REG(pipeIndex, planeIndex));
+	uint32 oldStride = read32(SKL_PLANE_STRIDE_REG(pipeIndex, planeIndex));
+	uint32 oldPos = read32(SKL_PLANE_POS_REG(pipeIndex, planeIndex));
+	uint32 oldSize = read32(SKL_PLANE_SIZE_REG(pipeIndex, planeIndex));
+	uint32 oldOff = read32(SKL_PLANE_OFF_REG(pipeIndex, planeIndex));
+	uint32 oldSurf = read32(SKL_PLANE_SURF_REG(pipeIndex, planeIndex));
+	uint32 oldBufCfg = read32(SKL_PLANE_BUF_CFG_REG(pipeIndex, planeIndex));
+	uint32 oldColor = read32(SKL_PLANE_COLOR_CTL_REG(pipeIndex, planeIndex));
+
+	debug_printf("\n[Gen9+ Overlay] >>> CONFIGURING PLANE %" PRIu32 " on pipe %" PRIu32 " <<<", planeIndex, pipeIndex);
+	debug_printf("\n[Gen9+ Overlay] OLD CTL: 0x%08" PRIx32 " STRIDE: %" PRIu32 " POS: 0x%08" PRIx32 " SIZE: 0x%08" PRIx32, oldCtl, oldStride, oldPos, oldSize);
+	debug_printf("\n[Gen9+ Overlay] OLD OFF: 0x%08" PRIx32 " SURF: 0x%08" PRIx32 " BUF_CFG: 0x%08" PRIx32 " COLOR_CTL: 0x%08" PRIx32, oldOff, oldSurf, oldBufCfg, oldColor);
+
+	debug_printf("\n[Gen9+ Overlay] NEW CTL (pending): 0x%08" PRIx32 " | POS: 0x%08" PRIx32 " | SIZE: 0x%08" PRIx32, planeCtl, pos, size);
+	debug_printf("\n[Gen9+ Overlay] STRIDE (units): %" PRIu32 " | SURF physOffset: 0x%08" PRIx32 "\n", strideInUnits, physOffset);
 
 	// 6. SCRITTURA ORDINATA NEI REGISTRI
 	// Program non-latched registers first
@@ -137,6 +150,19 @@ gen9_configure_overlay(overlay_token overlayToken,
 
 	// Abilita la plane (ENABLE = 1) solo ora
 	write32(regCtl, planeCtl | PLANE_ENABLE);
+
+	// Log diagnostico scannabile: dump valori dopo
+	uint32 newCtl = read32(SKL_PLANE_CTL_REG(pipeIndex, planeIndex));
+	uint32 newStride = read32(SKL_PLANE_STRIDE_REG(pipeIndex, planeIndex));
+	uint32 newPos = read32(SKL_PLANE_POS_REG(pipeIndex, planeIndex));
+	uint32 newSize = read32(SKL_PLANE_SIZE_REG(pipeIndex, planeIndex));
+	uint32 newOff = read32(SKL_PLANE_OFF_REG(pipeIndex, planeIndex));
+	uint32 newSurf = read32(SKL_PLANE_SURF_REG(pipeIndex, planeIndex));
+	uint32 newBufCfg = read32(SKL_PLANE_BUF_CFG_REG(pipeIndex, planeIndex));
+	uint32 newColor = read32(SKL_PLANE_COLOR_CTL_REG(pipeIndex, planeIndex));
+
+	debug_printf("\n[Gen9+ Overlay] POST CTL: 0x%08" PRIx32 " STRIDE: %" PRIu32 " POS: 0x%08" PRIx32 " SIZE: 0x%08" PRIx32, newCtl, newStride, newPos, newSize);
+	debug_printf("\n[Gen9+ Overlay] POST OFF: 0x%08" PRIx32 " SURF: 0x%08" PRIx32 " BUF_CFG: 0x%08" PRIx32 " COLOR_CTL: 0x%08" PRIx32 "\n", newOff, newSurf, newBufCfg, newColor);
 
 	return B_OK;
 }
