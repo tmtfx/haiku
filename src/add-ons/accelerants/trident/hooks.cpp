@@ -46,8 +46,10 @@ get_accelerant_hook(uint32 feature, void* data)
 		case B_SET_CURSOR_SHAPE:		return (void*)(si.bDisableHdwCursor ? NULL : SetCursorShape);
 		case B_MOVE_CURSOR:				return (void*)(si.bDisableHdwCursor ? NULL : MoveCursor);
 		case B_SHOW_CURSOR:				return (void*)(si.bDisableHdwCursor ? NULL : ShowCursor);
+#ifdef IS_PIRATI_BUILD
 		case B_SET_CURSOR_BITMAP:		return (void*)(si.bDisableHdwCursor ? NULL : SetCursorBitmap);
 		case B_GET_CURSOR_BITS:			return (void*)(si.bDisableHdwCursor ? NULL : GetCursorBits);
+#endif
 
 		// Engine Management
 		case B_ACCELERANT_ENGINE_COUNT:	return (void*)AccelerantEngineCount;

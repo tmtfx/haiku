@@ -453,9 +453,10 @@ void* get_accelerant_hook(uint32 feature, void* data) {
         case B_MOVE_CURSOR:                 return (void*)sm750_move_cursor;			//0x200
         case B_SET_CURSOR_SHAPE:            return (void*)sm750_set_cursor_shape;
         case B_SHOW_CURSOR:                 return (void*)sm750_show_cursor;
+#ifdef IS_PIRATI_BUILD
         case B_SET_CURSOR_BITMAP:           return (void*)sm750_set_cursor_bitmap;
         case B_GET_CURSOR_BITS:             return (void*)sm750_get_cursor_bits;
-        
+#endif        
         /* Engine */
         case B_MOVE_DISPLAY:                return (void*)sm750_move_display_area;
 

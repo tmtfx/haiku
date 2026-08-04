@@ -92,10 +92,12 @@ get_accelerant_hook(uint32 feature, void* data)
 			return (void*)radeon_move_cursor;
 		case B_SHOW_CURSOR:
 			return (void*)radeon_show_cursor;
+#ifdef IS_PIRATI_BUILD
 		case B_SET_CURSOR_BITMAP:
 			return (void*)radeon_set_cursor_bitmap;
 		case B_GET_CURSOR_BITS:
 			return (void*)radeon_get_cursor_bits;
+#endif
 	}
 
 	return NULL;

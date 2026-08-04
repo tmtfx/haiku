@@ -72,11 +72,12 @@ get_accelerant_hook(uint32 feature, void* data)
 			return (void*)MoveCursor;
 		case B_SHOW_CURSOR:
 			return (void*)(gInfo.ShowCursor);
+#ifdef IS_PIRATI_BUILD
 		case B_GET_CURSOR_BITS:
 			return (void*)GetCursorBits;
 		case B_SET_CURSOR_BITMAP:
 			return (void*)SetCursorBitmap;
-
+#endif
 		// Engine Management
 		case B_ACCELERANT_ENGINE_COUNT:
 			return (void*)AccelerantEngineCount;

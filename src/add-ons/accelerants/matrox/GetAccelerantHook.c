@@ -73,9 +73,10 @@ void *	get_accelerant_hook(uint32 feature, void *data)
 		HRDC(SET_CURSOR_SHAPE);
 		HRDC(MOVE_CURSOR);
 		HRDC(SHOW_CURSOR);
+#ifdef IS_PIRATI_BUILD
 		HRDC(GET_CURSOR_BITS);
 		HRDC(SET_CURSOR_BITMAP);
-
+#endif
 		/* synchronization */
 		HOOK(ACCELERANT_ENGINE_COUNT);
 		HOOK(ACQUIRE_ENGINE);
