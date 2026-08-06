@@ -305,6 +305,7 @@ bool LoadAISettings(AISettings& out)
         out.api_key.SetTo("");
     }
     
+    if (m.FindString("base_url", &s) == B_OK) out.base_url = s;
     if (m.FindBool("use_remote_context", &out.use_remote_context) != B_OK) {
         out.use_remote_context = false; 
     }
@@ -327,6 +328,7 @@ bool SaveAISettings(const AISettings& settings)
     m.AddString("engine", settings.engine.String());
     m.AddString("plugin", settings.plugin.String());
     m.AddString("model", settings.model.String());
+    m.AddString("base_url", settings.base_url.String());
     m.AddBool("use_remote_context", settings.use_remote_context);
     m.AddInt32("mcp_permissions", (int32)settings.mcp_permissions);
     // Do NOT store api_key in the settings file. Store it securely in KeyStore.

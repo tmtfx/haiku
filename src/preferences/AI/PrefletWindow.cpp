@@ -155,8 +155,9 @@ FetchSessionsThread(void* data)
 
 class PluginListItem : public BStringItem {
 public:
-    PluginListItem(const char* text, bool isDefault = false)
+    PluginListItem(const char* text, const char* type = "local", bool isDefault = false)
         : BStringItem(text),
+          fType(type),
           fIsDefault(isDefault)
     {
     }
@@ -198,8 +199,10 @@ public:
 
     void SetDefault(bool isDefault) { fIsDefault = isDefault; }
     bool IsDefault() const { return fIsDefault; }
+    const char* Type() const { return fType.String(); }
 
 private:
+    BString fType;
     bool fIsDefault;
 };
 
@@ -245,6 +248,9 @@ PrefletWindow::PrefletWindow()
     fClearApiKeyButton = new BButton("clear", B_TRANSLATE("Clear"), new BMessage(MSG_CLEAR_KEY));
     fRemoteContextCheckBox = new BCheckBox("remote_ctx", B_TRANSLATE("Use Remote Context"), new BMessage(MSG_TOGGLE_REM_CTX));
 
+    // Nuovo campo: Base URL (per plugin locali/custom)
+    fBaseUrlControl = new BTextControl("base_url", B_TRANSLATE("Base URL:"), "", nullptr);
+
     fSystemInfoCheckBox = new BCheckBox("perm_sys_info", B_TRANSLATE("Allow System Info Tool"), nullptr);
     fFileSystemCheckBox = new BCheckBox("perm_file_sys", B_TRANSLATE("Allow File System Access Tool"), nullptr);
     fRunCommandsCheckBox = new BCheckBox("perm_run_cmds", B_TRANSLATE("Allow Run Terminal Commands Tool"), nullptr);
@@ -272,6 +278,9 @@ PrefletWindow::PrefletWindow()
             .Add(fApiKeyControl)
             .Add(fToggleApiKeyButton)
             .Add(fClearApiKeyButton)
+        .End()
+        .AddGroup(B_HORIZONTAL)
+            .Add(fBaseUrlControl)
         .End()
         .Add(fRemoteContextCheckBox)
         .Add(mcpPermissionsBox)
@@ -436,16 +445,24 @@ void PrefletWindow::MessageReceived(BMessage* msg)
                 AISettings s;
                 LoadAISettings(s);
                 
-                int32 i = 0;
-                const char* pName = nullptr;
+                    int32 i = 0;
+                BMessage pluginMsg;
                 int32 defaultIndex = -1;
 
-                while (plugins.FindString("plugin_name", i, &pName) == B_OK) {
+                // Ora il server fornisce una lista di messaggi plugin { "plugin_name", "plugin_type" }
+                while (plugins.FindMessage("plugin", i, &pluginMsg) == B_OK) {
+                    const char* pName = nullptr;
+                    const char* pType = "local";
+                    pluginMsg.FindString("plugin_name", &pName);
+                    pluginMsg.FindString("plugin_type", &pType);
+
+                    if (!pName) { i++; continue; }
+
                     bool isDefault = (s.plugin.Length() > 0 && s.plugin == pName);
-                    
-                    PluginListItem* newItem = new PluginListItem(pName, isDefault);
+
+                    PluginListItem* newItem = new PluginListItem(pName, pType, isDefault);
                     fPluginListView->AddItem(newItem);
-                    
+
                     if (isDefault) {
                         defaultIndex = i;
                     }
@@ -684,7 +701,11 @@ void PrefletWindow::MessageReceived(BMessage* msg)
             } else {
                 s.api_key.SetTo(apiText);
             }
-            
+
+            // 5b. Base URL (se presente nel controllo)
+            const char* baseText = fBaseUrlControl->Text();
+            if (baseText && strlen(baseText) > 0) s.base_url.SetTo(baseText);
+            else s.base_url.SetTo("");
 
             // 6. Scrittura effettiva su disco
             if (SaveAISettings(s)) {                
@@ -775,6 +796,22 @@ void PrefletWindow::_UpdatePluginDetails()
     // 2. Aggiorna API Key e bottoni correlati
     _UpdateApiKeyField();
     _UpdateClearButton();
+
+    // 2b. Aggiorna Base URL dal settings se presente
+    AISettings s;
+    if (LoadAISettings(s) && s.plugin == pluginName) {
+        fBaseUrlControl->SetText(s.base_url.String());
+    } else {
+        fBaseUrlControl->SetText("");
+    }
+
+    // Abilitiamo/disabilitiamo il campo Base URL in base al tipo del plugin (local vs remote)
+    if (item && strcmp(item->Type(), "local") == 0) {
+        fBaseUrlControl->SetEnabled(true);
+    } else {
+        // Mostra comunque il valore salvato ma non permettere la modifica
+        fBaseUrlControl->SetEnabled(false);
+    }
 
     // 3. Gestione Checkbox Contesto Remoto
     // Supponiamo che tu abbia una funzione nel Kit o nel config che interroghi il plugin

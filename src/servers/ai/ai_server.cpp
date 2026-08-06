@@ -671,6 +671,16 @@ public:
 				chatContext->RemoveName("model_name");
 				chatContext->AddString("model_name", modelName.String());
 
+					// Aggiungiamo eventuale base_url dalle impostazioni globali per questo plugin
+					AISettings confAsync;
+					if (LoadAISettings(confAsync) && confAsync.plugin == pluginName) {
+						chatContext->RemoveName("base_url");
+						chatContext->AddString("base_url", confAsync.base_url.String());
+					} else {
+						chatContext->RemoveName("base_url");
+						chatContext->AddString("base_url", "");
+					}
+
 				// 4. Propaghiamo use_remote_context
 				bool useRemoteCtxAsync = false;
 				if (sessionID != -1 && gSessions.count(sessionID) > 0) {
@@ -892,6 +902,16 @@ public:
 				chatContext.AddString("api_key", apiKey.String());
 				chatContext.RemoveName("model_name");
 				chatContext.AddString("model_name", modelName.String());
+
+				// 3b. Aggiungiamo eventuale base_url dalle impostazioni globali (se configurata per questo plugin)
+				AISettings conf;
+				if (LoadAISettings(conf) && conf.plugin == pluginName) {
+				    chatContext.RemoveName("base_url");
+				    chatContext.AddString("base_url", conf.base_url.String());
+				} else {
+				    chatContext.RemoveName("base_url");
+				    chatContext.AddString("base_url", "");
+				}
 
 				// 4. Determiniamo l'autorità del contesto remoto
 				bool useRemoteCtx = false;
@@ -1460,7 +1480,10 @@ public:
 				for (const auto& p : gPlugins) {
 					BPath pth(p.path.c_str());
 					if (requestedType == "all" || p.type == requestedType) {
-						pluginList.AddString("plugin_name", pth.Leaf());
+						BMessage pluginEntry;
+						pluginEntry.AddString("plugin_name", pth.Leaf());
+						pluginEntry.AddString("plugin_type", p.type);
+						pluginList.AddMessage("plugin", &pluginEntry);
 					}
 				}
 
@@ -1483,8 +1506,12 @@ public:
 				BString apiKey;
 				GetPluginAPIKey(pluginName.String(), apiKey);
 
-				// TODO: Se hai anche un base_url salvato nelle impostazioni del server, recuperalo qui.
+				// Recuperiamo eventuale base_url salvato nelle impostazioni per questo plugin
 				BString baseUrl = ""; 
+				AISettings s;
+				if (LoadAISettings(s) && s.plugin == pluginName) {
+					baseUrl = s.base_url;
+				}
 
 				// 2. Componiamo il BMessage nativo di configurazione al posto del vecchio JSON string
 				BMessage configMsg('AISC');
@@ -1499,7 +1526,7 @@ public:
 					if (pluginName == pth.Leaf() || pluginName == p.name) {
 						if (p.list_models) {
 							fprintf(stderr, "[DEBUG SERVER] Richiesta modelli per '%s' tramite BMessage nativo...\n", p.name.String());
-							
+                            
 							// 4. Passiamo il BMessage di configurazione e il buffer di destinazione
 							if (p.list_models(&configMsg, buffer, sizeof(buffer)) != 0) {
 								strcpy(buffer, "[]");

@@ -17,6 +17,7 @@ struct AISettings {
     BString plugin; // "Ollama", "OpenAI", ecc.
     BString model; // "llama3", "gpt-4o", ecc.
     BString api_key; // for remote engines
+    BString base_url; // optional base url (for local plugins or custom endpoints)
     bool    use_remote_context;
     uint32  mcp_permissions;
 };

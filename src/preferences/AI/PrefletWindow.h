@@ -57,6 +57,7 @@ private:
     BButton* fRefreshModelsButton;
     
     BTextControl* fApiKeyControl;
+    BTextControl* fBaseUrlControl;
     BButton* fToggleApiKeyButton;
     BButton* fClearApiKeyButton;
     BCheckBox* fRemoteContextCheckBox;
