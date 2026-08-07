@@ -51,6 +51,7 @@ static const uint32 MSG_CLEAR_KEY       = 'CLRK';
 static const uint32 MSG_CONTEXT_SELECTED= 'CTX_';
 static const uint32 MSG_CONTEXT_OPEN    = 'CTXO';
 static const uint32 MSG_TOGGLE_REM_CTX   = 'TGRC';
+static const uint32 MSG_BASE_URL_OVERRIDE = 'BOVR';
 static const uint32 MSG_SESSIONS_FETCHED = 'SFCH';
 
 // Simple JSON array parser for flat arrays of strings: ["a","b"]
@@ -251,6 +252,18 @@ PrefletWindow::PrefletWindow()
     // Nuovo campo: Base URL (per plugin locali/custom)
     fBaseUrlControl = new BTextControl("base_url", B_TRANSLATE("Base URL:"), "", nullptr);
 
+    // Provider selector (openai, anthropic, ollama, lm-studio, custom)
+    fProviderMenu = new BPopUpMenu("providers");
+    fProviderMenu->AddItem(new BMenuItem("openai", nullptr));
+    fProviderMenu->AddItem(new BMenuItem("anthropic", nullptr));
+    fProviderMenu->AddItem(new BMenuItem("ollama", nullptr));
+    fProviderMenu->AddItem(new BMenuItem("lm-studio", nullptr));
+    fProviderMenu->AddItem(new BMenuItem("custom", nullptr));
+    fProviderMenuField = new BMenuField("provider", B_TRANSLATE("Provider:"), fProviderMenu);
+
+    // Override checkbox to allow editing base_url also for remote plugins
+    fBaseUrlOverrideCheckBox = new BCheckBox("base_url_override", B_TRANSLATE("Override remote Base URL (Advanced)"), new BMessage(MSG_BASE_URL_OVERRIDE));
+
     fSystemInfoCheckBox = new BCheckBox("perm_sys_info", B_TRANSLATE("Allow System Info Tool"), nullptr);
     fFileSystemCheckBox = new BCheckBox("perm_file_sys", B_TRANSLATE("Allow File System Access Tool"), nullptr);
     fRunCommandsCheckBox = new BCheckBox("perm_run_cmds", B_TRANSLATE("Allow Run Terminal Commands Tool"), nullptr);
@@ -280,7 +293,11 @@ PrefletWindow::PrefletWindow()
             .Add(fClearApiKeyButton)
         .End()
         .AddGroup(B_HORIZONTAL)
+            .Add(fProviderMenuField)
+        .End()
+        .AddGroup(B_HORIZONTAL)
             .Add(fBaseUrlControl)
+            .Add(fBaseUrlOverrideCheckBox)
         .End()
         .Add(fRemoteContextCheckBox)
         .Add(mcpPermissionsBox)
@@ -650,6 +667,14 @@ void PrefletWindow::MessageReceived(BMessage* msg)
             }
             break;
         }
+        case MSG_BASE_URL_OVERRIDE: {
+            // Toggle enabling of base URL when override checkbox changed
+            if (fBaseUrlOverrideCheckBox) {
+                bool ov = (fBaseUrlOverrideCheckBox->Value() == B_CONTROL_ON);
+                fBaseUrlControl->SetEnabled(ov);
+            }
+            break;
+        }
         case MSG_SAVE: {
             fprintf(stderr, "\n[LOG] --- OPERAZIONE DI SALVATAGGIO (MSG_SAVE) ---\n");
             AISettings s;
@@ -706,6 +731,13 @@ void PrefletWindow::MessageReceived(BMessage* msg)
             const char* baseText = fBaseUrlControl->Text();
             if (baseText && strlen(baseText) > 0) s.base_url.SetTo(baseText);
             else s.base_url.SetTo("");
+
+            // 5c. Provider and override flag
+            BMenuItem* provMarked = fProviderMenu ? fProviderMenu->FindMarked() : nullptr;
+            if (provMarked) s.provider.SetTo(provMarked->Label());
+            else s.provider.SetTo("");
+
+            s.base_url_override = (fBaseUrlOverrideCheckBox && fBaseUrlOverrideCheckBox->Value() == B_CONTROL_ON);
 
             // 6. Scrittura effettiva su disco
             if (SaveAISettings(s)) {                
@@ -797,20 +829,37 @@ void PrefletWindow::_UpdatePluginDetails()
     _UpdateApiKeyField();
     _UpdateClearButton();
 
-    // 2b. Aggiorna Base URL dal settings se presente
+    // 2b. Aggiorna Base URL, provider e stato override dal settings se presente
     AISettings s;
     if (LoadAISettings(s) && s.plugin == pluginName) {
         fBaseUrlControl->SetText(s.base_url.String());
+        // Provider selection
+        if (s.provider.Length() > 0 && fProviderMenu) {
+            BMenuItem* m = fProviderMenu->FindItem(s.provider.String());
+            if (m) m->SetMarked(true);
+            else {
+                BMenuItem* custom = fProviderMenu->FindItem("custom");
+                if (custom) custom->SetMarked(true);
+            }
+        }
+        // Override checkbox
+        if (fBaseUrlOverrideCheckBox) fBaseUrlOverrideCheckBox->SetValue(s.base_url_override ? B_CONTROL_ON : B_CONTROL_OFF);
     } else {
         fBaseUrlControl->SetText("");
+        if (fBaseUrlOverrideCheckBox) fBaseUrlOverrideCheckBox->SetValue(B_CONTROL_OFF);
     }
 
     // Abilitiamo/disabilitiamo il campo Base URL in base al tipo del plugin (local vs remote)
     if (item && strcmp(item->Type(), "local") == 0) {
         fBaseUrlControl->SetEnabled(true);
+        if (fBaseUrlOverrideCheckBox) {
+            fBaseUrlOverrideCheckBox->SetEnabled(false);
+            fBaseUrlOverrideCheckBox->SetValue(B_CONTROL_OFF);
+        }
     } else {
-        // Mostra comunque il valore salvato ma non permettere la modifica
-        fBaseUrlControl->SetEnabled(false);
+        if (fBaseUrlOverrideCheckBox) fBaseUrlOverrideCheckBox->SetEnabled(true);
+        bool ov = (fBaseUrlOverrideCheckBox && fBaseUrlOverrideCheckBox->Value() == B_CONTROL_ON);
+        fBaseUrlControl->SetEnabled(ov);
     }
 
     // 3. Gestione Checkbox Contesto Remoto
