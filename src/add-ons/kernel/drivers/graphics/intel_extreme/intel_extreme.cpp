@@ -30,7 +30,10 @@
 #include "driver.h"
 #include "power.h"
 #include "utility.h"
+
+#ifdef IS_PIRATI_BUILD
 #include "intel_logo.h"
+#endif
 
 
 #define TRACE_INTELEXTREME
@@ -44,6 +47,7 @@
 #define CALLED(x...) TRACE("intel_extreme: CALLED %s\n", __PRETTY_FUNCTION__)
 
 
+#ifdef IS_PIRATI_BUILD
 static void
 draw_intel_logo(intel_info &info, struct frame_buffer_boot_info *bi)
 {
@@ -81,6 +85,7 @@ draw_intel_logo(intel_info &info, struct frame_buffer_boot_info *bi)
 		user_memcpy(fb + fbOffset, (void*)&intel_logo[logoRowOffset], copySize);
 	}
 }
+#endif
 
 static void
 init_overlay_registers(overlay_registers* _registers)
@@ -643,8 +648,11 @@ status_t
 intel_extreme_init(intel_info &info)
 {
 	CALLED();
+	
+#ifdef IS_PIRATI_BUILD
 	struct frame_buffer_boot_info* bi = (struct frame_buffer_boot_info*)get_boot_item(
         FRAME_BUFFER_BOOT_INFO, NULL);
+#endif
 
 	info.aperture = gGART->map_aperture(info.pci->bus, info.pci->device,
 		info.pci->function, 0, &info.aperture_base);
@@ -983,9 +991,10 @@ intel_extreme_init(intel_info &info)
 	}
 	TRACE("%s: hw_cdclk: %" B_PRIu32 " kHz\n", __func__, info.shared_info->hw_cdclk);
 
+#ifdef IS_PIRATI_BUILD
 	draw_intel_logo(info, bi);
 	snooze(2000000);
-
+#endif
 	TRACE("%s: completed successfully!\n", __func__);
 	return B_OK;
 }
