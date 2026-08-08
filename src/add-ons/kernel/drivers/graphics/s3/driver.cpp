@@ -19,7 +19,10 @@
 
 #include <boot_item.h>
 #include <frame_buffer_console.h>
+
+#ifdef IS_PIRATI_BUILD
 #include "s3_logo.h"
+#endif
 
 #include "DriverInterface.h"
 
@@ -137,6 +140,7 @@ static device_hooks gDeviceHooks =
 	NULL
 };
 
+#ifdef IS_PIRATI_BUILD
 static void
 draw_logo(DeviceInfo& di)
 {
@@ -200,6 +204,7 @@ draw_logo(DeviceInfo& di)
 		user_memcpy(fb + fbOffset, (void*)&s3_logo[logoRowOffset], copySize);
 	}
 }
+#endif
 
 static inline uint32
 GetPCI(pci_info& info, uint8 offset, uint8 size)
@@ -523,8 +528,11 @@ FRAME_BUFFER_BOOT_INFO, NULL);
 
 	TRACE("Interrupt assigned:  %s\n", si.bInterruptAssigned ? "yes" : "no");
 
+#ifdef IS_PIRATI_BUILD
 	draw_logo(di);
 	snooze(2000000);
+#endif
+
 	return B_OK;
 }
 

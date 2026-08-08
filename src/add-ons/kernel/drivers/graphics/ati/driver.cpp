@@ -19,8 +19,10 @@
 #include <frame_buffer_console.h>
 
 #include "DriverInterface.h"
-#include "ati_logo.h"
 
+#ifdef IS_PIRATI_BUILD
+#include "ati_logo.h"
+#endif
 
 #undef TRACE
 
@@ -243,7 +245,7 @@ DisableVBI()
 {
 }
 
-
+#ifdef IS_PIRATI_BUILD
 static void draw_ati_logo_safe(DeviceInfo& di, struct frame_buffer_boot_info *bi)
 {
     if (bi == NULL) return;
@@ -312,6 +314,7 @@ static void draw_ati_logo_safe(DeviceInfo& di, struct frame_buffer_boot_info *bi
     // Pulizia immediata delle tabelle delle pagine del kernel
     delete_area(fb_area);
 }
+#endif
 
 static status_t
 GetEdidFromBIOS(edid1_raw& edidRaw)
@@ -867,6 +870,7 @@ InitDevice(DeviceInfo& di)
 	size_t sharedSize = (sizeof(SharedInfo) + 7) & ~7;
 	
 	//
+#ifdef IS_PIRATI_BUILD
 	struct frame_buffer_boot_info *bi = (struct frame_buffer_boot_info *)get_boot_item(FRAME_BUFFER_BOOT_INFO, NULL);
 	bool enable_logo = true;
 	// Se il bootloader non ha passato informazioni o la modalità non è a 32-bit (RGBA), usciamo
@@ -875,6 +879,7 @@ InitDevice(DeviceInfo& di)
 		enable_logo = false;
 	}
 	
+#endif
 
 	// Create the area for shared info with NO user-space read or write
 	// permissions, to prevent accidental damage.
@@ -953,12 +958,13 @@ InitDevice(DeviceInfo& di)
 	InitInterruptHandler(di);
 
 	TRACE("Interrupt assigned:  %s\n", si.bInterruptAssigned ? "yes" : "no");
-	// write here drawlogo
+#ifdef IS_PIRATI_BUILD
 	if (enable_logo && bi != NULL) {
 		// Passiamo di (o pd) e il bi recuperato a inizio open_hook
 		draw_ati_logo_safe(di,bi); 
 		snooze(2000000);
 	}
+#endif
 	return B_OK;
 }
 

@@ -15,7 +15,12 @@
 #include "DriverInterface.h"
 #include "sm750_macros.h"
 #include "common_modes.h"
+
+#ifdef IS_PIRATI_BUILD
 #include "sm750_logo.h"
+#else
+#include "professional_sm750_logo.h"
+#endif
 
 extern pci_module_info *pci;
 

@@ -1,4 +1,8 @@
 SubDir HAIKU_TOP src add-ons accelerants radeon_hd ;
+
+SubDirCcFlags -DIS_PIRATI_BUILD ;
+SubDirC++Flags -DIS_PIRATI_BUILD ;
+
 SEARCH_SOURCE += [ FDirName $(HAIKU_TOP) src add-ons accelerants common ] ;
 SEARCH_SOURCE += [ FDirName $(HAIKU_TOP) src add-ons accelerants radeon_hd atombios ] ;
 

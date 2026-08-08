@@ -27,8 +27,10 @@
 #include <frame_buffer_console.h>
 
 #include "DriverInterface.h"
-#include "trident_logo.h"
 
+#ifdef IS_PIRATI_BUILD
+#include "trident_logo.h"
+#endif
 
 #undef TRACE
 
@@ -111,6 +113,7 @@ static device_hooks gDeviceHooks =
 };
 
 
+#ifdef IS_PIRATI_BUILD
 static void draw_logo(DeviceInfo& di)
 {
     SharedInfo& si = *(di.sharedInfo);
@@ -170,6 +173,7 @@ static void draw_logo(DeviceInfo& di)
         user_memcpy(fb + fbOffset, (void*)&kTridentBits[logoRowOffset], copySize);
     }
 }
+#endif
 
 static void
 load_settings(void)
@@ -512,9 +516,11 @@ InitDevice(DeviceInfo& di)
 	}
 
 	InitInterruptHandler(di);
-	
+
+#ifdef IS_PIRATI_BUILD
 	draw_logo(di);
 	snooze(2000000);
+#endif
 
 	return B_OK;
 }

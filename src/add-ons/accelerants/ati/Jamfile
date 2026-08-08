@@ -1,5 +1,8 @@
 SubDir HAIKU_TOP src add-ons accelerants ati ;
 
+SubDirCcFlags -DIS_PIRATI_BUILD ;
+SubDirC++Flags -DIS_PIRATI_BUILD ;
+
 UsePrivateHeaders graphics ;
 UsePrivateHeaders [ FDirName graphics ati ] ;
 UsePrivateHeaders [ FDirName graphics common ] ;

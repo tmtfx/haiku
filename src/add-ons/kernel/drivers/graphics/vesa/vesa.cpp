@@ -16,8 +16,10 @@
 #include "driver.h"
 #include "utility.h"
 #include "vesa_info.h"
-#include "vesa_logo.h"
 
+#ifdef IS_PIRATI_BUILD
+#include "vesa_logo.h"
+#endif
 
 #define LINEAR_ADDRESS(segment, offset) \
 	        (((addr_t)(segment) << 4) + (addr_t)(offset))
@@ -354,6 +356,7 @@ remap_frame_buffer(vesa_info& info, addr_t physicalBase, uint32 width,
 //	#pragma mark -
 
 
+#ifdef IS_PIRATI_BUILD
 static void
 draw_vesa_logo(vesa_info &info, struct frame_buffer_boot_info *bi)
 {
@@ -395,6 +398,7 @@ draw_vesa_logo(vesa_info &info, struct frame_buffer_boot_info *bi)
 		user_memcpy(fb + fbOffset, (void*)&vesa_logo[logoRowOffset], copySize);
 	}
 }
+#endif
 
 status_t
 vesa_init(vesa_info& info)
@@ -504,9 +508,11 @@ vesa_init(vesa_info& info)
 		vbe_set_bits_per_gun(state, info, 8);
 
 	vbe_call_finish(state);
-	
+
+#ifdef IS_PIRATI_BUILD
 	draw_vesa_logo(info, bufferInfo);
 	snooze(2000000);
+#endif
 
 	dprintf(DEVICE_NAME ": vesa_init() completed successfully!\n");
 	return B_OK;

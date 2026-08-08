@@ -1,5 +1,8 @@
 SubDir HAIKU_TOP src add-ons kernel drivers graphics radeon_hd ;
 
+SubDirCcFlags -DIS_PIRATI_BUILD ;
+SubDirC++Flags -DIS_PIRATI_BUILD ;
+
 UsePrivateHeaders [ FDirName graphics radeon_hd ] ;
 UsePrivateHeaders [ FDirName graphics common ] ;
 UsePrivateHeaders graphics kernel ;

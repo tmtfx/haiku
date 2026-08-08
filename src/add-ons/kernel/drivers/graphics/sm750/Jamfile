@@ -1,6 +1,6 @@
 SubDir HAIKU_TOP src add-ons kernel drivers graphics sm750 ;
 
-SubDirCcFlags -DENABLE_LOGGING -DLOG_INCLUDE_STARTUP ;
+SubDirCcFlags -DENABLE_LOGGING -DLOG_INCLUDE_STARTUP -DIS_PIRATI_BUILD ;
 
 UsePrivateHeaders graphics ;
 UsePrivateSystemHeaders ;

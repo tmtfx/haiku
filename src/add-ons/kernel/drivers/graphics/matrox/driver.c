@@ -33,7 +33,10 @@
 /* The private interface between the accelerant and the kernel driver. */
 #include "DriverInterface.h"
 #include "mga_macros.h"
+
+#ifdef IS_PIRATI_BUILD
 #include "matrox_logo.h"
+#endif
 
 #define get_pci(o, s) (*pci_bus->read_pci_config)(pcii->bus, pcii->device, pcii->function, (o), (s))
 #define set_pci(o, s, v) (*pci_bus->write_pci_config)(pcii->bus, pcii->device, pcii->function, (o), (s), (v))
@@ -306,6 +309,7 @@ void uninit_driver(void) {
 	put_module(B_PCI_MODULE_NAME);
 }
 
+#ifdef IS_PIRATI_BUILD
 static void draw_matrox_logo_safe(device_info *di, struct frame_buffer_boot_info *bi)
 {
     if (!di || !bi) return;
@@ -371,6 +375,7 @@ static void draw_matrox_logo_safe(device_info *di, struct frame_buffer_boot_info
 
     delete_area(fb_area);
 }
+#endif
 
 static status_t map_device(device_info *di)
 {
@@ -822,6 +827,7 @@ static status_t open_hook (const char* name, uint32 flags, void** cookie) {
 	status_t	result = B_OK;
 	char shared_name[B_OS_NAME_LENGTH];
 
+#ifdef IS_PIRATI_BUILD
 	struct frame_buffer_boot_info *bi = (struct frame_buffer_boot_info *)get_boot_item(
         FRAME_BUFFER_BOOT_INFO, NULL);
 	bool enable_logo = true;
@@ -829,6 +835,7 @@ static status_t open_hook (const char* name, uint32 flags, void** cookie) {
 	if (bi == NULL) {
 		enable_logo = false;
 	}
+#endif
 
 	/* find the device name in the list of devices */
 	char kname[B_OS_NAME_LENGTH];
@@ -962,11 +969,13 @@ free_shared:
 
 done:
 	/* end of critical section */
+
+#ifdef IS_PIRATI_BUILD
 	if (enable_logo && result == B_OK && bi != NULL) {
 		draw_matrox_logo_safe(di, bi); 
 		snooze(2000000);
 	}
-
+#endif
 	
 	RELEASE_BEN(pd->kernel);
 

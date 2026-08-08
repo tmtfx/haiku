@@ -20,8 +20,9 @@
 #include "driver.h"
 #include "utility.h"
 #include "vesa_info.h"
+#ifdef IS_PIRATI_BUILD
 #include "framebuffer_logo.h"
-
+#endif
 
 static uint32
 get_color_space_for_depth(uint32 depth)
@@ -88,6 +89,7 @@ remap_frame_buffer(framebuffer_info& info, addr_t physicalBase, uint32 width,
 //	#pragma mark -
 
 
+#ifdef IS_PIRATI_BUILD
 static void
 draw_framebuffer_logo(framebuffer_info &info, struct frame_buffer_boot_info *bi)
 {
@@ -129,6 +131,7 @@ draw_framebuffer_logo(framebuffer_info &info, struct frame_buffer_boot_info *bi)
 		user_memcpy(fb + fbOffset, (void*)&framebuffer_logo[logoRowOffset], copySize);
 	}
 }
+#endif
 
 status_t
 framebuffer_init(framebuffer_info& info)
@@ -171,9 +174,10 @@ framebuffer_init(framebuffer_info& info)
 		memcpy(&sharedInfo.edid_info, edidInfo, sizeof(edid1_info));
 	}
 	
+#ifdef IS_PIRATI_BUILD
 	draw_framebuffer_logo(info, bufferInfo);
 	snooze(2000000);
-
+#endif
 	dprintf(DEVICE_NAME ": framebuffer_init() completed successfully!\n");
 	return B_OK;
 }

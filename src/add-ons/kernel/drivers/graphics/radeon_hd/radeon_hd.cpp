@@ -31,8 +31,10 @@
 
 #include <boot_item.h>
 #include <frame_buffer_console.h>
-#include "radeon_hd_logo.h"
 
+#ifdef IS_PIRATI_BUILD
+#include "radeon_hd_logo.h"
+#endif
 
 #define TRACE_DEVICE
 #ifdef TRACE_DEVICE
@@ -660,6 +662,7 @@ radeon_hd_pci_bar_mmio(uint16 chipsetID)
 }
 
 
+#ifdef IS_PIRATI_BUILD
 static void draw_radeonhd_logo(radeon_info &info, struct frame_buffer_boot_info *bi)
 {
     if (bi == NULL) return;
@@ -706,6 +709,7 @@ static void draw_radeonhd_logo(radeon_info &info, struct frame_buffer_boot_info 
 		user_memcpy(fb + fbOffset, (void*)&logo_data[logoRowOffset], copySize);
 	}
 }
+#endif
 
 status_t
 radeon_hd_init(radeon_info &info)
@@ -715,7 +719,9 @@ radeon_hd_init(radeon_info &info)
 	ERROR("%s: card(%" B_PRId32 "): "
 		"Radeon %s 1002:%" B_PRIX32 "\n", __func__, info.id,
 		radeon_chip_name[info.chipsetID], info.pciID);
-	
+
+
+#ifdef IS_PIRATI_BUILD
 	struct frame_buffer_boot_info *bi = (struct frame_buffer_boot_info *)get_boot_item(FRAME_BUFFER_BOOT_INFO, NULL);
 	bool enable_logo = true;
 	// Se il bootloader non ha passato informazioni o la modalità non è a 32-bit (RGBA), usciamo
@@ -723,6 +729,7 @@ radeon_hd_init(radeon_info &info)
 		dprintf("radeon_hd: frame buffer boot info - Impossibile ricavare info boot FB\n");
 		enable_logo = false;
 	}
+#endif
 
 	// Enable response in I/O, memory space. Enable bus mastering
 	uint32 pciConfig = get_pci_config(info.pci, PCI_command, 2);
@@ -962,12 +969,15 @@ radeon_hd_init(radeon_info &info)
 
 	TRACE("card(%" B_PRId32 "): GPU thermal status: %" B_PRId32 "C\n",
 		info.id, radeon_thermal_query(info) / 1000);
-		
+
+
+#ifdef IS_PIRATI_BUILD		
 	//draw_logo
 	if (enable_logo && bi != NULL) {
 		draw_radeonhd_logo(info,bi);
 		snooze(2000000);
 	}
+#endif
 
 	return B_OK;
 }

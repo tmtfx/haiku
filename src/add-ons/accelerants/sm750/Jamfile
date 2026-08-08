@@ -1,5 +1,8 @@
 SubDir HAIKU_TOP src add-ons accelerants sm750 ;
 
+SubDirCcFlags -DIS_PIRATI_BUILD ;
+SubDirC++Flags -DIS_PIRATI_BUILD ;
+
 UsePrivateHeaders graphics ;
 UsePrivateHeaders [ FDirName graphics sm750 ] ;
 UsePrivateHeaders [ FDirName graphics common ] ;
