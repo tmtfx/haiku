@@ -57,7 +57,7 @@ struct PluginEntry {
     status_t (*generate_async)(ai_plugin_t, const char*, BMessage*);
     uint32 (*get_capabilities)(void);
     status_t (*list_models)(const BMessage*, char*, size_t);
-    status_t (*set_model)(ai_plugin_t, const char*);
+    // status_t (*set_model)(ai_plugin_t, const char*);
 };
 
 #endif // _AI_SERVER_H

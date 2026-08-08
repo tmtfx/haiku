@@ -22,14 +22,12 @@ enum capabilities {
 };
 
 struct AIPluginHandle {
-    BString base_url;
+    AIPluginHandle() = default;
+    virtual ~AIPluginHandle() = default;
 
-    // Costruttore per inizializzare comodamente a nullptr
-    AIPluginHandle() : base_url("") {}
-
-    // Un distruttore virtuale è FONDAMENTALE qui. 
-    // Permette di liberare la memoria correttamente anche se usiamo l'ereditarietà!
-    virtual ~AIPluginHandle() {}
+    // Disabilita la copia per evitare 'slicing' o gestione errata della memoria
+    AIPluginHandle(const AIPluginHandle&) = delete;
+    AIPluginHandle& operator=(const AIPluginHandle&) = delete;
 };
 
 struct AsyncArgs {
@@ -94,7 +92,7 @@ status_t ai_plugin_generate_async(ai_plugin_t handle,
 status_t ai_plugin_list_models(const BMessage* settingsMsg, char* out_buf, size_t out_len);
 
 // Set active model by name.
-status_t ai_plugin_set_model(ai_plugin_t handle, const char* model_name);
+// status_t ai_plugin_set_model(ai_plugin_t handle, const char* model_name);
 
 typedef const char* (*plugin_get_name_t)(void);
 

@@ -114,7 +114,7 @@ static void load_plugins(const char* dirpath)
 		auto gen_async = (status_t (*)(ai_plugin_t, const char*, BMessage*)) dlsym(h, "ai_plugin_generate_text_async");
 		auto get_cap = (uint32 (*)(void)) dlsym(h, "ai_plugin_get_capabilities");
 		auto list_models = (status_t (*)(const BMessage*, char*, size_t)) dlsym(h, "ai_plugin_list_models");
-		auto set_model = (status_t (*)(ai_plugin_t, const char*)) dlsym(h, "ai_plugin_set_model");
+		//auto set_model = (status_t (*)(ai_plugin_t, const char*)) dlsym(h, "ai_plugin_set_model");
 
 		const char* (*get_name)(void) = (const char* (*)(void))dlsym(h, "get_plugin_name");
 
@@ -159,7 +159,7 @@ static void load_plugins(const char* dirpath)
 		e.generate_async = gen_async;
 		e.get_capabilities = get_cap; // Aggiornato con il nuovo puntatore
 		e.list_models = list_models;
-		e.set_model = set_model;
+		//e.set_model = set_model;
 
 		if (get_name != nullptr) {
 			e.name = get_name();
@@ -185,12 +185,12 @@ static void load_plugins(const char* dirpath)
 		
 
 		
-		if (s.plugin == e.name) {
+		/*if (s.plugin == e.name) {
 			if (e.set_model && s.model.Length() > 0) {
 				e.set_model(e.instance, s.model.String());
 				fprintf(stderr, "ai_server: [LOADER] Modello predefinito '%s' applicato a %s\n", s.model.String(), e.name.String());
 			}
-		}
+		}*/
 		
 		gPlugins.push_back(e);
 		
@@ -237,8 +237,9 @@ static status_t append_message_to_context(BMessage* context, const char* role, c
 	historyMsg.AddMessage("msg", &newMsg);
 	
 	// Aggiorniamo il messaggio principale (Rimuoviamo il vecchio e mettiamo il nuovo)
-	context->RemoveName("messages");
-	context->AddMessage("messages", &historyMsg);
+	//context->RemoveName("messages");
+	//context->AddMessage("messages", &historyMsg);
+	context->ReplaceMessage("messages", &historyMsg);
 	
 	return B_OK;
 }
@@ -488,6 +489,9 @@ public:
 					}
 					fprintf(stderr, "ai_server: Chiusa e liberata sessione %d\n", id);
 				}
+				BMessage reply(B_REPLY);
+				reply.AddInt32("status", B_OK);
+				msg->SendReply(&reply);
 				break;
 			}
 			
@@ -499,13 +503,21 @@ public:
 				
 				// 1. Determiniamo il contextID associato alla sessione (se esiste) o alla richiesta
 				const char* reqContextID = msg->FindString("context_id");
+				
+				bool foundInSession = false;
+				ClientSession* activeSession = nullptr;
+				
+				
+				if (sessionID != -1 && gSessions.count(sessionID) > 0) {
+					activeSession = &gSessions[sessionID];
+					foundInSession = true;
+					if (activeSession->context_id.Length() > 0) {
+						contextID = activeSession->context_id;
+					}
+				}
+    
 				if (reqContextID && reqContextID[0] != '\0') {
 					contextID = reqContextID;
-				} else if (sessionID != -1 && gSessions.count(sessionID) > 0) {
-					ClientSession& session = gSessions[sessionID];
-					if (session.context_id.Length() > 0) {
-						contextID = session.context_id;
-					}
 				}
 
 				// 2. Carichiamo il contesto direttamente da disco usando l'helper esistente
@@ -524,14 +536,18 @@ public:
 					chatContext.FindString("model_name", &modelName);
 					chatContext.FindString("remote_id", &remoteId);
 					
-					bool foundInSession = false;
-					if (sessionID != -1 && gSessions.count(sessionID) > 0) {
-						ClientSession& session = gSessions[sessionID];
-						baseUrl = session.base_url;
-						foundInSession = true;
+					if (foundInSession && activeSession) {
+						pluginName = activeSession->plugin_name;
+						modelName = activeSession->model_name;
+						baseUrl = activeSession->base_url;
+					} else {
+						chatContext.FindString("plugin_name", &pluginName);
+						chatContext.FindString("model_name", &modelName);
 					}
 
-					if (!foundInSession || baseUrl.IsEmpty()) {
+					chatContext.FindString("remote_id", &remoteId);
+
+					if (baseUrl.IsEmpty()) {
 						if (chatContext.FindString("base_url", &baseUrl) != B_OK) {
 							AISettings globalSettings;
 							if (LoadAISettings(globalSettings)) baseUrl = globalSettings.base_url;
@@ -544,13 +560,12 @@ public:
 
 					chatContext.FindString("title", &title);
 
-					// Impacchettiamo i dati reali del file per il client
 					reply.AddInt32("status", B_OK);
 					reply.AddString("context_id", contextID.String());
 					reply.AddString("title", title.String());
 					reply.AddString("plugin_name", pluginName.String());
 					reply.AddString("model_name", modelName.String());
-					// Rispondi con base_url
+					
 					if (!baseUrl.IsEmpty()) {
 						reply.AddString("base_url", baseUrl.String());
 					}
@@ -568,8 +583,7 @@ public:
 			case MSG_GET_ALL_SESSIONS: {
 				BMessage reply(B_REPLY);
 				
-				// Aggiungiamo il conteggio totale delle sessioni attive
-				reply.AddInt32("count", (int32)gSessions.size());
+				reply.AddInt32("count", static_cast<int32>(gSessions.size()));
 
 				for (const auto& pair : gSessions) {
 					const ClientSession& session = pair.second;
@@ -577,27 +591,31 @@ public:
 
 					sessionInfo.AddInt32("session_id", session.id);
 					sessionInfo.AddString("context_id", session.context_id.String());
+					// I dati in memoria prevalgono sempre sullo stato persistito per le sessioni attive
 					sessionInfo.AddString("plugin_name", session.plugin_name.String());
 					sessionInfo.AddString("model_name", session.model_name.String());
+					
 					if (session.base_url.Length() > 0) {
 						sessionInfo.AddString("base_url", session.base_url.String());
 					}
 
-					// Recuperiamo il titolo dal file di contesto usando la logica che hai già
 					BMessage chatContext;
 					BString title = "New chat";
 					BString remoteId;
 					
 					if (load_or_create_chat_context(session.context_id.String(), &chatContext) == B_OK) {
+						if (check_update_context_title(&chatContext)) {
+							save_chat_context(session.context_id.String(), &chatContext);
+						}
 						chatContext.FindString("title", &title);
 						chatContext.FindString("remote_id", &remoteId);
 					}
+					
 					sessionInfo.AddString("title", title.String());
 					if (!remoteId.IsEmpty()) {
 						sessionInfo.AddString("remote_id", remoteId.String());
 					}
 
-					// Impacchettiamo la sessione dentro il messaggio di risposta globale
 					reply.AddMessage("session", &sessionInfo);
 				}
 
@@ -635,9 +653,9 @@ public:
 				BString baseUrl;
 				BString contextID = "ctx_default";
 
-				// 1. Risoluzione dei parametri
+				// --- 1. RISOLUZIONE GERARCHICA PARAMETRI ---
 				const char* customPlugin = msg->FindString("custom_plugin");
-				const char* customModel = msg->FindString("custom_model");
+				const char* customModel  = msg->FindString("custom_model");
 				const char* customApiKey = msg->FindString("custom_api_key");
 				const char* reqContextID = msg->FindString("context_id");
 
@@ -645,10 +663,11 @@ public:
 					contextID = reqContextID;
 				}
 
+				// Piorità 1: Parametri una-tantum nel messaggio BMessage di richiesta
 				if (customPlugin && customModel) {
 					pluginName = customPlugin;
-					modelName = customModel;
-					apiKey = customApiKey ? customApiKey : "";
+					modelName  = customModel;
+					apiKey     = customApiKey ? customApiKey : "";
 
 					for (auto& pe : gPlugins) {
 						if (pe.name == customPlugin || pe.name.FindFirst(customPlugin) >= 0) {
@@ -656,12 +675,14 @@ public:
 							break;
 						}
 					}
-				} else if (gSessions.count(sessionID) > 0) {
+				} 
+				// Priorità 2: Dati estratti dalla ClientSession in memoria
+				else if (sessionID != -1 && gSessions.count(sessionID) > 0) {
 					ClientSession& session = gSessions[sessionID];
 					pluginName = session.plugin_name;
-					modelName = session.model_name;
-					apiKey = session.custom_api_key;
-					baseUrl = session.base_url;
+					modelName  = session.model_name;
+					apiKey     = session.custom_api_key;
+					baseUrl    = session.base_url; // Vince su qualsiasi base_url salvato nel contesto
 
 					if (session.context_id.Length() > 0) {
 						contextID = session.context_id;
@@ -687,36 +708,44 @@ public:
 				}
 
 				if (pluginName.IsEmpty()) pluginName = p->name;
-				if (modelName.IsEmpty()) modelName = "gemini-2.5-flash";
+				if (modelName.IsEmpty())  modelName  = "gemini-2.5-flash";
 
-				// 2. Carichiamo on-demand il contesto BMessage da disco
+				// --- 2. CARICAMENTO CONTESTO DA DISCO ---
 				BMessage* chatContext = new BMessage();
 				load_or_create_chat_context(contextID.String(), chatContext, pluginName.String(), modelName.String());
-			
-				// Fallback/Integrazione per base_url se non trovati dalla sessione
+
+				// Priorità 3: Fallback del base_url da File di Contesto (se la Sessione non l'ha fornito)
 				if (baseUrl.IsEmpty()) {
-					if (chatContext->FindString("base_url", &baseUrl) != B_OK) {
-						AISettings globalConf;
-						if (LoadAISettings(globalConf)) baseUrl = globalConf.base_url;
+					chatContext->FindString("base_url", &baseUrl);
+				}
+
+				// Priorità 4: Fallback del base_url da Impostazioni Globali
+				if (baseUrl.IsEmpty()) {
+					AISettings globalConf;
+					if (LoadAISettings(globalConf)) {
+						baseUrl = globalConf.base_url;
 					}
 				}
 
-				// Recupero della chiave API se vuota
+				// Recupero API Key se vuota
 				if (apiKey.IsEmpty()) {
 					GetPluginAPIKey(p->name.String(), apiKey);
 				}
 
-				// 3. Arricchiamo il BMessage con i dati della sessione
+				// --- 3. AGGIORNAMENTO FORZATO BMESSAGE DI CONTESTO ---
 				chatContext->RemoveName("api_key");
 				chatContext->AddString("api_key", apiKey.String());
+
 				chatContext->RemoveName("model_name");
 				chatContext->AddString("model_name", modelName.String());
 
-				// Aggiungiamo base_url
+				chatContext->RemoveName("plugin_name");
+				chatContext->AddString("plugin_name", pluginName.String());
+
 				chatContext->RemoveName("base_url");
 				chatContext->AddString("base_url", baseUrl.String());
 
-				// 4. Propagazione use_remote_context
+				// --- 4. GESTIONE REMOTE CONTEXT & MAPPING LOCALE ---
 				bool useRemoteCtxAsync = false;
 				if (sessionID != -1 && gSessions.count(sessionID) > 0) {
 					useRemoteCtxAsync = gSessions[sessionID].useRemoteContext;
@@ -725,57 +754,55 @@ public:
 					if (LoadAISettings(globalSA))
 						useRemoteCtxAsync = globalSA.use_remote_context;
 				}
+
 				chatContext->RemoveName("use_remote_context");
 				chatContext->AddBool("use_remote_context", useRemoteCtxAsync);
 
-				// CORREZIONE 1: Sincronizzazione forzata stato locale
 				if (!useRemoteCtxAsync) {
 					chatContext->RemoveName("remote_id");
 					chatContext->AddString("remote_id", "");
-		
-					// 5. In modalità locale salviamo subito il prompt dell'utente
+
 					append_message_to_context(chatContext, "user", prompt);
 					save_chat_context(contextID.String(), chatContext);
 				}
 
-				// 6. Percorso temporaneo per lo stream
+				// --- 5. PERCORSO STREAM E NOTIFICA ACK ---
 				char tmpPath[PATH_MAX];
-				snprintf(tmpPath, sizeof(tmpPath), "/tmp/ai_stream_%d_%lu.tmp", (int)getpid(), (unsigned long)rand());
-			
+				snprintf(tmpPath, sizeof(tmpPath), "/tmp/ai_stream_%" B_PRId32 "_%lu.tmp", getpid(), (unsigned long)rand());
+
 				chatContext->RemoveName("notify_path");
 				chatContext->AddString("notify_path", tmpPath);
 
-				// Risposta immediata di ACK per sbloccare il client BLooper
+				chatContext->RemoveName("server_messenger");
+				chatContext->AddMessenger("server_messenger", be_app_messenger);
+
+				// Risposta ACK immediata al chiamante per sbloccarlo
 				BMessage ack;
 				ack.AddString("status", "ok");
 				msg->SendReply(&ack);
 
-				// Invocazione asincrona del plugin
+				// Invocazione del plugin
 				ai_plugin_t instance = p->instance;
 				std::string promptCopy = prompt;
-				
-				chatContext->RemoveName("server_messenger");
-				chatContext->AddMessenger("server_messenger", be_app_messenger);
-	
+
 				int rc = p->generate_async(instance, promptCopy.c_str(), chatContext);
 				if (rc != 0) {
 					BMessage err(MSG_AI_ERROR);
 					err.AddString("error", "plugin async failed to start");
 					target.SendMessage(&err);
-		
+
 					delete chatContext;
 					break;
 				}
 
-				int32 tokenLimit = 4000; 
-				msg->FindInt32("token_limit", &tokenLimit);
-
-				// 7. Lancio del thread Watcher
-				std::thread watcher([target, tmpPath = std::string(tmpPath), contextID, chatContext, tokenLimit, useRemoteCtxAsync]() mutable {
+				// --- 6. LAUNCH WATCHER THREAD (MONITORAGGIO STREAM) ---
+				std::thread watcher([target, tmpPath = std::string(tmpPath), contextID, chatContext, useRemoteCtxAsync]() mutable {
 					FILE* f = NULL;
 					size_t lastSize = 0;
 					bool done = false;
 					BString fullResponseAccumulator("");
+					int emptyReads = 0;
+					const int maxEmptyReads = 1200; // ~60 secondi di timeout inattività
 
 					while (!done) {
 						if (!f) f = fopen(tmpPath.c_str(), "r");
@@ -789,30 +816,39 @@ public:
 								size_t r = fread(buf.data(), 1, toRead, f);
 								buf[r] = '\0';
 								lastSize += r;
-					
-								BString s(buf.data());
-								int32 pos = s.FindFirst("<<STREAM_END>>");
+								emptyReads = 0; // Reset contatore timeout
+
+								BString chunk(buf.data());
+								fullResponseAccumulator << chunk;
+
+								// Controlliamo se il marker di fine stream è presente nel buffer totale
+								int32 pos = fullResponseAccumulator.FindFirst("<<STREAM_END>>");
 								if (pos != B_ERROR) {
-									BString part;
-									s.CopyInto(part, 0, pos);
-									if (part.Length() > 0) {
-										BMessage out(MSG_AI_RESPONSE);
-										out.AddString("partial", part.String());
-										out.AddBool("complete", false);
-										target.SendMessage(&out);
-										fullResponseAccumulator << part;
+									BString finalCleanText;
+									fullResponseAccumulator.CopyInto(finalCleanText, 0, pos);
+
+									// Invio eventuale frammento parziale prima del marker
+									if (chunk.FindFirst("<<STREAM_END>>") != B_ERROR) {
+										BString partChunk;
+										chunk.CopyInto(partChunk, 0, chunk.FindFirst("<<STREAM_END>>"));
+										if (partChunk.Length() > 0) {
+											BMessage out(MSG_AI_RESPONSE);
+											out.AddString("partial", partChunk.String());
+											out.AddBool("complete", false);
+											target.SendMessage(&out);
+										}
 									}
-						
-									// Stream completato con successo
+
+									// Invio evento completamento
 									BMessage fin(MSG_AI_RESPONSE);
-									fin.AddString("response", fullResponseAccumulator.String());
+									fin.AddString("response", finalCleanText.String());
 									fin.AddBool("complete", true);
 									fin.AddInt32("status", 0);
 									target.SendMessage(&fin);
-						
-									// Pulizia metadati volatili prima del dump finale
+
+									// Pulizia metadati volatili/sensibili prima del salvataggio
 									chatContext->RemoveName("api_key");
-									chatContext->AddString("api_key", ""); 
+									chatContext->AddString("api_key", "");
 									chatContext->RemoveName("notify_path");
 									chatContext->RemoveName("use_remote_context");
 
@@ -825,30 +861,40 @@ public:
 										}
 									} else {
 										check_update_context_title(chatContext);
-										append_message_to_context(chatContext, "assistant", fullResponseAccumulator.String());
+										append_message_to_context(chatContext, "assistant", finalCleanText.String());
 										save_chat_context(contextID.String(), chatContext);
 									}
-						
+
 									done = true;
 									break;
 								} else {
+									// Invio chunk parziale ordinario
 									BMessage out(MSG_AI_RESPONSE);
-									out.AddString("partial", s.String());
+									out.AddString("partial", chunk.String());
 									out.AddBool("complete", false);
 									target.SendMessage(&out);
-									fullResponseAccumulator << s;
+								}
+							} else {
+								emptyReads++;
+								if (emptyReads > maxEmptyReads) {
+									BMessage err(MSG_AI_ERROR);
+									err.AddString("error", "stream timeout reached");
+									target.SendMessage(&err);
+									done = true;
+									break;
 								}
 							}
 						}
-						snooze(50000); // 50ms
+						snooze(50000); // Poll 50ms
 					}
+
 					if (f) fclose(f);
 					remove(tmpPath.c_str());
-		
-					// == PULIZIA FINALE ASINCRONA ==
+
+					// Deallocazione sicura della memoria del contesto
 					delete chatContext;
 				});
-	
+
 				watcher.detach();
 				break;
 			}
@@ -888,6 +934,9 @@ public:
 					if (session.context_id.Length() > 0) {
 						contextID = session.context_id;
 					}
+
+					// Reset eventuale flag di abort precedente per questa sessione
+					session.abort_requested = false;
 
 					for (auto& pe : gPlugins) {
 						if (pe.name == session.plugin_name) {
@@ -945,6 +994,10 @@ public:
 				chatContext.RemoveName("base_url");
 				chatContext.AddString("base_url", baseUrl.String());
 
+				// Passiamo il context_id al plugin per gli eventuali check sull'abort
+				chatContext.RemoveName("context_id");
+				chatContext.AddString("context_id", contextID.String());
+
 				// 4. Determiniamo l'autorità del contesto remoto
 				bool useRemoteCtx = false;
 				if (res == B_OK && gSessions.count(sessionID) > 0) {
@@ -959,7 +1012,7 @@ public:
 				chatContext.RemoveName("use_remote_context");
 				chatContext.AddBool("use_remote_context", useRemoteCtx);
 
-				// CORREZIONE 1: Se la sessione è forzata in LOCALE, puliamo l'eventuale remote_id residuo
+				// Se la sessione è forzata in LOCALE, puliamo l'eventuale remote_id residuo
 				if (!useRemoteCtx) {
 					chatContext.RemoveName("remote_id");
 					chatContext.AddString("remote_id", "");
@@ -1000,6 +1053,15 @@ public:
 						save_chat_context(contextID.String(), &chatContext);
 					}
 				} else {
+					// Se c'è stato un errore e siamo in locale, rimuoviamo l'ultimo messaggio "user" salvato prima
+					if (!useRemoteCtx) {
+						BMessage messages;
+						if (chatContext.FindMessage("messages", &messages) == B_OK) {
+							// Ricarichiamo il contesto pulito senza il messaggio fallito
+							load_or_create_chat_context(contextID.String(), &chatContext, pluginName.String(), modelName.String());
+						}
+					}
+
 					r.AddString("error", "plugin generation failed");
 					r.AddInt32("status", rc);
 				}
@@ -1031,7 +1093,7 @@ public:
 				BString contextId = msg->FindString("context_id");
 				BMessage reply(B_REPLY);
 				reply.AddInt32("status", B_OK); // Default: non interrotto
-	
+
 				if (!contextId.IsEmpty()) {
 					for (auto& pair : gSessions) { 
 						if (pair.second.context_id == contextId) {
@@ -1612,14 +1674,14 @@ public:
 					}
 
 					// 3. Notifichiamo il plugin attivo del nuovo modello scelto
-					for (auto &pe : gPlugins) {
+					/*for (auto &pe : gPlugins) {
 						if (s.plugin == pe.name) {
 							if (pe.set_model && s.model.Length() > 0) {
 								pe.set_model(pe.instance, s.model.String());
 							}
 							break;
 						}
-					}
+					}*/
 				}
 
 				BMessage r('RLOD');
