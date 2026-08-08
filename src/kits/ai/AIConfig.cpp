@@ -306,8 +306,7 @@ bool LoadAISettings(AISettings& out)
     }
     
     if (m.FindString("base_url", &s) == B_OK) out.base_url = s;
-    // New: provider and base_url_override (allows editing base_url for remote plugins)
-    if (m.FindString("provider", &s) == B_OK) out.provider = s;
+    if (m.FindString("dialect", &s) == B_OK) out.dialect = s;
     if (m.FindBool("base_url_override", &out.base_url_override) != B_OK) {
         out.base_url_override = false;
     }
@@ -334,8 +333,7 @@ bool SaveAISettings(const AISettings& settings)
     m.AddString("plugin", settings.plugin.String());
     m.AddString("model", settings.model.String());
     m.AddString("base_url", settings.base_url.String());
-    // New: persist provider and override flag
-    m.AddString("provider", settings.provider.String());
+    m.AddString("dialect", settings.dialect.String());
     m.AddBool("base_url_override", settings.base_url_override);
     m.AddBool("use_remote_context", settings.use_remote_context);
     m.AddInt32("mcp_permissions", (int32)settings.mcp_permissions);

@@ -127,6 +127,10 @@ static void load_plugins(const char* dirpath)
 		configMsg.AddString("plugin", s.plugin.String());
 		configMsg.AddString("model_name", s.model.String()); // Usiamo "model_name" coerente con il contesto
 		configMsg.AddString("api_key", s.api_key.String());
+		configMsg.AddString("base_url", s.base_url.String());
+		if (pType == "local") {
+			configMsg.AddString("dialect", s.dialect.String());
+		}
 
 		// 3. Inizializziamo l'istanza passando il puntatore al BMessage
 		ai_plugin_t inst = init();
@@ -368,6 +372,8 @@ public:
 				const char* reqPlugin = msg->FindString("plugin");
 				const char* reqModel = msg->FindString("model");
 				const char* reqKey = msg->FindString("api_key");
+				const char* reqBaseUrl = msg->FindString("base_url");
+				const char* reqDialect = msg->FindString("dialect");
 				
 				AISettings globalSettings;
 				bool availableGlobalSettings = false;
@@ -389,6 +395,18 @@ public:
 						session.custom_api_key = globalSettings.api_key;
 						session.useRemoteContext = globalSettings.use_remote_context;
 					}
+				}
+				
+				if (reqBaseUrl && strlen(reqBaseUrl) > 0) {
+					session.base_url = reqBaseUrl;
+				} else if (availableGlobalSettings) {
+					session.base_url = globalSettings.base_url;
+				}
+
+				if (reqDialect && strlen(reqDialect) > 0) {
+					session.dialect = reqDialect;
+				} else if (availableGlobalSettings) {
+					session.dialect = globalSettings.dialect;
 				}
 
 				// Determina useRemoteContext dal context file salvato:
@@ -423,14 +441,14 @@ public:
 				//	}
 				//}
 				if (availableGlobalSettings) {
-    				mcpPermissions = globalSettings.mcp_permissions;
+					mcpPermissions = globalSettings.mcp_permissions;
 				}
 
 				// 3. (Opzionale) Se il client vuole auto-limitarsi ulteriormente, può farlo,
 				// ma non potrà MAI ottenere più permessi di quelli concessi dal server.
 				int32 clientRequestedPermissions = 0;
 				if (msg->FindInt32("mcp_permissions", &clientRequestedPermissions) == B_OK) {
-				    mcpPermissions &= clientRequestedPermissions; // Intersezione bit a bit
+					mcpPermissions &= clientRequestedPermissions; // Intersezione bit a bit
 				}
 
 				session.mcp_permissions = mcpPermissions;
@@ -510,11 +528,35 @@ public:
 					BString pluginName;
 					BString modelName;
 					BString remoteId;
+					BString baseUrl;
+					BString dialect;
 
 					
 					chatContext.FindString("plugin_name", &pluginName);
 					chatContext.FindString("model_name", &modelName);
 					chatContext.FindString("remote_id", &remoteId);
+					
+					bool foundInSession = false;
+					if (sessionID != -1 && gSessions.count(sessionID) > 0) {
+						ClientSession& session = gSessions[sessionID];
+						baseUrl = session.base_url;
+						dialect = session.dialect;
+						foundInSession = true;
+					}
+
+					if (!foundInSession || baseUrl.IsEmpty()) {
+						if (chatContext.FindString("base_url", &baseUrl) != B_OK) {
+							AISettings globalSettings;
+							if (LoadAISettings(globalSettings)) baseUrl = globalSettings.base_url;
+						}
+					}
+
+					if (!foundInSession || dialect.IsEmpty()) {
+						if (chatContext.FindString("dialect", &dialect) != B_OK) {
+							AISettings globalSettings;
+							if (LoadAISettings(globalSettings)) dialect = globalSettings.dialect;
+						}
+					}
 
 					if (check_update_context_title(&chatContext)) {
 						save_chat_context(contextID.String(), &chatContext);
@@ -528,6 +570,23 @@ public:
 					reply.AddString("title", title.String());
 					reply.AddString("plugin_name", pluginName.String());
 					reply.AddString("model_name", modelName.String());
+					// Rispondi con base_url
+					if (!baseUrl.IsEmpty()) {
+						reply.AddString("base_url", baseUrl.String());
+					}
+
+					// Determina il tipo di plugin per inviare "dialect" SOLO se è "local"
+					BString pType = "remote";
+					for (const auto& pe : gPlugins) {
+						if (pe.name == pluginName) {
+							pType = pe.type;
+							break;
+						}
+					}
+
+					if (pType == "local" && !dialect.IsEmpty()) {
+						reply.AddString("dialect", dialect.String());
+					}
 					if (!remoteId.IsEmpty()) {
 						reply.AddString("remote_id", remoteId.String());
 					}
@@ -552,6 +611,20 @@ public:
 					sessionInfo.AddString("context_id", session.context_id.String());
 					sessionInfo.AddString("plugin_name", session.plugin_name.String());
 					sessionInfo.AddString("model_name", session.model_name.String());
+					if (session.base_url.Length() > 0) {
+						sessionInfo.AddString("base_url", session.base_url.String());
+					}
+					BString pType = "remote";
+					for (const auto& pe : gPlugins) {
+						if (pe.name == session.plugin_name) {
+							pType = pe.type;
+							break;
+						}
+					}
+
+					if (pType == "local" && session.dialect.Length() > 0) {
+						sessionInfo.AddString("dialect", session.dialect.String());
+					}
 
 					// Recuperiamo il titolo dal file di contesto usando la logica che hai già
 					BMessage chatContext;
@@ -602,6 +675,8 @@ public:
 				BString pluginName;
 				BString modelName;
 				BString apiKey;
+				BString baseUrl;
+				BString dialect;
 				BString contextID = "ctx_default";
 
 				// 1. Risoluzione dei parametri
@@ -630,6 +705,9 @@ public:
 					pluginName = session.plugin_name;
 					modelName = session.model_name;
 					apiKey = session.custom_api_key;
+					baseUrl = session.base_url;
+					dialect = session.dialect;
+
 					if (session.context_id.Length() > 0) {
 						contextID = session.context_id;
 					}
@@ -659,8 +737,23 @@ public:
 				// 2. Carichiamo on-demand il contesto BMessage da disco
 				BMessage* chatContext = new BMessage();
 				load_or_create_chat_context(contextID.String(), chatContext, pluginName.String(), modelName.String());
+			
+				// Fallback/Integrazione per base_url e dialect se non trovati dalla sessione
+				if (baseUrl.IsEmpty()) {
+					if (chatContext->FindString("base_url", &baseUrl) != B_OK) {
+						AISettings globalConf;
+						if (LoadAISettings(globalConf)) baseUrl = globalConf.base_url;
+					}
+				}
 
-				// Recupero della chiave se vuota
+				if (dialect.IsEmpty()) {
+					if (chatContext->FindString("dialect", &dialect) != B_OK) {
+						AISettings globalConf;
+						if (LoadAISettings(globalConf)) dialect = globalConf.dialect;
+					}
+				}
+
+				// Recupero della chiave API se vuota
 				if (apiKey.IsEmpty()) {
 					GetPluginAPIKey(p->name.String(), apiKey);
 				}
@@ -671,17 +764,17 @@ public:
 				chatContext->RemoveName("model_name");
 				chatContext->AddString("model_name", modelName.String());
 
-					// Aggiungiamo eventuale base_url dalle impostazioni globali per questo plugin
-					AISettings confAsync;
-					if (LoadAISettings(confAsync) && confAsync.plugin == pluginName) {
-						chatContext->RemoveName("base_url");
-						chatContext->AddString("base_url", confAsync.base_url.String());
-					} else {
-						chatContext->RemoveName("base_url");
-						chatContext->AddString("base_url", "");
-					}
+				// Aggiungiamo base_url
+				chatContext->RemoveName("base_url");
+				chatContext->AddString("base_url", baseUrl.String());
 
-				// 4. Propaghiamo use_remote_context
+				// Aggiungiamo dialect SOLO se il plugin risolto è di tipo "local"
+				chatContext->RemoveName("dialect");
+				if (p->type == "local" && !dialect.IsEmpty()) {
+					chatContext->AddString("dialect", dialect.String());
+				}
+
+				// 4. Propagazione use_remote_context
 				bool useRemoteCtxAsync = false;
 				if (sessionID != -1 && gSessions.count(sessionID) > 0) {
 					useRemoteCtxAsync = gSessions[sessionID].useRemoteContext;
@@ -697,7 +790,7 @@ public:
 				if (!useRemoteCtxAsync) {
 					chatContext->RemoveName("remote_id");
 					chatContext->AddString("remote_id", "");
-					
+		
 					// 5. In modalità locale salviamo subito il prompt dell'utente
 					append_message_to_context(chatContext, "user", prompt);
 					save_chat_context(contextID.String(), chatContext);
@@ -706,7 +799,7 @@ public:
 				// 6. Percorso temporaneo per lo stream
 				char tmpPath[PATH_MAX];
 				snprintf(tmpPath, sizeof(tmpPath), "/tmp/ai_stream_%d_%lu.tmp", (int)getpid(), (unsigned long)rand());
-
+			
 				chatContext->RemoveName("notify_path");
 				chatContext->AddString("notify_path", tmpPath);
 
@@ -715,28 +808,19 @@ public:
 				ack.AddString("status", "ok");
 				msg->SendReply(&ack);
 
-				// === INTEGRAZIONE MCP: Preparazione del contesto asincrono ===
-				//AsyncToolContext* mcpCtx = new AsyncToolContext();
-				//mcpCtx->clientTarget = target;
-				//mcpCtx->sessionID = sessionID;
-				//mcpCtx->contextID = contextID; // Nota: Se AsyncToolContext richiede std::string o const char*, usa contextID.String()
-
 				// Invocazione asincrona del plugin
 				ai_plugin_t instance = p->instance;
 				std::string promptCopy = prompt;
 				
-				//chatContext->AddPointer("mcp_context", mcpCtx);
 				chatContext->RemoveName("server_messenger");
 				chatContext->AddMessenger("server_messenger", be_app_messenger);
-				
-				// Passiamo mcpCtx come quarto argomento alla funzione
+	
 				int rc = p->generate_async(instance, promptCopy.c_str(), chatContext);
 				if (rc != 0) {
 					BMessage err(MSG_AI_ERROR);
 					err.AddString("error", "plugin async failed to start");
 					target.SendMessage(&err);
-					
-					//delete mcpCtx;			 // Pulizia del contesto MCP in caso di fallimento immediato
+		
 					delete chatContext;
 					break;
 				}
@@ -744,7 +828,7 @@ public:
 				int32 tokenLimit = 4000; 
 				msg->FindInt32("token_limit", &tokenLimit);
 
-				// 7. Lancio del thread Watcher locale modificato (Cattura mcpCtx nell'ambiente della lambda)
+				// 7. Lancio del thread Watcher
 				std::thread watcher([target, tmpPath = std::string(tmpPath), contextID, chatContext, tokenLimit, useRemoteCtxAsync]() mutable {
 					FILE* f = NULL;
 					size_t lastSize = 0;
@@ -763,7 +847,7 @@ public:
 								size_t r = fread(buf.data(), 1, toRead, f);
 								buf[r] = '\0';
 								lastSize += r;
-								
+					
 								BString s(buf.data());
 								int32 pos = s.FindFirst("<<STREAM_END>>");
 								if (pos != B_ERROR) {
@@ -776,14 +860,14 @@ public:
 										target.SendMessage(&out);
 										fullResponseAccumulator << part;
 									}
-									
+						
 									// Stream completato con successo
 									BMessage fin(MSG_AI_RESPONSE);
 									fin.AddString("response", fullResponseAccumulator.String());
 									fin.AddBool("complete", true);
 									fin.AddInt32("status", 0);
 									target.SendMessage(&fin);
-									
+						
 									// Pulizia metadati volatili prima del dump finale
 									chatContext->RemoveName("api_key");
 									chatContext->AddString("api_key", ""); 
@@ -802,7 +886,7 @@ public:
 										append_message_to_context(chatContext, "assistant", fullResponseAccumulator.String());
 										save_chat_context(contextID.String(), chatContext);
 									}
-									
+						
 									done = true;
 									break;
 								} else {
@@ -818,11 +902,11 @@ public:
 					}
 					if (f) fclose(f);
 					remove(tmpPath.c_str());
-					
+		
 					// == PULIZIA FINALE ASINCRONA ==
-					delete chatContext; // Liberiamo la memoria del contesto
+					delete chatContext;
 				});
-				
+	
 				watcher.detach();
 				break;
 			}
@@ -842,6 +926,8 @@ public:
 				BString pluginName;
 				BString modelName;
 				BString apiKey;
+				BString baseUrl;
+				BString dialect;
 				BString contextID = "ctx_default";
 				
 				status_t res = msg->FindInt32("session_id", &sessionID);
@@ -856,6 +942,9 @@ public:
 					pluginName = session.plugin_name;
 					modelName = session.model_name;
 					apiKey = session.custom_api_key;
+					baseUrl = session.base_url;
+					dialect = session.dialect;
+
 					if (session.context_id.Length() > 0) {
 						contextID = session.context_id;
 					}
@@ -875,6 +964,8 @@ public:
 						pluginName = globalSettings.plugin;
 						modelName = globalSettings.model;
 						apiKey = globalSettings.api_key;
+						if (baseUrl.IsEmpty()) baseUrl = globalSettings.base_url;
+						if (dialect.IsEmpty()) dialect = globalSettings.dialect;
 					}
 				}
 
@@ -892,6 +983,21 @@ public:
 				BMessage chatContext;
 				load_or_create_chat_context(contextID.String(), &chatContext, pluginName.String(), modelName.String());
 
+				// Fallback/Integrazione da file di contesto o settings se vuoti
+				if (baseUrl.IsEmpty()) {
+					if (chatContext.FindString("base_url", &baseUrl) != B_OK) {
+						AISettings globalConf;
+						if (LoadAISettings(globalConf)) baseUrl = globalConf.base_url;
+					}
+				}
+
+				if (dialect.IsEmpty()) {
+					if (chatContext.FindString("dialect", &dialect) != B_OK) {
+						AISettings globalConf;
+						if (LoadAISettings(globalConf)) dialect = globalConf.dialect;
+					}
+				}
+
 				// 2. Recupero API Key
 				if (apiKey.IsEmpty()) {
 					GetPluginAPIKey(p->name.String(), apiKey);
@@ -903,14 +1009,14 @@ public:
 				chatContext.RemoveName("model_name");
 				chatContext.AddString("model_name", modelName.String());
 
-				// 3b. Aggiungiamo eventuale base_url dalle impostazioni globali (se configurata per questo plugin)
-				AISettings conf;
-				if (LoadAISettings(conf) && conf.plugin == pluginName) {
-				    chatContext.RemoveName("base_url");
-				    chatContext.AddString("base_url", conf.base_url.String());
-				} else {
-				    chatContext.RemoveName("base_url");
-				    chatContext.AddString("base_url", "");
+				// Impostiamo base_url
+				chatContext.RemoveName("base_url");
+				chatContext.AddString("base_url", baseUrl.String());
+
+				// Impostiamo dialect SOLO se il plugin risolto è di tipo "local"
+				chatContext.RemoveName("dialect");
+				if (p->type == "local" && !dialect.IsEmpty()) {
+					chatContext.AddString("dialect", dialect.String());
 				}
 
 				// 4. Determiniamo l'autorità del contesto remoto
@@ -928,7 +1034,6 @@ public:
 				chatContext.AddBool("use_remote_context", useRemoteCtx);
 
 				// CORREZIONE 1: Se la sessione è forzata in LOCALE, puliamo l'eventuale remote_id residuo
-				// nel messaggio per evitare che il plugin si confonda.
 				if (!useRemoteCtx) {
 					chatContext.RemoveName("remote_id");
 					chatContext.AddString("remote_id", "");
@@ -961,9 +1066,6 @@ public:
 						const char* updatedRemoteId = nullptr;
 						if (chatContext.FindString("remote_id", &updatedRemoteId) == B_OK
 							&& updatedRemoteId && updatedRemoteId[0] != '\0') {
-							
-							// CORREZIONE 2: Usiamo direttamente chatContext senza ricaricarlo.
-							// In questo modo preserviamo i vecchi messaggi locali e aggiorniamo solo l'ID.
 							save_chat_context(contextID.String(), &chatContext);
 						}
 					} else {
@@ -981,347 +1083,347 @@ public:
 			}
 			case MSG_ABORT_SESSION:
 			{
-			    BString contextId = msg->FindString("context_id");
-			    if (!contextId.IsEmpty()) {
-			        // Cerchiamo la sessione attiva
-			        for (auto& pair : gSessions) { 
-			            if (pair.second.context_id == contextId) {
-			                pair.second.abort_requested = true; // Attiviamo il Kill Switch!
-			                fprintf(stderr, "[AI_SERVER] [KILL SWITCH] Richiesta di interruzione ricevuta per la sessione: %s\n", contextId.String());
+				BString contextId = msg->FindString("context_id");
+				if (!contextId.IsEmpty()) {
+					// Cerchiamo la sessione attiva
+					for (auto& pair : gSessions) { 
+						if (pair.second.context_id == contextId) {
+							pair.second.abort_requested = true; // Attiviamo il Kill Switch!
+							fprintf(stderr, "[AI_SERVER] [KILL SWITCH] Richiesta di interruzione ricevuta per la sessione: %s\n", contextId.String());
 
-			                BMessage reply(B_REPLY);
-			                reply.AddInt32("status", B_OK);
-			                msg->SendReply(&reply);
-			                break;
-			            }
-			        }
-			    }
-			    break;
+							BMessage reply(B_REPLY);
+							reply.AddInt32("status", B_OK);
+							msg->SendReply(&reply);
+							break;
+						}
+					}
+				}
+				break;
 			}
 			case MSG_CHECK_ABORT:
 			{
-			    BString contextId = msg->FindString("context_id");
-			    BMessage reply(B_REPLY);
-			    reply.AddInt32("status", B_OK); // Default: non interrotto
-    
-			    if (!contextId.IsEmpty()) {
-			        for (auto& pair : gSessions) { 
-			            if (pair.second.context_id == contextId) {
-			                if (pair.second.abort_requested) {
-			                    reply.AddInt32("status", B_CANCELED); // Segnala l'interruzione!
-			                }
-			                break;
-			            }
-			        }
-			    }
-			    msg->SendReply(&reply);
-			    break;
+				BString contextId = msg->FindString("context_id");
+				BMessage reply(B_REPLY);
+				reply.AddInt32("status", B_OK); // Default: non interrotto
+	
+				if (!contextId.IsEmpty()) {
+					for (auto& pair : gSessions) { 
+						if (pair.second.context_id == contextId) {
+							if (pair.second.abort_requested) {
+								reply.AddInt32("status", B_CANCELED); // Segnala l'interruzione!
+							}
+							break;
+						}
+					}
+				}
+				msg->SendReply(&reply);
+				break;
 			}
 			case MSG_EXECUTE_TOOL:
-            {
-                BString contextId = msg->FindString("context_id");
-                BString toolName = msg->FindString("name");
-                if (toolName.IsEmpty()) {
-                    toolName = msg->FindString("tool_name");
-                }
+			{
+				BString contextId = msg->FindString("context_id");
+				BString toolName = msg->FindString("name");
+				if (toolName.IsEmpty()) {
+					toolName = msg->FindString("tool_name");
+				}
 
-                BString argsJson = msg->FindString("args");
-                fprintf(stderr, "[AI_SERVER] Richiesta esecuzione tool '%s'\n", toolName.String());
+				BString argsJson = msg->FindString("args");
+				fprintf(stderr, "[AI_SERVER] Richiesta esecuzione tool '%s'\n", toolName.String());
 
-                BMessage reply(B_REPLY);
-                status_t resultStatus = B_ERROR;
-                BString resultOutput;
+				BMessage reply(B_REPLY);
+				status_t resultStatus = B_ERROR;
+				BString resultOutput;
 
-                // 1. Recupero della sessione attiva
-                ClientSession* session = nullptr;
-                for (auto& pair : gSessions) { 
-                    if (pair.second.context_id == contextId) {
-                        session = &pair.second;
-                        break;
-                    }
-                }
+				// 1. Recupero della sessione attiva
+				ClientSession* session = nullptr;
+				for (auto& pair : gSessions) { 
+					if (pair.second.context_id == contextId) {
+						session = &pair.second;
+						break;
+					}
+				}
 
-                if (session == nullptr) {
-                    reply.AddInt32("status", B_ENTRY_NOT_FOUND);
-                    reply.AddString("result", "{\"error\":\"Sessione non trovata\"}");
-                    msg->SendReply(&reply);
-                    break;
-                }
-                
-                // =========================================================================
-                // === INTEGRATIVE KILL SWITCH: INTERRUZIONE TRA UN COMANDO E L'ALTRO ===
-                // =========================================================================
-                if (session->abort_requested) {
-                    session->abort_requested = false; // Resettiamo il flag per le prossime chat
+				if (session == nullptr) {
+					reply.AddInt32("status", B_ENTRY_NOT_FOUND);
+					reply.AddString("result", "{\"error\":\"Sessione non trovata\"}");
+					msg->SendReply(&reply);
+					break;
+				}
+				
+				// =========================================================================
+				// === INTEGRATIVE KILL SWITCH: INTERRUZIONE TRA UN COMANDO E L'ALTRO ===
+				// =========================================================================
+				if (session->abort_requested) {
+					session->abort_requested = false; // Resettiamo il flag per le prossime chat
 
-                    fprintf(stderr, "[AI_SERVER] [KILL SWITCH] Loop interrotto dall'utente prima del tool '%s'!\n", toolName.String());
+					fprintf(stderr, "[AI_SERVER] [KILL SWITCH] Loop interrotto dall'utente prima del tool '%s'!\n", toolName.String());
 
-                    // Ritorniamo un errore specifico (B_CANCELED / Canceled)
-                    reply.AddInt32("status", B_CANCELED);
-        
-                    // Risposta JSON che dice a Gemini che l'operazione è stata cancellata
-                    reply.AddString("result", "{\"error\":\"Interrotto: L'utente ha annullato l'esecuzione dei comandi in background.\"}");
-                    msg->SendReply(&reply);
-                    break; 
-                }
-                // =========================================================================
+					// Ritorniamo un errore specifico (B_CANCELED / Canceled)
+					reply.AddInt32("status", B_CANCELED);
+		
+					// Risposta JSON che dice a Gemini che l'operazione è stata cancellata
+					reply.AddString("result", "{\"error\":\"Interrotto: L'utente ha annullato l'esecuzione dei comandi in background.\"}");
+					msg->SendReply(&reply);
+					break; 
+				}
+				// =========================================================================
 
-                // 2. CONTROLLO DI SICUREZZA: Il tool è registrato (quindi autorizzato dalla Preflet)?
-                BMessage* foundTool = nullptr;
-                int32 toolCount = session->mpcManager.CountItems();
-                for (int32 i = 0; i < toolCount; i++) {
-                    BMessage* tool = (BMessage*)session->mpcManager.ItemAt(i);
-                    if (tool && tool->FindString("name") == toolName) {
-                        foundTool = tool;
-                        break;
-                    }
-                }
+				// 2. CONTROLLO DI SICUREZZA: Il tool è registrato (quindi autorizzato dalla Preflet)?
+				BMessage* foundTool = nullptr;
+				int32 toolCount = session->mpcManager.CountItems();
+				for (int32 i = 0; i < toolCount; i++) {
+					BMessage* tool = (BMessage*)session->mpcManager.ItemAt(i);
+					if (tool && tool->FindString("name") == toolName) {
+						foundTool = tool;
+						break;
+					}
+				}
 
-                if (foundTool == nullptr) {
-                    reply.AddInt32("status", B_NAME_NOT_FOUND);
-                    reply.AddString("result", "{\"error\":\"Tool non consentito dalle impostazioni di sicurezza (Preflet)\"}");
-                    msg->SendReply(&reply);
-                    break;
-                }
+				if (foundTool == nullptr) {
+					reply.AddInt32("status", B_NAME_NOT_FOUND);
+					reply.AddString("result", "{\"error\":\"Tool non consentito dalle impostazioni di sicurezza (Preflet)\"}");
+					msg->SendReply(&reply);
+					break;
+				}
 
-                // 3. ESTRAZIONE ROBUSTA DEGLI ARGOMENTI (Normalizzazione per l'esecutore)
-                BMessage arguments;
-                if (msg->FindMessage("arguments", &arguments) != B_OK) {
-                    // FALLBACK RETROCOMPATIBILE: Se il client invia ancora la stringa JSON grezza
-                    if (!argsJson.IsEmpty()) {
-                        BString path, cmd, text, title, content, action, name, value, pattern;
-                        
-                        // 1. I percorsi e i comandi/pattern non devono MAI interpretare i caratteri di controllo (SEMPRE false)
-                        if (ExtractStringFromJson(argsJson.String(), "path", path, false) || 
-                            ExtractStringFromJson(argsJson.String(), "directory", path, false)) {
-                            arguments.AddString("path", path);
-                        }
-                        if (ExtractStringFromJson(argsJson.String(), "cmd", cmd, false) || 
-                            ExtractStringFromJson(argsJson.String(), "command", cmd, false)) {
-                            arguments.AddString("cmd", cmd);
-                        }
-                        if (ExtractStringFromJson(argsJson.String(), "pattern", pattern, false)) {
-                            arguments.AddString("pattern", pattern);
-                        }
+				// 3. ESTRAZIONE ROBUSTA DEGLI ARGOMENTI (Normalizzazione per l'esecutore)
+				BMessage arguments;
+				if (msg->FindMessage("arguments", &arguments) != B_OK) {
+					// FALLBACK RETROCOMPATIBILE: Se il client invia ancora la stringa JSON grezza
+					if (!argsJson.IsEmpty()) {
+						BString path, cmd, text, title, content, action, name, value, pattern;
+						
+						// 1. I percorsi e i comandi/pattern non devono MAI interpretare i caratteri di controllo (SEMPRE false)
+						if (ExtractStringFromJson(argsJson.String(), "path", path, false) || 
+							ExtractStringFromJson(argsJson.String(), "directory", path, false)) {
+							arguments.AddString("path", path);
+						}
+						if (ExtractStringFromJson(argsJson.String(), "cmd", cmd, false) || 
+							ExtractStringFromJson(argsJson.String(), "command", cmd, false)) {
+							arguments.AddString("cmd", cmd);
+						}
+						if (ExtractStringFromJson(argsJson.String(), "pattern", pattern, false)) {
+							arguments.AddString("pattern", pattern);
+						}
 
-                        // 2. Gestione intelligente per la scrittura di file o attributi BFS
-                        bool preserveRawData = (toolName == "create_file" || toolName == "manage_attribute");
-                        bool unescapeContent = !preserveRawData;
+						// 2. Gestione intelligente per la scrittura di file o attributi BFS
+						bool preserveRawData = (toolName == "create_file" || toolName == "manage_attribute");
+						bool unescapeContent = !preserveRawData;
 
-                        if (ExtractStringFromJson(argsJson.String(), "content", content, unescapeContent)) {
-                            arguments.AddString("content", content);
-                        }
-                        if (ExtractStringFromJson(argsJson.String(), "value", value, unescapeContent)) {
-                            arguments.AddString("value", value);
-                        }
+						if (ExtractStringFromJson(argsJson.String(), "content", content, unescapeContent)) {
+							arguments.AddString("content", content);
+						}
+						if (ExtractStringFromJson(argsJson.String(), "value", value, unescapeContent)) {
+							arguments.AddString("value", value);
+						}
 
-                        // 3. Campi testuali generici -> interpretazione attiva (SEMPRE true)
-                        if (ExtractStringFromJson(argsJson.String(), "text", text, true))       arguments.AddString("text", text);
-                        if (ExtractStringFromJson(argsJson.String(), "title", title, true))     arguments.AddString("title", title);
-                        if (ExtractStringFromJson(argsJson.String(), "action", action, true))   arguments.AddString("action", action);
-                        if (ExtractStringFromJson(argsJson.String(), "name", name, true))       arguments.AddString("name", name);
-                    }
-                } else {
-                    // ECCELLENTE: Il plugin ha inviato direttamente il BMessage analizzato in sicurezza.
-                    // I dati sono già perfetti in memoria. Applichiamo solo le normalizzazioni di naming dell'LLM.
-                    if (!arguments.HasString("path") && arguments.HasString("directory")) {
-                        arguments.AddString("path", arguments.FindString("directory"));
-                    }
-                    if (!arguments.HasString("cmd") && arguments.HasString("command")) {
-                        arguments.AddString("cmd", arguments.FindString("command"));
-                    }
-                }  
-                bool isCritical = false;
-                BString details = "";
+						// 3. Campi testuali generici -> interpretazione attiva (SEMPRE true)
+						if (ExtractStringFromJson(argsJson.String(), "text", text, true))	   arguments.AddString("text", text);
+						if (ExtractStringFromJson(argsJson.String(), "title", title, true))	 arguments.AddString("title", title);
+						if (ExtractStringFromJson(argsJson.String(), "action", action, true))   arguments.AddString("action", action);
+						if (ExtractStringFromJson(argsJson.String(), "name", name, true))	   arguments.AddString("name", name);
+					}
+				} else {
+					// ECCELLENTE: Il plugin ha inviato direttamente il BMessage analizzato in sicurezza.
+					// I dati sono già perfetti in memoria. Applichiamo solo le normalizzazioni di naming dell'LLM.
+					if (!arguments.HasString("path") && arguments.HasString("directory")) {
+						arguments.AddString("path", arguments.FindString("directory"));
+					}
+					if (!arguments.HasString("cmd") && arguments.HasString("command")) {
+						arguments.AddString("cmd", arguments.FindString("command"));
+					}
+				}  
+				bool isCritical = false;
+				BString details = "";
 
-                if (toolName == "run_terminal_command") {
-                    isCritical = true;
-                    const char* cmdToRun = arguments.FindString("cmd");
-                    details.SetToFormat("Vuole eseguire il comando terminale:\n\n  \"%s\"", 
-                                        cmdToRun ? cmdToRun : "N/A");
-                } 
-                else if (toolName == "create_file") {
-                    isCritical = true;
-                    const char* filePath = arguments.FindString("path");
-                    details.SetToFormat("Vuole creare o sovrascrivere il file:\n\n  \"%s\"", 
-                                        filePath ? filePath : "N/A");
-                } 
-                else if (toolName == "make_directory") {
-                    isCritical = true;
-                    const char* filePath = arguments.FindString("path");
-                    details.SetToFormat("Vuole creare la cartella:\n\n  \"%s\"", 
-                                        filePath ? filePath : "N/A");
-                } 
-                else if (toolName == "delete_file") {
-                    isCritical = true;
-                    const char* filePath = arguments.FindString("path");
-                    details.SetToFormat("Vuole ELIMINARE definitivamente:\n\n  \"%s\"", 
-                                        filePath ? filePath : "N/A");
-                } 
-                else if (toolName == "open_document") {
-                    isCritical = true;
-                    const char* filePath = arguments.FindString("path");
-                    details.SetToFormat("Vuole aprire il documento o avviare l'applicazione:\n\n  \"%s\"", 
-                                        filePath ? filePath : "N/A");
-                } 
-                else if (toolName == "show_alert_dialog") {
-                    isCritical = true;
-                    const char* text = arguments.FindString("text");
-                    details.SetToFormat("Vuole mostrare un messaggio di avviso a schermo:\n\n  \"%s\"", 
-                                        text ? text : "N/A");
-                } 
-                else if (toolName == "manage_attribute") {
-                    // Questa è un'operazione BFS speciale: controlliamo l'azione richiesta!
-                    const char* action = arguments.FindString("action");
-                    if (action && strcmp(action, "write") == 0) {
-                        isCritical = true;
-                        const char* filePath = arguments.FindString("path");
-                        const char* attrName = arguments.FindString("name");
-                        const char* attrValue = arguments.FindString("value");
-                        details.SetToFormat(
-                            "Vuole scrivere l'attributo BFS '%s' con valore '%s'\n"
-                            "sul file:\n\n  \"%s\"", 
-                            attrName ? attrName : "N/A", 
-                            attrValue ? attrValue : "N/A", 
-                            filePath ? filePath : "N/A"
-                        );
-                    }
-                }
-                
-                if (isCritical) {
-                    BString alertText;
-                    alertText.SetToFormat(
-                        "L'assistente AI richiede l'autorizzazione per eseguire un'operazione critica.\n\n"
-                        "Strumento richiesto: %s\n"
-                        "%s\n\n"
-                        "Vuoi consentire questa operazione?",
-                        toolName.String(),
-                        details.String()
-                    );
+				if (toolName == "run_terminal_command") {
+					isCritical = true;
+					const char* cmdToRun = arguments.FindString("cmd");
+					details.SetToFormat("Vuole eseguire il comando terminale:\n\n  \"%s\"", 
+										cmdToRun ? cmdToRun : "N/A");
+				} 
+				else if (toolName == "create_file") {
+					isCritical = true;
+					const char* filePath = arguments.FindString("path");
+					details.SetToFormat("Vuole creare o sovrascrivere il file:\n\n  \"%s\"", 
+										filePath ? filePath : "N/A");
+				} 
+				else if (toolName == "make_directory") {
+					isCritical = true;
+					const char* filePath = arguments.FindString("path");
+					details.SetToFormat("Vuole creare la cartella:\n\n  \"%s\"", 
+										filePath ? filePath : "N/A");
+				} 
+				else if (toolName == "delete_file") {
+					isCritical = true;
+					const char* filePath = arguments.FindString("path");
+					details.SetToFormat("Vuole ELIMINARE definitivamente:\n\n  \"%s\"", 
+										filePath ? filePath : "N/A");
+				} 
+				else if (toolName == "open_document") {
+					isCritical = true;
+					const char* filePath = arguments.FindString("path");
+					details.SetToFormat("Vuole aprire il documento o avviare l'applicazione:\n\n  \"%s\"", 
+										filePath ? filePath : "N/A");
+				} 
+				else if (toolName == "show_alert_dialog") {
+					isCritical = true;
+					const char* text = arguments.FindString("text");
+					details.SetToFormat("Vuole mostrare un messaggio di avviso a schermo:\n\n  \"%s\"", 
+										text ? text : "N/A");
+				} 
+				else if (toolName == "manage_attribute") {
+					// Questa è un'operazione BFS speciale: controlliamo l'azione richiesta!
+					const char* action = arguments.FindString("action");
+					if (action && strcmp(action, "write") == 0) {
+						isCritical = true;
+						const char* filePath = arguments.FindString("path");
+						const char* attrName = arguments.FindString("name");
+						const char* attrValue = arguments.FindString("value");
+						details.SetToFormat(
+							"Vuole scrivere l'attributo BFS '%s' con valore '%s'\n"
+							"sul file:\n\n  \"%s\"", 
+							attrName ? attrName : "N/A", 
+							attrValue ? attrValue : "N/A", 
+							filePath ? filePath : "N/A"
+						);
+					}
+				}
+				
+				if (isCritical) {
+					BString alertText;
+					alertText.SetToFormat(
+						"L'assistente AI richiede l'autorizzazione per eseguire un'operazione critica.\n\n"
+						"Strumento richiesto: %s\n"
+						"%s\n\n"
+						"Vuoi consentire questa operazione?",
+						toolName.String(),
+						details.String()
+					);
 
-                    // Mostriamo il BAlert nativo di Haiku
-                    BAlert* safetyAlert = new BAlert(
-                        "Sicurezza AI (MCP)",
-                        alertText.String(),
-                        "Rifiuta",      // Pulsante 0 (Ritorna 0, mappato su ESC/Default)
-                        "Consenti",     // Pulsante 1 (Ritorna 1)
-                        "Interrompi Loop AI",
-                        B_WIDTH_AS_USUAL,
-                        B_WARNING_ALERT // Icona di pericolo gialla
-                    );
-                    
-                    safetyAlert->SetShortcut(0, B_ESCAPE); // Esc per rifiutare al volo
-                    
-                    int32 choice = safetyAlert->Go();
-                    if (choice == 2) {
-                        // L'utente vuole fermare l'intera catena di ragionamento dell'AI!
-                        fprintf(stderr, "[AI_SERVER] [SICUREZZA] INTERRUZIONE FORZATA richiesta dall'utente.\n");
-                        
-                        // 1. Impostiamo un flag di interruzione sulla sessione in modo che il thread del plugin 
-                        // sappia che non deve più elaborare ulteriori risposte o loop.
-                        session->abort_requested = true; 
+					// Mostriamo il BAlert nativo di Haiku
+					BAlert* safetyAlert = new BAlert(
+						"Sicurezza AI (MCP)",
+						alertText.String(),
+						"Rifiuta",	  // Pulsante 0 (Ritorna 0, mappato su ESC/Default)
+						"Consenti",	 // Pulsante 1 (Ritorna 1)
+						"Interrompi Loop AI",
+						B_WIDTH_AS_USUAL,
+						B_WARNING_ALERT // Icona di pericolo gialla
+					);
+					
+					safetyAlert->SetShortcut(0, B_ESCAPE); // Esc per rifiutare al volo
+					
+					int32 choice = safetyAlert->Go();
+					if (choice == 2) {
+						// L'utente vuole fermare l'intera catena di ragionamento dell'AI!
+						fprintf(stderr, "[AI_SERVER] [SICUREZZA] INTERRUZIONE FORZATA richiesta dall'utente.\n");
+						
+						// 1. Impostiamo un flag di interruzione sulla sessione in modo che il thread del plugin 
+						// sappia che non deve più elaborare ulteriori risposte o loop.
+						session->abort_requested = true; 
 
-                        // 2. Notifichiamo il client dell'interruzione forzata
-                        if (session->client_target.IsValid()) {
-                            BMessage notifyMsg(MSG_AI_RESPONSE);
-                            notifyMsg.AddString("partial", "\n🛑 [Loop di elaborazione INTERROTTO dall'utente]\n");
-                            notifyMsg.AddBool("complete", false);
-                            session->client_target.SendMessage(&notifyMsg);
-                        }
+						// 2. Notifichiamo il client dell'interruzione forzata
+						if (session->client_target.IsValid()) {
+							BMessage notifyMsg(MSG_AI_RESPONSE);
+							notifyMsg.AddString("partial", "\n🛑 [Loop di elaborazione INTERROTTO dall'utente]\n");
+							notifyMsg.AddBool("complete", false);
+							session->client_target.SendMessage(&notifyMsg);
+						}
 
-                        // 3. Rispondiamo con un errore fatale che costringe il client a chiudere la chiamata
-                        reply.AddInt32("status", B_CANCELED);
-                        reply.AddString("result", "{\"error\":\"Aborted: L'utente ha interrotto le operazioni di elaborazione dell'AI.\"}");
-                        msg->SendReply(&reply);
-                        break;
-                    }
-                    
-                    if (choice == 0) {
-                        // L'utente ha negato l'autorizzazione
-                        fprintf(stderr, "[AI_SERVER] [SICUREZZA] Accesso negato dall'utente per '%s'\n", toolName.String());
-                        
-                        // Notifichiamo il client del rifiuto
-                        if (session->client_target.IsValid()) {
-                            BString refuseNotify;
-                            refuseNotify.SetToFormat("\n❌ [Esecuzione %s RIFIUTATA dall'utente]\n", toolName.String());
-                            BMessage notifyMsg(MSG_AI_RESPONSE);
-                            notifyMsg.AddString("partial", refuseNotify.String());
-                            notifyMsg.AddBool("complete", false);
-                            session->client_target.SendMessage(&notifyMsg);
-                        }
+						// 3. Rispondiamo con un errore fatale che costringe il client a chiudere la chiamata
+						reply.AddInt32("status", B_CANCELED);
+						reply.AddString("result", "{\"error\":\"Aborted: L'utente ha interrotto le operazioni di elaborazione dell'AI.\"}");
+						msg->SendReply(&reply);
+						break;
+					}
+					
+					if (choice == 0) {
+						// L'utente ha negato l'autorizzazione
+						fprintf(stderr, "[AI_SERVER] [SICUREZZA] Accesso negato dall'utente per '%s'\n", toolName.String());
+						
+						// Notifichiamo il client del rifiuto
+						if (session->client_target.IsValid()) {
+							BString refuseNotify;
+							refuseNotify.SetToFormat("\n❌ [Esecuzione %s RIFIUTATA dall'utente]\n", toolName.String());
+							BMessage notifyMsg(MSG_AI_RESPONSE);
+							notifyMsg.AddString("partial", refuseNotify.String());
+							notifyMsg.AddBool("complete", false);
+							session->client_target.SendMessage(&notifyMsg);
+						}
 
-                        reply.AddInt32("status", B_PERMISSION_DENIED);
-                        reply.AddString("result", "{\"error\":\"Errore: L'utente di Haiku ha negato l'autorizzazione per eseguire questa azione di scrittura/modifica.\"}");
-                        msg->SendReply(&reply);
-                        break;
-                    }
-                    
-                    fprintf(stderr, "[AI_SERVER] [SICUREZZA] Accesso consentito dall'utente per '%s'\n", toolName.String());
-                }
+						reply.AddInt32("status", B_PERMISSION_DENIED);
+						reply.AddString("result", "{\"error\":\"Errore: L'utente di Haiku ha negato l'autorizzazione per eseguire questa azione di scrittura/modifica.\"}");
+						msg->SendReply(&reply);
+						break;
+					}
+					
+					fprintf(stderr, "[AI_SERVER] [SICUREZZA] Accesso consentito dall'utente per '%s'\n", toolName.String());
+				}
 
-                // --- NOTIFICA AL CLIENT DELL'ESECUZIONE IN TEMPO REALE ---
-                if (session && session->client_target.IsValid()) {
-                    BString notificationText;
-                    if (toolName == "run_terminal_command") {
-                        const char* cmdToRun = arguments.FindString("cmd");
-                        notificationText.SetToFormat("\n⚙️ [Esecuzione comando terminale: %s]\n", cmdToRun ? cmdToRun : "");
-                    } else if (toolName == "create_file") {
-                        const char* filePath = arguments.FindString("path");
-                        notificationText.SetToFormat("\n📝 [Creazione file: %s]\n", filePath ? filePath : "");
-                    } else if (toolName == "make_directory") {
-                        const char* filePath = arguments.FindString("path");
-                        notificationText.SetToFormat("\n📁 [Creazione cartella: %s]\n", filePath ? filePath : "");
-                    } else if (toolName == "delete_file") {
-                        const char* filePath = arguments.FindString("path");
-                        notificationText.SetToFormat("\n🗑️ [Eliminazione: %s]\n", filePath ? filePath : "");
-                    } else if (toolName == "open_document") {
-                        const char* filePath = arguments.FindString("path");
-                        notificationText.SetToFormat("\n🚀 [Apertura documento/app: %s]\n", filePath ? filePath : "");
-                    } else if (toolName == "show_alert_dialog") {
-                        const char* text = arguments.FindString("text");
-                        notificationText.SetToFormat("\n💬 [Mostra avviso: %s]\n", text ? text : "");
-                    } else if (toolName == "manage_attribute") {
-                        const char* action = arguments.FindString("action");
-                        const char* filePath = arguments.FindString("path");
-                        const char* attrName = arguments.FindString("name");
-                        notificationText.SetToFormat("\n🏷️ [Gestione attributo BFS '%s' (%s) su: %s]\n", 
-                            attrName ? attrName : "N/A", action ? action : "read", filePath ? filePath : "N/A");
-                    } else if (toolName == "read_file") {
-                        const char* filePath = arguments.FindString("path");
-                        notificationText.SetToFormat("\n📖 [Lettura file: %s]\n", filePath ? filePath : "");
-                    } else if (toolName == "list_directory") {
-                        const char* filePath = arguments.FindString("path");
-                        notificationText.SetToFormat("\n📂 [Elenco cartella: %s]\n", filePath ? filePath : "");
-                    } else if (toolName == "search_text") {
-                        const char* pattern = arguments.FindString("pattern");
-                        const char* filePath = arguments.FindString("path");
-                        notificationText.SetToFormat("\n🔍 [Ricerca pattern '%s' in: %s]\n", pattern ? pattern : "", filePath ? filePath : "");
-                    } else if (toolName == "get_system_stats") {
-                        notificationText = "\n📊 [Lettura statistiche di sistema]\n";
-                    } else {
-                        notificationText.SetToFormat("\n⚙️ [Esecuzione strumento: %s]\n", toolName.String());
-                    }
+				// --- NOTIFICA AL CLIENT DELL'ESECUZIONE IN TEMPO REALE ---
+				if (session && session->client_target.IsValid()) {
+					BString notificationText;
+					if (toolName == "run_terminal_command") {
+						const char* cmdToRun = arguments.FindString("cmd");
+						notificationText.SetToFormat("\n⚙️ [Esecuzione comando terminale: %s]\n", cmdToRun ? cmdToRun : "");
+					} else if (toolName == "create_file") {
+						const char* filePath = arguments.FindString("path");
+						notificationText.SetToFormat("\n📝 [Creazione file: %s]\n", filePath ? filePath : "");
+					} else if (toolName == "make_directory") {
+						const char* filePath = arguments.FindString("path");
+						notificationText.SetToFormat("\n📁 [Creazione cartella: %s]\n", filePath ? filePath : "");
+					} else if (toolName == "delete_file") {
+						const char* filePath = arguments.FindString("path");
+						notificationText.SetToFormat("\n🗑️ [Eliminazione: %s]\n", filePath ? filePath : "");
+					} else if (toolName == "open_document") {
+						const char* filePath = arguments.FindString("path");
+						notificationText.SetToFormat("\n🚀 [Apertura documento/app: %s]\n", filePath ? filePath : "");
+					} else if (toolName == "show_alert_dialog") {
+						const char* text = arguments.FindString("text");
+						notificationText.SetToFormat("\n💬 [Mostra avviso: %s]\n", text ? text : "");
+					} else if (toolName == "manage_attribute") {
+						const char* action = arguments.FindString("action");
+						const char* filePath = arguments.FindString("path");
+						const char* attrName = arguments.FindString("name");
+						notificationText.SetToFormat("\n🏷️ [Gestione attributo BFS '%s' (%s) su: %s]\n", 
+							attrName ? attrName : "N/A", action ? action : "read", filePath ? filePath : "N/A");
+					} else if (toolName == "read_file") {
+						const char* filePath = arguments.FindString("path");
+						notificationText.SetToFormat("\n📖 [Lettura file: %s]\n", filePath ? filePath : "");
+					} else if (toolName == "list_directory") {
+						const char* filePath = arguments.FindString("path");
+						notificationText.SetToFormat("\n📂 [Elenco cartella: %s]\n", filePath ? filePath : "");
+					} else if (toolName == "search_text") {
+						const char* pattern = arguments.FindString("pattern");
+						const char* filePath = arguments.FindString("path");
+						notificationText.SetToFormat("\n🔍 [Ricerca pattern '%s' in: %s]\n", pattern ? pattern : "", filePath ? filePath : "");
+					} else if (toolName == "get_system_stats") {
+						notificationText = "\n📊 [Lettura statistiche di sistema]\n";
+					} else {
+						notificationText.SetToFormat("\n⚙️ [Esecuzione strumento: %s]\n", toolName.String());
+					}
 
-                    if (!notificationText.IsEmpty()) {
-                        BMessage notifyMsg(MSG_AI_RESPONSE);
-                        notifyMsg.AddString("partial", notificationText.String());
-                        notifyMsg.AddBool("complete", false);
-                        session->client_target.SendMessage(&notifyMsg);
-                    }
-                }
+					if (!notificationText.IsEmpty()) {
+						BMessage notifyMsg(MSG_AI_RESPONSE);
+						notifyMsg.AddString("partial", notificationText.String());
+						notifyMsg.AddBool("complete", false);
+						session->client_target.SendMessage(&notifyMsg);
+					}
+				}
 
-                // 4. DELEGA ALL'ESECUTORE CENTRALE (mcp_manager.cpp)
-                fprintf(stderr, "[AI_SERVER] Sicurezza superata. Delegando esecuzione a ExecuteLocalTool per: '%s'\n", toolName.String());
-                
-                resultOutput = ExecuteLocalTool(toolName.String(), arguments);
-                resultStatus = B_OK;
+				// 4. DELEGA ALL'ESECUTORE CENTRALE (mcp_manager.cpp)
+				fprintf(stderr, "[AI_SERVER] Sicurezza superata. Delegando esecuzione a ExecuteLocalTool per: '%s'\n", toolName.String());
+				
+				resultOutput = ExecuteLocalTool(toolName.String(), arguments);
+				resultStatus = B_OK;
 
-                // 5. Risposta al plugin
-                reply.AddInt32("status", resultStatus);
-                reply.AddString("result", resultOutput);
-                msg->SendReply(&reply);
-                break;
-            }
+				// 5. Risposta al plugin
+				reply.AddInt32("status", resultStatus);
+				reply.AddString("result", resultOutput);
+				msg->SendReply(&reply);
+				break;
+			}
 			case MSG_MCP_GET_TOOLS:
 			{
 				// Estraiamo il context_id per capire quale sessione sta chiedendo i tool
@@ -1500,34 +1602,43 @@ public:
 				}
 
 				BMessage reply('MDBK'); // Models Back
-				char buffer[4096] = "[]"; 
+				char buffer[16384] = "[]"; // Aumentato a 16KB: le liste dei modelli (es. Ollama) possono essere molto lunghe!
 
 				// 1. Recuperiamo la chiave reale per questo plugin dal KeyStore
 				BString apiKey;
 				GetPluginAPIKey(pluginName.String(), apiKey);
 
-				// Recuperiamo eventuale base_url salvato nelle impostazioni per questo plugin
-				BString baseUrl = ""; 
+				// 2. Risoluzione di base_url e dialect
+				BString baseUrl = msg->FindString("base_url");
+				BString dialect = msg->FindString("dialect");
+
+				// Fallback sulle impostazioni salvate se non passati esplicitamente nel messaggio
 				AISettings s;
 				if (LoadAISettings(s) && s.plugin == pluginName) {
-					baseUrl = s.base_url;
+					if (baseUrl.IsEmpty()) {
+						baseUrl = s.base_url;
+					}
+					if (dialect.IsEmpty()) {
+						dialect = s.dialect;
+					}
 				}
 
-				// 2. Componiamo il BMessage nativo di configurazione al posto del vecchio JSON string
+				// 3. Componiamo il BMessage nativo di configurazione ('AISC') per il plugin
 				BMessage configMsg('AISC');
 				configMsg.AddString("api_key", apiKey.String());
 				configMsg.AddString("base_url", baseUrl.String());
+				configMsg.AddString("dialect", dialect.String());
 				configMsg.AddString("plugin", pluginName.String());
 
-				// 3. Cerchiamo il plugin specifico in memoria
+				// 4. Cerchiamo il plugin specifico in memoria
 				for (const auto& p : gPlugins) {
-					// Controllo flessibile sia sul nome foglia del path che sul nome registrato del plugin
 					BPath pth(p.path.c_str());
 					if (pluginName == pth.Leaf() || pluginName == p.name) {
 						if (p.list_models) {
-							fprintf(stderr, "[DEBUG SERVER] Richiesta modelli per '%s' tramite BMessage nativo...\n", p.name.String());
-                            
-							// 4. Passiamo il BMessage di configurazione e il buffer di destinazione
+							fprintf(stderr, "[DEBUG SERVER] Richiesta modelli per '%s' (url: '%s', dialect: '%s')...\n", 
+									p.name.String(), baseUrl.String(), dialect.String());
+							
+							// 5. Passiamo il BMessage di configurazione e il buffer di destinazione
 							if (p.list_models(&configMsg, buffer, sizeof(buffer)) != 0) {
 								strcpy(buffer, "[]");
 							}
@@ -1544,66 +1655,52 @@ public:
 				AISettings s;
 				int applied = 0;
 
-				// 1. Carichiamo le impostazioni globali aggiornate dal server
+				// 1. Carichiamo le impostazioni globali aggiornate da disco
 				if (LoadAISettings(s)) {
 					BString apiKey;
 					GetPluginAPIKey(s.plugin.String(), apiKey);
 
-					// 2. Controlliamo le sessioni attive per verificare quali usano il plugin da applicare
-					// e se hanno useCustomAPIKey impostato a false.
+					// 2. Aggiorniamo le sessioni attive che dipendono dalle impostazioni globali
 					for (auto& pair : gSessions) {
 						ClientSession& session = pair.second;
-						if (session.plugin_name == s.plugin && !session.useCustomAPIKey) {
-							// Recuperiamo il titolo della chat per mostrarlo nel BAlert
-							BString chatTitle = "New chat";
+
+						// Se la sessione non usava una API Key/configurazione totalmente customizzata dall'utente
+						if (!session.useCustomAPIKey) {
+							// Aggiorniamo la struttura in memoria
+							session.plugin_name = s.plugin;
+							session.model_name = s.model;
+							session.custom_api_key = apiKey;
+							session.base_url = s.base_url;
+							session.dialect = s.dialect;
+
+							// Aggiorniamo anche il contesto persistente (.chat) su disco
 							BMessage chatContext;
 							if (load_or_create_chat_context(session.context_id.String(), &chatContext) == B_OK) {
-								chatContext.FindString("title", &chatTitle);
+								chatContext.RemoveName("plugin_name");
+								chatContext.AddString("plugin_name", s.plugin.String());
+
+								chatContext.RemoveName("model_name");
+								chatContext.AddString("model_name", s.model.String());
+
+								chatContext.RemoveName("base_url");
+								chatContext.AddString("base_url", s.base_url.String());
+
+								chatContext.RemoveName("dialect");
+								chatContext.AddString("dialect", s.dialect.String());
+
+								save_chat_context(session.context_id.String(), &chatContext);
 							}
-
-							BString alertText;
-							alertText.SetToFormat(
-								"La sessione attiva \"%s\" sta usando il plugin \"%s\".\n\n"
-								"La configurazione globale è stata aggiornata.\n"
-								"Vuoi applicare il nuovo modello \"%s\" e la nuova configurazione a questa sessione?",
-								chatTitle.String(),
-								s.plugin.String(),
-								s.model.String()
-							);
-
-							BAlert* alert = new BAlert(
-								"Aggiorna Sessione AI",
-								alertText.String(),
-								"No",
-								"Sì",
-								nullptr,
-								B_WIDTH_AS_USUAL,
-								B_INFO_ALERT
-							);
-
-							if (alert->Go() == 1) {
-								session.model_name = s.model;
-								session.custom_api_key = apiKey;
-
-								// Aggiorniamo anche il file di contesto salvato su disco
-								if (load_or_create_chat_context(session.context_id.String(), &chatContext) == B_OK) {
-									chatContext.RemoveName("model_name");
-									chatContext.AddString("model_name", s.model.String());
-									save_chat_context(session.context_id.String(), &chatContext);
-								}
-								applied++;
-							}
+							applied++;
 						}
 					}
 
-					// Notifichiamo il plugin attivo del cambio di modello al volo
+					// 3. Notifichiamo il plugin attivo del nuovo modello scelto
 					for (auto &pe : gPlugins) {
 						if (s.plugin == pe.name) {
 							if (pe.set_model && s.model.Length() > 0) {
 								pe.set_model(pe.instance, s.model.String());
-								applied++;
 							}
-							break; // Trovato il plugin globale attivo, possiamo uscire dal ciclo
+							break;
 						}
 					}
 				}
@@ -1782,7 +1879,6 @@ int main(int argc, char** argv)
 
 	fprintf(stderr, "ai_server: main() avviato.\n");
 	AIServerApp app;
-	fprintf(stderr, "ai_server: Chiamata a app.Run()...\n");
 	app.Run();
 	fprintf(stderr, "ai_server: Server spento.\n");
 	return B_OK;

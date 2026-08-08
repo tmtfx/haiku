@@ -53,6 +53,9 @@ struct AISessionInfo {
     BString title;
     BString plugin_name;
     BString model_name;
+    BString base_url;
+    BString dialect;
+    BString remote_id;
 };
 
 
@@ -63,9 +66,15 @@ public:
     AIEngine(const char* contextID);
     
     // Inizializza ignorando la Preflet (es. per usare un plugin specifico in un'app)
-    AIEngine(const char* pluginName, const char* modelName, const char* apiKey = nullptr, uint32 mcpPermissions = AI_PERM_SYSTEM_DEFAULT);
-    AIEngine(const char* contextID, const char* pluginName, const char* modelName, const char* apiKey, uint32 mcpPermissions = AI_PERM_SYSTEM_DEFAULT);
-    
+    //AIEngine(const char* pluginName, const char* modelName, const char* apiKey = nullptr, uint32 mcpPermissions = AI_PERM_SYSTEM_DEFAULT);
+    //AIEngine(const char* contextID, const char* pluginName, const char* modelName, const char* apiKey, uint32 mcpPermissions = AI_PERM_SYSTEM_DEFAULT);
+    AIEngine(const char* pluginName, const char* modelName, const char* apiKey = nullptr,
+            const char* baseUrl = nullptr, const char* dialect = nullptr, 
+            uint32 mcpPermissions = AI_PERM_SYSTEM_DEFAULT);
+            
+    AIEngine(const char* contextID, const char* pluginName, const char* modelName, 
+            const char* apiKey = nullptr, const char* baseUrl = nullptr, 
+            const char* dialect = nullptr, uint32 mcpPermissions = AI_PERM_SYSTEM_DEFAULT);
     ~AIEngine();
 
     // Comandi Semplificati (Sincroni)
@@ -89,6 +98,8 @@ public:
     void        SetPlugin(const char* pluginName);
     void        SetModel(const char* modelName);
     void        SetApiKey(const char* apiKey);
+    void        SetBaseUrl(const char* baseUrl);
+    void        SetDialect(const char* dialect);
     status_t	SetMCPPermissions(uint32 permissions);
     uint32		GetMCPPermissions();
     
@@ -102,6 +113,8 @@ private:
     BString     fPlugin;
     BString     fModel;
     BString     fApiKey;
+    BString     fBaseUrl;
+    BString     fDialect;
     BMessenger  fServerMessenger;
     bool        fUseSystemSettings;
     bool        fUseRemoteContext;

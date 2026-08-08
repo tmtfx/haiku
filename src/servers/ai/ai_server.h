@@ -41,6 +41,9 @@ struct ClientSession {
     BList mpcManager;	// lista di messaggi che contengono le operazioni che può fare l'mpc
     volatile bool abort_requested = false;
     BMessenger client_target; // Messenger del client per notifiche in tempo reale (ad es. esecuzione tool)
+    
+    BString base_url;
+    BString dialect;
 };
 
 struct PluginEntry {

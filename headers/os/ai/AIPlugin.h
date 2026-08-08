@@ -12,6 +12,7 @@
 #include <Messenger.h>
 #include <stdlib.h>
 #include <new>
+#include <String.h>
 
 enum capabilities {
     AI_CAP_STREAMING			= 1 << 0,
@@ -21,18 +22,14 @@ enum capabilities {
 };
 
 struct AIPluginHandle {
-    char* base_url;
+    BString base_url;
 
     // Costruttore per inizializzare comodamente a nullptr
-    AIPluginHandle() : base_url(nullptr) {}
+    AIPluginHandle() : base_url("") {}
 
     // Un distruttore virtuale è FONDAMENTALE qui. 
     // Permette di liberare la memoria correttamente anche se usiamo l'ereditarietà!
-    virtual ~AIPluginHandle() {
-        if (base_url) {
-            free(base_url);
-        }
-    }
+    virtual ~AIPluginHandle() {}
 };
 
 struct AsyncArgs {

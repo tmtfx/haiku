@@ -53,6 +53,7 @@ static const uint32 MSG_CONTEXT_OPEN    = 'CTXO';
 static const uint32 MSG_TOGGLE_REM_CTX   = 'TGRC';
 static const uint32 MSG_BASE_URL_OVERRIDE = 'BOVR';
 static const uint32 MSG_SESSIONS_FETCHED = 'SFCH';
+static const uint32 MSG_DIALECT_CHANGED = 'DCHG';
 
 // Simple JSON array parser for flat arrays of strings: ["a","b"]
 static void parse_models_json(const char* json, BPopUpMenu* menu) {
@@ -252,14 +253,15 @@ PrefletWindow::PrefletWindow()
     // Nuovo campo: Base URL (per plugin locali/custom)
     fBaseUrlControl = new BTextControl("base_url", B_TRANSLATE("Base URL:"), "", nullptr);
 
-    // Provider selector (openai, anthropic, ollama, lm-studio, custom)
-    fProviderMenu = new BPopUpMenu("providers");
-    fProviderMenu->AddItem(new BMenuItem("openai", nullptr));
-    fProviderMenu->AddItem(new BMenuItem("anthropic", nullptr));
-    fProviderMenu->AddItem(new BMenuItem("ollama", nullptr));
-    fProviderMenu->AddItem(new BMenuItem("lm-studio", nullptr));
-    fProviderMenu->AddItem(new BMenuItem("custom", nullptr));
-    fProviderMenuField = new BMenuField("provider", B_TRANSLATE("Provider:"), fProviderMenu);
+    // Dialect selector (openai, anthropic, ollama, lm-studio, custom)
+    fDialectMenu = new BPopUpMenu("Select Dialect");
+    fDialectMenu->AddItem(new BMenuItem("OpenAI Compatible", new BMessage(MSG_DIALECT_CHANGED)));
+    fDialectMenu->AddItem(new BMenuItem("Anthropic Compatible", new BMessage(MSG_DIALECT_CHANGED)));
+    fDialectMenu->AddItem(new BMenuItem("LM Studio Native", new BMessage(MSG_DIALECT_CHANGED)));
+    fDialectMenu->AddItem(new BMenuItem("Custom / Native", new BMessage(MSG_DIALECT_CHANGED)));
+
+    // Aggiornata la label visibile da "Provider:" a "Dialect:"
+    fDialectMenuField = new BMenuField("dialectMenuField", "Dialect:", fDialectMenu);
 
     // Override checkbox to allow editing base_url also for remote plugins
     fBaseUrlOverrideCheckBox = new BCheckBox("base_url_override", B_TRANSLATE("Override remote Base URL (Advanced)"), new BMessage(MSG_BASE_URL_OVERRIDE));
@@ -293,7 +295,7 @@ PrefletWindow::PrefletWindow()
             .Add(fClearApiKeyButton)
         .End()
         .AddGroup(B_HORIZONTAL)
-            .Add(fProviderMenuField)
+            .Add(fDialectMenuField)
         .End()
         .AddGroup(B_HORIZONTAL)
             .Add(fBaseUrlControl)
@@ -733,9 +735,9 @@ void PrefletWindow::MessageReceived(BMessage* msg)
             else s.base_url.SetTo("");
 
             // 5c. Provider and override flag
-            BMenuItem* provMarked = fProviderMenu ? fProviderMenu->FindMarked() : nullptr;
-            if (provMarked) s.provider.SetTo(provMarked->Label());
-            else s.provider.SetTo("");
+            BMenuItem* provMarked = fDialectMenu ? fDialectMenu->FindMarked() : nullptr;
+            if (provMarked) s.dialect.SetTo(provMarked->Label());
+            else s.dialect.SetTo("");
 
             s.base_url_override = (fBaseUrlOverrideCheckBox && fBaseUrlOverrideCheckBox->Value() == B_CONTROL_ON);
 
@@ -830,15 +832,16 @@ void PrefletWindow::_UpdatePluginDetails()
     _UpdateClearButton();
 
     // 2b. Aggiorna Base URL, provider e stato override dal settings se presente
+    bool isLocalPlugin = (strcmp(item->Type(), "local") == 0);
+    
     AISettings s;
     if (LoadAISettings(s) && s.plugin == pluginName) {
         fBaseUrlControl->SetText(s.base_url.String());
-        // Provider selection
-        if (s.provider.Length() > 0 && fProviderMenu) {
-            BMenuItem* m = fProviderMenu->FindItem(s.provider.String());
+        if (s.dialect.Length() > 0 && fDialectMenu) {
+            BMenuItem* m = fDialectMenu->FindItem(s.dialect.String());
             if (m) m->SetMarked(true);
             else {
-                BMenuItem* custom = fProviderMenu->FindItem("custom");
+                BMenuItem* custom = fDialectMenu->FindItem("custom");
                 if (custom) custom->SetMarked(true);
             }
         }
@@ -850,13 +853,15 @@ void PrefletWindow::_UpdatePluginDetails()
     }
 
     // Abilitiamo/disabilitiamo il campo Base URL in base al tipo del plugin (local vs remote)
-    if (item && strcmp(item->Type(), "local") == 0) {
+    if (isLocalPlugin) {
         fBaseUrlControl->SetEnabled(true);
+        if (fDialectMenuField) fDialectMenuField->SetEnabled(true);
         if (fBaseUrlOverrideCheckBox) {
             fBaseUrlOverrideCheckBox->SetEnabled(false);
             fBaseUrlOverrideCheckBox->SetValue(B_CONTROL_OFF);
         }
     } else {
+    	if (fDialectMenuField) fDialectMenuField->SetEnabled(false);
         if (fBaseUrlOverrideCheckBox) fBaseUrlOverrideCheckBox->SetEnabled(true);
         bool ov = (fBaseUrlOverrideCheckBox && fBaseUrlOverrideCheckBox->Value() == B_CONTROL_ON);
         fBaseUrlControl->SetEnabled(ov);
