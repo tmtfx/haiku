@@ -493,13 +493,11 @@ extern "C" ai_plugin_t ai_plugin_init(void)
 extern "C" void
 ai_plugin_free(ai_plugin_t handle)
 {
-	AIPluginHandle* typedHandle = (AIPluginHandle*)handle;
-	if (typedHandle == NULL)
+	if (handle == NULL)
 		return;
-
-	if (typedHandle->base_url != NULL)
-		free(typedHandle->base_url);
-	free(typedHandle);
+		
+	AIPluginHandle* typedHandle = (AIPluginHandle*)handle;
+	delete typedHandle;
 }
 
 
@@ -518,7 +516,14 @@ ai_plugin_generate_text_sync(ai_plugin_t handle, const char* prompt,
 		return B_BAD_VALUE;
 
 	AIPluginHandle* typedHandle = (AIPluginHandle*)handle;
-	BString url = BuildChatUrl(typedHandle != NULL ? typedHandle->base_url : NULL);
+	if (typedHandle == NULL)
+        return B_BAD_VALUE;
+	//BString url = BuildChatUrl(typedHandle != NULL ? typedHandle->base_url : NULL);
+	const char* baseUrl = NULL;
+    if (contextMsg != NULL)
+        contextMsg->FindString("base_url", &baseUrl);
+
+    BString url = BuildChatUrl(baseUrl);
 
 	BString payload;
 	BuildPayloadFromContext(contextMsg, prompt, payload, false);
@@ -594,8 +599,10 @@ ai_plugin_generate_text_async(ai_plugin_t handle, const char* prompt,
 
 	const char* notifyPath = NULL;
 	const char* model = NULL;
+	const char* baseUrl = NULL;
 	contextMsg->FindString("notify_path", &notifyPath);
 	contextMsg->FindString("model_name", &model);
+	contextMsg->FindString("base_url", &baseUrl);
 
 	if (notifyPath == NULL || notifyPath[0] == '\0')
 		return B_BAD_VALUE;
@@ -607,7 +614,7 @@ ai_plugin_generate_text_async(ai_plugin_t handle, const char* prompt,
 	args->model = dupstr_or_null(
 		(model != NULL && model[0] != '\0') ? model : DEFAULT_OLLAMA_MODEL);
 	args->notify_path = dupstr_or_null(notifyPath);
-	args->base_url = typedHandle != NULL ? dupstr_or_null(typedHandle->base_url) : NULL;
+	args->base_url = dupstr_or_null(baseUrl);//typedHandle != NULL ? dupstr_or_null(typedHandle->base_url) : NULL;
 	args->context_copy = new BMessage(*contextMsg);
 	if (args->context_copy == NULL) {
 		FreeAsyncArgs(args);
@@ -722,5 +729,5 @@ ai_plugin_set_model(ai_plugin_t handle, const char* model_name)
 extern "C" const char*
 get_plugin_name(void)
 {
-	return "Ollama";
+	return "OllamaPlugin";
 }

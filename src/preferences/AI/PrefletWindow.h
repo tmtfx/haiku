@@ -65,9 +65,6 @@ private:
     BCheckBox* fFileSystemCheckBox;
     BCheckBox* fRunCommandsCheckBox;
 
-    // Provider selector and override for remote plugins
-    BPopUpMenu* fDialectMenu;
-    BMenuField*  fDialectMenuField;
     BCheckBox*   fBaseUrlOverrideCheckBox;
 
     // Sezione Centrale: Contesti

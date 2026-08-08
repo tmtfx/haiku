@@ -43,7 +43,6 @@ struct ClientSession {
     BMessenger client_target; // Messenger del client per notifiche in tempo reale (ad es. esecuzione tool)
     
     BString base_url;
-    BString dialect;
 };
 
 struct PluginEntry {

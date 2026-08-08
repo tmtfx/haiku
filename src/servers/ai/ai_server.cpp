@@ -128,9 +128,6 @@ static void load_plugins(const char* dirpath)
 		configMsg.AddString("model_name", s.model.String()); // Usiamo "model_name" coerente con il contesto
 		configMsg.AddString("api_key", s.api_key.String());
 		configMsg.AddString("base_url", s.base_url.String());
-		if (pType == "local") {
-			configMsg.AddString("dialect", s.dialect.String());
-		}
 
 		// 3. Inizializziamo l'istanza passando il puntatore al BMessage
 		ai_plugin_t inst = init();
@@ -373,7 +370,6 @@ public:
 				const char* reqModel = msg->FindString("model");
 				const char* reqKey = msg->FindString("api_key");
 				const char* reqBaseUrl = msg->FindString("base_url");
-				const char* reqDialect = msg->FindString("dialect");
 				
 				AISettings globalSettings;
 				bool availableGlobalSettings = false;
@@ -401,12 +397,6 @@ public:
 					session.base_url = reqBaseUrl;
 				} else if (availableGlobalSettings) {
 					session.base_url = globalSettings.base_url;
-				}
-
-				if (reqDialect && strlen(reqDialect) > 0) {
-					session.dialect = reqDialect;
-				} else if (availableGlobalSettings) {
-					session.dialect = globalSettings.dialect;
 				}
 
 				// Determina useRemoteContext dal context file salvato:
@@ -529,8 +519,6 @@ public:
 					BString modelName;
 					BString remoteId;
 					BString baseUrl;
-					BString dialect;
-
 					
 					chatContext.FindString("plugin_name", &pluginName);
 					chatContext.FindString("model_name", &modelName);
@@ -540,7 +528,6 @@ public:
 					if (sessionID != -1 && gSessions.count(sessionID) > 0) {
 						ClientSession& session = gSessions[sessionID];
 						baseUrl = session.base_url;
-						dialect = session.dialect;
 						foundInSession = true;
 					}
 
@@ -548,13 +535,6 @@ public:
 						if (chatContext.FindString("base_url", &baseUrl) != B_OK) {
 							AISettings globalSettings;
 							if (LoadAISettings(globalSettings)) baseUrl = globalSettings.base_url;
-						}
-					}
-
-					if (!foundInSession || dialect.IsEmpty()) {
-						if (chatContext.FindString("dialect", &dialect) != B_OK) {
-							AISettings globalSettings;
-							if (LoadAISettings(globalSettings)) dialect = globalSettings.dialect;
 						}
 					}
 
@@ -575,18 +555,6 @@ public:
 						reply.AddString("base_url", baseUrl.String());
 					}
 
-					// Determina il tipo di plugin per inviare "dialect" SOLO se è "local"
-					BString pType = "remote";
-					for (const auto& pe : gPlugins) {
-						if (pe.name == pluginName) {
-							pType = pe.type;
-							break;
-						}
-					}
-
-					if (pType == "local" && !dialect.IsEmpty()) {
-						reply.AddString("dialect", dialect.String());
-					}
 					if (!remoteId.IsEmpty()) {
 						reply.AddString("remote_id", remoteId.String());
 					}
@@ -613,17 +581,6 @@ public:
 					sessionInfo.AddString("model_name", session.model_name.String());
 					if (session.base_url.Length() > 0) {
 						sessionInfo.AddString("base_url", session.base_url.String());
-					}
-					BString pType = "remote";
-					for (const auto& pe : gPlugins) {
-						if (pe.name == session.plugin_name) {
-							pType = pe.type;
-							break;
-						}
-					}
-
-					if (pType == "local" && session.dialect.Length() > 0) {
-						sessionInfo.AddString("dialect", session.dialect.String());
 					}
 
 					// Recuperiamo il titolo dal file di contesto usando la logica che hai già
@@ -676,7 +633,6 @@ public:
 				BString modelName;
 				BString apiKey;
 				BString baseUrl;
-				BString dialect;
 				BString contextID = "ctx_default";
 
 				// 1. Risoluzione dei parametri
@@ -706,7 +662,6 @@ public:
 					modelName = session.model_name;
 					apiKey = session.custom_api_key;
 					baseUrl = session.base_url;
-					dialect = session.dialect;
 
 					if (session.context_id.Length() > 0) {
 						contextID = session.context_id;
@@ -738,18 +693,11 @@ public:
 				BMessage* chatContext = new BMessage();
 				load_or_create_chat_context(contextID.String(), chatContext, pluginName.String(), modelName.String());
 			
-				// Fallback/Integrazione per base_url e dialect se non trovati dalla sessione
+				// Fallback/Integrazione per base_url se non trovati dalla sessione
 				if (baseUrl.IsEmpty()) {
 					if (chatContext->FindString("base_url", &baseUrl) != B_OK) {
 						AISettings globalConf;
 						if (LoadAISettings(globalConf)) baseUrl = globalConf.base_url;
-					}
-				}
-
-				if (dialect.IsEmpty()) {
-					if (chatContext->FindString("dialect", &dialect) != B_OK) {
-						AISettings globalConf;
-						if (LoadAISettings(globalConf)) dialect = globalConf.dialect;
 					}
 				}
 
@@ -767,12 +715,6 @@ public:
 				// Aggiungiamo base_url
 				chatContext->RemoveName("base_url");
 				chatContext->AddString("base_url", baseUrl.String());
-
-				// Aggiungiamo dialect SOLO se il plugin risolto è di tipo "local"
-				chatContext->RemoveName("dialect");
-				if (p->type == "local" && !dialect.IsEmpty()) {
-					chatContext->AddString("dialect", dialect.String());
-				}
 
 				// 4. Propagazione use_remote_context
 				bool useRemoteCtxAsync = false;
@@ -927,7 +869,6 @@ public:
 				BString modelName;
 				BString apiKey;
 				BString baseUrl;
-				BString dialect;
 				BString contextID = "ctx_default";
 				
 				status_t res = msg->FindInt32("session_id", &sessionID);
@@ -943,7 +884,6 @@ public:
 					modelName = session.model_name;
 					apiKey = session.custom_api_key;
 					baseUrl = session.base_url;
-					dialect = session.dialect;
 
 					if (session.context_id.Length() > 0) {
 						contextID = session.context_id;
@@ -965,7 +905,6 @@ public:
 						modelName = globalSettings.model;
 						apiKey = globalSettings.api_key;
 						if (baseUrl.IsEmpty()) baseUrl = globalSettings.base_url;
-						if (dialect.IsEmpty()) dialect = globalSettings.dialect;
 					}
 				}
 
@@ -991,13 +930,6 @@ public:
 					}
 				}
 
-				if (dialect.IsEmpty()) {
-					if (chatContext.FindString("dialect", &dialect) != B_OK) {
-						AISettings globalConf;
-						if (LoadAISettings(globalConf)) dialect = globalConf.dialect;
-					}
-				}
-
 				// 2. Recupero API Key
 				if (apiKey.IsEmpty()) {
 					GetPluginAPIKey(p->name.String(), apiKey);
@@ -1012,12 +944,6 @@ public:
 				// Impostiamo base_url
 				chatContext.RemoveName("base_url");
 				chatContext.AddString("base_url", baseUrl.String());
-
-				// Impostiamo dialect SOLO se il plugin risolto è di tipo "local"
-				chatContext.RemoveName("dialect");
-				if (p->type == "local" && !dialect.IsEmpty()) {
-					chatContext.AddString("dialect", dialect.String());
-				}
 
 				// 4. Determiniamo l'autorità del contesto remoto
 				bool useRemoteCtx = false;
@@ -1608,9 +1534,8 @@ public:
 				BString apiKey;
 				GetPluginAPIKey(pluginName.String(), apiKey);
 
-				// 2. Risoluzione di base_url e dialect
+				// 2. Risoluzione di base_url
 				BString baseUrl = msg->FindString("base_url");
-				BString dialect = msg->FindString("dialect");
 
 				// Fallback sulle impostazioni salvate se non passati esplicitamente nel messaggio
 				AISettings s;
@@ -1618,16 +1543,12 @@ public:
 					if (baseUrl.IsEmpty()) {
 						baseUrl = s.base_url;
 					}
-					if (dialect.IsEmpty()) {
-						dialect = s.dialect;
-					}
 				}
 
 				// 3. Componiamo il BMessage nativo di configurazione ('AISC') per il plugin
 				BMessage configMsg('AISC');
 				configMsg.AddString("api_key", apiKey.String());
 				configMsg.AddString("base_url", baseUrl.String());
-				configMsg.AddString("dialect", dialect.String());
 				configMsg.AddString("plugin", pluginName.String());
 
 				// 4. Cerchiamo il plugin specifico in memoria
@@ -1635,8 +1556,8 @@ public:
 					BPath pth(p.path.c_str());
 					if (pluginName == pth.Leaf() || pluginName == p.name) {
 						if (p.list_models) {
-							fprintf(stderr, "[DEBUG SERVER] Richiesta modelli per '%s' (url: '%s', dialect: '%s')...\n", 
-									p.name.String(), baseUrl.String(), dialect.String());
+							fprintf(stderr, "[DEBUG SERVER] Richiesta modelli per '%s' (url: '%s')...\n", 
+									p.name.String(), baseUrl.String());
 							
 							// 5. Passiamo il BMessage di configurazione e il buffer di destinazione
 							if (p.list_models(&configMsg, buffer, sizeof(buffer)) != 0) {
@@ -1671,7 +1592,6 @@ public:
 							session.model_name = s.model;
 							session.custom_api_key = apiKey;
 							session.base_url = s.base_url;
-							session.dialect = s.dialect;
 
 							// Aggiorniamo anche il contesto persistente (.chat) su disco
 							BMessage chatContext;
@@ -1684,9 +1604,6 @@ public:
 
 								chatContext.RemoveName("base_url");
 								chatContext.AddString("base_url", s.base_url.String());
-
-								chatContext.RemoveName("dialect");
-								chatContext.AddString("dialect", s.dialect.String());
 
 								save_chat_context(session.context_id.String(), &chatContext);
 							}

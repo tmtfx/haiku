@@ -16,7 +16,6 @@ AIEngine::AIEngine()
       fModel(""),
       fApiKey(""),
       fBaseUrl(""),
-      fDialect(""),
       fUseSystemSettings(true),
       fUseRemoteContext(false),
       fSessionID(-1),
@@ -44,7 +43,6 @@ AIEngine::AIEngine(const char* contextID)
       fModel(""),
       fApiKey(""),
       fBaseUrl(""),
-      fDialect(""),
       fUseSystemSettings(true), 
       fUseRemoteContext(false),
       fSessionID(-1), 
@@ -68,12 +66,11 @@ AIEngine::AIEngine(const char* contextID)
 }
 
 AIEngine::AIEngine(const char* pluginName, const char* modelName, const char* apiKey, 
-                   const char* baseUrl, const char* dialect, uint32 mcpPermissions)
+                   const char* baseUrl, uint32 mcpPermissions)
     : fPlugin(pluginName ? pluginName : ""),
       fModel(modelName ? modelName : ""),
       fApiKey(apiKey ? apiKey : ""),
       fBaseUrl(baseUrl ? baseUrl : ""),
-      fDialect(dialect ? dialect : ""),
       fUseSystemSettings(false),
       fUseRemoteContext(false),
       fSessionID(-1),
@@ -84,7 +81,6 @@ AIEngine::AIEngine(const char* pluginName, const char* modelName, const char* ap
     if (fModel.Length() > 0)  msg.AddString("model", fModel);
     if (fApiKey.Length() > 0)  msg.AddString("api_key", fApiKey);
     if (fBaseUrl.Length() > 0) msg.AddString("base_url", fBaseUrl);
-    if (fDialect.Length() > 0) msg.AddString("dialect", fDialect);
 
     if (mcpPermissions != AI_PERM_SYSTEM_DEFAULT) {
         msg.AddInt32("mcp_permissions", (int32)mcpPermissions);
@@ -106,12 +102,11 @@ AIEngine::AIEngine(const char* pluginName, const char* modelName, const char* ap
 }
 
 AIEngine::AIEngine(const char* contextID, const char* pluginName, const char* modelName, 
-                   const char* apiKey, const char* baseUrl, const char* dialect, uint32 mcpPermissions)
+                   const char* apiKey, const char* baseUrl, uint32 mcpPermissions)
     : fPlugin(pluginName ? pluginName : ""),
       fModel(modelName ? modelName : ""),
       fApiKey(apiKey ? apiKey : ""),
       fBaseUrl(baseUrl ? baseUrl : ""),
-      fDialect(dialect ? dialect : ""),
       fUseSystemSettings(false),
       fUseRemoteContext(false),
       fSessionID(-1),
@@ -123,7 +118,6 @@ AIEngine::AIEngine(const char* contextID, const char* pluginName, const char* mo
     if (fContextID.Length() > 0) msg.AddString("context_id", fContextID);
     if (fApiKey.Length() > 0)  msg.AddString("api_key", fApiKey);
     if (fBaseUrl.Length() > 0) msg.AddString("base_url", fBaseUrl);
-    if (fDialect.Length() > 0) msg.AddString("dialect", fDialect);
 
     if (mcpPermissions != AI_PERM_SYSTEM_DEFAULT) {
         msg.AddInt32("mcp_permissions", (int32)mcpPermissions);
@@ -157,7 +151,6 @@ void AIEngine::SetPlugin(const char* pluginName) { fPlugin = pluginName ? plugin
 void AIEngine::SetModel(const char* modelName)   { fModel = modelName ? modelName : ""; fUseSystemSettings = false; }
 void AIEngine::SetApiKey(const char* apiKey)     { fApiKey = apiKey ? apiKey : ""; fUseSystemSettings = false; }
 void AIEngine::SetBaseUrl(const char* baseUrl)   { fBaseUrl = baseUrl ? baseUrl : ""; fUseSystemSettings = false; }
-void AIEngine::SetDialect(const char* dialect)   { fDialect = dialect ? dialect : ""; fUseSystemSettings = false; }
 
 void AIEngine::EnableRemoteContext(bool enable)
 {
@@ -227,7 +220,6 @@ AIEngine::_TalkToServer(BMessage* message, BMessage& reply, bigtime_t timeout)
         if (fModel.Length() > 0)   message->AddString("custom_model", fModel.String());
         if (fApiKey.Length() > 0)  message->AddString("custom_api_key", fApiKey.String());
         if (fBaseUrl.Length() > 0) message->AddString("custom_base_url", fBaseUrl.String());
-        if (fDialect.Length() > 0) message->AddString("custom_dialect", fDialect.String());
     }
 
     return fServerMessenger.SendMessage(message, &reply, timeout);
@@ -428,7 +420,6 @@ AIEngine::GetAllSessions(BList& outSessionsList)
             sessionInfo.FindString("plugin_name", &info->plugin_name);
             sessionInfo.FindString("model_name", &info->model_name);
             sessionInfo.FindString("base_url", &info->base_url);
-            sessionInfo.FindString("dialect", &info->dialect);
             sessionInfo.FindString("remote_id", &info->remote_id);
 
             outSessionsList.AddItem(info);

@@ -18,7 +18,6 @@ struct AISettings {
     BString model; // "llama3", "gpt-4o", ecc.
     BString api_key; // for remote engines
     BString base_url; // optional base url (for local plugins or custom endpoints)
-    BString dialect; // dialect type: "openai", "anthropic", "ollama", "lm-studio", "custom"
     bool    base_url_override; // allow editing base_url even for remote plugins when true
     bool    use_remote_context;
     uint32  mcp_permissions;
