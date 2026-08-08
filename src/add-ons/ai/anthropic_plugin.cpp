@@ -647,39 +647,37 @@ static void BuildAnthropicPayload(const BMessage* chatContext, const char* expli
     outPayload.Append("\n}");
 }
 
-/*
 class SyncListener : public BUrlProtocolListener {
 public:
-	virtual bool CertificateVerificationFailed(BUrlRequest* request,
-		BCertificate& certificate, const char* message)
-	{
-		(void)request;
-		(void)certificate;
-		(void)message;
-		return false;
-	}
+    virtual bool CertificateVerificationFailed(BUrlRequest* request,
+        BCertificate& certificate, const char* message)
+    {
+        (void)request;
+        (void)certificate;
+        (void)message;
+        return false;
+    }
 };
 
 
 class CompletionListener : public BUrlProtocolListener {
 public:
-	CompletionListener(const char* notifyPath)
-		:
-		fPath(notifyPath)
-	{
-	}
+    CompletionListener(const char* notifyPath)
+        :
+        fPath(notifyPath)
+    {
+    }
 
-	virtual void RequestCompleted(BUrlRequest* request, bool success)
-	{
-		(void)request;
-		(void)success;
-		WriteStreamEnd(fPath.String());
-	}
+    virtual void RequestCompleted(BUrlRequest* request, bool success)
+    {
+        (void)request;
+        (void)success;
+        WriteStreamEnd(fPath.String());
+    }
 
 private:
-	BString fPath;
+    BString fPath;
 };
-*/
 
 
 class AnthropicStreamTarget : public BDataIO {
@@ -1173,13 +1171,11 @@ ai_plugin_init(void)
 extern "C" void
 ai_plugin_free(ai_plugin_t handle)
 {
-	AIPluginHandle* typedHandle = (AIPluginHandle*)handle;
-	if (typedHandle == NULL)
+	if (handle == NULL)
 		return;
+	AIPluginHandle* typedHandle = (AIPluginHandle*)handle;
 
-	if (typedHandle->base_url != NULL)
-		free(typedHandle->base_url);
-	free(typedHandle);
+	delete typedHandle;
 }
 
 /*
