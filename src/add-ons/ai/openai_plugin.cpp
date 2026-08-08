@@ -25,28 +25,11 @@
 
 using namespace BPrivate::Network;
 
-// Prototipi di supporto in cima a openai_plugin.cpp
-/*static char* dupstr_or_null(const char* str)
-{
-    return str ? strdup(str) : nullptr;
-}*/
-
-// Se StreamTarget è una classe custom derivata da BDataIO / BUrlResultListener,
-// assicurati che la sua definizione preceda l'uso o spostala prima di openai_stream_thread_func.
-class StreamTarget;
-
+#define DEFAULT_OPENAI_BASE_URL "https://api.openai.com"
 
 struct OpenAIHandle : public AIPluginHandle {
-//struct AIPluginHandle {
-    BString apiKey;
-    OpenAIHandle()
-        : AIPluginHandle()
-    {
-        // Impostiamo l'URL di default
-        base_url = "https://api.openai.com";
-    }
-
-    virtual ~OpenAIHandle() override {}
+    OpenAIHandle() = default;
+    virtual ~OpenAIHandle() = default;
 };
 
 static void free_async_args(AsyncArgs* args) {
@@ -808,7 +791,7 @@ ai_plugin_generate_text_sync(ai_plugin_t handle,
                              size_t response_len,
                              BMessage* config)
 {
-    OpenAIHandle* h = static_cast<OpenAIHandle*>(handle);
+    //OpenAIHandle* h = static_cast<OpenAIHandle*>(handle);
     if (!config || !response_buf || response_len == 0)
         return B_ERROR;
 
@@ -825,8 +808,8 @@ ai_plugin_generate_text_sync(ai_plugin_t handle,
     
     const char* baseUrlRaw = nullptr;
     config->FindString("base_url", &baseUrlRaw);
-    if ((!baseUrlRaw || baseUrlRaw[0] == '\0') && h && h->base_url) {
-        baseUrlRaw = h->base_url;
+    if (!baseUrlRaw || baseUrlRaw[0] == '\0') {
+        baseUrlRaw = DEFAULT_OPENAI_BASE_URL;
     }
 
     bool useRemoteContext = false;
@@ -1027,7 +1010,8 @@ openai_stream_thread_func(void* data)
 {
 	BString baseUrl;
     BString targetUrl;
-    const char* configBaseUrl = nullptr;
+    BString tempUrl;
+    //const char* configBaseUrl = nullptr;
     
     fprintf(stderr, "[OPENAI STREAM WORKER] Thread avviato.\n");
     AsyncArgs* args = (AsyncArgs*)data;
@@ -1051,11 +1035,14 @@ openai_stream_thread_func(void* data)
     }
     
     // ESTRAZIONE GERARCHICA BASE URL (context_copy > args > default) ===
-    if (args->context_copy && args->context_copy->FindString("base_url", &configBaseUrl) == B_OK 
-        && configBaseUrl && configBaseUrl[0] != '\0') {
-        baseUrl = configBaseUrl;
-    } else if (args->base_url && args->base_url[0] != '\0') {
+    if (args->base_url && args->base_url[0] != '\0') {
         baseUrl = args->base_url;
+    } else if (args->context_copy && args->context_copy->FindString("base_url", &tempUrl) == B_OK 
+           && !tempUrl.IsEmpty()) {
+        baseUrl = tempUrl;
+    } else {
+        // 3. Fallback di sistema: macro #define
+        baseUrl = DEFAULT_OPENAI_BASE_URL;
     }
     
     // Costruzione dell'endpoint /chat/completions corretto
@@ -1148,7 +1135,7 @@ openai_stream_thread_func(void* data)
         }
 
         BHttpRequest* http = dynamic_cast<BHttpRequest*>(req);
-        BMallocIO* input = nullptr;
+        //BMallocIO* input = nullptr;
         if (http) {
             http->SetMethod(B_HTTP_POST);
             BHttpHeaders headers;
@@ -1158,7 +1145,7 @@ openai_stream_thread_func(void* data)
             headers.AddHeader("Authorization", authHeader.String());
             http->SetHeaders(headers);
             
-            input = new BMallocIO();
+            BMallocIO* input = new BMallocIO();
             input->WriteExactly(payload.String(), payload.Length());
             http->AdoptInputData(input, payload.Length());
         }
@@ -1169,7 +1156,7 @@ openai_stream_thread_func(void* data)
             wait_for_thread(netThread, &rc); 
         }
         delete req;
-        delete input; // Fix Leak
+        //delete input; // Fix Leak
 
         BString rawResponse((const char*)outNetworkData.Buffer(), outNetworkData.BufferLength());
         BMessage parsedJson;
@@ -1318,7 +1305,7 @@ fallback_to_standard:
         BUrlRequest* req = BUrlProtocolRoster::MakeRequest(bUrl, &streamTarget, &listener, NULL);
         if (req) {
             BHttpRequest* http = dynamic_cast<BHttpRequest*>(req);
-            BMemoryIO* input = nullptr;
+            //BMemoryIO* input = nullptr;
             if (http) {
                 http->SetMethod(B_HTTP_POST);
                 BHttpHeaders headers;
@@ -1328,7 +1315,7 @@ fallback_to_standard:
                 headers.AddHeader("Authorization", authHeader.String());
                 http->SetHeaders(headers);
 
-                input = new BMemoryIO(payload.String(), payload.Length());
+                BMemoryIO* input = new BMemoryIO(payload.String(), payload.Length());
                 http->AdoptInputData(input, payload.Length());
             }
             thread_id thread = req->Run();
@@ -1337,7 +1324,7 @@ fallback_to_standard:
                 wait_for_thread(thread, &rc); 
             }
             delete req;
-            delete input; // Fix Leak
+            //delete input; // Fix Leak
         }
     }
 }
@@ -1407,7 +1394,7 @@ thread_cleanup:
 }
 extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle, const char* prompt, BMessage* config)
 {
-    OpenAIHandle* h = static_cast<OpenAIHandle*>(handle);
+    //OpenAIHandle* h = static_cast<OpenAIHandle*>(handle);
     if (!config) return B_ERROR;
     
     const char* apiKey = nullptr;
@@ -1435,10 +1422,8 @@ extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle, const char
     // Gestione override base_url: config > handle
     if (configBaseUrl && configBaseUrl[0] != '\0') {
         args->base_url = dupstr_or_null(configBaseUrl);
-    } else if (h && h->base_url && h->base_url[0] != '\0') {
-        args->base_url = dupstr_or_null(h->base_url);
     } else {
-        args->base_url = nullptr;
+        args->base_url = strdup(DEFAULT_OPENAI_BASE_URL);
     }
 
     args->context_copy = new (std::nothrow) BMessage(*config);
@@ -1489,9 +1474,12 @@ extern "C" status_t ai_plugin_list_models(const BMessage* config, char* out_buf,
     }
 
     const char* apiKey = nullptr;
-    const char* baseUrl = nullptr;
     config->FindString("api_key", &apiKey);
-    config->FindString("base_url", &baseUrl);
+    BString baseUrl;
+    // Se FindString fallisce o trova una stringa vuota, usiamo la macro
+    if (config->FindString("base_url", &baseUrl) != B_OK || baseUrl.IsEmpty()) {
+        baseUrl = DEFAULT_OPENAI_BASE_URL;
+    }
 
     if (!apiKey || apiKey[0] == '\0') {
         if (strlen(defaultFallback) + 1 > out_len) return B_ERROR;
@@ -1500,17 +1488,17 @@ extern "C" status_t ai_plugin_list_models(const BMessage* config, char* out_buf,
     }
 
     // Costruzione dinamica dell'endpoint per i modelli
-    BString url;
-    if (baseUrl && baseUrl[0] != '\0') {
-        url = baseUrl;
-        if (url.EndsWith("/")) {
-            url.Remove(url.Length() - 1, 1);
-        }
-        if (!url.EndsWith("/models")) {
-            url << "/models";
-        }
-    } else {
-        url = "https://api.openai.com/v1/models";
+    BString url = baseUrl;
+    if (url.EndsWith("/")) {
+        url.Remove(url.Length() - 1, 1);
+    }
+
+    // Se la base url non contiene già "/v1", aggiungiamo il path completo,
+    // altrimenti accodiamo solo "/models"
+    if (!url.EndsWith("/v1") && !url.EndsWith("/models")) {
+        url << "/v1/models";
+    } else if (!url.EndsWith("/models")) {
+        url << "/models";
     }
 
     BMallocIO* out = new (std::nothrow) BMallocIO();
