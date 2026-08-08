@@ -31,20 +31,20 @@ static const uint32 MSG_RESET_PASSWORD = 'RSTP';
 static const uint32 MSG_CANCEL_RESET   = 'RSTC';
 
 // TODO: RIMUOVERE FINITO IL DEBUG
-#include <iomanip>
-#include <sstream>
+//#include <iomanip>
+//#include <sstream>
 
 // Helper locale per convertire buffer binari in stringhe esadecimali per i log
-static std::string _ShadowBufToHex(const uint8_t* buf, size_t len) {
-    std::ostringstream ss;
-    for (size_t i = 0; i < len; ++i)
-        ss << std::hex << std::setw(2) << std::setfill('0') << (int)buf[i];
-    return ss.str();
-}
+//static std::string _ShadowBufToHex(const uint8_t* buf, size_t len) {
+//    std::ostringstream ss;
+//    for (size_t i = 0; i < len; ++i)
+//        ss << std::hex << std::setw(2) << std::setfill('0') << (int)buf[i];
+//    return ss.str();
+//}
 // ************************************
 
 ResetMasterWindow::ResetMasterWindow(BWindow* parent)
-    : BWindow(BRect(150, 150, 500, 400), B_TRANSLATE("Reset Master Password"),
+    : BWindow(BRect(150, 150, 600, 500), B_TRANSLATE("Reset Master Password"),
         B_TITLED_WINDOW, B_NOT_RESIZABLE | B_NOT_ZOOMABLE | B_AUTO_UPDATE_SIZE_LIMITS),
       fParent(parent)
 {
@@ -157,7 +157,7 @@ void ResetMasterWindow::_OnReset()
 
 status_t ResetMasterWindow::_WriteMasterPasswordShadow(uint8* outSalt)
 {
-    fprintf(stderr, "\n[DEBUG SHADOW-WRITE] === INIZIO _WriteMasterPasswordShadow ===\n");
+    //fprintf(stderr, "\n[DEBUG SHADOW-WRITE] === INIZIO _WriteMasterPasswordShadow ===\n");
 
     BPath settingsDir;
     if (find_directory(B_USER_SETTINGS_DIRECTORY, &settingsDir) != B_OK) {
@@ -173,7 +173,7 @@ status_t ResetMasterWindow::_WriteMasterPasswordShadow(uint8* outSalt)
 
     const char* password = fPasswordControl->Text();
     size_t passLen = strlen(password);
-    fprintf(stderr, "[DEBUG SHADOW-WRITE] Password immessa: \"%s\" (Lunghezza: %zu)\n", password, passLen);
+    //fprintf(stderr, "[DEBUG SHADOW-WRITE] Password immessa: \"%s\" (Lunghezza: %zu)\n", password, passLen);
 
     uint8 salt[16];
     status_t err = crypto.GetRandomBytes(salt, sizeof(salt));
@@ -184,7 +184,7 @@ status_t ResetMasterWindow::_WriteMasterPasswordShadow(uint8* outSalt)
 
     // Passiamo il salt a _WriteKeystore
     memcpy(outSalt, salt, sizeof(salt));
-    fprintf(stderr, "[DEBUG SHADOW-WRITE] SALT unico generato (Hex): %s\n", _ShadowBufToHex(salt, 16).c_str());
+    //fprintf(stderr, "[DEBUG SHADOW-WRITE] SALT unico generato (Hex): %s\n", _ShadowBufToHex(salt, 16).c_str());
 
     size_t inputLen = passLen + sizeof(salt);
     uint8* input = new(std::nothrow) uint8[inputLen];
@@ -195,7 +195,7 @@ status_t ResetMasterWindow::_WriteMasterPasswordShadow(uint8* outSalt)
     
     memcpy(input, password, passLen);
     memcpy(input + passLen, salt, sizeof(salt));
-    fprintf(stderr, "[DEBUG SHADOW-WRITE] Dati concatenati (Pass+Salt Hex): %s\n", _ShadowBufToHex(input, inputLen).c_str());
+    //fprintf(stderr, "[DEBUG SHADOW-WRITE] Dati concatenati (Pass+Salt Hex): %s\n", _ShadowBufToHex(input, inputLen).c_str());
 
     uint8 hash[64];
     size_t hashLen = crypto.GetHashLength(B_CRYPTO_BLAKE2B);
@@ -212,7 +212,7 @@ status_t ResetMasterWindow::_WriteMasterPasswordShadow(uint8* outSalt)
         return err;
     }
 
-    fprintf(stderr, "[DEBUG SHADOW-WRITE] HASH BLAKE2b risultante (Hex): %s\n", _ShadowBufToHex(hash, hashLen).c_str());
+    //fprintf(stderr, "[DEBUG SHADOW-WRITE] HASH BLAKE2b risultante (Hex): %s\n", _ShadowBufToHex(hash, hashLen).c_str());
 
     BMessage shadow;
     shadow.AddData("salt", B_RAW_TYPE, salt, sizeof(salt));
@@ -222,7 +222,7 @@ status_t ResetMasterWindow::_WriteMasterPasswordShadow(uint8* outSalt)
     memset(hash, 0, sizeof(hash));
 
     BPath shadowPath(settingsDir.Path(), "shadow");
-    fprintf(stderr, "[DEBUG SHADOW-WRITE] Salvo il file shadow in: %s\n", shadowPath.Path());
+    //fprintf(stderr, "[DEBUG SHADOW-WRITE] Salvo il file shadow in: %s\n", shadowPath.Path());
 
     BFile shadowFile(shadowPath.Path(), B_WRITE_ONLY | B_CREATE_FILE | B_ERASE_FILE);
     if (shadowFile.InitCheck() != B_OK) {
@@ -230,7 +230,7 @@ status_t ResetMasterWindow::_WriteMasterPasswordShadow(uint8* outSalt)
     }
 
     err = shadow.Flatten(&shadowFile);
-    fprintf(stderr, "[DEBUG SHADOW-WRITE] === FINE _WriteMasterPasswordShadow (Esito: %s) ===\n\n", (err == B_OK ? "OK" : "ERR"));
+    //fprintf(stderr, "[DEBUG SHADOW-WRITE] === FINE _WriteMasterPasswordShadow (Esito: %s) ===\n\n", (err == B_OK ? "OK" : "ERR"));
 
     return err;
 }
