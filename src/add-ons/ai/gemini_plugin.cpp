@@ -277,13 +277,19 @@ void BuildPayloadFromContext(const BMessage* config, const char* currentPrompt, 
     bool first = true;
 
     BMessage messagesMsg;
+    bool hasHistory = false;
+    BMessage lastMsgItem;
+
     if (config && config->FindMessage("messages", &messagesMsg) == B_OK) {
+        hasHistory = true;
         BMessage msgItem;
         int32 i = 0;
         
         while (messagesMsg.FindMessage("msg", i, &msgItem) == B_OK || 
                messagesMsg.FindMessage(BString().SetToFormat("%d", i).String(), &msgItem) == B_OK) {
             
+            lastMsgItem = msgItem; // Salviamo l'ultimo messaggio processato
+
             const char* type = nullptr;
             msgItem.FindString("type", &type);
 
@@ -304,14 +310,11 @@ void BuildPayloadFromContext(const BMessage* config, const char* currentPrompt, 
                     cleanArgs = (argsStr && argsStr[0] != '\0' ? argsStr : "{}");
                 }
                 
-                // Assicuriamoci che i ritorni a capo reali non escapati dentro args (se presenti) 
-                // non spacchino la riga prima di arrivare a thought_signature
                 cleanArgs.ReplaceAll("\n", "\\n");
                 cleanArgs.ReplaceAll("\r", "\\r");
                 
                 BString tempCall;
                 if (thoughtSig && thoughtSig[0] != '\0') {
-                    // === FIX FONDAMENTALE: Applichiamo l'escape sul thought_signature ===
                     BString escapedThought = EscapeStringForJson(thoughtSig);
 
                     tempCall << "{\"role\":\"model\",\"parts\":[";
@@ -338,7 +341,6 @@ void BuildPayloadFromContext(const BMessage* config, const char* currentPrompt, 
                 if (respStr.StartsWith("{") && respStr.EndsWith("}")) {
                     formattedResponse = respStr;
                 } else {
-                    // Usiamo la funzione centralizzata anche qui
                     BString escapedResp = EscapeStringForJson(respStr.String());
                     formattedResponse.SetToFormat("{\"output\":\"%s\"}", escapedResp.String());
                 }
@@ -362,8 +364,6 @@ void BuildPayloadFromContext(const BMessage* config, const char* currentPrompt, 
                     if (!first) outPayload.Append(",");
                     
                     BString geminiRole = (strcmp(role, "assistant") == 0) ? "model" : "user";
-
-                    // Usiamo la funzione centralizzata
                     BString escapedContent = EscapeStringForJson(content);
 
                     BString objectStr;
@@ -378,16 +378,32 @@ void BuildPayloadFromContext(const BMessage* config, const char* currentPrompt, 
         }
     }
 
-    // Il prompt corrente viene aggiunto SEMPRE alla fine, se esiste
+    // Controlliamo se currentPrompt deve essere aggiunto oppure è già presente in fondo allo storico
     if (currentPrompt && currentPrompt[0] != '\0') {
-        if (!first) outPayload.Append(",");
-        
-        // Usiamo la funzione centralizzata
-        BString escapedPrompt = EscapeStringForJson(currentPrompt);
-        
-        BString objectStr;
-        objectStr.SetToFormat("{\"role\":\"user\",\"parts\":[{\"text\":\"%s\"}]}", escapedPrompt.String());
-        outPayload.Append(objectStr);
+        bool alreadyAppended = false;
+
+        if (hasHistory) {
+            const char* lastRole = nullptr;
+            const char* lastContent = nullptr;
+            lastMsgItem.FindString("role", &lastRole);
+            if (lastMsgItem.FindString("content", &lastContent) != B_OK) {
+                lastMsgItem.FindString("text", &lastContent);
+            }
+
+            if (lastRole && strcmp(lastRole, "user") == 0 &&
+                lastContent && strcmp(lastContent, currentPrompt) == 0) {
+                alreadyAppended = true;
+            }
+        }
+
+        if (!alreadyAppended) {
+            if (!first) outPayload.Append(",");
+            
+            BString escapedPrompt = EscapeStringForJson(currentPrompt);
+            BString objectStr;
+            objectStr.SetToFormat("{\"role\":\"user\",\"parts\":[{\"text\":\"%s\"}]}", escapedPrompt.String());
+            outPayload.Append(objectStr);
+        }
     }
 
     outPayload.Append("]");
@@ -550,24 +566,19 @@ extern "C" void ai_plugin_free(ai_plugin_t handle)
     AIPluginHandle* h = (AIPluginHandle*)handle;
     delete h;
 }
-
-extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
-                                             const char* prompt,
-                                             char* response_buf,
-                                             size_t response_len,
-                                             BMessage* config)
+extern "C" status_t 
+ai_plugin_generate_text_sync(ai_plugin_t handle,
+                             const char* prompt,
+                             char* response_buf,
+                             size_t response_len,
+                             BMessage* config)
 {
     fprintf(stderr, "[GEMINI PLUGIN] === INIZIO generate_text_sync ===\n");
-    
-    // Cast alla nuova struct condivisa ed elegante!
-    //AIPluginHandle* h = (AIPluginHandle*)handle;
     
     if (!config) {
         fprintf(stderr, "[GEMINI PLUGIN] ERRORE: il puntatore BMessage* config è NULL!\n");
         return B_ERROR;
     }
-    fprintf(stderr, "[GEMINI PLUGIN] Ispezione BMessage di configurazione ricevuto:\n");
-    config->PrintToStream();
     
     const char* apiKey = nullptr;
     const char* model = nullptr;
@@ -576,7 +587,7 @@ extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
     config->FindString("model_name", &model);
     config->FindString("base_url", &configBaseUrl);
 
-    if (!model || model[0] == '\0') model = "gemini-3.5-flash";
+    if (!model || model[0] == '\0') model = "gemini-1.5-flash";
     
     if (!apiKey || apiKey[0] == '\0') {
         fprintf(stderr, "[GEMINI PLUGIN] ERRORE CRITICO: api_key non trovata o vuota nel BMessage!\n");
@@ -584,14 +595,23 @@ extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
         return B_ERROR;
     }
     
+    // FIX LOGICA URL: Se configBaseUrl è fornito lo usiamo, altrimenti usiamo il default Google
     BString url;
-    if (!configBaseUrl || configBaseUrl[0] == '\0') {
-        url << configBaseUrl;
+    if (configBaseUrl && configBaseUrl[0] != '\0') {
+        url = configBaseUrl;
+        if (url.EndsWith("/")) url.Remove(url.Length() - 1, 1);
+        if (url.FindFirst(":generateContent") == B_ERROR) {
+            url << "/v1beta/models/" << model << ":generateContent";
+        }
     } else {
         url.SetToFormat("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent", model);
     }
-    url << "?key=" << apiKey;
-    //fprintf(stderr, "[GEMINI PLUGIN] Target URL (chiave oscurata): https://generativelanguage.googleapis.com/...:generateContent\n");
+    
+    if (url.FindFirst("?") != B_ERROR) {
+        url << "&key=" << apiKey;
+    } else {
+        url << "?key=" << apiKey;
+    }
     
     // Compiliamo il payload iniettando lo storico memorizzato nel BMessage
     BString payload;
@@ -602,12 +622,14 @@ extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
     SyncListener listener;
     BUrl bUrl(url.String(), true);
     
-    BUrlRequest* req = BUrlProtocolRoster::MakeRequest(bUrl, out, &listener, NULL);
+    // Istanziamo il BUrlContext per evitare crash/punti a vtable vuoti
+    BUrlContext context;
+    
+    BUrlRequest* req = BUrlProtocolRoster::MakeRequest(bUrl, out, &listener, &context);
     if (!req) {
         fprintf(stderr, "[GEMINI PLUGIN] ERRORE: BUrlProtocolRoster::MakeRequest ha fallito!\n");
         delete out; 
-        // Sì, serve! Scrivere l'errore nel buffer evita che il client usi dati casuali rimasti in memoria.
-        snprintf(response_buf, response_len, "{\"error\":\"request failed\"}"); 
+        snprintf(response_buf, response_len, "{\"error\":\"request creation failed\"}"); 
         return B_ERROR; 
     }
 
@@ -616,6 +638,8 @@ extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
         http->SetMethod(B_HTTP_POST);
         BMallocIO* in = new BMallocIO();
         in->WriteExactly(payload.String(), payload.Length());
+        
+        // http adotta 'in' e lo libererà da solo con il distruttore di req
         http->AdoptInputData(in, payload.Length());
         
         BHttpHeaders headers;
@@ -653,7 +677,9 @@ extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
     
     if (statusCode != 200) {
         fprintf(stderr, "[GEMINI PLUGIN] Dettaglio errore server remoto:\n%.*s\n", (int)len, (const char*)buf);
-        snprintf(response_buf, response_len, "{\"error\":\"http error %d\"}", (int)statusCode); 
+        size_t copy_len = len < response_len - 1 ? len : response_len - 1;
+        memcpy(response_buf, buf, copy_len);
+        response_buf[copy_len] = '\0';
         delete req; delete out; 
         return B_ERROR; 
     }
@@ -671,7 +697,7 @@ extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
             && candidateZero.FindMessage("content", &content) == B_OK
             && content.FindMessage("parts", &parts) == B_OK
             && parts.FindMessage("0", &partZero) == B_OK
-            && partZero.FindString("text", &extractedText) == B_OK) {
+            && partZero.FindString("text", &extractedText) == B_OK && extractedText != nullptr) {
             
             size_t textLen = strlen(extractedText);
             size_t copy_len = textLen < response_len - 1 ? textLen : response_len - 1;
@@ -689,8 +715,6 @@ extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
                 }
                 config->RemoveName("title");
                 config->AddString("title", autoTitle.String());
-            
-                // TODO: Qui notifichi l'applicazione principale (se necessario) che il BMessage config è aggiornato
             }
         }
     }
@@ -705,7 +729,7 @@ extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
     delete req; 
     delete out;
     fprintf(stderr, "[GEMINI PLUGIN] === FINE generate_text_sync ===\n\n");
-    return rc == B_OK ? 0 : -1;
+    return (rc == B_OK && statusCode == 200) ? B_OK : B_ERROR;
 }
 
 void ConvertBMessageToGeminiToolsJson(const BMessage* toolsMsg, BString& outJson)
