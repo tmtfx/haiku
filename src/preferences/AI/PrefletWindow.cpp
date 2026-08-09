@@ -657,10 +657,9 @@ void PrefletWindow::MessageReceived(BMessage* msg)
         }
         case MSG_BASE_URL_OVERRIDE: {
             // Toggle enabling of base URL when override checkbox changed
-            if (fBaseUrlOverrideCheckBox) {
-                bool ov = (fBaseUrlOverrideCheckBox->Value() == B_CONTROL_ON);
-                fBaseUrlControl->SetEnabled(ov);
-            }
+            bool ov = (fBaseUrlOverrideCheckBox->Value() == B_CONTROL_ON);
+            fBaseUrlControl->SetEnabled(ov);
+            
             break;
         }
         case MSG_SAVE: {
@@ -721,6 +720,15 @@ void PrefletWindow::MessageReceived(BMessage* msg)
             else s.base_url.SetTo("");
 
             s.base_url_override = (fBaseUrlOverrideCheckBox && fBaseUrlOverrideCheckBox->Value() == B_CONTROL_ON);
+            
+            if (s.base_url_override) {
+                // Se l'override è attivo, usiamo il testo inserito dall'utente
+                s.base_url = fBaseUrlControl->Text();
+            } else {
+                // Se l'override è DISATTIVATO, azzeriamo l'URL personalizzato
+                // così il sistema/plugin saprà di dovere usare il suo endpoint predefinito
+                s.base_url.Truncate(0); 
+            }
 
             // 6. Scrittura effettiva su disco
             if (SaveAISettings(s)) {                
