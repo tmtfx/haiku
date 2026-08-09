@@ -32,15 +32,6 @@
 typedef void* ai_plugin_t;
 
 using namespace BPrivate::Network;
-/*
-class SyncListener : public BUrlProtocolListener {
-public:
-    SyncListener() {}
-    virtual ~SyncListener() {}
-    bool CertificateVerificationFailed(BUrlRequest* request, BCertificate& certificate, const char* message) override {
-        return false; 
-    }
-};*/
 
 class StreamTarget : public BDataIO {
 public:
@@ -104,62 +95,6 @@ private:
     BFile   fFile;
     BString fBuffer;
 };
-/* in AINetworkPlugin.h
-class CompletionListener : public SyncListener {
-public:
-    CompletionListener(const char* notifyPath) : fPath(notifyPath) {}
-
-    virtual void RequestCompleted(BUrlRequest* caller, bool success) override {
-        BFile file(fPath.String(), B_WRITE_ONLY | B_OPEN_AT_END);
-        if (file.InitCheck() == B_OK) {
-            BString endMarker = "<<STREAM_END>>";
-            file.Write(endMarker.String(), endMarker.Length());
-        }
-    }
-private:
-    BString fPath;
-};
-*/
-/* usiamo la generica Handle in AIPlugin.h
-struct GeminiHandle {
-    char* base_url;
-};
-*/
-/* usiamo la generica AsyncArgs in AIPlugin.h
-struct GeminiAsyncArgs {
-    char* api_key;
-    char* model;
-    char* notify_path;
-    char* base_url;
-    BMessage* context_copy;
-    BMessenger server_messenger;
-};
-*/
-
-// Estrae in modo sicuro la sottostringa JSON dell'oggetto "args" bilanciando le parentesi graffe
-//versione buggata!!!
-/*
-BString ExtractArgsJson(const BString& json, int32 functionCallPos) {
-    int32 argsPos = json.FindFirst("\"args\"", functionCallPos);
-    if (argsPos == B_ERROR) return "{}";
-    int32 braceStart = json.FindFirst("{", argsPos);
-    if (braceStart == B_ERROR) return "{}";
-    
-    int32 depth = 0;
-    for (int32 i = braceStart; i < json.Length(); i++) {
-        char c = json.ByteAt(i);
-        if (c == '{') depth++;
-        else if (c == '}') {
-            depth--;
-            if (depth == 0) {
-                BString result;
-                json.CopyInto(result, braceStart, i - braceStart + 1);
-                return result;
-            }
-        }
-    }
-    return "{}";
-}*/
 
 void SerializeBMessageToJson(const BMessage* msg, BString& outJson) {
     outJson << "{";
@@ -264,6 +199,15 @@ BString ExtractArgsJson(const BString& json, int32 functionCallPos) {
         }
     }
     return "{}";
+}
+
+
+static char* dupstr_or_null(const char* s) {
+    if (!s) return nullptr;
+    size_t n = strlen(s) + 1;
+    char* p = (char*)malloc(n);
+    if (p) memcpy(p, s, n);
+    return p;
 }
 
 void AppendToolCallToContext(BMessage* context, const char* name, const BMessage* argsMsg, const char* thoughtSignature = nullptr) {
@@ -616,7 +560,7 @@ extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
     fprintf(stderr, "[GEMINI PLUGIN] === INIZIO generate_text_sync ===\n");
     
     // Cast alla nuova struct condivisa ed elegante!
-    AIPluginHandle* h = (AIPluginHandle*)handle;
+    //AIPluginHandle* h = (AIPluginHandle*)handle;
     
     if (!config) {
         fprintf(stderr, "[GEMINI PLUGIN] ERRORE: il puntatore BMessage* config è NULL!\n");
@@ -627,8 +571,10 @@ extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
     
     const char* apiKey = nullptr;
     const char* model = nullptr;
+    const char* configBaseUrl = nullptr;
     config->FindString("api_key", &apiKey);
     config->FindString("model_name", &model);
+    config->FindString("base_url", &configBaseUrl);
 
     if (!model || model[0] == '\0') model = "gemini-3.5-flash";
     
@@ -639,13 +585,13 @@ extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
     }
     
     BString url;
-    if (h && h->base_url && h->base_url[0]) {
-        url << h->base_url;
+    if (!configBaseUrl || configBaseUrl[0] == '\0') {
+        url << configBaseUrl;
     } else {
         url.SetToFormat("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent", model);
     }
     url << "?key=" << apiKey;
-    fprintf(stderr, "[GEMINI PLUGIN] Target URL (chiave oscurata): https://generativelanguage.googleapis.com/...:generateContent\n");
+    //fprintf(stderr, "[GEMINI PLUGIN] Target URL (chiave oscurata): https://generativelanguage.googleapis.com/...:generateContent\n");
     
     // Compiliamo il payload iniettando lo storico memorizzato nel BMessage
     BString payload;
@@ -761,270 +707,7 @@ extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
     fprintf(stderr, "[GEMINI PLUGIN] === FINE generate_text_sync ===\n\n");
     return rc == B_OK ? 0 : -1;
 }
-/*
-extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
-                                             const char* prompt,
-                                             char* response_buf,
-                                             size_t response_len,
-                                             BMessage* config)
-{
-	fprintf(stderr, "[GEMINI PLUGIN] === INIZIO generate_text_sync ===\n");
-    GeminiHandle* h = (GeminiHandle*)handle;
-    if (!config) {
-        fprintf(stderr, "[GEMINI PLUGIN] ERRORE: il puntatore BMessage* config è NULL!\n");
-        return B_ERROR;
-    }
-    fprintf(stderr, "[GEMINI PLUGIN] Ispezione BMessage di configurazione ricevuto:\n");
-    config->PrintToStream();
-    
-    const char* apiKey = nullptr;
-    const char* model = nullptr;
-    config->FindString("api_key", &apiKey);
-    config->FindString("model_name", &model);
 
-    if (!model || model[0] == '\0') model = "gemini-2.5-flash";
-    
-    if (!apiKey || apiKey[0] == '\0') {
-        fprintf(stderr, "[GEMINI PLUGIN] ERRORE CRITICO: api_key non trovata o vuota nel BMessage!\n");
-        snprintf(response_buf, response_len, "[gemini_plugin] error: no API key provided");
-        return B_ERROR;
-    }
-    
-    BString url;
-    if (h && h->base_url && h->base_url[0]) {
-        url << h->base_url;
-    } else {
-        url.SetToFormat("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent", model);
-    }
-    url << "?key=" << apiKey;
-    fprintf(stderr, "[GEMINI PLUGIN] Target URL (chiave oscurata): https://generativelanguage.googleapis.com/...:generateContent\n");
-    // Compiliamo il payload iniettando lo storico memorizzato nel BMessage
-    BString payload;
-    BuildPayloadFromContext(config, prompt, payload);
-    fprintf(stderr, "[GEMINI PLUGIN] Payload JSON generato:\n%s\n", payload.String());
-    
-    BMallocIO* out = new BMallocIO();
-    SyncListener listener;
-    BUrl bUrl(url.String(), true);
-    
-    BUrlRequest* req = BUrlProtocolRoster::MakeRequest(bUrl, out, &listener, NULL);
-    if (!req) {
-    	fprintf(stderr, "[GEMINI PLUGIN] ERRORE: BUrlProtocolRoster::MakeRequest ha fallito la creazione del client di rete!\n");
-        delete out; 
-        snprintf(response_buf, response_len, "{\"error\":\"request failed\"}"); // <--- Serve????
-        return B_ERROR; 
-    }
-
-    BHttpRequest* http = dynamic_cast<BHttpRequest*>(req);
-    if (http) {
-        http->SetMethod(B_HTTP_POST);
-        BMallocIO* in = new BMallocIO();
-        in->WriteExactly(payload.String(), payload.Length());
-        http->AdoptInputData(in, payload.Length());
-        
-        BHttpHeaders headers;
-        headers.AddHeader("Content-Type", "application/json");
-        http->SetHeaders(headers);
-    }
-
-    fprintf(stderr, "[GEMINI PLUGIN] Avvio richiesta HTTP di rete sincrona...\n");
-    thread_id thread = req->Run();
-    status_t rc = B_ERROR;
-    if (thread >= 0) {
-        wait_for_thread(thread, &rc);
-    } else {
-        rc = thread;
-    }
-    fprintf(stderr, "[GEMINI PLUGIN] Chiamata di rete conclusa. Thread return code: %d\n", (int)rc);
-
-    const void* buf = out->Buffer();
-    size_t len = out->BufferLength();
-    if (!buf || len == 0) { 
-        snprintf(response_buf, response_len, "{\"error\":\"empty response\"}"); 
-        delete req; delete out; 
-        return B_ERROR; 
-    }
-    fprintf(stderr, "[GEMINI PLUGIN] Buffer di risposta: %d byte ricevuti.\n", (int)len);
-    
-    
-    int32 statusCode = 0;
-    if (http) {
-        const BHttpResult* httpResult = dynamic_cast<const BHttpResult*>(&(http->Result()));
-        if (httpResult != nullptr) {
-            statusCode = httpResult->StatusCode();
-        }
-    }
-    fprintf(stderr, "[GEMINI PLUGIN] HTTP Status Code Server Google: %d\n", (int)statusCode);
-    
-    if (!buf || len == 0 || statusCode != 200) {
-        if (buf && len > 0) {
-            fprintf(stderr, "[GEMINI PLUGIN] Dettaglio errore server remoto:\n%.*s\n", (int)len, (const char*)buf);
-        }
-        snprintf(response_buf, response_len, "{\"error\":\"http error or empty response\"}"); 
-        delete req; delete out; 
-        return B_ERROR; 
-    }
-    
-    bool extractedSuccessfully = false;
-    BString rawResponse((const char*)buf, len);
-
-    if (statusCode == 200) {
-        BMessage parsedJson;
-        if (BJson::Parse(rawResponse.String(), parsedJson) == B_OK) {
-            BMessage candidates, candidateZero, content, parts, partZero;
-            const char* extractedText = nullptr;
-
-            if (parsedJson.FindMessage("candidates", &candidates) == B_OK
-                && candidates.FindMessage("0", &candidateZero) == B_OK
-                && candidateZero.FindMessage("content", &content) == B_OK
-                && content.FindMessage("parts", &parts) == B_OK
-                && parts.FindMessage("0", &partZero) == B_OK
-                && partZero.FindString("text", &extractedText) == B_OK) {
-                
-                size_t textLen = strlen(extractedText);
-                size_t copy_len = textLen < response_len - 1 ? textLen : response_len - 1;
-                memcpy(response_buf, extractedText, copy_len);
-                response_buf[copy_len] = '\0';
-                extractedSuccessfully = true;
-                fprintf(stderr, "[GEMINI PLUGIN] Testo estratto con successo dal JSON.\n");
-            }
-        }
-    }
-
-    if (!extractedSuccessfully) {
-        fprintf(stderr, "[GEMINI PLUGIN] ATTENZIONE: Parsing strutturato fallito, restituzione testo raw.\n");
-        size_t copy_len = len < response_len - 1 ? len : response_len - 1;
-        memcpy(response_buf, buf, copy_len);
-        response_buf[copy_len] = '\0';
-    }
-
-    delete req; delete out;
-    fprintf(stderr, "[GEMINI PLUGIN] === FINE generate_text_sync ===\n\n");
-    return rc == B_OK ? 0 : -1;
-}
-*/
-/*
-static status_t gemini_stream_thread_func(void* data)
-{
-    fprintf(stderr, "[GEMINI STREAM WORKER] Thread avviato.\n");
-    GeminiAsyncArgs* args = (GeminiAsyncArgs*)data;
-    
-    // 1. Controllo di sicurezza immediato prima di allocare oggetti nello stack
-    if (!args) return B_BAD_VALUE;
-
-    if (!args->api_key || args->api_key[0] == '\0') {
-        fprintf(stderr, "[GEMINI STREAM WORKER] ERRORE CRITICO: API key assente!\n");
-        if (args->notify_path) {
-            BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE);
-            BString endMarker = "<<STREAM_END>>";
-            streamFile.Write(endMarker.String(), endMarker.Length());
-        }
-        // Liberiamo la memoria ed usciamo subito in sicurezza senza goto
-        if (args->api_key) free(args->api_key);
-        if (args->model) free(args->model);
-        if (args->notify_path) free(args->notify_path);
-        if (args->base_url) free(args->base_url);
-        if (args->context_copy) delete args->context_copy;
-        free(args);
-        return B_ERROR;
-    }
-
-    // 2. Ora possiamo dichiarare in sicurezza le variabili nello stack
-    BString url;
-    if (args->base_url && args->base_url[0] != '\0') {
-        url << args->base_url;
-    } else {
-        url.SetToFormat("https://generativelanguage.googleapis.com/v1beta/models/%s:streamGenerateContent", args->model);
-    }
-    url << "?key=" << args->api_key;
-
-    BString payload;
-    BuildPayloadFromContext(args->context_copy, nullptr, payload);
-    fprintf(stderr, "[GEMINI STREAM WORKER] Payload Streaming generato:\n%s\n", payload.String());
-
-    {
-        StreamTarget streamTarget(args->notify_path);
-        CompletionListener listener(args->notify_path);
-        BUrl bUrl(url.String(), true);
-
-        BUrlRequest* req = BUrlProtocolRoster::MakeRequest(bUrl, &streamTarget, &listener, NULL);
-        if (req != nullptr) {
-            BHttpRequest* http = dynamic_cast<BHttpRequest*>(req);
-            if (http) {
-                http->SetMethod(B_HTTP_POST);
-                BHttpHeaders headers;
-                headers.AddHeader("Content-Type", "application/json");
-                http->SetHeaders(headers);
-
-                BMallocIO* input = new BMallocIO();
-                input->WriteExactly(payload.String(), payload.Length());
-                http->AdoptInputData(input, payload.Length());
-            }
-
-            fprintf(stderr, "[GEMINI STREAM WORKER] Esecuzione loop di streaming di rete...\n");
-            thread_id thread = req->Run();
-            if (thread >= 0) {
-                status_t rc;
-                wait_for_thread(thread, &rc);
-                fprintf(stderr, "[GEMINI STREAM WORKER] Streaming terminato (rc: %d).\n", (int)rc);
-            }
-            delete req;
-        } else {
-            fprintf(stderr, "[GEMINI STREAM WORKER] Errore di creazione della BUrlRequest di streaming.\n");
-            BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE);
-            BString endMarker = "<<STREAM_END>>";
-            streamFile.Write(endMarker.String(), endMarker.Length());
-        }
-    }
-
-    // 3. Cleanup standard all'uscita nominale
-    fprintf(stderr, "[GEMINI STREAM WORKER] Pulizia e chiusura thread worker.\n");
-    if (args->api_key) free(args->api_key);
-    if (args->model) free(args->model);
-    if (args->notify_path) free(args->notify_path);
-    if (args->base_url) free(args->base_url);
-    if (args->context_copy) delete args->context_copy;
-    free(args);
-
-    return B_OK;
-}*/
-
-/*
-void ConvertBMessageToGeminiToolsJson(const BMessage* toolsMsg, BString& outJson)
-{
-    outJson = "[";
-    
-    BMessage tool;
-    int32 i = 0;
-    bool first = true;
-    
-    // Cicliamo direttamente sui messaggi "tool" presenti nella radice di toolsMsg
-    while (toolsMsg->FindMessage("tool", i, &tool) == B_OK) {
-        if (!first) outJson << ",";
-        first = false;
-        
-        const char* name = tool.FindString("name");
-        const char* desc = tool.FindString("description");
-        
-        BMessage params;
-        tool.FindMessage("parameters", &params);
-        
-        outJson << "{";
-        outJson << "\"name\":\"" << name << "\",";
-        outJson << "\"description\":\"" << desc << "\"";
-        
-        if (!params.IsEmpty()) {
-            BString jsonParams;
-            SerializeBMessageToJson(&params, jsonParams);
-            outJson << ",\"parameters\":" << jsonParams;
-        }
-        
-        outJson << "}";
-        i++;
-    }
-    
-    outJson << "]";
-}*/
 void ConvertBMessageToGeminiToolsJson(const BMessage* toolsMsg, BString& outJson)
 {
     outJson = "[{\"functionDeclarations\":["; // Involucro Gemini
@@ -1069,11 +752,11 @@ void ConvertBMessageToGeminiToolsJson(const BMessage* toolsMsg, BString& outJson
     if (first) outJson.SetTo("");
 }
 
+
 static status_t gemini_stream_thread_func(void* data)
 {
     fprintf(stderr, "[GEMINI STREAM WORKER] Thread avviato.\n");
     
-    // Cast alla nuova struct globale e condivisa
     AsyncArgs* args = (AsyncArgs*)data;
     if (!args) return B_BAD_VALUE;
 
@@ -1104,7 +787,6 @@ static status_t gemini_stream_thread_func(void* data)
         }
         
         if (args->server_messenger.SendMessage(&reqTools, &replyTools) == B_OK) {
-            // Controlliamo se la risposta contiene almeno un tool prima di attivare l'MCP
             if (replyTools.HasMessage("tool", 0)) {
                 mcpActive = true;
             }
@@ -1158,11 +840,9 @@ static status_t gemini_stream_thread_func(void* data)
     
     executionLoop = true;
     while (executionLoop) {
-    	// =====================================================================
-        // NUOVO: CONTROLLO INTERRUZIONE PREVENTIVO VIA IPC
-        // =====================================================================
+        // Controllo Interruzione Preventivo
         if (args->server_messenger.IsValid()) {
-            BMessage checkAbortMsg('CHAB'); // Un 'what' dedicato, es: MSG_CHECK_ABORT
+            BMessage checkAbortMsg('CHAB');
             const char* ctxId = nullptr;
             if (args->context_copy) {
                 args->context_copy->FindString("context_id", &ctxId);
@@ -1175,51 +855,33 @@ static status_t gemini_stream_thread_func(void* data)
             if (args->server_messenger.SendMessage(&checkAbortMsg, &abortReply) == B_OK) {
                 int32 status = B_OK;
                 if (abortReply.FindInt32("status", &status) == B_OK && status == B_CANCELED) {
-                    fprintf(stderr, "[GEMINI STREAM WORKER] Rilevata interruzione asincrona dall'utente. Esco.\n");
+                    fprintf(stderr, "[GEMINI STREAM WORKER] Interruzione dall'utente. Esco.\n");
                     executionLoop = false;
                     break;
                 }
             }
         }
-        // =====================================================================
-    	
+        
         BString url;
         if (args->base_url && args->base_url[0] != '\0') {
             url << args->base_url;
         } else {
-            url.SetToFormat("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent", args->model);
+            // Se usiamo streamGenerateContent la risposta sarà un array JSON [...]
+            url.SetToFormat("https://generativelanguage.googleapis.com/v1beta/models/%s:streamGenerateContent", args->model);
         }
         url << "?key=" << args->api_key;
 
         BString payload;
         BuildPayloadFromContext(args->context_copy, nullptr, payload);
-/*
-        if (mcpActive) {
-            if (payload.EndsWith("}")) {
-                payload.Truncate(payload.Length() - 1);
-                
-                BString geminiToolsJson;
-                ConvertBMessageToGeminiToolsJson(&replyTools, geminiToolsJson);
-                
-                if (geminiToolsJson.Length() > 0) {
-                    payload << ",\"tools\":[{\"functionDeclarations\":" << geminiToolsJson << "}]}";
-                } else {
-                    payload << "}";
-                }
-            }
-        }*/
+
         if (mcpActive) {
             BString geminiToolsJson;
             ConvertBMessageToGeminiToolsJson(&replyTools, geminiToolsJson);
 
             if (geminiToolsJson.Length() > 0) {
-                // Invece di fare Truncate(length - 1) sperando che l'ultimo carattere sia '}', 
-                // cerchiamo l'ultima parentesi di chiusura reale dell'oggetto root.
                 int32 lastCloseBrace = payload.FindLast("}");
                 if (lastCloseBrace != B_ERROR) {
-                    // Tagliamo la stringa esattamente all'ultima graffa di chiusura globale
                     payload.Truncate(lastCloseBrace);
-                    // Iniettiamo i tool a livello radice e richiudiamo in sicurezza
                     payload << ",\"tools\":" << geminiToolsJson << "}";
                 }
             }
@@ -1261,155 +923,182 @@ static status_t gemini_stream_thread_func(void* data)
             break;
         }
 
-        BMessage candidates, candidateZero, content, parts, partZero, functionCall;
-        const char* toolName = nullptr;
-        const char* textContent = nullptr;
+        // =====================================================================
+        // NUOVA LOGICA DI DECODIFICA (Gestisce sia Array [...] che Oggetto Single {})
+        // =====================================================================
+        
+        BString fullTextAccumulator;
+        BMessage pendingToolCall;
+        BString pendingToolName;
+        BString pendingThoughtSignature;
+        bool hasToolCall = false;
 
-        if (parsedJson.FindMessage("candidates", &candidates) == B_OK
-            && candidates.FindMessage("0", &candidateZero) == B_OK
-            && candidateZero.FindMessage("content", &content) == B_OK
-            && content.FindMessage("parts", &parts) == B_OK
-            && parts.FindMessage("0", &partZero) == B_OK) {
+        // Prepariamo la lista dei chunk da analizzare
+        int32 chunkIndex = 0;
+        BMessage chunkMsg;
 
-            // Sotto-caso A: Gemini vuole eseguire un tool
-            if (partZero.FindMessage("functionCall", &functionCall) == B_OK
-                && functionCall.FindString("name", &toolName) == B_OK) {
-                
-                // Estraiamo la thought_signature inviata da Google
-                const char* thoughtSignature = nullptr;
-                if (partZero.FindString("thought_signature", &thoughtSignature) == B_OK) {
-                    // Trovato in partZero (snake_case)
-                } else if (partZero.FindString("thoughtSignature", &thoughtSignature) == B_OK) {
-                    // Trovato in partZero (camelCase)
-                } else if (functionCall.FindString("thought_signature", &thoughtSignature) == B_OK) {
-                    // Trovato in functionCall (snake_case)
-                } else {
-                    // Trovato in functionCall (camelCase) o non presente
-                    functionCall.FindString("thoughtSignature", &thoughtSignature);
-                }
+        // Helper Lambda o loop per processare un singolo oggetto 'chunk'
+        auto processChunk = [&](const BMessage& chunk) {
+            BMessage candidates, candidateZero, content, parts, partZero, functionCall;
 
-                BMessage argsMsg;
-                BString argsJson;
-                if (functionCall.FindMessage("args", &argsMsg) == B_OK) {
-                    SerializeBMessageToJson(&argsMsg, argsJson);
-                } else {
-                    argsJson = "{}";
-                }
+            if (chunk.FindMessage("candidates", &candidates) == B_OK
+                && candidates.FindMessage("0", &candidateZero) == B_OK
+                && candidateZero.FindMessage("content", &content) == B_OK
+                && content.FindMessage("parts", &parts) == B_OK) {
 
-                fprintf(stderr, "[GEMINI MCP] L'LLM richiede lo strumento: %s con argomenti: %s\n", toolName, argsJson.String());
+                int32 partIdx = 0;
+                BMessage partItem;
+                while (parts.FindMessage(BString().SetToFormat("%" B_PRId32, partIdx++).String(), &partItem) == B_OK) {
+                    
+                    // 1. Controllo se è un Tool Call
+                    const char* tName = nullptr;
+                    if (partItem.FindMessage("functionCall", &functionCall) == B_OK
+                        && functionCall.FindString("name", &tName) == B_OK) {
+                        
+                        hasToolCall = true;
+                        pendingToolName = tName;
+                        pendingToolCall = functionCall;
 
-                // Invochiamo lo strumento mandando un messaggio sincrono all'ai_server
-                BMessage reqExec(MSG_EXECUTE_TOOL);
-                reqExec.AddString("name", toolName);
-                reqExec.AddMessage("arguments", &argsMsg);
-                
-                const char* ctxId = nullptr;
-                if (args->context_copy) {
-                    args->context_copy->FindString("context_id", &ctxId);
-                }
-                if (ctxId) {
-                    reqExec.AddString("context_id", ctxId);
-                }
-                
-                BMessage replyExec;
-                BString toolResultBuf;
-                
-                if (args->server_messenger.SendMessage(&reqExec, &replyExec) == B_OK) {
-                    const char* resStr = replyExec.FindString("result");
-                    if (resStr && strlen(resStr) > 0) {
-                        BString testStr(resStr);
-                        testStr.Trim();
-                        // Se la risposta è già un JSON valido, la teniamo così
-                        if (testStr.StartsWith("{") || testStr.StartsWith("[")) {
-                            toolResultBuf = resStr;
-                        } else {
-                            // Altrimenti la incapsuliamo in un JSON pulito
-                            BString escapedRes = EscapeStringForJson(resStr);
-                            toolResultBuf.SetToFormat("{\"output\":\"%s\"}", escapedRes.String());
+                        // Thought signature
+                        const char* thoughtSig = nullptr;
+                        if (partItem.FindString("thought_signature", &thoughtSig) != B_OK &&
+                            partItem.FindString("thoughtSignature", &thoughtSig) != B_OK &&
+                            functionCall.FindString("thought_signature", &thoughtSig) != B_OK) {
+                            functionCall.FindString("thoughtSignature", &thoughtSig);
                         }
-                    } else {
-                        toolResultBuf = "{\"error\":\"Il comando sul server ha restituito una risposta vuota.\"}";
+                        if (thoughtSig) pendingThoughtSignature = thoughtSig;
                     }
-                } else {
-                    toolResultBuf = "{\"error\":\"Esecuzione dello strumento fallita via IPC BMessenger\"}";
+                    
+                    // 2. Controllo se è Testo
+                    const char* txt = nullptr;
+                    if (partItem.FindString("text", &txt) == B_OK && txt) {
+                        fullTextAccumulator << txt;
+                    }
                 }
+            }
+        };
 
-                // Aggiorniamo la history clonata in memoria per il prossimo turno del loop
-                AppendToolCallToContext(args->context_copy, toolName, &argsMsg, thoughtSignature);
-                AppendToolResponseToContext(args->context_copy, toolName, toolResultBuf.String());
-                
-            } 
-            // Sotto-caso B: Gemini ha terminato la catena e restituisce il testo finale
-            else if (partZero.FindString("text", &textContent) == B_OK) {
-                fprintf(stderr, "[GEMINI MCP] Risposta testuale finale ricevuta.\n");
-                BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
-                if (streamFile.InitCheck() == B_OK) {
-                    streamFile.Write(textContent, strlen(textContent));
-                } else {
-                    fprintf(stderr, "[GEMINI MCP] ERRORE: Impossibile creare/aprire il file di notifica!\n");
-                }
-                executionLoop = false; // Abbiamo il testo finale, usciamo dal loop!
+        // Se la radice ha la chiave "0", è un Array JSON [...]
+        if (parsedJson.FindMessage("0", &chunkMsg) == B_OK) {
+            while (parsedJson.FindMessage(BString().SetToFormat("%" B_PRId32, chunkIndex).String(), &chunkMsg) == B_OK) {
+                processChunk(chunkMsg);
+                chunkIndex++;
             }
         } else {
-            // === RECUPERO E LOGGING DELL'ERRORE ===
-            fprintf(stderr, "[GEMINI STREAM WORKER] ERRORE: Risposta di rete non valida o priva di 'candidates'.\n");
-            fprintf(stderr, "[GEMINI STREAM WORKER] Risposta grezza ricevuta:\n%s\n", rawResponse.String());
+            // Altrimenti è un singolo oggetto JSON {}
+            processChunk(parsedJson);
+        }
+
+        // --- GESTIONE DEGLI ESITI DEL PARSING ---
+
+        // CASO A: L'LLM ha richiesto la chiamata a un Tool
+        if (hasToolCall) {
+            BMessage argsMsg;
+            BString argsJson;
+            if (pendingToolCall.FindMessage("args", &argsMsg) == B_OK) {
+                SerializeBMessageToJson(&argsMsg, argsJson);
+            } else {
+                argsJson = "{}";
+            }
+
+            fprintf(stderr, "[GEMINI MCP] Richiesta tool: %s con args: %s\n", pendingToolName.String(), argsJson.String());
+
+            BMessage reqExec(MSG_EXECUTE_TOOL);
+            reqExec.AddString("name", pendingToolName.String());
+            reqExec.AddMessage("arguments", &argsMsg);
+            
+            const char* ctxId = nullptr;
+            if (args->context_copy) {
+                args->context_copy->FindString("context_id", &ctxId);
+            }
+            if (ctxId) {
+                reqExec.AddString("context_id", ctxId);
+            }
+            
+            BMessage replyExec;
+            BString toolResultBuf;
+            
+            if (args->server_messenger.SendMessage(&reqExec, &replyExec) == B_OK) {
+                const char* resStr = replyExec.FindString("result");
+                if (resStr && strlen(resStr) > 0) {
+                    BString testStr(resStr);
+                    testStr.Trim();
+                    if (testStr.StartsWith("{") || testStr.StartsWith("[")) {
+                        toolResultBuf = resStr;
+                    } else {
+                        BString escapedRes = EscapeStringForJson(resStr);
+                        toolResultBuf.SetToFormat("{\"output\":\"%s\"}", escapedRes.String());
+                    }
+                } else {
+                    toolResultBuf = "{\"error\":\"Risposta vuota dal server tool.\"}";
+                }
+            } else {
+                toolResultBuf = "{\"error\":\"Esecuzione tool fallita via IPC.\"}";
+            }
+
+            AppendToolCallToContext(args->context_copy, pendingToolName.String(), &argsMsg, 
+                                     pendingThoughtSignature.IsEmpty() ? nullptr : pendingThoughtSignature.String());
+            AppendToolResponseToContext(args->context_copy, pendingToolName.String(), toolResultBuf.String());
+
+            // Il loop continua per inviare il risultato del tool di nuovo a Gemini!
+        }
+        // CASO B: L'LLM ha restituito del testo
+        else if (fullTextAccumulator.Length() > 0) {
+            fprintf(stderr, "[GEMINI MCP] Risposta testuale accumulata (%" B_PRId32 " byte).\n", fullTextAccumulator.Length());
+            
+            BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
+            if (streamFile.InitCheck() == B_OK) {
+                streamFile.Write(fullTextAccumulator.String(), fullTextAccumulator.Length());
+            } else {
+                fprintf(stderr, "[GEMINI MCP] ERRORE: Impossibile scrivere il file di notifica!\n");
+            }
+            executionLoop = false; // Abbiamo la risposta testuale completa, usciamo!
+        }
+        // CASO C: Nessun testo e nessun tool, verifichiamo errori API
+        else {
+            fprintf(stderr, "[GEMINI STREAM WORKER] Risposta priva di contenuti o con errore.\n");
             
             BMessage errorObj;
             if (parsedJson.FindMessage("error", &errorObj) == B_OK) {
                 const char* errMsg = nullptr;
                 errorObj.FindString("message", &errMsg);
                 if (errMsg) {
-                    fprintf(stderr, "[GEMINI STREAM WORKER] Dettaglio errore API di Google: %s\n", errMsg);
-                    BAlert* errAlert = new BAlert(
-                        "Google API Error",
-                        errMsg,
-                        "OK",      // Pulsante 0 (Ritorna 0, mappato su ESC/Default)
-                        NULL,     // Pulsante 1 (Ritorna 1), magare copiare in clipboard
-                        NULL,
-                        B_WIDTH_AS_USUAL,
-                        B_WARNING_ALERT // Icona di pericolo gialla
-                    );
-                    
+                    fprintf(stderr, "[GEMINI STREAM WORKER] Errore API: %s\n", errMsg);
                     BFile streamFile(args->notify_path, B_WRITE_ONLY | B_OPEN_AT_END);
                     if (streamFile.InitCheck() == B_OK) {
                         BString guiError;
                         guiError.SetToFormat("\n[Errore API Gemini: %s]\n", errMsg);
                         streamFile.Write(guiError.String(), guiError.Length());
                     }
-                    errAlert->Go();
                 }
             }
             executionLoop = false;
         }
     }
-    // =========================================================================
-    // === GENERAZIONE TITOLO POST-RISPOSTA IN MODALITÀ ASINCRONA (MCP) ===
-    // =========================================================================
+
+    // === GENERAZIONE TITOLO POST-RISPOSTA ===
     if (args->context_copy != nullptr && !args->context_copy->HasString("title")) {
         BMessage messagesMsg;
         const char* firstPromptText = nullptr;
 
-        // Recuperiamo l'ultimo prompt reale inviato dall'utente nello storico dei messaggi
         if (args->context_copy->FindMessage("messages", &messagesMsg) == B_OK) {
             int32 msgCount = 0;
             BMessage msgItem;
             
             while (messagesMsg.FindMessage("msg", msgCount, &msgItem) == B_OK || 
-                   messagesMsg.FindMessage(BString().SetToFormat("%d", msgCount).String(), &msgItem) == B_OK) {
+                   messagesMsg.FindMessage(BString().SetToFormat("%" B_PRId32, msgCount).String(), &msgItem) == B_OK) {
                 
                 const char* role = msgItem.FindString("role");
                 const char* content = msgItem.FindString("content");
                 if (!content) msgItem.FindString("text", &content);
                 
                 if (role && strcmp(role, "user") == 0 && content && content[0] != '\0') {
-                    firstPromptText = content; // Sovrascrive fino a beccare l'ultimo
+                    firstPromptText = content;
                 }
                 msgCount++;
             }
         }
 
-        // Se abbiamo trovato il testo del prompt originario utente, generiamo l'auto-titolo
         if (firstPromptText && firstPromptText[0] != '\0') {
             BString autoTitle(firstPromptText);
             autoTitle.Trim();
@@ -1418,21 +1107,19 @@ static status_t gemini_stream_thread_func(void* data)
                 autoTitle << "...";
             }
             
-            // 1. Aggiorniamo la copia locale del thread
             args->context_copy->RemoveName("title");
             args->context_copy->AddString("title", autoTitle.String());
             
-            // 2. Notifichiamo la finestra/applicazione principale via IPC BMessenger 
             if (args->server_messenger.IsValid()) {
-                BMessage titleUpdateMsg('UTIT'); // Assicurati che 'UTIT' sia l'ID che si aspetta la tua app
+                BMessage titleUpdateMsg('UTIT');
                 titleUpdateMsg.AddString("title", autoTitle.String());
                 args->server_messenger.SendMessage(&titleUpdateMsg);
             }
-            fprintf(stderr, "[GEMINI ASYNC] Auto-titolo generato post-risposta: '%s'\n", autoTitle.String());
+            fprintf(stderr, "[GEMINI ASYNC] Auto-titolo generato: '%s'\n", autoTitle.String());
         }
     }
 
-    // Scriviamo il terminatore ufficiale sul file tmp per svegliare il Watcher del server
+    // Scrittura end marker
     {
         BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
         if (streamFile.InitCheck() == B_OK) {
@@ -1443,438 +1130,27 @@ static status_t gemini_stream_thread_func(void* data)
 
 thread_cleanup:
     fprintf(stderr, "[GEMINI STREAM WORKER] Pulizia e chiusura thread worker.\n");
-    
-    // Questa singola riga C++ sostituisce tutte le free() manuali, 
-    // perché lo sanno fare da sole il distruttore di AsyncArgs!
     delete args; 
-
     return B_OK;
 }
-/* funzionante prima della centralizzazione
-static status_t gemini_stream_thread_func(void* data)
-{
-    fprintf(stderr, "[GEMINI STREAM WORKER] Thread avviato.\n");
-    GeminiAsyncArgs* args = (GeminiAsyncArgs*)data;
-    
-    if (!args) return B_BAD_VALUE;
 
-    BMessage replyTools;
-    bool mcpActive = false;
-    bool executionLoop = true;
-
-    // Controllo di sicurezza sulla chiave API
-    if (!args->api_key || args->api_key[0] == '\0') {
-        fprintf(stderr, "[GEMINI STREAM WORKER] ERRORE CRITICO: API key assente!\n");
-        if (args->notify_path) {
-            BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE);
-            BString endMarker = "<<STREAM_END>>";
-            streamFile.Write(endMarker.String(), endMarker.Length());
-        }
-        goto thread_cleanup;
-    }
-
-    // === CONTROLLO CAPABILITY VIA MESSENGER ===
-    if (args->server_messenger.IsValid()) {
-        BMessage reqTools(MSG_MCP_GET_TOOLS); 
-        const char* ctxId = nullptr;
-        if (args->context_copy) {
-            args->context_copy->FindString("context_id", &ctxId);
-        }
-        if (ctxId) {
-            reqTools.AddString("context_id", ctxId);
-        }
-        
-        if (args->server_messenger.SendMessage(&reqTools, &replyTools) == B_OK) {
-            // Controlliamo se la risposta contiene almeno un tool prima di attivare l'MCP
-            if (replyTools.HasMessage("tool", 0)) {
-                mcpActive = true;
-            }
-        }
-    }
-
-    // === CASO 1: MODALITÀ STANDARD (STREAMING NATIVO RETROCOMPATIBILE) ===
-    if (!mcpActive) {
-        fprintf(stderr, "[GEMINI STREAM WORKER] Modalità Standard: Avvio Streaming Diretto.\n");
-        
-        BString url;
-        if (args->base_url && args->base_url[0] != '\0') {
-            url << args->base_url;
-        } else {
-            url.SetToFormat("https://generativelanguage.googleapis.com/v1beta/models/%s:streamGenerateContent", args->model);
-        }
-        url << "?key=" << args->api_key;
-
-        BString payload;
-        BuildPayloadFromContext(args->context_copy, nullptr, payload);
-
-        {
-            StreamTarget streamTarget(args->notify_path);
-            CompletionListener listener(args->notify_path);
-            BUrl bUrl(url.String(), true);
-            BUrlRequest* req = BUrlProtocolRoster::MakeRequest(bUrl, &streamTarget, &listener, NULL);
-            if (req) {
-                BHttpRequest* http = dynamic_cast<BHttpRequest*>(req);
-                if (http) {
-                    http->SetMethod(B_HTTP_POST);
-                    BHttpHeaders headers;
-                    headers.AddHeader("Content-Type", "application/json");
-                    http->SetHeaders(headers);
-                    BMallocIO* input = new BMallocIO();
-                    input->WriteExactly(payload.String(), payload.Length());
-                    http->AdoptInputData(input, payload.Length());
-                }
-                thread_id thread = req->Run();
-                if (thread >= 0) { 
-                    status_t rc; 
-                    wait_for_thread(thread, &rc); 
-                }
-                delete req;
-            }
-        }
-        goto thread_cleanup;
-    }
-
-    // === CASO 2: MODALITÀ MCP ATTIVA (LOOP STRUMENTI VIA IPC MESSENGER) ===
-    fprintf(stderr, "[GEMINI STREAM WORKER] Modalità MCP Attiva: Avvio loop di interazione strumenti.\n");
-    
-    executionLoop = true;
-    while (executionLoop) {
-        BString url;
-        if (args->base_url && args->base_url[0] != '\0') {
-            url << args->base_url;
-        } else {
-            url.SetToFormat("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent", args->model);
-        }
-        url << "?key=" << args->api_key;
-
-        BString payload;
-        BuildPayloadFromContext(args->context_copy, nullptr, payload);
-
-        // Iniettiamo i tool disponibili recuperati via IPC dall'ai_server
-        //if (availableTools.Length() > 0) {
-        //    if (payload.EndsWith("}")) {
-        //        payload.Truncate(payload.Length() - 1);
-        //        //payload.AppendFormat(",\"tools\":[{\"functionDeclarations\":%s}]}", availableTools.String());
-        //        BString toolsFormatted;
-        //        toolsFormatted.SetToFormat(",\"tools\":[{\"functionDeclarations\":%s}]}", availableTools.String());
-        //        payload << toolsFormatted;
-        //    }
-        //}
-        if (mcpActive) {
-            if (payload.EndsWith("}")) {
-                payload.Truncate(payload.Length() - 1);
-                
-                BString geminiToolsJson;
-                ConvertBMessageToGeminiToolsJson(&replyTools, geminiToolsJson);
-                
-                if (geminiToolsJson.Length() > 0) {
-                    payload << ",\"tools\":[{\"functionDeclarations\":" << geminiToolsJson << "}]}";
-                } else {
-                    payload << "}";
-                }
-            }
-        }
-
-        BMallocIO outNetworkData;
-        SyncListener syncListener;
-        BUrl bUrl(url.String(), true);
-        BUrlRequest* req = BUrlProtocolRoster::MakeRequest(bUrl, &outNetworkData, &syncListener, NULL);
-        if (!req) { 
-            executionLoop = false; 
-            break; 
-        }
-
-        BHttpRequest* http = dynamic_cast<BHttpRequest*>(req);
-        if (http) {
-            http->SetMethod(B_HTTP_POST);
-            BHttpHeaders headers;
-            headers.AddHeader("Content-Type", "application/json");
-            http->SetHeaders(headers);
-            BMallocIO* input = new BMallocIO();
-            input->WriteExactly(payload.String(), payload.Length());
-            http->AdoptInputData(input, payload.Length());
-        }
-
-        thread_id netThread = req->Run();
-        if (netThread >= 0) { 
-            status_t rc; 
-            wait_for_thread(netThread, &rc); 
-        }
-        delete req;
-
-        BString rawResponse((const char*)outNetworkData.Buffer(), outNetworkData.BufferLength());
-        BMessage parsedJson;
-        
-        if (BJson::Parse(rawResponse.String(), parsedJson) != B_OK) {
-            fprintf(stderr, "[GEMINI STREAM WORKER] Fallito il parsing JSON della risposta di rete.\n");
-            executionLoop = false;
-            break;
-        }
-
-        BMessage candidates, candidateZero, content, parts, partZero, functionCall;
-        const char* toolName = nullptr;
-        const char* textContent = nullptr;
-
-        if (parsedJson.FindMessage("candidates", &candidates) == B_OK
-            && candidates.FindMessage("0", &candidateZero) == B_OK
-            && candidateZero.FindMessage("content", &content) == B_OK
-            && content.FindMessage("parts", &parts) == B_OK
-            && parts.FindMessage("0", &partZero) == B_OK) {
-
-            // Sotto-caso A: Gemini vuole eseguire un tool
-            if (partZero.FindMessage("functionCall", &functionCall) == B_OK
-                && functionCall.FindString("name", &toolName) == B_OK) {
-                
-                // === NOVITÀ: Estraiamo la thought_signature inviata da Google ===
-                const char* thoughtSignature = nullptr;
-                if (partZero.FindString("thought_signature", &thoughtSignature) == B_OK) {
-                    // Caso 1: Trovato in partZero (snake_case)
-                } else if (partZero.FindString("thoughtSignature", &thoughtSignature) == B_OK) {
-                    // Caso 2: Trovato in partZero (camelCase)
-                } else if (functionCall.FindString("thought_signature", &thoughtSignature) == B_OK) {
-                    // Caso 3: Trovato in functionCall (snake_case)
-                } else {
-                    // Caso 4: Trovato in functionCall (camelCase) o non presente
-                    functionCall.FindString("thoughtSignature", &thoughtSignature);
-                }
-
-                BMessage argsMsg;
-                BString argsJson;
-                if (functionCall.FindMessage("args", &argsMsg) == B_OK) {
-                    SerializeBMessageToJson(&argsMsg, argsJson);
-                } else {
-                    argsJson = "{}";
-                }
-
-                fprintf(stderr, "[GEMINI MCP] L'LLM richiede lo strumento: %s con argomenti: %s\n", toolName, argsJson.String());
-
-                // Invochiamo lo strumento mandando un messaggio sincrono all'ai_server
-                BMessage reqExec(MSG_EXECUTE_TOOL);
-                reqExec.AddString("name", toolName);
-                reqExec.AddMessage("arguments", &argsMsg);
-                
-                const char* ctxId = nullptr;
-                if (args->context_copy) {
-                    args->context_copy->FindString("context_id", &ctxId);
-                }
-                if (ctxId) {
-                    reqExec.AddString("context_id", ctxId);
-                }
-                
-                BMessage replyExec;
-                BString toolResultBuf;
-                
-                if (args->server_messenger.SendMessage(&reqExec, &replyExec) == B_OK) {
-                    const char* resStr = replyExec.FindString("result");
-                    if (resStr && strlen(resStr) > 0) {
-                        BString testStr(resStr);
-                        testStr.Trim();
-                        // Se la risposta è già un JSON valido (inizia con { o [), la teniamo così
-                        if (testStr.StartsWith("{") || testStr.StartsWith("[")) {
-                            toolResultBuf = resStr;
-                        } else {
-                            // Se è testo semplice (o vuoto), lo incapsuliamo in un JSON pulito per Gemini
-                            BString escapedRes = EscapeStringForJson(resStr);
-                            //toolResultBuf.SetToFormat("{\"output\":\"%s\"}", resStr);
-                            toolResultBuf.SetToFormat("{\"output\":\"%s\"}", escapedRes.String());
-                        }
-                    } else {
-                        // Se il server ha risposto con una stringa vuota (come nel tuo caso!)
-                        toolResultBuf = "{\"error\":\"Il comando sul server ha restituito una risposta vuota.\"}";
-                    }
-                } else {
-                    toolResultBuf = "{\"error\":\"Esecuzione dello strumento fallita via IPC BMessenger\"}";
-                }
-
-                // Aggiorniamo la history clonata in memoria per il prossimo turno del loop
-                //AppendToolCallToContext(args->context_copy, toolName, argsJson.String());
-                AppendToolCallToContext(args->context_copy, toolName, &argsMsg, thoughtSignature);
-                AppendToolResponseToContext(args->context_copy, toolName, toolResultBuf.String());
-                
-                // Il loop continua (executionLoop = true), inviando il risultato a Gemini al prossimo ciclo
-            } 
-            // Sotto-caso B: Gemini ha terminato la catena e restituisce il testo finale
-            else if (partZero.FindString("text", &textContent) == B_OK) {
-                fprintf(stderr, "[GEMINI MCP] Risposta testuale finale ricevuta.\n");
-                BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
-                if (streamFile.InitCheck() == B_OK) {
-                    streamFile.Write(textContent, strlen(textContent));
-                } else {
-					fprintf(stderr, "[GEMINI MCP] ERRORE: Impossibile creare/aprire il file di notifica!\n");
-    			}
-                executionLoop = false; // Abbiamo il testo finale, usciamo dal loop!
-            }
-        } else {
-        	// === RECUPERO E LOGGING DELL'ERRORE ===
-            fprintf(stderr, "[GEMINI STREAM WORKER] ERRORE: Risposta di rete non valida o priva di 'candidates'.\n");
-            fprintf(stderr, "[GEMINI STREAM WORKER] Risposta grezza ricevuta:\n%s\n", rawResponse.String());
-            
-            // Tentiamo di estrarre l'errore strutturato inviato da Google per mostrarlo in UI
-            BMessage errorObj;
-            if (parsedJson.FindMessage("error", &errorObj) == B_OK) {
-                const char* errMsg = nullptr;
-                errorObj.FindString("message", &errMsg);
-                if (errMsg) {
-                    fprintf(stderr, "[GEMINI STREAM WORKER] Dettaglio errore API di Google: %s\n", errMsg);
-                    
-                    // Scriviamo l'errore nel file temporaneo per mostrarlo nell'interfaccia utente
-                    BFile streamFile(args->notify_path, B_WRITE_ONLY | B_OPEN_AT_END);
-                    if (streamFile.InitCheck() == B_OK) {
-                        BString guiError;
-                        guiError.SetToFormat("\n[Errore API Gemini: %s]\n", errMsg);
-                        streamFile.Write(guiError.String(), guiError.Length());
-                    }
-                }
-            }
-            executionLoop = false;
-        }
-    }
-
-    // Scriviamo il terminatore ufficiale sul file tmp per svegliare il Watcher del server
-    {
-        BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
-        if (streamFile.InitCheck() == B_OK) {
-            BString endMarker = "<<STREAM_END>>";
-            streamFile.Write(endMarker.String(), endMarker.Length());
-        }
-    }
-
-thread_cleanup:
-    fprintf(stderr, "[GEMINI STREAM WORKER] Pulizia e chiusura thread worker.\n");
-    if (args->api_key) free(args->api_key);
-    if (args->model) free(args->model);
-    if (args->notify_path) free(args->notify_path);
-    if (args->base_url) free(args->base_url);
-    if (args->context_copy) delete args->context_copy;
-    free(args);
-
-    return B_OK;
-}*/
-/*
-extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle, const char* prompt, BMessage* config)
-{
-    GeminiHandle* h = (GeminiHandle*)handle;
-    if (!config) return B_ERROR;
-    
-    const char* apiKey = nullptr;
-    const char* model = nullptr;
-    const char* notifyPath = nullptr;
-    
-    config->FindString("api_key", &apiKey);
-    config->FindString("model_name", &model);
-    config->FindString("notify_path", &notifyPath);
-
-    if (!notifyPath || notifyPath[0] == '\0') {
-        fprintf(stderr, "[GEMINI_PLUGIN] Errore: notify_path mancante.\n");
-        return B_ERROR;
-    }
-    
-    GeminiAsyncArgs* args = (GeminiAsyncArgs*)malloc(sizeof(GeminiAsyncArgs));
-    if (!args) return B_ERROR;
-    
-    args->api_key = dupstr_or_null(apiKey);
-    args->model = dupstr_or_null(model && model[0] ? model : "gemini-2.5-flash");
-    args->notify_path = dupstr_or_null(notifyPath);
-    args->base_url = h ? dupstr_or_null(h->base_url) : nullptr;
-    
-    // Cloniamo il BMessage di contesto per renderlo thread-safe (evitando corruzioni di memoria asincrone)
-    args->context_copy = new BMessage(*config);
-
-    thread_id thread = spawn_thread(
-        gemini_stream_thread_func,
-        "gemini_stream_worker",
-        B_NORMAL_PRIORITY,
-        args
-    );
-
-    if (thread < B_OK) {
-        if (args->api_key) free(args->api_key);
-        if (args->model) free(args->model);
-        if (args->notify_path) free(args->notify_path);
-        if (args->base_url) free(args->base_url);
-        delete args->context_copy;
-        free(args);
-        return B_ERROR;
-    }
-
-    resume_thread(thread);
-    return B_OK;
-}*/
-/*
-extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle, 
-                                                  const char* prompt, 
-                                                  BMessage* config)
-{
-    GeminiHandle* h = (GeminiHandle*)handle;
-    if (!config) return B_ERROR;
-    
-    const char* apiKey = nullptr;
-    const char* model = nullptr;
-    const char* notifyPath = nullptr;
-    
-    config->FindString("api_key", &apiKey);
-    config->FindString("model_name", &model);
-    config->FindString("notify_path", &notifyPath);
-
-    if (!notifyPath || notifyPath[0] == '\0') {
-        fprintf(stderr, "[GEMINI_PLUGIN] Errore: notify_path mancante.\n");
-        return B_ERROR;
-    }
-    
-    GeminiAsyncArgs* args = (GeminiAsyncArgs*)malloc(sizeof(GeminiAsyncArgs));
-    if (!args) return B_ERROR;
-    
-    args->api_key = dupstr_or_null(apiKey);
-    args->model = dupstr_or_null(model && model[0] ? model : "gemini-2.5-flash");
-    args->notify_path = dupstr_or_null(notifyPath);
-    args->base_url = h ? dupstr_or_null(h->base_url) : nullptr;
-    args->context_copy = new BMessage(*config);
-    
-    // === NUOVA LOGICA: Sincronizzazione IPC via BMessenger ===
-    // Peschiamo il messenger dell'ai_server inserito nel BMessage di configurazione
-    BMessenger serverMessenger;
-    if (config->FindMessenger("server_messenger", &serverMessenger) == B_OK) {
-        args->server_messenger = serverMessenger;
-    } else {
-        // Se per qualche motivo manca, inizializziamo un messenger vuoto/non valido
-        args->server_messenger = BMessenger();
-    }
-
-    thread_id thread = spawn_thread(
-        gemini_stream_thread_func,
-        "gemini_stream_worker",
-        B_NORMAL_PRIORITY,
-        args
-    );
-
-    if (thread < B_OK) {
-        if (args->api_key) free(args->api_key);
-        if (args->model) free(args->model);
-        if (args->notify_path) free(args->notify_path);
-        if (args->base_url) free(args->base_url);
-        delete args->context_copy;
-        free(args);
-        return B_ERROR;
-    }
-
-    resume_thread(thread);
-    return B_OK;
-}*/
 extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle, 
                                                   const char* prompt, 
                                                   BMessage* config)
 {
     // Cast alla nuova struct di base dei plugin
-    AIPluginHandle* h = (AIPluginHandle*)handle;
+    //AIPluginHandle* h = (AIPluginHandle*)handle;
     if (!config) return B_ERROR;
     
     const char* apiKey = nullptr;
     const char* model = nullptr;
     const char* notifyPath = nullptr;
+    const char* configBaseUrl = nullptr;
     
     config->FindString("api_key", &apiKey);
     config->FindString("model_name", &model);
     config->FindString("notify_path", &notifyPath);
+    config->FindString("base_url", &configBaseUrl);
 
     if (!notifyPath || notifyPath[0] == '\0') {
         fprintf(stderr, "[GEMINI_PLUGIN] Errore: notify_path mancante.\n");
@@ -1889,8 +1165,19 @@ extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle,
     args->api_key = apiKey ? strdup(apiKey) : nullptr;
     args->model = strdup(model && model[0] ? model : "gemini-3.5-flash");
     args->notify_path = notifyPath ? strdup(notifyPath) : nullptr;
-    args->base_url = (h && h->base_url) ? strdup(h->base_url) : nullptr;
-    args->context_copy = new BMessage(*config);
+    if (configBaseUrl && configBaseUrl[0] != '\0') {
+        args->base_url = dupstr_or_null(configBaseUrl);
+    } else {
+    	BString url;
+        url.SetToFormat("https://generativelanguage.googleapis.com/v1beta/models/%s:streamGenerateContent", args->model);
+        args->base_url = strdup(url.String());
+    }
+
+    args->context_copy = new (std::nothrow) BMessage(*config);
+    if (!args->context_copy) {
+        delete args;
+        return B_NO_MEMORY;
+    }
     
     // === Sincronizzazione IPC via BMessenger ===
     BMessenger serverMessenger;
@@ -1909,7 +1196,7 @@ extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle,
 
     if (thread < B_OK) {
         fprintf(stderr, "[GEMINI_PLUGIN] Errore: spawn_thread fallito.\n");
-        delete args; // Distrugge TUTTO in automatico richiamando il distruttore!
+        delete args;
         return B_ERROR;
     }
 
