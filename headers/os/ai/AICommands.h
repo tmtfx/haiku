@@ -71,7 +71,7 @@ public:
             const char* baseUrl = nullptr, uint32 mcpPermissions = AI_PERM_SYSTEM_DEFAULT);
             
     AIEngine(const char* contextID, const char* pluginName, const char* modelName, 
-            const char* apiKey = nullptr, const char* baseUrl = nullptr, uint32 mcpPermissions = AI_PERM_SYSTEM_DEFAULT);
+            const char* apiKey, const char* baseUrl, uint32 mcpPermissions = AI_PERM_SYSTEM_DEFAULT);
     ~AIEngine();
 
     // Comandi Semplificati (Sincroni)
