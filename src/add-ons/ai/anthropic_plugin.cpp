@@ -27,22 +27,6 @@ using namespace BPrivate::Network;
 #define DEFAULT_ANTHROPIC_URL   "https://api.anthropic.com"
 #define DEFAULT_ANTHROPIC_MODEL "claude-3-5-sonnet-20241022"
 
-/* usiamo la generica Handle in AIPlugin.h
-struct AnthropicHandle {
-	char* base_url;
-};
-*/
-
-/*
-struct AnthropicAsyncArgs {
-	char* api_key;
-	char* model;
-	char* notify_path;
-	char* base_url;
-	BMessage* context_copy;
-};
-*/
-
 static char*
 dupstr_or_null(const char* s)
 {
@@ -56,37 +40,6 @@ dupstr_or_null(const char* s)
 	return copy;
 }
 
-/*
-static void
-AppendEscapedJsonString(BString& out, const char* text)
-{
-	if (text == NULL)
-		return;
-
-	for (const char* p = text; *p != '\0'; ++p) {
-		switch (*p) {
-			case '\\':
-				out.Append("\\\\");
-				break;
-			case '"':
-				out.Append("\\\"");
-				break;
-			case '\n':
-				out.Append("\\n");
-				break;
-			case '\r':
-				out.Append("\\r");
-				break;
-			case '\t':
-				out.Append("\\t");
-				break;
-			default:
-				out.Append(p, 1);
-				break;
-		}
-	}
-}
-*/
 
 static BString EscapeStringForJson(const char* input) {
     if (!input) return "";
@@ -122,7 +75,7 @@ CopyToBuffer(const char* text, char* out, size_t outLen)
 	return B_OK;
 }
 
-
+/*
 static void
 WriteStreamEnd(const char* notifyPath)
 {
@@ -136,27 +89,7 @@ WriteStreamEnd(const char* notifyPath)
 	static const char* kEndMarker = "<<STREAM_END>>";
 	file.Write(kEndMarker, strlen(kEndMarker));
 }
-
-/*
-static void
-FreeAsyncArgs(AnthropicAsyncArgs* args)
-{
-	if (args == NULL)
-		return;
-
-	if (args->api_key != NULL)
-		free(args->api_key);
-	if (args->model != NULL)
-		free(args->model);
-	if (args->notify_path != NULL)
-		free(args->notify_path);
-	if (args->base_url != NULL)
-		free(args->base_url);
-	delete args->context_copy;
-	free(args);
-}
 */
-
 static BString
 BuildMessagesUrl(const char* baseUrl)
 {
@@ -446,64 +379,6 @@ static void AppendToolResponseToContext(BMessage* context, const char* name, con
     context->AddMessage("messages", &messagesMsg);
 }
 
-/*
-static void
-BuildAnthropicPayload(const BMessage* config, const char* currentPrompt,
-	BString& outPayload, bool stream)
-{
-	const char* model = NULL;
-	if (config != NULL)
-		config->FindString("model_name", &model);
-	if (model == NULL || model[0] == '\0')
-		model = DEFAULT_ANTHROPIC_MODEL;
-
-	outPayload.SetTo("{");
-	outPayload << "\"model\":\"";
-	AppendEscapedJsonString(outPayload, model);
-	outPayload << "\",\"max_tokens\":4096,";
-	if (stream)
-		outPayload << "\"stream\":true,";
-	outPayload << "\"messages\":[";
-
-	bool first = true;
-	BMessage messages;
-	if (config != NULL && config->FindMessage("messages", &messages) == B_OK) {
-		BMessage turn;
-		int32 index = 0;
-		while (messages.FindMessage("msg", index, &turn) == B_OK
-			|| messages.FindMessage(BString().SetToFormat("%ld", (long)index).String(),
-				&turn) == B_OK) {
-			const char* role = NULL;
-			const char* content = NULL;
-			turn.FindString("role", &role);
-			if (turn.FindString("content", &content) != B_OK)
-				turn.FindString("text", &content);
-
-			if (role != NULL && content != NULL && content[0] != '\0'
-				&& (strcmp(role, "user") == 0 || strcmp(role, "assistant") == 0)) {
-				if (!first)
-					outPayload.Append(",");
-
-				outPayload << "{\"role\":\"";
-				AppendEscapedJsonString(outPayload, role);
-				outPayload << "\",\"content\":\"";
-				AppendEscapedJsonString(outPayload, content);
-				outPayload << "\"}";
-				first = false;
-			}
-			index++;
-		}
-	}
-
-	if (first && currentPrompt != NULL && currentPrompt[0] != '\0') {
-		outPayload << "{\"role\":\"user\",\"content\":\"";
-		AppendEscapedJsonString(outPayload, currentPrompt);
-		outPayload << "\"}";
-	}
-
-	outPayload << "]}";
-}
-*/
 
 static void BuildAnthropicPayload(const BMessage* chatContext, const char* explicitPrompt, BString& outPayload, bool stream = false)
 {
@@ -647,38 +522,6 @@ static void BuildAnthropicPayload(const BMessage* chatContext, const char* expli
     outPayload.Append("\n}");
 }
 
-class SyncListener : public BUrlProtocolListener {
-public:
-    virtual bool CertificateVerificationFailed(BUrlRequest* request,
-        BCertificate& certificate, const char* message)
-    {
-        (void)request;
-        (void)certificate;
-        (void)message;
-        return false;
-    }
-};
-
-
-class CompletionListener : public BUrlProtocolListener {
-public:
-    CompletionListener(const char* notifyPath)
-        :
-        fPath(notifyPath)
-    {
-    }
-
-    virtual void RequestCompleted(BUrlRequest* request, bool success)
-    {
-        (void)request;
-        (void)success;
-        WriteStreamEnd(fPath.String());
-    }
-
-private:
-    BString fPath;
-};
-
 
 class AnthropicStreamTarget : public BDataIO {
 public:
@@ -729,76 +572,6 @@ private:
 	BFile fFile;
 	BString fBuffer;
 };
-
-/*
-static status_t
-anthropic_stream_thread_func(void* data)
-{
-	AnthropicAsyncArgs* args = (AnthropicAsyncArgs*)data;
-	if (args == NULL)
-		return B_BAD_VALUE;
-
-	fprintf(stderr, "[ANTHROPIC PLUGIN] streaming worker avviato\n");
-
-	if (args->notify_path == NULL || args->notify_path[0] == '\0') {
-		fprintf(stderr, "[ANTHROPIC PLUGIN] notify_path mancante\n");
-		FreeAsyncArgs(args);
-		return B_BAD_VALUE;
-	}
-
-	if (args->api_key == NULL || args->api_key[0] == '\0') {
-		fprintf(stderr, "[ANTHROPIC PLUGIN] api_key mancante\n");
-		WriteStreamEnd(args->notify_path);
-		FreeAsyncArgs(args);
-		return B_BAD_VALUE;
-	}
-
-	BString url = BuildMessagesUrl(args->base_url);
-	PrepareContextForStreaming(args->context_copy, NULL, args->model);
-
-	BString payload;
-	BuildAnthropicPayload(args->context_copy, NULL, payload, true);
-
-	AnthropicStreamTarget streamTarget(args->notify_path);
-	CompletionListener listener(args->notify_path);
-	BUrlRequest* request = BUrlProtocolRoster::MakeRequest(
-		BUrl(url.String(), false), &streamTarget, &listener, NULL);
-	if (request == NULL) {
-		fprintf(stderr, "[ANTHROPIC PLUGIN] creazione request streaming fallita\n");
-		WriteStreamEnd(args->notify_path);
-		FreeAsyncArgs(args);
-		return B_ERROR;
-	}
-
-	BHttpRequest* http = dynamic_cast<BHttpRequest*>(request);
-	if (http != NULL) {
-		http->SetMethod(B_HTTP_POST);
-
-		BHttpHeaders headers;
-		headers.AddHeader("Content-Type", "application/json");
-		headers.AddHeader("anthropic-version", "2023-06-01");
-		headers.AddHeader("x-api-key", args->api_key);
-		http->SetHeaders(headers);
-
-		BMemoryIO* input = new BMemoryIO(payload.String(), payload.Length());
-		http->AdoptInputData(input, payload.Length());
-	}
-
-	thread_id thread = request->Run();
-	if (thread >= 0) {
-		status_t rc = B_ERROR;
-		wait_for_thread(thread, &rc);
-		fprintf(stderr, "[ANTHROPIC PLUGIN] streaming terminato rc=%ld\n", (long)rc);
-	} else {
-		fprintf(stderr, "[ANTHROPIC PLUGIN] avvio thread streaming fallito\n");
-		WriteStreamEnd(args->notify_path);
-	}
-
-	delete request;
-	FreeAsyncArgs(args);
-	return B_OK;
-}
-*/
 
 static status_t
 anthropic_stream_thread_func(void* data)
@@ -1157,12 +930,6 @@ thread_cleanup:
 extern "C" ai_plugin_t
 ai_plugin_init(void)
 {
-	/*AIPluginHandle* handle = (AIPluginHandle*)malloc(sizeof(AnthropicHandle));
-	if (handle == NULL)
-		return NULL;
-
-	handle->base_url = NULL;
-	return (ai_plugin_t)handle;*/
 	AIPluginHandle* h = new(std::nothrow) AIPluginHandle();
     return (ai_plugin_t)h;
 }
@@ -1209,8 +976,13 @@ ai_plugin_generate_text_sync(ai_plugin_t handle, const char* prompt,
 		return B_BAD_VALUE;
 	}
 
-	AIPluginHandle* typedHandle = (AIPluginHandle*)handle;
-	BString url = BuildMessagesUrl(typedHandle != NULL ? typedHandle->base_url : NULL);
+	//AIPluginHandle* typedHandle = (AIPluginHandle*)handle;
+	const char* baseUrlRaw = nullptr;
+    contextMsg->FindString("base_url", &baseUrlRaw);
+    if (!baseUrlRaw || baseUrlRaw[0] == '\0') {
+        baseUrlRaw = DEFAULT_ANTHROPIC_URL;
+    }
+	BString url = BuildMessagesUrl(baseUrlRaw);
 
 	BString payload;
 	BuildAnthropicPayload(contextMsg, prompt, payload, false);
@@ -1292,70 +1064,22 @@ ai_plugin_generate_text_sync(ai_plugin_t handle, const char* prompt,
 	return (rc == B_OK && statusCode == 200) ? B_OK : B_ERROR;
 }
 
-/*
 extern "C" status_t
 ai_plugin_generate_text_async(ai_plugin_t handle, const char* prompt,
 	BMessage* contextMsg)
 {
-	AIPluginHandle* typedHandle = (AIPluginHandle*)handle;
+	//AIPluginHandle* typedHandle = (AIPluginHandle*)handle;
 	if (contextMsg == NULL)
 		return B_BAD_VALUE;
 
 	const char* apiKey = NULL;
 	const char* model = NULL;
 	const char* notifyPath = NULL;
+	const char* configBaseUrl = nullptr;
 	contextMsg->FindString("api_key", &apiKey);
 	contextMsg->FindString("model_name", &model);
 	contextMsg->FindString("notify_path", &notifyPath);
-
-	if (apiKey == NULL || apiKey[0] == '\0' || notifyPath == NULL
-		|| notifyPath[0] == '\0') {
-		return B_BAD_VALUE;
-	}
-
-	AnthropicAsyncArgs* args = (AnthropicAsyncArgs*)malloc(sizeof(AnthropicAsyncArgs));
-	if (args == NULL)
-		return B_NO_MEMORY;
-
-	args->api_key = dupstr_or_null(apiKey);
-	args->model = dupstr_or_null(
-		(model != NULL && model[0] != '\0') ? model : DEFAULT_ANTHROPIC_MODEL);
-	args->notify_path = dupstr_or_null(notifyPath);
-	args->base_url = typedHandle != NULL ? dupstr_or_null(typedHandle->base_url) : NULL;
-	args->context_copy = new BMessage(*contextMsg);
-	if (args->context_copy == NULL) {
-		FreeAsyncArgs(args);
-		return B_NO_MEMORY;
-	}
-
-	PrepareContextForStreaming(args->context_copy, prompt, args->model);
-
-	thread_id thread = spawn_thread(anthropic_stream_thread_func,
-		"anthropic_stream_worker", B_NORMAL_PRIORITY, args);
-	if (thread < B_OK) {
-		FreeAsyncArgs(args);
-		return B_ERROR;
-	}
-
-	resume_thread(thread);
-	return B_OK;
-}
-*/
-
-extern "C" status_t
-ai_plugin_generate_text_async(ai_plugin_t handle, const char* prompt,
-	BMessage* contextMsg)
-{
-	AIPluginHandle* typedHandle = (AIPluginHandle*)handle;
-	if (contextMsg == NULL)
-		return B_BAD_VALUE;
-
-	const char* apiKey = NULL;
-	const char* model = NULL;
-	const char* notifyPath = NULL;
-	contextMsg->FindString("api_key", &apiKey);
-	contextMsg->FindString("model_name", &model);
-	contextMsg->FindString("notify_path", &notifyPath);
+	contextMsg->FindString("base_url", &configBaseUrl);
 
 	if (apiKey == NULL || apiKey[0] == '\0' || notifyPath == NULL
 		|| notifyPath[0] == '\0') {
@@ -1370,7 +1094,13 @@ ai_plugin_generate_text_async(ai_plugin_t handle, const char* prompt,
 	args->model = dupstr_or_null(
 		(model != NULL && model[0] != '\0') ? model : DEFAULT_ANTHROPIC_MODEL);
 	args->notify_path = dupstr_or_null(notifyPath);
-	args->base_url = typedHandle != NULL ? dupstr_or_null(typedHandle->base_url) : NULL;
+	
+	//args->base_url = typedHandle != NULL ? dupstr_or_null(typedHandle->base_url) : NULL;
+	if (configBaseUrl && configBaseUrl[0] != '\0') {
+        args->base_url = dupstr_or_null(configBaseUrl);
+    } else {
+        args->base_url = strdup(DEFAULT_ANTHROPIC_URL);
+    }
 	args->context_copy = new BMessage(*contextMsg);
 	if (args->context_copy == NULL) {
 		delete args;

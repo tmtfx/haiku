@@ -25,7 +25,7 @@
 
 using namespace BPrivate::Network;
 
-#define DEFAULT_PUBLICAI_URL   "https://api.publicai.co/v1"
+#define DEFAULT_PUBLICAI_URL   "https://api.publicai.co"
 #define DEFAULT_PUBLICAI_MODEL "swiss-ai/apertus-8b-instruct"
 #define PUBLICAI_USER_AGENT    "HaikuAIEngine/1.0"
 
@@ -108,39 +108,6 @@ private:
     BString fBuffer;
 };
 
-/* --- VECCHIO CODICE COMMENTATO (I listener ora provengono da AINetworkPlugin.h) ---
-class CompletionListener : public BUrlProtocolListener {
-public:
-    CompletionListener(const char* notifyPath) : fPath(notifyPath) {}
-
-    virtual void RequestCompleted(BUrlRequest* caller, bool success) override {
-        BFile file(fPath.String(), B_WRITE_ONLY | B_OPEN_AT_END);
-        if (file.InitCheck() == B_OK) {
-            BString endMarker = "<<STREAM_END>>";
-            file.Write(endMarker.String(), endMarker.Length());
-        }
-    }
-private:
-    BString fPath;
-};
-*/
-
-/* usiamo la generica Handle in AIPlugin.h
-struct PublicAIHandle {
-    char* base_url;
-};
-*/
-
-/* --- VECCHIO CODICE COMMENTATO (Ora usiamo AsyncArgs globale da AIPlugin.h) ---
-struct PublicAIAsyncArgs {
-    char* api_key;
-    char* model;
-    char* notify_path;
-    char* base_url;
-    BMessage* context_copy;
-};
-*/
-
 static char* dupstr_or_null(const char* s) {
     if (!s) return nullptr;
     size_t n = strlen(s) + 1;
@@ -148,17 +115,6 @@ static char* dupstr_or_null(const char* s) {
     if (p) memcpy(p, s, n);
     return p;
 }
-
-/* --- VECCHIO CODICE COMMENTATO (Ora SyncListener proviene da AINetworkPlugin.h) ---
-class SyncListener : public BUrlProtocolListener {
-public:
-    SyncListener() {}
-    virtual ~SyncListener() {}
-    bool CertificateVerificationFailed(BUrlRequest* request, BCertificate& certificate, const char* message) override {
-        return false; 
-    }
-};
-*/
 
 // ============================================================================
 // HELPER PER SERIALIZZAZIONE E SUPPORTO STRUMENTI (MCP)
@@ -427,7 +383,7 @@ static void BuildPublicAIPayload(const BMessage* chatContext, const char* explic
     }
     if (systemPrompt && systemPrompt[0] != '\0') {
         BString escapedSystem = EscapeStringForJson(systemPrompt);
-        outPayload << "    {\"role\": \"system\", \"content\": \"" << escapedSystem << "\"\}";
+        outPayload << "    {\"role\": \"system\", \"content\": \"" << escapedSystem << "\"\"}";
         first = false;
     }
     BMessage historyMsg;
@@ -559,7 +515,7 @@ extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
                                              BMessage* config)
 {
     fprintf(stderr, "[PUBLICAI PLUGIN] === INIZIO generate_text_sync ===\n");
-    AIPluginHandle* h = (AIPluginHandle*)handle;
+    //AIPluginHandle* h = (AIPluginHandle*)handle;
     if (!config) {
         fprintf(stderr, "[PUBLICAI PLUGIN] ERRORE: il puntatore BMessage* config è NULL!\n");
         return B_ERROR;
@@ -577,9 +533,10 @@ extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
         return B_ERROR;
     }
     
-    BString url = (h && h->base_url && h->base_url[0]) ? h->base_url : DEFAULT_PUBLICAI_URL;
+    const char* baseUrlRaw = nullptr;
+    BString url = (config->FindString("base_url", &baseUrlRaw) == B_OK) ? baseUrlRaw : DEFAULT_PUBLICAI_URL;
     if (!url.EndsWith("/")) url.Append("/", 1);
-    url.Append("chat/completions");
+    url.Append("v1/chat/completions");
     fprintf(stderr, "[PUBLICAI PLUGIN] Target URL: %s\n", url.String());
     
     BString payload;
@@ -680,93 +637,6 @@ extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
     return rc == B_OK ? 0 : -1;
 }
 
-/* --- VECCHIO CODICE COMMENTATO (Sostituito dal thread worker MCP-ready) ---
-static status_t publicai_stream_thread_func(void* data)
-{
-    fprintf(stderr, "[PUBLICAI STREAM WORKER] Thread avviato.\n");
-    PublicAIAsyncArgs* args = (PublicAIAsyncArgs*)data;
-    if (!args) return B_BAD_VALUE;
-
-    if (!args->api_key || args->api_key[0] == '\0') {
-        fprintf(stderr, "[PUBLICAI STREAM WORKER] ERRORE CRITICO: API key assente!\n");
-        if (args->notify_path) {
-            BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE);
-            BString endMarker = "<<STREAM_END>>";
-            streamFile.Write(endMarker.String(), endMarker.Length());
-        }
-        if (args->api_key) free(args->api_key);
-        if (args->model) free(args->model);
-        if (args->notify_path) free(args->notify_path);
-        if (args->base_url) free(args->base_url);
-        if (args->context_copy) delete args->context_copy;
-        free(args);
-        return B_ERROR;
-    }
-
-    BString urlString;
-    if (args->base_url && args->base_url[0] != '\0') {
-        urlString << args->base_url;
-        if (!urlString.EndsWith("/")) urlString.Append("/", 1);
-        urlString.Append("chat/completions");
-    } else {
-        urlString = "https://api.publicai.co/v1/chat/completions";
-    }
-
-    BString payload;
-    BuildPayloadFromContext(args->context_copy, nullptr, payload, true);
-    fprintf(stderr, "[PUBLICAI STREAM WORKER] Payload Streaming generato:\n%s\n", payload.String());
-    
-    {
-        StreamTarget streamTarget(args->notify_path);
-        CompletionListener listener(args->notify_path);
-        BUrl bUrl(urlString.String(), false);
-
-        BUrlRequest* req = BUrlProtocolRoster::MakeRequest(bUrl, &streamTarget, &listener, NULL);
-        if (req != nullptr) {
-            BHttpRequest* http = dynamic_cast<BHttpRequest*>(req);
-            if (http) {
-                http->SetMethod(B_HTTP_POST);
-                BHttpHeaders headers;
-                headers.AddHeader("Content-Type", "application/json");
-                headers.AddHeader("User-Agent", "HaikuAIserver/1.0"); 
-                
-                BString authHeader;
-                authHeader << "Bearer " << args->api_key;
-                headers.AddHeader("Authorization", authHeader.String());
-                http->SetHeaders(headers);
-
-                BMemoryIO* input = new BMemoryIO(payload.String(), payload.Length());
-                http->AdoptInputData(input, payload.Length());
-            }
-
-            fprintf(stderr, "[PUBLICAI STREAM WORKER] Avvio streaming...\n");
-            thread_id thread = req->Run();
-            if (thread >= 0) {
-                status_t rc;
-                wait_for_thread(thread, &rc);
-                fprintf(stderr, "[PUBLICAI STREAM WORKER] Streaming concluso (rc: %d).\n", (int)rc);
-            }
-            delete req;
-        } else {
-            fprintf(stderr, "[PUBLICAI STREAM WORKER] Errore creazione richiesta.\n");
-            BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE);
-            BString endMarker = "<<STREAM_END>>";
-            streamFile.Write(endMarker.String(), endMarker.Length());
-        }
-    }
-
-    fprintf(stderr, "[PUBLICAI STREAM WORKER] Cleanup di fine ciclo.\n");
-    if (args->api_key) free(args->api_key);
-    if (args->model) free(args->model);
-    if (args->notify_path) free(args->notify_path);
-    if (args->base_url) free(args->base_url);
-    if (args->context_copy) delete args->context_copy;
-    free(args);
-
-    return B_OK;
-}
-*/
-
 // ============================================================================
 // NUOVO WORKER STREAMING CON SUPPORTO MCP CENTRALIZZATO (BJson / BMessage)
 // ============================================================================
@@ -779,6 +649,9 @@ static status_t publicai_stream_thread_func(void* data)
     BMessage replyTools;
     bool mcpActive = false;
     bool executionLoop = true;
+    BString baseUrl;
+    BString targetUrl;
+    BString tempUrl;
 
     // Controllo di sicurezza sulla chiave API
     if (!args->api_key || args->api_key[0] == '\0') {
@@ -789,6 +662,27 @@ static status_t publicai_stream_thread_func(void* data)
             streamFile.Write(endMarker.String(), endMarker.Length());
         }
         goto thread_cleanup;
+    }
+    
+    // ESTRAZIONE GERARCHICA BASE URL (args > context_copy > default) ===
+    if (args->base_url && args->base_url[0] != '\0') {
+        baseUrl = args->base_url;
+    } else if (args->context_copy && args->context_copy->FindString("base_url", &tempUrl) == B_OK 
+           && !tempUrl.IsEmpty()) {
+        baseUrl = tempUrl;
+    } else {
+        // 3. Fallback di sistema: macro #define
+        baseUrl = DEFAULT_PUBLICAI_URL;
+    }
+    // Costruzione dell'endpoint /chat/completions corretto
+    if (baseUrl.Length() > 0) {
+        targetUrl = baseUrl;
+        if (targetUrl.EndsWith("/")) 
+            targetUrl.Remove(targetUrl.Length() - 1, 1);
+        if (!targetUrl.EndsWith("/v1/chat/completions")) 
+            targetUrl << "/v1/chat/completions";
+    } else {
+        targetUrl = "https://api.openai.com/v1/chat/completions";
     }
 
     // === CONTROLLO CAPABILITY VIA MESSENGER ===
@@ -813,9 +707,9 @@ static status_t publicai_stream_thread_func(void* data)
     if (!mcpActive) {
         fprintf(stderr, "[PUBLICAI STREAM WORKER] Modalità Standard: Avvio Streaming Diretto.\n");
         
-        BString url = (args->base_url && args->base_url[0] != '\0') ? args->base_url : DEFAULT_PUBLICAI_URL;
-        if (!url.EndsWith("/")) url.Append("/", 1);
-        url.Append("chat/completions");
+        //BString url = (args->base_url && args->base_url[0] != '\0') ? args->base_url : DEFAULT_PUBLICAI_URL;
+        //if (!targetUrl.EndsWith("/")) url.Append("/", 1);
+        //url.Append("chat/completions");
 
         BString payload;
         BuildPublicAIPayload(args->context_copy, nullptr, payload, true);
@@ -823,7 +717,7 @@ static status_t publicai_stream_thread_func(void* data)
         {
             StreamTarget streamTarget(args->notify_path);
             CompletionListener listener(args->notify_path);
-            BUrl bUrl(url.String(), false);
+            BUrl bUrl(targetUrl.String(), false);
             BUrlRequest* req = BUrlProtocolRoster::MakeRequest(bUrl, &streamTarget, &listener, NULL);
             if (req) {
                 BHttpRequest* http = dynamic_cast<BHttpRequest*>(req);
@@ -878,9 +772,9 @@ static status_t publicai_stream_thread_func(void* data)
             }
         }
 
-        BString url = (args->base_url && args->base_url[0] != '\0') ? args->base_url : DEFAULT_PUBLICAI_URL;
-        if (!url.EndsWith("/")) url.Append("/", 1);
-        url.Append("chat/completions");
+        //BString url = (args->base_url && args->base_url[0] != '\0') ? args->base_url : DEFAULT_PUBLICAI_URL;
+        //if (!url.EndsWith("/")) url.Append("/", 1);
+        //url.Append("chat/completions");
 
         BString payload;
         // In modalità MCP non usiamo lo streaming (stream = false)
@@ -891,17 +785,26 @@ static status_t publicai_stream_thread_func(void* data)
             ConvertBMessageToOpenAIToolsJson(&replyTools, openAiToolsJson);
 
             if (openAiToolsJson.Length() > 0) {
-                int32 lastCloseBrace = payload.FindLast("}");
-                if (lastCloseBrace != B_ERROR) {
-                    payload.Truncate(lastCloseBrace);
-                    payload << ",\"tools\":" << openAiToolsJson << "}";
+                //int32 lastCloseBrace = payload.FindLast("}");
+                //if (lastCloseBrace != B_ERROR) {
+                //    payload.Truncate(lastCloseBrace);
+                //    payload << ",\"tools\":" << openAiToolsJson << "}";
+                //}
+                BMessage toolsMsg;
+                if (BJson::Parse(openAiToolsJson,toolsMsg) == B_OK) {
+                    // Aggiungi l'oggetto tools strutturato senza manipolare parentesi graffe via stringa
+                    int32 lastCloseBrace = payload.FindLast("}");
+                    if (lastCloseBrace != B_ERROR) {
+                        payload.Truncate(lastCloseBrace);
+                        payload << ",\"tools\":" << openAiToolsJson << "}";
+                    }
                 }
             }
         }
 
         BMallocIO outNetworkData;
         SyncListener syncListener;
-        BUrl bUrl(url.String(), false);
+        BUrl bUrl(targetUrl.String(), false);
         BUrlRequest* req = BUrlProtocolRoster::MakeRequest(bUrl, &outNetworkData, &syncListener, NULL);
         if (!req) { 
             executionLoop = false; 
@@ -1095,71 +998,26 @@ static status_t publicai_stream_thread_func(void* data)
 
 thread_cleanup:
     fprintf(stderr, "[PUBLICAI STREAM WORKER] Pulizia e chiusura thread worker.\n");
-    delete args; 
+        
+    delete args;
+
     return B_OK;
 }
 
-/* --- VECCHIO CODICE COMMENTATO (Adattamento ai_plugin_generate_text_async precedente) ---
 extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle, const char* prompt, BMessage* config)
 {
-    AIPluginHandle* h = (AIPluginHandle*)handle;
-    if (!config) return B_ERROR;
-    
-    const char* apiKeyBuf = nullptr;
-    const char* modelBuf = nullptr;
-    const char* pathBuf = nullptr;
-    
-    config->FindString("api_key", &apiKeyBuf);
-    config->FindString("model_name", &modelBuf);
-    config->FindString("notify_path", &pathBuf);
-
-    if (!pathBuf || pathBuf[0] == '\0') return B_ERROR;
-    
-    PublicAIAsyncArgs* args = (PublicAIAsyncArgs*)malloc(sizeof(PublicAIAsyncArgs));
-    if (!args) return B_ERROR;
-    
-    args->api_key = dupstr_or_null(apiKeyBuf);
-    args->model = dupstr_or_null(modelBuf && modelBuf[0] ? modelBuf : DEFAULT_PUBLICAI_MODEL);
-    args->notify_path = dupstr_or_null(pathBuf);
-    args->base_url = h ? dupstr_or_null(h->base_url) : nullptr;
-    
-    // Duplichiamo l'intero contesto nativo BMessage per passarlo al thread in sicurezza
-    args->context_copy = new BMessage(*config);
-
-    thread_id thread = spawn_thread(
-        publicai_stream_thread_func,
-        "publicai_stream_worker",
-        B_NORMAL_PRIORITY,
-        args
-    );
-
-    if (thread < B_OK) {
-        if (args->api_key) free(args->api_key);
-        if (args->model) free(args->model);
-        if (args->notify_path) free(args->notify_path);
-        if (args->base_url) free(args->base_url);
-        delete args->context_copy;
-        free(args);
-        return B_ERROR;
-    }
-
-    resume_thread(thread);
-    return B_OK;
-}
-*/
-
-extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle, const char* prompt, BMessage* config)
-{
-    AIPluginHandle* h = (AIPluginHandle*)handle;
+    //AIPluginHandle* h = (AIPluginHandle*)handle;
     if (!config) return B_ERROR;
     
     const char* apiKey = nullptr;
     const char* modelName = nullptr;
     const char* notifyPath = nullptr;
+    const char* configBaseUrl = nullptr;
     
     config->FindString("api_key", &apiKey);
     config->FindString("model_name", &modelName);
     config->FindString("notify_path", &notifyPath);
+    config->FindString("base_url", &configBaseUrl);
 
     if (!notifyPath || notifyPath[0] == '\0') {
         fprintf(stderr, "[PUBLICAI_PLUGIN] Errore: notify_path mancante nella sessione.\n");
@@ -1172,8 +1030,23 @@ extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle, const char
     args->api_key = dupstr_or_null(apiKey);
     args->model = dupstr_or_null(modelName && modelName[0] ? modelName : DEFAULT_PUBLICAI_MODEL);
     args->notify_path = dupstr_or_null(notifyPath);
-    args->base_url = h ? dupstr_or_null(h->base_url) : nullptr;
-    args->context_copy = new BMessage(*config);
+    
+    if (configBaseUrl && configBaseUrl[0] != '\0') {
+        args->base_url = dupstr_or_null(configBaseUrl);
+    } else {
+        args->base_url = strdup(DEFAULT_PUBLICAI_URL);
+    }
+    
+    args->context_copy = new (std::nothrow) BMessage(*config);
+    if (!args->context_copy) {
+        delete args;
+        return B_NO_MEMORY;
+    }
+    
+    // Se prompt è passato separatamente ma non è in config, possiamo inserirlo in context_copy
+    if (prompt && prompt[0] != '\0' && !args->context_copy->HasString("prompt")) {
+        args->context_copy->AddString("prompt", prompt);
+    }
 
     BMessenger serverMessenger;
     if (config->FindMessenger("server_messenger", &serverMessenger) == B_OK) {
@@ -1197,7 +1070,7 @@ extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle, const char
     resume_thread(thread);
     return B_OK;
 }
-
+/*
 extern "C" status_t ai_plugin_list_models(const BMessage* config, char* out_buf, size_t out_len)
 {
     const char* defaultFallback = "[\"swiss-ai/apertus-8b-instruct\"]";
@@ -1311,6 +1184,125 @@ extern "C" status_t ai_plugin_list_models(const BMessage* config, char* out_buf,
     out_buf[copy_len] = '\0';
 
     delete req; delete out;
+    return B_OK;
+}*/
+extern "C" status_t ai_plugin_list_models(const BMessage* config, char* out_buf, size_t out_len)
+{
+    const char* defaultFallback = "[\"swiss-ai/apertus-8b-instruct\"]";
+
+    if (!out_buf || out_len == 0) return B_BAD_VALUE;
+
+    auto write_fallback = [&]() -> status_t {
+        if (strlen(defaultFallback) + 1 > out_len) return B_ERROR;
+        strcpy(out_buf, defaultFallback);
+        return B_OK;
+    };
+
+    if (!config) {
+        return write_fallback();
+    }
+
+    const char* apiKey = nullptr;
+    const char* baseUrl = nullptr;
+    config->FindString("api_key", &apiKey);
+    config->FindString("base_url", &baseUrl);
+
+    if (!apiKey || apiKey[0] == '\0') {
+        return write_fallback();
+    }
+
+    BString urlString;
+    if (baseUrl && baseUrl[0] != '\0') {
+        urlString << baseUrl;
+        if (!urlString.EndsWith("/")) urlString.Append("/", 1);
+        urlString.Append("models");
+    } else {
+        urlString = "https://api.publicai.co/v1/models";
+    }
+
+    BMallocIO* out = new BMallocIO();
+    SyncListener listener;
+    BUrl bUrl(urlString.String(), false);
+
+    BUrlRequest* req = BUrlProtocolRoster::MakeRequest(bUrl, out, &listener, NULL);
+    if (!req) { 
+        delete out; 
+        return write_fallback(); 
+    }
+    
+    int32 statusCode = 0;
+    BHttpRequest* http = dynamic_cast<BHttpRequest*>(req);
+    if (http) {
+        http->SetMethod(B_HTTP_GET);
+        BHttpHeaders headers;
+        headers.AddHeader("User-Agent", PUBLICAI_USER_AGENT); 
+        BString authHeader;
+        authHeader.SetToFormat("Bearer %s", apiKey);
+        headers.AddHeader("Authorization", authHeader.String());
+        http->SetHeaders(headers);
+    }
+
+    thread_id thread = req->Run();
+    status_t rc = B_ERROR;
+    if (thread >= 0) {
+        wait_for_thread(thread, &rc);
+    } else {
+        rc = thread;
+    }
+    
+    if (rc == B_OK && http != nullptr) {
+        const BHttpResult* httpResult = dynamic_cast<const BHttpResult*>(&(http->Result()));
+        if (httpResult != nullptr) {
+            statusCode = httpResult->StatusCode();
+        }
+    }
+
+    if (rc != B_OK || out->BufferLength() == 0 || statusCode != 200) {
+        delete req; 
+        delete out;
+        return write_fallback();
+    }
+
+    BString jsonResponse((const char*)out->Buffer(), out->BufferLength());
+    delete req; 
+    delete out; // Memoria di rete liberata subito dopo la lettura
+
+    // Parsing strutturato via BJson
+    BMessage parsedJson;
+    BString cleanJson("[");
+    bool first = true;
+
+    if (BPrivate::BJson::Parse(jsonResponse, parsedJson) == B_OK) {
+        BMessage dataList;
+        if (parsedJson.FindMessage("data", &dataList) == B_OK) {
+            int32 index = 0;
+            BMessage item;
+            while (dataList.FindMessage("data", index++, &item) == B_OK) {
+                const char* modelId = nullptr;
+                if (item.FindString("id", &modelId) == B_OK && modelId != nullptr) {
+                    BString mStr(modelId);
+                    mStr.Trim();
+                    if (!mStr.IsEmpty() && mStr.FindFirst("embed") == B_ERROR && mStr.FindFirst("rerank") == B_ERROR) {
+                        if (!first) cleanJson.Append(", ");
+                        cleanJson << "\"" << mStr << "\"";
+                        first = false;
+                    }
+                }
+            }
+        }
+    }
+
+    cleanJson.Append("]");
+    if (cleanJson == "[]") {
+        return write_fallback();
+    }
+
+    size_t jsonLength = (size_t)cleanJson.Length();
+    size_t copy_len = jsonLength < (out_len - 1) ? jsonLength : (out_len - 1);
+    
+    memcpy(out_buf, cleanJson.String(), copy_len);
+    out_buf[copy_len] = '\0';
+
     return B_OK;
 }
 

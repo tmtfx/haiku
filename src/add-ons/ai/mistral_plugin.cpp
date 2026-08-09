@@ -25,7 +25,7 @@
 
 using namespace BPrivate::Network;
 
-#define DEFAULT_MISTRAL_URL   "https://api.mistral.ai/v1"
+#define DEFAULT_MISTRAL_URL   "https://api.mistral.ai"
 #define DEFAULT_MISTRAL_MODEL "mistral-large-latest"
 #define MISTRAL_USER_AGENT    "HaikuAIEngine/1.0"
 
@@ -99,43 +99,6 @@ private:
     BString fBuffer;
 };
 
-/*
-class CompletionListener : public BUrlProtocolListener {
-public:
-    CompletionListener(const char* notifyPath)
-        : fPath(notifyPath)
-    {
-    }
-
-    virtual void RequestCompleted(BUrlRequest* caller, bool success) override
-    {
-        BFile file(fPath.String(), B_WRITE_ONLY | B_OPEN_AT_END);
-        if (file.InitCheck() == B_OK) {
-            BString endMarker = "<<STREAM_END>>";
-            file.Write(endMarker.String(), endMarker.Length());
-        }
-    }
-
-private:
-    BString fPath;
-};
-*/
-
-/* usiamo la generica Handle in AIPlugin.h
-struct MistralHandle {
-    char* base_url;
-};
-*/
-
-/*
-struct MistralAsyncArgs {
-    char* api_key;
-    char* model;
-    char* notify_path;
-    char* base_url;
-    BMessage* context_copy;
-};
-*/
 
 static char* dupstr_or_null(const char* s)
 {
@@ -148,24 +111,6 @@ static char* dupstr_or_null(const char* s)
     return p;
 }
 
-/*
-class SyncListener : public BUrlProtocolListener {
-public:
-    SyncListener()
-    {
-    }
-
-    virtual ~SyncListener()
-    {
-    }
-
-    bool CertificateVerificationFailed(BUrlRequest* request, BCertificate& certificate,
-        const char* message) override
-    {
-        return false;
-    }
-};
-*/
 
 static BString EscapeStringForJson(const char* input) {
     if (!input) return "";
@@ -351,78 +296,6 @@ void AppendToolResponseToContext(BMessage* context, const char* name, const char
     context->AddMessage("messages", &messagesMsg);
 }
 
-/*
-static void
-BuildPayloadFromContext(const BMessage* config, const char* currentPrompt,
-    BString& outPayload, bool stream)
-{
-    outPayload.SetTo("{\n");
-
-    const char* model = nullptr;
-    if (config)
-        config->FindString("model_name", &model);
-    if (!model || model[0] == '\0')
-        model = DEFAULT_MISTRAL_MODEL;
-
-    BString modelLine;
-    modelLine.SetToFormat("  \"model\": \"%s\",\n", model);
-    outPayload << modelLine;
-
-    if (stream)
-        outPayload.Append("  \"stream\": true,\n");
-
-    outPayload.Append("  \"messages\": [");
-    bool first = true;
-
-    BMessage messagesMsg;
-    if (config && config->FindMessage("messages", &messagesMsg) == B_OK) {
-        BMessage turn;
-        for (int32 i = 0; messagesMsg.FindMessage("msg", i, &turn) == B_OK; i++) {
-            const char* role = nullptr;
-            const char* content = nullptr;
-            turn.FindString("role", &role);
-            if (turn.FindString("content", &content) != B_OK)
-                turn.FindString("text", &content);
-
-            if (!role || !content || content[0] == '\0')
-                continue;
-
-            BString mappedRole = strcmp(role, "model") == 0 ? "assistant" : role;
-            BString escapedContent(content);
-            escapedContent.ReplaceAll("\\", "\\\\");
-            escapedContent.ReplaceAll("\"", "\\\"");
-            escapedContent.ReplaceAll("\n", "\\n");
-            escapedContent.ReplaceAll("\r", "\\r");
-            escapedContent.ReplaceAll("\t", "\\t");
-
-            if (!first)
-                outPayload.Append(",");
-
-            BString objectStr;
-            objectStr.SetToFormat("{\"role\":\"%s\",\"content\":\"%s\"}",
-                mappedRole.String(), escapedContent.String());
-            outPayload.Append(objectStr);
-            first = false;
-        }
-    }
-
-    if (first && currentPrompt && currentPrompt[0] != '\0') {
-        BString escapedPrompt(currentPrompt);
-        escapedPrompt.ReplaceAll("\\", "\\\\");
-        escapedPrompt.ReplaceAll("\"", "\\\"");
-        escapedPrompt.ReplaceAll("\n", "\\n");
-        escapedPrompt.ReplaceAll("\r", "\\r");
-        escapedPrompt.ReplaceAll("\t", "\\t");
-
-        BString objectStr;
-        objectStr.SetToFormat("{\"role\":\"user\",\"content\":\"%s\"}",
-            escapedPrompt.String());
-        outPayload.Append(objectStr);
-    }
-
-    outPayload.Append("]\n}");
-}
-*/
 
 static void
 BuildPayloadFromContext(const BMessage* config, const char* currentPrompt,
@@ -572,9 +445,6 @@ extern "C" void ai_plugin_free(ai_plugin_t handle)
     AIPluginHandle* mistral = (AIPluginHandle*)handle;
     if (!mistral)
         return;
-
-    if (mistral->base_url)
-        free(mistral->base_url);
     free(mistral);
 }
 
@@ -613,12 +483,16 @@ extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
         return B_BAD_VALUE;
     }
 
-    AIPluginHandle* mistral = (AIPluginHandle*)handle;
-    BString url = (mistral && mistral->base_url && mistral->base_url[0] != '\0')
-        ? mistral->base_url : DEFAULT_MISTRAL_URL;
+    //AIPluginHandle* mistral = (AIPluginHandle*)handle;
+    const char* baseUrlRaw = nullptr;
+    contextMsg->FindString("base_url", &baseUrlRaw);
+    if (!baseUrlRaw || baseUrlRaw[0] == '\0') {
+        baseUrlRaw = DEFAULT_MISTRAL_URL;
+    }
+    BString url = baseUrlRaw ;
     if (!url.EndsWith("/"))
         url.Append("/", 1);
-    url.Append("chat/completions");
+    url.Append("v1/chat/completions");
 
     BString payload;
     BuildPayloadFromContext(contextMsg, prompt, payload, false);
@@ -709,488 +583,363 @@ extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
     return B_OK;
 }
 
-/*
-static int32 mistral_stream_thread_func(void* data)
-{
-    MistralAsyncArgs* args = (MistralAsyncArgs*)data;
-    if (!args)
-        return B_BAD_VALUE;
-
-    fprintf(stderr, "[MISTRAL PLUGIN] async worker start\n");
-
-    if (args->context_copy && args->model && args->model[0] != '\0') {
-        if (args->context_copy->ReplaceString("model_name", args->model) != B_OK)
-            args->context_copy->AddString("model_name", args->model);
-    }
-
-    if (!args->api_key || args->api_key[0] == '\0' || !args->notify_path
-        || args->notify_path[0] == '\0') {
-        fprintf(stderr, "[MISTRAL PLUGIN] async worker missing required fields\n");
-        if (args->notify_path && args->notify_path[0] != '\0') {
-            BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE);
-            BString endMarker = "<<STREAM_END>>";
-            streamFile.Write(endMarker.String(), endMarker.Length());
-        }
-        if (args->api_key) free(args->api_key);
-        if (args->model) free(args->model);
-        if (args->notify_path) free(args->notify_path);
-        if (args->base_url) free(args->base_url);
-        if (args->context_copy) delete args->context_copy;
-        free(args);
-        return B_ERROR;
-    }
-
-    BString urlString = (args->base_url && args->base_url[0] != '\0')
-        ? args->base_url : DEFAULT_MISTRAL_URL;
-    if (!urlString.EndsWith("/"))
-        urlString.Append("/", 1);
-    urlString.Append("chat/completions");
-
-    BString payload;
-    BuildPayloadFromContext(args->context_copy, nullptr, payload, true);
-
-    {
-        StreamTarget streamTarget(args->notify_path);
-        CompletionListener listener(args->notify_path);
-        BUrl bUrl(urlString.String(), false);
-        BUrlRequest* req = BUrlProtocolRoster::MakeRequest(bUrl, &streamTarget, &listener, NULL);
-        if (req) {
-            BHttpRequest* http = dynamic_cast<BHttpRequest*>(req);
-            if (http) {
-                http->SetMethod(B_HTTP_POST);
-                BHttpHeaders headers;
-                headers.AddHeader("Content-Type", "application/json");
-                headers.AddHeader("User-Agent", MISTRAL_USER_AGENT);
-                BString authHeader;
-                authHeader << "Bearer " << args->api_key;
-                headers.AddHeader("Authorization", authHeader.String());
-                http->SetHeaders(headers);
-
-                BMemoryIO* input = new BMemoryIO(payload.String(), payload.Length());
-                http->AdoptInputData(input, payload.Length());
-            }
-
-            thread_id thread = req->Run();
-            if (thread >= 0) {
-                status_t rc = B_ERROR;
-                wait_for_thread(thread, &rc);
-                fprintf(stderr, "[MISTRAL PLUGIN] async worker completed rc=%ld\n", (long)rc);
-            }
-            delete req;
-        } else {
-            fprintf(stderr, "[MISTRAL PLUGIN] async request creation failed\n");
-            BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE);
-            BString endMarker = "<<STREAM_END>>";
-            streamFile.Write(endMarker.String(), endMarker.Length());
-        }
-    }
-
-    if (args->api_key) free(args->api_key);
-    if (args->model) free(args->model);
-    if (args->notify_path) free(args->notify_path);
-    if (args->base_url) free(args->base_url);
-    if (args->context_copy) delete args->context_copy;
-    free(args);
-    return B_OK;
-}
-*/
 
 static int32 mistral_stream_thread_func(void* data)
 {
-    fprintf(stderr, "[MISTRAL STREAM WORKER] Thread avviato.\n");
-    AsyncArgs* args = (AsyncArgs*)data;
-    if (!args) return B_BAD_VALUE;
+	fprintf(stderr, "[MISTRAL STREAM WORKER] Thread avviato.\n");
+	AsyncArgs* args = (AsyncArgs*)data;
+	if (!args) return B_BAD_VALUE;
+	
+	BString baseUrl;
+	BString url;
+	BString tempUrl;
 
-    BMessage replyTools;
-    bool mcpActive = false;
-    bool executionLoop = true;
+	BMessage replyTools;
+	bool mcpActive = false;
+	bool executionLoop = true;
 
-    if (!args->api_key || args->api_key[0] == '\0') {
-        fprintf(stderr, "[MISTRAL STREAM WORKER] ERRORE CRITICO: API key assente!\n");
-        if (args->notify_path) {
-            BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE);
-            BString endMarker = "<<STREAM_END>>";
-            streamFile.Write(endMarker.String(), endMarker.Length());
-        }
-        goto thread_cleanup;
-    }
+	if (!args->api_key || args->api_key[0] == '\0') {
+		fprintf(stderr, "[MISTRAL STREAM WORKER] ERRORE CRITICO: API key assente!\n");
+		if (args->notify_path) {
+			BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE);
+			BString endMarker = "<<STREAM_END>>";
+			streamFile.Write(endMarker.String(), endMarker.Length());
+		}
+		goto thread_cleanup;
+	}
+	if (args->base_url && args->base_url[0] != '\0') {
+		baseUrl = args->base_url;
+	} else if (args->context_copy && args->context_copy->FindString("base_url", &tempUrl) == B_OK 
+			   && !tempUrl.IsEmpty()) {
+		baseUrl = tempUrl;
+	} else {
+		// 3. Fallback di sistema: macro #define
+		baseUrl = DEFAULT_MISTRAL_URL;
+	}
+	if (baseUrl.Length() > 0) {
+		 url = baseUrl;
+		 if (url.EndsWith("/")) 
+			 url.Remove(url.Length() - 1, 1);
+		 if (!url.EndsWith("/v1/chat/completions")) 
+			 url << "/v1/chat/completions";
+	} else {
+		url = "https://api.mistral.ai/v1/chat/completions";
+	}
 
-    if (args->server_messenger.IsValid()) {
-        BMessage reqTools(MSG_MCP_GET_TOOLS); 
-        const char* ctxId = nullptr;
-        if (args->context_copy) {
-            args->context_copy->FindString("context_id", &ctxId);
-        }
-        if (ctxId) {
-            reqTools.AddString("context_id", ctxId);
-        }
-        
-        if (args->server_messenger.SendMessage(&reqTools, &replyTools) == B_OK) {
-            if (replyTools.HasMessage("tool", 0)) {
-                mcpActive = true;
-            }
-        }
-    }
+	if (args->server_messenger.IsValid()) {
+		BMessage reqTools(MSG_MCP_GET_TOOLS); 
+		const char* ctxId = nullptr;
+		if (args->context_copy) {
+			args->context_copy->FindString("context_id", &ctxId);
+		}
+		if (ctxId) {
+			reqTools.AddString("context_id", ctxId);
+		}
+		
+		if (args->server_messenger.SendMessage(&reqTools, &replyTools) == B_OK) {
+			if (replyTools.HasMessage("tool", 0)) {
+				mcpActive = true;
+			}
+		}
+	}
 
-    if (!mcpActive) {
-        goto fallback_to_standard;
-    }
+	if (!mcpActive) {
+		goto fallback_to_standard;
+	}
 
-    fprintf(stderr, "[MISTRAL STREAM WORKER] Modalità MCP Attiva: Avvio loop di interazione strumenti.\n");
-    
-    executionLoop = true;
-    while (executionLoop) {
-        if (args->server_messenger.IsValid()) {
-            BMessage checkAbortMsg('CHAB');
-            const char* ctxId = nullptr;
-            if (args->context_copy) {
-                args->context_copy->FindString("context_id", &ctxId);
-            }
-            if (ctxId) {
-                checkAbortMsg.AddString("context_id", ctxId);
-            }
-            
-            BMessage abortReply;
-            if (args->server_messenger.SendMessage(&checkAbortMsg, &abortReply) == B_OK) {
-                int32 status = B_OK;
-                if (abortReply.FindInt32("status", &status) == B_OK && status == B_CANCELED) {
-                    fprintf(stderr, "[MISTRAL STREAM WORKER] Rilevata interruzione asincrona dall'utente. Esco.\n");
-                    executionLoop = false;
-                    break;
-                }
-            }
-        }
+	fprintf(stderr, "[MISTRAL STREAM WORKER] Modalità MCP Attiva: Avvio loop di interazione strumenti.\n");
+	
+	executionLoop = true;
+	while (executionLoop) {
+		if (args->server_messenger.IsValid()) {
+			BMessage checkAbortMsg('CHAB');
+			const char* ctxId = nullptr;
+			if (args->context_copy) {
+				args->context_copy->FindString("context_id", &ctxId);
+			}
+			if (ctxId) {
+				checkAbortMsg.AddString("context_id", ctxId);
+			}
+			
+			BMessage abortReply;
+			if (args->server_messenger.SendMessage(&checkAbortMsg, &abortReply) == B_OK) {
+				int32 status = B_OK;
+				if (abortReply.FindInt32("status", &status) == B_OK && status == B_CANCELED) {
+					fprintf(stderr, "[MISTRAL STREAM WORKER] Rilevata interruzione asincrona dall'utente. Esco.\n");
+					executionLoop = false;
+					break;
+				}
+			}
+		}
 
-        BString url = (args->base_url && args->base_url[0] != '\0') ? args->base_url : DEFAULT_MISTRAL_URL;
-        if (!url.EndsWith("/"))
-            url.Append("/", 1);
-        url.Append("chat/completions");
+		//BString url = (args->base_url && args->base_url[0] != '\0') ? args->base_url : DEFAULT_MISTRAL_URL;
+		
 
-        BString payload;
-        BuildPayloadFromContext(args->context_copy, nullptr, payload, false);
+		BString payload;
+		BuildPayloadFromContext(args->context_copy, nullptr, payload, false);
 
-        if (mcpActive) {
-            BString openAiToolsJson;
-            ConvertBMessageToOpenAIToolsJson(&replyTools, openAiToolsJson);
+		if (mcpActive) {
+			BString openAiToolsJson;
+			ConvertBMessageToOpenAIToolsJson(&replyTools, openAiToolsJson);
 
-            if (openAiToolsJson.Length() > 0) {
-                int32 lastCloseBrace = payload.FindLast("}");
-                if (lastCloseBrace != B_ERROR) {
-                    payload.Truncate(lastCloseBrace);
-                    payload << ",\"tools\":" << openAiToolsJson << "}";
-                }
-            }
-        }
+			if (openAiToolsJson.Length() > 0) {
+				int32 lastCloseBrace = payload.FindLast("}");
+				if (lastCloseBrace != B_ERROR) {
+					payload.Truncate(lastCloseBrace);
+					payload << ",\"tools\":" << openAiToolsJson << "}";
+				}
+			}
+		}
 
-        BMallocIO outNetworkData;
-        SyncListener syncListener;
-        BUrl bUrl(url.String(), true);
-        BUrlRequest* req = BUrlProtocolRoster::MakeRequest(bUrl, &outNetworkData, &syncListener, NULL);
-        if (!req) { 
-            executionLoop = false; 
-            break; 
-        }
+		BMallocIO outNetworkData;
+		SyncListener syncListener;
+		BUrl bUrl(url.String(), true);
+		BUrlRequest* req = BUrlProtocolRoster::MakeRequest(bUrl, &outNetworkData, &syncListener, NULL);
+		if (!req) { 
+			executionLoop = false; 
+			break; 
+		}
 
-        BHttpRequest* http = dynamic_cast<BHttpRequest*>(req);
-        if (http) {
-            http->SetMethod(B_HTTP_POST);
-            BHttpHeaders headers;
-            headers.AddHeader("Content-Type", "application/json");
-            headers.AddHeader("User-Agent", MISTRAL_USER_AGENT);
-            BString authHeader;
-            authHeader << "Bearer " << args->api_key;
-            headers.AddHeader("Authorization", authHeader.String());
-            http->SetHeaders(headers);
-            
-            BMallocIO* input = new BMallocIO();
-            input->WriteExactly(payload.String(), payload.Length());
-            http->AdoptInputData(input, payload.Length());
-        }
+		BHttpRequest* http = dynamic_cast<BHttpRequest*>(req);
+		if (http) {
+			http->SetMethod(B_HTTP_POST);
+			BHttpHeaders headers;
+			headers.AddHeader("Content-Type", "application/json");
+			headers.AddHeader("User-Agent", MISTRAL_USER_AGENT);
+			BString authHeader;
+			authHeader << "Bearer " << args->api_key;
+			headers.AddHeader("Authorization", authHeader.String());
+			http->SetHeaders(headers);
+			
+			BMallocIO* input = new BMallocIO();
+			input->WriteExactly(payload.String(), payload.Length());
+			http->AdoptInputData(input, payload.Length());
+		}
 
-        thread_id netThread = req->Run();
-        if (netThread >= 0) { 
-            status_t rc; 
-            wait_for_thread(netThread, &rc); 
-        }
-        delete req;
+		thread_id netThread = req->Run();
+		if (netThread >= 0) { 
+			status_t rc; 
+			wait_for_thread(netThread, &rc); 
+		}
+		delete req;
 
-        BString rawResponse((const char*)outNetworkData.Buffer(), outNetworkData.BufferLength());
-        BMessage parsedJson;
-        
-        if (BJson::Parse(rawResponse.String(), parsedJson) != B_OK) {
-            fprintf(stderr, "[MISTRAL STREAM WORKER] Fallito il parsing JSON della risposta di rete.\n");
-            executionLoop = false;
-            break;
-        }
-        
-        BMessage errorObj;
-        if (parsedJson.FindMessage("error", &errorObj) == B_OK) {
-            const char* errMsg = nullptr;
-            errorObj.FindString("message", &errMsg);
-            
-            if (errMsg && (BString(errMsg).FindFirst("tool choice") != B_ERROR || 
-                           BString(errMsg).FindFirst("tools") != B_ERROR)) {
-                
-                fprintf(stderr, "[MISTRAL WORKER] Il server remoto rifiuta l'MCP. Errore: %s\n", errMsg);
-                mcpActive = false; 
-                executionLoop = false;
-                goto fallback_to_standard;
-            }
-        }
+		BString rawResponse((const char*)outNetworkData.Buffer(), outNetworkData.BufferLength());
+		BMessage parsedJson;
+		
+		if (BJson::Parse(rawResponse.String(), parsedJson) != B_OK) {
+			fprintf(stderr, "[MISTRAL STREAM WORKER] Fallito il parsing JSON della risposta di rete.\n");
+			executionLoop = false;
+			break;
+		}
+		
+		BMessage errorObj;
+		if (parsedJson.FindMessage("error", &errorObj) == B_OK) {
+			const char* errMsg = nullptr;
+			errorObj.FindString("message", &errMsg);
+			
+			if (errMsg && (BString(errMsg).FindFirst("tool choice") != B_ERROR || 
+						   BString(errMsg).FindFirst("tools") != B_ERROR)) {
+				
+				fprintf(stderr, "[MISTRAL WORKER] Il server remoto rifiuta l'MCP. Errore: %s\n", errMsg);
+				mcpActive = false; 
+				executionLoop = false;
+				goto fallback_to_standard;
+			}
+		}
 
-        BMessage choices, choiceZero, message, toolCalls, toolCallZero, functionObj;
-        const char* toolName = nullptr;
-        const char* toolCallId = nullptr;
-        const char* argumentsStr = nullptr;
-        const char* textContent = nullptr;
+		BMessage choices, choiceZero, message, toolCalls, toolCallZero, functionObj;
+		const char* toolName = nullptr;
+		const char* toolCallId = nullptr;
+		const char* argumentsStr = nullptr;
+		const char* textContent = nullptr;
 
-        if (parsedJson.FindMessage("choices", &choices) == B_OK
-            && choices.FindMessage("0", &choiceZero) == B_OK
-            && choiceZero.FindMessage("message", &message) == B_OK) {
+		if (parsedJson.FindMessage("choices", &choices) == B_OK
+			&& choices.FindMessage("0", &choiceZero) == B_OK
+			&& choiceZero.FindMessage("message", &message) == B_OK) {
 
-            if (message.FindMessage("tool_calls", &toolCalls) == B_OK
-                && toolCalls.FindMessage("0", &toolCallZero) == B_OK
-                && toolCallZero.FindMessage("function", &functionObj) == B_OK
-                && functionObj.FindString("name", &toolName) == B_OK) {
-                
-                toolCallZero.FindString("id", &toolCallId);
-                functionObj.FindString("arguments", &argumentsStr);
+			if (message.FindMessage("tool_calls", &toolCalls) == B_OK
+				&& toolCalls.FindMessage("0", &toolCallZero) == B_OK
+				&& toolCallZero.FindMessage("function", &functionObj) == B_OK
+				&& functionObj.FindString("name", &toolName) == B_OK) {
+				
+				toolCallZero.FindString("id", &toolCallId);
+				functionObj.FindString("arguments", &argumentsStr);
 
-                BMessage argsMsg;
-                BString argsJson;
-                if (argumentsStr && BJson::Parse(argumentsStr, argsMsg) == B_OK) {
-                    SerializeBMessageToJson(&argsMsg, argsJson);
-                } else {
-                    argsJson = "{}";
-                }
+				BMessage argsMsg;
+				BString argsJson;
+				if (argumentsStr && BJson::Parse(argumentsStr, argsMsg) == B_OK) {
+					SerializeBMessageToJson(&argsMsg, argsJson);
+				} else {
+					argsJson = "{}";
+				}
 
-                fprintf(stderr, "[MISTRAL MCP] L'LLM richiede lo strumento: %s con argomenti: %s\n", toolName, argsJson.String());
+				fprintf(stderr, "[MISTRAL MCP] L'LLM richiede lo strumento: %s con argomenti: %s\n", toolName, argsJson.String());
 
-                BMessage reqExec(MSG_EXECUTE_TOOL);
-                reqExec.AddString("name", toolName);
-                reqExec.AddMessage("arguments", &argsMsg);
-                
-                const char* ctxId = nullptr;
-                if (args->context_copy) {
-                    args->context_copy->FindString("context_id", &ctxId);
-                }
-                if (ctxId) {
-                    reqExec.AddString("context_id", ctxId);
-                }
-                
-                BMessage replyExec;
-                BString toolResultBuf;
-                
-                if (args->server_messenger.SendMessage(&reqExec, &replyExec) == B_OK) {
-                    const char* resStr = replyExec.FindString("result");
-                    if (resStr && strlen(resStr) > 0) {
-                        BString testStr(resStr);
-                        testStr.Trim();
-                        if (testStr.StartsWith("{") || testStr.StartsWith("[")) {
-                            toolResultBuf = resStr;
-                        } else {
-                            BString escapedRes = EscapeStringForJson(resStr);
-                            toolResultBuf.SetToFormat("{\"output\":\"%s\"}", escapedRes.String());
-                        }
-                    } else {
-                        toolResultBuf = "{\"error\":\"Il comando sul server ha restituito una risposta vuota.\"}";
-                    }
-                } else {
-                    toolResultBuf = "{\"error\":\"Esecuzione dello strumento fallita via IPC BMessenger\"}";
-                }
+				BMessage reqExec(MSG_EXECUTE_TOOL);
+				reqExec.AddString("name", toolName);
+				reqExec.AddMessage("arguments", &argsMsg);
+				
+				const char* ctxId = nullptr;
+				if (args->context_copy) {
+					args->context_copy->FindString("context_id", &ctxId);
+				}
+				if (ctxId) {
+					reqExec.AddString("context_id", ctxId);
+				}
+				
+				BMessage replyExec;
+				BString toolResultBuf;
+				
+				if (args->server_messenger.SendMessage(&reqExec, &replyExec) == B_OK) {
+					const char* resStr = replyExec.FindString("result");
+					if (resStr && strlen(resStr) > 0) {
+						BString testStr(resStr);
+						testStr.Trim();
+						if (testStr.StartsWith("{") || testStr.StartsWith("[")) {
+							toolResultBuf = resStr;
+						} else {
+							BString escapedRes = EscapeStringForJson(resStr);
+							toolResultBuf.SetToFormat("{\"output\":\"%s\"}", escapedRes.String());
+						}
+					} else {
+						toolResultBuf = "{\"error\":\"Il comando sul server ha restituito una risposta vuota.\"}";
+					}
+				} else {
+					toolResultBuf = "{\"error\":\"Esecuzione dello strumento fallita via IPC BMessenger\"}";
+				}
 
-                AppendToolCallToContext(args->context_copy, toolName, &argsMsg, toolCallId);
-                AppendToolResponseToContext(args->context_copy, toolName, toolResultBuf.String(), toolCallId);
-            } 
-            else if (message.FindString("content", &textContent) == B_OK && textContent != nullptr) {
-                fprintf(stderr, "[MISTRAL MCP] Risposta testuale finale ricevuta.\n");
-                BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
-                if (streamFile.InitCheck() == B_OK) {
-                    streamFile.Write(textContent, strlen(textContent));
-                }
-                executionLoop = false;
-            }
-        } else {
-            fprintf(stderr, "[MISTRAL STREAM WORKER] ERRORE: Risposta di rete non valida o priva di 'choices'.\n");
-            executionLoop = false;
-        }
-    }
-    goto thread_post_actions;
+				AppendToolCallToContext(args->context_copy, toolName, &argsMsg, toolCallId);
+				AppendToolResponseToContext(args->context_copy, toolName, toolResultBuf.String(), toolCallId);
+			} 
+			else if (message.FindString("content", &textContent) == B_OK && textContent != nullptr) {
+				fprintf(stderr, "[MISTRAL MCP] Risposta testuale finale ricevuta.\n");
+				BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
+				if (streamFile.InitCheck() == B_OK) {
+					streamFile.Write(textContent, strlen(textContent));
+				}
+				executionLoop = false;
+			}
+		} else {
+			fprintf(stderr, "[MISTRAL STREAM WORKER] ERRORE: Risposta di rete non valida o priva di 'choices'.\n");
+			executionLoop = false;
+		}
+	}
+	goto thread_post_actions;
 
 fallback_to_standard:
 {
-    fprintf(stderr, "[MISTRAL STREAM WORKER] Modalità Standard: Avvio Streaming Diretto.\n");
-    
-    BString url = (args->base_url && args->base_url[0] != '\0') ? args->base_url : DEFAULT_MISTRAL_URL;
-    if (!url.EndsWith("/"))
-        url.Append("/", 1);
-    url.Append("chat/completions");
+	fprintf(stderr, "[MISTRAL STREAM WORKER] Modalità Standard: Avvio Streaming Diretto.\n");
+	
+	//BString url = (args->base_url && args->base_url[0] != '\0') ? args->base_url : DEFAULT_MISTRAL_URL;
+	//if (!url.EndsWith("/"))
+	//    url.Append("/", 1);
+	//url.Append("chat/completions");
 
-    BString payload;
-    BuildPayloadFromContext(args->context_copy, nullptr, payload, true);
+	BString payload;
+	BuildPayloadFromContext(args->context_copy, nullptr, payload, true);
 
-    {
-        StreamTarget streamTarget(args->notify_path);
-        CompletionListener listener(args->notify_path);
-        BUrl bUrl(url.String(), true);
-        BUrlRequest* req = BUrlProtocolRoster::MakeRequest(bUrl, &streamTarget, &listener, NULL);
-        if (req) {
-            BHttpRequest* http = dynamic_cast<BHttpRequest*>(req);
-            if (http) {
-                http->SetMethod(B_HTTP_POST);
-                BHttpHeaders headers;
-                headers.AddHeader("Content-Type", "application/json");
-                headers.AddHeader("User-Agent", MISTRAL_USER_AGENT);
-                BString authHeader;
-                authHeader << "Bearer " << args->api_key;
-                headers.AddHeader("Authorization", authHeader.String());
-                http->SetHeaders(headers);
+	{
+		StreamTarget streamTarget(args->notify_path);
+		CompletionListener listener(args->notify_path);
+		BUrl bUrl(url.String(), true);
+		BUrlRequest* req = BUrlProtocolRoster::MakeRequest(bUrl, &streamTarget, &listener, NULL);
+		if (req) {
+			BHttpRequest* http = dynamic_cast<BHttpRequest*>(req);
+			if (http) {
+				http->SetMethod(B_HTTP_POST);
+				BHttpHeaders headers;
+				headers.AddHeader("Content-Type", "application/json");
+				headers.AddHeader("User-Agent", MISTRAL_USER_AGENT);
+				BString authHeader;
+				authHeader << "Bearer " << args->api_key;
+				headers.AddHeader("Authorization", authHeader.String());
+				http->SetHeaders(headers);
 
-                BMemoryIO* input = new BMemoryIO(payload.String(), payload.Length());
-                http->AdoptInputData(input, payload.Length());
-            }
-            thread_id thread = req->Run();
-            if (thread >= 0) { 
-                status_t rc; 
-                wait_for_thread(thread, &rc); 
-            }
-            delete req;
-        }
-    }
+				BMemoryIO* input = new BMemoryIO(payload.String(), payload.Length());
+				http->AdoptInputData(input, payload.Length());
+			}
+			thread_id thread = req->Run();
+			if (thread >= 0) { 
+				status_t rc; 
+				wait_for_thread(thread, &rc); 
+			}
+			delete req;
+		}
+	}
 }
 
 thread_post_actions:
-    if (args->context_copy != nullptr && !args->context_copy->HasString("title")) {
-        BMessage messagesMsg;
-        const char* firstPromptText = nullptr;
+	if (args->context_copy != nullptr && !args->context_copy->HasString("title")) {
+		BMessage messagesMsg;
+		const char* firstPromptText = nullptr;
 
-        if (args->context_copy->FindMessage("messages", &messagesMsg) == B_OK) {
-            int32 msgCount = 0;
-            BMessage msgItem;
-            
-            while (messagesMsg.FindMessage("msg", msgCount, &msgItem) == B_OK || 
-                   messagesMsg.FindMessage(BString().SetToFormat("%d", msgCount).String(), &msgItem) == B_OK) {
-                
-                const char* role = msgItem.FindString("role");
-                const char* content = msgItem.FindString("content");
-                if (!content) msgItem.FindString("text", &content);
-                
-                if (role && strcmp(role, "user") == 0 && content && content[0] != '\0') {
-                    firstPromptText = content;
-                }
-                msgCount++;
-            }
-        }
+		if (args->context_copy->FindMessage("messages", &messagesMsg) == B_OK) {
+			int32 msgCount = 0;
+			BMessage msgItem;
+			
+			while (messagesMsg.FindMessage("msg", msgCount, &msgItem) == B_OK || 
+				   messagesMsg.FindMessage(BString().SetToFormat("%d", msgCount).String(), &msgItem) == B_OK) {
+				
+				const char* role = msgItem.FindString("role");
+				const char* content = msgItem.FindString("content");
+				if (!content) msgItem.FindString("text", &content);
+				
+				if (role && strcmp(role, "user") == 0 && content && content[0] != '\0') {
+					firstPromptText = content;
+				}
+				msgCount++;
+			}
+		}
 
-        if (firstPromptText && firstPromptText[0] != '\0') {
-            BString autoTitle(firstPromptText);
-            autoTitle.Trim();
-            if (autoTitle.Length() > 30) {
-                autoTitle.Truncate(30);
-                autoTitle << "...";
-            }
-            
-            args->context_copy->RemoveName("title");
-            args->context_copy->AddString("title", autoTitle.String());
-            
-            if (args->server_messenger.IsValid()) {
-                BMessage titleUpdateMsg('UTIT');
-                titleUpdateMsg.AddString("title", autoTitle.String());
-                args->server_messenger.SendMessage(&titleUpdateMsg);
-            }
-            fprintf(stderr, "[MISTRAL ASYNC] Auto-titolo generato: '%s'\n", autoTitle.String());
-        }
-    }
-    {
-        BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
-        if (streamFile.InitCheck() == B_OK) {
-            BString endMarker = "<<STREAM_END>>";
-            streamFile.Write(endMarker.String(), endMarker.Length());
-        }
-    }
+		if (firstPromptText && firstPromptText[0] != '\0') {
+			BString autoTitle(firstPromptText);
+			autoTitle.Trim();
+			if (autoTitle.Length() > 30) {
+				autoTitle.Truncate(30);
+				autoTitle << "...";
+			}
+			
+			args->context_copy->RemoveName("title");
+			args->context_copy->AddString("title", autoTitle.String());
+			
+			if (args->server_messenger.IsValid()) {
+				BMessage titleUpdateMsg('UTIT');
+				titleUpdateMsg.AddString("title", autoTitle.String());
+				args->server_messenger.SendMessage(&titleUpdateMsg);
+			}
+			fprintf(stderr, "[MISTRAL ASYNC] Auto-titolo generato: '%s'\n", autoTitle.String());
+		}
+	}
+	{
+		BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
+		if (streamFile.InitCheck() == B_OK) {
+			BString endMarker = "<<STREAM_END>>";
+			streamFile.Write(endMarker.String(), endMarker.Length());
+		}
+	}
 
 thread_cleanup:
-    fprintf(stderr, "[MISTRAL STREAM WORKER] Pulizia e chiusura thread worker.\n");
-    delete args; 
-    return B_OK;
+	fprintf(stderr, "[MISTRAL STREAM WORKER] Pulizia e chiusura thread worker.\n");
+	delete args; 
+	return B_OK;
 }
 
-/*
+
 extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle,
     const char* prompt, BMessage* contextMsg)
 {
-    AIPluginHandle* mistral = (AIPluginHandle*)handle;
+    //AIPluginHandle* mistral = (AIPluginHandle*)handle;
     if (!contextMsg)
         return B_BAD_VALUE;
 
     const char* apiKey = nullptr;
     const char* model = nullptr;
     const char* notifyPath = nullptr;
+	const char* configBaseUrl = nullptr;
     contextMsg->FindString("api_key", &apiKey);
     contextMsg->FindString("model_name", &model);
     contextMsg->FindString("notify_path", &notifyPath);
-
-    if (!notifyPath || notifyPath[0] == '\0')
-        return B_BAD_VALUE;
-
-    MistralAsyncArgs* args = (MistralAsyncArgs*)malloc(sizeof(MistralAsyncArgs));
-    if (!args)
-        return B_NO_MEMORY;
-
-    args->api_key = dupstr_or_null(apiKey);
-    args->model = dupstr_or_null((model && model[0] != '\0') ? model : DEFAULT_MISTRAL_MODEL);
-    args->notify_path = dupstr_or_null(notifyPath);
-    args->base_url = (mistral && mistral->base_url) ? dupstr_or_null(mistral->base_url) : nullptr;
-    args->context_copy = new BMessage(*contextMsg);
-
-    if (prompt && prompt[0] != '\0') {
-        BMessage messagesMsg;
-        BMessage firstTurn;
-        bool hasHistory = args->context_copy->FindMessage("messages", &messagesMsg) == B_OK
-            && messagesMsg.FindMessage("msg", 0, &firstTurn) == B_OK;
-
-        if (!hasHistory) {
-            BMessage newMessages;
-            BMessage turn;
-            turn.AddString("role", "user");
-            turn.AddString("content", prompt);
-            newMessages.AddMessage("msg", &turn);
-
-            if (args->context_copy->ReplaceMessage("messages", &newMessages) != B_OK)
-                args->context_copy->AddMessage("messages", &newMessages);
-        }
-    }
-
-    thread_id thread = spawn_thread(mistral_stream_thread_func,
-        "mistral_stream_worker", B_NORMAL_PRIORITY, args);
-    if (thread < B_OK) {
-        if (args->api_key) free(args->api_key);
-        if (args->model) free(args->model);
-        if (args->notify_path) free(args->notify_path);
-        if (args->base_url) free(args->base_url);
-        delete args->context_copy;
-        free(args);
-        return B_ERROR;
-    }
-
-    resume_thread(thread);
-    return B_OK;
-}
-*/
-
-extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle,
-    const char* prompt, BMessage* contextMsg)
-{
-    AIPluginHandle* mistral = (AIPluginHandle*)handle;
-    if (!contextMsg)
-        return B_BAD_VALUE;
-
-    const char* apiKey = nullptr;
-    const char* model = nullptr;
-    const char* notifyPath = nullptr;
-    contextMsg->FindString("api_key", &apiKey);
-    contextMsg->FindString("model_name", &model);
-    contextMsg->FindString("notify_path", &notifyPath);
+	contextMsg->FindString("base_url", &configBaseUrl);
 
     if (!notifyPath || notifyPath[0] == '\0')
         return B_BAD_VALUE;
@@ -1202,8 +951,17 @@ extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle,
     args->api_key = dupstr_or_null(apiKey);
     args->model = dupstr_or_null((model && model[0] != '\0') ? model : DEFAULT_MISTRAL_MODEL);
     args->notify_path = dupstr_or_null(notifyPath);
-    args->base_url = (mistral && mistral->base_url) ? dupstr_or_null(mistral->base_url) : nullptr;
-    args->context_copy = new BMessage(*contextMsg);
+    if (configBaseUrl && configBaseUrl[0] != '\0') {
+        args->base_url = dupstr_or_null(configBaseUrl);
+    } else {
+        args->base_url = strdup(DEFAULT_MISTRAL_URL);
+    }
+
+    args->context_copy = new (std::nothrow) BMessage(*contextMsg);
+    if (!args->context_copy) {
+        delete args;
+        return B_NO_MEMORY;
+    }
 
     BMessenger serverMessenger;
     if (contextMsg->FindMessenger("server_messenger", &serverMessenger) == B_OK) {
@@ -1257,9 +1015,14 @@ extern "C" status_t ai_plugin_list_models(const BMessage* settingsMsg,
     }
 
     const char* apiKey = nullptr;
-    const char* baseUrl = nullptr;
+    //const char* baseUrl = nullptr;
     settingsMsg->FindString("api_key", &apiKey);
-    settingsMsg->FindString("base_url", &baseUrl);
+    //settingsMsg->FindString("base_url", &baseUrl);
+	BString baseUrl;
+    // Se FindString fallisce o trova una stringa vuota, usiamo la macro
+    if (settingsMsg->FindString("base_url", &baseUrl) != B_OK || baseUrl.IsEmpty()) {
+        baseUrl = DEFAULT_MISTRAL_URL;
+    }
 
     if (!apiKey || apiKey[0] == '\0') {
         if (strlen(defaultFallback) + 1 > out_len)
@@ -1268,10 +1031,15 @@ extern "C" status_t ai_plugin_list_models(const BMessage* settingsMsg,
         return B_OK;
     }
 
-    BString urlString = (baseUrl && baseUrl[0] != '\0') ? baseUrl : DEFAULT_MISTRAL_URL;
-    if (!urlString.EndsWith("/"))
-        urlString.Append("/", 1);
-    urlString.Append("models");
+    BString urlString = baseUrl;
+    if (urlString.EndsWith("/")) {
+        urlString.Remove(urlString.Length() - 1, 1);
+    }
+    if (!urlString.EndsWith("/v1") && !urlString.EndsWith("/models")) {
+        urlString << "/v1/models";
+    } else if (!urlString.EndsWith("/models")) {
+        urlString << "/models";
+    }
 
     BMallocIO* out = new BMallocIO();
     SyncListener listener;

@@ -25,7 +25,7 @@
 
 using namespace BPrivate::Network;
 
-#define DEFAULT_DEEPSEEK_URL   "https://api.deepseek.com/v1"
+#define DEFAULT_DEEPSEEK_URL   "https://api.deepseek.com"
 #define DEFAULT_DEEPSEEK_MODEL "deepseek-chat"
 #define DEEPSEEK_USER_AGENT    "HaikuAIEngine/1.0"
 
@@ -99,43 +99,6 @@ private:
     BString fBuffer;
 };
 
-/*
-class CompletionListener : public BUrlProtocolListener {
-public:
-    CompletionListener(const char* notifyPath)
-        : fPath(notifyPath)
-    {
-    }
-
-    virtual void RequestCompleted(BUrlRequest* caller, bool success) override
-    {
-        BFile file(fPath.String(), B_WRITE_ONLY | B_OPEN_AT_END);
-        if (file.InitCheck() == B_OK) {
-            BString endMarker = "<<STREAM_END>>";
-            file.Write(endMarker.String(), endMarker.Length());
-        }
-    }
-
-private:
-    BString fPath;
-};
-*/
-
-/* usiamo la generica Handle in AIPlugin.h
-struct DeepSeekHandle {
-    char* base_url;
-};
-*/
-
-/*
-struct DeepSeekAsyncArgs {
-    char* api_key;
-    char* model;
-    char* notify_path;
-    char* base_url;
-    BMessage* context_copy;
-};
-*/
 
 static char* dupstr_or_null(const char* s)
 {
@@ -148,24 +111,6 @@ static char* dupstr_or_null(const char* s)
     return p;
 }
 
-/*
-class SyncListener : public BUrlProtocolListener {
-public:
-    SyncListener()
-    {
-    }
-
-    virtual ~SyncListener()
-    {
-    }
-
-    bool CertificateVerificationFailed(BUrlRequest* request, BCertificate& certificate,
-        const char* message) override
-    {
-        return false;
-    }
-};
-*/
 
 static BString EscapeStringForJson(const char* input) {
     if (!input) return "";
@@ -557,12 +502,6 @@ BuildPayloadFromContext(const BMessage* config, const char* currentPrompt,
 
 extern "C" ai_plugin_t ai_plugin_init(void)
 {
-    /*AIPluginHandle* handle = (AIPluginHandle*)malloc(sizeof(DeepSeekHandle));
-    if (!handle)
-        return nullptr;
-
-    handle->base_url = nullptr;
-    return (ai_plugin_t)handle;*/
     AIPluginHandle* h = new(std::nothrow) AIPluginHandle();
     return (ai_plugin_t)h;
 }
@@ -572,9 +511,6 @@ extern "C" void ai_plugin_free(ai_plugin_t handle)
     AIPluginHandle* deepseek = (AIPluginHandle*)handle;
     if (!deepseek)
         return;
-
-    if (deepseek->base_url)
-        free(deepseek->base_url);
     free(deepseek);
 }
 
@@ -613,12 +549,21 @@ extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
         return B_BAD_VALUE;
     }
 
-    AIPluginHandle* deepseek = (AIPluginHandle*)handle;
-    BString url = (deepseek && deepseek->base_url && deepseek->base_url[0] != '\0')
-        ? deepseek->base_url : DEFAULT_DEEPSEEK_URL;
-    if (!url.EndsWith("/"))
-        url.Append("/", 1);
-    url.Append("chat/completions");
+    //AIPluginHandle* deepseek = (AIPluginHandle*)handle;
+	const char* baseUrlRaw = nullptr;
+    contextMsg->FindString("base_url", &baseUrlRaw);
+    if (!baseUrlRaw || baseUrlRaw[0] == '\0') {
+        baseUrlRaw = DEFAULT_DEEPSEEK_URL;
+    }
+    BString url;
+	if (baseUrlRaw && baseUrlRaw[0] != '\0') {
+        url = baseUrlRaw;
+        if (url.EndsWith("/")) url.Remove(url.Length() - 1, 1);
+        if (!url.EndsWith("/v1/chat/completions")) url << "/v1/chat/completions";
+    } else {
+        url = "https://api.deepseek.com/v1/chat/completions";
+	}
+	
 
     BString payload;
     BuildPayloadFromContext(contextMsg, prompt, payload, false);
@@ -709,97 +654,15 @@ extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
     return B_OK;
 }
 
-/*
-static int32 deepseek_stream_thread_func(void* data)
-{
-    DeepSeekAsyncArgs* args = (DeepSeekAsyncArgs*)data;
-    if (!args)
-        return B_BAD_VALUE;
-
-    fprintf(stderr, "[DEEPSEEK PLUGIN] async worker start\n");
-
-    if (args->context_copy && args->model && args->model[0] != '\0') {
-        if (args->context_copy->ReplaceString("model_name", args->model) != B_OK)
-            args->context_copy->AddString("model_name", args->model);
-    }
-
-    if (!args->api_key || args->api_key[0] == '\0' || !args->notify_path
-        || args->notify_path[0] == '\0') {
-        fprintf(stderr, "[DEEPSEEK PLUGIN] async worker missing required fields\n");
-        if (args->notify_path && args->notify_path[0] != '\0') {
-            BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE);
-            BString endMarker = "<<STREAM_END>>";
-            streamFile.Write(endMarker.String(), endMarker.Length());
-        }
-        if (args->api_key) free(args->api_key);
-        if (args->model) free(args->model);
-        if (args->notify_path) free(args->notify_path);
-        if (args->base_url) free(args->base_url);
-        if (args->context_copy) delete args->context_copy;
-        free(args);
-        return B_ERROR;
-    }
-
-    BString urlString = (args->base_url && args->base_url[0] != '\0')
-        ? args->base_url : DEFAULT_DEEPSEEK_URL;
-    if (!urlString.EndsWith("/"))
-        urlString.Append("/", 1);
-    urlString.Append("chat/completions");
-
-    BString payload;
-    BuildPayloadFromContext(args->context_copy, nullptr, payload, true);
-
-    {
-        StreamTarget streamTarget(args->notify_path);
-        CompletionListener listener(args->notify_path);
-        BUrl bUrl(urlString.String(), false);
-        BUrlRequest* req = BUrlProtocolRoster::MakeRequest(bUrl, &streamTarget, &listener, NULL);
-        if (req) {
-            BHttpRequest* http = dynamic_cast<BHttpRequest*>(req);
-            if (http) {
-                http->SetMethod(B_HTTP_POST);
-                BHttpHeaders headers;
-                headers.AddHeader("Content-Type", "application/json");
-                headers.AddHeader("User-Agent", DEEPSEEK_USER_AGENT);
-                BString authHeader;
-                authHeader << "Bearer " << args->api_key;
-                headers.AddHeader("Authorization", authHeader.String());
-                http->SetHeaders(headers);
-
-                BMemoryIO* input = new BMemoryIO(payload.String(), payload.Length());
-                http->AdoptInputData(input, payload.Length());
-            }
-
-            thread_id thread = req->Run();
-            if (thread >= 0) {
-                status_t rc = B_ERROR;
-                wait_for_thread(thread, &rc);
-                fprintf(stderr, "[DEEPSEEK PLUGIN] async worker completed rc=%ld\n", (long)rc);
-            }
-            delete req;
-        } else {
-            fprintf(stderr, "[DEEPSEEK PLUGIN] async request creation failed\n");
-            BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE);
-            BString endMarker = "<<STREAM_END>>";
-            streamFile.Write(endMarker.String(), endMarker.Length());
-        }
-    }
-
-    if (args->api_key) free(args->api_key);
-    if (args->model) free(args->model);
-    if (args->notify_path) free(args->notify_path);
-    if (args->base_url) free(args->base_url);
-    if (args->context_copy) delete args->context_copy;
-    free(args);
-    return B_OK;
-}
-*/
-
 static int32 deepseek_stream_thread_func(void* data)
 {
     fprintf(stderr, "[DEEPSEEK STREAM WORKER] Thread avviato.\n");
     AsyncArgs* args = (AsyncArgs*)data;
     if (!args) return B_BAD_VALUE;
+	
+	BString baseUrl;
+    BString url;
+    BString tempUrl;
 
     BMessage replyTools;
     bool mcpActive = false;
@@ -813,6 +676,28 @@ static int32 deepseek_stream_thread_func(void* data)
             streamFile.Write(endMarker.String(), endMarker.Length());
         }
         goto thread_cleanup;
+    }
+	
+	// ESTRAZIONE GERARCHICA BASE URL (args > context_copy > default) ===
+    if (args->base_url && args->base_url[0] != '\0') {
+        baseUrl = args->base_url;
+    } else if (args->context_copy && args->context_copy->FindString("base_url", &tempUrl) == B_OK 
+           && !tempUrl.IsEmpty()) {
+        baseUrl = tempUrl;
+    } else {
+        // 3. Fallback di sistema: macro #define
+        baseUrl = DEFAULT_DEEPSEEK_URL;
+    }
+    
+    // Costruzione dell'endpoint /chat/completions corretto
+    if (baseUrl.Length() > 0) {
+        url = baseUrl;
+        if (url.EndsWith("/")) 
+            url.Remove(url.Length() - 1, 1);
+        if (!url.EndsWith("/v1/chat/completions")) 
+            url << "/v1/chat/completions";
+    } else {
+        url = "https://api.deepseek.com/v1/chat/completions";
     }
 
     if (args->server_messenger.IsValid()) {
@@ -861,10 +746,10 @@ static int32 deepseek_stream_thread_func(void* data)
             }
         }
 
-        BString url = (args->base_url && args->base_url[0] != '\0') ? args->base_url : DEFAULT_DEEPSEEK_URL;
-        if (!url.EndsWith("/"))
-            url.Append("/", 1);
-        url.Append("chat/completions");
+        //BString url = (args->base_url && args->base_url[0] != '\0') ? args->base_url : DEFAULT_DEEPSEEK_URL;
+        //if (!url.EndsWith("/"))
+        //    url.Append("/", 1);
+        //url.Append("chat/completions");
 
         BString payload;
         BuildPayloadFromContext(args->context_copy, nullptr, payload, false);
@@ -1021,10 +906,10 @@ fallback_to_standard:
 {
     fprintf(stderr, "[DEEPSEEK STREAM WORKER] Modalità Standard: Avvio Streaming Diretto.\n");
     
-    BString url = (args->base_url && args->base_url[0] != '\0') ? args->base_url : DEFAULT_DEEPSEEK_URL;
-    if (!url.EndsWith("/"))
-        url.Append("/", 1);
-    url.Append("chat/completions");
+    //BString url = (args->base_url && args->base_url[0] != '\0') ? args->base_url : DEFAULT_DEEPSEEK_URL;
+    //if (!url.EndsWith("/"))
+    //    url.Append("/", 1);
+    //url.Append("chat/completions");
 
     BString payload;
     BuildPayloadFromContext(args->context_copy, nullptr, payload, true);
@@ -1115,82 +1000,22 @@ thread_cleanup:
     return B_OK;
 }
 
-/*
+
 extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle,
     const char* prompt, BMessage* contextMsg)
 {
-    AIPluginHandle* deepseek = (AIPluginHandle*)handle;
+    //AIPluginHandle* deepseek = (AIPluginHandle*)handle;
     if (!contextMsg)
         return B_BAD_VALUE;
 
     const char* apiKey = nullptr;
     const char* model = nullptr;
     const char* notifyPath = nullptr;
+	const char* configBaseUrl = nullptr;
     contextMsg->FindString("api_key", &apiKey);
     contextMsg->FindString("model_name", &model);
     contextMsg->FindString("notify_path", &notifyPath);
-
-    if (!notifyPath || notifyPath[0] == '\0')
-        return B_BAD_VALUE;
-
-    DeepSeekAsyncArgs* args = (DeepSeekAsyncArgs*)malloc(sizeof(DeepSeekAsyncArgs));
-    if (!args)
-        return B_NO_MEMORY;
-
-    args->api_key = dupstr_or_null(apiKey);
-    args->model = dupstr_or_null((model && model[0] != '\0') ? model : DEFAULT_DEEPSEEK_MODEL);
-    args->notify_path = dupstr_or_null(notifyPath);
-    args->base_url = (deepseek && deepseek->base_url) ? dupstr_or_null(deepseek->base_url) : nullptr;
-    args->context_copy = new BMessage(*contextMsg);
-
-    if (prompt && prompt[0] != '\0') {
-        BMessage messagesMsg;
-        BMessage firstTurn;
-        bool hasHistory = args->context_copy->FindMessage("messages", &messagesMsg) == B_OK
-            && messagesMsg.FindMessage("msg", 0, &firstTurn) == B_OK;
-
-        if (!hasHistory) {
-            BMessage newMessages;
-            BMessage turn;
-            turn.AddString("role", "user");
-            turn.AddString("content", prompt);
-            newMessages.AddMessage("msg", &turn);
-
-            if (args->context_copy->ReplaceMessage("messages", &newMessages) != B_OK)
-                args->context_copy->AddMessage("messages", &newMessages);
-        }
-    }
-
-    thread_id thread = spawn_thread(deepseek_stream_thread_func,
-        "deepseek_stream_worker", B_NORMAL_PRIORITY, args);
-    if (thread < B_OK) {
-        if (args->api_key) free(args->api_key);
-        if (args->model) free(args->model);
-        if (args->notify_path) free(args->notify_path);
-        if (args->base_url) free(args->base_url);
-        delete args->context_copy;
-        free(args);
-        return B_ERROR;
-    }
-
-    resume_thread(thread);
-    return B_OK;
-}
-*/
-
-extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle,
-    const char* prompt, BMessage* contextMsg)
-{
-    AIPluginHandle* deepseek = (AIPluginHandle*)handle;
-    if (!contextMsg)
-        return B_BAD_VALUE;
-
-    const char* apiKey = nullptr;
-    const char* model = nullptr;
-    const char* notifyPath = nullptr;
-    contextMsg->FindString("api_key", &apiKey);
-    contextMsg->FindString("model_name", &model);
-    contextMsg->FindString("notify_path", &notifyPath);
+	contextMsg->FindString("base_url", &configBaseUrl);
 
     if (!notifyPath || notifyPath[0] == '\0')
         return B_BAD_VALUE;
@@ -1202,8 +1027,17 @@ extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle,
     args->api_key = dupstr_or_null(apiKey);
     args->model = dupstr_or_null((model && model[0] != '\0') ? model : DEFAULT_DEEPSEEK_MODEL);
     args->notify_path = dupstr_or_null(notifyPath);
-    args->base_url = (deepseek && deepseek->base_url) ? dupstr_or_null(deepseek->base_url) : nullptr;
-    args->context_copy = new BMessage(*contextMsg);
+     if (configBaseUrl && configBaseUrl[0] != '\0') {
+        args->base_url = dupstr_or_null(configBaseUrl);
+    } else {
+        args->base_url = strdup(DEFAULT_DEEPSEEK_URL);
+    }
+
+    args->context_copy = new (std::nothrow) BMessage(*contextMsg);
+    if (!args->context_copy) {
+        delete args;
+        return B_NO_MEMORY;
+    }
 
     BMessenger serverMessenger;
     if (contextMsg->FindMessenger("server_messenger", &serverMessenger) == B_OK) {

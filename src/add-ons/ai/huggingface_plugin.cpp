@@ -1,4 +1,4 @@
-#include "../../../../headers/os/ai/AIPlugin.h"
+#include <os/ai/AIPlugin.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,6 +15,8 @@
 #include <HttpRequest.h>
 #include <String.h>
 #include <OS.h>
+
+#define DEFAULT_HF_BASE_URL "https://api-inference.huggingface.co"
 
 using namespace BPrivate::Network;
 
@@ -124,13 +126,17 @@ extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
     contextMsg->FindString("api_key", &apiKey);
     contextMsg->FindString("model_name", &modelName);
     contextMsg->FindString("base_url", &baseUrl);
-
+/*
     if (!baseUrl || baseUrl[0] == '\0') {
         baseUrl = h->base_url;
     }
     if (!baseUrl || baseUrl[0] == '\0') {
         baseUrl = "https://api-inference.huggingface.co";
+    }*/
+	if (!baseUrl || baseUrl[0] == '\0') {
+        baseUrl = strdup(DEFAULT_HF_BASE_URL);
     }
+
 
     if (h->mode == "local") {
         snprintf(response_buf, response_len, "{\"error\":\"local inference not implemented\"}");
@@ -215,10 +221,7 @@ extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle,
     if (!notifyPath || notifyPath[0] == '\0') return B_BAD_VALUE;
 
     if (!baseUrl || baseUrl[0] == '\0') {
-        baseUrl = h->base_url;
-    }
-    if (!baseUrl || baseUrl[0] == '\0') {
-        baseUrl = "https://api-inference.huggingface.co";
+        baseUrl = strdup(DEFAULT_HF_BASE_URL);
     }
 
     std::string url = baseUrl;
