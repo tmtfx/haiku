@@ -89,6 +89,8 @@ status_t AIGetPluginModels(const char* pluginName, BString& outJsonModels)
 // Helper: read API key from KeyStore under keyring kAIKeyring with secondary=engine
 static bool _GetAPIKeyFromKeyStore(const char* pluginName, BString& out)
 {
+	if (!pluginName || pluginName[0] == '\0')
+        return false;
     BKeyStore keyStore;
     BPasswordKey password;
     password.SetTo("", B_KEY_PURPOSE_GENERIC, kAPIIdentifier, pluginName);
@@ -248,38 +250,7 @@ bool RemoveAPIKey(const char* plugin)
     return _StoreAPIKeyToKeyStore(plugin, "");
 }
 
-// Rotate (replace) the API key for engine with newKey
-bool RotateAPIKey(const char* engine, const char* newKey)
-{
-    if (!newKey) return false;
-    // Overwrite existing entry atomically by removing then adding
-    BKeyStore ks;
-    BPasswordKey existing;
-    if (ks.GetEncryptedKey(kAIKeyring, B_KEY_TYPE_PASSWORD, kAPIIdentifier,
-            engine, existing) == B_OK) {
-        ks.RemoveKey(kAIKeyring, existing);
-    }
-    // ensure keyring exists
-    ks.AddKeyring(kAIKeyring);
-    BPasswordKey pw;
-    pw.EncryptedSetTo(newKey, B_KEY_PURPOSE_GENERIC, kAPIIdentifier, engine);
-    return ks.AddEncryptedKey(kAIKeyring, pw) == B_OK;
-}
-/*bool RotateAPIKey(const char* engine, const char* newKey)
-{
-    if (!newKey) return false;
-    BKeyStore ks;
-    BPasswordKey existing;
-    if (ks.GetEncryptedKey(kAIKeyring, B_KEY_TYPE_PASSWORD, engine,
-            kAPIIdentifier, existing) == B_OK) {
-        ks.RemoveKey(kAIKeyring, existing);
-    }
-    ks.AddKeyring(kAIKeyring);
-    BPasswordKey pw;
-    pw.EncryptedSetTo(newKey, B_KEY_PURPOSE_GENERIC, engine, kAPIIdentifier);
-    return ks.AddEncryptedKey(kAIKeyring, pw) == B_OK;
-}*/
-
+/*
 bool LoadAISettings(AISettings& out)
 {
     BPath path;
@@ -315,6 +286,69 @@ bool LoadAISettings(AISettings& out)
     if (m.FindInt32("mcp_permissions", (int32*)&out.mcp_permissions) != B_OK) {
         out.mcp_permissions = 0;
     }
+    return true;
+}*/
+bool LoadAISettings(AISettings& out)
+{
+    BPath path;
+    if (find_directory(B_USER_SETTINGS_DIRECTORY, &path) != B_OK) return false;
+    path.Append("AIService_settings");
+
+    BFile file(path.Path(), B_READ_ONLY);
+    if (file.InitCheck() != B_OK) return false;
+
+    BMessage m;
+    if (m.Unflatten(&file) != B_OK) return false;
+
+    // Estragga i valori in BString locali per evitare di dipendere da puntatori grezzi di BMessage
+    BString val;
+    
+    if (m.FindString("engine", &val) == B_OK) {
+        out.engine = val;
+    } else {
+        out.engine.Truncate(0);
+    }
+
+    if (m.FindString("plugin", &val) == B_OK) {
+        out.plugin = val;
+    } else {
+        out.plugin.Truncate(0);
+    }
+
+    if (m.FindString("model", &val) == B_OK) {
+        out.model = val;
+    } else {
+        out.model.Truncate(0);
+    }
+
+    // Gestione KeyStore sicura
+    out.api_key.Truncate(0); // Resetta la stringa in sicurezza senza reallocazioni fantasma
+    if (!out.plugin.IsEmpty()) {
+        BString api;
+        // Passa il BString della plugin copiato in modo pulito
+        if (_GetAPIKeyFromKeyStore(out.plugin.String(), api)) {
+            out.api_key = api;
+        }
+    }
+
+    if (m.FindString("base_url", &val) == B_OK) {
+        out.base_url = val;
+    } else {
+        out.base_url.Truncate(0);
+    }
+
+    if (m.FindBool("base_url_override", &out.base_url_override) != B_OK) {
+        out.base_url_override = false;
+    }
+
+    if (m.FindBool("use_remote_context", &out.use_remote_context) != B_OK) {
+        out.use_remote_context = false; 
+    }
+
+    if (m.FindInt32("mcp_permissions", (int32*)&out.mcp_permissions) != B_OK) {
+        out.mcp_permissions = 0;
+    }
+
     return true;
 }
 
