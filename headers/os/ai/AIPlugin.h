@@ -47,10 +47,10 @@ struct AsyncArgs {
           server_messenger() {}
 
     virtual ~AsyncArgs() { // Un distruttore virtuale è sempre una buona pratica
-        if (api_key) free(api_key);
-        if (model) free(model);
-        if (notify_path) free(notify_path);
-        if (base_url) free(base_url);
+        free(api_key);
+        free(model);
+        free(notify_path);
+        free(base_url);
         delete context_copy;
     }
 };
