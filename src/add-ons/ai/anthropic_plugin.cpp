@@ -379,7 +379,6 @@ static void AppendToolResponseToContext(BMessage* context, const char* name, con
     context->AddMessage("messages", &messagesMsg);
 }
 
-
 static void BuildAnthropicPayload(const BMessage* chatContext, const char* explicitPrompt, BString& outPayload, bool stream = false)
 {
     const char* model = nullptr;
@@ -431,7 +430,7 @@ static void BuildAnthropicPayload(const BMessage* chatContext, const char* expli
                            << "        {\n"
                            << "          \"type\": \"tool_use\",\n"
                            << "          \"id\": \"" << toolCallId << "\",\n"
-                           << "          \"name\": \"" << name << "\",\n"
+                           << "          \"name\": \"" << (name ? name : "") << "\",\n"
                            << "          \"input\": " << cleanArgs << "\n"
                            << "        }\n"
                            << "      ]\n"
@@ -439,15 +438,12 @@ static void BuildAnthropicPayload(const BMessage* chatContext, const char* expli
                 first = false;
             }
             else if (type && strcmp(type, "functionResponse") == 0) {
-                const char* name = msgTurn.FindString("name");
                 const char* response = msgTurn.FindString("response");
                 const char* toolCallId = msgTurn.FindString("tool_call_id");
                 if (!toolCallId || toolCallId[0] == '\0') toolCallId = "call_dummy";
 
-                BString formattedResponse;
                 BString respStr(response ? response : "");
                 respStr.Trim();
-                
                 BString escapedResp = EscapeStringForJson(respStr.String());
 
                 if (!first) outPayload.Append(",\n");
@@ -472,9 +468,14 @@ static void BuildAnthropicPayload(const BMessage* chatContext, const char* expli
                     msgTurn.FindString("text", &content);
                 }
 
-                if (role && content) {
+                if (role && content && content[0] != '\0') {
                     BString roleStr(role);
-                    if (roleStr == "model" || roleStr == "system") {
+                    
+                    // Se nello storico c'è 'system', scartalo dall'array messages (sarà gestito nel campo top-level system)
+                    if (roleStr == "system") {
+                        continue;
+                    }
+                    if (roleStr == "model") {
                         roleStr = "assistant"; 
                     }
                     
@@ -482,10 +483,9 @@ static void BuildAnthropicPayload(const BMessage* chatContext, const char* expli
                         if (!first) outPayload.Append(",\n");
                         
                         BString escapedContent = EscapeStringForJson(content);
-                        
-                        BString modelLine;
-                        modelLine.SetToFormat("    {\"role\": \"%s\", \"content\": \"%s\"}", roleStr.String(), escapedContent.String());
-                        outPayload << modelLine;
+                        BString line;
+                        line.SetToFormat("    {\"role\": \"%s\", \"content\": \"%s\"}", roleStr.String(), escapedContent.String());
+                        outPayload << line;
                         first = false;
                     }
                 }
@@ -493,18 +493,25 @@ static void BuildAnthropicPayload(const BMessage* chatContext, const char* expli
         }
     }
 
-    // 2. Se viene passato un prompt esplicito (non ancora salvato nello storico), lo appende alla fine
+    // 2. Se viene passato un prompt esplicito, lo appende
     if (explicitPrompt && explicitPrompt[0] != '\0') {
         if (!first) outPayload.Append(",\n");
         BString escapedPrompt = EscapeStringForJson(explicitPrompt);
         
-        BString modelLine;
-        modelLine.SetToFormat("    {\"role\": \"user\", \"content\": \"%s\"}", escapedPrompt.String());
-        outPayload << modelLine;
+        BString line;
+        line.SetToFormat("    {\"role\": \"user\", \"content\": \"%s\"}", escapedPrompt.String());
+        outPayload << line;
+        first = false;
+    }
+
+    // 3. FALLBACK DI SICUREZZA: Se 'messages' è ancora vuoto, Anthropic darebbe HTTP 400!
+    if (first) {
+        outPayload << "    {\"role\": \"user\", \"content\": \"Hello\"}";
     }
 
     outPayload.Append("\n  ]");
     
+    // Gestione System Prompt Top-Level
     BString systemPrompt;
     if (chatContext) {
         const char* sys = nullptr;
@@ -529,6 +536,8 @@ public:
 	{
 		fFile.SetTo(notifyPath, B_WRITE_ONLY | B_CREATE_FILE | B_ERASE_FILE);
 	}
+	
+	const BString& Buffer() const { return fBuffer; }
 
 	virtual ssize_t Write(const void* buffer, size_t size)
 	{
@@ -572,360 +581,406 @@ private:
 	BFile fFile;
 	BString fBuffer;
 };
-
 static status_t
 anthropic_stream_thread_func(void* data)
 {
-	fprintf(stderr, "[ANTHROPIC STREAM WORKER] Thread avviato.\n");
-	AsyncArgs* args = (AsyncArgs*)data;
-	if (args == NULL)
-		return B_BAD_VALUE;
+    fprintf(stderr, "[ANTHROPIC STREAM WORKER] Thread avviato.\n");
+    AsyncArgs* args = (AsyncArgs*)data;
+    if (args == NULL)
+        return B_BAD_VALUE;
 
-	BMessage replyTools;
-	bool mcpActive = false;
-	bool executionLoop = true;
+    BMessage replyTools;
+    bool mcpActive = false;
+    bool executionLoop = true;
+    bool hasError = false;
 
-	// Controllo di sicurezza sulla chiave API
-	if (args->api_key == NULL || args->api_key[0] == '\0') {
-		fprintf(stderr, "[ANTHROPIC STREAM WORKER] ERRORE CRITICO: API key assente!\n");
-		if (args->notify_path != NULL) {
-			BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE);
-			BString endMarker = "<<STREAM_END>>";
-			streamFile.Write(endMarker.String(), endMarker.Length());
-		}
-		goto thread_cleanup;
-	}
+    // Controllo di sicurezza sulla chiave API
+    if (args->api_key == NULL || args->api_key[0] == '\0') {
+        fprintf(stderr, "[ANTHROPIC STREAM WORKER] ERRORE CRITICO: API key assente!\n");
+        if (args->notify_path != NULL) {
+            BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE);
+            BString endMarker = "<<STREAM_END>>";
+            streamFile.Write(endMarker.String(), endMarker.Length());
+        }
+        goto thread_cleanup;
+    }
 
-	// === CONTROLLO CAPABILITY VIA MESSENGER ===
-	if (args->server_messenger.IsValid()) {
-		BMessage reqTools(MSG_MCP_GET_TOOLS); 
-		const char* ctxId = NULL;
-		if (args->context_copy != NULL) {
-			args->context_copy->FindString("context_id", &ctxId);
-		}
-		if (ctxId != NULL) {
-			reqTools.AddString("context_id", ctxId);
-		}
-		
-		if (args->server_messenger.SendMessage(&reqTools, &replyTools) == B_OK) {
-			if (replyTools.HasMessage("tool", 0)) {
-				mcpActive = true;
-			}
-		}
-	}
+    // === CONTROLLO CAPABILITY VIA MESSENGER ===
+    if (args->server_messenger.IsValid()) {
+        BMessage reqTools(MSG_MCP_GET_TOOLS); 
+        const char* ctxId = NULL;
+        if (args->context_copy != NULL) {
+            args->context_copy->FindString("context_id", &ctxId);
+        }
+        if (ctxId != NULL) {
+            reqTools.AddString("context_id", ctxId);
+        }
+        
+        if (args->server_messenger.SendMessage(&reqTools, &replyTools) == B_OK) {
+            if (replyTools.HasMessage("tool", 0)) {
+                mcpActive = true;
+            }
+        }
+    }
 
-	// === CASO 1: MODALITÀ STANDARD (STREAMING NATIVO RETROCOMPATIBILE) ===
-	if (!mcpActive) {
-		goto fallback_to_standard;
-	}
+    if (!mcpActive) {
+        goto fallback_to_standard;
+    }
 
-	// === CASO 2: MODALITÀ MCP ATTIVA (LOOP STRUMENTI VIA IPC MESSENGER) ===
-	fprintf(stderr, "[ANTHROPIC STREAM WORKER] Modalità MCP Attiva: Avvio loop di interazione strumenti.\n");
-	
-	executionLoop = true;
-	while (executionLoop) {
-		// Controllo interruzione preventivo via IPC
-		if (args->server_messenger.IsValid()) {
-			BMessage checkAbortMsg('CHAB'); // MSG_CHECK_ABORT
-			const char* ctxId = NULL;
-			if (args->context_copy != NULL) {
-				args->context_copy->FindString("context_id", &ctxId);
-			}
-			if (ctxId != NULL) {
-				checkAbortMsg.AddString("context_id", ctxId);
-			}
-			
-			BMessage abortReply;
-			if (args->server_messenger.SendMessage(&checkAbortMsg, &abortReply) == B_OK) {
-				int32 status = B_OK;
-				if (abortReply.FindInt32("status", &status) == B_OK && status == B_CANCELED) {
-					fprintf(stderr, "[ANTHROPIC STREAM WORKER] Rilevata interruzione asincrona dall'utente. Esco.\n");
-					executionLoop = false;
-					break;
-				}
-			}
-		}
+    // === CASO 2: MODALITÀ MCP ATTIVA ===
+    fprintf(stderr, "[ANTHROPIC STREAM WORKER] Modalità MCP Attiva: Avvio loop di interazione strumenti.\n");
+    
+    executionLoop = true;
+    while (executionLoop) {
+        // Controllo interruzione preventivo via IPC
+        if (args->server_messenger.IsValid()) {
+            BMessage checkAbortMsg('CHAB'); // MSG_CHECK_ABORT
+            const char* ctxId = NULL;
+            if (args->context_copy != NULL) {
+                args->context_copy->FindString("context_id", &ctxId);
+            }
+            if (ctxId != NULL) {
+                checkAbortMsg.AddString("context_id", ctxId);
+            }
+            
+            BMessage abortReply;
+            if (args->server_messenger.SendMessage(&checkAbortMsg, &abortReply) == B_OK) {
+                int32 status = B_OK;
+                if (abortReply.FindInt32("status", &status) == B_OK && status == B_CANCELED) {
+                    fprintf(stderr, "[ANTHROPIC STREAM WORKER] Rilevata interruzione asincrona dall'utente. Esco.\n");
+                    executionLoop = false;
+                    break;
+                }
+            }
+        }
 
-		BString url = BuildMessagesUrl(args->base_url);
+        BString url = BuildMessagesUrl(args->base_url);
 
-		BString payload;
-		// In modalità MCP non usiamo lo streaming (stream = false)
-		BuildAnthropicPayload(args->context_copy, NULL, payload, false);
+        BString payload;
+        BuildAnthropicPayload(args->context_copy, NULL, payload, false);
 
-		if (mcpActive) {
-			BString anthropicToolsJson;
-			ConvertBMessageToAnthropicToolsJson(&replyTools, anthropicToolsJson);
+        if (mcpActive) {
+            BString anthropicToolsJson;
+            ConvertBMessageToAnthropicToolsJson(&replyTools, anthropicToolsJson);
 
-			if (anthropicToolsJson.Length() > 0) {
-				int32 lastCloseBrace = payload.FindLast("}");
-				if (lastCloseBrace != B_ERROR) {
-					payload.Truncate(lastCloseBrace);
-					payload << ",\"tools\":" << anthropicToolsJson << "}";
-				}
-			}
-		}
+            if (anthropicToolsJson.Length() > 0) {
+                int32 lastCloseBrace = payload.FindLast("}");
+                if (lastCloseBrace != B_ERROR) {
+                    payload.Truncate(lastCloseBrace);
+                    payload << ",\"tools\":" << anthropicToolsJson << "}";
+                }
+            }
+        }
 
-		BMallocIO outNetworkData;
-		SyncListener syncListener;
-		BUrl bUrl(url.String(), true);
-		BUrlRequest* req = BUrlProtocolRoster::MakeRequest(bUrl, &outNetworkData, &syncListener, NULL);
-		if (!req) { 
-			executionLoop = false; 
-			break; 
-		}
+        BMallocIO outNetworkData;
+        SyncListener syncListener;
+        BUrl bUrl(url.String(), true);
+        BUrlRequest* req = BUrlProtocolRoster::MakeRequest(bUrl, &outNetworkData, &syncListener, NULL);
+        if (!req) { 
+            hasError = true;
+            executionLoop = false; 
+            break; 
+        }
 
-		BHttpRequest* http = dynamic_cast<BHttpRequest*>(req);
-		if (http != NULL) {
-			http->SetMethod(B_HTTP_POST);
-			BHttpHeaders headers;
-			headers.AddHeader("Content-Type", "application/json");
-			headers.AddHeader("anthropic-version", "2023-06-01");
-			headers.AddHeader("x-api-key", args->api_key);
-			http->SetHeaders(headers);
-			
-			BMallocIO* input = new BMallocIO();
-			input->WriteExactly(payload.String(), payload.Length());
-			http->AdoptInputData(input, payload.Length());
-		}
+        BHttpRequest* http = dynamic_cast<BHttpRequest*>(req);
+        if (http != NULL) {
+            http->SetMethod(B_HTTP_POST);
+            BHttpHeaders headers;
+            headers.AddHeader("Content-Type", "application/json");
+            headers.AddHeader("anthropic-version", "2023-06-01");
+            
+            BString cleanApiKey(args->api_key);
+            cleanApiKey.Trim();
+            headers.AddHeader("x-api-key", cleanApiKey.String());
 
-		thread_id netThread = req->Run();
-		if (netThread >= 0) { 
-			status_t rc; 
-			wait_for_thread(netThread, &rc); 
-		}
-		delete req;
+            BString contentLengthStr;
+            contentLengthStr << payload.Length();
+            headers.AddHeader("Content-Length", contentLengthStr.String());
 
-		BString rawResponse((const char*)outNetworkData.Buffer(), outNetworkData.BufferLength());
-		BMessage parsedJson;
-		
-		if (BJson::Parse(rawResponse.String(), parsedJson) != B_OK) {
-			fprintf(stderr, "[ANTHROPIC STREAM WORKER] Fallito il parsing JSON della risposta di rete.\n");
-			executionLoop = false;
-			break;
-		}
+            http->SetHeaders(headers);
+            
+            BMallocIO* input = new BMallocIO();
+            input->WriteExactly(payload.String(), payload.Length());
+            http->AdoptInputData(input, payload.Length());
+        }
 
-		BMessage errorObj;
-		if (parsedJson.FindMessage("error", &errorObj) == B_OK) {
-			const char* errMsg = NULL;
-			errorObj.FindString("message", &errMsg);
-			if (errMsg != NULL) {
-				fprintf(stderr, "[ANTHROPIC WORKER] Dettaglio errore API Anthropic: %s\n", errMsg);
-				
-				// Se contiene indicazioni di problemi coi tool
-				if (BString(errMsg).FindFirst("tool") != B_ERROR) {
-					fprintf(stderr, "[ANTHROPIC WORKER] Rifiuto MCP. Fallback alla Modalità Standard.\n");
-					mcpActive = false;
-					executionLoop = false;
-					goto fallback_to_standard;
-				}
-			}
-		}
+        thread_id netThread = req->Run();
+        if (netThread >= 0) { 
+            status_t rc; 
+            wait_for_thread(netThread, &rc); 
+        }
+        delete req;
 
-		BMessage contentMsg;
-		bool foundTool = false;
+        BString rawResponse((const char*)outNetworkData.Buffer(), outNetworkData.BufferLength());
+        BMessage parsedJson;
+        
+        if (BJson::Parse(rawResponse.String(), parsedJson) != B_OK) {
+            fprintf(stderr, "[ANTHROPIC STREAM WORKER] Fallito il parsing JSON della risposta di rete.\n");
+            hasError = true;
+            executionLoop = false;
+            break;
+        }
 
-		if (parsedJson.FindMessage("content", &contentMsg) == B_OK) {
-			int32 blockIndex = 0;
-			BMessage block;
+        BMessage errorObj;
+        if (parsedJson.FindMessage("error", &errorObj) == B_OK) {
+            const char* errMsg = NULL;
+            errorObj.FindString("message", &errMsg);
+            if (errMsg != NULL) {
+                fprintf(stderr, "[ANTHROPIC WORKER] Dettaglio errore API Anthropic: %s\n", errMsg);
+                
+                if (BString(errMsg).FindFirst("tool") != B_ERROR) {
+                    fprintf(stderr, "[ANTHROPIC WORKER] Rifiuto MCP. Fallback alla Modalità Standard.\n");
+                    mcpActive = false;
+                    executionLoop = false;
+                    goto fallback_to_standard;
+                }
+            }
+            hasError = true;
+            executionLoop = false;
+            break;
+        }
 
-			while (contentMsg.FindMessage(BString().SetToFormat("%ld", (long)blockIndex).String(), &block) == B_OK
-				|| contentMsg.FindMessage("msg", blockIndex, &block) == B_OK) {
-				
-				const char* typeStr = NULL;
-				block.FindString("type", &typeStr);
-				if (typeStr != NULL && strcmp(typeStr, "tool_use") == 0) {
-					const char* toolName = NULL;
-					const char* toolCallId = NULL;
-					block.FindString("name", &toolName);
-					block.FindString("id", &toolCallId);
-					
-					BMessage inputMsg;
-					BString argsJson;
-					if (block.FindMessage("input", &inputMsg) == B_OK) {
-						SerializeBMessageToJson(&inputMsg, argsJson);
-					} else {
-						argsJson = "{}";
-					}
+        BMessage contentMsg;
+        bool foundTool = false;
 
-					fprintf(stderr, "[ANTHROPIC MCP] Claude richiede lo strumento: %s con argomenti: %s\n", toolName, argsJson.String());
+        if (parsedJson.FindMessage("content", &contentMsg) == B_OK) {
+            int32 blockIndex = 0;
+            BMessage block;
+            BString intermediateText;
 
-					// Invochiamo lo strumento mandando un messaggio sincrono all'ai_server
-					BMessage reqExec(MSG_EXECUTE_TOOL);
-					reqExec.AddString("name", toolName);
-					reqExec.AddMessage("arguments", &inputMsg);
-					
-					const char* ctxId = NULL;
-					if (args->context_copy != NULL) {
-						args->context_copy->FindString("context_id", &ctxId);
-					}
-					if (ctxId != NULL) {
-						reqExec.AddString("context_id", ctxId);
-					}
-					
-					BMessage replyExec;
-					BString toolResultBuf;
-					
-					if (args->server_messenger.SendMessage(&reqExec, &replyExec) == B_OK) {
-						const char* resStr = replyExec.FindString("result");
-						if (resStr != NULL && strlen(resStr) > 0) {
-							BString testStr(resStr);
-							testStr.Trim();
-							if (testStr.StartsWith("{") || testStr.StartsWith("[")) {
-								toolResultBuf = resStr;
-							} else {
-								BString escapedRes = EscapeStringForJson(resStr);
-								toolResultBuf.SetToFormat("{\"output\":\"%s\"}", escapedRes.String());
-							}
-						} else {
-							toolResultBuf = "{\"error\":\"Il comando sul server ha restituito una risposta vuota.\"}";
-						}
-					} else {
-						toolResultBuf = "{\"error\":\"Esecuzione dello strumento fallita via IPC BMessenger\"}";
-					}
+            while (contentMsg.FindMessage(BString().SetToFormat("%ld", (long)blockIndex).String(), &block) == B_OK
+                || contentMsg.FindMessage("msg", blockIndex, &block) == B_OK) {
+                
+                const char* typeStr = NULL;
+                block.FindString("type", &typeStr);
 
-					// Aggiorniamo la history clonata in memoria per il prossimo turno del loop
-					AppendToolCallToContext(args->context_copy, toolName, &inputMsg, toolCallId);
-					AppendToolResponseToContext(args->context_copy, toolName, toolResultBuf.String(), toolCallId);
-					
-					foundTool = true;
-					break; // Esci dal loop dei blocchi e procedi al prossimo turno della conversazione
-				}
-				blockIndex++;
-			}
+                if (typeStr != NULL && strcmp(typeStr, "text") == 0) {
+                    const char* textVal = NULL;
+                    if (block.FindString("text", &textVal) == B_OK && textVal != NULL) {
+                        intermediateText.Append(textVal);
+                    }
+                } else if (typeStr != NULL && strcmp(typeStr, "tool_use") == 0) {
+                    const char* toolName = NULL;
+                    const char* toolCallId = NULL;
+                    block.FindString("name", &toolName);
+                    block.FindString("id", &toolCallId);
+                    
+                    BMessage inputMsg;
+                    BString argsJson;
+                    if (block.FindMessage("input", &inputMsg) == B_OK) {
+                        SerializeBMessageToJson(&inputMsg, argsJson);
+                    } else {
+                        argsJson = "{}";
+                    }
 
-			if (!foundTool) {
-				// Let's collect all text content
-				BString fullText;
-				blockIndex = 0;
-				BMessage block;
-				while (contentMsg.FindMessage(BString().SetToFormat("%ld", (long)blockIndex).String(), &block) == B_OK
-					|| contentMsg.FindMessage("msg", blockIndex, &block) == B_OK) {
-					
-					const char* typeStr = NULL;
-					block.FindString("type", &typeStr);
-					if (typeStr != NULL && strcmp(typeStr, "text") == 0) {
-						const char* textVal = NULL;
-						if (block.FindString("text", &textVal) == B_OK && textVal != NULL) {
-							fullText.Append(textVal);
-						}
-					}
-					blockIndex++;
-				}
-				
-				if (fullText.Length() > 0) {
-					fprintf(stderr, "[ANTHROPIC MCP] Risposta testuale finale ricevuta.\n");
-					BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
-					if (streamFile.InitCheck() == B_OK) {
-						streamFile.Write(fullText.String(), fullText.Length());
-					} else {
-						fprintf(stderr, "[ANTHROPIC MCP] ERRORE: Impossibile creare/aprire il file di notifica!\n");
-					}
-					executionLoop = false;
-				} else {
-					executionLoop = false;
-				}
-			}
-		} else {
-			fprintf(stderr, "[ANTHROPIC STREAM WORKER] ERRORE: Risposta di rete non valida o priva di 'content'.\n");
-			fprintf(stderr, "[ANTHROPIC STREAM WORKER] Risposta grezza ricevuta:\n%s\n", rawResponse.String());
-			executionLoop = false;
-		}
-	}
-	goto thread_post_actions;
+                    // Scriviamo l'eventuale testo intermedio prima di invocare il tool
+                    if (intermediateText.Length() > 0) {
+                        BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
+                        if (streamFile.InitCheck() == B_OK) {
+                            streamFile.Write(intermediateText.String(), intermediateText.Length());
+                        }
+                        intermediateText.Truncate(0);
+                    }
 
+                    fprintf(stderr, "[ANTHROPIC MCP] Claude richiede lo strumento: %s con argomenti: %s\n", toolName, argsJson.String());
+
+                    BMessage reqExec(MSG_EXECUTE_TOOL);
+                    reqExec.AddString("name", toolName);
+                    reqExec.AddMessage("arguments", &inputMsg);
+                    
+                    const char* ctxId = NULL;
+                    if (args->context_copy != NULL) {
+                        args->context_copy->FindString("context_id", &ctxId);
+                    }
+                    if (ctxId != NULL) {
+                        reqExec.AddString("context_id", ctxId);
+                    }
+                    
+                    BMessage replyExec;
+                    BString toolResultBuf;
+                    
+                    if (args->server_messenger.SendMessage(&reqExec, &replyExec) == B_OK) {
+                        const char* resStr = replyExec.FindString("result");
+                        if (resStr != NULL && strlen(resStr) > 0) {
+                            BString testStr(resStr);
+                            testStr.Trim();
+                            if (testStr.StartsWith("{") || testStr.StartsWith("[")) {
+                                toolResultBuf = resStr;
+                            } else {
+                                BString escapedRes = EscapeStringForJson(resStr);
+                                toolResultBuf.SetToFormat("{\"output\":\"%s\"}", escapedRes.String());
+                            }
+                        } else {
+                            toolResultBuf = "{\"error\":\"Il comando sul server ha restituito una risposta vuota.\"}";
+                        }
+                    } else {
+                        toolResultBuf = "{\"error\":\"Esecuzione dello strumento fallita via IPC BMessenger\"}";
+                    }
+
+                    AppendToolCallToContext(args->context_copy, toolName, &inputMsg, toolCallId);
+                    AppendToolResponseToContext(args->context_copy, toolName, toolResultBuf.String(), toolCallId);
+                    
+                    foundTool = true;
+                    break;
+                }
+                blockIndex++;
+            }
+
+            if (!foundTool) {
+                if (intermediateText.Length() > 0) {
+                    fprintf(stderr, "[ANTHROPIC MCP] Risposta testuale finale ricevuta.\n");
+                    BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
+                    if (streamFile.InitCheck() == B_OK) {
+                        streamFile.Write(intermediateText.String(), intermediateText.Length());
+                    } else {
+                        fprintf(stderr, "[ANTHROPIC MCP] ERRORE: Impossibile aprire il file di notifica!\n");
+                    }
+                }
+                executionLoop = false;
+            }
+        } else {
+            fprintf(stderr, "[ANTHROPIC STREAM WORKER] ERRORE: Risposta di rete non valida o priva di 'content'.\n");
+            hasError = true;
+            executionLoop = false;
+        }
+    }
+    goto thread_post_actions;
 
 fallback_to_standard:
-	{
-		fprintf(stderr, "[ANTHROPIC STREAM WORKER] Modalità Standard: Avvio Streaming Diretto.\n");
-		
-		BString url = BuildMessagesUrl(args->base_url);
-		PrepareContextForStreaming(args->context_copy, NULL, args->model);
+    {
+        fprintf(stderr, "[ANTHROPIC STREAM WORKER] Modalità Standard: Avvio Streaming Diretto.\n");
+        
+        BString url = BuildMessagesUrl(args->base_url);
+        PrepareContextForStreaming(args->context_copy, NULL, args->model);
 
-		BString payload;
-		BuildAnthropicPayload(args->context_copy, NULL, payload, true);
+        BString payload;
+        BuildAnthropicPayload(args->context_copy, NULL, payload, true);
+        
+        fprintf(stderr, "[ANTHROPIC DEBUG] Payload inviato:\n%s\n", payload.String());
 
-		AnthropicStreamTarget streamTarget(args->notify_path);
-		CompletionListener listener(args->notify_path);
-		BUrl bUrl(url.String(), true);
-		BUrlRequest* req = BUrlProtocolRoster::MakeRequest(bUrl, &streamTarget, &listener, NULL);
-		if (req != NULL) {
-			BHttpRequest* http = dynamic_cast<BHttpRequest*>(req);
-			if (http != NULL) {
-				http->SetMethod(B_HTTP_POST);
-				BHttpHeaders headers;
-				headers.AddHeader("Content-Type", "application/json");
-				headers.AddHeader("anthropic-version", "2023-06-01");
-				headers.AddHeader("x-api-key", args->api_key);
-				http->SetHeaders(headers);
+        AnthropicStreamTarget streamTarget(args->notify_path);
+        CompletionListener listener(args->notify_path);
+        BUrl bUrl(url.String(), true);
+        BUrlRequest* req = BUrlProtocolRoster::MakeRequest(bUrl, &streamTarget, &listener, NULL);
+        if (req != NULL) {
+            BHttpRequest* http = dynamic_cast<BHttpRequest*>(req);
+            if (http != NULL) {
+                http->SetMethod(B_HTTP_POST);
+                BHttpHeaders headers;
+                headers.AddHeader("Content-Type", "application/json");
+                headers.AddHeader("anthropic-version", "2023-06-01");
+                
+                BString cleanApiKey(args->api_key);
+                cleanApiKey.Trim();
+                headers.AddHeader("x-api-key", cleanApiKey.String());
 
-				BMemoryIO* input = new BMemoryIO(payload.String(), payload.Length());
-				http->AdoptInputData(input, payload.Length());
-			}
-			thread_id thread = req->Run();
-			if (thread >= 0) { 
-				status_t rc; 
-				wait_for_thread(thread, &rc); 
-			}
-			delete req;
-		}
-	}
+                BString contentLengthStr;
+                contentLengthStr << payload.Length();
+                headers.AddHeader("Content-Length", contentLengthStr.String());
+
+                http->SetHeaders(headers);
+
+                BMallocIO* input = new BMallocIO();
+                input->WriteExactly(payload.String(), payload.Length());
+                http->AdoptInputData(input, payload.Length());
+            }
+
+            thread_id thread = req->Run();
+            if (thread >= 0) { 
+                status_t rc; 
+                wait_for_thread(thread, &rc); 
+            }
+
+            // === VERIFICA STATUS DI ERRORE HTTP ===
+            if (http != NULL) {
+                const BHttpResult& httpResult = static_cast<const BHttpResult&>(http->Result());
+                int32 statusCode = httpResult.StatusCode();
+                if (statusCode != 200) {
+                    fprintf(stderr, "[ANTHROPIC STREAM WORKER] Errore HTTP %" B_PRId32 " durante lo streaming.\n", statusCode);
+
+                    // Legge il body restituito da Anthropic direttamente dal target di streaming
+                    BString errorBody = streamTarget.Buffer();
+                    if (errorBody.Length() > 0) {
+                        fprintf(stderr, "[ANTHROPIC API DETAILS] Dettaglio errore dal server:\n%s\n", errorBody.String());
+                    }
+
+                    // Scrive un messaggio esplicito sul file di notifica per il client
+                    BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
+                    if (streamFile.InitCheck() == B_OK) {
+                        BString errBuffer;
+                        if (errorBody.Length() > 0) {
+                            errBuffer.SetToFormat("\n[ERRORE API %" B_PRId32 "]: %s\n", statusCode, errorBody.String());
+                        } else {
+                            errBuffer.SetToFormat("\n[ERRORE API %" B_PRId32 ": Verificare configurazione o parametri payload]\n", statusCode);
+                        }
+                        streamFile.Write(errBuffer.String(), errBuffer.Length());
+                    }
+                    hasError = true;
+                }
+            }
+            delete req;
+        } else {
+            hasError = true;
+        }
+    }
 
 thread_post_actions:
-	if (args->context_copy != NULL && !args->context_copy->HasString("title")) {
-		BMessage messagesMsg;
-		const char* firstPromptText = NULL;
+    if (!hasError && args->context_copy != NULL && !args->context_copy->HasString("title")) {
+        BMessage messagesMsg;
+        const char* firstPromptText = NULL;
 
-		if (args->context_copy->FindMessage("messages", &messagesMsg) == B_OK) {
-			int32 msgCount = 0;
-			BMessage msgItem;
-			
-			while (messagesMsg.FindMessage("msg", msgCount, &msgItem) == B_OK || 
-				   messagesMsg.FindMessage(BString().SetToFormat("%d", msgCount).String(), &msgItem) == B_OK) {
-				
-				const char* role = msgItem.FindString("role");
-				const char* content = msgItem.FindString("content");
-				if (!content) msgItem.FindString("text", &content);
-				
-				if (role && strcmp(role, "user") == 0 && content && content[0] != '\0') {
-					firstPromptText = content;
-				}
-				msgCount++;
-			}
-		}
+        if (args->context_copy->FindMessage("messages", &messagesMsg) == B_OK) {
+            int32 msgCount = 0;
+            BMessage msgItem;
+            
+            while (messagesMsg.FindMessage("msg", msgCount, &msgItem) == B_OK || 
+                   messagesMsg.FindMessage(BString().SetToFormat("%d", msgCount).String(), &msgItem) == B_OK) {
+                
+                const char* role = msgItem.FindString("role");
+                const char* content = msgItem.FindString("content");
+                if (!content) msgItem.FindString("text", &content);
+                
+                if (role && strcmp(role, "user") == 0 && content && content[0] != '\0') {
+                    firstPromptText = content;
+                }
+                msgCount++;
+            }
+        }
 
-		if (firstPromptText && firstPromptText[0] != '\0') {
-			BString autoTitle(firstPromptText);
-			autoTitle.Trim();
-			if (autoTitle.Length() > 30) {
-				autoTitle.Truncate(30);
-				autoTitle << "...";
-			}
-			
-			args->context_copy->RemoveName("title");
-			args->context_copy->AddString("title", autoTitle.String());
-			
-			if (args->server_messenger.IsValid()) {
-				BMessage titleUpdateMsg('UTIT');
-				titleUpdateMsg.AddString("title", autoTitle.String());
-				args->server_messenger.SendMessage(&titleUpdateMsg);
-			}
-			fprintf(stderr, "[ANTHROPIC ASYNC] Auto-titolo generato: '%s'\n", autoTitle.String());
-		}
-	}
-	{
-		BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
-		if (streamFile.InitCheck() == B_OK) {
-			BString endMarker = "<<STREAM_END>>";
-			streamFile.Write(endMarker.String(), endMarker.Length());
-		}
-	}
+        if (firstPromptText && firstPromptText[0] != '\0') {
+            BString autoTitle(firstPromptText);
+            autoTitle.Trim();
+            if (autoTitle.Length() > 30) {
+                autoTitle.Truncate(30);
+                autoTitle << "...";
+            }
+            
+            args->context_copy->RemoveName("title");
+            args->context_copy->AddString("title", autoTitle.String());
+            
+            if (args->server_messenger.IsValid()) {
+                BMessage titleUpdateMsg('UTIT');
+                titleUpdateMsg.AddString("title", autoTitle.String());
+                args->server_messenger.SendMessage(&titleUpdateMsg);
+            }
+            fprintf(stderr, "[ANTHROPIC ASYNC] Auto-titolo generato: '%s'\n", autoTitle.String());
+        }
+    }
+
+    // Scrittura del marcatore di fine stream
+    {
+        BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
+        if (streamFile.InitCheck() == B_OK) {
+            BString endMarker = "<<STREAM_END>>";
+            streamFile.Write(endMarker.String(), endMarker.Length());
+        }
+    }
 
 thread_cleanup:
-	fprintf(stderr, "[ANTHROPIC STREAM WORKER] Pulizia e chiusura thread worker.\n");
-	delete args; 
-	return B_OK;
+    fprintf(stderr, "[ANTHROPIC STREAM WORKER] Pulizia e chiusura thread worker.\n");
+    delete args; 
+    return B_OK;
 }
-
 
 extern "C" ai_plugin_t
 ai_plugin_init(void)
@@ -959,109 +1014,112 @@ ai_plugin_get_capabilities(void)
 	return AI_CAP_STREAMING | AI_CAP_MCP;
 }
 
-
 extern "C" status_t
 ai_plugin_generate_text_sync(ai_plugin_t handle, const char* prompt,
-	char* response_buf, size_t response_len, BMessage* contextMsg)
+    char* response_buf, size_t response_len, BMessage* contextMsg)
 {
-	if (response_buf == NULL || response_len == 0)
-		return B_BAD_VALUE;
+    if (response_buf == NULL || response_len == 0)
+        return B_BAD_VALUE;
 
-	const char* apiKey = NULL;
-	if (contextMsg != NULL)
-		contextMsg->FindString("api_key", &apiKey);
-	if (apiKey == NULL || apiKey[0] == '\0') {
-		CopyToBuffer("[anthropic_plugin] error: no API key provided",
-			response_buf, response_len);
-		return B_BAD_VALUE;
-	}
+    const char* apiKey = NULL;
+    if (contextMsg != NULL)
+        contextMsg->FindString("api_key", &apiKey);
+    if (apiKey == NULL || apiKey[0] == '\0') {
+        CopyToBuffer("[anthropic_plugin] error: no API key provided",
+            response_buf, response_len);
+        return B_BAD_VALUE;
+    }
 
-	//AIPluginHandle* typedHandle = (AIPluginHandle*)handle;
-	const char* baseUrlRaw = nullptr;
-    contextMsg->FindString("base_url", &baseUrlRaw);
+    const char* baseUrlRaw = nullptr;
+    if (contextMsg != NULL)
+        contextMsg->FindString("base_url", &baseUrlRaw);
     if (!baseUrlRaw || baseUrlRaw[0] == '\0') {
         baseUrlRaw = DEFAULT_ANTHROPIC_URL;
     }
-	BString url = BuildMessagesUrl(baseUrlRaw);
+    BString url = BuildMessagesUrl(baseUrlRaw);
 
-	BString payload;
-	BuildAnthropicPayload(contextMsg, prompt, payload, false);
-	fprintf(stderr, "[ANTHROPIC PLUGIN] sync request verso %s\n", url.String());
+    BString payload;
+    BuildAnthropicPayload(contextMsg, prompt, payload, false);
+    fprintf(stderr, "[ANTHROPIC PLUGIN] sync request verso %s\n", url.String());
 
-	BMallocIO* output = new BMallocIO();
-	SyncListener listener;
-	BUrlRequest* request = BUrlProtocolRoster::MakeRequest(
-		BUrl(url.String(), false), output, &listener, NULL);
-	if (request == NULL) {
-		delete output;
-		CopyToBuffer("{\"error\":\"request failed\"}", response_buf, response_len);
-		return B_ERROR;
-	}
+    // BMallocIO gestito dal BUrlRequest (non fare delete output alla fine!)
+    BMallocIO* output = new BMallocIO();
+    SyncListener listener;
+    BUrlRequest* request = BUrlProtocolRoster::MakeRequest(
+        BUrl(url.String(), false), output, &listener, NULL);
+    if (request == NULL) {
+        delete output; // Solo qui va cancellato manualmente se la MakeRequest fallisce!
+        CopyToBuffer("{\"error\":\"request failed\"}", response_buf, response_len);
+        return B_ERROR;
+    }
 
-	BHttpRequest* http = dynamic_cast<BHttpRequest*>(request);
-	if (http != NULL) {
-		http->SetMethod(B_HTTP_POST);
+    BHttpRequest* http = dynamic_cast<BHttpRequest*>(request);
+    if (http != NULL) {
+        http->SetMethod(B_HTTP_POST);
 
-		BHttpHeaders headers;
-		headers.AddHeader("Content-Type", "application/json");
-		headers.AddHeader("anthropic-version", "2023-06-01");
-		headers.AddHeader("x-api-key", apiKey);
-		http->SetHeaders(headers);
+        BHttpHeaders headers;
+        headers.AddHeader("Content-Type", "application/json");
+        headers.AddHeader("anthropic-version", "2023-06-01");
+        headers.AddHeader("x-api-key", apiKey);
+        http->SetHeaders(headers);
 
-		BMallocIO* input = new BMallocIO();
-		input->WriteExactly(payload.String(), payload.Length());
-		http->AdoptInputData(input, payload.Length());
-	}
+        BMallocIO* input = new BMallocIO();
+        input->WriteExactly(payload.String(), payload.Length());
+        http->AdoptInputData(input, payload.Length());
+    }
 
-	thread_id thread = request->Run();
-	status_t rc = B_ERROR;
-	if (thread >= 0)
-		wait_for_thread(thread, &rc);
-	else
-		rc = thread;
+    thread_id thread = request->Run();
+    status_t rc = B_ERROR;
+    if (thread >= 0)
+        wait_for_thread(thread, &rc);
+    else
+        rc = thread;
 
-	int32 statusCode = 0;
-	if (http != NULL) {
-		const BHttpResult* httpResult
-			= dynamic_cast<const BHttpResult*>(&(http->Result()));
-		if (httpResult != NULL)
-			statusCode = httpResult->StatusCode();
-	}
+    int32 statusCode = 0;
+    if (http != NULL) {
+        const BHttpResult* httpResult
+            = dynamic_cast<const BHttpResult*>(&(http->Result()));
+        if (httpResult != NULL)
+            statusCode = httpResult->StatusCode();
+    }
 
-	const void* buffer = output->Buffer();
-	size_t length = output->BufferLength();
-	BString rawResponse;
-	if (buffer != NULL && length > 0)
-		rawResponse.SetTo((const char*)buffer, length);
+    const void* buffer = output->Buffer();
+    size_t length = output->BufferLength();
+    BString rawResponse;
+    if (buffer != NULL && length > 0)
+        rawResponse.SetTo((const char*)buffer, length);
 
-	bool extracted = false;
-	if (statusCode == 200 && length > 0) {
-		BMessage parsedJson;
-		if (BJson::Parse(rawResponse.String(), parsedJson) == B_OK) {
-			BMessage contentArray;
-			BMessage firstItem;
-			const char* text = NULL;
+    // LOG DI DEBUG UTILS: Stampa lo status HTTP e la risposta grezza ricevuta
+    fprintf(stderr, "[ANTHROPIC DEBUG] Status Code: %" B_PRId32 "\n", statusCode);
+    fprintf(stderr, "[ANTHROPIC DEBUG] Raw Response: %s\n", rawResponse.String());
 
-			if (parsedJson.FindMessage("content", &contentArray) == B_OK
-				&& contentArray.FindMessage("0", &firstItem) == B_OK
-				&& firstItem.FindString("text", &text) == B_OK) {
-				CopyToBuffer(text, response_buf, response_len);
-				extracted = true;
-			}
-		}
-	}
+    bool extracted = false;
+    if (statusCode == 200 && length > 0) {
+        BMessage parsedJson;
+        if (BJson::Parse(rawResponse.String(), parsedJson) == B_OK) {
+            BMessage firstItem;
+            const char* text = NULL;
 
-	if (!extracted) {
-		if (length > 0)
-			CopyToBuffer(rawResponse.String(), response_buf, response_len);
-		else
-			CopyToBuffer("{\"error\":\"empty response\"}", response_buf, response_len);
-	}
+            // FIX BJSON: Estrazione corretta del messaggio 0 dall'array "content"
+            if (parsedJson.FindMessage("content", 0, &firstItem) == B_OK
+                && firstItem.FindString("text", &text) == B_OK) {
+                CopyToBuffer(text, response_buf, response_len);
+                extracted = true;
+            }
+        }
+    }
 
-	delete request;
-	delete output;
+    if (!extracted) {
+        if (length > 0)
+            CopyToBuffer(rawResponse.String(), response_buf, response_len);
+        else
+            CopyToBuffer("{\"error\":\"empty response\"}", response_buf, response_len);
+    }
 
-	return (rc == B_OK && statusCode == 200) ? B_OK : B_ERROR;
+    // Distruggendo request viene distrutto automaticamente anche 'output'
+    delete request;
+
+    return (rc == B_OK && statusCode == 200) ? B_OK : B_ERROR;
 }
 
 extern "C" status_t
