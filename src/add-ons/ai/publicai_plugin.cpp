@@ -507,15 +507,14 @@ extern "C" void ai_plugin_free(ai_plugin_t handle)
     AIPluginHandle* h = (AIPluginHandle*)handle;
     delete h;
 }
-
-extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
-                                             const char* prompt,
-                                             char* response_buf,
-                                             size_t response_len,
-                                             BMessage* config)
+extern "C" status_t 
+ai_plugin_generate_text_sync(ai_plugin_t handle,
+                             const char* prompt,
+                             char* response_buf,
+                             size_t response_len,
+                             BMessage* config)
 {
     fprintf(stderr, "[PUBLICAI PLUGIN] === INIZIO generate_text_sync ===\n");
-    //AIPluginHandle* h = (AIPluginHandle*)handle;
     if (!config) {
         fprintf(stderr, "[PUBLICAI PLUGIN] ERRORE: il puntatore BMessage* config è NULL!\n");
         return B_ERROR;
@@ -533,10 +532,24 @@ extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
         return B_ERROR;
     }
     
+    // Controlliamo che baseUrlRaw sia valido E non vuoto
     const char* baseUrlRaw = nullptr;
-    BString url = (config->FindString("base_url", &baseUrlRaw) == B_OK) ? baseUrlRaw : DEFAULT_PUBLICAI_URL;
-    if (!url.EndsWith("/")) url.Append("/", 1);
-    url.Append("v1/chat/completions");
+    config->FindString("base_url", &baseUrlRaw);
+
+    BString url;
+    if (baseUrlRaw && baseUrlRaw[0] != '\0') {
+        url = baseUrlRaw;
+        if (url.EndsWith("/")) url.Remove(url.Length() - 1, 1);
+        if (url.FindFirst("/v1/chat/completions") == B_ERROR) {
+            url << "/v1/chat/completions";
+        }
+    } else {
+        url = DEFAULT_PUBLICAI_URL;
+        if (url.EndsWith("/")) url.Remove(url.Length() - 1, 1);
+        if (url.FindFirst("/v1/chat/completions") == B_ERROR) {
+            url << "/v1/chat/completions";
+        }
+    }
     fprintf(stderr, "[PUBLICAI PLUGIN] Target URL: %s\n", url.String());
     
     BString payload;
@@ -545,12 +558,16 @@ extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
     
     BMallocIO* out = new BMallocIO();
     SyncListener listener;
-    BUrl bUrl(url.String(), false);
+    BUrl bUrl(url.String(), true);
     
-    BUrlRequest* req = BUrlProtocolRoster::MakeRequest(bUrl, out, &listener, NULL);
+    // Istanziamo il BUrlContext locale
+    BUrlContext context;
+    
+    BUrlRequest* req = BUrlProtocolRoster::MakeRequest(bUrl, out, &listener, &context);
     if (!req) { 
         fprintf(stderr, "[PUBLICAI PLUGIN] ERRORE: creazione BUrlRequest fallita.\n");
         delete out; 
+        snprintf(response_buf, response_len, "{\"error\":\"request creation failed\"}");
         return B_ERROR; 
     }
 
@@ -597,8 +614,12 @@ extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
     if (!buf || len == 0 || statusCode != 200) {
         if (buf && len > 0) {
             fprintf(stderr, "[PUBLICAI PLUGIN] Dettaglio errore server:\n%.*s\n", (int)len, (const char*)buf);
+            size_t copy_len = len < response_len - 1 ? len : response_len - 1;
+            memcpy(response_buf, buf, copy_len);
+            response_buf[copy_len] = '\0';
+        } else {
+            snprintf(response_buf, response_len, "{\"error\":\"http error %d or empty response\"}", (int)statusCode);
         }
-        snprintf(response_buf, response_len, "{\"error\":\"http error or empty response\"}"); 
         delete req; delete out; 
         return B_ERROR; 
     }
@@ -612,9 +633,10 @@ extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
         const char* extractedText = nullptr;
 
         if (parsedJson.FindMessage("choices", &choices) == B_OK
-            && choices.FindMessage("0", &choiceZero) == B_OK
+            && (choices.FindMessage("0", &choiceZero) == B_OK 
+                || choices.FindMessage("msg", 0, &choiceZero) == B_OK)
             && choiceZero.FindMessage("message", &message) == B_OK
-            && message.FindString("content", &extractedText) == B_OK) {
+            && message.FindString("content", &extractedText) == B_OK && extractedText != nullptr) {
             
             size_t textLen = strlen(extractedText);
             size_t copy_len = textLen < response_len - 1 ? textLen : response_len - 1;
@@ -634,7 +656,7 @@ extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
 
     delete req; delete out;
     fprintf(stderr, "[PUBLICAI PLUGIN] === FINE generate_text_sync ===\n\n");
-    return rc == B_OK ? 0 : -1;
+    return (rc == B_OK && statusCode == 200) ? B_OK : B_ERROR;
 }
 
 // ============================================================================
