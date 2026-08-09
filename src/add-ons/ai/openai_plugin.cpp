@@ -32,16 +32,6 @@ struct OpenAIHandle : public AIPluginHandle {
     virtual ~OpenAIHandle() = default;
 };
 
-static void free_async_args(AsyncArgs* args) {
-    if (!args) return;
-    free((void*)args->api_key);
-    free((void*)args->model);
-    free((void*)args->notify_path);
-    free((void*)args->base_url);
-    delete args->context_copy;
-    delete args;
-}
-
 static bool json_extract_quoted_string(const BString& json, int32 start, BString& out)
 {
     out.SetTo("");
@@ -407,7 +397,7 @@ static bool openai_get_latest_message(const char* apiKey, const char* baseUrl,
     copy_to_buffer(value.String(), outBuf, outLen);
     return true;
 }
-
+/*
 class StreamTarget : public BDataIO {
 public:
     StreamTarget(const char* notifyPath) {
@@ -419,6 +409,8 @@ public:
 
         BString rawData((const char*)buffer, size);
         int32 currentPos = 0;
+        
+        fprintf(stderr, "[STREAM TARGET RAW DATA]\n%s\n-------------------\n", rawData.String());
 
         while (true) {
             int32 matchPos = rawData.FindFirst("data: ", currentPos);
@@ -451,6 +443,74 @@ public:
 
 private:
     BFile fFile;
+};*/
+class StreamTarget : public BDataIO {
+public:
+    StreamTarget(const char* notifyPath) {
+        fFile.SetTo(notifyPath, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
+    }
+
+    virtual ssize_t Write(const void* buffer, size_t size) override {
+        if (fFile.InitCheck() != B_OK || size == 0) return size;
+
+        // Accumula i dati ricevuti nel buffer di classe per gestire chunk TCP spezzati
+        fBuffer.Append((const char*)buffer, size);
+
+        int32 lineStart = 0;
+        int32 lineEnd = 0;
+
+        while ((lineEnd = fBuffer.FindFirst("\n", lineStart)) != B_ERROR) {
+            BString line;
+            fBuffer.CopyInto(line, lineStart, lineEnd - lineStart);
+            lineStart = lineEnd + 1;
+
+            line.Trim();
+            if (line.IsEmpty() || !line.StartsWith("data:"))
+                continue;
+
+            // Rimuove "data:" ed eventuali spazi iniziali (gestisce sia "data: " che "data:")
+            line.Remove(0, 5);
+            line.Trim();
+
+            if (line == "[DONE]")
+                break;
+
+            // Parsing formale del JSON nativo di Haiku
+            BMessage parsedJson;
+            if (BJson::Parse(line.String(), parsedJson) == B_OK) {
+                BMessage choices, choiceZero, delta;
+                const char* contentText = nullptr;
+
+                if (parsedJson.FindMessage("choices", &choices) == B_OK) {
+                    // Gestisce sia l'indice "0" che "msg" nell'array choices
+                    if (choices.FindMessage("0", &choiceZero) == B_OK || 
+                        choices.FindMessage("msg", 0, &choiceZero) == B_OK) {
+                        
+                        if (choiceZero.FindMessage("delta", &delta) == B_OK) {
+                            delta.FindString("content", &contentText);
+                        }
+                    }
+                }
+
+                // Se abbiamo estratto del testo valido, lo scriviamo sul file
+                if (contentText != nullptr && contentText[0] != '\0') {
+                    fFile.Write(contentText, strlen(contentText));
+                    fFile.Flush(); // Assicura che la GUI veda subito i token
+                }
+            }
+        }
+
+        // Rimuove dal buffer le righe elaborate
+        if (lineStart > 0) {
+            fBuffer.Remove(0, lineStart);
+        }
+
+        return size;
+    }
+
+private:
+    BFile fFile;
+    BString fBuffer;
 };
 
 // --- Serializzazione JSON e gestione BMessage ---
@@ -463,10 +523,20 @@ static BString EscapeStringForJson(const char* input) {
         switch (*p) {
             case '\\': escaped << "\\\\"; break;
             case '"':  escaped << "\\\""; break;
+            case '\b': escaped << "\\b";  break;
+            case '\f': escaped << "\\f";  break;
             case '\n': escaped << "\\n"; break;
             case '\r': escaped << "\\r"; break;
             case '\t': escaped << "\\t"; break;
-            default:   escaped << *p; break;
+            default: //   escaped << *p; break;
+                if ((unsigned char)*p < 0x20) {
+                    char buf[7];
+                    snprintf(buf, sizeof(buf), "\\u%04x", (unsigned char)*p);
+                    escaped << buf;
+                } else {
+                    escaped << *p;
+                }
+                break;
         }
         p++;
     }
@@ -651,6 +721,8 @@ static char* dupstr_or_null(const char* s) {
     if (p) memcpy(p, s, n);
     return p;
 }
+
+/* funziona con openai
 // Construction helper per Chat Completions Payload
 static void BuildOpenAIPayload(const BMessage* chatContext, const char* explicitPrompt, BString& outPayload, bool stream = false)
 {
@@ -767,6 +839,128 @@ static void BuildOpenAIPayload(const BMessage* chatContext, const char* explicit
     }
 
     outPayload.Append("\n  ]\n}");
+}*/
+
+static void BuildOpenAIPayload(const BMessage* chatContext, 
+                               const char* explicitPrompt, 
+                               BString& outPayload, 
+                               bool stream = false,
+                               const BString* openAiToolsJson = nullptr)
+{
+    const char* model = nullptr;
+    if (chatContext) chatContext->FindString("model_name", &model);
+    if (!model || model[0] == '\0') model = "gpt-4o-mini";
+
+    outPayload.SetTo("{\n");
+    BString modelLine;
+    modelLine.SetToFormat("  \"model\": \"%s\",\n", model);
+    outPayload << modelLine;
+
+    if (stream) {
+        outPayload.Append("  \"stream\": true,\n");
+    }
+
+    outPayload.Append("  \"messages\": [\n");
+
+    bool first = true;
+    const char* systemPrompt = nullptr;
+    if (chatContext) {
+        chatContext->FindString("system_prompt", &systemPrompt);
+    }
+    if (systemPrompt && systemPrompt[0] != '\0') {
+        BString escapedSystem = EscapeStringForJson(systemPrompt);
+        outPayload << "    {\"role\": \"system\", \"content\": \"" << escapedSystem << "\"}";
+        first = false;
+    }
+
+    BMessage historyMsg;
+    if (chatContext && chatContext->FindMessage("messages", &historyMsg) == B_OK) {
+        int32 i = 0;
+        BMessage msgTurn;
+        while (historyMsg.FindMessage("msg", i++, &msgTurn) == B_OK) {
+            const char* type = nullptr;
+            msgTurn.FindString("type", &type);
+
+            if (type && strcmp(type, "functionCall") == 0) {
+                const char* name = msgTurn.FindString("name");
+                const char* toolCallId = msgTurn.FindString("tool_call_id");
+                if (!toolCallId || toolCallId[0] == '\0') toolCallId = "call_dummy";
+
+                BString cleanArgs;
+                BMessage argsMsg;
+                if (msgTurn.FindMessage("args", &argsMsg) == B_OK) {
+                    SerializeBMessageToJson(&argsMsg, cleanArgs);
+                } else {
+                    const char* argsStr = msgTurn.FindString("args");
+                    cleanArgs = (argsStr && argsStr[0] != '\0' ? argsStr : "{}");
+                }
+
+                if (!first) outPayload.Append(",\n");
+                outPayload << "    {\n"
+                           << "      \"role\": \"assistant\",\n"
+                           << "      \"tool_calls\": [\n"
+                           << "        {\n"
+                           << "          \"id\": \"" << toolCallId << "\",\n"
+                           << "          \"type\": \"function\",\n"
+                           << "          \"function\": {\n"
+                           << "            \"name\": \"" << name << "\",\n"
+                           << "            \"arguments\": \"" << EscapeStringForJson(cleanArgs.String()) << "\"\n"
+                           << "          }\n"
+                           << "        }\n"
+                           << "      ]\n"
+                           << "    }";
+                first = false;
+            }
+            else if (type && strcmp(type, "functionResponse") == 0) {
+                const char* response = msgTurn.FindString("response");
+                const char* toolCallId = msgTurn.FindString("tool_call_id");
+                if (!toolCallId || toolCallId[0] == '\0') toolCallId = "call_dummy";
+
+                // Pulisci il testo della risposta eliminando spazi ai bordi
+                BString respStr(response ? response : "");
+                respStr.Trim();
+
+                if (!first) outPayload.Append(",\n");
+                outPayload << "    {\n"
+                           << "      \"role\": \"tool\",\n"
+                           << "      \"tool_call_id\": \"" << toolCallId << "\",\n"
+                           << "      \"content\": \"" << EscapeStringForJson(respStr.String()) << "\"\n"
+                           << "    }";
+                first = false;
+            }
+            else {
+                const char* role = nullptr;
+                const char* content = nullptr;
+                msgTurn.FindString("role", &role);
+                if (msgTurn.FindString("content", &content) != B_OK) {
+                    msgTurn.FindString("text", &content);
+                }
+
+                if (role && content) {
+                    if (!first) outPayload.Append(",\n");
+                    BString escapedContent = EscapeStringForJson(content);
+                    outPayload << "    {\"role\": \"" << role << "\", \"content\": \"" << escapedContent << "\"}";
+                    first = false;
+                }
+            }
+        }
+    }
+
+    if (explicitPrompt && explicitPrompt[0] != '\0') {
+        if (!first) outPayload.Append(",\n");
+        BString escapedPrompt = EscapeStringForJson(explicitPrompt);
+        outPayload << "    {\"role\": \"user\", \"content\": \"" << escapedPrompt << "\"}";
+    }
+
+    outPayload.Append("\n  ]");
+
+    // Iniezione diretta del blocco tools (se presente e non vuoto)
+    if (openAiToolsJson && openAiToolsJson->Length() > 0) {
+        outPayload.Append(",\n  \"tools\": ");
+        outPayload.Append(*openAiToolsJson);
+    }
+
+    outPayload.Append("\n}");
 }
 
 // --- INTERFACCIA C PUBBLICA PER HAIKU AI KIT ---
@@ -906,7 +1100,7 @@ ai_plugin_generate_text_sync(ai_plugin_t handle,
     if (baseUrlRaw && baseUrlRaw[0] != '\0') {
         url = baseUrlRaw;
         if (url.EndsWith("/")) url.Remove(url.Length() - 1, 1);
-        if (!url.EndsWith("/chat/completions")) url << "/chat/completions";
+        if (!url.EndsWith("/v1/chat/completions")) url << "/v1/chat/completions";
     } else {
         url = "https://api.openai.com/v1/chat/completions";
     }
@@ -1005,6 +1199,7 @@ ai_plugin_generate_text_sync(ai_plugin_t handle,
 
     return rc == B_OK ? B_OK : B_ERROR;
 }
+/*
 static status_t
 openai_stream_thread_func(void* data)
 {
@@ -1034,7 +1229,7 @@ openai_stream_thread_func(void* data)
         goto thread_cleanup;
     }
     
-    // ESTRAZIONE GERARCHICA BASE URL (context_copy > args > default) ===
+    // ESTRAZIONE GERARCHICA BASE URL (args > context_copy > default) ===
     if (args->base_url && args->base_url[0] != '\0') {
         baseUrl = args->base_url;
     } else if (args->context_copy && args->context_copy->FindString("base_url", &tempUrl) == B_OK 
@@ -1391,6 +1586,429 @@ thread_cleanup:
     fprintf(stderr, "[OPENAI STREAM WORKER] Pulizia e chiusura thread worker.\n");
     delete args; 
     return B_OK;
+}*/
+static status_t
+openai_stream_thread_func(void* data)
+{
+    BString baseUrl;
+    BString targetUrl;
+    BString tempUrl;
+    
+    fprintf(stderr, "[OPENAI STREAM WORKER] Thread avviato.\n");
+    AsyncArgs* args = (AsyncArgs*)data;
+    if (!args) return B_BAD_VALUE;
+
+    BMessage replyTools;
+    bool mcpActive = false;
+    bool executionLoop = true;
+
+    // Controllo di sicurezza sulla chiave API
+    /*if (!args->api_key || args->api_key[0] == '\0') {
+        fprintf(stderr, "[OPENAI STREAM WORKER] ERRORE CRITICO: API key assente!\n");
+        if (args->notify_path) {
+            BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE);
+            if (streamFile.InitCheck() == B_OK) {
+                BString endMarker = "<<STREAM_END>>";
+                streamFile.Write(endMarker.String(), endMarker.Length());
+            }
+        }
+        goto thread_cleanup;
+    }*/
+    
+    // ESTRAZIONE GERARCHICA BASE URL (args > context_copy > default)
+    if (args->base_url && args->base_url[0] != '\0') {
+        baseUrl = args->base_url;
+    } else if (args->context_copy && args->context_copy->FindString("base_url", &tempUrl) == B_OK 
+               && !tempUrl.IsEmpty()) {
+        baseUrl = tempUrl;
+    } else {
+        baseUrl = DEFAULT_OPENAI_BASE_URL;
+    }
+    
+    // Costruzione dell'endpoint /chat/completions corretto
+    if (baseUrl.Length() > 0) {
+        targetUrl = baseUrl;
+        if (targetUrl.EndsWith("/")) 
+            targetUrl.Remove(targetUrl.Length() - 1, 1);
+        if (!targetUrl.EndsWith("/v1/chat/completions")) 
+            targetUrl << "/v1/chat/completions";
+    } else {
+        targetUrl = "https://api.openai.com/v1/chat/completions";
+    }
+
+    fprintf(stderr, "[OPENAI STREAM WORKER] Target URL finale: '%s'\n", targetUrl.String());
+
+    // === CONTROLLO CAPABILITY VIA MESSENGER ===
+    if (args->server_messenger.IsValid()) {
+        BMessage reqTools(MSG_MCP_GET_TOOLS); 
+        const char* ctxId = nullptr;
+        if (args->context_copy) {
+            args->context_copy->FindString("context_id", &ctxId);
+        }
+        if (ctxId) {
+            reqTools.AddString("context_id", ctxId);
+        }
+        
+        if (args->server_messenger.SendMessage(&reqTools, &replyTools) == B_OK) {
+            if (replyTools.HasMessage("tool", 0)) {
+                mcpActive = true;
+                fprintf(stderr, "[OPENAI STREAM WORKER] Strumenti MCP rilevati e attivi.\n");
+            } else {
+                fprintf(stderr, "[OPENAI STREAM WORKER] Nessun tool MCP registrato. Uso modalità standard streaming.\n");
+            }
+        } else {
+            fprintf(stderr, "[OPENAI STREAM WORKER] Avviso: Fallita comunicazione IPC per recupero tool MCP.\n");
+        }
+    }
+
+    // === CASO 1: MODALITÀ STANDARD (STREAMING NATIVO RETROCOMPATIBILE) ===
+    if (!mcpActive) {
+        goto fallback_to_standard;
+    }
+
+    // === CASO 2: MODALITÀ MCP ATTIVA (LOOP STRUMENTI VIA IPC MESSENGER) ===
+    fprintf(stderr, "[OPENAI STREAM WORKER] Modalità MCP Attiva: Avvio loop di interazione strumenti.\n");
+    
+    executionLoop = true;
+    while (executionLoop) {
+        if (args->server_messenger.IsValid()) {
+            BMessage checkAbortMsg('CHAB'); // MSG_CHECK_ABORT
+            const char* ctxId = nullptr;
+            if (args->context_copy) {
+                args->context_copy->FindString("context_id", &ctxId);
+            }
+            if (ctxId) {
+                checkAbortMsg.AddString("context_id", ctxId);
+            }
+            
+            BMessage abortReply;
+            if (args->server_messenger.SendMessage(&checkAbortMsg, &abortReply) == B_OK) {
+                int32 status = B_OK;
+                if (abortReply.FindInt32("status", &status) == B_OK && status == B_CANCELED) {
+                    fprintf(stderr, "[OPENAI STREAM WORKER] Rilevata interruzione asincrona dall'utente. Esco.\n");
+                    executionLoop = false;
+                    break;
+                }
+            }
+        }
+/* funziona con openai
+        BString payload;
+        BuildOpenAIPayload(args->context_copy, nullptr, payload, false);
+
+        if (mcpActive) {
+            BString openAiToolsJson;
+            ConvertBMessageToOpenAIToolsJson(&replyTools, openAiToolsJson);
+
+            if (openAiToolsJson.Length() > 0) {
+                int32 lastCloseBrace = payload.FindLast("}");
+                if (lastCloseBrace != B_ERROR) {
+                    payload.Truncate(lastCloseBrace);
+                    payload << ",\"tools\":" << openAiToolsJson << "}";
+                }
+            }
+        }*/
+        BString payload;
+        BString openAiToolsJson;
+
+        if (mcpActive) {
+            ConvertBMessageToOpenAIToolsJson(&replyTools, openAiToolsJson);
+        }
+
+        // Genera l'intero JSON correttamente strutturato in un solo passaggio
+        BuildOpenAIPayload(args->context_copy, nullptr, payload, false, 
+                   (mcpActive && openAiToolsJson.Length() > 0) ? &openAiToolsJson : nullptr);
+
+        // LOG PAYLOAD MCP
+        fprintf(stderr, "[OPENAI MCP DEBUG] Payload inviato:\n%s\n", payload.String());
+
+        BMallocIO outNetworkData;
+        SyncListener syncListener;
+        BUrl bUrl(targetUrl.String(), true);
+        BUrlRequest* req = BUrlProtocolRoster::MakeRequest(bUrl, &outNetworkData, &syncListener, NULL);
+        if (!req) { 
+            fprintf(stderr, "[OPENAI MCP ERRORE] Impossibile creare BUrlRequest.\n");
+            executionLoop = false; 
+            break; 
+        }
+
+        BHttpRequest* http = dynamic_cast<BHttpRequest*>(req);
+        if (http) {
+            http->SetMethod(B_HTTP_POST);
+            BHttpHeaders headers;
+            headers.AddHeader("Content-Type", "application/json");
+            BString authHeader;
+            authHeader << "Bearer " << args->api_key;
+            headers.AddHeader("Authorization", authHeader.String());
+            http->SetHeaders(headers);
+            
+            BMallocIO* input = new BMallocIO();
+            input->WriteExactly(payload.String(), payload.Length());
+            http->AdoptInputData(input, payload.Length());
+        }
+
+        thread_id netThread = req->Run();
+        if (netThread >= 0) { 
+            status_t rc; 
+            wait_for_thread(netThread, &rc); 
+        }
+
+        if (http) {
+            const BHttpResult* result = dynamic_cast<const BHttpResult*>(&http->Result());
+            if (result != nullptr) {
+                fprintf(stderr, "[OPENAI MCP DEBUG] HTTP Status Code: %d\n", result->StatusCode());
+            }
+        }
+
+        delete req;
+
+        BString rawResponse((const char*)outNetworkData.Buffer(), outNetworkData.BufferLength());
+        fprintf(stderr, "[OPENAI MCP DEBUG] Risposta grezza dal server:\n%s\n", rawResponse.String());
+
+        BMessage parsedJson;
+        if (BJson::Parse(rawResponse.String(), parsedJson) != B_OK) {
+            fprintf(stderr, "[OPENAI STREAM WORKER] Fallito il parsing JSON della risposta di rete.\n");
+            executionLoop = false;
+            break;
+        }
+        
+        BMessage errorObj;
+        if (parsedJson.FindMessage("error", &errorObj) == B_OK) {
+            const char* errMsg = nullptr;
+            errorObj.FindString("message", &errMsg);
+            
+            if (errMsg && (BString(errMsg).FindFirst("tool choice") != B_ERROR || 
+                           BString(errMsg).FindFirst("tools") != B_ERROR)) {
+                
+                fprintf(stderr, "[OPENAI WORKER] Il server remoto rifiuta l'MCP. Errore: %s\n", errMsg);
+                fprintf(stderr, "[OPENAI WORKER] Disattivazione MCP forzata e passaggio alla Modalità Standard.\n");
+                
+                mcpActive = false; 
+                executionLoop = false;
+                goto fallback_to_standard;
+            }
+        }
+
+        BMessage choices, choiceZero, message, toolCalls, toolCallZero, functionObj;
+        const char* toolName = nullptr;
+        const char* toolCallId = nullptr;
+        const char* argumentsStr = nullptr;
+        const char* textContent = nullptr;
+
+        bool hasChoices = (parsedJson.FindMessage("choices", &choices) == B_OK) 
+            && (choices.FindMessage("msg", 0, &choiceZero) == B_OK || choices.FindMessage("0", &choiceZero) == B_OK)
+            && (choiceZero.FindMessage("message", &message) == B_OK);
+
+        if (hasChoices) {
+            bool hasToolCall = (message.FindMessage("tool_calls", &toolCalls) == B_OK)
+                && (toolCalls.FindMessage("msg", 0, &toolCallZero) == B_OK || toolCalls.FindMessage("0", &toolCallZero) == B_OK)
+                && (toolCallZero.FindMessage("function", &functionObj) == B_OK)
+                && (functionObj.FindString("name", &toolName) == B_OK);
+
+            if (hasToolCall) {
+                toolCallZero.FindString("id", &toolCallId);
+                functionObj.FindString("arguments", &argumentsStr);
+
+                BMessage argsMsg;
+                BString argsJson;
+                if (argumentsStr && BJson::Parse(argumentsStr, argsMsg) == B_OK) {
+                    SerializeBMessageToJson(&argsMsg, argsJson);
+                } else {
+                    argsJson = "{}";
+                }
+
+                fprintf(stderr, "[OPENAI MCP] L'LLM richiede lo strumento: %s con argomenti: %s\n", toolName, argsJson.String());
+
+                BMessage reqExec(MSG_EXECUTE_TOOL);
+                reqExec.AddString("name", toolName);
+                reqExec.AddMessage("arguments", &argsMsg);
+                
+                const char* ctxId = nullptr;
+                if (args->context_copy) {
+                    args->context_copy->FindString("context_id", &ctxId);
+                }
+                if (ctxId) {
+                    reqExec.AddString("context_id", ctxId);
+                }
+                
+                BMessage replyExec;
+                BString toolResultBuf;
+                
+                if (args->server_messenger.SendMessage(&reqExec, &replyExec) == B_OK) {
+                    const char* resStr = replyExec.FindString("result");
+                    if (resStr && strlen(resStr) > 0) {
+                        BString testStr(resStr);
+                        testStr.Trim();
+                        if (testStr.StartsWith("{") || testStr.StartsWith("[")) {
+                            toolResultBuf = resStr;
+                        } else {
+                            //BString escapedRes = EscapeStringForJson(resStr);
+                            //toolResultBuf.SetToFormat("{\"output\":\"%s\"}", escapedRes.String());
+                            toolResultBuf = "Operazione completata con successo.";
+                        }
+                    } else {
+                        toolResultBuf = "{\"error\":\"Il comando sul server ha restituito una risposta vuota.\"}";
+                    }
+                } else {
+                    toolResultBuf = "{\"error\":\"Esecuzione dello strumento fallita via IPC BMessenger\"}";
+                }
+
+                AppendToolCallToContext(args->context_copy, toolName, &argsMsg, toolCallId);
+                AppendToolResponseToContext(args->context_copy, toolName, toolResultBuf.String(), toolCallId);
+            } 
+            else if (message.FindString("content", &textContent) == B_OK && textContent != nullptr) {
+                fprintf(stderr, "[OPENAI MCP] Risposta testuale finale ricevuta.\n");
+                BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
+                if (streamFile.InitCheck() == B_OK) {
+                    streamFile.Write(textContent, strlen(textContent));
+                } else {
+                    fprintf(stderr, "[OPENAI MCP] ERRORE: Impossibile aprire il file di notifica (%s)!\n", args->notify_path);
+                }
+                executionLoop = false;
+            }
+        } else {
+            fprintf(stderr, "[OPENAI STREAM WORKER] ERRORE: Risposta di rete non valida o priva di 'choices'.\n");
+            fprintf(stderr, "[OPENAI STREAM WORKER] Risposta grezza ricevuta:\n%s\n", rawResponse.String());
+            
+            BMessage errDetails;
+            if (parsedJson.FindMessage("error", &errDetails) == B_OK) {
+                const char* errMsg = nullptr;
+                errDetails.FindString("message", &errMsg);
+                if (errMsg) {
+                    fprintf(stderr, "[OPENAI STREAM WORKER] Dettaglio errore API OpenAI: %s\n", errMsg);
+                    
+                    BFile streamFile(args->notify_path, B_WRITE_ONLY | B_OPEN_AT_END);
+                    if (streamFile.InitCheck() == B_OK) {
+                        BString guiError;
+                        guiError.SetToFormat("\n[Errore API OpenAI: %s]\n", errMsg);
+                        streamFile.Write(guiError.String(), guiError.Length());
+                    }
+                }
+            }
+            executionLoop = false;
+        }
+    }
+    goto thread_post_actions;
+
+// =========================================================================
+// === CASO 1: MODALITÀ STANDARD (STREAMING NATIVO RETROCOMPATIBILE) ===
+// =========================================================================
+fallback_to_standard:
+{
+    fprintf(stderr, "[OPENAI STREAM WORKER] Modalità Standard: Avvio Streaming Diretto.\n");
+    
+    BString payload;
+    BuildOpenAIPayload(args->context_copy, nullptr, payload, true);
+
+    // LOG DIAGNOSTICO MODALITA STANDARD
+    fprintf(stderr, "[OPENAI STREAM DEBUG] Target URL: %s\n", targetUrl.String());
+    fprintf(stderr, "[OPENAI STREAM DEBUG] API Key (prime 7 lettere): %.7s...\n", args->api_key ? args->api_key : "NULL");
+    fprintf(stderr, "[OPENAI STREAM DEBUG] Payload inviato in streaming:\n%s\n", payload.String());
+
+    {
+        StreamTarget streamTarget(args->notify_path);
+        CompletionListener listener(args->notify_path);
+        BUrl bUrl(targetUrl.String(), true);
+        BUrlRequest* req = BUrlProtocolRoster::MakeRequest(bUrl, &streamTarget, &listener, NULL);
+        if (req) {
+            BHttpRequest* http = dynamic_cast<BHttpRequest*>(req);
+            if (http) {
+                http->SetMethod(B_HTTP_POST);
+                BHttpHeaders headers;
+                headers.AddHeader("Content-Type", "application/json");
+                BString authHeader;
+                authHeader << "Bearer " << args->api_key;
+                headers.AddHeader("Authorization", authHeader.String());
+                http->SetHeaders(headers);
+
+                BMemoryIO* input = new BMemoryIO(payload.String(), payload.Length());
+                http->AdoptInputData(input, payload.Length());
+            }
+            thread_id thread = req->Run();
+            if (thread >= 0) { 
+                status_t rc; 
+                wait_for_thread(thread, &rc); 
+                fprintf(stderr, "[OPENAI STREAM DEBUG] Thread di rete completato con rc: %" B_PRId32 "\n", rc);
+            } else {
+                fprintf(stderr, "[OPENAI STREAM ERRORE] Impossibile avviare il thread di rete!\n");
+            }
+
+            if (http) {
+                const BHttpResult* result = dynamic_cast<const BHttpResult*>(&http->Result());
+                if (result != nullptr) {
+                    fprintf(stderr, "[OPENAI STREAM DEBUG] HTTP Status Code finale: %d\n", result->StatusCode());
+                }
+            }
+
+            delete req;
+        } else {
+            fprintf(stderr, "[OPENAI STREAM ERRORE] MakeRequest ha restituito NULL.\n");
+        }
+    }
+}
+
+// =========================================================================
+// === AZIONI POST-RISPOSTA (CONVERGENZA PER ENTRAMBI I FLUSSI) ===
+// =========================================================================
+thread_post_actions:
+    if (args->context_copy != nullptr && !args->context_copy->HasString("title")) {
+        BMessage messagesMsg;
+        const char* firstPromptText = nullptr;
+
+        if (args->context_copy->FindMessage("messages", &messagesMsg) == B_OK) {
+            int32 msgCount = 0;
+            BMessage msgItem;
+            
+            while (messagesMsg.FindMessage("msg", msgCount, &msgItem) == B_OK || 
+                   messagesMsg.FindMessage(BString().SetToFormat("%d", msgCount).String(), &msgItem) == B_OK) {
+                
+                const char* role = msgItem.FindString("role");
+                const char* content = msgItem.FindString("content");
+                if (!content) msgItem.FindString("text", &content);
+                
+                if (role && strcmp(role, "user") == 0 && content && content[0] != '\0') {
+                    firstPromptText = content;
+                    break;
+                }
+                msgCount++;
+            }
+        }
+
+        if (firstPromptText && firstPromptText[0] != '\0') {
+            BString autoTitle(firstPromptText);
+            autoTitle.Trim();
+            if (autoTitle.Length() > 30) {
+                autoTitle.Truncate(30);
+                autoTitle << "...";
+            }
+            
+            args->context_copy->RemoveName("title");
+            args->context_copy->AddString("title", autoTitle.String());
+            
+            if (args->server_messenger.IsValid()) {
+                BMessage titleUpdateMsg('UTIT');
+                titleUpdateMsg.AddString("title", autoTitle.String());
+                args->server_messenger.SendMessage(&titleUpdateMsg);
+            }
+            fprintf(stderr, "[OPENAI ASYNC] Auto-titolo generato: '%s'\n", autoTitle.String());
+        }
+    }
+
+    // Scriviamo il terminatore sul file per svegliare il server
+    {
+        BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
+        if (streamFile.InitCheck() == B_OK) {
+            BString endMarker = "<<STREAM_END>>";
+            streamFile.Write(endMarker.String(), endMarker.Length());
+            fprintf(stderr, "[OPENAI STREAM WORKER] Scritto <<STREAM_END>> sul file di notifica.\n");
+        } else {
+            fprintf(stderr, "[OPENAI STREAM WORKER] ERRORE: Impossibile scrivere <<STREAM_END>> su notify_path!\n");
+        }
+    }
+
+thread_cleanup:
+    fprintf(stderr, "[OPENAI STREAM WORKER] Pulizia e chiusura thread worker.\n");
+    delete args; 
+    return B_OK;
 }
 extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle, const char* prompt, BMessage* config)
 {
@@ -1428,7 +2046,7 @@ extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle, const char
 
     args->context_copy = new (std::nothrow) BMessage(*config);
     if (!args->context_copy) {
-        free_async_args(args);
+        delete args;
         return B_NO_MEMORY;
     }
 
@@ -1452,7 +2070,7 @@ extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle, const char
     );
 
     if (thread < B_OK) {
-        free_async_args(args);
+        delete args;
         return B_ERROR;
     }
 
@@ -1480,12 +2098,12 @@ extern "C" status_t ai_plugin_list_models(const BMessage* config, char* out_buf,
     if (config->FindString("base_url", &baseUrl) != B_OK || baseUrl.IsEmpty()) {
         baseUrl = DEFAULT_OPENAI_BASE_URL;
     }
-
+/*
     if (!apiKey || apiKey[0] == '\0') {
         if (strlen(defaultFallback) + 1 > out_len) return B_ERROR;
         strcpy(out_buf, defaultFallback);
         return B_OK;
-    }
+    }*/
 
     // Costruzione dinamica dell'endpoint per i modelli
     BString url = baseUrl;
