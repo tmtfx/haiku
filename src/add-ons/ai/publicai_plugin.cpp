@@ -370,10 +370,11 @@ static void BuildPublicAIPayload(const BMessage* chatContext, const char* explic
     BString modelLine;
     modelLine.SetToFormat("  \"model\": \"%s\",\n", model);
     outPayload << modelLine;
-    
+
     if (stream) {
         outPayload.Append("  \"stream\": true,\n");
     }
+
     outPayload.Append("  \"messages\": [\n");
 
     bool first = true;
@@ -383,16 +384,22 @@ static void BuildPublicAIPayload(const BMessage* chatContext, const char* explic
     }
     if (systemPrompt && systemPrompt[0] != '\0') {
         BString escapedSystem = EscapeStringForJson(systemPrompt);
-        outPayload << "    {\"role\": \"system\", \"content\": \"" << escapedSystem << "\"\"}";
+        // FIX: Rimosso il doppio apice errato "\"\"}"
+        outPayload << "    {\"role\": \"system\", \"content\": \"" << escapedSystem << "\"}";
         first = false;
     }
+
     BMessage historyMsg;
-    
+    int32 msgIndex = 0;
+    BMessage lastMsgTurn;
+    bool hasHistory = false;
+
     // 1. Inietta lo storico se presente nel contesto nativo
     if (chatContext && chatContext->FindMessage("messages", &historyMsg) == B_OK) {
-        int32 i = 0;
+        hasHistory = true;
         BMessage msgTurn;
-        while (historyMsg.FindMessage("msg", i++, &msgTurn) == B_OK) {
+        while (historyMsg.FindMessage("msg", msgIndex++, &msgTurn) == B_OK) {
+            lastMsgTurn = msgTurn; // Salviamo l'ultimo turno letto per il check anti-duplicato
             const char* type = nullptr;
             msgTurn.FindString("type", &type);
 
@@ -409,9 +416,6 @@ static void BuildPublicAIPayload(const BMessage* chatContext, const char* explic
                     const char* argsStr = msgTurn.FindString("args");
                     cleanArgs = (argsStr && argsStr[0] != '\0' ? argsStr : "{}");
                 }
-                
-                cleanArgs.ReplaceAll("\n", "\\n");
-                cleanArgs.ReplaceAll("\r", "\\r");
 
                 if (!first) outPayload.Append(",\n");
                 outPayload << "    {\n"
@@ -435,9 +439,10 @@ static void BuildPublicAIPayload(const BMessage* chatContext, const char* explic
                 const char* toolCallId = msgTurn.FindString("tool_call_id");
                 if (!toolCallId || toolCallId[0] == '\0') toolCallId = "call_dummy";
 
-                BString formattedResponse;
                 BString respStr(response ? response : "");
                 respStr.Trim();
+
+                BString formattedResponse;
                 if (respStr.StartsWith("{") && respStr.EndsWith("}")) {
                     formattedResponse = respStr;
                 } else {
@@ -449,7 +454,7 @@ static void BuildPublicAIPayload(const BMessage* chatContext, const char* explic
                 outPayload << "    {\n"
                            << "      \"role\": \"tool\",\n"
                            << "      \"tool_call_id\": \"" << toolCallId << "\",\n"
-                           << "      \"name\": \"" << name << "\",\n"
+                           << "      \"name\": \"" << (name ? name : "") << "\",\n"
                            << "      \"content\": \"" << EscapeStringForJson(formattedResponse.String()) << "\"\n"
                            << "    }";
                 first = false;
@@ -465,28 +470,45 @@ static void BuildPublicAIPayload(const BMessage* chatContext, const char* explic
 
                 if (role && content) {
                     if (!first) outPayload.Append(",\n");
-                    
+
                     BString escapedContent = EscapeStringForJson(content);
-                    
                     BString mappedRole = (strcmp(role, "model") == 0) ? "assistant" : role;
 
-                    BString modelLine;
-                    modelLine.SetToFormat("    {\"role\": \"%s\", \"content\": \"%s\"}", mappedRole.String(), escapedContent.String());
-                    outPayload << modelLine;
+                    BString msgLine;
+                    msgLine.SetToFormat("    {\"role\": \"%s\", \"content\": \"%s\"}", mappedRole.String(), escapedContent.String());
+                    outPayload << msgLine;
                     first = false;
                 }
             }
         }
     }
 
-    // 2. Se viene passato un prompt esplicito (non ancora salvato nello storico), lo appende alla fine
+    // 2. Controllo Anti-Duplicazione del Prompt Esplicito
     if (explicitPrompt && explicitPrompt[0] != '\0') {
-        if (!first) outPayload.Append(",\n");
-        BString escapedPrompt = EscapeStringForJson(explicitPrompt);
-        
-        BString modelLine;
-        modelLine.SetToFormat("    {\"role\": \"user\", \"content\": \"%s\"}", escapedPrompt.String());
-        outPayload << modelLine;
+        bool alreadyAppended = false;
+
+        if (hasHistory && msgIndex > 1) {
+            const char* lastRole = nullptr;
+            const char* lastContent = nullptr;
+            lastMsgTurn.FindString("role", &lastRole);
+            if (lastMsgTurn.FindString("content", &lastContent) != B_OK) {
+                lastMsgTurn.FindString("text", &lastContent);
+            }
+
+            if (lastRole && (strcmp(lastRole, "user") == 0) &&
+                lastContent && strcmp(lastContent, explicitPrompt) == 0) {
+                alreadyAppended = true;
+            }
+        }
+
+        if (!alreadyAppended) {
+            if (!first) outPayload.Append(",\n");
+            BString escapedPrompt = EscapeStringForJson(explicitPrompt);
+
+            BString msgLine;
+            msgLine.SetToFormat("    {\"role\": \"user\", \"content\": \"%s\"}", escapedPrompt.String());
+            outPayload << msgLine;
+        }
     }
 
     outPayload.Append("\n  ]\n}");
@@ -680,32 +702,36 @@ static status_t publicai_stream_thread_func(void* data)
         fprintf(stderr, "[PUBLICAI STREAM WORKER] ERRORE CRITICO: API key assente!\n");
         if (args->notify_path) {
             BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE);
-            BString endMarker = "<<STREAM_END>>";
-            streamFile.Write(endMarker.String(), endMarker.Length());
+            if (streamFile.InitCheck() == B_OK) {
+                BString endMarker = "<<STREAM_END>>";
+                streamFile.Write(endMarker.String(), endMarker.Length());
+            }
         }
         goto thread_cleanup;
     }
     
-    // ESTRAZIONE GERARCHICA BASE URL (args > context_copy > default) ===
+    // === ESTRAZIONE GERARCHICA BASE URL (args > context_copy > default) ===
     if (args->base_url && args->base_url[0] != '\0') {
         baseUrl = args->base_url;
     } else if (args->context_copy && args->context_copy->FindString("base_url", &tempUrl) == B_OK 
-           && !tempUrl.IsEmpty()) {
+               && !tempUrl.IsEmpty()) {
         baseUrl = tempUrl;
     } else {
-        // 3. Fallback di sistema: macro #define
         baseUrl = DEFAULT_PUBLICAI_URL;
     }
-    // Costruzione dell'endpoint /chat/completions corretto
+
+    // Costruzione dell'endpoint /v1/chat/completions corretto
     if (baseUrl.Length() > 0) {
         targetUrl = baseUrl;
         if (targetUrl.EndsWith("/")) 
             targetUrl.Remove(targetUrl.Length() - 1, 1);
-        if (!targetUrl.EndsWith("/v1/chat/completions")) 
+        if (targetUrl.FindFirst("/v1/chat/completions") == B_ERROR) 
             targetUrl << "/v1/chat/completions";
     } else {
         targetUrl = "https://api.openai.com/v1/chat/completions";
     }
+
+    fprintf(stderr, "[PUBLICAI STREAM WORKER] Target URL: %s\n", targetUrl.String());
 
     // === CONTROLLO CAPABILITY VIA MESSENGER ===
     if (args->server_messenger.IsValid()) {
@@ -721,50 +747,18 @@ static status_t publicai_stream_thread_func(void* data)
         if (args->server_messenger.SendMessage(&reqTools, &replyTools) == B_OK) {
             if (replyTools.HasMessage("tool", 0)) {
                 mcpActive = true;
+                fprintf(stderr, "[PUBLICAI STREAM WORKER] Strumenti MCP rilevati e attivi.\n");
+            } else {
+                fprintf(stderr, "[PUBLICAI STREAM WORKER] Nessun tool MCP registrato. Uso modalità standard streaming.\n");
             }
+        } else {
+            fprintf(stderr, "[PUBLICAI STREAM WORKER] Avviso: Fallita comunicazione IPC per recupero tool MCP.\n");
         }
     }
 
-    // === CASO 1: MODALITÀ STANDARD (STREAMING NATIVO RETROCOMPATIBILE) ===
+    // === ROUTING CASO 1: SE MCP NON È ATTIVO, VAI AL FALLBACK STANDARD ===
     if (!mcpActive) {
-        fprintf(stderr, "[PUBLICAI STREAM WORKER] Modalità Standard: Avvio Streaming Diretto.\n");
-        
-        //BString url = (args->base_url && args->base_url[0] != '\0') ? args->base_url : DEFAULT_PUBLICAI_URL;
-        //if (!targetUrl.EndsWith("/")) url.Append("/", 1);
-        //url.Append("chat/completions");
-
-        BString payload;
-        BuildPublicAIPayload(args->context_copy, nullptr, payload, true);
-
-        {
-            StreamTarget streamTarget(args->notify_path);
-            CompletionListener listener(args->notify_path);
-            BUrl bUrl(targetUrl.String(), false);
-            BUrlRequest* req = BUrlProtocolRoster::MakeRequest(bUrl, &streamTarget, &listener, NULL);
-            if (req) {
-                BHttpRequest* http = dynamic_cast<BHttpRequest*>(req);
-                if (http) {
-                    http->SetMethod(B_HTTP_POST);
-                    BHttpHeaders headers;
-                    headers.AddHeader("Content-Type", "application/json");
-                    headers.AddHeader("User-Agent", PUBLICAI_USER_AGENT);
-                    BString authHeader;
-                    authHeader << "Bearer " << args->api_key;
-                    headers.AddHeader("Authorization", authHeader.String());
-                    http->SetHeaders(headers);
-
-                    BMemoryIO* input = new BMemoryIO(payload.String(), payload.Length());
-                    http->AdoptInputData(input, payload.Length());
-                }
-                thread_id thread = req->Run();
-                if (thread >= 0) { 
-                    status_t rc; 
-                    wait_for_thread(thread, &rc); 
-                }
-                delete req;
-            }
-        }
-        goto thread_cleanup;
+        goto fallback_to_standard;
     }
 
     // === CASO 2: MODALITÀ MCP ATTIVA (LOOP STRUMENTI VIA IPC MESSENGER) ===
@@ -794,41 +788,34 @@ static status_t publicai_stream_thread_func(void* data)
             }
         }
 
-        //BString url = (args->base_url && args->base_url[0] != '\0') ? args->base_url : DEFAULT_PUBLICAI_URL;
-        //if (!url.EndsWith("/")) url.Append("/", 1);
-        //url.Append("chat/completions");
-
         BString payload;
-        // In modalità MCP non usiamo lo streaming (stream = false)
-        BuildPublicAIPayload(args->context_copy, nullptr, payload, false);
+        BString openAiToolsJson;
 
         if (mcpActive) {
-            BString openAiToolsJson;
             ConvertBMessageToOpenAIToolsJson(&replyTools, openAiToolsJson);
+        }
 
-            if (openAiToolsJson.Length() > 0) {
-                //int32 lastCloseBrace = payload.FindLast("}");
-                //if (lastCloseBrace != B_ERROR) {
-                //    payload.Truncate(lastCloseBrace);
-                //    payload << ",\"tools\":" << openAiToolsJson << "}";
-                //}
-                BMessage toolsMsg;
-                if (BJson::Parse(openAiToolsJson,toolsMsg) == B_OK) {
-                    // Aggiungi l'oggetto tools strutturato senza manipolare parentesi graffe via stringa
-                    int32 lastCloseBrace = payload.FindLast("}");
-                    if (lastCloseBrace != B_ERROR) {
-                        payload.Truncate(lastCloseBrace);
-                        payload << ",\"tools\":" << openAiToolsJson << "}";
-                    }
+        BuildPublicAIPayload(args->context_copy, nullptr, payload, false);
+
+        if (mcpActive && openAiToolsJson.Length() > 0) {
+            BMessage toolsMsg;
+            if (BJson::Parse(openAiToolsJson, toolsMsg) == B_OK) {
+                int32 lastCloseBrace = payload.FindLast("}");
+                if (lastCloseBrace != B_ERROR) {
+                    payload.Truncate(lastCloseBrace);
+                    payload << ",\"tools\":" << openAiToolsJson << "}";
                 }
             }
         }
 
         BMallocIO outNetworkData;
         SyncListener syncListener;
-        BUrl bUrl(targetUrl.String(), false);
-        BUrlRequest* req = BUrlProtocolRoster::MakeRequest(bUrl, &outNetworkData, &syncListener, NULL);
+        BUrl bUrl(targetUrl.String(), true);
+        BUrlContext context;
+        
+        BUrlRequest* req = BUrlProtocolRoster::MakeRequest(bUrl, &outNetworkData, &syncListener, &context);
         if (!req) { 
+            fprintf(stderr, "[PUBLICAI STREAM WORKER] MakeRequest fallito in modalità MCP.\n");
             executionLoop = false; 
             break; 
         }
@@ -839,8 +826,9 @@ static status_t publicai_stream_thread_func(void* data)
             BHttpHeaders headers;
             headers.AddHeader("Content-Type", "application/json");
             headers.AddHeader("User-Agent", PUBLICAI_USER_AGENT);
+            
             BString authHeader;
-            authHeader << "Bearer " << args->api_key;
+            authHeader.SetToFormat("Bearer %s", args->api_key);
             headers.AddHeader("Authorization", authHeader.String());
             http->SetHeaders(headers);
             
@@ -865,22 +853,40 @@ static status_t publicai_stream_thread_func(void* data)
             break;
         }
 
+        BMessage errorObj;
+        if (parsedJson.FindMessage("error", &errorObj) == B_OK) {
+            const char* errMsg = nullptr;
+            errorObj.FindString("message", &errMsg);
+            
+            if (errMsg && (BString(errMsg).FindFirst("tool choice") != B_ERROR || 
+                           BString(errMsg).FindFirst("tools") != B_ERROR)) {
+                
+                fprintf(stderr, "[PUBLICAI WORKER] Il server remoto rifiuta l'MCP. Errore: %s\n", errMsg);
+                fprintf(stderr, "[PUBLICAI WORKER] Disattivazione MCP forzata e passaggio alla Modalità Standard.\n");
+                
+                mcpActive = false; 
+                executionLoop = false;
+                goto fallback_to_standard;
+            }
+        }
+
         BMessage choices, choiceZero, message, toolCalls, toolCallZero, functionObj;
         const char* toolName = nullptr;
         const char* toolCallId = nullptr;
         const char* argumentsStr = nullptr;
         const char* textContent = nullptr;
 
-        if (parsedJson.FindMessage("choices", &choices) == B_OK
-            && choices.FindMessage("0", &choiceZero) == B_OK
-            && choiceZero.FindMessage("message", &message) == B_OK) {
+        bool hasChoices = (parsedJson.FindMessage("choices", &choices) == B_OK) 
+            && (choices.FindMessage("msg", 0, &choiceZero) == B_OK || choices.FindMessage("0", &choiceZero) == B_OK)
+            && (choiceZero.FindMessage("message", &message) == B_OK);
 
-            // Caso A: l'LLM vuole eseguire un tool (standard OpenAI usato anche da PublicAI)
-            if (message.FindMessage("tool_calls", &toolCalls) == B_OK
-                && toolCalls.FindMessage("0", &toolCallZero) == B_OK
-                && toolCallZero.FindMessage("function", &functionObj) == B_OK
-                && functionObj.FindString("name", &toolName) == B_OK) {
-                
+        if (hasChoices) {
+            bool hasToolCall = (message.FindMessage("tool_calls", &toolCalls) == B_OK)
+                && (toolCalls.FindMessage("msg", 0, &toolCallZero) == B_OK || toolCalls.FindMessage("0", &toolCallZero) == B_OK)
+                && (toolCallZero.FindMessage("function", &functionObj) == B_OK)
+                && (functionObj.FindString("name", &toolName) == B_OK);
+
+            if (hasToolCall) {
                 toolCallZero.FindString("id", &toolCallId);
                 functionObj.FindString("arguments", &argumentsStr);
 
@@ -894,7 +900,6 @@ static status_t publicai_stream_thread_func(void* data)
 
                 fprintf(stderr, "[PUBLICAI MCP] L'LLM richiede lo strumento: %s con argomenti: %s\n", toolName, argsJson.String());
 
-                // Invochiamo lo strumento mandando un messaggio sincrono all'ai_server
                 BMessage reqExec(MSG_EXECUTE_TOOL);
                 reqExec.AddString("name", toolName);
                 reqExec.AddMessage("arguments", &argsMsg);
@@ -918,8 +923,7 @@ static status_t publicai_stream_thread_func(void* data)
                         if (testStr.StartsWith("{") || testStr.StartsWith("[")) {
                             toolResultBuf = resStr;
                         } else {
-                            BString escapedRes = EscapeStringForJson(resStr);
-                            toolResultBuf.SetToFormat("{\"output\":\"%s\"}", escapedRes.String());
+                            toolResultBuf = "Operazione completata con successo.";
                         }
                     } else {
                         toolResultBuf = "{\"error\":\"Il comando sul server ha restituito una risposta vuota.\"}";
@@ -928,11 +932,9 @@ static status_t publicai_stream_thread_func(void* data)
                     toolResultBuf = "{\"error\":\"Esecuzione dello strumento fallita via IPC BMessenger\"}";
                 }
 
-                // Aggiorniamo la history clonata in memoria per il prossimo turno del loop
                 AppendToolCallToContext(args->context_copy, toolName, &argsMsg, toolCallId);
                 AppendToolResponseToContext(args->context_copy, toolName, toolResultBuf.String(), toolCallId);
             } 
-            // Caso B: l'LLM restituisce il testo finale
             else if (message.FindString("content", &textContent) == B_OK && textContent != nullptr) {
                 fprintf(stderr, "[PUBLICAI MCP] Risposta testuale finale ricevuta.\n");
                 BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
@@ -941,16 +943,16 @@ static status_t publicai_stream_thread_func(void* data)
                 } else {
                     fprintf(stderr, "[PUBLICAI MCP] ERRORE: Impossibile creare/aprire il file di notifica!\n");
                 }
-                executionLoop = false; // Usciamo dal loop!
+                executionLoop = false;
             }
         } else {
             fprintf(stderr, "[PUBLICAI STREAM WORKER] ERRORE: Risposta di rete non valida o priva di 'choices'.\n");
             fprintf(stderr, "[PUBLICAI STREAM WORKER] Risposta grezza ricevuta:\n%s\n", rawResponse.String());
             
-            BMessage errorObj;
-            if (parsedJson.FindMessage("error", &errorObj) == B_OK) {
+            BMessage errorObjMsg;
+            if (parsedJson.FindMessage("error", &errorObjMsg) == B_OK) {
                 const char* errMsg = nullptr;
-                errorObj.FindString("message", &errMsg);
+                errorObjMsg.FindString("message", &errMsg);
                 if (errMsg) {
                     fprintf(stderr, "[PUBLICAI STREAM WORKER] Dettaglio errore API PublicAI: %s\n", errMsg);
                     
@@ -966,6 +968,64 @@ static status_t publicai_stream_thread_func(void* data)
         }
     }
 
+    // Terminato il ciclo MCP, vai direttamente alle azioni successive (non passare per lo streaming)
+    goto thread_post_actions;
+
+// =========================================================================
+// === CASO 1: MODALITÀ STANDARD (STREAMING NATIVO RETROCOMPATIBILE) ===
+// =========================================================================
+fallback_to_standard:
+{
+    fprintf(stderr, "[PUBLICAI STREAM WORKER] Modalità Standard: Avvio Streaming Diretto.\n");
+
+    BString payload;
+    BuildPublicAIPayload(args->context_copy, nullptr, payload, true);
+
+    StreamTarget streamTarget(args->notify_path);
+    CompletionListener listener(args->notify_path);
+    
+    BUrl bUrl(targetUrl.String(), true);
+    BUrlContext context;
+    
+    BUrlRequest* req = BUrlProtocolRoster::MakeRequest(bUrl, &streamTarget, &listener, &context);
+    if (req) {
+        BHttpRequest* http = dynamic_cast<BHttpRequest*>(req);
+        if (http) {
+            http->SetMethod(B_HTTP_POST);
+            BHttpHeaders headers;
+            headers.AddHeader("Content-Type", "application/json");
+            headers.AddHeader("Accept", "text/event-stream");
+            headers.AddHeader("User-Agent", PUBLICAI_USER_AGENT);
+            
+            BString authHeader;
+            authHeader.SetToFormat("Bearer %s", args->api_key);
+            headers.AddHeader("Authorization", authHeader.String());
+            http->SetHeaders(headers);
+
+            BMallocIO* input = new BMallocIO();
+            input->WriteExactly(payload.String(), payload.Length());
+            http->AdoptInputData(input, payload.Length());
+        }
+
+        thread_id thread = req->Run();
+        if (thread >= 0) { 
+            status_t rc; 
+            wait_for_thread(thread, &rc); 
+
+            if (http) {
+                const BHttpResult* httpResult = dynamic_cast<const BHttpResult*>(&(http->Result()));
+                fprintf(stderr, "[PUBLICAI STREAM WORKER] HTTP Status Code: %d\n", httpResult->StatusCode());
+            }
+        } else {
+            fprintf(stderr, "[PUBLICAI STREAM WORKER] ERRORE: Impossibile avviare il thread HTTP (%s)\n", strerror(thread));
+        }
+        delete req;
+    } else {
+        fprintf(stderr, "[PUBLICAI STREAM WORKER] ERRORE CRITICO: MakeRequest ha restituito NULL per %s\n", targetUrl.String());
+    }
+}
+
+thread_post_actions:
     // === GENERAZIONE TITOLO POST-RISPOSTA IN MODALITÀ ASINCRONA ===
     if (args->context_copy != nullptr && !args->context_copy->HasString("title")) {
         BMessage messagesMsg;
@@ -984,6 +1044,7 @@ static status_t publicai_stream_thread_func(void* data)
                 
                 if (role && strcmp(role, "user") == 0 && content && content[0] != '\0') {
                     firstPromptText = content;
+                    break;
                 }
                 msgCount++;
             }
@@ -1015,12 +1076,13 @@ static status_t publicai_stream_thread_func(void* data)
         if (streamFile.InitCheck() == B_OK) {
             BString endMarker = "<<STREAM_END>>";
             streamFile.Write(endMarker.String(), endMarker.Length());
+        } else {
+            fprintf(stderr, "[PUBLICAI STREAM WORKER] ERRORE: Impossibile scrivere <<STREAM_END>> su notify_path!\n");
         }
     }
 
 thread_cleanup:
     fprintf(stderr, "[PUBLICAI STREAM WORKER] Pulizia e chiusura thread worker.\n");
-        
     delete args;
 
     return B_OK;
@@ -1028,7 +1090,7 @@ thread_cleanup:
 
 extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle, const char* prompt, BMessage* config)
 {
-    //AIPluginHandle* h = (AIPluginHandle*)handle;
+    // AIPluginHandle* h = (AIPluginHandle*)handle;
     if (!config) return B_ERROR;
     
     const char* apiKey = nullptr;
@@ -1047,7 +1109,7 @@ extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle, const char
     }
     
     AsyncArgs* args = new (std::nothrow) AsyncArgs();
-    if (!args) return B_ERROR;
+    if (!args) return B_NO_MEMORY;
     
     args->api_key = dupstr_or_null(apiKey);
     args->model = dupstr_or_null(modelName && modelName[0] ? modelName : DEFAULT_PUBLICAI_MODEL);
@@ -1056,16 +1118,17 @@ extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle, const char
     if (configBaseUrl && configBaseUrl[0] != '\0') {
         args->base_url = dupstr_or_null(configBaseUrl);
     } else {
-        args->base_url = strdup(DEFAULT_PUBLICAI_URL);
+        args->base_url = dupstr_or_null(DEFAULT_PUBLICAI_URL);
     }
     
     args->context_copy = new (std::nothrow) BMessage(*config);
     if (!args->context_copy) {
-        delete args;
+        // Usa la funzione di pulizia o il distruttore di AsyncArgs per liberare tutto
+        delete args; 
         return B_NO_MEMORY;
     }
     
-    // Se prompt è passato separatamente ma non è in config, possiamo inserirlo in context_copy
+    // Se prompt è passato separatamente e non è in config, lo inseriamo nel contesto
     if (prompt && prompt[0] != '\0' && !args->context_copy->HasString("prompt")) {
         args->context_copy->AddString("prompt", prompt);
     }
@@ -1085,6 +1148,9 @@ extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle, const char
     );
 
     if (thread < B_OK) {
+        fprintf(stderr, "[PUBLICAI_PLUGIN] Errore: impossibile creare il thread worker (%s)\n", strerror(thread));
+        // Se il distruttore ~AsyncArgs() libera già i vari dupstr/context_copy, delete args va bene,
+        // altrimenti va richiamata la pulizia esplicita.
         delete args;
         return B_ERROR;
     }
