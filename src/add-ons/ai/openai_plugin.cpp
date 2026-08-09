@@ -1594,7 +1594,7 @@ openai_stream_thread_func(void* data)
     BString targetUrl;
     BString tempUrl;
     
-    fprintf(stderr, "[OPENAI STREAM WORKER] Thread avviato.\n");
+    //fprintf(stderr, "[OPENAI STREAM WORKER] Thread avviato.\n");
     AsyncArgs* args = (AsyncArgs*)data;
     if (!args) return B_BAD_VALUE;
 
@@ -1719,7 +1719,7 @@ openai_stream_thread_func(void* data)
                    (mcpActive && openAiToolsJson.Length() > 0) ? &openAiToolsJson : nullptr);
 
         // LOG PAYLOAD MCP
-        fprintf(stderr, "[OPENAI MCP DEBUG] Payload inviato:\n%s\n", payload.String());
+        //fprintf(stderr, "[OPENAI MCP DEBUG] Payload inviato:\n%s\n", payload.String());
 
         BMallocIO outNetworkData;
         SyncListener syncListener;
@@ -1762,7 +1762,7 @@ openai_stream_thread_func(void* data)
         delete req;
 
         BString rawResponse((const char*)outNetworkData.Buffer(), outNetworkData.BufferLength());
-        fprintf(stderr, "[OPENAI MCP DEBUG] Risposta grezza dal server:\n%s\n", rawResponse.String());
+        //fprintf(stderr, "[OPENAI MCP DEBUG] Risposta grezza dal server:\n%s\n", rawResponse.String());
 
         BMessage parsedJson;
         if (BJson::Parse(rawResponse.String(), parsedJson) != B_OK) {
@@ -1856,7 +1856,7 @@ openai_stream_thread_func(void* data)
                 AppendToolResponseToContext(args->context_copy, toolName, toolResultBuf.String(), toolCallId);
             } 
             else if (message.FindString("content", &textContent) == B_OK && textContent != nullptr) {
-                fprintf(stderr, "[OPENAI MCP] Risposta testuale finale ricevuta.\n");
+                //fprintf(stderr, "[OPENAI MCP] Risposta testuale finale ricevuta.\n");
                 BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
                 if (streamFile.InitCheck() == B_OK) {
                     streamFile.Write(textContent, strlen(textContent));
@@ -1900,9 +1900,9 @@ fallback_to_standard:
     BuildOpenAIPayload(args->context_copy, nullptr, payload, true);
 
     // LOG DIAGNOSTICO MODALITA STANDARD
-    fprintf(stderr, "[OPENAI STREAM DEBUG] Target URL: %s\n", targetUrl.String());
-    fprintf(stderr, "[OPENAI STREAM DEBUG] API Key (prime 7 lettere): %.7s...\n", args->api_key ? args->api_key : "NULL");
-    fprintf(stderr, "[OPENAI STREAM DEBUG] Payload inviato in streaming:\n%s\n", payload.String());
+    //fprintf(stderr, "[OPENAI STREAM DEBUG] Target URL: %s\n", targetUrl.String());
+    //fprintf(stderr, "[OPENAI STREAM DEBUG] API Key (prime 7 lettere): %.7s...\n", args->api_key ? args->api_key : "NULL");
+    //fprintf(stderr, "[OPENAI STREAM DEBUG] Payload inviato in streaming:\n%s\n", payload.String());
 
     {
         StreamTarget streamTarget(args->notify_path);
@@ -1989,7 +1989,7 @@ thread_post_actions:
                 titleUpdateMsg.AddString("title", autoTitle.String());
                 args->server_messenger.SendMessage(&titleUpdateMsg);
             }
-            fprintf(stderr, "[OPENAI ASYNC] Auto-titolo generato: '%s'\n", autoTitle.String());
+            //fprintf(stderr, "[OPENAI ASYNC] Auto-titolo generato: '%s'\n", autoTitle.String());
         }
     }
 
@@ -1999,7 +1999,7 @@ thread_post_actions:
         if (streamFile.InitCheck() == B_OK) {
             BString endMarker = "<<STREAM_END>>";
             streamFile.Write(endMarker.String(), endMarker.Length());
-            fprintf(stderr, "[OPENAI STREAM WORKER] Scritto <<STREAM_END>> sul file di notifica.\n");
+            //fprintf(stderr, "[OPENAI STREAM WORKER] Scritto <<STREAM_END>> sul file di notifica.\n");
         } else {
             fprintf(stderr, "[OPENAI STREAM WORKER] ERRORE: Impossibile scrivere <<STREAM_END>> su notify_path!\n");
         }
