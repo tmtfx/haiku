@@ -53,6 +53,9 @@ static const uint32 MSG_CONTEXT_OPEN    = 'CTXO';
 static const uint32 MSG_TOGGLE_REM_CTX   = 'TGRC';
 static const uint32 MSG_BASE_URL_OVERRIDE = 'BOVR';
 static const uint32 MSG_SESSIONS_FETCHED = 'SFCH';
+static const uint32 MSG_TOGGLE_FILE_SYS_ACCESS = 'TFSA';
+static const uint32 MSG_READ_PERM_CHANGED = 'RPCH';
+static const uint32 MSG_WRITE_PERM_CHANGED = 'WPCH';
 
 // Simple JSON array parser for flat arrays of strings: ["a","b"]
 static void parse_models_json(const char* json, BPopUpMenu* menu) {
@@ -221,7 +224,7 @@ private:
 };
 
 PrefletWindow::PrefletWindow()
-    : BWindow(BRect(100, 100, 750, 800), B_TRANSLATE("AI Preflet"), B_TITLED_WINDOW, B_AUTO_UPDATE_SIZE_LIMITS | B_QUIT_ON_WINDOW_CLOSE)
+    : BWindow(BRect(0, 10, 1024, 860), B_TRANSLATE("AI Preflet"), B_TITLED_WINDOW, B_AUTO_UPDATE_SIZE_LIMITS | B_QUIT_ON_WINDOW_CLOSE)
 {
     // 1. Menu Selezione Tipo Engine (In alto)
     fEngineMenu = new BPopUpMenu("engines");
@@ -236,6 +239,7 @@ PrefletWindow::PrefletWindow()
 
     // 2. Sezione Superiore: Plugins (Sinistra) & Dettagli (Destra)
     fPluginListView = new BListView("plugins_list", B_SINGLE_SELECTION_LIST);
+    //fPluginListView->SetExplicitMaxSize(BSize(300, B_SIZE_UNLIMITED));
     fPluginListView->SetSelectionMessage(new BMessage(MSG_PLUGIN_SELECTED));
     fPluginScrollView = new BScrollView("plugins_scroll", fPluginListView, B_WILL_DRAW | B_FRAME_EVENTS, false, true);
 
@@ -253,21 +257,66 @@ PrefletWindow::PrefletWindow()
     fBaseUrlControl = new BTextControl("base_url", B_TRANSLATE("Base URL:"), "", nullptr);
 
     // Override checkbox to allow editing base_url also for remote plugins
-    fBaseUrlOverrideCheckBox = new BCheckBox("base_url_override", B_TRANSLATE("Override remote Base URL (Advanced)"), new BMessage(MSG_BASE_URL_OVERRIDE));
+    fBaseUrlOverrideCheckBox = new BCheckBox("base_url_override", B_TRANSLATE("Override Base URL"), new BMessage(MSG_BASE_URL_OVERRIDE));
 
     fSystemInfoCheckBox = new BCheckBox("perm_sys_info", B_TRANSLATE("Allow System Info Tool"), nullptr);
-    fFileSystemCheckBox = new BCheckBox("perm_file_sys", B_TRANSLATE("Allow File System Access Tool"), nullptr);
+    fFileSystemCheckBox = new BCheckBox("perm_file_sys", B_TRANSLATE("Allow File System Access Tool"), new BMessage(MSG_TOGGLE_FILE_SYS_ACCESS));
     fRunCommandsCheckBox = new BCheckBox("perm_run_cmds", B_TRANSLATE("Allow Run Terminal Commands Tool"), nullptr);
 
     BBox* pluginConfigBox = new BBox("plugin_config");
     pluginConfigBox->SetLabel(B_TRANSLATE("Plugin Configuration"));
+    pluginConfigBox->SetExplicitMinSize(BSize(600,485));
 
     BBox* mcpPermissionsBox = new BBox("mcp_perms");
     mcpPermissionsBox->SetLabel(B_TRANSLATE("MCP Tool Permissions"));
+    
+    fFileSystemCheckBox->SetLabel(B_TRANSLATE("Allow File System Access Tool"));
+    
+    BBox* ReadAccessGroup = new BBox("mcp_read_access");
+    ReadAccessGroup->SetLabel(B_TRANSLATE("Read Permissions"));
+    BBox* WriteAccessGroup = new BBox("mcp_write_access");
+    WriteAccessGroup->SetLabel(B_TRANSLATE("Write Permissions"));
+
+    fReadAlwaysRadio = new BRadioButton("readAlways", B_TRANSLATE("Always allow"), new BMessage(MSG_READ_PERM_CHANGED));
+    fReadAskRadio    = new BRadioButton("readAsk",    B_TRANSLATE("Ask every time"), new BMessage(MSG_READ_PERM_CHANGED));
+    fReadNeverRadio  = new BRadioButton("readNever",  B_TRANSLATE("Never allow"), new BMessage(MSG_READ_PERM_CHANGED));
+    fWriteAlwaysRadio = new BRadioButton("writeAlways", B_TRANSLATE("Always allow"), new BMessage(MSG_WRITE_PERM_CHANGED));
+    fWriteAskRadio    = new BRadioButton("writeAsk",    B_TRANSLATE("Ask every time"), new BMessage(MSG_WRITE_PERM_CHANGED));
+    fWriteNeverRadio  = new BRadioButton("writeNever",  B_TRANSLATE("Never allow"), new BMessage(MSG_WRITE_PERM_CHANGED));
+    
+    
+
+    // Sezione Read Access
+    BLayoutBuilder::Group<>(ReadAccessGroup, B_VERTICAL, 5)
+        .SetInsets(B_USE_DEFAULT_SPACING, B_USE_DEFAULT_SPACING, B_USE_DEFAULT_SPACING, B_USE_SMALL_SPACING)
+        .AddGroup(B_VERTICAL, B_USE_SMALL_SPACING)
+            .Add(fReadAlwaysRadio)
+            .Add(fReadAskRadio)
+            .Add(fReadNeverRadio)
+            .AddGlue()
+        .End()
+    .End(); // Fine Read Access
+
+    // Sezione Write Access
+    BLayoutBuilder::Group<>(WriteAccessGroup, B_VERTICAL, 5)
+        .SetInsets(B_USE_DEFAULT_SPACING, B_USE_DEFAULT_SPACING, B_USE_DEFAULT_SPACING, B_USE_SMALL_SPACING)
+        .AddGroup(B_VERTICAL, B_USE_SMALL_SPACING)
+            .Add(fWriteAlwaysRadio)
+            .Add(fWriteAskRadio)
+            .Add(fWriteNeverRadio)
+            .AddGlue()
+        .End()
+    .End(); // Fine Write Access
+    
     BLayoutBuilder::Group<>(mcpPermissionsBox, B_VERTICAL, 5)
         .SetInsets(10, 20, 10, 10)
         .Add(fSystemInfoCheckBox)
         .Add(fFileSystemCheckBox)
+        .AddGroup(B_HORIZONTAL, 10)
+            .SetInsets(15, 0, 0, 0)
+            .Add(ReadAccessGroup)
+            .Add(WriteAccessGroup)
+        .End()
         .Add(fRunCommandsCheckBox)
     .End();
 
@@ -300,6 +349,7 @@ PrefletWindow::PrefletWindow()
     fContextListView->SetSelectionMessage(new BMessage(MSG_CONTEXT_SELECTED));
     fContextListView->SetInvocationMessage(new BMessage(MSG_CONTEXT_OPEN));
     fContextScrollView = new BScrollView("context_scroll", fContextListView, B_WILL_DRAW, false, true);
+    //fContextScrollView->SetExplicitMaxSize(BSize(510, B_SIZE_UNLIMITED));
 
     fContextIdView = new BStringView("context_id", B_TRANSLATE("Context ID: None"));
     fContextIdView->SetFont(be_bold_font);
@@ -307,8 +357,9 @@ PrefletWindow::PrefletWindow()
     fContextTextView = new BTextView("context_text");
     fContextTextView->MakeEditable(false);
     fContextTextScrollView = new BScrollView("context_text_scroll", fContextTextView, B_WILL_DRAW, false, true);
+    fContextTextView->SetExplicitMinSize(BSize(500, 20));
 
-    BLayoutBuilder::Group<>(contextBox, B_HORIZONTAL, 10)
+    BLayoutBuilder::Group<>(contextBox, B_HORIZONTAL, B_USE_SMALL_SPACING)
         .SetInsets(10, 20, 10, 10)
         .Add(fContextScrollView, 1)
         .AddGroup(B_VERTICAL, 5, 2)
@@ -336,14 +387,30 @@ PrefletWindow::PrefletWindow()
     // COSTRUZIONE LAYOUT GENERALE DELLA PREFLET
     BView* root = new BView(Bounds(), "root", B_FOLLOW_ALL_SIDES, B_WILL_DRAW);
     root->SetViewColor(ui_color(B_PANEL_BACKGROUND_COLOR));
-    AddChild(root);
+    
+    
+    int minHeight = 20 +  // Inset top
+             fEngineMenuField->Frame().Height() + 10 +
+             contextBox->Bounds().Height() + 5 +
+             sessionBox->Bounds().Height() + 10 +
+             30; // Spazio per bottoni + margini
 
+    root->SetExplicitMinSize(BSize(Bounds().Width(), minHeight));
+    
+    AddChild(root);
+    
+	//BView* spacer = new BView(BRect(0, 0, B_SIZE_UNLIMITED, minHeight - root->Bounds().Height()), "bottom_spacer", B_FOLLOW_LEFT_RIGHT | B_FOLLOW_BOTTOM,B_WILL_DRAW);
+	//spacer->SetLowColor(ui_color(B_PANEL_BACKGROUND_COLOR));
+	
     BLayoutBuilder::Group<>(root, B_VERTICAL, 10)
         .SetInsets(10)
         .Add(fEngineMenuField) // In alto
-        .AddGroup(B_HORIZONTAL, 10, 3) // Sezione Plugin (H: List | Config)
+        .AddGroup(B_HORIZONTAL, B_USE_SMALL_SPACING, 0) // Sezione Plugin (H: List | Config) 10/3
+            //.SetExplicitMaxSize(BSize(200, B_SIZE_UNLIMITED))
             .Add(fPluginScrollView, 1)
-            .Add(pluginConfigBox, 2)
+            //.Add(fPluginScrollView, B_SIZE_UNLIMITED) // Larghezza massima (non minima)
+            //.SetExplicitMinSize(BSize(200, 500))
+            .Add(pluginConfigBox, 10)
         .End()
         .Add(contextBox, 3)  // Sezione Contesti (Centrale)
         .Add(sessionBox, 1)  // Sezione Sessioni (Inferiore)
@@ -352,6 +419,8 @@ PrefletWindow::PrefletWindow()
             .Add(fSaveButton)
             .Add(fApplyButton)
         .End()
+        //.AddGlue()
+        //.Add(spacer)
     .End();
 
     // Inizializzazioni e Caricamento Stati Precedenti
@@ -383,6 +452,8 @@ PrefletWindow::PrefletWindow()
             watch_node(&fContextDirRef, B_WATCH_DIRECTORY, this);
     }
     _RefreshContexts();
+    
+    CenterOnScreen();
 }
 
 PrefletWindow::~PrefletWindow()
@@ -397,7 +468,23 @@ bool PrefletWindow::QuitRequested() {
 
 void PrefletWindow::MessageReceived(BMessage* msg)
 {
-    switch (msg->what) {
+	switch (msg->what) {
+		case MSG_TOGGLE_FILE_SYS_ACCESS: {
+			bool enabled = (fFileSystemCheckBox->Value() == B_CONTROL_ON);
+			fReadAlwaysRadio->SetEnabled(enabled);
+			fReadAskRadio->SetEnabled(enabled);
+			fReadNeverRadio->SetEnabled(enabled);
+			fWriteAlwaysRadio->SetEnabled(enabled);
+			fWriteAskRadio->SetEnabled(enabled);
+			fWriteNeverRadio->SetEnabled(enabled);
+			break;
+		}
+    	case MSG_READ_PERM_CHANGED: {
+    		break;
+    	}
+    	case MSG_WRITE_PERM_CHANGED: {
+    		break;
+    	}
         case MSG_ENGINE_LOCAL:
         case MSG_ENGINE_REMOTE:
         case MSG_ENGINE_ALL: {

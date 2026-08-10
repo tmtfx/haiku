@@ -13,6 +13,7 @@
 #include <StringView.h>
 #include <String.h>
 #include <Node.h>
+#include <RadioButton.h>
 
 
 class BMenuField;
@@ -32,7 +33,7 @@ class PrefletWindow : public BWindow {
 public:
     PrefletWindow();
     virtual ~PrefletWindow();
-
+    
     virtual bool QuitRequested();
     virtual void MessageReceived(BMessage* msg);
 
@@ -63,6 +64,14 @@ private:
     BCheckBox* fRemoteContextCheckBox;
     BCheckBox* fSystemInfoCheckBox;
     BCheckBox* fFileSystemCheckBox;
+
+    BRadioButton*   fReadAlwaysRadio;
+    BRadioButton* fReadAskRadio;
+    BRadioButton* fReadNeverRadio;
+    BRadioButton*   fWriteAlwaysRadio;
+    BRadioButton* fWriteAskRadio;
+    BRadioButton* fWriteNeverRadio;
+
     BCheckBox* fRunCommandsCheckBox;
 
     BCheckBox*   fBaseUrlOverrideCheckBox;
