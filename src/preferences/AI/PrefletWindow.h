@@ -61,9 +61,10 @@ private:
     BTextControl* fBaseUrlControl;
     BButton* fToggleApiKeyButton;
     BButton* fClearApiKeyButton;
+    BCheckBox* fToggleMCPTools;
     BCheckBox* fRemoteContextCheckBox;
     BCheckBox* fSystemInfoCheckBox;
-    BCheckBox* fFileSystemCheckBox;
+    //BCheckBox* fFileSystemCheckBox;
 
     BRadioButton*   fReadAlwaysRadio;
     BRadioButton* fReadAskRadio;
