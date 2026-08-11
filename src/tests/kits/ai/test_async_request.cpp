@@ -121,12 +121,6 @@ public:
 			}
 
 			case MSG_AI_ERROR: {
-				/*
-				const char* err = nullptr;
-				msg->FindString("error", &err);
-				printf("\n[CLIENT ERRORE SERVER] %s\n", err ? err : "Errore generico.");
-				PostMessage(B_QUIT_REQUESTED);
-				break;*/
 				const char* err = nullptr;
                 if (msg->FindString("error", &err) != B_OK) {
                     msg->FindString("error_message", &err);
