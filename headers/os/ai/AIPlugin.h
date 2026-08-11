@@ -14,6 +14,9 @@
 #include <new>
 #include <String.h>
 
+static const uint32 MSG_LLM_ERROR		= 'LERR';
+static const uint32 MSG_MOD_ERROR		= 'MERR';
+
 enum capabilities {
     AI_CAP_STREAMING			= 1 << 0,
     AI_CAP_REMOTE_CONTEXT		= 1 << 1, // Il plugin supporta i thread/contesti remoti
