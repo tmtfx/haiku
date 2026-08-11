@@ -1436,6 +1436,21 @@ public:
 						}
 					}
 				}
+				int32 id = -1;
+				msg->FindInt32("session_id",&id);
+				if (id > -1) {
+					for (auto& pair : gSessions) { 
+						if (pair.second.id == id) {
+							pair.second.abort_requested = true; // Attiviamo il Kill Switch!
+							fprintf(stderr, "[AI_SERVER] [KILL SWITCH] Richiesta di interruzione ricevuta per la sessione: %s\n", contextId.String());
+
+							BMessage reply(B_REPLY);
+							reply.AddInt32("status", B_OK);
+							msg->SendReply(&reply);
+							break;
+						}
+					}
+				}
 				break;
 			}
 			case MSG_CHECK_ABORT:
@@ -1902,16 +1917,6 @@ public:
 							applied++;
 						}
 					}
-
-					// 3. Notifichiamo il plugin attivo del nuovo modello scelto
-					/*for (auto &pe : gPlugins) {
-						if (s.plugin == pe.name) {
-							if (pe.set_model && s.model.Length() > 0) {
-								pe.set_model(pe.instance, s.model.String());
-							}
-							break;
-						}
-					}*/
 				}
 
 				BMessage r('RLOD');
@@ -1980,7 +1985,7 @@ public:
 				break;
 			}
 			case MSG_SET_REMOTE_CTX: {
-								int32 sessionID = -1;
+				int32 sessionID = -1;
 				bool enable = false;
 				msg->FindInt32("session_id", &sessionID);
 				msg->FindBool("enable", &enable);
@@ -2112,7 +2117,6 @@ public:
 			}
 			case MSG_AI_TITLE_CHANGED: // Update Title
 			{
-				fprintf(stderr,"mando aggiornamento di titolo\n");
 				const char* title = nullptr;
 				if (msg->FindString("title", &title) != B_OK || !title)
 					break;
@@ -2122,39 +2126,7 @@ public:
 				BMessage notifyUI(MSG_AI_TITLE_CHANGED);
 				notifyUI.AddString("title", title);
 				TargetMessenger.SendMessage(&notifyUI);
-/*
-				int32 sessionID = -1;
-				const char* ctxId = nullptr;
-				msg->FindInt32("session_id", &sessionID);
-				//msg->FindString("context_id", &ctxId);
-				
-				//fprintf(stderr, "[SERVER] MSG_UPDATE_TITLE ricevuto: '%s' (session_id: %" B_PRId32 ", context_id: %s)\n",  title, sessionID, ctxId ? ctxId : "null");
 
-				// 1. Aggiorna lo stato della sessione (tramite ID o context string)
-				ClientSession* session = nullptr;
-				if (sessionID != -1 && gSessions.count(sessionID) > 0) {
-					session = &gSessions[sessionID];
-				}// else if (ctxId != nullptr) {
-				//	session = fSessionManager->FindSessionByContextId(ctxId);
-				//}
-
-				if (session != nullptr) {
-					BMessenger& clientTarget = gSessions[sessionID].client_target;
-					if (clientTarget.IsValid()) {
-						BMessage notifyUI(MSG_AI_TITLE_CHANGED);
-						notifyUI.AddString("title", title);
-						if (sessionID != -1)
-							notifyUI.AddInt32("session_id", sessionID);
-						//if (ctxId != nullptr)
-						//	notifyUI.AddString("context_id", ctxId);
-
-						clientTarget.SendMessage(&notifyUI);
-					} else {
-						fprintf(stderr, "[SERVER] Errore: clientTarget non valido per sessionID %" B_PRId32 "\n", sessionID);
-					}
-				} else {
-					fprintf(stderr, "[SERVER] Errore: Nessuna sessione trovata per aggiornare il titolo!\n");
-				}*/
 				break;
 			}
 			default:
