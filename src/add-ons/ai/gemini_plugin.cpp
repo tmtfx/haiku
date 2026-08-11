@@ -6,13 +6,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <new>
 
 //verificare cosa rimuovere qua
 #include <Url.h>
 #include <UrlRequest.h>
 #include <UrlSynchronousRequest.h>
 #include <UrlProtocolRoster.h>
-#include <UrlRequest.h>
+//#include <UrlRequest.h>
 #include <HttpHeaders.h>
 #include <HttpRequest.h>
 #include <HttpResult.h>
@@ -21,7 +22,6 @@
 #include <DataIO.h>
 #include <String.h>
 #include <File.h>
-#include <Alert.h>
 #include <OS.h>
 #include <Messenger.h>
 #include <Message.h>
@@ -33,15 +33,23 @@ typedef void* ai_plugin_t;
 
 using namespace BPrivate::Network;
 
+#define DEFAULT_GEMINI_BASE_URL "https://generativelanguage.googleapis.com"
+#define DEFAULT_GEMINI_MODEL "gemini-3.5-flash"
+
 class StreamTarget : public BDataIO {
 public:
     StreamTarget(const char* notifyPath) {
         fFile.SetTo(notifyPath, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
         fBuffer.SetTo("");
+        fRawResponse.SetTo("");
     }
 
     virtual ssize_t Write(const void* buffer, size_t size) override {
-        if (fFile.InitCheck() != B_OK || size == 0) return size;
+        if (size == 0) return 0;
+        
+        fRawResponse.Append((const char*)buffer, size);
+        
+        if (fFile.InitCheck() != B_OK) return size;
 
         fBuffer.Append((const char*)buffer, size);
 
@@ -80,6 +88,7 @@ public:
 
             if (!token.IsEmpty()) {
                 fFile.Write(token.String(), token.Length());
+                fFile.Flush();
             }
             
             currentPos = endContent + 1;
@@ -91,9 +100,15 @@ public:
 
         return size;
     }
+    
+    const BString& RawResponse() const {
+        return fRawResponse;
+    }
+    
 private:
     BFile   fFile;
     BString fBuffer;
+    BString fRawResponse;
 };
 
 void SerializeBMessageToJson(const BMessage* msg, BString& outJson) {
@@ -147,7 +162,7 @@ void SerializeBMessageToJson(const BMessage* msg, BString& outJson) {
     
     outJson << "}";
 }
-
+/*
 BString ExtractArgsJson(const BString& json, int32 functionCallPos) {
     int32 argsPos = json.FindFirst("\"args\"", functionCallPos);
     if (argsPos == B_ERROR) return "{}";
@@ -199,7 +214,7 @@ BString ExtractArgsJson(const BString& json, int32 functionCallPos) {
         }
     }
     return "{}";
-}
+}*/
 
 
 static char* dupstr_or_null(const char* s) {
@@ -271,8 +286,7 @@ static BString EscapeStringForJson(const char* input) {
 }
 
 // Funzione helper per iniettare l'intero storico dei messaggi salvato nel BMessage nel JSON di Gemini
-void BuildPayloadFromContext(const BMessage* config, const char* currentPrompt, BString& outPayload)
-{
+void BuildPayloadFromContext(const BMessage* config, const char* currentPrompt, BString& outPayload, const BString* geminiToolsJson = nullptr){
     outPayload.SetTo("{\"contents\":[");
     bool first = true;
 
@@ -363,7 +377,7 @@ void BuildPayloadFromContext(const BMessage* config, const char* currentPrompt, 
                 if (role && content && content[0] != '\0') {
                     if (!first) outPayload.Append(",");
                     
-                    BString geminiRole = (strcmp(role, "assistant") == 0) ? "model" : "user";
+                    BString geminiRole = (strcmp(role, "assistant") == 0 || strcmp(role, "model") == 0) ? "model" : "user";
                     BString escapedContent = EscapeStringForJson(content);
 
                     BString objectStr;
@@ -419,139 +433,56 @@ void BuildPayloadFromContext(const BMessage* config, const char* currentPrompt, 
     if (systemPrompt.Length() > 0) {
         outPayload << ",\"systemInstruction\":{\"parts\":[{\"text\":\"" << EscapeStringForJson(systemPrompt.String()) << "\"}]}";
     }
+    
+    if (geminiToolsJson && geminiToolsJson->Length() > 0) {
+        outPayload << ",\"tools\":" << *geminiToolsJson;
+    }
+    
     outPayload.Append("}");
 }
-/*
-void BuildPayloadFromContext(const BMessage* config, const char* currentPrompt, BString& outPayload)
+
+// Helper per inviare la segnalazione di errore via Messenger
+static void DispatchGeminiError(const BMessenger& messenger, int32 httpCode, 
+                                int32 sessionID, const char* ctxId, const BString& rawResponse)
 {
-    outPayload.SetTo("{\"contents\":[");
-    bool first = true;
+    if (!messenger.IsValid()) return;
 
-    BMessage messagesMsg;
-    if (config && config->FindMessage("messages", &messagesMsg) == B_OK) {
-        BMessage msgItem;
-        int32 i = 0;
+    BMessage errorReport(MSG_LLM_ERROR);
+    errorReport.AddString("plugin_name", "Google Gemini");
+    errorReport.AddInt32("http_code", httpCode > 0 ? httpCode : 400);
+    
+    if (sessionID != -1)
+        errorReport.AddInt32("session_id", sessionID);
+    if (ctxId)
+        errorReport.AddString("session_id", ctxId);
+
+    BMessage parsedJson;
+    BMessage errorObj;
+    if (!rawResponse.IsEmpty() && BJson::Parse(rawResponse.String(), parsedJson) == B_OK 
+        && parsedJson.FindMessage("error", &errorObj) == B_OK) {
         
-        while (messagesMsg.FindMessage("msg", i, &msgItem) == B_OK || 
-               messagesMsg.FindMessage(BString().SetToFormat("%d", i).String(), &msgItem) == B_OK) {
-            
-            const char* type = nullptr;
-            msgItem.FindString("type", &type);
+        const char* errMsg = errorObj.FindString("message");
+        const char* errStatus = errorObj.FindString("status");
+        int32 codeVal = 0;
+        errorObj.FindInt32("code", &codeVal);
 
-            if (type && strcmp(type, "functionCall") == 0) {
-                // Storico di una chiamata a un tool fatta dall'LLM
-                const char* name = msgItem.FindString("name");
-                const char* args = msgItem.FindString("args");
-                
-                const char* thoughtSig = nullptr;
-                msgItem.FindString("thought_signature", &thoughtSig);
-                
-                if (!first) outPayload.Append(",");
-                
-                //outPayload.AppendFormat("{\"role\":\"model\",\"parts\":[{\"functionCall\":{\"name\":\"%s\",\"args\":%s}}]}", name, (args && args[0] != '\0') ? args : "{}");
-                BString tempCall;
-                if (thoughtSig && thoughtSig[0] != '\0') {
-                    // Inseriamo thought_signature nel part, come fratello di functionCall
-                    tempCall.SetToFormat(
-                        "{\"role\":\"model\",\"parts\":["
-                        "{\"functionCall\":{\"name\":\"%s\",\"args\":%s},\"thought_signature\":\"%s\"}"
-                        "]}", 
-                        name, 
-                        (args && args[0] != '\0') ? args : "{}", 
-                        thoughtSig
-                    );
-                } else {
-                    // Fallback standard senza firma
-                    tempCall.SetToFormat(
-                        "{\"role\":\"model\",\"parts\":["
-                        "{\"functionCall\":{\"name\":\"%s\",\"args\":%s}}"
-                        "]}", 
-                        name, 
-                        (args && args[0] != '\0') ? args : "{}"
-                    );
-                }
-                outPayload << tempCall;
-                first = false;
-            } 
-            else if (type && strcmp(type, "functionResponse") == 0) {
-                // Storico della risposta del sistema passata all'LLM
-                const char* name = msgItem.FindString("name");
-                const char* response = msgItem.FindString("response");
-                if (!first) outPayload.Append(",");
-                
-                BString formattedResponse;
-                BString respStr(response ? response : "");
-                respStr.Trim();
-                if (respStr.StartsWith("{") && respStr.EndsWith("}")) {
-                    formattedResponse = respStr;
-                } else {
-                    // Non è un oggetto JSON valido, lo wrappiamo noi facendo l'escape
-                    BString escapedResp = respStr;
-                    escapedResp.ReplaceAll("\\", "\\\\");
-                    escapedResp.ReplaceAll("\"", "\\\"");
-                    escapedResp.ReplaceAll("\n", "\\n");
-                    escapedResp.ReplaceAll("\r", "\\r");
-                    escapedResp.ReplaceAll("\t", "\\t");
-                    formattedResponse.SetToFormat("{\"output\":\"%s\"}", escapedResp.String());
-                }
-                
-                BString tempCall;
-                tempCall.SetToFormat("{\"role\":\"function\",\"parts\":[{\"functionResponse\":{\"name\":\"%s\",\"response\":%s}}]}", name, formattedResponse.String());
-                outPayload << tempCall;
-                first = false;
-            } 
-            else {
-                // Messaggio standard di testo (User o Assistant)
-                const char* role = nullptr;
-                const char* content = nullptr;
-                msgItem.FindString("role", &role);
-                
-                if (msgItem.FindString("content", &content) != B_OK) {
-                    msgItem.FindString("text", &content);
-                }
-
-                if (role && content && content[0] != '\0') {
-                    if (!first) outPayload.Append(",");
-                    
-                    BString geminiRole = (strcmp(role, "assistant") == 0) ? "model" : "user";
-
-                    BString escapedContent(content);
-                    escapedContent.ReplaceAll("\\", "\\\\");
-                    escapedContent.ReplaceAll("\"", "\\\"");
-                    escapedContent.ReplaceAll("\n", "\\n");
-                    escapedContent.ReplaceAll("\r", "\\r");
-                    escapedContent.ReplaceAll("\t", "\\t");
-
-                    BString objectStr;
-                    objectStr.SetToFormat("{\"role\":\"%s\",\"parts\":[{\"text\":\"%s\"}]}", 
-                                          geminiRole.String(), escapedContent.String());
-                    
-                    outPayload.Append(objectStr);
-                    first = false;
-                }
-            }
-            i++;
+        if (errMsg) errorReport.AddString("error_message", errMsg);
+        if (errStatus) errorReport.AddString("error_type", errStatus);
+        if (codeVal != 0) {
+            BString cStr;
+            cStr << codeVal;
+            errorReport.AddString("error_code", cStr.String());
+        }
+    } else {
+        if (!rawResponse.IsEmpty()) {
+            errorReport.AddString("error_message", rawResponse.String());
+        } else {
+            errorReport.AddString("error_message", "Errore di connessione o risposta non valida dal server backend Gemini.");
         }
     }
 
-    // BUG FIX: Il prompt corrente viene aggiunto SEMPRE alla fine, se esiste
-    if (currentPrompt && currentPrompt[0] != '\0') {
-        if (!first) outPayload.Append(",");
-        
-        BString escapedPrompt(currentPrompt);
-        escapedPrompt.ReplaceAll("\\", "\\\\");
-        escapedPrompt.ReplaceAll("\"", "\\\"");
-        escapedPrompt.ReplaceAll("\n", "\\n");
-        escapedPrompt.ReplaceAll("\r", "\\r");
-        escapedPrompt.ReplaceAll("\t", "\\t");
-        
-        BString objectStr;
-        objectStr.SetToFormat("{\"role\":\"user\",\"parts\":[{\"text\":\"%s\"}]}", escapedPrompt.String());
-        outPayload.Append(objectStr);
-    }
-
-    outPayload.Append("]}");
-}*/
+    messenger.SendMessage(&errorReport);
+}
 
 extern "C" ai_plugin_t ai_plugin_init(void)
 {
@@ -579,39 +510,38 @@ ai_plugin_generate_text_sync(ai_plugin_t handle,
         fprintf(stderr, "[GEMINI PLUGIN] ERRORE: il puntatore BMessage* config è NULL!\n");
         return B_ERROR;
     }
+    if (!response_buf || response_len == 0) return B_ERROR;
     
-    const char* apiKey = nullptr;
-    const char* model = nullptr;
-    const char* configBaseUrl = nullptr;
-    config->FindString("api_key", &apiKey);
-    config->FindString("model_name", &model);
-    config->FindString("base_url", &configBaseUrl);
-
-    if (!model || model[0] == '\0') model = "gemini-1.5-flash";
-    
-    if (!apiKey || apiKey[0] == '\0') {
+    const char* apiKeyRaw = nullptr;
+    config->FindString("api_key", &apiKeyRaw);
+    if (!apiKeyRaw || apiKeyRaw[0] == '\0') {
         fprintf(stderr, "[GEMINI PLUGIN] ERRORE CRITICO: api_key non trovata o vuota nel BMessage!\n");
         snprintf(response_buf, response_len, "[gemini_plugin] error: no API key provided");
         return B_ERROR;
     }
+    BString apiKey(apiKeyRaw);
     
-    // FIX LOGICA URL: Se configBaseUrl è fornito lo usiamo, altrimenti usiamo il default Google
+    const char* baseUrlRaw = nullptr;
+    config->FindString("base_url", &baseUrlRaw);
+    BString baseUrl = (baseUrlRaw && baseUrlRaw[0] != '\0') ? baseUrlRaw : DEFAULT_GEMINI_BASE_URL;
+    if (baseUrl.EndsWith("/")) baseUrl.Truncate(baseUrl.Length() - 1);
+
+    const char* modelName = nullptr;
+    config->FindString("model_name", &modelName);
+    if (!modelName || modelName[0] == '\0')
+        modelName = DEFAULT_GEMINI_MODEL;
+
+    const char* ctxId = nullptr;
+    config->FindString("context_id", &ctxId);
+
+    int32 sessionID = -1;
+    config->FindInt32("session_id", &sessionID);
+
+    BMessenger serverMessenger;
+    config->FindMessenger("server_messenger", &serverMessenger);
+
     BString url;
-    if (configBaseUrl && configBaseUrl[0] != '\0') {
-        url = configBaseUrl;
-        if (url.EndsWith("/")) url.Remove(url.Length() - 1, 1);
-        if (url.FindFirst(":generateContent") == B_ERROR) {
-            url << "/v1beta/models/" << model << ":generateContent";
-        }
-    } else {
-        url.SetToFormat("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent", model);
-    }
-    
-    if (url.FindFirst("?") != B_ERROR) {
-        url << "&key=" << apiKey;
-    } else {
-        url << "?key=" << apiKey;
-    }
+    url.SetToFormat("%s/v1beta/models/%s:generateContent?key=%s", baseUrl.String(), modelName, apiKey.String());
     
     // Compiliamo il payload iniettando lo storico memorizzato nel BMessage
     BString payload;
@@ -661,7 +591,8 @@ ai_plugin_generate_text_sync(ai_plugin_t handle,
     size_t len = out->BufferLength();
     if (!buf || len == 0) { 
         snprintf(response_buf, response_len, "{\"error\":\"empty response\"}"); 
-        delete req; delete out; 
+        delete req;
+        delete out; 
         return B_ERROR; 
     }
     fprintf(stderr, "[GEMINI PLUGIN] Buffer di risposta: %d byte ricevuti.\n", (int)len);
@@ -674,38 +605,31 @@ ai_plugin_generate_text_sync(ai_plugin_t handle,
         }
     }
     fprintf(stderr, "[GEMINI PLUGIN] HTTP Status Code Server Google: %d\n", (int)statusCode);
-    
-    if (statusCode != 200) {
-        fprintf(stderr, "[GEMINI PLUGIN] Dettaglio errore server remoto:\n%.*s\n", (int)len, (const char*)buf);
-        size_t copy_len = len < response_len - 1 ? len : response_len - 1;
-        memcpy(response_buf, buf, copy_len);
-        response_buf[copy_len] = '\0';
-        delete req; delete out; 
-        return B_ERROR; 
-    }
-    
-    bool extractedSuccessfully = false;
+    bool handled = false;
     BString rawResponse((const char*)buf, len);
-
     BMessage parsedJson;
-    if (BJson::Parse(rawResponse.String(), parsedJson) == B_OK) {
+    bool parseSuccess = (BJson::Parse(rawResponse.String(), parsedJson) == B_OK);
+
+    if (statusCode == 200 && parseSuccess) {
         BMessage candidates, candidateZero, content, parts, partZero;
         const char* extractedText = nullptr;
 
-        if (parsedJson.FindMessage("candidates", &candidates) == B_OK
-            && candidates.FindMessage("0", &candidateZero) == B_OK
-            && candidateZero.FindMessage("content", &content) == B_OK
-            && content.FindMessage("parts", &parts) == B_OK
-            && parts.FindMessage("0", &partZero) == B_OK
-            && partZero.FindString("text", &extractedText) == B_OK && extractedText != nullptr) {
-            
+        bool found = (parsedJson.FindMessage("candidates", &candidates) == B_OK)
+            && (candidates.FindMessage("0", &candidateZero) == B_OK || candidates.FindMessage("msg", 0, &candidateZero) == B_OK)
+            && (candidateZero.FindMessage("content", &content) == B_OK)
+            && (content.FindMessage("parts", &parts) == B_OK)
+            && (parts.FindMessage("0", &partZero) == B_OK || parts.FindMessage("msg", 0, &partZero) == B_OK)
+            && (partZero.FindString("text", &extractedText) == B_OK && extractedText != nullptr);
+
+        if (found) {
             size_t textLen = strlen(extractedText);
             size_t copy_len = textLen < response_len - 1 ? textLen : response_len - 1;
             memcpy(response_buf, extractedText, copy_len);
             response_buf[copy_len] = '\0';
-            extractedSuccessfully = true;
+            handled = true;
             fprintf(stderr, "[GEMINI PLUGIN] Testo estratto con successo dal JSON.\n");
-            
+
+            // Generazione auto-title se non presente
             if (!config->HasString("title") && prompt != nullptr) {
                 BString autoTitle(prompt);
                 autoTitle.Trim();
@@ -717,9 +641,21 @@ ai_plugin_generate_text_sync(ai_plugin_t handle,
                 config->AddString("title", autoTitle.String());
             }
         }
+    } else if (statusCode != 200 && parseSuccess) {
+        // Estrazione messaggio d'errore strutturato da Gemini
+        BMessage errorObj;
+        if (parsedJson.FindMessage("error", &errorObj) == B_OK) {
+            const char* errMsg = errorObj.FindString("message");
+            if (errMsg) {
+                snprintf(response_buf, response_len, "[Errore Gemini %" B_PRId32 "] %s", statusCode, errMsg);
+            } else {
+                snprintf(response_buf, response_len, "[Errore Gemini %" B_PRId32 "]", statusCode);
+            }
+            handled = true;
+        }
     }
 
-    if (!extractedSuccessfully) {
+    if (!handled) {
         fprintf(stderr, "[GEMINI PLUGIN] ATTENZIONE: Parsing strutturato fallito, restituzione testo raw.\n");
         size_t copy_len = len < response_len - 1 ? len : response_len - 1;
         memcpy(response_buf, buf, copy_len);
@@ -729,9 +665,9 @@ ai_plugin_generate_text_sync(ai_plugin_t handle,
     delete req; 
     delete out;
     fprintf(stderr, "[GEMINI PLUGIN] === FINE generate_text_sync ===\n\n");
-    return (rc == B_OK && statusCode == 200) ? B_OK : B_ERROR;
+    return B_OK;//(rc == B_OK && statusCode == 200) ? B_OK : B_ERROR;
 }
-
+/*
 void ConvertBMessageToGeminiToolsJson(const BMessage* toolsMsg, BString& outJson)
 {
     outJson = "[{\"functionDeclarations\":["; // Involucro Gemini
@@ -774,9 +710,70 @@ void ConvertBMessageToGeminiToolsJson(const BMessage* toolsMsg, BString& outJson
 
     outJson << "]}]"; // Chiusura involucro Gemini
     if (first) outJson.SetTo("");
+}*/
+
+void ConvertBMessageToGeminiToolsJson(const BMessage* toolsMsg, BString& outJson)
+{
+    outJson = "[{\"functionDeclarations\":[";
+
+    BMessage tool;
+    int32 i = 0;
+    bool first = true;
+
+    while (toolsMsg->FindMessage("tool", i, &tool) == B_OK) {
+        if (!first) outJson << ",";
+        first = false;
+
+        const char* name = tool.FindString("name");
+        const char* desc = tool.FindString("description");
+
+        BString escapedDesc(desc ? desc : "");
+        escapedDesc.ReplaceAll("\\", "\\\\");
+        escapedDesc.ReplaceAll("\"", "\\\"");
+        escapedDesc.ReplaceAll("\n", "\\n");
+        escapedDesc.ReplaceAll("\r", "\\r");
+        escapedDesc.ReplaceAll("\t", "\\t");
+
+        outJson << "{";
+        outJson << "\"name\":\"" << name << "\",";
+        outJson << "\"description\":\"" << escapedDesc << "\"";
+
+        BMessage params;
+        tool.FindMessage("parameters", &params);
+        if (!params.IsEmpty()) {
+            BMessage requiredMsg;
+            BString reqFieldStr = "";
+            const char* fStr = nullptr;
+            if (params.FindString("required", &fStr) == B_OK && fStr != nullptr) {
+                reqFieldStr = fStr;
+            } else if (params.FindMessage("required", &requiredMsg) == B_OK) {
+                const char* f = requiredMsg.FindString("0");
+                if (f) reqFieldStr = f;
+            }
+            params.RemoveName("required");
+
+            BString jsonParams;
+            SerializeBMessageToJson(&params, jsonParams);
+            
+            if (!reqFieldStr.IsEmpty()) {
+                int32 lastBrace = jsonParams.FindLast("}");
+                if (lastBrace != B_ERROR) {
+                    jsonParams.Truncate(lastBrace);
+                    jsonParams << ",\"required\":[\"" << reqFieldStr << "\"]}";
+                }
+            }
+
+            outJson << ",\"parameters\":" << jsonParams;
+        }
+
+        outJson << "}";
+        i++;
+    }
+
+    outJson << "]}]";
 }
 
-
+/*
 static status_t gemini_stream_thread_func(void* data)
 {
     fprintf(stderr, "[GEMINI STREAM WORKER] Thread avviato.\n");
@@ -1156,6 +1153,308 @@ thread_cleanup:
     fprintf(stderr, "[GEMINI STREAM WORKER] Pulizia e chiusura thread worker.\n");
     delete args; 
     return B_OK;
+}*/
+
+
+static status_t
+gemini_stream_thread_func(void* data)
+{
+    AsyncArgs* args = (AsyncArgs*)data;
+    if (!args) return B_BAD_VALUE;
+
+    BString baseUrl;
+    BString targetUrl;
+    BString tempUrl;
+
+    const char* ctxId = nullptr;
+    int32 sessionID = -1;
+    if (args->context_copy) {
+        args->context_copy->FindString("context_id", &ctxId);
+        args->context_copy->FindInt32("session_id", &sessionID);
+    }
+
+    if (args->base_url && args->base_url[0] != '\0') {
+        baseUrl = args->base_url;
+    } else if (args->context_copy && args->context_copy->FindString("base_url", &tempUrl) == B_OK && !tempUrl.IsEmpty()) {
+        baseUrl = tempUrl;
+    } else {
+        baseUrl = DEFAULT_GEMINI_BASE_URL;
+    }
+    if (baseUrl.EndsWith("/")) baseUrl.Truncate(baseUrl.Length() - 1);
+
+    const char* modelName = (args->model && args->model[0] != '\0') ? args->model : DEFAULT_GEMINI_MODEL;
+
+    BMessage replyTools;
+    bool mcpActive = false;
+
+    if (args->server_messenger.IsValid()) {
+        BMessage reqTools(MSG_MCP_GET_TOOLS);
+        if (ctxId) reqTools.AddString("context_id", ctxId);
+        
+        if (args->server_messenger.SendMessage(&reqTools, &replyTools) == B_OK) {
+            if (replyTools.HasMessage("tool", 0)) {
+                mcpActive = true;
+                fprintf(stderr, "[GEMINI STREAM WORKER] Strumenti MCP rilevati e attivi.\n");
+            }
+        }
+    }
+
+    if (!mcpActive) {
+        goto fallback_to_standard;
+    }
+
+    // === MODALITÀ MCP (Loop function calling sincrono) ===
+    {
+        targetUrl.SetToFormat("%s/v1beta/models/%s:generateContent?key=%s", 
+                              baseUrl.String(), modelName, args->api_key ? args->api_key : "");
+
+        bool executionLoop = true;
+        while (executionLoop) {
+            if (args->server_messenger.IsValid()) {
+                BMessage checkAbortMsg('CHAB');
+                if (ctxId) checkAbortMsg.AddString("context_id", ctxId);
+                
+                BMessage abortReply;
+                if (args->server_messenger.SendMessage(&checkAbortMsg, &abortReply) == B_OK) {
+                    int32 status = B_OK;
+                    if (abortReply.FindInt32("status", &status) == B_OK && status == B_CANCELED) {
+                        fprintf(stderr, "[GEMINI STREAM WORKER] Rilevata interruzione asincrona dall'utente.\n");
+                        if (args->notify_path) {
+                            BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_ERASE_FILE);
+                            if (streamFile.InitCheck() == B_OK) {
+                                streamFile.Write("<<STREAM_ABORT>>", 16);
+                            }
+                        }
+                        goto thread_cleanup;
+                    }
+                }
+            }
+
+            BString toolsJson;
+            ConvertBMessageToGeminiToolsJson(&replyTools, toolsJson);
+
+            BString payload;
+            BuildPayloadFromContext(args->context_copy, nullptr, payload, &toolsJson);
+
+            BMallocIO outNetworkData;
+            SyncListener syncListener;
+            BUrl bUrl(targetUrl.String(), true);
+            BUrlRequest* req = BUrlProtocolRoster::MakeRequest(bUrl, &outNetworkData, &syncListener, NULL);
+            if (!req) {
+                executionLoop = false;
+                break;
+            }
+
+            BHttpRequest* http = dynamic_cast<BHttpRequest*>(req);
+            if (http) {
+                http->SetMethod(B_HTTP_POST);
+                BHttpHeaders headers;
+                headers.AddHeader("Content-Type", "application/json");
+                http->SetHeaders(headers);
+
+                BMallocIO* input = new BMallocIO();
+                input->WriteExactly(payload.String(), payload.Length());
+                http->AdoptInputData(input, payload.Length());
+            }
+
+            thread_id netThread = req->Run();
+            if (netThread >= 0) {
+                status_t rc;
+                wait_for_thread(netThread, &rc);
+            }
+
+            uint32 httpStatusCode = 0;
+            if (http) {
+                const BHttpResult* result = dynamic_cast<const BHttpResult*>(&http->Result());
+                if (result != nullptr)
+                    httpStatusCode = result->StatusCode();
+            }
+
+            delete req;
+
+            BString rawResponse((const char*)outNetworkData.Buffer(), outNetworkData.BufferLength());
+            BMessage parsedJson;
+            bool parseOk = (BJson::Parse(rawResponse.String(), parsedJson) == B_OK);
+
+            if (httpStatusCode != 200 || !parseOk) {
+                fprintf(stderr, "[GEMINI STREAM WORKER] Errore di rete/HTTP (Status %" B_PRId32 ") o JSON malformato.\n", httpStatusCode);
+                DispatchGeminiError(args->server_messenger, httpStatusCode, sessionID, ctxId, rawResponse);
+                
+                // Segnala errore visibile anche sul notify_path prima di uscire
+                BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
+                if (streamFile.InitCheck() == B_OK) {
+                    BString guiError;
+                    guiError.SetToFormat("\n[Errore API Gemini (%d)]\n", httpStatusCode);
+                    streamFile.Write(guiError.String(), guiError.Length());
+                }
+
+                executionLoop = false;
+                break;
+            }
+
+            // Parsing della risposta del candidato Gemini
+            BMessage candidates, candZero, contentMsg, partsMsg, partZero;
+            bool hasCandidates = (parsedJson.FindMessage("candidates", &candidates) == B_OK)
+                && (candidates.FindMessage("0", &candZero) == B_OK || candidates.FindMessage("msg", 0, &candZero) == B_OK)
+                && (candZero.FindMessage("content", &contentMsg) == B_OK)
+                && (contentMsg.FindMessage("parts", &partsMsg) == B_OK)
+                && (partsMsg.FindMessage("0", &partZero) == B_OK || partsMsg.FindMessage("msg", 0, &partZero) == B_OK);
+
+            if (hasCandidates) {
+                BMessage functionCallObj;
+                const char* toolName = nullptr;
+                const char* textContent = nullptr;
+
+                if (partZero.FindMessage("functionCall", &functionCallObj) == B_OK 
+                    && functionCallObj.FindString("name", &toolName) == B_OK) {
+                    
+                    BMessage argsMsg;
+                    functionCallObj.FindMessage("args", &argsMsg);
+                    
+                    const char* thoughtSig = nullptr;
+                    partZero.FindString("thought_signature", &thoughtSig);
+
+                    BMessage reqExec(MSG_EXECUTE_TOOL);
+                    reqExec.AddString("name", toolName);
+                    reqExec.AddMessage("arguments", &argsMsg);
+                    if (ctxId) reqExec.AddString("context_id", ctxId);
+
+                    BMessage replyExec;
+                    BString toolResultBuf;
+
+                    if (args->server_messenger.SendMessage(&reqExec, &replyExec) == B_OK) {
+                        const char* resStr = replyExec.FindString("result");
+                        if (resStr && strlen(resStr) > 0) {
+                            BString testStr(resStr);
+                            testStr.Trim();
+                            if (testStr.StartsWith("{") || testStr.StartsWith("[")) {
+                                toolResultBuf = resStr;
+                            } else {
+                                toolResultBuf = "Operazione completata con successo.";
+                            }
+                        } else {
+                            toolResultBuf = "{\"error\":\"Il comando sul server ha restituito una risposta vuota.\"}";
+                        }
+                    } else {
+                        toolResultBuf = "{\"error\":\"Esecuzione dello strumento fallita via IPC BMessenger\"}";
+                    }
+
+                    AppendToolCallToContext(args->context_copy, toolName, &argsMsg, thoughtSig);
+                    AppendToolResponseToContext(args->context_copy, toolName, toolResultBuf.String());
+                } 
+                else if (partZero.FindString("text", &textContent) == B_OK && textContent != nullptr) {
+                    BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
+                    if (streamFile.InitCheck() == B_OK) {
+                        streamFile.Write(textContent, strlen(textContent));
+                        streamFile.Flush();
+                    }
+                    executionLoop = false;
+                }
+            } else {
+                fprintf(stderr, "[GEMINI STREAM WORKER] Risposta priva di candidati o non valida.\n");
+                DispatchGeminiError(args->server_messenger, httpStatusCode, sessionID, ctxId, rawResponse);
+                executionLoop = false;
+            }
+        }
+        goto thread_post_actions;
+    }
+
+// === MODALITÀ STANDARD (Streaming SSE/Chunked) ===
+fallback_to_standard:
+{
+    targetUrl.SetToFormat("%s/v1beta/models/%s:streamGenerateContent?alt=sse&key=%s", 
+                          baseUrl.String(), modelName, args->api_key ? args->api_key : "");
+
+    BString payload;
+    BuildPayloadFromContext(args->context_copy, nullptr, payload, nullptr);
+
+    StreamTarget streamTarget(args->notify_path);
+    CompletionListener listener(args->notify_path);
+    BUrl bUrl(targetUrl.String(), true);
+    BUrlRequest* req = BUrlProtocolRoster::MakeRequest(bUrl, &streamTarget, &listener, NULL);
+    if (req) {
+        BHttpRequest* http = dynamic_cast<BHttpRequest*>(req);
+        if (http) {
+            http->SetMethod(B_HTTP_POST);
+            BHttpHeaders headers;
+            headers.AddHeader("Content-Type", "application/json");
+            http->SetHeaders(headers);
+
+            BMemoryIO* input = new BMemoryIO(payload.String(), payload.Length());
+            http->AdoptInputData(input, payload.Length());
+        }
+
+        thread_id thread = req->Run();
+        if (thread >= 0) {
+            status_t rc;
+            wait_for_thread(thread, &rc);
+        }
+
+        if (http) {
+            const BHttpResult* result = dynamic_cast<const BHttpResult*>(&http->Result());
+            if (result != nullptr && result->StatusCode() != 200) {
+                fprintf(stderr, "[GEMINI STREAM ERRORE] Status HTTP non valido in streaming: %d\n", result->StatusCode());
+                DispatchGeminiError(args->server_messenger, result->StatusCode(), sessionID, ctxId, streamTarget.RawResponse());
+            }
+        }
+        delete req;
+    }
+}
+
+thread_post_actions:
+    if (args->context_copy != nullptr && !args->context_copy->HasString("title")) {
+        BMessage messagesMsg;
+        const char* firstPromptText = nullptr;
+
+        if (args->context_copy->FindMessage("messages", &messagesMsg) == B_OK) {
+            int32 msgCount = 0;
+            BMessage msgItem;
+            
+            while (messagesMsg.FindMessage("msg", msgCount, &msgItem) == B_OK || 
+                   messagesMsg.FindMessage(BString().SetToFormat("%d", msgCount).String(), &msgItem) == B_OK) {
+                
+                const char* role = msgItem.FindString("role");
+                const char* content = msgItem.FindString("content");
+                if (!content) msgItem.FindString("text", &content);
+                
+                if (role && strcmp(role, "user") == 0 && content && content[0] != '\0') {
+                    firstPromptText = content;
+                    break;
+                }
+                msgCount++;
+            }
+        }
+
+        if (firstPromptText && firstPromptText[0] != '\0') {
+            BString autoTitle(firstPromptText);
+            autoTitle.Trim();
+            if (autoTitle.Length() > 30) {
+                autoTitle.Truncate(30);
+                autoTitle << "...";
+            }
+            
+            args->context_copy->RemoveName("title");
+            args->context_copy->AddString("title", autoTitle.String());
+            
+            if (args->server_messenger.IsValid()) {
+                BMessage titleUpdateMsg('UTIT');
+                titleUpdateMsg.AddString("title", autoTitle.String());
+                args->server_messenger.SendMessage(&titleUpdateMsg);
+            }
+        }
+    }
+
+    {
+        BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
+        if (streamFile.InitCheck() == B_OK) {
+            BString endMarker = "<<STREAM_END>>";
+            streamFile.Write(endMarker.String(), endMarker.Length());
+        }
+    }
+
+thread_cleanup:
+    delete args;
+    return B_OK;
 }
 
 extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle, 
@@ -1167,12 +1466,12 @@ extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle,
     if (!config) return B_ERROR;
     
     const char* apiKey = nullptr;
-    const char* model = nullptr;
+    const char* modelName = nullptr;
     const char* notifyPath = nullptr;
     const char* configBaseUrl = nullptr;
     
     config->FindString("api_key", &apiKey);
-    config->FindString("model_name", &model);
+    config->FindString("model_name", &modelName);
     config->FindString("notify_path", &notifyPath);
     config->FindString("base_url", &configBaseUrl);
 
@@ -1186,21 +1485,23 @@ extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle,
     if (!args) return B_ERROR;
     
     // Inizializzazione pulita senza dupstr_or_null
-    args->api_key = apiKey ? strdup(apiKey) : nullptr;
-    args->model = strdup(model && model[0] ? model : "gemini-3.5-flash");
-    args->notify_path = notifyPath ? strdup(notifyPath) : nullptr;
+    args->api_key = dupstr_or_null(apiKey);
+    args->model = dupstr_or_null(modelName && modelName[0] ? modelName : DEFAULT_GEMINI_MODEL);
+    args->notify_path = dupstr_or_null(notifyPath);
     if (configBaseUrl && configBaseUrl[0] != '\0') {
         args->base_url = dupstr_or_null(configBaseUrl);
     } else {
-    	BString url;
-        url.SetToFormat("https://generativelanguage.googleapis.com/v1beta/models/%s:streamGenerateContent", args->model);
-        args->base_url = strdup(url.String());
+    	args->base_url = strdup(DEFAULT_GEMINI_BASE_URL);
     }
 
     args->context_copy = new (std::nothrow) BMessage(*config);
     if (!args->context_copy) {
         delete args;
         return B_NO_MEMORY;
+    }
+    
+    if (prompt && prompt[0] != '\0' && !args->context_copy->HasString("prompt")) {
+        args->context_copy->AddString("prompt", prompt);
     }
     
     // === Sincronizzazione IPC via BMessenger ===
@@ -1237,25 +1538,40 @@ extern "C" status_t ai_plugin_list_models(const BMessage* config, char* out_buf,
 {
     const char* defaultFallback = "[\"gemini-3.5-flash\"]";
     
+    if (!out_buf || out_len == 0) return B_BAD_VALUE;
+    
+    if (!config) {
+        if (out_len > strlen(defaultFallback)) {
+            strcpy(out_buf, defaultFallback);
+            return B_OK;
+        }
+        return B_ERROR;
+    }
+    
+    BMessenger serverMessenger;
+    config->FindMessenger("server_messenger", &serverMessenger);
+    
+    int32 sessionID = -1;
+    config->FindInt32("session_id", &sessionID);
+
+    const char* ctxId = nullptr;
+    config->FindString("context_id", &ctxId);
+
+    
     const char* apiKey = nullptr;
-    const char* baseUrl = nullptr;
-    if (config) {
-        config->FindString("api_key", &apiKey);
-        config->FindString("base_url", &baseUrl);
+    config->FindString("api_key", &apiKey);
+    
+    BString baseUrl;
+    if (config->FindString("base_url", &baseUrl) != B_OK || baseUrl.IsEmpty()) {
+        baseUrl = DEFAULT_GEMINI_BASE_URL;
     }
+    if (baseUrl.EndsWith("/")) baseUrl.Truncate(baseUrl.Length() - 1);
 
-    if (!apiKey || apiKey[0] == '\0') {
-        if (strlen(defaultFallback) + 1 > out_len) return B_ERROR;
-        strcpy(out_buf, defaultFallback);
-        return B_OK;
-    }
-
-    BString url = (baseUrl && baseUrl[0] != '\0') ? baseUrl : "https://generativelanguage.googleapis.com/v1beta";
-    if (!url.EndsWith("/")) url.Append("/", 1);
-    url.Append("models");
-    url << "?key=" << apiKey;
+    BString url;
+    url.SetToFormat("%s/v1beta/models?key=%s", baseUrl.String(), apiKey ? apiKey : "");
 
     BMallocIO* out = new BMallocIO();
+    if (!out) return B_NO_MEMORY;
     SyncListener listener;
     BUrl bUrl(url.String(), true);
 
@@ -1287,10 +1603,43 @@ extern "C" status_t ai_plugin_list_models(const BMessage* config, char* out_buf,
     }
 
     if (rc != B_OK || out->BufferLength() == 0 || statusCode != 200) {
-        delete req; delete out;
-        const char* fallback = "[\"gemini-3.5-flash\"]";
-        if (strlen(fallback) + 1 > out_len) return B_ERROR;
-        strcpy(out_buf, fallback);
+        fprintf(stderr, "[GEMINI LIST MODELS ERROR] Status HTTP: %" B_PRId32 ", RC: %" B_PRId32 "\n", statusCode, rc);
+
+        if (serverMessenger.IsValid()) {
+            BMessage errorReport(MSG_MOD_ERROR);
+            errorReport.AddString("plugin_name", "Google Gemini");
+            errorReport.AddInt32("http_code", statusCode);
+
+            if (sessionID != -1) errorReport.AddInt32("session_id", sessionID);
+            if (ctxId) errorReport.AddString("session_id", ctxId);
+
+            BString rawError((const char*)out->Buffer(), out->BufferLength());
+            BMessage parsedJson;
+            BMessage errorObj;
+            if (rawError.Length() > 0 && BJson::Parse(rawError.String(), parsedJson) == B_OK
+                && parsedJson.FindMessage("error", &errorObj) == B_OK) {
+                const char* errMsg = errorObj.FindString("message");
+                if (errMsg) {
+                    errorReport.AddString("error_message", errMsg);
+                } else {
+                    errorReport.AddString("error_message", rawError.String());
+                }
+            } else {
+                if (statusCode != 0) {
+                    BString genericErr;
+                    genericErr.SetToFormat("Impossibile recuperare i modelli Gemini. Errore HTTP %" B_PRId32, statusCode);
+                    errorReport.AddString("error_message", genericErr.String());
+                } else {
+                    errorReport.AddString("error_message", "Errore di connessione durante il recupero dei modelli Gemini.");
+                }
+            }
+            serverMessenger.SendMessage(&errorReport);
+        }
+        delete req;
+        delete out;
+
+        if (strlen(defaultFallback) + 1 > out_len) return B_ERROR;
+        strcpy(out_buf, defaultFallback);
         return B_OK;
     }
     
@@ -1301,10 +1650,10 @@ extern "C" status_t ai_plugin_list_models(const BMessage* config, char* out_buf,
 
     while (true) {
         int32 matchPos = jsonResponse.FindFirst("\"name\": \"models/", currentPos);
+        if (matchPos == B_ERROR) matchPos = jsonResponse.FindFirst("\"name\":\"models/", currentPos);
         if (matchPos == B_ERROR) break;
 
-        matchPos += 16; 
-        
+        matchPos = jsonResponse.FindFirst("models/", matchPos) + 7;
         int32 endPos = jsonResponse.FindFirst("\"", matchPos);
         if (endPos == B_ERROR) break;
 
@@ -1312,22 +1661,19 @@ extern "C" status_t ai_plugin_list_models(const BMessage* config, char* out_buf,
         jsonResponse.CopyInto(modelName, matchPos, endPos - matchPos);
 
         bool isEmbedding = (modelName.FindFirst("embedding") != B_ERROR);
-        bool isAqa = (modelName.FindFirst("aqa") != B_ERROR);
+        bool isAQA = (modelName.FindFirst("aqa") != B_ERROR);
 
-        if (!isEmbedding && !isAqa) {
-            if (!first) {
-                cleanJson.Append(", ");
-            }
+        if (!isEmbedding && !isAQA) {
+            if (!first) cleanJson.Append(", ");
             cleanJson << "\"" << modelName << "\"";
             first = false;
         }
-
         currentPos = endPos + 1;
     }
     cleanJson.Append("]");
 
     if (cleanJson == "[]") {
-        cleanJson = "[\"gemini-3.5-flash\"]";
+        cleanJson = defaultFallback;
     }
 
     size_t jsonLength = (size_t)cleanJson.Length();
