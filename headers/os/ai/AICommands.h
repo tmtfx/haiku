@@ -32,6 +32,7 @@ static const uint32 MSG_GET_ALL_SESSIONS    = 'GALS';
 static const uint32 MSG_AI_ACK				= 'ACK_'; // Presa in carico del server
 static const uint32 MSG_AI_RESPONSE			= 'ARES'; // Token o risposta asincrona arrivata
 static const uint32 MSG_AI_ERROR			= 'ERS '; // Errore interno del server o del plugin
+static const uint32 MSG_AI_TITLE_CHANGED	= 'TITC'; // Informa il client (asincrono) del cambio titolo
 // Contesto/Memoria messaggi
 static const uint32 MSG_SWITCH_CONTEXT		= 'SCTX'; // Cambio contesto
 // Remote context
