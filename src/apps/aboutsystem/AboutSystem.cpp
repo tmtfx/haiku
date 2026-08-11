@@ -1661,6 +1661,44 @@ AboutView::_CreateCreditsView()
 	BScrollView* creditsScroller = new BScrollView("creditsScroller",
 		fCreditsView, B_WILL_DRAW | B_FRAME_EVENTS, false, true,
 		B_PLAIN_BORDER);
+		
+	// PIRATI DEL FRICO COPYRIGHT
+	BFont fonta(be_bold_font);
+	fonta.SetSize(fonta.Size() + 4);
+
+	fCreditsView->SetFontAndColor(&fonta, B_FONT_ALL, &fHaikuGreenColor);
+	fCreditsView->Insert("Pirati Del Frico\n");
+	
+	time_t time = ::time(NULL);
+	struct tm* tm = localtime(&time);
+	int32 year = tm->tm_year + 1900;
+	if (year < 2008)
+		year = 2008;
+	BString text;
+	
+	text.SetToFormat(
+		B_TRANSLATE(COPYRIGHT_STRING "2026-%" B_PRId32 " The Pirati Del Frico project. "),
+		year);
+	
+	fCreditsView->SetFontAndColor(be_plain_font, B_FONT_ALL, &fTextColor);
+	fCreditsView->Insert(text.String());
+	
+	fCreditsView->Insert(B_TRANSLATE("Pirati Del Frico is a buccaneer project "
+		" based on Haiku, it is a private proof of concept and not an official "
+		" Haiku build. Please visit https://www.haiku-os.org/ for information "
+		" about the official Haiku project.\n\n "
+		" Here the pirates added some features such as:\n "
+		" · Hardware cursor (for some cards)\n "
+		" · AI/LLM subsystem (server, preflet, plugins, kit)\n "
+		" · Keystore with (strongly)encrypted passwords\n "
+		" · Master password set at Install time or later, you can even set no\n "
+		"   password, your password will be obscured (but not secured) -> no more\n "
+		"   password stored in plain text\n "
+		" · New Deskbar menu, you can still access to old menu by pressing OPTION\n "
+		"   key and clicking on the cannon\n "
+		" · Some easter eggs, some nice apps along with an AI assistant crab\n "
+		"   and maybe somethig more...\n " 
+		"\n\n"));
 
 	// Haiku copyright
 	BFont font(be_bold_font);
@@ -1669,12 +1707,7 @@ AboutView::_CreateCreditsView()
 	fCreditsView->SetFontAndColor(&font, B_FONT_ALL, &fHaikuGreenColor);
 	fCreditsView->Insert("Haiku\n");
 
-	time_t time = ::time(NULL);
-	struct tm* tm = localtime(&time);
-	int32 year = tm->tm_year + 1900;
-	if (year < 2008)
-		year = 2008;
-	BString text;
+	
 	text.SetToFormat(
 		B_TRANSLATE(COPYRIGHT_STRING "2001-%" B_PRId32 " The Haiku project. "),
 		year);
