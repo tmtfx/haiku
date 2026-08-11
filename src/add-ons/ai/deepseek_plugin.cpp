@@ -1,5 +1,5 @@
 // deepseek_plugin.cpp
-// Plugin DeepSeek per Haiku - implementazione OpenAI-compatible con streaming SSE.
+// Plugin DeepSeek per Haiku - implementazione OpenAI-compatible unificata con streaming SSE e gestione errori.
 
 #include <os/ai/AIPlugin.h>
 #include <os/ai/AINetworkPlugin.h>
@@ -12,7 +12,6 @@
 #include <UrlProtocolRoster.h>
 #include <UrlRequest.h>
 #include <UrlSynchronousRequest.h>
-//#include <UrlProtocolListener.h>
 #include <DataIO.h>
 #include <HttpHeaders.h>
 #include <HttpRequest.h>
@@ -29,77 +28,6 @@ using namespace BPrivate::Network;
 #define DEFAULT_DEEPSEEK_MODEL "deepseek-chat"
 #define DEEPSEEK_USER_AGENT    "HaikuAIEngine/1.0"
 
-class StreamTarget : public BDataIO {
-public:
-    StreamTarget(const char* notifyPath)
-    {
-        fFile.SetTo(notifyPath, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
-    }
-
-    virtual ssize_t Write(const void* buffer, size_t size) override
-    {
-        if (fFile.InitCheck() != B_OK || size == 0)
-            return size;
-
-        fBuffer.Append((const char*)buffer, size);
-        int32 processedPos = 0;
-
-        while (true) {
-            int32 nextNewline = fBuffer.FindFirst("\n", processedPos);
-            if (nextNewline == B_ERROR)
-                break;
-
-            BString line;
-            fBuffer.CopyInto(line, processedPos, nextNewline - processedPos);
-            line.Trim();
-            processedPos = nextNewline + 1;
-
-            if (line.IsEmpty())
-                continue;
-            if (line == "data: [DONE]")
-                break;
-
-            if (line.StartsWith("data: ")) {
-                line.Remove(0, 6);
-
-                int32 contentPos = line.FindFirst("\"content\":\"");
-                int32 advance = 11;
-                if (contentPos == B_ERROR) {
-                    contentPos = line.FindFirst("\"content\": \"");
-                    advance = 12;
-                }
-
-                if (contentPos != B_ERROR) {
-                    contentPos += advance;
-                    int32 endContent = line.FindFirst("\"", contentPos);
-                    while (endContent != B_ERROR && line.ByteAt(endContent - 1) == '\\')
-                        endContent = line.FindFirst("\"", endContent + 1);
-
-                    if (endContent != B_ERROR) {
-                        BString token;
-                        line.CopyInto(token, contentPos, endContent - contentPos);
-                        token.ReplaceAll("\\n", "\n");
-                        token.ReplaceAll("\\t", "\t");
-                        token.ReplaceAll("\\\"", "\"");
-                        token.ReplaceAll("\\\\", "\\");
-                        fFile.Write(token.String(), token.Length());
-                    }
-                }
-            }
-        }
-
-        if (processedPos > 0)
-            fBuffer.Remove(0, processedPos);
-
-        return size;
-    }
-
-private:
-    BFile   fFile;
-    BString fBuffer;
-};
-
-
 static char* dupstr_or_null(const char* s)
 {
     if (!s)
@@ -111,7 +39,6 @@ static char* dupstr_or_null(const char* s)
     return p;
 }
 
-
 static BString EscapeStringForJson(const char* input) {
     if (!input) return "";
     BString escaped;
@@ -120,14 +47,39 @@ static BString EscapeStringForJson(const char* input) {
         switch (*p) {
             case '\\': escaped << "\\\\"; break;
             case '"':  escaped << "\\\""; break;
-            case '\n': escaped << "\\n"; break;
-            case '\r': escaped << "\\r"; break;
-            case '\t': escaped << "\\t"; break;
-            default:   escaped << *p; break;
+            case '\b': escaped << "\\b";  break;
+            case '\f': escaped << "\\f";  break;
+            case '\n': escaped << "\\n";  break;
+            case '\r': escaped << "\\r";  break;
+            case '\t': escaped << "\\t";  break;
+            default:
+                if ((unsigned char)*p < 0x20) {
+                    char buf[7];
+                    snprintf(buf, sizeof(buf), "\\u%04x", (unsigned char)*p);
+                    escaped << buf;
+                } else {
+                    escaped << *p;
+                }
+                break;
         }
         p++;
     }
     return escaped;
+}
+
+static status_t CopyToBuffer(const char* text, char* out, size_t outLen)
+{
+    if (out == NULL || outLen == 0)
+        return B_BAD_VALUE;
+
+    if (text == NULL)
+        text = "";
+
+    size_t length = strlen(text);
+    size_t copyLength = length < outLen - 1 ? length : outLen - 1;
+    memcpy(out, text, copyLength);
+    out[copyLength] = '\0';
+    return B_OK;
 }
 
 void SerializeBMessageToJson(const BMessage* msg, BString& outJson) {
@@ -158,12 +110,7 @@ void SerializeBMessageToJson(const BMessage* msg, BString& outJson) {
         } else if (field_code == B_STRING_TYPE || field_code == B_CHAR_TYPE) {
             const char* strVal = msg->FindString(field_name);
             if (strVal) {
-                BString escaped(strVal);
-                escaped.ReplaceAll("\\", "\\\\");
-                escaped.ReplaceAll("\"", "\\\"");
-                escaped.ReplaceAll("\n", "\\n");
-                escaped.ReplaceAll("\r", "\\r");
-                escaped.ReplaceAll("\t", "\\t");
+                BString escaped = EscapeStringForJson(strVal);
                 outJson << "\"" << escaped << "\"";
             } else {
                 outJson << "\"\"";
@@ -197,12 +144,7 @@ void ConvertBMessageToOpenAIToolsJson(const BMessage* toolsMsg, BString& outJson
         const char* name = tool.FindString("name");
         const char* desc = tool.FindString("description");
 
-        BString escapedDesc(desc ? desc : "");
-        escapedDesc.ReplaceAll("\\", "\\\\");
-        escapedDesc.ReplaceAll("\"", "\\\"");
-        escapedDesc.ReplaceAll("\n", "\\n");
-        escapedDesc.ReplaceAll("\r", "\\r");
-        escapedDesc.ReplaceAll("\t", "\\t");
+        BString escapedDesc = EscapeStringForJson(desc);
 
         outJson << "{";
         outJson << "\"type\":\"function\",";
@@ -235,9 +177,6 @@ void ConvertBMessageToOpenAIToolsJson(const BMessage* toolsMsg, BString& outJson
                 }
             }
 
-            fprintf(stderr, "[DEBUG DeepSeek TOOLS] Tool '%s' - jsonParams finale generato:\n%s\n", 
-                    name, jsonParams.String());
-
             outJson << ",\"parameters\":" << jsonParams;
         } else {
             outJson << ",\"parameters\":{\"type\":\"object\",\"properties\":{}}";
@@ -249,7 +188,6 @@ void ConvertBMessageToOpenAIToolsJson(const BMessage* toolsMsg, BString& outJson
     }
 
     outJson << "]";
-    fprintf(stderr, "[DEBUG DeepSeek TOOLS] PAYLOAD STRUMENTI COMPLETO INVIATO ALL'API:\n%s\n", outJson.String());
 }
 
 void AppendToolCallToContext(BMessage* context, const char* name, const BMessage* argsMsg, const char* toolCallId) {
@@ -296,19 +234,17 @@ void AppendToolResponseToContext(BMessage* context, const char* name, const char
     context->AddMessage("messages", &messagesMsg);
 }
 
-/*
 static void
 BuildPayloadFromContext(const BMessage* config, const char* currentPrompt,
     BString& outPayload, bool stream)
 {
-    outPayload.SetTo("{\n");
-
     const char* model = nullptr;
     if (config)
         config->FindString("model_name", &model);
     if (!model || model[0] == '\0')
         model = DEFAULT_DEEPSEEK_MODEL;
 
+    outPayload.SetTo("{\n");
     BString modelLine;
     modelLine.SetToFormat("  \"model\": \"%s\",\n", model);
     outPayload << modelLine;
@@ -316,94 +252,31 @@ BuildPayloadFromContext(const BMessage* config, const char* currentPrompt,
     if (stream)
         outPayload.Append("  \"stream\": true,\n");
 
-    outPayload.Append("  \"messages\": [");
-    bool first = true;
-
-    BMessage messagesMsg;
-    if (config && config->FindMessage("messages", &messagesMsg) == B_OK) {
-        BMessage turn;
-        for (int32 i = 0; messagesMsg.FindMessage("msg", i, &turn) == B_OK; i++) {
-            const char* role = nullptr;
-            const char* content = nullptr;
-            turn.FindString("role", &role);
-            if (turn.FindString("content", &content) != B_OK)
-                turn.FindString("text", &content);
-
-            if (!role || !content || content[0] == '\0')
-                continue;
-
-            BString mappedRole = strcmp(role, "model") == 0 ? "assistant" : role;
-            BString escapedContent(content);
-            escapedContent.ReplaceAll("\\", "\\\\");
-            escapedContent.ReplaceAll("\"", "\\\"");
-            escapedContent.ReplaceAll("\n", "\\n");
-            escapedContent.ReplaceAll("\r", "\\r");
-            escapedContent.ReplaceAll("\t", "\\t");
-
-            if (!first)
-                outPayload.Append(",");
-
-            BString objectStr;
-            objectStr.SetToFormat("{\"role\":\"%s\",\"content\":\"%s\"}",
-                mappedRole.String(), escapedContent.String());
-            outPayload.Append(objectStr);
-            first = false;
+    // Supporto System Prompt unificato
+    BString systemPrompt;
+    if (config) {
+        const char* sys = nullptr;
+        if (config->FindString("system_prompt", &sys) == B_OK && sys != nullptr) {
+            systemPrompt = sys;
+        } else if (config->FindString("instructions", &sys) == B_OK && sys != nullptr) {
+            systemPrompt = sys;
         }
     }
-
-    if (first && currentPrompt && currentPrompt[0] != '\0') {
-        BString escapedPrompt(currentPrompt);
-        escapedPrompt.ReplaceAll("\\", "\\\\");
-        escapedPrompt.ReplaceAll("\"", "\\\"");
-        escapedPrompt.ReplaceAll("\n", "\\n");
-        escapedPrompt.ReplaceAll("\r", "\\r");
-        escapedPrompt.ReplaceAll("\t", "\\t");
-
-        BString objectStr;
-        objectStr.SetToFormat("{\"role\":\"user\",\"content\":\"%s\"}",
-            escapedPrompt.String());
-        outPayload.Append(objectStr);
+    
+    if (systemPrompt.Length() > 0) {
+        outPayload << "  \"system\": \"" << EscapeStringForJson(systemPrompt.String()) << "\",\n";
     }
-
-    outPayload.Append("]\n}");
-}
-*/
-
-static void
-BuildPayloadFromContext(const BMessage* config, const char* currentPrompt,
-    BString& outPayload, bool stream)
-{
-    const char* model = nullptr;
-    if (config)
-        config->FindString("model_name", &model);
-    if (!model || model[0] == '\0')
-        model = DEFAULT_DEEPSEEK_MODEL;
-
-    outPayload.SetTo("{\n");
-    BString modelLine;
-    modelLine.SetToFormat("  \"model\": \"%s\",\n", model);
-    outPayload << modelLine;
-
-    if (stream)
-        outPayload.Append("  \"stream\": true,\n");
 
     outPayload.Append("  \"messages\": [\n");
     bool first = true;
-    const char* systemPrompt = nullptr;
-    if (config) {
-        config->FindString("system_prompt", &systemPrompt);
-    }
-    if (systemPrompt && systemPrompt[0] != '\0') {
-        BString escapedSystem = EscapeStringForJson(systemPrompt);
-        outPayload << "    {\"role\": \"system\", \"content\": \"" << escapedSystem << "\"\}";
-        first = false;
-    }
 
     BMessage messagesMsg;
     if (config && config->FindMessage("messages", &messagesMsg) == B_OK) {
         int32 i = 0;
         BMessage msgTurn;
-        while (messagesMsg.FindMessage("msg", i++, &msgTurn) == B_OK) {
+        while (messagesMsg.FindMessage("msg", i++, &msgTurn) == B_OK
+            || messagesMsg.FindMessage(BString().SetToFormat("%ld", (long)(i-1)).String(), &msgTurn) == B_OK) {
+            
             const char* type = nullptr;
             msgTurn.FindString("type", &type);
 
@@ -420,9 +293,6 @@ BuildPayloadFromContext(const BMessage* config, const char* currentPrompt,
                     const char* argsStr = msgTurn.FindString("args");
                     cleanArgs = (argsStr && argsStr[0] != '\0' ? argsStr : "{}");
                 }
-                
-                cleanArgs.ReplaceAll("\n", "\\n");
-                cleanArgs.ReplaceAll("\r", "\\r");
 
                 if (!first) outPayload.Append(",\n");
                 outPayload << "    {\n"
@@ -473,32 +343,142 @@ BuildPayloadFromContext(const BMessage* config, const char* currentPrompt,
                     msgTurn.FindString("text", &content);
                 }
 
-                if (role && content) {
-                    if (!first) outPayload.Append(",\n");
-                    
-                    BString mappedRole = strcmp(role, "model") == 0 ? "assistant" : role;
-                    BString escapedContent = EscapeStringForJson(content);
-                    
-                    BString objectStr;
-                    objectStr.SetToFormat("    {\"role\": \"%s\", \"content\": \"%s\"}",
-                        mappedRole.String(), escapedContent.String());
-                    outPayload.Append(objectStr);
-                    first = false;
+                if (role && content && content[0] != '\0') {
+                    BString roleStr(role);
+                    if (roleStr == "system") continue; // Gestito in alto
+                    if (roleStr == "model") roleStr = "assistant";
+
+                    if (roleStr == "user" || roleStr == "assistant") {
+                        if (!first) outPayload.Append(",\n");
+                        BString escapedContent = EscapeStringForJson(content);
+                        outPayload << "    {\"role\": \"" << roleStr << "\", \"content\": \"" << escapedContent << "\"}";
+                        first = false;
+                    }
                 }
             }
         }
     }
 
-    if (first && currentPrompt && currentPrompt[0] != '\0') {
-        BString escapedPrompt = EscapeStringForJson(currentPrompt);
-        BString objectStr;
-        objectStr.SetToFormat("    {\"role\": \"user\", \"content\": \"%s\"}",
-            escapedPrompt.String());
-        outPayload.Append(objectStr);
+    if (currentPrompt && currentPrompt[0] != '\0') {
+        bool alreadyAppended = false;
+        if (config) {
+            BMessage historyCheck;
+            if (config->FindMessage("messages", &historyCheck) == B_OK) {
+                int32 lastIdx = 0;
+                BMessage lastTurn;
+                while (historyCheck.FindMessage("msg", lastIdx, &lastTurn) == B_OK
+                    || historyCheck.FindMessage(BString().SetToFormat("%ld", (long)lastIdx).String(), &lastTurn) == B_OK) {
+                    lastIdx++;
+                }
+                if (lastIdx > 0) {
+                    BMessage lastItem;
+                    if (historyCheck.FindMessage("msg", lastIdx - 1, &lastItem) != B_OK) {
+                        historyCheck.FindMessage(BString().SetToFormat("%ld", (long)(lastIdx - 1)).String(), &lastItem);
+                    }
+                    const char* lRole = lastItem.FindString("role");
+                    const char* lCont = lastItem.FindString("content");
+                    if (!lCont) lastItem.FindString("text", &lCont);
+
+                    if (lRole && strcmp(lRole, "user") == 0 && lCont && strcmp(lCont, currentPrompt) == 0) {
+                        alreadyAppended = true;
+                    }
+                }
+            }
+        }
+
+        if (!alreadyAppended) {
+            if (!first) outPayload.Append(",\n");
+            BString escapedPrompt = EscapeStringForJson(currentPrompt);
+            outPayload << "    {\"role\": \"user\", \"content\": \"" << escapedPrompt << "\"}";
+            first = false;
+        }
+    }
+
+    if (first) {
+        outPayload << "    {\"role\": \"user\", \"content\": \"Hello\"}";
     }
 
     outPayload.Append("\n  ]\n}");
 }
+
+class DeepSeekStreamTarget : public BDataIO {
+public:
+    DeepSeekStreamTarget(const char* notifyPath)
+    {
+        fFile.SetTo(notifyPath, B_WRITE_ONLY | B_CREATE_FILE | B_ERASE_FILE);
+        fRawResponse.SetTo("");
+    }
+    
+    const BString& RawResponse() const { return fRawResponse; }
+
+    virtual ssize_t Write(const void* buffer, size_t size) override
+    {
+        if (size == 0)
+            return 0;
+
+        fRawResponse.Append((const char*)buffer, size);
+
+        if (fFile.InitCheck() != B_OK)
+            return (ssize_t)size;
+
+        fBuffer.Append((const char*)buffer, size);
+        int32 processedPos = 0;
+
+        while (true) {
+            int32 nextNewline = fBuffer.FindFirst("\n", processedPos);
+            if (nextNewline == B_ERROR)
+                break;
+
+            BString line;
+            fBuffer.CopyInto(line, processedPos, nextNewline - processedPos);
+            line.Trim();
+            processedPos = nextNewline + 1;
+
+            if (line.IsEmpty() || line.StartsWith("event:"))
+                continue;
+            if (line == "data: [DONE]")
+                continue;
+
+            if (line.StartsWith("data: ")) {
+                line.Remove(0, 6);
+                
+                int32 contentPos = line.FindFirst("\"content\":\"");
+                int32 advance = 11;
+                if (contentPos == B_ERROR) {
+                    contentPos = line.FindFirst("\"content\": \"");
+                    advance = 12;
+                }
+
+                if (contentPos != B_ERROR) {
+                    contentPos += advance;
+                    int32 endContent = line.FindFirst("\"", contentPos);
+                    while (endContent != B_ERROR && line.ByteAt(endContent - 1) == '\\')
+                        endContent = line.FindFirst("\"", endContent + 1);
+
+                    if (endContent != B_ERROR) {
+                        BString token;
+                        line.CopyInto(token, contentPos, endContent - contentPos);
+                        token.ReplaceAll("\\n", "\n");
+                        token.ReplaceAll("\\t", "\t");
+                        token.ReplaceAll("\\\"", "\"");
+                        token.ReplaceAll("\\\\", "\\");
+                        fFile.Write(token.String(), token.Length());
+                    }
+                }
+            }
+        }
+
+        if (processedPos > 0)
+            fBuffer.Remove(0, processedPos);
+
+        return (ssize_t)size;
+    }
+
+private:
+    BFile   fFile;
+    BString fBuffer;
+    BString fRawResponse;
+};
 
 extern "C" ai_plugin_t ai_plugin_init(void)
 {
@@ -511,15 +491,9 @@ extern "C" void ai_plugin_free(ai_plugin_t handle)
     AIPluginHandle* deepseek = (AIPluginHandle*)handle;
     if (!deepseek)
         return;
-    free(deepseek);
+    delete deepseek;
 }
 
-/*
-extern "C" uint32 ai_plugin_get_capabilities(void)
-{
-    return AI_CAP_STREAMING;
-}
-*/
 extern "C" uint32 ai_plugin_get_capabilities(void)
 {
     return AI_CAP_STREAMING | AI_CAP_MCP;
@@ -529,41 +503,39 @@ extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
     const char* prompt, char* response_buf, size_t response_len,
     BMessage* contextMsg)
 {
-    fprintf(stderr, "[DEEPSEEK PLUGIN] generate_text_sync start\n");
-
+    (void)handle;
     if (!response_buf || response_len == 0)
         return B_BAD_VALUE;
     response_buf[0] = '\0';
 
-    if (!contextMsg) {
-        fprintf(stderr, "[DEEPSEEK PLUGIN] missing context message\n");
-        snprintf(response_buf, response_len, "[deepseek_plugin] error: missing context");
-        return B_BAD_VALUE;
-    }
-
     const char* apiKey = nullptr;
-    contextMsg->FindString("api_key", &apiKey);
+    int32 sessionID = -1;
+    const char* ctxId = nullptr;
+    BMessenger serverMessenger;
+
+    if (contextMsg != NULL) {
+        contextMsg->FindString("api_key", &apiKey);
+        contextMsg->FindInt32("session_id", &sessionID);
+        contextMsg->FindString("context_id", &ctxId);
+        contextMsg->FindMessenger("server_messenger", &serverMessenger);
+    }
+
     if (!apiKey || apiKey[0] == '\0') {
-        fprintf(stderr, "[DEEPSEEK PLUGIN] missing api_key\n");
-        snprintf(response_buf, response_len, "[deepseek_plugin] error: no API key provided");
+        CopyToBuffer("[deepseek_plugin] error: no API key provided", response_buf, response_len);
+        DispatchError(serverMessenger, 401, sessionID, ctxId, "API key assente");
         return B_BAD_VALUE;
     }
 
-    //AIPluginHandle* deepseek = (AIPluginHandle*)handle;
-	const char* baseUrlRaw = nullptr;
-    contextMsg->FindString("base_url", &baseUrlRaw);
+    const char* baseUrlRaw = nullptr;
+    if (contextMsg)
+        contextMsg->FindString("base_url", &baseUrlRaw);
     if (!baseUrlRaw || baseUrlRaw[0] == '\0') {
         baseUrlRaw = DEFAULT_DEEPSEEK_URL;
     }
-    BString url;
-	if (baseUrlRaw && baseUrlRaw[0] != '\0') {
-        url = baseUrlRaw;
-        if (url.EndsWith("/")) url.Remove(url.Length() - 1, 1);
-        if (!url.EndsWith("/v1/chat/completions")) url << "/v1/chat/completions";
-    } else {
-        url = "https://api.deepseek.com/v1/chat/completions";
-	}
-	
+
+    BString url = baseUrlRaw;
+    if (url.EndsWith("/")) url.Remove(url.Length() - 1, 1);
+    if (!url.EndsWith("/v1/chat/completions")) url << "/v1/chat/completions";
 
     BString payload;
     BuildPayloadFromContext(contextMsg, prompt, payload, false);
@@ -573,18 +545,15 @@ extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
     BUrl bUrl(url.String(), true);
     BUrlRequest* req = BUrlProtocolRoster::MakeRequest(bUrl, out, &listener, NULL);
     if (!req) {
-        fprintf(stderr, "[DEEPSEEK PLUGIN] request creation failed\n");
         delete out;
+        CopyToBuffer("{\"error\":\"request failed\"}", response_buf, response_len);
+        DispatchError(serverMessenger, 500, sessionID, ctxId, "Richiesta di rete fallita");
         return B_ERROR;
     }
 
     BHttpRequest* http = dynamic_cast<BHttpRequest*>(req);
     if (http) {
         http->SetMethod(B_HTTP_POST);
-        BMallocIO* in = new BMallocIO();
-        in->WriteExactly(payload.String(), payload.Length());
-        http->AdoptInputData(in, payload.Length());
-
         BHttpHeaders headers;
         headers.AddHeader("Content-Type", "application/json");
         headers.AddHeader("User-Agent", DEEPSEEK_USER_AGENT);
@@ -592,6 +561,10 @@ extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
         authHeader.SetToFormat("Bearer %s", apiKey);
         headers.AddHeader("Authorization", authHeader.String());
         http->SetHeaders(headers);
+
+        BMallocIO* in = new BMallocIO();
+        in->WriteExactly(payload.String(), payload.Length());
+        http->AdoptInputData(in, payload.Length());
     }
 
     thread_id thread = req->Run();
@@ -610,105 +583,89 @@ extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
 
     const void* buf = out->Buffer();
     size_t len = out->BufferLength();
-    if (rc != B_OK || !buf || len == 0 || statusCode != 200) {
-        fprintf(stderr, "[DEEPSEEK PLUGIN] request failed rc=%ld status=%ld len=%lu\n",
-            (long)rc, (long)statusCode, (unsigned long)len);
-        if (buf && len > 0)
-            snprintf(response_buf, response_len, "%.*s", (int)len, (const char*)buf);
-        else
-            snprintf(response_buf, response_len, "[deepseek_plugin] error: request failed");
-        delete req;
-        delete out;
-        return B_ERROR;
-    }
+    BString rawResponse;
+    if (buf && len > 0)
+        rawResponse.SetTo((const char*)buf, len);
+    BMessage parsedJson;
+    bool parseSuccess = (BJson::Parse(rawResponse.String(), parsedJson) == B_OK);
 
     bool extracted = false;
-    BString rawResponse((const char*)buf, len);
-    BMessage parsedJson;
-    if (BJson::Parse(rawResponse.String(), parsedJson) == B_OK) {
-        BMessage choices;
-        BMessage choiceZero;
-        BMessage message;
-        const char* content = nullptr;
-        if (parsedJson.FindMessage("choices", &choices) == B_OK
-            && choices.FindMessage("0", &choiceZero) == B_OK
-            && choiceZero.FindMessage("message", &message) == B_OK
-            && message.FindString("content", &content) == B_OK) {
-            size_t textLen = strlen(content);
-            size_t copyLen = textLen < response_len - 1 ? textLen : response_len - 1;
-            memcpy(response_buf, content, copyLen);
-            response_buf[copyLen] = '\0';
+    if (statusCode == 200 && len > 0 && parseSuccess) {
+        BMessage parsedJson;
+        if (BJson::Parse(rawResponse.String(), parsedJson) == B_OK) {
+            BMessage choices, choiceZero, message;
+            const char* content = nullptr;
+            if (parsedJson.FindMessage("choices", &choices) == B_OK
+                && choices.FindMessage("0", &choiceZero) == B_OK
+                && choiceZero.FindMessage("message", &message) == B_OK
+                && message.FindString("content", &content) == B_OK) {
+                CopyToBuffer(content, response_buf, response_len);
+                extracted = true;
+            }
+        }
+    } else if (statusCode != 200 && parseSuccess) {
+        BMessage errorObj;
+        if (parsedJson.FindMessage("error", &errorObj) == B_OK) {
+            const char* errMsg = errorObj.FindString("message");
+            if (errMsg) {
+                snprintf(response_buf, response_len, "[Errore OpenAI %" B_PRId32 "] %s", statusCode, errMsg);
+            } else {
+                snprintf(response_buf, response_len, "[Errore OpenAI %" B_PRId32 "]", statusCode);
+            }
             extracted = true;
         }
     }
 
     if (!extracted) {
-        size_t copyLen = len < response_len - 1 ? len : response_len - 1;
-        memcpy(response_buf, buf, copyLen);
-        response_buf[copyLen] = '\0';
+        if (len > 0)
+            CopyToBuffer(rawResponse.String(), response_buf, response_len);
+        else
+            CopyToBuffer("{\"error\":\"empty response\"}", response_buf, response_len);
     }
 
     delete req;
     delete out;
-    fprintf(stderr, "[DEEPSEEK PLUGIN] generate_text_sync end\n");
-    return B_OK;
+    return B_OK;//(rc == B_OK && statusCode == 200) ? B_OK : B_ERROR;
 }
 
 static int32 deepseek_stream_thread_func(void* data)
 {
-    fprintf(stderr, "[DEEPSEEK STREAM WORKER] Thread avviato.\n");
     AsyncArgs* args = (AsyncArgs*)data;
     if (!args) return B_BAD_VALUE;
-	
-	BString baseUrl;
-    BString url;
-    BString tempUrl;
 
     BMessage replyTools;
+    BString baseUrl;
+    BString url;
     bool mcpActive = false;
     bool executionLoop = true;
+    bool hasError = false;
+
+    const char* ctxId = nullptr;
+    int32 sessionID = -1;
+
+    if (args->context_copy != nullptr) {
+        args->context_copy->FindString("context_id", &ctxId);
+        args->context_copy->FindInt32("session_id", &sessionID);
+    }
 
     if (!args->api_key || args->api_key[0] == '\0') {
-        fprintf(stderr, "[DEEPSEEK STREAM WORKER] ERRORE CRITICO: API key assente!\n");
+        DispatchError(args->server_messenger, 401, sessionID, ctxId, "API key assente");
         if (args->notify_path) {
-            BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE);
+            BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_ERASE_FILE);
             BString endMarker = "<<STREAM_END>>";
             streamFile.Write(endMarker.String(), endMarker.Length());
         }
         goto thread_cleanup;
     }
-	
-	// ESTRAZIONE GERARCHICA BASE URL (args > context_copy > default) ===
-    if (args->base_url && args->base_url[0] != '\0') {
-        baseUrl = args->base_url;
-    } else if (args->context_copy && args->context_copy->FindString("base_url", &tempUrl) == B_OK 
-           && !tempUrl.IsEmpty()) {
-        baseUrl = tempUrl;
-    } else {
-        // 3. Fallback di sistema: macro #define
-        baseUrl = DEFAULT_DEEPSEEK_URL;
-    }
-    
-    // Costruzione dell'endpoint /chat/completions corretto
-    if (baseUrl.Length() > 0) {
-        url = baseUrl;
-        if (url.EndsWith("/")) 
-            url.Remove(url.Length() - 1, 1);
-        if (!url.EndsWith("/v1/chat/completions")) 
-            url << "/v1/chat/completions";
-    } else {
-        url = "https://api.deepseek.com/v1/chat/completions";
-    }
+
+    baseUrl = (args->base_url && args->base_url[0] != '\0') ? args->base_url : DEFAULT_DEEPSEEK_URL;
+    url = baseUrl;
+    if (url.EndsWith("/")) url.Remove(url.Length() - 1, 1);
+    if (!url.EndsWith("/v1/chat/completions")) url << "/v1/chat/completions";
 
     if (args->server_messenger.IsValid()) {
         BMessage reqTools(MSG_MCP_GET_TOOLS); 
-        const char* ctxId = nullptr;
-        if (args->context_copy) {
-            args->context_copy->FindString("context_id", &ctxId);
-        }
-        if (ctxId) {
-            reqTools.AddString("context_id", ctxId);
-        }
+        if (ctxId) reqTools.AddString("context_id", ctxId);
         
         if (args->server_messenger.SendMessage(&reqTools, &replyTools) == B_OK) {
             if (replyTools.HasMessage("tool", 0)) {
@@ -721,35 +678,25 @@ static int32 deepseek_stream_thread_func(void* data)
         goto fallback_to_standard;
     }
 
-    fprintf(stderr, "[DEEPSEEK STREAM WORKER] Modalità MCP Attiva: Avvio loop di interazione strumenti.\n");
-    
     executionLoop = true;
     while (executionLoop) {
         if (args->server_messenger.IsValid()) {
             BMessage checkAbortMsg('CHAB');
-            const char* ctxId = nullptr;
-            if (args->context_copy) {
-                args->context_copy->FindString("context_id", &ctxId);
-            }
-            if (ctxId) {
-                checkAbortMsg.AddString("context_id", ctxId);
-            }
+            if (ctxId) checkAbortMsg.AddString("context_id", ctxId);
             
             BMessage abortReply;
             if (args->server_messenger.SendMessage(&checkAbortMsg, &abortReply) == B_OK) {
                 int32 status = B_OK;
                 if (abortReply.FindInt32("status", &status) == B_OK && status == B_CANCELED) {
-                    fprintf(stderr, "[DEEPSEEK STREAM WORKER] Rilevata interruzione asincrona dall'utente. Esco.\n");
                     executionLoop = false;
+                    if (args->notify_path != NULL) {
+                        BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_ERASE_FILE);
+                        if (streamFile.InitCheck() == B_OK) streamFile.Write("<<STREAM_ABORT>>", 16);
+                    }
                     break;
                 }
             }
         }
-
-        //BString url = (args->base_url && args->base_url[0] != '\0') ? args->base_url : DEFAULT_DEEPSEEK_URL;
-        //if (!url.EndsWith("/"))
-        //    url.Append("/", 1);
-        //url.Append("chat/completions");
 
         BString payload;
         BuildPayloadFromContext(args->context_copy, nullptr, payload, false);
@@ -772,10 +719,12 @@ static int32 deepseek_stream_thread_func(void* data)
         BUrl bUrl(url.String(), true);
         BUrlRequest* req = BUrlProtocolRoster::MakeRequest(bUrl, &outNetworkData, &syncListener, NULL);
         if (!req) { 
+            hasError = true;
             executionLoop = false; 
             break; 
         }
 
+        uint32 httpStatusCode = 0;
         BHttpRequest* http = dynamic_cast<BHttpRequest*>(req);
         if (http) {
             http->SetMethod(B_HTTP_POST);
@@ -797,13 +746,19 @@ static int32 deepseek_stream_thread_func(void* data)
             status_t rc; 
             wait_for_thread(netThread, &rc); 
         }
+
+        if (http) {
+            const BHttpResult* result = dynamic_cast<const BHttpResult*>(&http->Result());
+            if (result != nullptr) httpStatusCode = result->StatusCode();
+        }
         delete req;
 
         BString rawResponse((const char*)outNetworkData.Buffer(), outNetworkData.BufferLength());
         BMessage parsedJson;
         
-        if (BJson::Parse(rawResponse.String(), parsedJson) != B_OK) {
-            fprintf(stderr, "[DEEPSEEK STREAM WORKER] Fallito il parsing JSON della risposta di rete.\n");
+        if (httpStatusCode != 200 || BJson::Parse(rawResponse.String(), parsedJson) != B_OK) {
+            DispatchError(args->server_messenger, httpStatusCode, sessionID, ctxId, rawResponse);
+            hasError = true;
             executionLoop = false;
             break;
         }
@@ -812,15 +767,16 @@ static int32 deepseek_stream_thread_func(void* data)
         if (parsedJson.FindMessage("error", &errorObj) == B_OK) {
             const char* errMsg = nullptr;
             errorObj.FindString("message", &errMsg);
-            
             if (errMsg && (BString(errMsg).FindFirst("tool choice") != B_ERROR || 
                            BString(errMsg).FindFirst("tools") != B_ERROR)) {
-                
-                fprintf(stderr, "[DEEPSEEK WORKER] Il server remoto rifiuta l'MCP. Errore: %s\n", errMsg);
                 mcpActive = false; 
                 executionLoop = false;
                 goto fallback_to_standard;
             }
+            DispatchError(args->server_messenger, httpStatusCode, sessionID, ctxId, rawResponse);
+            hasError = true;
+            executionLoop = false;
+            break;
         }
 
         BMessage choices, choiceZero, message, toolCalls, toolCallZero, functionObj;
@@ -842,26 +798,14 @@ static int32 deepseek_stream_thread_func(void* data)
                 functionObj.FindString("arguments", &argumentsStr);
 
                 BMessage argsMsg;
-                BString argsJson;
-                if (argumentsStr && BJson::Parse(argumentsStr, argsMsg) == B_OK) {
-                    SerializeBMessageToJson(&argsMsg, argsJson);
-                } else {
-                    argsJson = "{}";
+                if (argumentsStr && BJson::Parse(argumentsStr, argsMsg) != B_OK) {
+                    // Fallback se gli argomenti non sono un JSON valido
                 }
-
-                fprintf(stderr, "[DEEPSEEK MCP] L'LLM richiede lo strumento: %s con argomenti: %s\n", toolName, argsJson.String());
 
                 BMessage reqExec(MSG_EXECUTE_TOOL);
                 reqExec.AddString("name", toolName);
                 reqExec.AddMessage("arguments", &argsMsg);
-                
-                const char* ctxId = nullptr;
-                if (args->context_copy) {
-                    args->context_copy->FindString("context_id", &ctxId);
-                }
-                if (ctxId) {
-                    reqExec.AddString("context_id", ctxId);
-                }
+                if (ctxId) reqExec.AddString("context_id", ctxId);
                 
                 BMessage replyExec;
                 BString toolResultBuf;
@@ -888,7 +832,6 @@ static int32 deepseek_stream_thread_func(void* data)
                 AppendToolResponseToContext(args->context_copy, toolName, toolResultBuf.String(), toolCallId);
             } 
             else if (message.FindString("content", &textContent) == B_OK && textContent != nullptr) {
-                fprintf(stderr, "[DEEPSEEK MCP] Risposta testuale finale ricevuta.\n");
                 BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
                 if (streamFile.InitCheck() == B_OK) {
                     streamFile.Write(textContent, strlen(textContent));
@@ -896,7 +839,8 @@ static int32 deepseek_stream_thread_func(void* data)
                 executionLoop = false;
             }
         } else {
-            fprintf(stderr, "[DEEPSEEK STREAM WORKER] ERRORE: Risposta di rete non valida o priva di 'choices'.\n");
+            DispatchError(args->server_messenger, httpStatusCode, sessionID, ctxId, rawResponse);
+            hasError = true;
             executionLoop = false;
         }
     }
@@ -904,48 +848,64 @@ static int32 deepseek_stream_thread_func(void* data)
 
 fallback_to_standard:
 {
-    fprintf(stderr, "[DEEPSEEK STREAM WORKER] Modalità Standard: Avvio Streaming Diretto.\n");
-    
-    //BString url = (args->base_url && args->base_url[0] != '\0') ? args->base_url : DEFAULT_DEEPSEEK_URL;
-    //if (!url.EndsWith("/"))
-    //    url.Append("/", 1);
-    //url.Append("chat/completions");
-
     BString payload;
     BuildPayloadFromContext(args->context_copy, nullptr, payload, true);
 
-    {
-        StreamTarget streamTarget(args->notify_path);
-        CompletionListener listener(args->notify_path);
-        BUrl bUrl(url.String(), true);
-        BUrlRequest* req = BUrlProtocolRoster::MakeRequest(bUrl, &streamTarget, &listener, NULL);
-        if (req) {
-            BHttpRequest* http = dynamic_cast<BHttpRequest*>(req);
-            if (http) {
-                http->SetMethod(B_HTTP_POST);
-                BHttpHeaders headers;
-                headers.AddHeader("Content-Type", "application/json");
-                headers.AddHeader("User-Agent", DEEPSEEK_USER_AGENT);
-                BString authHeader;
-                authHeader << "Bearer " << args->api_key;
-                headers.AddHeader("Authorization", authHeader.String());
-                http->SetHeaders(headers);
+    DeepSeekStreamTarget streamTarget(args->notify_path);
+    CompletionListener listener(args->notify_path);
+    BUrl bUrl(url.String(), true);
+    BUrlRequest* req = BUrlProtocolRoster::MakeRequest(bUrl, &streamTarget, &listener, NULL);
+    if (req) {
+        BHttpRequest* http = dynamic_cast<BHttpRequest*>(req);
+        if (http) {
+            http->SetMethod(B_HTTP_POST);
+            BHttpHeaders headers;
+            headers.AddHeader("Content-Type", "application/json");
+            headers.AddHeader("User-Agent", DEEPSEEK_USER_AGENT);
+            BString authHeader;
+            authHeader << "Bearer " << args->api_key;
+            headers.AddHeader("Authorization", authHeader.String());
+            http->SetHeaders(headers);
 
-                BMemoryIO* input = new BMemoryIO(payload.String(), payload.Length());
-                http->AdoptInputData(input, payload.Length());
-            }
-            thread_id thread = req->Run();
-            if (thread >= 0) { 
-                status_t rc; 
-                wait_for_thread(thread, &rc); 
-            }
-            delete req;
+            BMallocIO* input = new BMallocIO();
+            input->WriteExactly(payload.String(), payload.Length());
+            http->AdoptInputData(input, payload.Length());
         }
+        
+        thread_id thread = req->Run();
+        if (thread >= 0) { 
+            status_t rc; 
+            wait_for_thread(thread, &rc); 
+        }
+
+        if (http != NULL) {
+            const BHttpResult& httpResult = static_cast<const BHttpResult&>(http->Result());
+            int32 statusCode = httpResult.StatusCode();
+            if (statusCode != 200) {
+                BString errorBody = streamTarget.RawResponse();
+                DispatchError(args->server_messenger, statusCode, sessionID, ctxId, errorBody);
+
+                BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
+                if (streamFile.InitCheck() == B_OK) {
+                    BString errBuffer;
+                    if (errorBody.Length() > 0) {
+                        errBuffer.SetToFormat("\n[ERRORE API %" B_PRId32 "]: %s\n", statusCode, errorBody.String());
+                    } else {
+                        errBuffer.SetToFormat("\n[ERRORE API %" B_PRId32 ": Verificare configurazione o parametri payload]\n", statusCode);
+                    }
+                    streamFile.Write(errBuffer.String(), errBuffer.Length());
+                }
+                hasError = true;
+            }
+        }
+        delete req;
+    } else {
+        hasError = true;
     }
 }
 
 thread_post_actions:
-    if (args->context_copy != nullptr && !args->context_copy->HasString("title")) {
+    if (!hasError && args->context_copy != nullptr && !args->context_copy->HasString("title")) {
         BMessage messagesMsg;
         const char* firstPromptText = nullptr;
 
@@ -962,6 +922,7 @@ thread_post_actions:
                 
                 if (role && strcmp(role, "user") == 0 && content && content[0] != '\0') {
                     firstPromptText = content;
+                    break;
                 }
                 msgCount++;
             }
@@ -983,9 +944,9 @@ thread_post_actions:
                 titleUpdateMsg.AddString("title", autoTitle.String());
                 args->server_messenger.SendMessage(&titleUpdateMsg);
             }
-            fprintf(stderr, "[DEEPSEEK ASYNC] Auto-titolo generato: '%s'\n", autoTitle.String());
         }
     }
+
     {
         BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
         if (streamFile.InitCheck() == B_OK) {
@@ -995,27 +956,26 @@ thread_post_actions:
     }
 
 thread_cleanup:
-    fprintf(stderr, "[DEEPSEEK STREAM WORKER] Pulizia e chiusura thread worker.\n");
     delete args; 
     return B_OK;
 }
 
-
 extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle,
     const char* prompt, BMessage* contextMsg)
 {
-    //AIPluginHandle* deepseek = (AIPluginHandle*)handle;
+    (void)handle;
     if (!contextMsg)
         return B_BAD_VALUE;
 
     const char* apiKey = nullptr;
     const char* model = nullptr;
     const char* notifyPath = nullptr;
-	const char* configBaseUrl = nullptr;
+    const char* configBaseUrl = nullptr;
+    
     contextMsg->FindString("api_key", &apiKey);
     contextMsg->FindString("model_name", &model);
     contextMsg->FindString("notify_path", &notifyPath);
-	contextMsg->FindString("base_url", &configBaseUrl);
+    contextMsg->FindString("base_url", &configBaseUrl);
 
     if (!notifyPath || notifyPath[0] == '\0')
         return B_BAD_VALUE;
@@ -1027,7 +987,8 @@ extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle,
     args->api_key = dupstr_or_null(apiKey);
     args->model = dupstr_or_null((model && model[0] != '\0') ? model : DEFAULT_DEEPSEEK_MODEL);
     args->notify_path = dupstr_or_null(notifyPath);
-     if (configBaseUrl && configBaseUrl[0] != '\0') {
+    
+    if (configBaseUrl && configBaseUrl[0] != '\0') {
         args->base_url = dupstr_or_null(configBaseUrl);
     } else {
         args->base_url = strdup(DEFAULT_DEEPSEEK_URL);
@@ -1046,11 +1007,12 @@ extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle,
         args->server_messenger = BMessenger();
     }
 
+    // Inserimento prompt iniziale se mancante nello storico
     if (prompt && prompt[0] != '\0') {
         BMessage messagesMsg;
         BMessage firstTurn;
         bool hasHistory = args->context_copy->FindMessage("messages", &messagesMsg) == B_OK
-            && messagesMsg.FindMessage("msg", 0, &firstTurn) == B_OK;
+            && (messagesMsg.FindMessage("msg", 0, &firstTurn) == B_OK || messagesMsg.FindMessage("0", &firstTurn) == B_OK);
 
         if (!hasHistory) {
             BMessage newMessages;
@@ -1078,26 +1040,19 @@ extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle,
 extern "C" status_t ai_plugin_list_models(const BMessage* settingsMsg,
     char* out_buf, size_t out_len)
 {
+    (void)settingsMsg;
     const char* modelsJson = "[\"deepseek-chat\",\"deepseek-reasoner\"]";
-    if (!out_buf || out_len == 0)
-        return B_BAD_VALUE;
-    if (strlen(modelsJson) + 1 > out_len)
-        return B_ERROR;
-
-    strcpy(out_buf, modelsJson);
-    return B_OK;
+    return CopyToBuffer(modelsJson, out_buf, out_len);
 }
 
 extern "C" status_t ai_plugin_set_model(ai_plugin_t handle, const char* model_name)
 {
     if (!handle || !model_name || model_name[0] == '\0')
         return B_BAD_VALUE;
-
-    fprintf(stderr, "[DEEPSEEK PLUGIN] set_model uses per-request context: %s\n", model_name);
     return B_OK;
 }
 
 extern "C" const char* get_plugin_name()
 {
-    return "DeepSeek";
+    return "DeepSeekPlugin";
 }
