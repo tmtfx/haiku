@@ -12,6 +12,7 @@
 #include <Messenger.h>
 #include <List.h>
 #include <os/ai/AIPlugin.h>
+#include <set>
 
 struct ChatMessage {
     BString role;    // "user" o "assistant" (o "system")
@@ -43,6 +44,7 @@ struct ClientSession {
     BMessenger client_target; // Messenger del client per notifiche in tempo reale (ad es. esecuzione tool)
     
     BString base_url;
+    std::set<BString> allowed_executables; // --- WHITELIST COMANDI APPROVATI PER SESSIONE ---
 };
 
 struct PluginEntry {
