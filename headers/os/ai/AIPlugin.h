@@ -100,6 +100,7 @@ status_t ai_plugin_list_models(const BMessage* settingsMsg, char* out_buf, size_
 typedef const char* (*plugin_get_name_t)(void);
 
 void extract_json_field(const char* json, const char* key, char* out, size_t out_len);
+void DispatchError(const BMessenger& messenger, int32 httpCode, int32 sessionID, const char* ctxId, const BString& rawResponse);
 
 #ifdef __cplusplus
 }
