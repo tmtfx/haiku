@@ -121,11 +121,30 @@ public:
 			}
 
 			case MSG_AI_ERROR: {
+				/*
 				const char* err = nullptr;
 				msg->FindString("error", &err);
 				printf("\n[CLIENT ERRORE SERVER] %s\n", err ? err : "Errore generico.");
 				PostMessage(B_QUIT_REQUESTED);
-				break;
+				break;*/
+				const char* err = nullptr;
+                if (msg->FindString("error", &err) != B_OK) {
+                    msg->FindString("error_message", &err);
+                }
+
+                int32 httpCode = 0;
+                msg->FindInt32("http_code", &httpCode);
+
+                if (httpCode > 0) {
+                    printf("\n[CLIENT ERRORE SERVER (HTTP %d)] %s\n", (int)httpCode, err ? err : "Nessun dettaglio");
+                } else {
+                    printf("\n[CLIENT ERRORE SERVER] %s\n", err ? err : "Errore generico.");
+                }
+
+                //msg->PrintToStream();
+
+                PostMessage(B_QUIT_REQUESTED);
+                break;
 			}
 
 			default:
