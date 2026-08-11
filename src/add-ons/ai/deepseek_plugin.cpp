@@ -639,7 +639,6 @@ static int32 deepseek_stream_thread_func(void* data)
     BString url;
     bool mcpActive = false;
     bool executionLoop = true;
-    bool hasError = false;
 
     const char* ctxId = nullptr;
     int32 sessionID = -1;
@@ -719,8 +718,7 @@ static int32 deepseek_stream_thread_func(void* data)
         SyncListener syncListener;
         BUrl bUrl(url.String(), true);
         BUrlRequest* req = BUrlProtocolRoster::MakeRequest(bUrl, &outNetworkData, &syncListener, NULL);
-        if (!req) { 
-            hasError = true;
+        if (!req) {
             executionLoop = false; 
             break; 
         }
@@ -759,7 +757,6 @@ static int32 deepseek_stream_thread_func(void* data)
         
         if (httpStatusCode != 200 || BJson::Parse(rawResponse.String(), parsedJson) != B_OK) {
             DispatchError(args->server_messenger, httpStatusCode, sessionID, ctxId, rawResponse);
-            hasError = true;
             executionLoop = false;
             break;
         }
@@ -775,7 +772,6 @@ static int32 deepseek_stream_thread_func(void* data)
                 goto fallback_to_standard;
             }
             DispatchError(args->server_messenger, httpStatusCode, sessionID, ctxId, rawResponse);
-            hasError = true;
             executionLoop = false;
             break;
         }
@@ -841,7 +837,6 @@ static int32 deepseek_stream_thread_func(void* data)
             }
         } else {
             DispatchError(args->server_messenger, httpStatusCode, sessionID, ctxId, rawResponse);
-            hasError = true;
             executionLoop = false;
         }
     }
@@ -896,12 +891,9 @@ fallback_to_standard:
                     }
                     streamFile.Write(errBuffer.String(), errBuffer.Length());
                 }
-                hasError = true;
             }
         }
         delete req;
-    } else {
-        hasError = true;
     }
 }
 

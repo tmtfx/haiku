@@ -620,7 +620,6 @@ anthropic_stream_thread_func(void* data)
     BMessage replyTools;
     bool mcpActive = false;
     bool executionLoop = true;
-    bool hasError = false;
 
     const char* ctxId = nullptr;
     int32 sessionID = -1;
@@ -711,8 +710,7 @@ anthropic_stream_thread_func(void* data)
         SyncListener syncListener;
         BUrl bUrl(url.String(), true);
         BUrlRequest* req = BUrlProtocolRoster::MakeRequest(bUrl, &outNetworkData, &syncListener, NULL);
-        if (!req) { 
-            hasError = true;
+        if (!req) {
             executionLoop = false; 
             break; 
         }
@@ -761,7 +759,6 @@ anthropic_stream_thread_func(void* data)
         if (httpStatusCode != 200 || BJson::Parse(rawResponse.String(), parsedJson) != B_OK) {
             fprintf(stderr, "[ANTHROPIC STREAM WORKER] Errore HTTP %d o parsing JSON fallito.\n", (int)httpStatusCode);
             DispatchError(args->server_messenger, httpStatusCode, sessionID, ctxId, rawResponse);
-            hasError = true;
             executionLoop = false;
             break;
         }
@@ -781,7 +778,6 @@ anthropic_stream_thread_func(void* data)
                 }
             }
             DispatchError(args->server_messenger, httpStatusCode, sessionID, ctxId, rawResponse);
-            hasError = true;
             executionLoop = false;
             break;
         }
@@ -883,7 +879,6 @@ anthropic_stream_thread_func(void* data)
         } else {
             fprintf(stderr, "[ANTHROPIC STREAM WORKER] ERRORE: Risposta di rete non valida o priva di 'content'.\n");
             DispatchError(args->server_messenger, httpStatusCode, sessionID, ctxId, rawResponse);
-            hasError = true;
             executionLoop = false;
         }
     }
@@ -955,12 +950,9 @@ fallback_to_standard:
                         }
                         streamFile.Write(errBuffer.String(), errBuffer.Length());
                     }
-                    hasError = true;
                 }
             }
             delete req;
-        } else {
-            hasError = true;
         }
     }
 
