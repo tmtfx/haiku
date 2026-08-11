@@ -296,6 +296,25 @@ AIEngine::GenerateAsync(const char* prompt, BMessenger target)
 }
 
 status_t
+AIEngine::Abort()
+{
+	BMessage msg(MSG_ABORT_SESSION);
+	msg.AddInt32("session_id", fSessionID);
+	
+	BMessage ack;
+    status_t err = _TalkToServer(&msg, ack, 5000000);
+    if (err != B_OK)
+        return err;
+
+    const char* status = nullptr;
+    if (ack.FindString("status", &status) == B_OK && strcmp(status, "ok") == 0) {
+        return B_OK;
+    }
+
+    return B_ERROR;
+}
+
+status_t
 AIEngine::GetStatus(BString& outStatus)
 {
     BMessage msg(MSG_PING);
