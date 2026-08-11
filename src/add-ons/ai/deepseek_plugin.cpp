@@ -592,16 +592,27 @@ extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
     bool extracted = false;
     if (statusCode == 200 && len > 0 && parseSuccess) {
         BMessage parsedJson;
-        if (BJson::Parse(rawResponse.String(), parsedJson) == B_OK) {
-            BMessage choices, choiceZero, message;
-            const char* content = nullptr;
-            if (parsedJson.FindMessage("choices", &choices) == B_OK
-                && choices.FindMessage("0", &choiceZero) == B_OK
-                && choiceZero.FindMessage("message", &message) == B_OK
-                && message.FindString("content", &content) == B_OK) {
-                CopyToBuffer(content, response_buf, response_len);
-                extracted = true;
-            }
+        //if (BJson::Parse(rawResponse.String(), parsedJson) == B_OK) {
+        BMessage choices, choiceZero, message;
+        const char* content = nullptr;
+        bool found = (parsedJson.FindMessage("choices", &choices) == B_OK)
+        	&& (choices.FindMessage("0", &choiceZero) == B_OK)
+            && (choiceZero.FindMessage("message", &message) == B_OK)
+            && (message.FindString("content", &content) == B_OK && content != nullptr);
+            
+        if (found){
+          	CopyToBuffer(content, response_buf, response_len);
+            extracted = true;
+        }
+        if (!contextMsg->HasString("title") && prompt != nullptr) {
+                BString autoTitle(prompt);
+                autoTitle.Trim();
+                if (autoTitle.Length() > 30) {
+                    autoTitle.Truncate(30);
+                    autoTitle << "...";
+                }
+                contextMsg->RemoveName("title");
+                contextMsg->AddString("title", autoTitle.String());
         }
     } else if (statusCode != 200 && parseSuccess) {
         BMessage errorObj;
