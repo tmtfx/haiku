@@ -622,6 +622,7 @@ public:
 				msg->SendReply(&reply);
 				break;
 			}
+			/*
 			case MSG_GEN_ASYNC: {
 				const char* prompt = nullptr;
 				if (msg->FindString("prompt", &prompt) != B_OK) {
@@ -744,6 +745,12 @@ public:
 
 				chatContext->RemoveName("base_url");
 				chatContext->AddString("base_url", baseUrl.String());
+				
+				chatContext->RemoveName("session_id");
+				chatContext->AddInt32("session_id", sessionID);
+
+				chatContext->RemoveName("context_id");
+				chatContext->AddString("context_id", contextID.String());
 
 				// --- 4. GESTIONE REMOTE CONTEXT & MAPPING LOCALE ---
 				bool useRemoteCtxAsync = false;
@@ -897,6 +904,310 @@ public:
 
 				watcher.detach();
 				break;
+			}*/
+			case MSG_GEN_ASYNC: {
+				const char* prompt = nullptr;
+				if (msg->FindString("prompt", &prompt) != B_OK) {
+					BMessage r(MSG_AI_ERROR);
+					r.AddString("error", "missing prompt");
+					msg->SendReply(&r);
+					break;
+				}
+
+				BMessenger target;
+				if (msg->FindMessenger("target", &target) != B_OK) {
+					BMessage r(MSG_AI_ERROR);
+					r.AddString("error", "missing target messenger");
+					msg->SendReply(&r);
+					break;
+				}
+
+				int32 sessionID = -1;
+				msg->FindInt32("session_id", &sessionID);
+
+				if (sessionID != -1 && gSessions.count(sessionID) > 0) {
+					gSessions[sessionID].client_target = target;
+				}
+
+				PluginEntry* p = nullptr;
+				BString pluginName;
+				BString modelName;
+				BString apiKey;
+				BString baseUrl;
+				BString contextID = "ctx_default";
+
+				// --- 1. RISOLUZIONE GERARCHICA PARAMETRI ---
+				const char* customPlugin = msg->FindString("custom_plugin");
+				const char* customModel  = msg->FindString("custom_model");
+				const char* customApiKey = msg->FindString("custom_api_key");
+				const char* reqContextID = msg->FindString("context_id");
+
+				if (reqContextID && reqContextID[0] != '\0') {
+					contextID = reqContextID;
+				}
+
+				// Priorità 1: Parametri una-tantum nel messaggio BMessage di richiesta
+				if (customPlugin && customModel) {
+					pluginName = customPlugin;
+					modelName  = customModel;
+					apiKey     = customApiKey ? customApiKey : "";
+
+					for (auto& pe : gPlugins) {
+						if (pe.name == customPlugin || pe.name.FindFirst(customPlugin) >= 0) {
+							p = &pe;
+							break;
+						}
+					}
+				} 
+				// Priorità 2: Dati estratti dalla ClientSession in memoria
+				else if (sessionID != -1 && gSessions.count(sessionID) > 0) {
+					ClientSession& session = gSessions[sessionID];
+					pluginName = session.plugin_name;
+					modelName  = session.model_name;
+					apiKey     = session.custom_api_key;
+					baseUrl    = session.base_url;
+
+					if (session.context_id.Length() > 0) {
+						contextID = session.context_id;
+					}
+
+					for (auto& pe : gPlugins) {
+						if (pe.name == session.plugin_name || 
+							pe.name.FindFirst(session.plugin_name) >= 0 || 
+							session.plugin_name.FindFirst(pe.name) >= 0) {
+							p = &pe;
+							break;
+						}
+					}
+				}
+
+				if (!p) p = default_plugin();
+
+				if (!p) {
+					BMessage r(MSG_AI_ERROR);
+					r.AddString("error", "no plugin available");
+					msg->SendReply(&r);
+					break;
+				}
+
+				if (pluginName.IsEmpty()) pluginName = p->name;
+				if (modelName.IsEmpty())  modelName  = "gemini-2.5-flash";
+
+				// --- 2. CARICAMENTO CONTESTO DA DISCO ---
+				BMessage* chatContext = new BMessage();
+				load_or_create_chat_context(contextID.String(), chatContext, pluginName.String(), modelName.String());
+
+				// Priorità 3: Fallback base_url da File di Contesto
+				if (baseUrl.IsEmpty()) {
+					chatContext->FindString("base_url", &baseUrl);
+				}
+
+				// Priorità 4: Fallback base_url da Impostazioni Globali
+				if (baseUrl.IsEmpty()) {
+					AISettings globalConf;
+					if (LoadAISettings(globalConf)) {
+						baseUrl = globalConf.base_url;
+					}
+				}
+
+				// Recupero API Key se vuota
+				if (apiKey.IsEmpty()) {
+					GetPluginAPIKey(p->name.String(), apiKey);
+				}
+
+				// --- 3. AGGIORNAMENTO FORZATO BMESSAGE DI CONTESTO ---
+				chatContext->RemoveName("api_key");
+				chatContext->AddString("api_key", apiKey.String());
+
+				chatContext->RemoveName("model_name");
+				chatContext->AddString("model_name", modelName.String());
+
+				chatContext->RemoveName("plugin_name");
+				chatContext->AddString("plugin_name", pluginName.String());
+
+				chatContext->RemoveName("base_url");
+				chatContext->AddString("base_url", baseUrl.String());
+				
+				chatContext->RemoveName("session_id");
+				chatContext->AddInt32("session_id", sessionID);
+
+				chatContext->RemoveName("context_id");
+				chatContext->AddString("context_id", contextID.String());
+
+				// --- 4. GESTIONE REMOTE CONTEXT & MAPPING LOCALE ---
+				bool useRemoteCtxAsync = false;
+				if (sessionID != -1 && gSessions.count(sessionID) > 0) {
+					useRemoteCtxAsync = gSessions[sessionID].useRemoteContext;
+				} else {
+					AISettings globalSA;
+					if (LoadAISettings(globalSA))
+						useRemoteCtxAsync = globalSA.use_remote_context;
+				}
+
+				chatContext->RemoveName("use_remote_context");
+				chatContext->AddBool("use_remote_context", useRemoteCtxAsync);
+
+				if (!useRemoteCtxAsync) {
+					chatContext->RemoveName("remote_id");
+					chatContext->AddString("remote_id", "");
+
+					append_message_to_context(chatContext, "user", prompt);
+					save_chat_context(contextID.String(), chatContext);
+				}
+
+				// --- 5. PERCORSO STREAM E NOTIFICA ACK ---
+				char tmpPath[PATH_MAX];
+				snprintf(tmpPath, sizeof(tmpPath), "/tmp/ai_stream_%" B_PRId32 "_%lu.tmp", getpid(), (unsigned long)rand());
+
+				chatContext->RemoveName("notify_path");
+				chatContext->AddString("notify_path", tmpPath);
+
+				chatContext->RemoveName("server_messenger");
+				chatContext->AddMessenger("server_messenger", be_app_messenger);
+
+				// Risposta ACK immediata al chiamante
+				BMessage ack;
+				ack.AddString("status", "ok");
+				msg->SendReply(&ack);
+
+				// Invocazione del plugin
+				ai_plugin_t instance = p->instance;
+				std::string promptCopy = prompt;
+
+				int rc = p->generate_async(instance, promptCopy.c_str(), chatContext);
+				if (rc != 0) {
+					BMessage err(MSG_AI_ERROR);
+					err.AddString("error", "plugin async failed to start");
+					target.SendMessage(&err);
+
+					delete chatContext;
+					break;
+				}
+
+				// --- 6. LAUNCH WATCHER THREAD ---
+				std::thread watcher([target, tmpPath = std::string(tmpPath), contextID, chatContext, useRemoteCtxAsync]() mutable {
+					FILE* f = NULL;
+					size_t lastSize = 0;
+					bool done = false;
+					BString fullResponseAccumulator("");
+					int32 sentLength = 0;
+					int emptyReads = 0;
+					const int maxEmptyReads = 1200; // ~60s timeout
+
+					const char* endToken   = "<<STREAM_END>>";
+					const char* abortToken = "<<STREAM_ABORT>>";
+					const int32 maxTokenLen = (int32)strlen(abortToken); // 16 byte (il più lungo tra i due)
+
+					while (!done) {
+						if (!f) f = fopen(tmpPath.c_str(), "r");
+						if (f) {
+							fseek(f, 0, SEEK_END);
+							size_t sz = (size_t)ftell(f);
+							if (sz > lastSize) {
+								fseek(f, (long)lastSize, SEEK_SET);
+								size_t toRead = sz - lastSize;
+								std::vector<char> buf(toRead + 1);
+								size_t r = fread(buf.data(), 1, toRead, f);
+								buf[r] = '\0';
+								lastSize += r;
+								emptyReads = 0;
+
+								fullResponseAccumulator << buf.data();
+
+								int32 posAbort = fullResponseAccumulator.FindFirst(abortToken);
+								int32 posEnd   = fullResponseAccumulator.FindFirst(endToken);
+
+								// CASO 1: STREAM ABORT
+								if (posAbort != B_ERROR) {
+									BMessage err(MSG_AI_ERROR);
+									err.AddString("error", "stream aborted by provider/plugin");
+									target.SendMessage(&err);
+
+									// Non salviamo la risposta nel contesto poiché incompleta/fallita
+									done = true;
+									break;
+								}
+
+								// CASO 2: STREAM END (COMPLETATO CON SUCCESSO)
+								if (posEnd != B_ERROR) {
+									// Invia l'eventuale pezzetto di testo valido rimasto nel buffer
+									if (posEnd > sentLength) {
+										BString remainingChunk;
+										fullResponseAccumulator.CopyInto(remainingChunk, sentLength, posEnd - sentLength);
+										
+										BMessage out(MSG_AI_RESPONSE);
+										out.AddString("partial", remainingChunk.String());
+										out.AddBool("complete", false);
+										target.SendMessage(&out);
+									}
+
+									// Testo pulito complessivo
+									BString finalCleanText;
+									fullResponseAccumulator.CopyInto(finalCleanText, 0, posEnd);
+
+									// Notifica di fine stream
+									BMessage fin(MSG_AI_RESPONSE);
+									fin.AddString("response", finalCleanText.String());
+									fin.AddBool("complete", true);
+									fin.AddInt32("status", 0);
+									target.SendMessage(&fin);
+
+									// Pulizia e salvataggio
+									chatContext->RemoveName("api_key");
+									chatContext->AddString("api_key", "");
+									chatContext->RemoveName("notify_path");
+									chatContext->RemoveName("use_remote_context");
+
+									if (useRemoteCtxAsync) {
+										const char* updatedId = nullptr;
+										if (chatContext->FindString("remote_id", &updatedId) == B_OK
+											&& updatedId && updatedId[0] != '\0') {
+											save_chat_context(contextID.String(), chatContext);
+										}
+									} else {
+										check_update_context_title(chatContext);
+										append_message_to_context(chatContext, "assistant", finalCleanText.String());
+										save_chat_context(contextID.String(), chatContext);
+									}
+
+									done = true;
+									break;
+								} 
+								
+								// CASO 3: STREAM IN CORSO
+								// Tratteniamo gli ultimi byte per evitare di emettere frammenti dei token a schermo
+								int32 safeLength = fullResponseAccumulator.Length() - (maxTokenLen - 1);
+								if (safeLength > sentLength) {
+									BString chunkToSend;
+									fullResponseAccumulator.CopyInto(chunkToSend, sentLength, safeLength - sentLength);
+									sentLength = safeLength;
+
+									BMessage out(MSG_AI_RESPONSE);
+									out.AddString("partial", chunkToSend.String());
+									out.AddBool("complete", false);
+									target.SendMessage(&out);
+								}
+							} else {
+								emptyReads++;
+								if (emptyReads > maxEmptyReads) {
+									BMessage err(MSG_AI_ERROR);
+									err.AddString("error", "stream timeout reached");
+									target.SendMessage(&err);
+									done = true;
+									break;
+								}
+							}
+						}
+						snooze(50000); // 50ms
+					}
+
+					if (f) fclose(f);
+					remove(tmpPath.c_str());
+					delete chatContext;
+				});
+
+				watcher.detach();
+				break;
 			}
 
 			case MSG_GEN_SYNC: {
@@ -997,6 +1308,14 @@ public:
 				// Passiamo il context_id al plugin per gli eventuali check sull'abort
 				chatContext.RemoveName("context_id");
 				chatContext.AddString("context_id", contextID.String());
+				
+				chatContext.RemoveName("server_messenger");
+                chatContext.AddMessenger("server_messenger", BMessenger(this));
+				
+				if (sessionID != -1) {
+                    chatContext.RemoveName("session_id");
+                    chatContext.AddInt32("session_id", sessionID);
+                }
 
 				// 4. Determiniamo l'autorità del contesto remoto
 				bool useRemoteCtx = false;
@@ -1039,6 +1358,8 @@ public:
 					// Pulizia dati volatili prima del salvataggio definitivo su disco
 					chatContext.RemoveName("api_key");
 					chatContext.RemoveName("use_remote_context");
+					chatContext.RemoveName("server_messenger");
+                    chatContext.RemoveName("session_id");
 
 					if (useRemoteCtx) {
 						// 6a. Contesto remoto: Il plugin ha generato/aggiornato il remote_id in chatContext
@@ -1175,179 +1496,60 @@ public:
 				}
 
 				// 3. ESTRAZIONE ROBUSTA DEGLI ARGOMENTI (Normalizzazione per l'esecutore)
-				BMessage arguments;
-				if (msg->FindMessage("arguments", &arguments) != B_OK) {
-					// FALLBACK RETROCOMPATIBILE: Se il client invia ancora la stringa JSON grezza
-					if (!argsJson.IsEmpty()) {
-						BString path, cmd, text, title, content, action, name, value, pattern;
-						
-						// 1. I percorsi e i comandi/pattern non devono MAI interpretare i caratteri di controllo (SEMPRE false)
-						if (ExtractStringFromJson(argsJson.String(), "path", path, false) || 
-							ExtractStringFromJson(argsJson.String(), "directory", path, false)) {
-							arguments.AddString("path", path);
-						}
-						if (ExtractStringFromJson(argsJson.String(), "cmd", cmd, false) || 
-							ExtractStringFromJson(argsJson.String(), "command", cmd, false)) {
-							arguments.AddString("cmd", cmd);
-						}
-						if (ExtractStringFromJson(argsJson.String(), "pattern", pattern, false)) {
-							arguments.AddString("pattern", pattern);
-						}
+                BMessage arguments;
+                if (msg->FindMessage("arguments", &arguments) != B_OK) {
+                    // FALLBACK RETROCOMPATIBILE: Se il client invia ancora la stringa JSON grezza
+                    if (!argsJson.IsEmpty()) {
+                        BString path, cmd, text, title, content, action, name, value, pattern;
+                        
+                        // 1. I percorsi e i comandi/pattern non devono MAI interpretare i caratteri di controllo (SEMPRE false)
+                        if (ExtractStringFromJson(argsJson.String(), "path", path, false) || 
+                            ExtractStringFromJson(argsJson.String(), "directory", path, false)) {
+                            arguments.AddString("path", path);
+                        }
+                        if (ExtractStringFromJson(argsJson.String(), "cmd", cmd, false) || 
+                            ExtractStringFromJson(argsJson.String(), "command", cmd, false)) {
+                            arguments.AddString("cmd", cmd);
+                        }
+                        
+                        // === QUI AGGIUNGI IL SUPPORTO A "query" NEL FALLBACK JSON ===
+                        if (ExtractStringFromJson(argsJson.String(), "pattern", pattern, false) ||
+                            ExtractStringFromJson(argsJson.String(), "query", pattern, false)) {
+                            arguments.AddString("pattern", pattern);
+                        }
 
-						// 2. Gestione intelligente per la scrittura di file o attributi BFS
-						bool preserveRawData = (toolName == "create_file" || toolName == "manage_attribute");
-						bool unescapeContent = !preserveRawData;
+                        // 2. Gestione intelligente per la scrittura di file o attributi BFS
+                        bool preserveRawData = (toolName == "create_file" || toolName == "manage_attribute");
+                        bool unescapeContent = !preserveRawData;
 
-						if (ExtractStringFromJson(argsJson.String(), "content", content, unescapeContent)) {
-							arguments.AddString("content", content);
-						}
-						if (ExtractStringFromJson(argsJson.String(), "value", value, unescapeContent)) {
-							arguments.AddString("value", value);
-						}
+                        if (ExtractStringFromJson(argsJson.String(), "content", content, unescapeContent)) {
+                            arguments.AddString("content", content);
+                        }
+                        if (ExtractStringFromJson(argsJson.String(), "value", value, unescapeContent)) {
+                            arguments.AddString("value", value);
+                        }
 
-						// 3. Campi testuali generici -> interpretazione attiva (SEMPRE true)
-						if (ExtractStringFromJson(argsJson.String(), "text", text, true))	   arguments.AddString("text", text);
-						if (ExtractStringFromJson(argsJson.String(), "title", title, true))	 arguments.AddString("title", title);
-						if (ExtractStringFromJson(argsJson.String(), "action", action, true))   arguments.AddString("action", action);
-						if (ExtractStringFromJson(argsJson.String(), "name", name, true))	   arguments.AddString("name", name);
-					}
-				} else {
-					// ECCELLENTE: Il plugin ha inviato direttamente il BMessage analizzato in sicurezza.
-					// I dati sono già perfetti in memoria. Applichiamo solo le normalizzazioni di naming dell'LLM.
-					if (!arguments.HasString("path") && arguments.HasString("directory")) {
-						arguments.AddString("path", arguments.FindString("directory"));
-					}
-					if (!arguments.HasString("cmd") && arguments.HasString("command")) {
-						arguments.AddString("cmd", arguments.FindString("command"));
-					}
-				}  
-				bool isCritical = false;
-				BString details = "";
-
-				if (toolName == "run_terminal_command") {
-					isCritical = true;
-					const char* cmdToRun = arguments.FindString("cmd");
-					details.SetToFormat("Vuole eseguire il comando terminale:\n\n  \"%s\"", 
-										cmdToRun ? cmdToRun : "N/A");
-				} 
-				else if (toolName == "create_file") {
-					isCritical = true;
-					const char* filePath = arguments.FindString("path");
-					details.SetToFormat("Vuole creare o sovrascrivere il file:\n\n  \"%s\"", 
-										filePath ? filePath : "N/A");
-				} 
-				else if (toolName == "make_directory") {
-					isCritical = true;
-					const char* filePath = arguments.FindString("path");
-					details.SetToFormat("Vuole creare la cartella:\n\n  \"%s\"", 
-										filePath ? filePath : "N/A");
-				} 
-				else if (toolName == "delete_file") {
-					isCritical = true;
-					const char* filePath = arguments.FindString("path");
-					details.SetToFormat("Vuole ELIMINARE definitivamente:\n\n  \"%s\"", 
-										filePath ? filePath : "N/A");
-				} 
-				else if (toolName == "open_document") {
-					isCritical = true;
-					const char* filePath = arguments.FindString("path");
-					details.SetToFormat("Vuole aprire il documento o avviare l'applicazione:\n\n  \"%s\"", 
-										filePath ? filePath : "N/A");
-				} 
-				else if (toolName == "show_alert_dialog") {
-					isCritical = true;
-					const char* text = arguments.FindString("text");
-					details.SetToFormat("Vuole mostrare un messaggio di avviso a schermo:\n\n  \"%s\"", 
-										text ? text : "N/A");
-				} 
-				else if (toolName == "manage_attribute") {
-					// Questa è un'operazione BFS speciale: controlliamo l'azione richiesta!
-					const char* action = arguments.FindString("action");
-					if (action && strcmp(action, "write") == 0) {
-						isCritical = true;
-						const char* filePath = arguments.FindString("path");
-						const char* attrName = arguments.FindString("name");
-						const char* attrValue = arguments.FindString("value");
-						details.SetToFormat(
-							"Vuole scrivere l'attributo BFS '%s' con valore '%s'\n"
-							"sul file:\n\n  \"%s\"", 
-							attrName ? attrName : "N/A", 
-							attrValue ? attrValue : "N/A", 
-							filePath ? filePath : "N/A"
-						);
-					}
-				}
-				
-				if (isCritical) {
-					BString alertText;
-					alertText.SetToFormat(
-						"L'assistente AI richiede l'autorizzazione per eseguire un'operazione critica.\n\n"
-						"Strumento richiesto: %s\n"
-						"%s\n\n"
-						"Vuoi consentire questa operazione?",
-						toolName.String(),
-						details.String()
-					);
-
-					// Mostriamo il BAlert nativo di Haiku
-					BAlert* safetyAlert = new BAlert(
-						"Sicurezza AI (MCP)",
-						alertText.String(),
-						"Rifiuta",	  // Pulsante 0 (Ritorna 0, mappato su ESC/Default)
-						"Consenti",	 // Pulsante 1 (Ritorna 1)
-						"Interrompi Loop AI",
-						B_WIDTH_AS_USUAL,
-						B_WARNING_ALERT // Icona di pericolo gialla
-					);
-					
-					safetyAlert->SetShortcut(0, B_ESCAPE); // Esc per rifiutare al volo
-					
-					int32 choice = safetyAlert->Go();
-					if (choice == 2) {
-						// L'utente vuole fermare l'intera catena di ragionamento dell'AI!
-						fprintf(stderr, "[AI_SERVER] [SICUREZZA] INTERRUZIONE FORZATA richiesta dall'utente.\n");
-						
-						// 1. Impostiamo un flag di interruzione sulla sessione in modo che il thread del plugin 
-						// sappia che non deve più elaborare ulteriori risposte o loop.
-						session->abort_requested = true; 
-
-						// 2. Notifichiamo il client dell'interruzione forzata
-						if (session->client_target.IsValid()) {
-							BMessage notifyMsg(MSG_AI_RESPONSE);
-							notifyMsg.AddString("partial", "\n🛑 [Loop di elaborazione INTERROTTO dall'utente]\n");
-							notifyMsg.AddBool("complete", false);
-							session->client_target.SendMessage(&notifyMsg);
-						}
-
-						// 3. Rispondiamo con un errore fatale che costringe il client a chiudere la chiamata
-						reply.AddInt32("status", B_CANCELED);
-						reply.AddString("result", "{\"error\":\"Aborted: L'utente ha interrotto le operazioni di elaborazione dell'AI.\"}");
-						msg->SendReply(&reply);
-						break;
-					}
-					
-					if (choice == 0) {
-						// L'utente ha negato l'autorizzazione
-						fprintf(stderr, "[AI_SERVER] [SICUREZZA] Accesso negato dall'utente per '%s'\n", toolName.String());
-						
-						// Notifichiamo il client del rifiuto
-						if (session->client_target.IsValid()) {
-							BString refuseNotify;
-							refuseNotify.SetToFormat("\n❌ [Esecuzione %s RIFIUTATA dall'utente]\n", toolName.String());
-							BMessage notifyMsg(MSG_AI_RESPONSE);
-							notifyMsg.AddString("partial", refuseNotify.String());
-							notifyMsg.AddBool("complete", false);
-							session->client_target.SendMessage(&notifyMsg);
-						}
-
-						reply.AddInt32("status", B_PERMISSION_DENIED);
-						reply.AddString("result", "{\"error\":\"Errore: L'utente di Haiku ha negato l'autorizzazione per eseguire questa azione di scrittura/modifica.\"}");
-						msg->SendReply(&reply);
-						break;
-					}
-					
-					fprintf(stderr, "[AI_SERVER] [SICUREZZA] Accesso consentito dall'utente per '%s'\n", toolName.String());
-				}
+                        // 3. Campi testuali generici -> interpretazione attiva (SEMPRE true)
+                        if (ExtractStringFromJson(argsJson.String(), "text", text, true))       arguments.AddString("text", text);
+                        if (ExtractStringFromJson(argsJson.String(), "title", title, true))     arguments.AddString("title", title);
+                        if (ExtractStringFromJson(argsJson.String(), "action", action, true))   arguments.AddString("action", action);
+                        if (ExtractStringFromJson(argsJson.String(), "name", name, true))       arguments.AddString("name", name);
+                    }
+                } else {
+                    // ECCELLENTE: Il plugin ha inviato direttamente il BMessage analizzato in sicurezza.
+                    // I dati sono già perfetti in memoria. Applichiamo solo le normalizzazioni di naming dell'LLM.
+                    if (!arguments.HasString("path") && arguments.HasString("directory")) {
+                        arguments.AddString("path", arguments.FindString("directory"));
+                    }
+                    if (!arguments.HasString("cmd") && arguments.HasString("command")) {
+                        arguments.AddString("cmd", arguments.FindString("command"));
+                    }
+                    
+                    // === QUI AGGIUNGI IL CONTROLLO NEL RAMO BMESSAGE DIRETTI ===
+                    if (!arguments.HasString("pattern") && arguments.HasString("query")) {
+                        arguments.AddString("pattern", arguments.FindString("query"));
+                    }
+                }
 
 				// --- NOTIFICA AL CLIENT DELL'ESECUZIONE IN TEMPO REALE ---
 				if (session && session->client_target.IsValid()) {
@@ -1402,8 +1604,7 @@ public:
 
 				// 4. DELEGA ALL'ESECUTORE CENTRALE (mcp_manager.cpp)
 				fprintf(stderr, "[AI_SERVER] Sicurezza superata. Delegando esecuzione a ExecuteLocalTool per: '%s'\n", toolName.String());
-				
-				resultOutput = ExecuteLocalTool(toolName.String(), arguments);
+				resultOutput = ExecuteLocalTool(session, toolName.String(), arguments);
 				resultStatus = B_OK;
 
 				// 5. Risposta al plugin
@@ -1840,6 +2041,44 @@ public:
 				}
 				reply.AddString("system_prompt", systemPrompt.String());
 				msg->SendReply(&reply);
+				break;
+			}
+			case MSG_LLM_ERROR: {
+				int32 sessionID = -1;
+				if (msg->FindInt32("session_id", &sessionID) == B_OK && sessionID != -1) {
+					if (gSessions.count(sessionID) > 0) {
+						BMessenger& clientTarget = gSessions[sessionID].client_target;
+						if (clientTarget.IsValid()) {
+							BMessage errToClient(MSG_AI_ERROR);
+							
+							const char* errMsg = msg->FindString("error_message");
+							int32 httpCode = 0;
+							msg->FindInt32("http_code", &httpCode);
+							
+							errToClient.AddInt32("http_code", httpCode);
+							errToClient.AddString("error", errMsg ? errMsg : "Errore generico dal backend LLM");
+							
+							clientTarget.SendMessage(&errToClient);
+						}
+					}
+				}
+				break;
+			}
+			case MSG_MOD_ERROR: {
+				const char* pluginName = msg->FindString("plugin_name");
+				const char* errMsg = msg->FindString("error_message");
+				int32 httpCode = 0;
+				msg->FindInt32("http_code", &httpCode);
+
+				BString alertText;
+				alertText.SetToFormat("Errore durante il caricamento dei modelli (%s):\n\n%s\n(HTTP %" B_PRId32 ")",
+									  pluginName ? pluginName : "Plugin",
+									  errMsg ? errMsg : "Errore sconosciuto",
+									  httpCode);
+
+				BAlert* alert = new BAlert("Modelli AI", alertText.String(), "OK", nullptr, nullptr,
+										   B_WIDTH_AS_USUAL, B_STOP_ALERT);
+				alert->Go(nullptr); // Asincrono, non blocca il server
 				break;
 			}
 			default:
