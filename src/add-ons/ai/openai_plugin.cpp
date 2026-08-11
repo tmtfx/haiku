@@ -397,53 +397,7 @@ static bool openai_get_latest_message(const char* apiKey, const char* baseUrl,
     copy_to_buffer(value.String(), outBuf, outLen);
     return true;
 }
-/*
-class StreamTarget : public BDataIO {
-public:
-    StreamTarget(const char* notifyPath) {
-        fFile.SetTo(notifyPath, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
-    }
 
-    virtual ssize_t Write(const void* buffer, size_t size) override {
-        if (fFile.InitCheck() != B_OK || size == 0) return size;
-
-        BString rawData((const char*)buffer, size);
-        int32 currentPos = 0;
-        
-        fprintf(stderr, "[STREAM TARGET RAW DATA]\n%s\n-------------------\n", rawData.String());
-
-        while (true) {
-            int32 matchPos = rawData.FindFirst("data: ", currentPos);
-            if (matchPos == B_ERROR) break;
-            
-            matchPos += 6; 
-            int32 endLine = rawData.FindFirst("\n", matchPos);
-            if (endLine == B_ERROR) endLine = rawData.Length();
-
-            BString jsonChunk;
-            rawData.CopyInto(jsonChunk, matchPos, endLine - matchPos);
-            jsonChunk.Trim();
-
-            if (jsonChunk == "[DONE]") break;
-
-            int32 contentPos = jsonChunk.FindFirst("\"content\": \"");
-            if (contentPos != B_ERROR) {
-                contentPos += 12;
-                int32 endContent = jsonChunk.FindFirst("\"", contentPos);
-                if (endContent != B_ERROR) {
-                    BString token;
-                    jsonChunk.CopyInto(token, contentPos, endContent - contentPos);
-                    fFile.Write(token.String(), token.Length());
-                }
-            }
-            currentPos = endLine + 1;
-        }
-        return size;
-    }
-
-private:
-    BFile fFile;
-};*/
 class StreamTarget : public BDataIO {
 public:
     StreamTarget(const char* notifyPath) {
