@@ -427,8 +427,9 @@ PrefletWindow::PrefletWindow()
         ctxDirPath.Append("ai_server/contexts");
         create_directory(ctxDirPath.Path(), 0755);
         BEntry dirEntry(ctxDirPath.Path());
-        if (dirEntry.GetNodeRef(&fContextDirRef) == B_OK)
-            watch_node(&fContextDirRef, B_WATCH_DIRECTORY, this);
+        if (dirEntry.GetNodeRef(&fContextDirRef) == B_OK) 
+        	watch_node(&fContextDirRef, B_WATCH_ALL,this);
+            //watch_node(&fContextDirRef, B_WATCH_DIRECTORY, this);
     }
     _RefreshContexts();
     
@@ -851,7 +852,20 @@ void PrefletWindow::MessageReceived(BMessage* msg)
             break;
         }
         case B_NODE_MONITOR:
-            _RefreshContexts();
+            //_RefreshContexts();
+            int32 opcode;
+			if (msg->FindInt32("opcode", &opcode) == B_OK) {
+				switch (opcode) {
+					case B_ENTRY_CREATED:
+					case B_ENTRY_REMOVED:
+					case B_ENTRY_MOVED:
+					case B_STAT_CHANGED:
+						_RefreshContexts();
+						break;
+					default:
+						break;
+				}
+			}
             break;
         default:
             BWindow::MessageReceived(msg);
