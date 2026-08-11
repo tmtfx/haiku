@@ -1091,17 +1091,6 @@ ai_plugin_generate_text_sync(ai_plugin_t handle,
             remoteId << assistantId << "::" << threadId;
             config->RemoveName("remote_id");
             config->AddString("remote_id", remoteId.String());
-/*
-            if (!config->HasString("title") && prompt != nullptr) {
-                BString autoTitle(prompt);
-                autoTitle.Trim();
-                if (autoTitle.Length() > 30) {
-                    autoTitle.Truncate(30);
-                    autoTitle << "...";
-                }
-                config->RemoveName("title");
-                config->AddString("title", autoTitle.String());
-            }*/
         }
 
         if (!openai_add_message(apiKey.String(), baseUrl.String(), threadId.String(), prompt != nullptr ? prompt : "")) {
@@ -1224,18 +1213,6 @@ ai_plugin_generate_text_sync(ai_plugin_t handle,
             response_buf[copy_len] = '\0';
             handled = true;
             fprintf(stderr, "[OPENAI PLUGIN] Testo estratto con successo dal JSON.\n");
-/*
-            // Generazione auto-title se non presente
-            if (!config->HasString("title") && prompt != nullptr) {
-                BString autoTitle(prompt);
-                autoTitle.Trim();
-                if (autoTitle.Length() > 30) {
-                    autoTitle.Truncate(30);
-                    autoTitle << "...";
-                }
-                config->RemoveName("title");
-                config->AddString("title", autoTitle.String());
-            }*/
         }
     } else if (statusCode != 200 && parseSuccess) {
         BMessage errorObj;
@@ -1389,17 +1366,6 @@ openai_stream_thread_func(void* data)
             remoteId << assistantId << "::" << threadId;
             args->context_copy->RemoveName("remote_id");
             args->context_copy->AddString("remote_id", remoteId.String());
-/*
-            if (!args->context_copy->HasString("title") && promptText && promptText[0] != '\0') {
-                BString autoTitle(promptText);
-                autoTitle.Trim();
-                if (autoTitle.Length() > 30) {
-                    autoTitle.Truncate(30);
-                    autoTitle << "...";
-                }
-                args->context_copy->RemoveName("title");
-                args->context_copy->AddString("title", autoTitle.String());
-            }*/
         }
 
         openai_add_message(args->api_key, baseUrl.String(), threadId.String(), promptText ? promptText : "");

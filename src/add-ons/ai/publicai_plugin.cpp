@@ -469,17 +469,6 @@ ai_plugin_generate_text_sync(ai_plugin_t handle,
             memcpy(response_buf, extractedText, copy_len);
             response_buf[copy_len] = '\0';
             handled = true;
-
-            if (!config->HasString("title") && prompt != nullptr) {
-                BString autoTitle(prompt);
-                autoTitle.Trim();
-                if (autoTitle.Length() > 30) {
-                    autoTitle.Truncate(30);
-                    autoTitle << "...";
-                }
-                config->RemoveName("title");
-                config->AddString("title", autoTitle.String());
-            }
         }
     } else if (statusCode != 200 && parseSuccess) {
         BMessage errorObj;
@@ -584,49 +573,6 @@ publicai_stream_thread_func(void* data)
             delete req;
         }
     }
-
-    if (args->context_copy != nullptr && !args->context_copy->HasString("title")) {
-        BMessage messagesMsg;
-        const char* firstPromptText = nullptr;
-
-        if (args->context_copy->FindMessage("messages", &messagesMsg) == B_OK) {
-            int32 msgCount = 0;
-            BMessage msgItem;
-            
-            while (messagesMsg.FindMessage("msg", msgCount, &msgItem) == B_OK || 
-                   messagesMsg.FindMessage(BString().SetToFormat("%d", msgCount).String(), &msgItem) == B_OK) {
-                
-                const char* role = msgItem.FindString("role");
-                const char* content = msgItem.FindString("content");
-                if (!content) msgItem.FindString("text", &content);
-                
-                if (role && strcmp(role, "user") == 0 && content && content[0] != '\0') {
-                    firstPromptText = content;
-                    break;
-                }
-                msgCount++;
-            }
-        }
-
-        if (firstPromptText && firstPromptText[0] != '\0') {
-            BString autoTitle(firstPromptText);
-            autoTitle.Trim();
-            if (autoTitle.Length() > 30) {
-                autoTitle.Truncate(30);
-                autoTitle << "...";
-            }
-            
-            args->context_copy->RemoveName("title");
-            args->context_copy->AddString("title", autoTitle.String());
-            
-            if (args->server_messenger.IsValid()) {
-                BMessage titleUpdateMsg('UTIT');
-                titleUpdateMsg.AddString("title", autoTitle.String());
-                args->server_messenger.SendMessage(&titleUpdateMsg);
-            }
-        }
-    }
-
     {
         BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
         if (streamFile.InitCheck() == B_OK) {
