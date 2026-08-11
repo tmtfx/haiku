@@ -1031,7 +1031,7 @@ static void DispatchOpenAIError(const BMessenger& messenger, int32 httpCode,
         if (!rawResponse.IsEmpty()) {
             errorReport.AddString("error_message", rawResponse.String());
         } else {
-            errorReport.AddString("error_message", "Errore di connessione o risposta non valida dal server backend Gemini.");
+            errorReport.AddString("error_message", "Errore di connessione o risposta non valida dal server backend OpenAI.");
         }
     }
 
