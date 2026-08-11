@@ -75,9 +75,10 @@ public:
             const char* apiKey, const char* baseUrl, uint32 mcpPermissions = AI_PERM_SYSTEM_DEFAULT);
     ~AIEngine();
 
-    // Comandi Semplificati (Sincroni)
+    // Comandi Semplificati
     status_t    Generate(const char* prompt, BString& outResponse);
     status_t    GenerateAsync(const char* prompt, BMessenger target);
+    status_t    Abort();
     status_t    GetStatus(BString& outStatus);
     status_t	SetContext(const char* contextID);
     status_t    GetContextID(BString& outContextID) const;
