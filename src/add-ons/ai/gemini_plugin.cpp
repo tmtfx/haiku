@@ -440,7 +440,7 @@ void BuildPayloadFromContext(const BMessage* config, const char* currentPrompt, 
     
     outPayload.Append("}");
 }
-
+/*
 // Helper per inviare la segnalazione di errore via Messenger
 static void DispatchGeminiError(const BMessenger& messenger, int32 httpCode, 
                                 int32 sessionID, const char* ctxId, const BString& rawResponse)
@@ -448,7 +448,7 @@ static void DispatchGeminiError(const BMessenger& messenger, int32 httpCode,
     if (!messenger.IsValid()) return;
 
     BMessage errorReport(MSG_LLM_ERROR);
-    errorReport.AddString("plugin_name", "Google Gemini");
+    errorReport.AddString("plugin_name", "GeminiPlugin");
     errorReport.AddInt32("http_code", httpCode > 0 ? httpCode : 400);
     
     if (sessionID != -1)
@@ -482,7 +482,7 @@ static void DispatchGeminiError(const BMessenger& messenger, int32 httpCode,
     }
 
     messenger.SendMessage(&errorReport);
-}
+}*/
 
 extern "C" ai_plugin_t ai_plugin_init(void)
 {
@@ -1278,7 +1278,7 @@ gemini_stream_thread_func(void* data)
 
             if (httpStatusCode != 200 || !parseOk) {
                 fprintf(stderr, "[GEMINI STREAM WORKER] Errore di rete/HTTP (Status %" B_PRId32 ") o JSON malformato.\n", httpStatusCode);
-                DispatchGeminiError(args->server_messenger, httpStatusCode, sessionID, ctxId, rawResponse);
+                DispatchError(args->server_messenger, httpStatusCode, sessionID, ctxId, rawResponse);
                 
                 // Segnala errore visibile anche sul notify_path prima di uscire
                 BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
@@ -1352,7 +1352,7 @@ gemini_stream_thread_func(void* data)
                 }
             } else {
                 fprintf(stderr, "[GEMINI STREAM WORKER] Risposta priva di candidati o non valida.\n");
-                DispatchGeminiError(args->server_messenger, httpStatusCode, sessionID, ctxId, rawResponse);
+                DispatchError(args->server_messenger, httpStatusCode, sessionID, ctxId, rawResponse);
                 executionLoop = false;
             }
         }
@@ -1394,7 +1394,7 @@ fallback_to_standard:
             const BHttpResult* result = dynamic_cast<const BHttpResult*>(&http->Result());
             if (result != nullptr && result->StatusCode() != 200) {
                 fprintf(stderr, "[GEMINI STREAM ERRORE] Status HTTP non valido in streaming: %d\n", result->StatusCode());
-                DispatchGeminiError(args->server_messenger, result->StatusCode(), sessionID, ctxId, streamTarget.RawResponse());
+                DispatchError(args->server_messenger, result->StatusCode(), sessionID, ctxId, streamTarget.RawResponse());
             }
         }
         delete req;

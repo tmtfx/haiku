@@ -448,10 +448,17 @@ class StreamTarget : public BDataIO {
 public:
     StreamTarget(const char* notifyPath) {
         fFile.SetTo(notifyPath, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
+        fBuffer.SetTo("");
+        fRawResponse.SetTo("");
     }
 
     virtual ssize_t Write(const void* buffer, size_t size) override {
-        if (fFile.InitCheck() != B_OK || size == 0) return size;
+        if (size == 0) return 0;
+
+        // Salvataggio raw per eventuale parsing d'errore HTTP
+        fRawResponse.Append((const char*)buffer, size);
+        
+        if (fFile.InitCheck() != B_OK) return size;
 
         // Accumula i dati ricevuti nel buffer di classe per gestire chunk TCP spezzati
         fBuffer.Append((const char*)buffer, size);
@@ -507,10 +514,15 @@ public:
 
         return size;
     }
+    
+    const BString& RawResponse() const {
+        return fRawResponse;
+    }
 
 private:
     BFile fFile;
     BString fBuffer;
+    BString fRawResponse;
 };
 
 // --- Serializzazione JSON e gestione BMessage ---
@@ -983,6 +995,48 @@ static void BuildOpenAIPayload(const BMessage* chatContext,
 
     outPayload.Append("\n}");
 }
+/*
+static void DispatchOpenAIError(const BMessenger& messenger, int32 httpCode, 
+                                int32 sessionID, const char* ctxId, const BString& rawResponse)
+{
+    if (!messenger.IsValid()) return;
+
+    BMessage errorReport(MSG_LLM_ERROR);
+    errorReport.AddString("plugin_name", "OpenAIPlugin");
+    errorReport.AddInt32("http_code", httpCode > 0 ? httpCode : 400);
+    
+    if (sessionID != -1)
+        errorReport.AddInt32("session_id", sessionID);
+    if (ctxId)
+        errorReport.AddString("session_id", ctxId);
+
+    BMessage parsedJson;
+    BMessage errorObj;
+    if (!rawResponse.IsEmpty() && BJson::Parse(rawResponse.String(), parsedJson) == B_OK 
+        && parsedJson.FindMessage("error", &errorObj) == B_OK) {
+        
+        const char* errMsg = errorObj.FindString("message");
+        const char* errStatus = errorObj.FindString("status");
+        int32 codeVal = 0;
+        errorObj.FindInt32("code", &codeVal);
+
+        if (errMsg) errorReport.AddString("error_message", errMsg);
+        if (errStatus) errorReport.AddString("error_type", errStatus);
+        if (codeVal != 0) {
+            BString cStr;
+            cStr << codeVal;
+            errorReport.AddString("error_code", cStr.String());
+        }
+    } else {
+        if (!rawResponse.IsEmpty()) {
+            errorReport.AddString("error_message", rawResponse.String());
+        } else {
+            errorReport.AddString("error_message", "Errore di connessione o risposta non valida dal server backend Gemini.");
+        }
+    }
+
+    messenger.SendMessage(&errorReport);
+}*/
 
 // --- INTERFACCIA C PUBBLICA PER HAIKU AI KIT ---
 
@@ -1006,7 +1060,7 @@ ai_plugin_generate_text_sync(ai_plugin_t handle,
                              size_t response_len,
                              BMessage* config)
 {
-    //OpenAIHandle* h = static_cast<OpenAIHandle*>(handle);
+    // OpenAIHandle* h = static_cast<OpenAIHandle*>(handle);
     if (!config || !response_buf || response_len == 0)
         return B_ERROR;
 
@@ -1027,230 +1081,20 @@ ai_plugin_generate_text_sync(ai_plugin_t handle,
         baseUrlRaw = DEFAULT_OPENAI_BASE_URL;
     }
 
-    bool useRemoteContext = false;
-    config->FindBool("use_remote_context", &useRemoteContext);
+    // Estrazione dati di sessione e messenger IPC per segnalazione errori
+    const char* ctxId = nullptr;
+    config->FindString("context_id", &ctxId);
 
-// --- RAMO 1: REMOTE CONTEXT (Assistants API) ---
-    if (useRemoteContext) {
-        const char* model = nullptr;
-        config->FindString("model_name", &model);
-        if (!model || model[0] == '\0')
-            model = "gpt-4o-mini";
+    int32 sessionID = -1;
+    config->FindInt32("session_id", &sessionID);
 
-        BString assistantId;
-        BString threadId;
-        const char* remoteIdRaw = nullptr;
-        
-        if (config->FindString("remote_id", &remoteIdRaw) == B_OK && remoteIdRaw != nullptr
-            && remoteIdRaw[0] != '\0') {
-            BString remoteId(remoteIdRaw);
-            int32 separator = remoteId.FindFirst("::");
-            if (separator != B_ERROR) {
-                remoteId.CopyInto(assistantId, 0, separator);
-                remoteId.CopyInto(threadId, separator + 2, remoteId.Length() - separator - 2);
-            }
-        }
-
-        // STEP 1: Creazione Assistant e Thread se non esistono
-        if (assistantId.Length() == 0 || threadId.Length() == 0) {
-            BString instructions = extract_assistant_instructions(config);
-            
-            if (!openai_create_assistant(apiKey.String(), baseUrlRaw, model,
-                                         instructions.String(), assistantId)) {
-                snprintf(response_buf, response_len,
-                         "[openai_plugin] error: assistant creation failed. API Key valida?");
-                return B_ERROR;
-            }
-            
-            if (!openai_create_thread(apiKey.String(), baseUrlRaw, threadId)) {
-                snprintf(response_buf, response_len, "[openai_plugin] error: thread creation failed");
-                return B_ERROR;
-            }
-            
-            BString remoteId;
-            remoteId << assistantId << "::" << threadId;
-            config->RemoveName("remote_id");
-            config->AddString("remote_id", remoteId.String());
-            
-            if (!config->HasString("title") && prompt != nullptr) {
-                BString autoTitle(prompt);
-                autoTitle.Trim();
-                if (autoTitle.Length() > 30) {
-                    autoTitle.Truncate(30);
-                    autoTitle << "...";
-                }
-                config->RemoveName("title");
-                config->AddString("title", autoTitle.String());
-            }
-        }
-
-        // STEP 2: Aggiunta del messaggio dell'utente
-        if (!openai_add_message(apiKey.String(), baseUrlRaw, threadId.String(),
-                                prompt != nullptr ? prompt : "")) {
-            snprintf(response_buf, response_len,
-                     "[openai_plugin] error: add message failed for thread %s", threadId.String());
-            return B_ERROR;
-        }
-
-        // STEP 3: Creazione del Run
-        BString runId;
-        if (!openai_create_run(apiKey.String(), baseUrlRaw, threadId.String(),
-                               assistantId.String(), runId)) {
-            snprintf(response_buf, response_len, "[openai_plugin] error: run creation failed");
-            return B_ERROR;
-        }
-
-        // STEP 4: Polling del Run
-        if (!openai_poll_run(apiKey.String(), baseUrlRaw, threadId.String(), runId.String())) {
-            snprintf(response_buf, response_len,
-                     "[openai_plugin] error: run did not complete (failed/timeout)");
-            return B_ERROR;
-        }
-
-        // STEP 5: Recupero del testo finale
-        if (!openai_get_latest_message(apiKey.String(), baseUrlRaw, threadId.String(),
-                                       response_buf, response_len)) {
-            snprintf(response_buf, response_len, "[openai_plugin] error: response extraction failed");
-            return B_ERROR;
-        }
-
-        return B_OK;
-    }
-// --- RAMO 2: CHAT COMPLETIONS STANDARD ---
-    BString url;
-    if (baseUrlRaw && baseUrlRaw[0] != '\0') {
-        url = baseUrlRaw;
-        if (url.EndsWith("/")) url.Remove(url.Length() - 1, 1);
-        if (!url.EndsWith("/v1/chat/completions")) url << "/v1/chat/completions";
-    } else {
-        url = "https://api.openai.com/v1/chat/completions";
-    }
-    
-    BString payload;
-    BuildOpenAIPayload(config, prompt, payload, false);
-    
-    BMallocIO* out = new BMallocIO();
-    SyncListener listener;
-    BUrl bUrl(url.String(), true);
-    
-    BUrlContext context;
-    
-    BUrlRequest* req = BUrlProtocolRoster::MakeRequest(bUrl, out, &listener, NULL);
-    if (!req) { 
-        delete out; 
-        snprintf(response_buf, response_len, "{\"error\":\"request creation failed\"}"); 
-        return B_ERROR; 
-    }
-
-    BHttpRequest* http = dynamic_cast<BHttpRequest*>(req);
-
-    if (http) {
-        http->SetMethod(B_HTTP_POST);
-        BMallocIO* in = new BMallocIO();
-        in->WriteExactly(payload.String(), payload.Length());
-        http->AdoptInputData(in, payload.Length());
-        
-        BHttpHeaders headers;
-        headers.AddHeader("Content-Type", "application/json");
-        BString authHeader;
-        authHeader.SetToFormat("Bearer %s", apiKey.String());
-        headers.AddHeader("Authorization", authHeader.String());
-        http->SetHeaders(headers);
-    }
-
-    thread_id thread = req->Run();
-    status_t rc = B_ERROR;
-    if (thread >= 0) {
-        wait_for_thread(thread, &rc);
-    } else {
-        rc = thread;
-    }
-
-    const void* buf = out->Buffer();
-    size_t len = out->BufferLength();
-    if (!buf || len == 0) { 
-        snprintf(response_buf, response_len, "{\"error\":\"empty response\"}"); 
-        delete req; 
-        delete out; 
-        return B_ERROR; 
-    }
-    
-    int32 statusCode = 0;
-    if (http) {
-        const BHttpResult* httpResult = dynamic_cast<const BHttpResult*>(&(http->Result()));
-        if (httpResult != nullptr) {
-            statusCode = httpResult->StatusCode();
-        }
-    }
-    
-    bool extractedSuccessfully = false;
-    BString rawResponse((const char*)buf, len);
-
-    if (statusCode == 200) {
-        BMessage parsedJson;
-        if (BJson::Parse(rawResponse.String(), parsedJson) == B_OK) {
-            BMessage choices, choiceZero, message;
-            const char* extractedText = nullptr;
-
-            bool foundChoice = (parsedJson.FindMessage("choices", &choices) == B_OK)
-                && (choices.FindMessage("msg", 0, &choiceZero) == B_OK || choices.FindMessage("0", &choiceZero) == B_OK);
-
-            if (foundChoice
-                && choiceZero.FindMessage("message", &message) == B_OK
-                && message.FindString("content", &extractedText) == B_OK && extractedText != nullptr) {
-                
-                size_t textLen = strlen(extractedText);
-                size_t copy_len = textLen < response_len - 1 ? textLen : response_len - 1;
-                memcpy(response_buf, extractedText, copy_len);
-                response_buf[copy_len] = '\0';
-                extractedSuccessfully = true;
-            }
-        }
-    }
-
-    if (!extractedSuccessfully) {
-        size_t copy_len = len < response_len - 1 ? len : response_len - 1;
-        memcpy(response_buf, buf, copy_len);
-        response_buf[copy_len] = '\0';
-    }
-
-    delete req;
-    delete out;
-
-    return (rc == B_OK && statusCode == 200) ? B_OK : B_ERROR;
-}*/
-extern "C" status_t
-ai_plugin_generate_text_sync(ai_plugin_t handle,
-                             const char* prompt,
-                             char* response_buf,
-                             size_t response_len,
-                             BMessage* config)
-{
-    //OpenAIHandle* h = static_cast<OpenAIHandle*>(handle);
-    if (!config || !response_buf || response_len == 0)
-        return B_ERROR;
-
-    const char* apiKeyRaw = nullptr;
-    config->FindString("api_key", &apiKeyRaw);
-
-    if (!apiKeyRaw || apiKeyRaw[0] == '\0') {
-        snprintf(response_buf, response_len, "[openai_plugin] error: no API key provided");
-        return B_ERROR;
-    }
-    
-    // BString protegge da invalidazione puntatori se config viene modificato
-    BString apiKey(apiKeyRaw);
-    
-    const char* baseUrlRaw = nullptr;
-    config->FindString("base_url", &baseUrlRaw);
-    if (!baseUrlRaw || baseUrlRaw[0] == '\0') {
-        baseUrlRaw = DEFAULT_OPENAI_BASE_URL;
-    }
+    BMessenger serverMessenger;
+    config->FindMessenger("server_messenger", &serverMessenger);
 
     bool useRemoteContext = false;
     config->FindBool("use_remote_context", &useRemoteContext);
 
-// --- RAMO 1: REMOTE CONTEXT (Assistants API) ---
+    // --- RAMO 1: REMOTE CONTEXT (Assistants API) ---
     if (useRemoteContext) {
         const char* model = nullptr;
         config->FindString("model_name", &model);
@@ -1337,7 +1181,7 @@ ai_plugin_generate_text_sync(ai_plugin_t handle,
         return B_OK;
     }
 
-// --- RAMO 2: CHAT COMPLETIONS STANDARD ---
+    // --- RAMO 2: CHAT COMPLETIONS STANDARD ---
     BString url;
     if (baseUrlRaw && baseUrlRaw[0] != '\0') {
         url = baseUrlRaw;
@@ -1354,7 +1198,6 @@ ai_plugin_generate_text_sync(ai_plugin_t handle,
     SyncListener listener;
     BUrl bUrl(url.String(), true);
     
-    // Passiamo il context a MakeRequest per evitare callback/vtable nulle
     BUrlContext context;
     
     BUrlRequest* req = BUrlProtocolRoster::MakeRequest(bUrl, out, &listener, &context);
@@ -1371,7 +1214,6 @@ ai_plugin_generate_text_sync(ai_plugin_t handle,
         BMallocIO* in = new BMallocIO();
         in->WriteExactly(payload.String(), payload.Length());
         
-        // http adotta 'in' e se ne occuperà al moment del delete req
         http->AdoptInputData(in, payload.Length());
         
         BHttpHeaders headers;
@@ -1416,7 +1258,6 @@ ai_plugin_generate_text_sync(ai_plugin_t handle,
             BMessage choices;
             if (parsedJson.FindMessage("choices", &choices) == B_OK) {
                 BMessage choiceZero;
-                // BJson indicizza gli elementi degli array usando le stringhe dei numeri ("0", "1", ...)
                 if (choices.FindMessage("0", &choiceZero) == B_OK 
                     || choices.FindMessage("msg", 0, &choiceZero) == B_OK) {
                     
@@ -1435,26 +1276,318 @@ ai_plugin_generate_text_sync(ai_plugin_t handle,
                 }
             }
         }
+    } else {
+        fprintf(stderr, "[OPENAI SYNC ERRORE] Status HTTP non valido: %" B_PRId32 "\n", statusCode);
+
+        BMessage errorReport(MSG_LLM_ERROR);
+        errorReport.AddString("plugin_name", "OpenAI / LM Studio");
+        errorReport.AddInt32("http_code", statusCode);
+        if (sessionID != -1) {
+            errorReport.AddInt32("session_id", sessionID);
+        }
+        if (ctxId) {
+            errorReport.AddString("session_id", ctxId);
+        }
+
+        // Tenta di estrarre il messaggio di errore dal payload JSON se presente
+        BMessage parsedJson;
+        BMessage errorObj;
+        if (BJson::Parse(rawResponse.String(), parsedJson) == B_OK 
+            && parsedJson.FindMessage("error", &errorObj) == B_OK) {
+            const char* errMsg = errorObj.FindString("message");
+            if (errMsg) {
+                errorReport.AddString("error_message", errMsg);
+            } else {
+                errorReport.AddString("error_message", rawResponse.String());
+            }
+        } else {
+            errorReport.AddString("error_message", "Errore di connessione o risposta non valida dal server backend.");
+        }
+
+        if (serverMessenger.IsValid()) {
+            serverMessenger.SendMessage(&errorReport);
+        }
     }
 
-    // Se non siamo riusciti a estrarre il testo dal JSON (es. HTTP non-200 o formato inatteso),
-    // copiamo la risposta grezza nel buffer per consentire di leggere l'errore ritornato dall'API
     if (!extractedSuccessfully) {
         size_t copy_len = len < response_len - 1 ? len : response_len - 1;
         memcpy(response_buf, buf, copy_len);
         response_buf[copy_len] = '\0';
     }
     
-    printf("\n=== [DEBUG OPENAI PLUGIN] ===\n");
-    printf("HTTP Status: %" PRId32 "\n", statusCode);
-    printf("Buffer Output: %s\n", response_buf);
-    printf("=============================\n\n");
+    fprintf(stderr, "\n=== [DEBUG OPENAI PLUGIN] ===\n");
+    fprintf(stderr, "HTTP Status: %" B_PRId32 "\n", statusCode);
+    fprintf(stderr, "Buffer Output: %s\n", response_buf);
+    fprintf(stderr, "=============================\n\n");
 
     delete req;
     delete out;
 
     return (rc == B_OK && statusCode == 200) ? B_OK : B_ERROR;
+}*/
+
+extern "C" status_t
+ai_plugin_generate_text_sync(ai_plugin_t handle,
+                             const char* prompt,
+                             char* response_buf,
+                             size_t response_len,
+                             BMessage* config)
+{
+	fprintf(stderr, ">>> DEBUG: ENTRATO IN ai_plugin_generate_text_sync, prompt=%s\n", prompt ? prompt : "NULL");
+    if (!config || !response_buf || response_len == 0){
+    	fprintf(stderr, ">>> DEBUG: Errore config response_buf o response_len");
+        return B_ERROR;
+    }
+
+    const char* apiKeyRaw = nullptr;
+    config->FindString("api_key", &apiKeyRaw);
+    if (!apiKeyRaw || apiKeyRaw[0] == '\0') {
+        snprintf(response_buf, response_len, "[openai_plugin] error: no API key provided");
+        
+    	fprintf(stderr, ">>> DEBUG: No API KEY");
+        return B_ERROR;
+    }
+    BString apiKey(apiKeyRaw);
+
+    BString baseUrl;
+    const char* baseUrlRaw = nullptr;
+    if (config->FindString("base_url", &baseUrlRaw) == B_OK && baseUrlRaw != nullptr && baseUrlRaw[0] != '\0') {
+        baseUrl = baseUrlRaw;
+    } else {
+        baseUrl = DEFAULT_OPENAI_BASE_URL;
+    }
+
+    const char* ctxId = nullptr;
+    config->FindString("context_id", &ctxId);
+
+    int32 sessionID = -1;
+    config->FindInt32("session_id", &sessionID);
+
+    BMessenger serverMessenger;
+    config->FindMessenger("server_messenger", &serverMessenger);
+
+    bool useRemoteContext = false;
+    config->FindBool("use_remote_context", &useRemoteContext);
+
+    // =========================================================================
+    // RAMO 1: REMOTE CONTEXT (Assistants API)
+    // =========================================================================
+    if (useRemoteContext) {
+    	fprintf(stderr, ">>> DEBUG: ENTRATO IN versione remota x Assistants API");
+        const char* model = nullptr;
+        config->FindString("model_name", &model);
+        if (!model || model[0] == '\0')
+            model = "gpt-4o-mini";
+
+        BString assistantId;
+        BString threadId;
+        const char* remoteIdRaw = nullptr;
+
+        if (config->FindString("remote_id", &remoteIdRaw) == B_OK && remoteIdRaw != nullptr && remoteIdRaw[0] != '\0') {
+            BString remoteId(remoteIdRaw);
+            int32 separator = remoteId.FindFirst("::");
+            if (separator != B_ERROR) {
+                remoteId.CopyInto(assistantId, 0, separator);
+                remoteId.CopyInto(threadId, separator + 2, remoteId.Length() - separator - 2);
+            }
+        }
+
+        if (assistantId.Length() == 0 || threadId.Length() == 0) {
+            BString instructions = extract_assistant_instructions(config);
+
+            if (!openai_create_assistant(apiKey.String(), baseUrl.String(), model,
+                                         instructions.String(), assistantId)) {
+                snprintf(response_buf, response_len, "[openai_plugin] error: assistant creation failed");
+                return B_ERROR;
+            }
+
+            if (!openai_create_thread(apiKey.String(), baseUrl.String(), threadId)) {
+                snprintf(response_buf, response_len, "[openai_plugin] error: thread creation failed");
+                return B_ERROR;
+            }
+
+            BString remoteId;
+            remoteId << assistantId << "::" << threadId;
+            config->RemoveName("remote_id");
+            config->AddString("remote_id", remoteId.String());
+
+            if (!config->HasString("title") && prompt != nullptr) {
+                BString autoTitle(prompt);
+                autoTitle.Trim();
+                if (autoTitle.Length() > 30) {
+                    autoTitle.Truncate(30);
+                    autoTitle << "...";
+                }
+                config->RemoveName("title");
+                config->AddString("title", autoTitle.String());
+            }
+        }
+
+        if (!openai_add_message(apiKey.String(), baseUrl.String(), threadId.String(), prompt != nullptr ? prompt : "")) {
+            snprintf(response_buf, response_len, "[openai_plugin] error: add message failed");
+            return B_ERROR;
+        }
+
+        BString runId;
+        if (!openai_create_run(apiKey.String(), baseUrl.String(), threadId.String(), assistantId.String(), runId)) {
+            snprintf(response_buf, response_len, "[openai_plugin] error: run creation failed");
+            return B_ERROR;
+        }
+
+        if (!openai_poll_run(apiKey.String(), baseUrl.String(), threadId.String(), runId.String())) {
+            snprintf(response_buf, response_len, "[openai_plugin] error: run poll failed/timeout");
+            return B_ERROR;
+        }
+
+        if (!openai_get_latest_message(apiKey.String(), baseUrl.String(), threadId.String(), response_buf, response_len)) {
+            snprintf(response_buf, response_len, "[openai_plugin] error: response extraction failed");
+            return B_ERROR;
+        }
+
+        return B_OK;
+    }
+
+    // =========================================================================
+    // RAMO 2: CHAT COMPLETIONS (Standard Sincrono)
+    // =========================================================================
+    BString targetUrl = baseUrl;
+    if (targetUrl.EndsWith("/"))
+        targetUrl.Remove(targetUrl.Length() - 1, 1);
+    if (!targetUrl.EndsWith("/v1/chat/completions"))
+        targetUrl << "/v1/chat/completions";
+
+    // Compiliamo il payload iniettando lo storico memorizzato nel BMessage
+    BString payload;
+    BuildOpenAIPayload(config, prompt, payload, false, nullptr);
+    fprintf(stderr, "[OPENAI PLUGIN] Payload JSON generato:\n%s\n", payload.String());
+
+    BMallocIO* out = new BMallocIO();
+    SyncListener syncListener;
+    BUrl bUrl(targetUrl.String(), true);
+    
+    // Istanziamo il BUrlContext per evitare crash/punti a vtable vuoti
+    BUrlContext context;
+    
+    BUrlRequest* req = BUrlProtocolRoster::MakeRequest(bUrl, out, &syncListener, &context);
+    if (!req) {
+        fprintf(stderr, "[OPENAI PLUGIN] ERRORE: BUrlProtocolRoster::MakeRequest ha fallito!\n");
+        delete out;
+        snprintf(response_buf, response_len, "{\"error\":\"request creation failed\"}");
+        return B_ERROR;
+    }
+
+    BHttpRequest* http = dynamic_cast<BHttpRequest*>(req);
+    if (http) {
+        http->SetMethod(B_HTTP_POST);
+        BMallocIO* in = new BMallocIO();
+        in->WriteExactly(payload.String(), payload.Length());
+        
+        // http adotta 'in' e lo libererà da solo con il distruttore di req
+        http->AdoptInputData(in, payload.Length());
+        
+        BHttpHeaders headers;
+        headers.AddHeader("Content-Type", "application/json");
+        BString authHeader;
+        authHeader << "Bearer " << apiKey;
+        headers.AddHeader("Authorization", authHeader.String());
+        http->SetHeaders(headers);
+    }
+
+    fprintf(stderr, "[OPENAI PLUGIN] Avvio richiesta HTTP di rete sincrona...\n");
+    thread_id thread = req->Run();
+    status_t rc = B_ERROR;
+    if (thread >= 0) {
+        wait_for_thread(thread, &rc);
+    } else {
+        rc = thread;
+    }
+    fprintf(stderr, "[OPENAI PLUGIN] Chiamata di rete conclusa. Thread return code: %d\n", (int)rc);
+
+    const void* buf = out->Buffer();
+    size_t len = out->BufferLength();
+    if (!buf || len == 0) {
+        snprintf(response_buf, response_len, "{\"error\":\"empty response\"}");
+        delete req;
+        delete out;
+        return B_ERROR;
+    }
+    fprintf(stderr, "[OPENAI PLUGIN] Buffer di risposta: %d byte ricevuti.\n", (int)len);
+
+    int32 statusCode = 0;
+    if (http) {
+        const BHttpResult* httpResult = dynamic_cast<const BHttpResult*>(&(http->Result()));
+        if (httpResult != nullptr) {
+            statusCode = httpResult->StatusCode();
+        }
+    }
+    fprintf(stderr, "[OPENAI PLUGIN] HTTP Status Code Server OpenAI: %d\n", (int)statusCode);
+
+    bool handled = false;
+    BString rawResponse((const char*)buf, len);
+    BMessage parsedJson;
+    bool parseSuccess = (BJson::Parse(rawResponse.String(), parsedJson) == B_OK);
+
+    if (statusCode == 200 && parseSuccess) {
+        BMessage choices, choiceZero, message;
+        const char* extractedText = nullptr;
+
+        bool found = (parsedJson.FindMessage("choices", &choices) == B_OK)
+            && (choices.FindMessage("0", &choiceZero) == B_OK || choices.FindMessage("msg", 0, &choiceZero) == B_OK)
+            && (choiceZero.FindMessage("message", &message) == B_OK)
+            && (message.FindString("content", &extractedText) == B_OK && extractedText != nullptr);
+
+        if (found) {
+            size_t textLen = strlen(extractedText);
+            size_t copy_len = textLen < response_len - 1 ? textLen : response_len - 1;
+            memcpy(response_buf, extractedText, copy_len);
+            response_buf[copy_len] = '\0';
+            handled = true;
+            fprintf(stderr, "[OPENAI PLUGIN] Testo estratto con successo dal JSON.\n");
+
+            // Generazione auto-title se non presente
+            if (!config->HasString("title") && prompt != nullptr) {
+                BString autoTitle(prompt);
+                autoTitle.Trim();
+                if (autoTitle.Length() > 30) {
+                    autoTitle.Truncate(30);
+                    autoTitle << "...";
+                }
+                config->RemoveName("title");
+                config->AddString("title", autoTitle.String());
+            }
+        }
+    } else if (statusCode != 200 && parseSuccess) {
+        BMessage errorObj;
+        if (parsedJson.FindMessage("error", &errorObj) == B_OK) {
+            const char* errMsg = errorObj.FindString("message");
+            if (errMsg) {
+                snprintf(response_buf, response_len, "[Errore OpenAI %" B_PRId32 "] %s", statusCode, errMsg);
+            } else {
+                snprintf(response_buf, response_len, "[Errore OpenAI %" B_PRId32 "]", statusCode);
+            }
+            handled = true;
+        }
+    }
+
+    if (!handled) {
+        // Se non abbiamo gestito il JSON strutturato, controlliamo se c'è una risposta raw da mostrare
+        if (len > 0) {
+            size_t copy_len = len < response_len - 1 ? len : response_len - 1;
+            memcpy(response_buf, buf, copy_len);
+            response_buf[copy_len] = '\0';
+        } else {
+            snprintf(response_buf, response_len, "[Errore OpenAI] Risposta vuota o non valida (HTTP status: %" B_PRId32 ")", statusCode);
+        }
+    }
+
+    delete req;
+    delete out;
+    fprintf(stderr, "[OPENAI PLUGIN] === FINE generate_text_sync ===\n\n");
+    
+    // Se lo status code è 200 e tutto è ok ritorniamo B_OK, altrimenti B_ERROR propagando il messaggio nel buffer
+    return B_OK; //(rc == B_OK && statusCode == 200 && handled) ? B_OK : B_ERROR;
 }
+
 static status_t
 openai_stream_thread_func(void* data)
 {
@@ -1469,6 +1602,14 @@ openai_stream_thread_func(void* data)
     BMessage replyTools;
     bool mcpActive = false;
     bool executionLoop = true;
+    
+    const char* ctxId = nullptr;
+    int32 sessionID = -1;
+    
+    if (args->context_copy) {
+        args->context_copy->FindString("context_id", &ctxId);
+        args->context_copy->FindInt32("session_id", &sessionID);
+    }
 
     // Controllo di sicurezza sulla chiave API
     /*if (!args->api_key || args->api_key[0] == '\0') {
@@ -1528,6 +1669,73 @@ openai_stream_thread_func(void* data)
             fprintf(stderr, "[OPENAI STREAM WORKER] Avviso: Fallita comunicazione IPC per recupero tool MCP.\n");
         }
     }
+    
+    // === CASO 0: REMOTE CONTEXT (Assistants API) IN ASYNC ===
+    bool useRemoteContext = false;
+    if (args->context_copy) {
+        args->context_copy->FindBool("use_remote_context", &useRemoteContext);
+    }
+
+    if (useRemoteContext) {
+        const char* model = nullptr;
+        if (args->context_copy) args->context_copy->FindString("model_name", &model);
+        if (!model || model[0] == '\0') model = (args->model && args->model[0]) ? args->model : "gpt-4o-mini";
+
+        // Estrazione prompt da context_copy
+        const char* promptText = "";
+        if (args->context_copy) {
+            args->context_copy->FindString("prompt", &promptText);
+        }
+
+        BString assistantId, threadId;
+        const char* remoteIdRaw = nullptr;
+        if (args->context_copy && args->context_copy->FindString("remote_id", &remoteIdRaw) == B_OK && remoteIdRaw) {
+            BString remoteId(remoteIdRaw);
+            int32 sep = remoteId.FindFirst("::");
+            if (sep != B_ERROR) {
+                remoteId.CopyInto(assistantId, 0, sep);
+                remoteId.CopyInto(threadId, sep + 2, remoteId.Length() - sep - 2);
+            }
+        }
+
+        if (assistantId.IsEmpty() || threadId.IsEmpty()) {
+            BString instructions = extract_assistant_instructions(args->context_copy);
+            if (!openai_create_assistant(args->api_key, baseUrl.String(), model, instructions.String(), assistantId)
+                || !openai_create_thread(args->api_key, baseUrl.String(), threadId)) {
+                goto thread_cleanup;
+            }
+            BString remoteId;
+            remoteId << assistantId << "::" << threadId;
+            args->context_copy->RemoveName("remote_id");
+            args->context_copy->AddString("remote_id", remoteId.String());
+
+            if (!args->context_copy->HasString("title") && promptText && promptText[0] != '\0') {
+                BString autoTitle(promptText);
+                autoTitle.Trim();
+                if (autoTitle.Length() > 30) {
+                    autoTitle.Truncate(30);
+                    autoTitle << "...";
+                }
+                args->context_copy->RemoveName("title");
+                args->context_copy->AddString("title", autoTitle.String());
+            }
+        }
+
+        openai_add_message(args->api_key, baseUrl.String(), threadId.String(), promptText ? promptText : "");
+        BString runId;
+        if (openai_create_run(args->api_key, baseUrl.String(), threadId.String(), assistantId.String(), runId)
+            && openai_poll_run(args->api_key, baseUrl.String(), threadId.String(), runId.String())) {
+            
+            char buffer[4096];
+            if (openai_get_latest_message(args->api_key, baseUrl.String(), threadId.String(), buffer, sizeof(buffer))) {
+                BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
+                if (streamFile.InitCheck() == B_OK) {
+                    streamFile.Write(buffer, strlen(buffer));
+                }
+            }
+        }
+        goto thread_post_actions;
+    }
 
     // === CASO 1: MODALITÀ STANDARD (STREAMING NATIVO RETROCOMPATIBILE) ===
     if (!mcpActive) {
@@ -1555,7 +1763,14 @@ openai_stream_thread_func(void* data)
                 if (abortReply.FindInt32("status", &status) == B_OK && status == B_CANCELED) {
                     fprintf(stderr, "[OPENAI STREAM WORKER] Rilevata interruzione asincrona dall'utente. Esco.\n");
                     executionLoop = false;
-                    break;
+                    if (args->notify_path) {
+                        BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_ERASE_FILE);
+                        if (streamFile.InitCheck() == B_OK) {
+                            streamFile.Write("<<STREAM_ABORT>>", 16);
+                        }
+                    }
+                    //break;
+                    goto thread_cleanup;
                 }
             }
         }
@@ -1619,11 +1834,14 @@ openai_stream_thread_func(void* data)
             status_t rc; 
             wait_for_thread(netThread, &rc); 
         }
+        
+        uint32 httpStatusCode = 0;
 
         if (http) {
             const BHttpResult* result = dynamic_cast<const BHttpResult*>(&http->Result());
             if (result != nullptr) {
-                fprintf(stderr, "[OPENAI MCP DEBUG] HTTP Status Code: %d\n", result->StatusCode());
+            	httpStatusCode=result->StatusCode();
+                fprintf(stderr, "[OPENAI MCP DEBUG] HTTP Status Code: %d\n", httpStatusCode);
             }
         }
 
@@ -1633,8 +1851,63 @@ openai_stream_thread_func(void* data)
         //fprintf(stderr, "[OPENAI MCP DEBUG] Risposta grezza dal server:\n%s\n", rawResponse.String());
 
         BMessage parsedJson;
-        if (BJson::Parse(rawResponse.String(), parsedJson) != B_OK) {
-            fprintf(stderr, "[OPENAI STREAM WORKER] Fallito il parsing JSON della risposta di rete.\n");
+        bool parseOk = (BJson::Parse(rawResponse.String(), parsedJson) == B_OK);
+
+        /*
+        if (httpStatusCode != 200 || !parseOk) {
+            fprintf(stderr, "[OPENAI STREAM WORKER] Errore di rete/HTTP (Status %" B_PRId32 ") o JSON malformato.\n", httpStatusCode);
+
+            BMessage errorReport(MSG_LLM_ERROR);
+            errorReport.AddString("plugin_name", "OpenAIPlugin");
+            errorReport.AddInt32("http_code", httpStatusCode > 0 ? httpStatusCode : 400);
+            if (sessionID != -1) {
+                errorReport.AddInt32("session_id", sessionID);
+            }
+            if (ctxId) {
+                errorReport.AddString("session_id", ctxId);
+            }
+
+            BMessage errorObj;
+            if (parseOk && parsedJson.FindMessage("error", &errorObj) == B_OK) {
+                const char* errMsg = errorObj.FindString("message");
+                const char* errType = errorObj.FindString("type");
+                const char* errParam = errorObj.FindString("param");
+                const char* errCode = errorObj.FindString("code");
+
+                if (errMsg) errorReport.AddString("error_message", errMsg);
+                if (errType) errorReport.AddString("error_type", errType);
+                if (errParam) errorReport.AddString("error_param", errParam);
+                if (errCode) errorReport.AddString("error_code", errCode);
+            } else {
+                // Se la risposta non è JSON o è un errore grezzo HTTP
+                if (!rawResponse.IsEmpty()) {
+                    errorReport.AddString("error_message", rawResponse.String());
+                } else {
+                    errorReport.AddString("error_message", "Risposta vuota o il server remoto ha interrotto la connessione.");
+                }
+            }
+            
+            if (args->server_messenger.IsValid()) {
+                args->server_messenger.SendMessage(&errorReport);
+            }
+
+            // Invio al gestore centrale di AIServer
+
+            executionLoop = false;
+            break;
+        }*/
+        if (httpStatusCode != 200 || !parseOk) {
+            fprintf(stderr, "[OPENAI STREAM WORKER] Errore di rete/HTTP (Status %" B_PRId32 ") o JSON malformato.\n", httpStatusCode);
+            DispatchError(args->server_messenger, httpStatusCode, sessionID, ctxId, rawResponse);
+                
+            // Segnala errore visibile anche sul notify_path prima di uscire
+            BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
+            if (streamFile.InitCheck() == B_OK) {
+                BString guiError;
+                guiError.SetToFormat("\n[Errore API OpenAI (%d)]\n", httpStatusCode);
+                streamFile.Write(guiError.String(), guiError.Length());
+            }
+
             executionLoop = false;
             break;
         }
@@ -1737,21 +2010,7 @@ openai_stream_thread_func(void* data)
             fprintf(stderr, "[OPENAI STREAM WORKER] ERRORE: Risposta di rete non valida o priva di 'choices'.\n");
             fprintf(stderr, "[OPENAI STREAM WORKER] Risposta grezza ricevuta:\n%s\n", rawResponse.String());
             
-            BMessage errDetails;
-            if (parsedJson.FindMessage("error", &errDetails) == B_OK) {
-                const char* errMsg = nullptr;
-                errDetails.FindString("message", &errMsg);
-                if (errMsg) {
-                    fprintf(stderr, "[OPENAI STREAM WORKER] Dettaglio errore API OpenAI: %s\n", errMsg);
-                    
-                    BFile streamFile(args->notify_path, B_WRITE_ONLY | B_OPEN_AT_END);
-                    if (streamFile.InitCheck() == B_OK) {
-                        BString guiError;
-                        guiError.SetToFormat("\n[Errore API OpenAI: %s]\n", errMsg);
-                        streamFile.Write(guiError.String(), guiError.Length());
-                    }
-                }
-            }
+            DispatchError(args->server_messenger, httpStatusCode, sessionID, ctxId, rawResponse);
             executionLoop = false;
         }
     }
@@ -1800,10 +2059,32 @@ fallback_to_standard:
                 fprintf(stderr, "[OPENAI STREAM ERRORE] Impossibile avviare il thread di rete!\n");
             }
 
+            /*if (http) {
+                const BHttpResult* result = dynamic_cast<const BHttpResult*>(&http->Result());
+                if (result != nullptr && result->StatusCode() != 200) {
+                    fprintf(stderr, "[OPENAI STREAM ERRORE] Status HTTP non valido in streaming: %d\n", result->StatusCode());
+
+                    BMessage errorReport(MSG_LLM_ERROR);
+                    errorReport.AddString("plugin_name", "OpenAI / LM Studio");
+                    errorReport.AddInt32("http_code", result->StatusCode());
+                    if (sessionID != -1) {
+                        errorReport.AddInt32("session_id", sessionID);
+                    }
+                    if (ctxId) {
+                        errorReport.AddString("session_id", ctxId);
+                    }
+                    errorReport.AddString("error_message", "Errore di connessione o risposta non valida dal server backend.");
+
+                    if (args->server_messenger.IsValid()) {
+                        args->server_messenger.SendMessage(&errorReport);
+                    }
+                }
+            }*/
             if (http) {
                 const BHttpResult* result = dynamic_cast<const BHttpResult*>(&http->Result());
-                if (result != nullptr) {
-                    fprintf(stderr, "[OPENAI STREAM DEBUG] HTTP Status Code finale: %d\n", result->StatusCode());
+                if (result != nullptr && result->StatusCode() != 200) {
+                    fprintf(stderr, "[OPENAI STREAM ERRORE] Status HTTP non valido in streaming: %d\n", result->StatusCode());
+                    DispatchError(args->server_messenger, result->StatusCode(), sessionID, ctxId, streamTarget.RawResponse());
                 }
             }
 
@@ -1917,6 +2198,9 @@ extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle, const char
         delete args;
         return B_NO_MEMORY;
     }
+       
+    int32 sessionID = -1;
+    args->context_copy->FindInt32("session_id", &sessionID);
 
     // Se prompt è passato separatamente ma non è in config, possiamo inserirlo in context_copy
     if (prompt && prompt[0] != '\0' && !args->context_copy->HasString("prompt")) {
@@ -1959,19 +2243,23 @@ extern "C" status_t ai_plugin_list_models(const BMessage* config, char* out_buf,
         return B_ERROR;
     }
 
+    // Estrazione dati per le notifiche di errore
+    BMessenger serverMessenger;
+    config->FindMessenger("server_messenger", &serverMessenger);
+
+    int32 sessionID = -1;
+    config->FindInt32("session_id", &sessionID);
+
+    const char* ctxId = nullptr;
+    config->FindString("context_id", &ctxId);
+
     const char* apiKey = nullptr;
     config->FindString("api_key", &apiKey);
+    
     BString baseUrl;
-    // Se FindString fallisce o trova una stringa vuota, usiamo la macro
     if (config->FindString("base_url", &baseUrl) != B_OK || baseUrl.IsEmpty()) {
         baseUrl = DEFAULT_OPENAI_BASE_URL;
     }
-/*
-    if (!apiKey || apiKey[0] == '\0') {
-        if (strlen(defaultFallback) + 1 > out_len) return B_ERROR;
-        strcpy(out_buf, defaultFallback);
-        return B_OK;
-    }*/
 
     // Costruzione dinamica dell'endpoint per i modelli
     BString url = baseUrl;
@@ -1979,8 +2267,6 @@ extern "C" status_t ai_plugin_list_models(const BMessage* config, char* out_buf,
         url.Remove(url.Length() - 1, 1);
     }
 
-    // Se la base url non contiene già "/v1", aggiungiamo il path completo,
-    // altrimenti accodiamo solo "/models"
     if (!url.EndsWith("/v1") && !url.EndsWith("/models")) {
         url << "/v1/models";
     } else if (!url.EndsWith("/models")) {
@@ -1994,7 +2280,10 @@ extern "C" status_t ai_plugin_list_models(const BMessage* config, char* out_buf,
     BUrl bUrl(url.String(), true);
 
     BUrlRequest* req = BUrlProtocolRoster::MakeRequest(bUrl, out, &listener, NULL);
-    if (!req) { delete out; return B_ERROR; }
+    if (!req) { 
+        delete out; 
+        return B_ERROR; 
+    }
     
     int32 statusCode = 0;
     BHttpRequest* http = dynamic_cast<BHttpRequest*>(req);
@@ -2003,9 +2292,11 @@ extern "C" status_t ai_plugin_list_models(const BMessage* config, char* out_buf,
         BHttpHeaders headers;
         headers.AddHeader("Content-Type", "application/json");
         
-        BString authHeader;
-        authHeader << "Bearer " << apiKey;
-        headers.AddHeader("Authorization", authHeader.String());
+        if (apiKey && apiKey[0] != '\0') {
+            BString authHeader;
+            authHeader << "Bearer " << apiKey;
+            headers.AddHeader("Authorization", authHeader.String());
+        }
         http->SetHeaders(headers);
     }
 
@@ -2024,8 +2315,51 @@ extern "C" status_t ai_plugin_list_models(const BMessage* config, char* out_buf,
         }
     }
 
+    // Gestione Errore e Notifica tramite MSG_MOD_ERROR
     if (rc != B_OK || out->BufferLength() == 0 || statusCode != 200) {
-        delete req; delete out;
+        fprintf(stderr, "[OPENAI LIST MODELS ERROR] Status HTTP: %" B_PRId32 ", RC: %" B_PRId32 "\n", statusCode, rc);
+
+        if (serverMessenger.IsValid()) {
+            BMessage errorReport(MSG_MOD_ERROR);
+            errorReport.AddString("plugin_name", "OpenAI / LM Studio");
+            errorReport.AddInt32("http_code", statusCode);
+            
+            if (sessionID != -1) {
+                errorReport.AddInt32("session_id", sessionID);
+            }
+            if (ctxId) {
+                errorReport.AddString("session_id", ctxId);
+            }
+
+            // Parsing dell'errore JSON se disponibile
+            BString rawError((const char*)out->Buffer(), out->BufferLength());
+            BMessage parsedJson;
+            BMessage errorObj;
+            if (rawError.Length() > 0 
+                && BJson::Parse(rawError.String(), parsedJson) == B_OK 
+                && parsedJson.FindMessage("error", &errorObj) == B_OK) {
+                const char* errMsg = errorObj.FindString("message");
+                if (errMsg) {
+                    errorReport.AddString("error_message", errMsg);
+                } else {
+                    errorReport.AddString("error_message", rawError.String());
+                }
+            } else {
+                if (statusCode != 0) {
+                    BString genericErr;
+                    genericErr.SetToFormat("Impossibile recuperare i modelli. Errore HTTP %" B_PRId32, statusCode);
+                    errorReport.AddString("error_message", genericErr.String());
+                } else {
+                    errorReport.AddString("error_message", "Errore di connessione durante il recupero dei modelli.");
+                }
+            }
+
+            serverMessenger.SendMessage(&errorReport);
+        }
+
+        delete req; 
+        delete out;
+
         if (strlen(defaultFallback) + 1 > out_len) return B_ERROR;
         strcpy(out_buf, defaultFallback);
         return B_OK;
@@ -2074,7 +2408,8 @@ extern "C" status_t ai_plugin_list_models(const BMessage* config, char* out_buf,
     memcpy(out_buf, cleanJson.String(), copy_len);
     out_buf[copy_len] = '\0';
 
-    delete req; delete out;
+    delete req; 
+    delete out;
     return B_OK;
 }
 
