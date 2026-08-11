@@ -41,29 +41,29 @@ Addon PublicAIPlugin : publicai_plugin.cpp : be libai_api.so libbnetapi.so libne
             [ TargetLibsupc++ ] <$(TARGET_PACKAGING_ARCH)>libshared.a $(TARGET_NETWORK_LIBS) ;
 AddPluginTypeAttribute PublicAIPlugin : remote ;
 
-#Addon OllamaPlugin : ollama_plugin.cpp : be libai_api.so libbnetapi.so libnetservices.a [ TargetLibstdc++ ]
-#            [ TargetLibsupc++ ] <$(TARGET_PACKAGING_ARCH)>libshared.a $(TARGET_NETWORK_LIBS) ;
-#AddPluginTypeAttribute OllamaPlugin : local ;
+Addon OllamaPlugin : ollama_plugin.cpp : be libai_api.so libbnetapi.so libnetservices.a [ TargetLibstdc++ ]
+            [ TargetLibsupc++ ] <$(TARGET_PACKAGING_ARCH)>libshared.a $(TARGET_NETWORK_LIBS) ;
+AddPluginTypeAttribute OllamaPlugin : local ;
 
 Addon GeminiPlugin : gemini_plugin.cpp : be libai_api.so libbnetapi.so libnetservices.a [ TargetLibstdc++ ]
             [ TargetLibsupc++ ] <$(TARGET_PACKAGING_ARCH)>libshared.a $(TARGET_NETWORK_LIBS) ;
 AddPluginTypeAttribute GeminiPlugin : remote ;
 
-#Addon HuggingFacePlugin : huggingface_plugin.cpp : be libai_api.so libbnetapi.so libnetservices.a [ TargetLibstdc++ ]
-#            [ TargetLibsupc++ ] <$(TARGET_PACKAGING_ARCH)>libshared.a $(TARGET_NETWORK_LIBS) ;
-#AddPluginTypeAttribute HuggingFacePlugin : remote ;
+Addon HuggingFacePlugin : huggingface_plugin.cpp : be libai_api.so libbnetapi.so libnetservices.a [ TargetLibstdc++ ]
+            [ TargetLibsupc++ ] <$(TARGET_PACKAGING_ARCH)>libshared.a $(TARGET_NETWORK_LIBS) ;
+AddPluginTypeAttribute HuggingFacePlugin : remote ;
 
 Addon AnthropicPlugin : anthropic_plugin.cpp : be libai_api.so libbnetapi.so libnetservices.a [ TargetLibstdc++ ]
             [ TargetLibsupc++ ] <$(TARGET_PACKAGING_ARCH)>libshared.a $(TARGET_NETWORK_LIBS) ;
 AddPluginTypeAttribute AnthropicPlugin : remote ;
 
-#Addon MistralPlugin : mistral_plugin.cpp : be libai_api.so libbnetapi.so libnetservices.a [ TargetLibstdc++ ]
-#            [ TargetLibsupc++ ] <$(TARGET_PACKAGING_ARCH)>libshared.a $(TARGET_NETWORK_LIBS) ;
-#AddPluginTypeAttribute MistralPlugin : remote ;
+Addon MistralPlugin : mistral_plugin.cpp : be libai_api.so libbnetapi.so libnetservices.a [ TargetLibstdc++ ]
+            [ TargetLibsupc++ ] <$(TARGET_PACKAGING_ARCH)>libshared.a $(TARGET_NETWORK_LIBS) ;
+AddPluginTypeAttribute MistralPlugin : remote ;
 
-#Addon DeepSeekPlugin : deepseek_plugin.cpp : be libai_api.so libbnetapi.so libnetservices.a [ TargetLibstdc++ ]
-#            [ TargetLibsupc++ ] <$(TARGET_PACKAGING_ARCH)>libshared.a $(TARGET_NETWORK_LIBS) ;
-#AddPluginTypeAttribute DeepSeekPlugin : remote ;
+Addon DeepSeekPlugin : deepseek_plugin.cpp : be libai_api.so libbnetapi.so libnetservices.a [ TargetLibstdc++ ]
+            [ TargetLibsupc++ ] <$(TARGET_PACKAGING_ARCH)>libshared.a $(TARGET_NETWORK_LIBS) ;
+AddPluginTypeAttribute DeepSeekPlugin : remote ;
 
 
 # ----------------------------------------------------

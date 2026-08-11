@@ -1402,55 +1402,13 @@ fallback_to_standard:
 }
 
 thread_post_actions:
-    if (args->context_copy != nullptr && !args->context_copy->HasString("title")) {
-        BMessage messagesMsg;
-        const char* firstPromptText = nullptr;
-
-        if (args->context_copy->FindMessage("messages", &messagesMsg) == B_OK) {
-            int32 msgCount = 0;
-            BMessage msgItem;
-            
-            while (messagesMsg.FindMessage("msg", msgCount, &msgItem) == B_OK || 
-                   messagesMsg.FindMessage(BString().SetToFormat("%d", msgCount).String(), &msgItem) == B_OK) {
-                
-                const char* role = msgItem.FindString("role");
-                const char* content = msgItem.FindString("content");
-                if (!content) msgItem.FindString("text", &content);
-                
-                if (role && strcmp(role, "user") == 0 && content && content[0] != '\0') {
-                    firstPromptText = content;
-                    break;
-                }
-                msgCount++;
-            }
-        }
-
-        if (firstPromptText && firstPromptText[0] != '\0') {
-            BString autoTitle(firstPromptText);
-            autoTitle.Trim();
-            if (autoTitle.Length() > 30) {
-                autoTitle.Truncate(30);
-                autoTitle << "...";
-            }
-            
-            args->context_copy->RemoveName("title");
-            args->context_copy->AddString("title", autoTitle.String());
-            
-            if (args->server_messenger.IsValid()) {
-                BMessage titleUpdateMsg('UTIT');
-                titleUpdateMsg.AddString("title", autoTitle.String());
-                args->server_messenger.SendMessage(&titleUpdateMsg);
-            }
-        }
+{
+    BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
+    if (streamFile.InitCheck() == B_OK) {
+        BString endMarker = "<<STREAM_END>>";
+        streamFile.Write(endMarker.String(), endMarker.Length());
     }
-
-    {
-        BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
-        if (streamFile.InitCheck() == B_OK) {
-            BString endMarker = "<<STREAM_END>>";
-            streamFile.Write(endMarker.String(), endMarker.Length());
-        }
-    }
+}
 
 thread_cleanup:
     delete args;

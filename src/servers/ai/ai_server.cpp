@@ -29,6 +29,7 @@
 #include <Node.h>
 #include <File.h>
 #include <Alert.h>
+#include <Catalog.h>
 
 #include <os/ai/AIPlugin.h>
 #include <AIConfig.h>
@@ -36,8 +37,11 @@
 #include "ai_server.h"
 #include "mcp_manager.h"
 
+#undef B_TRANSLATION_CONTEXT
+#define B_TRANSLATION_CONTEXT "AIServer"
 
 const char* kServerSignature = "application/x-vnd.Haiku-ai_server";
+const char* kNewChat = B_TRANSLATE("New chat");
 
 static std::vector<PluginEntry> gPlugins;
 
@@ -245,8 +249,27 @@ static status_t append_message_to_context(BMessage* context, const char* role, c
 }
 
 
-// Salva (o aggiorna) il contesto nativo su disco
+// Salva (o aggiorna) il contesto nativo su disco solo se ci sono messaggi e non operiamo in remoto
 status_t save_chat_context(const char* contextID, BMessage* context) {
+	BMessage historyMsg;
+	bool hasMessages = false;
+	if (context->FindMessage("messages", &historyMsg) == B_OK) {
+		type_code type;
+		int32 count = 0;
+		if (historyMsg.GetInfo("msg", &type, &count) == B_OK && count > 0) {
+			hasMessages = true;
+		}
+	}
+	
+	const char* remoteId = nullptr;
+	bool hasRemoteId = (context->FindString("remote_id", &remoteId) == B_OK 
+						&& remoteId != nullptr && remoteId[0] != '\0');
+
+	if (!hasMessages && !hasRemoteId) {
+		// Contesto ancora vuoto, non inquiniamo il disco
+		return B_OK;
+	}
+	
 	BString path = get_context_file_path(contextID);
 	BFile file(path.String(), B_WRITE_ONLY | B_CREATE_FILE | B_ERASE_FILE);
 	
@@ -269,7 +292,7 @@ status_t load_or_create_chat_context(const char* contextID, BMessage* outContext
 	// Il contesto non esiste: lo inizializziamo con i metadati di base
 	outContext->MakeEmpty();
 	outContext->AddString("context_id", contextID);
-	outContext->AddString("title", "New chat");
+	outContext->AddString("title", kNewChat);
 	outContext->AddString("plugin_name", defaultPlugin);
 	outContext->AddString("model_name", defaultModel);
 	outContext->AddString("remote_id", ""); // Vuoto di default (modalità locale)
@@ -285,7 +308,7 @@ static bool check_update_context_title(BMessage* chatContext){
 	bool tosave=false;
 	BString title;
 	chatContext->FindString("title", &title);
-	if (title == "New chat") {
+	if (title == kNewChat) {
 		BMessage historyMsg;
 		if (chatContext->FindMessage("messages", &historyMsg) == B_OK) {
 			BMessage firstMsg;
@@ -600,7 +623,7 @@ public:
 					}
 
 					BMessage chatContext;
-					BString title = "New chat";
+					BString title = kNewChat;
 					BString remoteId;
 					
 					if (load_or_create_chat_context(session.context_id.String(), &chatContext) == B_OK) {
@@ -1165,7 +1188,13 @@ public:
 											save_chat_context(contextID.String(), chatContext);
 										}
 									} else {
-										check_update_context_title(chatContext);
+										if (check_update_context_title(chatContext)) {
+											BMessage notify(MSG_AI_TITLE_CHANGED);
+											notify.AddString("title", chatContext->FindString("title"));
+											notify.AddMessenger("messenger",target);
+											const BMessenger& me = be_app_messenger;
+											me.SendMessage(&notify);
+										}
 										append_message_to_context(chatContext, "assistant", finalCleanText.String());
 										save_chat_context(contextID.String(), chatContext);
 									}
@@ -2079,6 +2108,53 @@ public:
 				BAlert* alert = new BAlert("Modelli AI", alertText.String(), "OK", nullptr, nullptr,
 										   B_WIDTH_AS_USUAL, B_STOP_ALERT);
 				alert->Go(nullptr); // Asincrono, non blocca il server
+				break;
+			}
+			case MSG_AI_TITLE_CHANGED: // Update Title
+			{
+				fprintf(stderr,"mando aggiornamento di titolo\n");
+				const char* title = nullptr;
+				if (msg->FindString("title", &title) != B_OK || !title)
+					break;
+				
+				BMessenger TargetMessenger;
+				msg->FindMessenger("messenger",&TargetMessenger);
+				BMessage notifyUI(MSG_AI_TITLE_CHANGED);
+				notifyUI.AddString("title", title);
+				TargetMessenger.SendMessage(&notifyUI);
+/*
+				int32 sessionID = -1;
+				const char* ctxId = nullptr;
+				msg->FindInt32("session_id", &sessionID);
+				//msg->FindString("context_id", &ctxId);
+				
+				//fprintf(stderr, "[SERVER] MSG_UPDATE_TITLE ricevuto: '%s' (session_id: %" B_PRId32 ", context_id: %s)\n",  title, sessionID, ctxId ? ctxId : "null");
+
+				// 1. Aggiorna lo stato della sessione (tramite ID o context string)
+				ClientSession* session = nullptr;
+				if (sessionID != -1 && gSessions.count(sessionID) > 0) {
+					session = &gSessions[sessionID];
+				}// else if (ctxId != nullptr) {
+				//	session = fSessionManager->FindSessionByContextId(ctxId);
+				//}
+
+				if (session != nullptr) {
+					BMessenger& clientTarget = gSessions[sessionID].client_target;
+					if (clientTarget.IsValid()) {
+						BMessage notifyUI(MSG_AI_TITLE_CHANGED);
+						notifyUI.AddString("title", title);
+						if (sessionID != -1)
+							notifyUI.AddInt32("session_id", sessionID);
+						//if (ctxId != nullptr)
+						//	notifyUI.AddString("context_id", ctxId);
+
+						clientTarget.SendMessage(&notifyUI);
+					} else {
+						fprintf(stderr, "[SERVER] Errore: clientTarget non valido per sessionID %" B_PRId32 "\n", sessionID);
+					}
+				} else {
+					fprintf(stderr, "[SERVER] Errore: Nessuna sessione trovata per aggiornare il titolo!\n");
+				}*/
 				break;
 			}
 			default:

@@ -8,6 +8,8 @@ AddResources ai_server : ai_server.rdef ;
 Application ai_server : 
     ai_server.cpp
     mcp_manager.cpp
+    :
+    localestub
 ;
 
 LinkAgainst ai_server : be [ TargetLibstdc++ ] libai_api.so ;
