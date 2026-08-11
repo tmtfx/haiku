@@ -5,6 +5,7 @@
 #ifndef MCP_MANAGER_H
 #define MCP_MANAGER_H
 
+#include "ai_server.h"
 #include <SupportDefs.h>
 #include <String.h>
 #include <Message.h>
@@ -17,7 +18,7 @@ void PopulateMcpTools(BList& mpcManager, uint32 permissions);
 bool ExtractStringFromJson(const char* json, const char* key, BString& out, bool unescapeControlChars = true);
 
 // Esegue uno specifico strumento locale in sicurezza e ne restituisce il risultato
-BString ExecuteLocalTool(const char* toolName, const BMessage& arguments);
+BString ExecuteLocalTool(ClientSession* session, const char* toolName, const BMessage& arguments);
 
 // Esegue un comando generico di sistema tramite shell
 BString RunSystemCommand(const char* command);
