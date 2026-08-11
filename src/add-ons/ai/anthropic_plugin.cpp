@@ -1156,14 +1156,13 @@ ai_plugin_generate_text_sync(ai_plugin_t handle, const char* prompt,
             }
         }
     } else if (statusCode != 200 && parseSuccess) {
-        // Estrazione messaggio d'errore strutturato da Gemini
         BMessage errorObj;
         if (parsedJson.FindMessage("error", &errorObj) == B_OK) {
             const char* errMsg = errorObj.FindString("message");
             if (errMsg) {
-                snprintf(response_buf, response_len, "[Errore Gemini %" B_PRId32 "] %s", statusCode, errMsg);
+                snprintf(response_buf, response_len, "[Errore Anthropic %" B_PRId32 "] %s", statusCode, errMsg);
             } else {
-                snprintf(response_buf, response_len, "[Errore Gemini %" B_PRId32 "]", statusCode);
+                snprintf(response_buf, response_len, "[Errore Anthropic %" B_PRId32 "]", statusCode);
             }
             extracted = true;
         }
