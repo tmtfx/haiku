@@ -17,6 +17,7 @@ for architectureObject in [ MultiArchSubDirSetup ] {
             AIPlugin.cpp
             :
             be
+            shared
         ;
         
         #HaikuInstall libai_api.so : /boot/system/lib ;
