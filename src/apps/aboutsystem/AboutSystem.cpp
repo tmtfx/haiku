@@ -1492,13 +1492,14 @@ AboutView::_ShowFricoVideo()
 	BPath path;
 	//find_directory(B_SYSTEM_DATA_DIRECTORY, &path);
 	//path.Append("Pirates_love_Skardy.webm");
+	/*
 	find_directory(B_USER_DIRECTORY, &path);
 	path.Append("Musiche/Pirates_love_Skardy.webm");
 	BEntry entry(path.Path(), true);
 	if (entry.InitCheck()!= B_OK || !entry.Exists())
-		return;
+		return;*/
 	
-	if (fVideoView == NULL )//|| !fVideoView->IsHidden())
+	if (fVideoView == NULL )
 		return;
 	fCardLayout->SetVisibleItem(1);
 	// Nascondiamo i crediti (il layout li rimuoverà dallo spazio visivo)
@@ -1515,7 +1516,8 @@ AboutView::_ShowFricoVideo()
 	////fVideoView->MoveBy(x,0);
 
 	// Avviamo la riproduzione
-	fVideoView->PlayVideo(path.Path());
+	//fVideoView->PlayVideo(path.Path());
+	fVideoView->PlayVideo(4);
 }
 
 void

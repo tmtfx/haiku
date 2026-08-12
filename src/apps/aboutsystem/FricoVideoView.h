@@ -7,6 +7,7 @@
 #include <MediaFile.h>
 #include <MediaTrack.h>
 #include <SoundPlayer.h>
+#include <DataIO.h>
 
 enum {
     MSG_NEXT_FRAME = 'fnnf'
@@ -24,15 +25,17 @@ public:
     virtual void MessageReceived(BMessage* message);
 
     void PlayVideo(const char* path);
+    void PlayVideo(const void* data, size_t size);
+    void PlayVideo(int32 resourceID);
     void StopVideo();
 
 private:
+	void _InitMediaPlayback();
     void _DecodeNextFrame();
     void _UpdateOverlay();
 
     static void _AudioCallback(void* cookie, void* buffer, size_t size,
                                const media_raw_audio_format& format);
-
     BMediaFile*     fMediaFile;
     BMediaTrack*    fVideoTrack;
     BMediaTrack*    fAudioTrack;
@@ -43,10 +46,13 @@ private:
     bigtime_t       fFrameDelay;
 
     bool            fUseOverlay;
+    
+    rgb_color       fOverlayKeyColor;
+    BDataIO* fDataIO;
     uint8*  fAudioBuffer;
     size_t  fAudioBufferPos;
     size_t  fAudioBufferSize;
-    rgb_color       fOverlayKeyColor;
+    
 };
 
 #endif // FRICO_VIDEO_VIEW_H

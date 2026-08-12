@@ -4,6 +4,12 @@
 #include <Entry.h>
 #include <MediaDefs.h>
 #include <string.h>
+#include <DataIO.h>
+#include <Application.h>
+#include <AppFileInfo.h>
+#include <Roster.h>
+#include <Resources.h>
+#include <File.h>
 
 #include <algorithm>
 
@@ -18,6 +24,8 @@ FricoVideoView::FricoVideoView(const char* name)
     fRunner(NULL),
     fFrameDelay(40000),
     fUseOverlay(false),
+    fOverlayKeyColor((rgb_color){ 255, 0, 255, 255 }),
+    fDataIO(NULL),
     fAudioBuffer(NULL),
     fAudioBufferPos(0),
     fAudioBufferSize(0)
@@ -62,16 +70,67 @@ FricoVideoView::MessageReceived(BMessage* message)
     }
 }
 
+
+void
+FricoVideoView::PlayVideo(int32 resourceID)
+{
+    app_info info;
+    be_app->GetAppInfo(&info);
+    BFile file(&info.ref, B_READ_ONLY);
+    BResources res(&file);
+
+    size_t size = 0;
+    const void* data = res.LoadResource(B_RAW_TYPE, resourceID, &size);
+    if (data == NULL || size == 0)
+        return;
+
+    PlayVideo(data, size);
+}
+
+
 void
 FricoVideoView::PlayVideo(const char* path)
 {
     StopVideo();
 
-    entry_ref ref;
-    if (get_ref_for_path(path, &ref) != B_OK)
+    BFile* file = new BFile(path, B_READ_ONLY);
+    if (file->InitCheck() != B_OK) {
+        delete file;
+        return;
+    }
+
+    fDataIO = file;
+    _InitMediaPlayback();
+}
+
+
+void
+FricoVideoView::PlayVideo(const void* data, size_t size)
+{
+    StopVideo();
+
+    if (data == NULL || size == 0)
         return;
 
-    fMediaFile = new BMediaFile(&ref);
+    BMallocIO* mallocIO = new BMallocIO();
+    ssize_t written = mallocIO->Write(data, size);
+    if (written < 0 || (size_t)written != size) {
+        delete mallocIO;
+        return;
+    }
+
+    // Riporta la testina all'inizio per la lettura di BMediaFile
+    mallocIO->Seek(0, SEEK_SET);
+
+    fDataIO = mallocIO;
+    _InitMediaPlayback();
+}
+
+
+void
+FricoVideoView::_InitMediaPlayback()
+{
+    fMediaFile = new BMediaFile(fDataIO);
     if (fMediaFile->InitCheck() != B_OK) {
         StopVideo();
         return;
@@ -106,13 +165,12 @@ FricoVideoView::PlayVideo(const char* path)
         return;
     }
 
-    // 1. Chiediamo al MediaKit il formato RAW YUV422 (YUY2) nativo per l'Overlay HW
+    // 1. Chiediamo il formato RAW YUV422 nativo per l'Overlay HW
     media_format decodedFormat = {};
     decodedFormat.type = B_MEDIA_RAW_VIDEO;
     decodedFormat.u.raw_video = media_raw_video_format::wildcard;
-    decodedFormat.u.raw_video.display.format = B_YCbCr422;//B_YUV422;
+    decodedFormat.u.raw_video.display.format = B_YCbCr422;
 
-    // Se YUV422 non è accettato dal decoder, proviamo il fallback su RGB32
     if (fVideoTrack->DecodedFormat(&decodedFormat) != B_OK) {
         decodedFormat.u.raw_video.display.format = B_RGB32;
         if (fVideoTrack->DecodedFormat(&decodedFormat) != B_OK) {
@@ -131,22 +189,19 @@ FricoVideoView::PlayVideo(const char* path)
     uint32 height = decodedFormat.u.raw_video.display.line_count;
     BRect frameRect(0, 0, width - 1, height - 1);
 
-    // 2. Tentiamos prima la creazione di una Bitmap Overlay Hardware
+    // 2. Overlay HW o fallback software
     if (space == B_YUV422 || space == B_YCbCr422) {
         fCurrentFrame = new BBitmap(frameRect, B_BITMAP_WILL_OVERLAY, space);
         if (fCurrentFrame->InitCheck() == B_OK) {
             fUseOverlay = true;
         } else {
-            // Se il driver/scheda non supporta l'overlay per questa risoluzione, pulisci
             delete fCurrentFrame;
             fCurrentFrame = NULL;
             fUseOverlay = false;
         }
     }
 
-    // Fallback software se l'overlay non è disponibile
     if (!fUseOverlay) {
-        // Se eravamo in YUV422 ma l'overlay è fallito, re-impostiamo RGB32 per DrawBitmap
         if (space != B_RGB32) {
             decodedFormat.u.raw_video.display.format = B_RGB32;
             fVideoTrack->DecodedFormat(&decodedFormat);
@@ -154,12 +209,11 @@ FricoVideoView::PlayVideo(const char* path)
         fCurrentFrame = new BBitmap(frameRect, B_RGB32);
     }
 
-    // 3. Se l'overlay è attivo, configuriamo il colore di Chroma Key ed impostiamo la superficie
     if (fUseOverlay) {
         _UpdateOverlay();
     }
 
-    // Avvia la riproduzione audio se esiste una traccia audio
+    // 3. Riproduzione audio
     if (fAudioTrack != NULL) {
         media_format audioFormat = {};
         audioFormat.type = B_MEDIA_RAW_AUDIO;
@@ -191,21 +245,24 @@ FricoVideoView::_DecodeNextFrame()
     int64 frameCount = 0;
     media_header header;
 
-    // Scrive i dati decodificati direttamente nella VRAM/Overlay Buffer di fCurrentFrame
     status_t err = fVideoTrack->ReadFrames(fCurrentFrame->Bits(), &frameCount, &header);
 
     if (err != B_OK || frameCount < 1) {
-        // Loop continuo del video
+        // Fine video: riavvolgiamo SIA il video SIA l'audio simultaneamente
         int64 frame = 0;
         fVideoTrack->SeekToFrame(&frame);
+
+        if (fAudioTrack != NULL) {
+            fAudioTrack->SeekToFrame(&frame);
+            fAudioBufferPos = 0;
+            fAudioBufferSize = 0;
+        }
         return;
     }
 
     if (!fUseOverlay) {
         Invalidate();
     }
-    // NOTA: Se fUseOverlay == true, non serve chiamare Invalidate()! 
-    // Il driver/GPU legge fCurrentFrame->Bits() direttamente ad ogni V-Sync.
 }
 
 
@@ -220,6 +277,11 @@ FricoVideoView::StopVideo()
         delete fSoundPlayer;
         fSoundPlayer = NULL;
     }
+
+    delete[] fAudioBuffer;
+    fAudioBuffer = NULL;
+    fAudioBufferPos = 0;
+    fAudioBufferSize = 0;
 
     if (fUseOverlay) {
         ClearViewOverlay();
@@ -239,7 +301,11 @@ FricoVideoView::StopVideo()
 
     delete fCurrentFrame;
     fCurrentFrame = NULL;
+
+    delete fDataIO;
+    fDataIO = NULL;
 }
+
 
 void
 FricoVideoView::_UpdateOverlay()
@@ -250,7 +316,6 @@ FricoVideoView::_UpdateOverlay()
     BRect bounds = Bounds();
     BRect bitmapBounds = fCurrentFrame->Bounds();
 
-    // Calcolo aspect ratio
     float scale = std::min(bounds.Width() / bitmapBounds.Width(),
                            bounds.Height() / bitmapBounds.Height());
 
@@ -264,7 +329,6 @@ FricoVideoView::_UpdateOverlay()
         (bounds.Height() + destHeight) / 2.0f
     );
 
-    // Aggiorna la superficie di overlay hardware del driver grafico
     SetViewOverlay(fCurrentFrame, bitmapBounds, destRect, 
                    &fOverlayKeyColor, B_FOLLOW_ALL, B_OVERLAY_FILTER_HORIZONTAL | B_OVERLAY_FILTER_VERTICAL);
 }
@@ -284,12 +348,9 @@ void
 FricoVideoView::Draw(BRect updateRect)
 {
     if (fUseOverlay) {
-        // Se usiamo l'overlay, app_server riempie l'area con la color key (es. Magenta) 
-        // ed il chip video esegue la sovrapposizione hardware YUV direttamente sul DAC!
         SetHighColor(fOverlayKeyColor);
         FillRect(updateRect);
     } else {
-        // Fallback Software con DrawBitmap (RGB32)
         FillRect(updateRect);
 
         if (fCurrentFrame == NULL || !fCurrentFrame->IsValid())
@@ -315,6 +376,7 @@ FricoVideoView::Draw(BRect updateRect)
     }
 }
 
+
 /*static*/ void
 FricoVideoView::_AudioCallback(void* cookie, void* buffer, size_t size,
     const media_raw_audio_format& format)
@@ -328,44 +390,43 @@ FricoVideoView::_AudioCallback(void* cookie, void* buffer, size_t size,
     uint8* dest = static_cast<uint8*>(buffer);
     size_t bytesNeeded = size;
 
+    size_t sampleSize = format.format & media_raw_audio_format::B_AUDIO_SIZE_MASK;
+    size_t frameSize = sampleSize * format.channel_count;
+    if (frameSize == 0)
+        frameSize = 4;
+
     while (bytesNeeded > 0) {
+        // 1. Se ci sono dati residui nel buffer d'appoggio, copiamoli
+        if (self->fAudioBufferSize > 0) {
+            size_t toCopy = std::min(bytesNeeded, self->fAudioBufferSize);
+            memcpy(dest, self->fAudioBuffer + self->fAudioBufferPos, toCopy);
+
+            dest += toCopy;
+            bytesNeeded -= toCopy;
+            self->fAudioBufferPos += toCopy;
+            self->fAudioBufferSize -= toCopy;
+
+            if (bytesNeeded == 0)
+                break;
+        }
+
+        // 2. Buffer vuoto: allochiamo se necessario e leggiamo un chunk
+        if (self->fAudioBuffer == NULL) {
+            self->fAudioBuffer = new uint8[65536];
+        }
+
         int64 framesRead = 0;
         media_header header;
 
-        // Dimensione approssimativa in byte per frame audio raw
-        size_t frameSize = (format.format & media_raw_audio_format::B_AUDIO_SIZE_MASK) 
-                            * format.channel_count;
-        if (frameSize == 0) 
-            frameSize = 4; // Fallback di sicurezza (es. 16-bit stereo)
-
-        int64 maxFramesToRead = bytesNeeded / frameSize;
-        if (maxFramesToRead == 0)
-            maxFramesToRead = 1;
-
-        status_t err = self->fAudioTrack->ReadFrames(dest, &framesRead, &header);
-
+        status_t err = self->fAudioTrack->ReadFrames(self->fAudioBuffer, &framesRead, &header);
         size_t bytesRead = framesRead * frameSize;
 
         if (err != B_OK || bytesRead == 0) {
-            // Fine dello stream audio: riavvolgi la traccia e azzera il resto del buffer
-            int64 frame = 0;
-            self->fAudioTrack->SeekToFrame(&frame);
-            
-            // Riavvolgi anche il video per mantenere il synchro di loop!
-            if (self->fVideoTrack != NULL) {
-                int64 vframe = 0;
-                self->fVideoTrack->SeekToFrame(&vframe);
-            }
-
             memset(dest, 0, bytesNeeded);
             break;
         }
 
-        if (bytesRead > bytesNeeded)
-            bytesRead = bytesNeeded;
-
-        dest += bytesRead;
-        bytesNeeded -= bytesRead;
+        self->fAudioBufferPos = 0;
+        self->fAudioBufferSize = bytesRead;
     }
 }
-

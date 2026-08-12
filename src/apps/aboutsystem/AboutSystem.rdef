@@ -31,6 +31,7 @@ resource(1, "walter_logo.png") #'PNG ' import "../../../data/artwork/Walter logo
 #endif
 
 resource(3, "matrix_vessel.png") #'PNG ' import "../../../data/artwork/matrix_vessel.png";
+resource(4, "pirates_love_skardy.webm") import "../../../data/artwork/Pirates_love_Skardy.webm";
 
 resource vector_icon {
 	$"6E636966090500020012020000003D4000BDA0000000004AE0004A1000000166"
