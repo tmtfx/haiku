@@ -171,7 +171,36 @@ TranslationComparator(const void* left, const void* right)
 
 
 //	#pragma mark - class definitions
+class BitmapView : public BView {
+public:
+	BitmapView(const char* name, BBitmap* bitmap)
+		:
+		BView(name, B_WILL_DRAW),
+		fBitmap(bitmap)
+	{
+		SetDrawingMode(B_OP_OVER);
+		if (fBitmap != NULL) {
+			ResizeTo(fBitmap->Bounds().Width(), fBitmap->Bounds().Height());
+		}
+	}
 
+	virtual ~BitmapView()
+	{
+		delete fBitmap;
+	}
+
+	virtual void Draw(BRect updateRect)
+	{
+		if (fBitmap != NULL) {
+			SetLowColor(ui_color(B_DOCUMENT_BACKGROUND_COLOR));
+			FillRect(Bounds(), B_SOLID_LOW);
+			DrawBitmap(fBitmap, BPoint(0, 0));
+		}
+	}
+
+private:
+	BBitmap* fBitmap;
+};
 
 class AboutApp : public BApplication {
 public:
@@ -321,6 +350,7 @@ public:
 							~AboutView();
 
 	virtual void			AttachedToWindow();
+	virtual void			FrameResized(float width, float height);
 	virtual void			Pulse();
 	virtual void			MessageReceived(BMessage* message);
 	virtual void			MouseDown(BPoint where);
@@ -347,6 +377,7 @@ private:
 			void			_AddCopyrightsFromAttribute();
 			void			_AddPackageCredit(const PackageCredit& package);
 			void			_AddPackageCreditEntries();
+			void			_UpdateVesselPosition();
 
 
 private:
@@ -355,6 +386,8 @@ private:
 			HyperTextView*	fCreditsView;
 			FricoVideoView* fVideoView;
 			BCardLayout* 	fCardLayout;
+			BitmapView*	fVesselView;
+			int32		fVesselOffset;
 
 			bigtime_t		fLastActionTime;
 			BMessageRunner*	fScrollRunner;
@@ -1258,7 +1291,7 @@ AboutView::AboutView()
 	fCachedMinHeight(kSysInfoMinHeight)
 {
 	SetViewUIColor(B_PANEL_BACKGROUND_COLOR);
-
+	SetFlags(Flags() | B_FRAME_EVENTS | B_FULL_UPDATE_ON_RESIZE);
 	// Assign the colors, sadly this does not respect live color updates
 	fTextColor = ui_color(B_DOCUMENT_TEXT_COLOR);
 	fLinkColor = ui_color(B_LINK_TEXT_COLOR);
@@ -1309,7 +1342,6 @@ AboutView::~AboutView()
 	delete fLogoView;
 }
 
-
 void
 AboutView::AttachedToWindow()
 {
@@ -1333,8 +1365,18 @@ AboutView::AttachedToWindow()
 
 	SetEventMask(B_POINTER_EVENTS);
 	DoLayout();
+	if (fVesselView != NULL && fCreditsView != NULL && fVesselView->Parent() == NULL) {
+		fCreditsView->AddChild(fVesselView);
+		_UpdateVesselPosition();
+	}
 }
 
+void
+AboutView::FrameResized(float width, float height)
+{
+	BView::FrameResized(width, height);
+	_UpdateVesselPosition();
+}
 
 void
 AboutView::MouseDown(BPoint where)
@@ -1683,8 +1725,9 @@ AboutView::_CreateCreditsView()
 	fCreditsView->SetFontAndColor(be_plain_font, B_FONT_ALL, &fTextColor);
 	fCreditsView->Insert(text.String());
 	
-	fCreditsView->Insert(B_TRANSLATE("Pirati Del Frico is a prank/ "
-		" \"goliard\" project based on Haiku, it is a private proof "
+	fCreditsView->Insert(B_TRANSLATE("Pirati Del Frico is a playful  "
+		" prank project based on Haiku, with the spirit of the ancient "
+		" goliards and a pirate flair. It is a private proof "
 		" of concept and not an official Haiku build. Please visit "
 		" https://www.haiku-os.org/ for information about the "
 		" official Haiku project. "
@@ -1692,19 +1735,116 @@ AboutView::_CreateCreditsView()
 		" Here the pirates added some features such as:\n "
 		" · Hardware cursor (for some cards)\n "
 		" · AI/LLM subsystem (server, preflet, plugins, kit)\n "
-		" · Keystore with (strongly)encrypted passwords\n "
-		" · Master password set at Install time or later, you can\n "
-		"      even set no passwords, your password will be obscured\n "
+		" · Keystore with (strongly) encrypted passwords\n "
+		" · Master password set at install time or later, even if\n "
+		"      you set no password, your password will be obscured\n "
 		"      in any case (but not secured) -> no more passwords\n "
 		"      stored in plain text\n "
-		" · New Deskbar menu, you can still access to old menu by\n "
+		" · New Deskbar menu, you can still access the old menu by\n "
 		"      pressing the OPTION key while clicking on the cannon\n "
 		" · An initial Cryptographic virtual device (still not\n "
 		"      compliant with openssl behavior and to be tested)\n "
 		" · Some easter eggs, some nice apps along with an AI\n "
-		"      assistant crab and maybe somethig more...\n "
-		"\n\n"));
+		"      assistant crab and maybe something more...\n\n "
+		));
+		
+/*	fCreditsView->SetFontAndColor(be_fixed_font, B_FONT_ALL, &fTextColor);
+	text.SetTo(R"(
 
+
+	
+		                                                  
+                       .                          
+                    .^7^                          
+                   .. ^!                          
+                   .:.!?..                        
+               .    ......:   ^!:..               
+               7:  .:..:. ..  !~::.               
+               !^.^^:^7J..^~. Y^.                 
+              .7:         .7~:~^:^:               
+            . .^^..        :.   :.:.              
+          :~..755!:::~J5~..^..::::  .             
+           .:^J#B!:^~775~^!~!JB5::.               
+          .  .JYY~       .~.  ..:~:    .          
+          .  ~~!7?        :.     .^..   ..        
+          . :7^!!^      ..~.     ^!^~....:~^.     
+        .^:^7~^!?:.:..^7.^~...~:...:^^~^^^^.      
+        ^~~JJ!:7Y~^!^.!5.7!!77G~  .!7?Y:..        
+        JGGGBB&&#GYJJ ~PPPPGB&&#5G#B^...          
+        7GG5G5B&&&&&#Y5PPPPGP##&&&G!..            
+         ~BBG55P5Y55Y55YPPGG#&#&#!                
+       .. ~YP57!JJ??JJ?!~YGPY!:~~ ...             
+                                                  
+                                             )");*/
+	/*
+    ......    .....    ......  .......    .....    ......    .....    .....  
+     ::::.    .:::.    .::::   :?::::.    .:::.    .::::.    ::::.    .::::  
+ ........................   .^^!J............................................
+ :::.    .::::     ::::..^~7JJYPY    .::::     ::::.    .::::     ::::.    ::
+ ........................^~~:..^J ...........................................
+     ::::.    .:::.    .:.:.   ?B!:::.    .:::.    .::::     ::::.    .::::  
+    ......    .....    ...::...JY~::..    .....    ......    .....    .....  
+ :::.    .::::   :.::::..~?7!~7YY!.::::.::    .!:.:.    .:::.     ::::.    .:
+ ..:.    .:...   ^....:.  .^.::^^~~~!7?~:.    .Y~^..    .....    ....:.    ..
+     .....    ...?^    ...:^      .  .:~. ..::.Y55Y7!7?7~.   .....    .....  
+     ::::.    .:~G7    .:.~^:....:^:...:^.::::.Y!^~77!~:.    .:::.    .::::  
+ ....    ..... :^P!::::.:~!^^!!7P~^:^^^^~:....~G~...    .....    ......    ..
+ :::.    .:::.:.~J!^!!J??7!~!J7JB!^...^^!~    ?G?~:.    .::::     ::::.    ::
+ ............:^:!J!^...~..:::^^~!!!!!77?JY?~^!7Y^~!^.........................
+     ::::.  .:.!!J!:.. ^.        ..  ..~7J?77?7Y7?~^!7~^.    ::::.    .::::  
+ ......... ::.:!^J7.^..~.  .     ...   .^~:   ..:^!::7?~.....................
+ :::.    .^^:.^~.??.~:^~  ...    ...  .:^!^.....  :!..^~:::::     ::::.    .:
+ .... .:.::...^^.JJ ^:~:.::.....::::::^^^!::.   ..:!~ .:^^...    ......    ..
+     :^?Y!   ~JJ?55?77~~~~~~~J5555J?~~~^~!:^.....:^^!:...:^: .:::.    .:::.  
+     :.^!7?!:~?P####G!^^^~~!?57J#G7^...~7~~~?5PGP5!^!!.. ..:^:..:.    .:...  
+ ....  :^..!??!?PGBP7777???JYY7YPP7?!7??!!7?Y?5&5!:. ~:.... .^:  ..:::.    ..
+ :::.  :^ ...^YGYGJY!  ......:::.::^7J??~!!!7!?JJ???!7~::. .  .^. ::::.    .:
+    ...^: .. :?YJP5?5:  .:    . ..  .^!7:       .:^~7!!:::.    .:^.   .....  
+     ::~..  .!Y7~J57PJ   .      ...  .^7~         .:^~?^:::....  .^:  .::::  
+ .....:~..  ~J?~^JY:!P:   ..     ... .^~7   .      .^:!~.^:::::....:^:.......
+ :::. ^.:. ^??!~^J5:~Y^  .:.   ...:..:^7!   ...  . .^:~?~~^^^::^^::::~~.   .:
+ ....:^.:.:!?7~!^J5^^?:  .:......:::^^~?^ ........ .~JJ7~~7!::^^^^^^^^!??!!..
+    :~:^::!7?7~7^J5^~!...^....::^^^^^^77...::...:::^^!~!!!7?::.... .^!7JY~^  
+  :~?!!~^7??77~!:?5^!^::^~~~~^~7J7~~~77~^:^~~^7?~^~~~^^^^^~~^!7^!???!~~^.....
+ :^~~~~~????7!!!^JP??!!7J?!~~.^Y&J .~?77~!!~?.J&!.:. ...^~7~!P#BP!::^~:    .:
+ .^!~^^~?7J77^~ .5P!7!~!!?~~:.~?G? ^J!!!!7?~?7JG7:::  .:!?Y5YJJ?: :~~:.    .:
+  !GPP5PGPBGBBGPPPPJ??:7^777  ~7P??5YYGY5GGBBB##BG~:!JYGBJ7:.:^::^^.  .....  
+  !5P5P555PG5G#######G5PYJYJ  ~7P55G55P5P55PBBBBBBPGB##BPPY:.^~^~^    .::::  
+ .!555P55Y5PY5P######G#B###B!~!YGPYYG5Y5G55PGBBBGBBB###BG5~^~!^:.......   ...
+ .~555G555PG55YPBBBBBBBGBBGGGGGP55PG55YPG555PGGBBBBBBBBY7^^^^     ::::.    .:
+ ..!J5PYYYPPYYYP55PJYYPY5GYJJ5YJJJY5YYY5555GGBBBBBBBGJ~:.....................
+    .~GBGP5YYYYYYYYYYYYYYYYYYYYYYYYY5PP5PPGGGBBBBBBG!..:     ::::.    .::::  
+ ...::?#B#BGGP5YYYJJJJJYJJJJJJJJYYY5PPPGGBBBB5?7YPG7:^:......................
+ ^~~^::~~7YY5Y?!~7J5YYJ??YYYYYJ?7^.^?5PPPYY7^. :::~::::^~^^::... .::::.    .:
+ :::.    .....    .::::..::^^::..    .:::.   ..::::::..:::::::.........    ..
+     ::::.    .:::.    .:...     ::::.    .:::.    .::.:     .:::.    .:::.  )");*/
+	//fCreditsView->Insert(text.String());
+
+	// Caricamento del PNG tramite TranslationUtils (da risorsa o percorso file)
+	BBitmap* vesselBitmap = BTranslationUtils::GetBitmap(B_PNG_FORMAT, "matrix_vessel.png");
+	if (vesselBitmap != NULL) {
+		float bmpHeight = vesselBitmap->Bounds().Height() + 1.0f;
+
+		// Salviamo l'offset esatto del testo prima di inserire il padding
+		fVesselOffset = fCreditsView->TextLength();
+		fVesselView = new BitmapView("vesselView", vesselBitmap);
+
+		// Calcolo del padding di '\n' necessari
+		font_height fh;
+		be_plain_font->GetHeight(&fh);
+		float lineHeight = fh.ascent + fh.descent + fh.leading;
+		if (lineHeight <= 0.0f)
+			lineHeight = 16.0f;
+
+		int32 lineBreaksNeeded = (int32)ceilf((bmpHeight + 16.0f) / lineHeight);
+
+		BString padding;
+		for (int32 i = 0; i < lineBreaksNeeded; i++)
+			padding << "\n";
+
+		fCreditsView->Insert(padding.String());
+	}
+	
 	// Haiku copyright
 	BFont font(be_bold_font);
 	font.SetSize(font.Size() + 4);
@@ -2229,7 +2369,26 @@ AboutView::_GetLicensePath(const char* license, BPath& path)
 	path.Unset();
 	return B_ENTRY_NOT_FOUND;
 }
+void
+AboutView::_UpdateVesselPosition()
+{
+	if (fVesselView == NULL || fCreditsView == NULL){
+		fprintf(stderr,"non esiste!!!!\n");
+		return;
+	}
+	// Ricalcola la Y reale del testo al nuovo offset/wrapping
+	BPoint insertPt = fCreditsView->PointAt(fVesselOffset);
 
+	float viewWidth = fCreditsView->TextRect().Width();
+	if (viewWidth <= 0.0f)
+		viewWidth = fCreditsView->Bounds().Width();
+
+	float bmpWidth = fVesselView->Bounds().Width();
+	float xPos = std::max(5.0f, (viewWidth - bmpWidth) / 2.0f);
+	float yPos = insertPt.y + 6.0f;
+
+	fVesselView->MoveTo(xPos, yPos);
+}
 
 void
 AboutView::_AddCopyrightsFromAttribute()
