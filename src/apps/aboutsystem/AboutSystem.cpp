@@ -1725,7 +1725,7 @@ AboutView::_CreateCreditsView()
 	fCreditsView->SetFontAndColor(be_plain_font, B_FONT_ALL, &fTextColor);
 	fCreditsView->Insert(text.String());
 	
-	fCreditsView->Insert(B_TRANSLATE("Pirati Del Frico is a playful  "
+	fCreditsView->Insert(B_TRANSLATE("Pirati Del Frico is a playful "
 		" prank project based on Haiku, with the spirit of the ancient "
 		" goliards and a pirate flair. It is a private proof "
 		" of concept and not an official Haiku build. Please visit "
