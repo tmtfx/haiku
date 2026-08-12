@@ -323,7 +323,7 @@ BuildPayloadFromContext(const BMessage* config, const char* currentPrompt,
     }
     if (systemPrompt && systemPrompt[0] != '\0') {
         BString escapedSystem = EscapeStringForJson(systemPrompt);
-        outPayload << "    {\"role\": \"system\", \"content\": \"" << escapedSystem << "\"\}";
+        outPayload << "    {\"role\": \"system\", \"content\": \"" << escapedSystem << "\"}";
         first = false;
     }
 
