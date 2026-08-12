@@ -1683,21 +1683,26 @@ AboutView::_CreateCreditsView()
 	fCreditsView->SetFontAndColor(be_plain_font, B_FONT_ALL, &fTextColor);
 	fCreditsView->Insert(text.String());
 	
-	fCreditsView->Insert(B_TRANSLATE("Pirati Del Frico is a buccaneer project "
-		" based on Haiku, it is a private proof of concept and not an official "
-		" Haiku build. Please visit https://www.haiku-os.org/ for information "
-		" about the official Haiku project.\n\n "
+	fCreditsView->Insert(B_TRANSLATE("Pirati Del Frico is a prank/ "
+		" \"goliard\" project based on Haiku, it is a private proof "
+		" of concept and not an official Haiku build. Please visit "
+		" https://www.haiku-os.org/ for information about the "
+		" official Haiku project. "
+		" \n\n "
 		" Here the pirates added some features such as:\n "
 		" · Hardware cursor (for some cards)\n "
 		" · AI/LLM subsystem (server, preflet, plugins, kit)\n "
 		" · Keystore with (strongly)encrypted passwords\n "
-		" · Master password set at Install time or later, you can even set no\n "
-		"   password, your password will be obscured (but not secured) -> no more\n "
-		"   password stored in plain text\n "
-		" · New Deskbar menu, you can still access to old menu by pressing OPTION\n "
-		"   key and clicking on the cannon\n "
-		" · Some easter eggs, some nice apps along with an AI assistant crab\n "
-		"   and maybe somethig more...\n " 
+		" · Master password set at Install time or later, you can\n "
+		"      even set no passwords, your password will be obscured\n "
+		"      in any case (but not secured) -> no more passwords\n "
+		"      stored in plain text\n "
+		" · New Deskbar menu, you can still access to old menu by\n "
+		"      pressing the OPTION key while clicking on the cannon\n "
+		" · An initial Cryptographic virtual device (still not\n "
+		"      compliant with openssl behavior and to be tested)\n "
+		" · Some easter eggs, some nice apps along with an AI\n "
+		"      assistant crab and maybe somethig more...\n "
 		"\n\n"));
 
 	// Haiku copyright
