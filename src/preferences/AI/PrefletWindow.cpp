@@ -478,7 +478,14 @@ void PrefletWindow::MessageReceived(BMessage* msg)
         case MSG_ENGINE_REMOTE:
         case MSG_ENGINE_ALL: {
             // Gestione cambio filtri come prima
+            for (int32 i = fPluginListView->CountItems() - 1; i >= 0; i--) {
+                delete fPluginListView->ItemAt(i);
+            }
             fPluginListView->MakeEmpty();
+            //while (fModelMenu->CountItems() > 0) {
+            //    BMenuItem* item = fModelMenu->RemoveItem((int32)0);
+            //    delete item;
+            //}
             fModelMenu->RemoveItems(0, fModelMenu->CountItems(), true);
             PostMessage(new BMessage(MSG_REFRESH_PLUGINS));
             break;
@@ -487,7 +494,14 @@ void PrefletWindow::MessageReceived(BMessage* msg)
             fprintf(stderr, "\n[LOG] --- INIZIO MSG_REFRESH_PLUGINS ---\n");
             
             // 1. Pulizia della UI: svuotiamo la lista dei plugin e il menu dei modelli
+            for (int32 i = fPluginListView->CountItems() - 1; i >= 0; i--) {
+                delete fPluginListView->ItemAt(i);
+            }
             fPluginListView->MakeEmpty();
+            //while (fModelMenu->CountItems() > 0) {
+            //    BMenuItem* item = fModelMenu->RemoveItem((int32)0);
+            //    delete item;
+            //}
             fModelMenu->RemoveItems(0, fModelMenu->CountItems(), true);
             fModelMenuField->SetEnabled(false);
 
@@ -573,6 +587,10 @@ void PrefletWindow::MessageReceived(BMessage* msg)
         }
         case MSG_MODELS_FETCHED: {
             fprintf(stderr, "\n[LOG] --- INIZIO MSG_MODELS_FETCHED ---\n");
+            //while (fModelMenu->CountItems() > 0) {
+            //    BMenuItem* item = fModelMenu->RemoveItem((int32)0);
+            //    delete item;
+            //}
             fModelMenu->RemoveItems(0, fModelMenu->CountItems(), true);
             
             const char* jsonModels = nullptr;
@@ -680,6 +698,9 @@ void PrefletWindow::MessageReceived(BMessage* msg)
             break;
         }
         case MSG_SESSIONS_FETCHED: {
+        	for (int32 i = fSessionListView->CountItems() - 1; i >= 0; i--) {
+        	    delete fSessionListView->ItemAt(i);
+        	}
             fSessionListView->MakeEmpty();
             int32 count = 0;
             msg->FindInt32("count", &count);
@@ -1137,7 +1158,9 @@ PrefletWindow::_RefreshContexts()
         if (prev)
             previousId = prev->ContextId();
     }
-
+    for (int32 i = fContextListView->CountItems() - 1; i >= 0; i--) {
+        delete fContextListView->ItemAt(i);
+    }
     fContextListView->MakeEmpty();
 
     BPath dirPath;
