@@ -1727,28 +1727,34 @@ AboutView::_CreateCreditsView()
 	fCreditsView->SetFontAndColor(be_plain_font, B_FONT_ALL, &fTextColor);
 	fCreditsView->Insert(text.String());
 	
-	fCreditsView->Insert(B_TRANSLATE("Pirati Del Frico is a playful "
-		" prank project based on Haiku, with the spirit of the ancient "
-		" goliards and a pirate flair. It is a private proof "
-		" of concept and not an official Haiku build. Please visit "
-		" https://www.haiku-os.org/ for information about the "
-		" official Haiku project. "
-		" \n\n "
+	fCreditsView->Insert(B_TRANSLATE("\nPirati Del Frico is a playful"
+		" prank project based on Haiku, with the spirit of the ancient"
+		" goliards and a pirate flair. It is a private proof"
+		" of concept and not an official Haiku" B_UTF8_REGISTERED
+		" build. Please visit https://www.haiku-os.org/ for information"
+		" about the official Haiku" B_UTF8_REGISTERED
+		" project.\n\n "
 		" Here the pirates added some features such as:\n "
 		" · Hardware cursor (for some cards)\n "
 		" · AI/LLM subsystem (server, preflet, plugins, kit)\n "
 		" · Keystore with (strongly) encrypted passwords\n "
 		" · Master password set at install time or later, even if\n "
 		"      you set no password, your password will be obscured\n "
-		"      in any case (but not secured) -> no more passwords\n "
-		"      stored in plain text\n "
+		"      in any case. This means no more passwords stored\n "
+		"      in plain text\n "
 		" · New Deskbar menu, you can still access the old menu by\n "
 		"      pressing the OPTION key while clicking on the cannon\n "
 		" · An initial Cryptographic virtual device (still not\n "
 		"      compliant with openssl behavior and to be tested)\n "
 		" · Some easter eggs, some nice apps along with an AI\n "
 		"      assistant crab and maybe something more...\n\n "
+		"If you want to buy me a coffee "
 		));
+	fCreditsView->SetFontAndColor(be_plain_font, B_FONT_ALL, &fLinkColor);
+	fCreditsView->InsertHyperText(B_TRANSLATE("click here\n"),
+		new URLAction("https://ko-fi.com/tmtfx"));
+	fCreditsView->SetFontAndColor(be_plain_font, B_FONT_ALL, &fTextColor);
+	fCreditsView->Insert(" and follow my progress.\n");
 		
 /*	fCreditsView->SetFontAndColor(be_fixed_font, B_FONT_ALL, &fTextColor);
 	text.SetTo(R"(
