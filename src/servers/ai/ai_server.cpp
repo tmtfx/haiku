@@ -950,6 +950,8 @@ public:
 
 				if (sessionID != -1 && gSessions.count(sessionID) > 0) {
 					gSessions[sessionID].client_target = target;
+					// azzeriamo il flag di abort se rimasto attivo
+					gSessions[sessionID].abort_requested = false;
 				}
 
 				PluginEntry* p = nullptr;
@@ -1507,7 +1509,7 @@ public:
 				// === INTEGRATIVE KILL SWITCH: INTERRUZIONE TRA UN COMANDO E L'ALTRO ===
 				// =========================================================================
 				if (session->abort_requested) {
-					session->abort_requested = false; // Resettiamo il flag per le prossime chat
+					//session->abort_requested = false; // Resettiamo il flag per le prossime chat // no lo resettiamo alla prossima richiesta
 
 					fprintf(stderr, "[AI_SERVER] [KILL SWITCH] Loop interrotto dall'utente prima del tool '%s'!\n", toolName.String());
 
