@@ -1,4 +1,5 @@
 #include "AIConfig.h"
+#include "AICommands.h"
 #include <FindDirectory.h>
 #include <Path.h>
 #include <File.h>
@@ -37,7 +38,7 @@ status_t AIGetAvailablePlugins(const char* engineType, BMessage& outPlugins)
     if (err != B_OK) return err;
 
     BMessage reply;
-    BMessage m('LIST');
+    BMessage m(MSG_LIST);
     const char* reqType = (engineType != nullptr && engineType[0] != '\0') ? engineType : "all";
     m.AddString("requested_type", reqType);
 
@@ -65,13 +66,13 @@ status_t AIGetAvailablePlugins(const char* engineType, BMessage& outPlugins)
 status_t AIGetPluginModels(const char* pluginName, BString& outJsonModels)
 {
     if (!pluginName) return B_BAD_VALUE;
-
+	fprintf(stderr,"entrato in AIGetPluginModels modalità solo parametro plugin");
     BMessenger server;
     status_t err = _EnsureServer(server);
     if (err != B_OK) return err;
 
     BMessage reply;
-    BMessage m('GMOD');
+    BMessage m(MSG_GET_MODELS);
     m.AddString("plugin_name", pluginName);
 
     err = server.SendMessage(&m, &reply, 8000000); // 8s timeout (può richiedere rete)
@@ -83,6 +84,31 @@ status_t AIGetPluginModels(const char* pluginName, BString& outJsonModels)
         return B_OK;
     }
 
+    return B_BAD_DATA;
+}
+
+status_t AIGetPluginModels(const char* pluginName, const char* apiKey, const char* base_url, BString& outJsonModels)
+{
+    if (!pluginName) return B_BAD_VALUE;
+	fprintf(stderr,"entrato in AIGetPluginModels modalità plugin specifico");
+    BMessenger server;
+    status_t err = _EnsureServer(server);
+    if (err != B_OK) return err;
+
+    BMessage reply;
+    BMessage m(MSG_GET_MODELS);
+    m.AddString("plugin_name", pluginName);
+    m.AddString("apiKey",apiKey);
+    m.AddString("base_url",base_url);
+
+    err = server.SendMessage(&m, &reply, 8000000); // 8s timeout (può richiedere rete)
+    if (err != B_OK) return err;
+
+    const char* json = nullptr; //TODO: non sarebbe il caso di passare ai BMessage invece di gestire i json fuori dal plugin?
+    if (reply.FindString("plugin_models", &json) == B_OK) {
+        outJsonModels.SetTo(json);
+        return B_OK;
+    }
     return B_BAD_DATA;
 }
 
@@ -361,7 +387,7 @@ bool SaveAISettings(const AISettings& settings)
     BFile file(path.Path(), B_READ_WRITE | B_CREATE_FILE | B_ERASE_FILE);
     if (file.InitCheck() != B_OK) return false;
 
-    BMessage m('AISC');
+    BMessage m(MSG_SAVE_CONFIG);
     m.AddString("engine", settings.engine.String());
     m.AddString("plugin", settings.plugin.String());
     m.AddString("model", settings.model.String());

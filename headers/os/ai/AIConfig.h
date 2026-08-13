@@ -77,7 +77,7 @@ status_t AIGetAvailablePlugins(const char* engineType, BMessage& outPlugins);
 // Chiede ad ai_server i modelli disponibili per un determinato plugin.
 // Restituisce la stringa JSON dei modelli (es. ["gpt-4", "gpt-3.5"])
 status_t AIGetPluginModels(const char* pluginName, BString& outJsonModels);
-
+status_t AIGetPluginModels(const char* pluginName, const char* apiKey, const char* base_url, BString& outJsonModels);
 // KeyStore helpers
 // Returns true if a key exists for the given engine
 bool HasAPIKey(const char* plugin);

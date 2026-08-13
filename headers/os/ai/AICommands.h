@@ -28,6 +28,7 @@ static const uint32 MSG_RELOAD				= 'RLDS';
 static const uint32 MSG_GET_MODELS			= 'GMOD';
 static const uint32 MSG_GET_CAPABILITIES	= 'GCAP';
 static const uint32 MSG_GET_ALL_SESSIONS    = 'GALS';
+static const uint32 MSG_SAVE_CONFIG			= 'AISC';
 // Risposte dal Server
 static const uint32 MSG_AI_ACK				= 'ACK_'; // Presa in carico del server
 static const uint32 MSG_AI_RESPONSE			= 'ARES'; // Token o risposta asincrona arrivata
