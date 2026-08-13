@@ -126,7 +126,7 @@ static void load_plugins(const char* dirpath)
 		LoadAISettings(s);
 
 		// 2. Costruiamo il BMessage completo da passare al plugin nativo
-		BMessage configMsg('AISC');
+		BMessage configMsg(MSG_SAVE_CONFIG);
 		configMsg.AddString("engine", s.engine.String());
 		configMsg.AddString("plugin", s.plugin.String());
 		configMsg.AddString("model_name", s.model.String()); // Usiamo "model_name" coerente con il contesto
@@ -1833,27 +1833,33 @@ public:
 					msg->SendReply(&reply);
 					break;
 				}
-
+				
+				
 				BMessage reply('MDBK'); // Models Back
 				char buffer[16384] = "[]"; // Aumentato a 16KB: le liste dei modelli (es. Ollama) possono essere molto lunghe!
 
-				// 1. Recuperiamo la chiave reale per questo plugin dal KeyStore
+				// Recuperiamo la chiave dal messaggio
 				BString apiKey;
-				GetPluginAPIKey(pluginName.String(), apiKey);
-
+				status_t ret = msg->FindString("apiKey", &apiKey);
+				if (ret != B_OK) {
+					// Altrimenti recuperiamo la chiave reale per questo plugin dal KeyStore
+					GetPluginAPIKey(pluginName.String(), apiKey);
+				}
+				
+				BString baseUrl;
 				// 2. Risoluzione di base_url
-				BString baseUrl = msg->FindString("base_url");
+				ret = msg->FindString("base_url",&baseUrl);
 
 				// Fallback sulle impostazioni salvate se non passati esplicitamente nel messaggio
-				AISettings s;
-				if (LoadAISettings(s) && s.plugin == pluginName) {
-					if (baseUrl.IsEmpty()) {
+				if (ret!=B_OK) {
+					AISettings s;
+					if (LoadAISettings(s) && s.plugin == pluginName) {
 						baseUrl = s.base_url;
 					}
 				}
 
 				// 3. Componiamo il BMessage nativo di configurazione ('AISC') per il plugin
-				BMessage configMsg('AISC');
+				BMessage configMsg(MSG_SAVE_CONFIG);
 				configMsg.AddString("api_key", apiKey.String());
 				configMsg.AddString("base_url", baseUrl.String());
 				configMsg.AddString("plugin", pluginName.String());
