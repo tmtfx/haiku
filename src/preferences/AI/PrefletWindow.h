@@ -40,6 +40,7 @@ public:
 private:
     void _UpdateClearButton();
     void _UpdateApiKeyField();
+    void _UpdateVolatileModels();
     void _UpdatePluginDetails();
     void _UpdateContextDetails();
     void _RefreshContexts();
