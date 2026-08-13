@@ -39,6 +39,7 @@
 static const uint32 MSG_SAVE            = 'SAVE';
 static const uint32 MSG_APPLY           = 'RLD!';
 static const uint32 MSG_TOGGLE_KEY      = 'TGLK';
+static const uint32 MSG_REFRESH_THIS    = 'RFTH';
 static const uint32 MSG_REFRESH_PLUGINS = 'RFMD';
 static const uint32 MSG_MODEL_SELECTED  = 'MSEL';
 static const uint32 MSG_PLUGINS_FETCHED = 'MFTC';
@@ -107,11 +108,29 @@ FetchModelsThread(void* data)
 
     BMessenger windowMessenger;
     BString pluginName;
+    BString apiKey;
+    BString base_url;
     args->FindMessenger("reply_to", &windowMessenger);
     args->FindString("plugin_name", &pluginName);
-
-    // CHIAMATA AL KIT!
+    args->FindString("apiKey", &apiKey);
+    args->FindString("base_url", &base_url);
     BString jsonModels;
+    
+    // CHIAMATA AL KIT!
+	if (!base_url.IsEmpty()){
+		fprintf(stderr,"base_url è stato passato, richiesta specifica!");
+		if (AIGetPluginModels(pluginName.String(), apiKey.String(), base_url.String(), jsonModels) == B_OK) {
+			BMessage successMsg(MSG_MODELS_FETCHED);
+        	successMsg.AddString("plugin_models", jsonModels.String());
+        	windowMessenger.SendMessage(&successMsg);
+		}
+		delete args;
+		return B_OK;
+	}
+	
+	fprintf(stderr,"base_url non è stato passato, richiesta del modello originario!");
+
+    
     if (AIGetPluginModels(pluginName.String(), jsonModels) == B_OK) {
         BMessage successMsg(MSG_MODELS_FETCHED);
         successMsg.AddString("plugin_models", jsonModels.String());
@@ -240,7 +259,7 @@ PrefletWindow::PrefletWindow()
 
     fModelMenu = new BPopUpMenu("models");
     fModelMenuField = new BMenuField("model", B_TRANSLATE("Model:"), fModelMenu);
-    fRefreshModelsButton = new BButton("rmodels", B_TRANSLATE("Refresh"), new BMessage(MSG_REFRESH_PLUGINS));
+    fRefreshModelsButton = new BButton("rmodels", B_TRANSLATE("Refresh"), new BMessage(MSG_REFRESH_THIS));
     
     fApiKeyControl = new BTextControl("api", B_TRANSLATE("API Key:"), "", nullptr);
     fApiKeyControl->Mask(true);
@@ -498,6 +517,9 @@ void PrefletWindow::MessageReceived(BMessage* msg)
             fprintf(stderr, "[LOG] --- FINE MSG_REFRESH_PLUGINS ---\n");
             break;
         }
+        case MSG_REFRESH_THIS:{
+        	_UpdateVolatileModels();            
+        }
         case MSG_PLUGINS_FETCHED: {
             fprintf(stderr, "\n[LOG] --- INIZIO MSG_PLUGINS_FETCHED ---\n");
             BMessage plugins;
@@ -690,15 +712,14 @@ void PrefletWindow::MessageReceived(BMessage* msg)
         }
         case MSG_APPLY: {
             BMessenger server("application/x-vnd.Haiku-ai_server");
-            const uint32 MSG_RELOAD_LOCAL = 'RLDS';
-            BMessage m(MSG_RELOAD_LOCAL);
+            BMessage m(MSG_RELOAD);
             BMessage reply;
             status_t s = server.SendMessage(&m, &reply);
             if (s == B_OK) {
                 int32 applied = 0;
                 if (reply.FindInt32("applied", &applied) == B_OK) {
                     BString msgStr;
-                    msgStr << applied << B_TRANSLATE(" plugin(s) updated.");
+                    msgStr << applied << B_TRANSLATE(" session(s) updated.");
                     BAlert* a = new BAlert(B_TRANSLATE("Applied"), msgStr.String(), B_TRANSLATE("OK"));
                     a->Go();
                 } else {
@@ -871,7 +892,31 @@ void PrefletWindow::MessageReceived(BMessage* msg)
             BWindow::MessageReceived(msg);
     }
 }
+void PrefletWindow::_UpdateVolatileModels()
+{
+	int32 selection = fPluginListView->CurrentSelection();
+    if (selection < 0) return;
 
+    PluginListItem* item = static_cast<PluginListItem*>(fPluginListView->ItemAt(selection));
+    if (!item) return;
+
+    BString pluginName = item->Text();
+
+    // 1. Carica Modelli per il plugin selezionato
+    BMessage* threadArgs = new BMessage();
+    threadArgs->AddMessenger("reply_to", BMessenger(this));
+    threadArgs->AddString("plugin_name", pluginName.String());
+    BString baseUrl = fBaseUrlControl->Text();
+    BString APIKey = fApiKeyControl->Text();
+    fprintf(stderr,"Checkbox is %d",fBaseUrlOverrideCheckBox->Value());
+    if ((fBaseUrlOverrideCheckBox->Value()==1) && !baseUrl.IsEmpty()) threadArgs->AddString("base_url", baseUrl.String());
+    if (!APIKey.IsEmpty()) threadArgs->AddString("apiKey", APIKey.String());
+    thread_id fetchThread = spawn_thread(FetchModelsThread, "AI Models Fetcher", B_NORMAL_PRIORITY, threadArgs);
+    if (fetchThread >= B_OK)
+        resume_thread(fetchThread);
+    else
+        delete threadArgs;
+}
 void PrefletWindow::_UpdatePluginDetails()
 {
     int32 selection = fPluginListView->CurrentSelection();
