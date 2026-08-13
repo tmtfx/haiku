@@ -1495,7 +1495,7 @@ openai_stream_thread_func(void* data)
         delete req;
 
         BString rawResponse((const char*)outNetworkData.Buffer(), outNetworkData.BufferLength());
-        //fprintf(stderr, "[OPENAI MCP DEBUG] Risposta grezza dal server:\n%s\n", rawResponse.String());
+		fprintf(stderr, "[OPENAI MCP DEBUG] Risposta grezza dal server:\n%s\n", rawResponse.String());
 
         BMessage parsedJson;
         bool parseOk = (BJson::Parse(rawResponse.String(), parsedJson) == B_OK);
@@ -1586,9 +1586,9 @@ openai_stream_thread_func(void* data)
                         if (testStr.StartsWith("{") || testStr.StartsWith("[")) {
                             toolResultBuf = resStr;
                         } else {
-                            //BString escapedRes = EscapeStringForJson(resStr);
-                            //toolResultBuf.SetToFormat("{\"output\":\"%s\"}", escapedRes.String());
-                            toolResultBuf = "Operazione completata con successo.";
+                            BString escapedRes = EscapeStringForJson(resStr);
+                            toolResultBuf.SetToFormat("{\"output\":\"%s\"}", escapedRes.String());
+                            //toolResultBuf = "Operazione completata con successo.";
                         }
                     } else {
                         toolResultBuf = "{\"error\":\"Il comando sul server ha restituito una risposta vuota.\"}";
