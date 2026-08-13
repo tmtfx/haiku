@@ -1014,7 +1014,7 @@ ai_plugin_generate_text_sync(ai_plugin_t handle,
                              size_t response_len,
                              BMessage* config)
 {
-	fprintf(stderr, ">>> DEBUG: ENTRATO IN ai_plugin_generate_text_sync, prompt=%s\n", prompt ? prompt : "NULL");
+	//fprintf(stderr, ">>> DEBUG: ENTRATO IN ai_plugin_generate_text_sync, prompt=%s\n", prompt ? prompt : "NULL");
     if (!config || !response_buf || response_len == 0){
     	fprintf(stderr, ">>> DEBUG: Errore config response_buf o response_len");
         return B_ERROR;
@@ -1025,7 +1025,7 @@ ai_plugin_generate_text_sync(ai_plugin_t handle,
     if (!apiKeyRaw || apiKeyRaw[0] == '\0') {
         snprintf(response_buf, response_len, "[openai_plugin] error: no API key provided");
         
-    	fprintf(stderr, ">>> DEBUG: No API KEY");
+    	//fprintf(stderr, ">>> DEBUG: No API KEY");
         return B_ERROR;
     }
     BString apiKey(apiKeyRaw);
@@ -1129,7 +1129,7 @@ ai_plugin_generate_text_sync(ai_plugin_t handle,
     // Compiliamo il payload iniettando lo storico memorizzato nel BMessage
     BString payload;
     BuildOpenAIPayload(config, prompt, payload, false, nullptr);
-    fprintf(stderr, "[OPENAI PLUGIN] Payload JSON generato:\n%s\n", payload.String());
+    //fprintf(stderr, "[OPENAI PLUGIN] Payload JSON generato:\n%s\n", payload.String());
 
     BMallocIO* out = new BMallocIO();
     SyncListener syncListener;
@@ -1163,7 +1163,7 @@ ai_plugin_generate_text_sync(ai_plugin_t handle,
         http->SetHeaders(headers);
     }
 
-    fprintf(stderr, "[OPENAI PLUGIN] Avvio richiesta HTTP di rete sincrona...\n");
+    //fprintf(stderr, "[OPENAI PLUGIN] Avvio richiesta HTTP di rete sincrona...\n");
     thread_id thread = req->Run();
     status_t rc = B_ERROR;
     if (thread >= 0) {
@@ -1171,7 +1171,7 @@ ai_plugin_generate_text_sync(ai_plugin_t handle,
     } else {
         rc = thread;
     }
-    fprintf(stderr, "[OPENAI PLUGIN] Chiamata di rete conclusa. Thread return code: %d\n", (int)rc);
+    //fprintf(stderr, "[OPENAI PLUGIN] Chiamata di rete conclusa. Thread return code: %d\n", (int)rc);
 
     const void* buf = out->Buffer();
     size_t len = out->BufferLength();
@@ -1181,7 +1181,7 @@ ai_plugin_generate_text_sync(ai_plugin_t handle,
         delete out;
         return B_ERROR;
     }
-    fprintf(stderr, "[OPENAI PLUGIN] Buffer di risposta: %d byte ricevuti.\n", (int)len);
+    //fprintf(stderr, "[OPENAI PLUGIN] Buffer di risposta: %d byte ricevuti.\n", (int)len);
 
     int32 statusCode = 0;
     if (http) {
@@ -1190,7 +1190,7 @@ ai_plugin_generate_text_sync(ai_plugin_t handle,
             statusCode = httpResult->StatusCode();
         }
     }
-    fprintf(stderr, "[OPENAI PLUGIN] HTTP Status Code Server OpenAI: %d\n", (int)statusCode);
+    //fprintf(stderr, "[OPENAI PLUGIN] HTTP Status Code Server OpenAI: %d\n", (int)statusCode);
 
     bool handled = false;
     BString rawResponse((const char*)buf, len);
@@ -1212,7 +1212,7 @@ ai_plugin_generate_text_sync(ai_plugin_t handle,
             memcpy(response_buf, extractedText, copy_len);
             response_buf[copy_len] = '\0';
             handled = true;
-            fprintf(stderr, "[OPENAI PLUGIN] Testo estratto con successo dal JSON.\n");
+            //fprintf(stderr, "[OPENAI PLUGIN] Testo estratto con successo dal JSON.\n");
         }
     } else if (statusCode != 200 && parseSuccess) {
         BMessage errorObj;
@@ -1240,7 +1240,7 @@ ai_plugin_generate_text_sync(ai_plugin_t handle,
 
     delete req;
     delete out;
-    fprintf(stderr, "[OPENAI PLUGIN] === FINE generate_text_sync ===\n\n");
+    //fprintf(stderr, "[OPENAI PLUGIN] === FINE generate_text_sync ===\n\n");
     
     // Se lo status code è 200 e tutto è ok ritorniamo B_OK, altrimenti B_ERROR propagando il messaggio nel buffer
     return B_OK; //(rc == B_OK && statusCode == 200 && handled) ? B_OK : B_ERROR;
@@ -1303,7 +1303,7 @@ openai_stream_thread_func(void* data)
         targetUrl = "https://api.openai.com/v1/chat/completions";
     }
 
-    fprintf(stderr, "[OPENAI STREAM WORKER] Target URL finale: '%s'\n", targetUrl.String());
+    //fprintf(stderr, "[OPENAI STREAM WORKER] Target URL finale: '%s'\n", targetUrl.String());
 
     // === CONTROLLO CAPABILITY VIA MESSENGER ===
     if (args->server_messenger.IsValid()) {
@@ -1495,7 +1495,7 @@ openai_stream_thread_func(void* data)
         delete req;
 
         BString rawResponse((const char*)outNetworkData.Buffer(), outNetworkData.BufferLength());
-		fprintf(stderr, "[OPENAI MCP DEBUG] Risposta grezza dal server:\n%s\n", rawResponse.String());
+		//fprintf(stderr, "[OPENAI MCP DEBUG] Risposta grezza dal server:\n%s\n", rawResponse.String());
 
         BMessage parsedJson;
         bool parseOk = (BJson::Parse(rawResponse.String(), parsedJson) == B_OK);
@@ -1561,7 +1561,7 @@ openai_stream_thread_func(void* data)
                     argsJson = "{}";
                 }
 
-                fprintf(stderr, "[OPENAI MCP] L'LLM richiede lo strumento: %s con argomenti: %s\n", toolName, argsJson.String());
+                //fprintf(stderr, "[OPENAI MCP] L'LLM richiede lo strumento: %s con argomenti: %s\n", toolName, argsJson.String());
 
                 BMessage reqExec(MSG_EXECUTE_TOOL);
                 reqExec.AddString("name", toolName);
@@ -1691,7 +1691,7 @@ thread_post_actions:
     }
 }
 thread_cleanup:
-    fprintf(stderr, "[OPENAI STREAM WORKER] Pulizia e chiusura thread worker.\n");
+    //fprintf(stderr, "[OPENAI STREAM WORKER] Pulizia e chiusura thread worker.\n");
     delete args; 
     return B_OK;
 }
