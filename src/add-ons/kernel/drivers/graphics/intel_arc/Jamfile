@@ -1,0 +1,11 @@
+SubDir HAIKU_TOP src add-ons kernel drivers graphics intel_arc ;
+
+UsePrivateHeaders [ FDirName graphics intel_arc ] ;
+UsePrivateHeaders [ FDirName graphics common ] ;
+UsePrivateHeaders [ FDirName graphics vesa ] ;
+UsePrivateHeaders graphics kernel ;
+UsePrivateKernelHeaders ;
+
+KernelAddon intel_arc :
+	driver.cpp
+;

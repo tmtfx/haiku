@@ -6,6 +6,7 @@ SubInclude HAIKU_TOP src add-ons accelerants common ;
 SubInclude HAIKU_TOP src add-ons accelerants et6x00 ;
 SubInclude HAIKU_TOP src add-ons accelerants framebuffer ;
 SubInclude HAIKU_TOP src add-ons accelerants intel_810 ;
+SubInclude HAIKU_TOP src add-ons accelerants intel_arc ;
 SubInclude HAIKU_TOP src add-ons accelerants intel_extreme ;
 SubInclude HAIKU_TOP src add-ons accelerants matrox ;
 SubInclude HAIKU_TOP src add-ons accelerants neomagic ;
