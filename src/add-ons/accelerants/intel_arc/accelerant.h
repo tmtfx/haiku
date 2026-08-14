@@ -29,6 +29,7 @@ struct accelerant_info {
 
 	edid1_info				edid_info;
 	bool					has_edid;
+	uint32					last_hotplug_event_count;
 };
 
 

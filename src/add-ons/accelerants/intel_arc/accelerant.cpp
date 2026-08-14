@@ -281,6 +281,7 @@ static bool compute_displayport_dpll(int* pDiv, int* qDiv, int* kDiv, float* dco
 static status_t program_port_dpll(uint8 ddiPort);
 static status_t program_ddi_buffer(uint8 ddiPort, int8 pipe, uint32 lanes, bool enable);
 static status_t configure_dp_link(display_mode* mode);
+static status_t handle_hotplug_event(void);
 static status_t set_sink_power(uint8 ddiPort, uint8 value);
 static status_t read_edid_from_hardware(void);
 static status_t read_edid_from_port(uint8 ddiPort, edid1_info& edid);
@@ -368,6 +369,7 @@ init_common(int device, bool isClone)
 	gInfo->mode_list_area = -1;
 	gInfo->frame_buffer_area = -1;
 	gInfo->has_edid = false;
+	gInfo->last_hotplug_event_count = 0;
 
 	intel_arc_get_private_data data;
 	data.magic = INTEL_ARC_PRIVATE_DATA_MAGIC;
@@ -390,6 +392,9 @@ init_common(int device, bool isClone)
 			return status;
 		regsDeleter.Detach();
 	}
+
+	if (gInfo->shared_info != NULL)
+		gInfo->last_hotplug_event_count = gInfo->shared_info->hotplug_event_count;
 
 	infoDeleter.Detach();
 	sharedDeleter.Detach();
@@ -596,6 +601,7 @@ intel_arc_dpms_capabilities(void)
 uint32
 intel_arc_dpms_mode(void)
 {
+	(void)handle_hotplug_event();
 	return gInfo->shared_info->dpms_mode;
 }
 
@@ -603,6 +609,7 @@ intel_arc_dpms_mode(void)
 status_t
 intel_arc_set_dpms_mode(uint32 mode)
 {
+	(void)handle_hotplug_event();
 	switch (mode) {
 		case B_DPMS_ON:
 			return apply_dpms_on();
@@ -617,6 +624,7 @@ intel_arc_set_dpms_mode(uint32 mode)
 uint32
 intel_arc_accelerant_mode_count(void)
 {
+	(void)handle_hotplug_event();
 	return gInfo->shared_info->mode_count;
 }
 
@@ -624,6 +632,7 @@ intel_arc_accelerant_mode_count(void)
 status_t
 intel_arc_get_mode_list(display_mode* modeList)
 {
+	(void)handle_hotplug_event();
 	if (gInfo->shared_info->mode_count == 0)
 		return B_ENTRY_NOT_FOUND;
 
@@ -637,6 +646,7 @@ status_t
 intel_arc_propose_display_mode(display_mode* target, display_mode* low,
 	display_mode* high)
 {
+	(void)handle_hotplug_event();
 	(void)low;
 	(void)high;
 
@@ -652,6 +662,7 @@ intel_arc_propose_display_mode(display_mode* target, display_mode* low,
 status_t
 intel_arc_get_preferred_mode(display_mode* mode)
 {
+	(void)handle_hotplug_event();
 	if (gInfo->shared_info->mode_count == 0)
 		return B_ENTRY_NOT_FOUND;
 
@@ -665,6 +676,7 @@ intel_arc_set_display_mode(display_mode* mode)
 {
 	if (mode == NULL)
 		return B_BAD_VALUE;
+	(void)handle_hotplug_event();
 	if (*mode == gInfo->shared_info->current_mode)
 		return B_OK;
 
@@ -756,6 +768,7 @@ intel_arc_set_display_mode(display_mode* mode)
 status_t
 intel_arc_get_display_mode(display_mode* mode)
 {
+	(void)handle_hotplug_event();
 	*mode = gInfo->shared_info->current_mode;
 	return B_OK;
 }
@@ -764,6 +777,7 @@ intel_arc_get_display_mode(display_mode* mode)
 status_t
 intel_arc_get_edid_info(void* info, size_t size, uint32* version)
 {
+	(void)handle_hotplug_event();
 	if (!gInfo->has_edid)
 		return B_ERROR;
 	if (size < sizeof(edid1_info))
@@ -778,6 +792,7 @@ intel_arc_get_edid_info(void* info, size_t size, uint32* version)
 status_t
 intel_arc_get_frame_buffer_config(frame_buffer_config* config)
 {
+	(void)handle_hotplug_event();
 	if (gInfo->frame_buffer == NULL)
 		return B_UNSUPPORTED;
 
@@ -791,6 +806,7 @@ intel_arc_get_frame_buffer_config(frame_buffer_config* config)
 status_t
 intel_arc_get_pixel_clock_limits(display_mode* mode, uint32* low, uint32* high)
 {
+	(void)handle_hotplug_event();
 	uint32 totalPixel = (uint32)mode->timing.h_total
 		* (uint32)mode->timing.v_total;
 	uint32 clockLimit = 2000000;
@@ -1122,6 +1138,43 @@ configure_dp_link(display_mode* mode)
 	}
 
 	return B_OK;
+}
+
+
+static status_t
+handle_hotplug_event(void)
+{
+	if (gInfo == NULL || gInfo->shared_info == NULL)
+		return B_NO_INIT;
+
+	if (gInfo->last_hotplug_event_count
+		== gInfo->shared_info->hotplug_event_count) {
+		return B_OK;
+	}
+
+	gInfo->last_hotplug_event_count = gInfo->shared_info->hotplug_event_count;
+
+	if (gInfo->shared_info->active_pipe < 0)
+		return B_OK;
+
+	(void)read_edid_from_hardware();
+
+	const uint8 activePort = gInfo->shared_info->active_ddi_port;
+	if (activePort == 0)
+		return B_OK;
+
+	if (activePort <= 4
+		&& (gInfo->shared_info->detected_port_bits & (1 << activePort)) == 0) {
+		gInfo->has_edid = false;
+		return B_OK;
+	}
+
+	if (gInfo->shared_info->current_mode.virtual_width == 0
+		|| gInfo->shared_info->current_mode.virtual_height == 0) {
+		return B_OK;
+	}
+
+	return configure_dp_link(&gInfo->shared_info->current_mode);
 }
 
 
