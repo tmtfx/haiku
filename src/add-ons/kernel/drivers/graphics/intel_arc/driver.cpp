@@ -479,6 +479,10 @@ probe_display_state(intel_arc_info& info)
 		}
 	}
 	read32(info, INTEL_ARC_MMIO_SHOTPLUG_CTL_DDI, shared.hotplug_ctl);
+	dprintf("active_pipe=%d active_ddi=%u ddi_ctl=%#" B_PRIx32 " detected=%#x\n",
+		shared.active_pipe, shared.active_ddi_port, 
+		shared.active_pipe >= 0 ? shared.pipe_ddi_func_ctl[shared.active_pipe] : 0,
+		shared.detected_port_bits);
 }
 
 
@@ -638,6 +642,8 @@ init_device(intel_arc_info& info)
 		info.shared_info = NULL;
 		return info.registers_area;
 	}
+	dprintf("MMIO base=%#" B_PRIxPHYSADDR " size=%#" B_PRIx64 " area=%" B_PRId32 "\n",
+		mmioBar.base, (uint64)mmioBar.size, info.registers_area);
 
 	info.shared_info->registers_area = info.registers_area;
 	info.shared_info->registers_base = mmioBar.base;

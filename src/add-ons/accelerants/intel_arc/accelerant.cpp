@@ -442,6 +442,26 @@ intel_arc_init_accelerant(int device)
 		gInfo->frame_buffer_area = info.area;
 		gInfo->frame_buffer = info.address;
 	}
+	
+	printf("ARC: registers_area=%" B_PRId32 "\n",
+		gInfo->shared_info->registers_area);
+
+	printf("ARC: registers_base=%" B_PRIu64 "\n",
+		(uint64)gInfo->shared_info->registers_base);
+
+	printf("ARC: registers_size=%" B_PRIu64 "\n",
+		(uint64)gInfo->shared_info->registers_size);
+
+	printf("ARC: regs=%p\n", gInfo->registers);
+
+	printf("ARC: active_pipe=%d\n",
+		gInfo->shared_info->active_pipe);
+
+	printf("ARC: active_ddi_port=%u\n",
+		gInfo->shared_info->active_ddi_port);
+
+	printf("ARC: detected_port_bits=0x%02x\n",
+		gInfo->shared_info->detected_port_bits);
 
 	return B_OK;
 }
@@ -2028,14 +2048,26 @@ read_edid_from_hardware(void)
 		return B_ENTRY_NOT_FOUND;
 	}
 
-	uint8 candidates[7];
+	//uint8 candidates[7];
 	size_t candidateCount = 0;
-	if (gInfo->shared_info->active_ddi_port != 0)
+	uint8 candidates[4];
+	
+	// Prima prova la porta effettivamente associata al pipe attivo.
+	if (gInfo->shared_info->active_pipe >= 0 && gInfo->shared_info->active_ddi_port < 4) {
 		candidates[candidateCount++] = gInfo->shared_info->active_ddi_port;
+	}
+	
+	if (gInfo->shared_info->active_ddi_port < 4)
+		candidates[candidateCount++] = gInfo->shared_info->active_ddi_port;
+	//if (gInfo->shared_info->active_ddi_port != 0)
+	//	candidates[candidateCount++] = gInfo->shared_info->active_ddi_port;
 
-	for (uint8 port = 1; port <= 3; port++) {
+	for (uint8 port = 0; port < 4; port++) {
 		if ((gInfo->shared_info->detected_port_bits & (1 << port)) == 0)
 			continue;
+	//for (uint8 port = 1; port <= 3; port++) {
+	//	if ((gInfo->shared_info->detected_port_bits & (1 << port)) == 0)
+	//		continue;
 
 		bool alreadyQueued = false;
 		for (size_t i = 0; i < candidateCount; i++) {
@@ -2048,6 +2080,7 @@ read_edid_from_hardware(void)
 			candidates[candidateCount++] = port;
 	}
 
+	/*
 	for (uint8 port = 1; port <= 6; port++) {
 		bool alreadyQueued = false;
 		for (size_t i = 0; i < candidateCount; i++) {
@@ -2058,7 +2091,7 @@ read_edid_from_hardware(void)
 		}
 		if (!alreadyQueued)
 			candidates[candidateCount++] = port;
-	}
+	}*/
 
 	for (size_t i = 0; i < candidateCount; i++) {
 		if (read_edid_from_port(candidates[i], gInfo->edid_info) == B_OK) {
@@ -2084,6 +2117,8 @@ read_edid_from_port(uint8 ddiPort, edid1_info& edid)
 {
 	if (ddiPort > 6)
 		return B_BAD_VALUE;
+		
+	printf("ARC: read EDID DDI port %u\n", ddiPort);
 
 	i2c_bus bus;
 	ddc2_init_timing(&bus);
@@ -2307,6 +2342,8 @@ aux_transfer(uint8 ddiPort, uint8* transmitBuffer, uint8 transmitSize,
 	uint8* receiveBuffer, uint8 receiveSize)
 {
 	const uint32 channelControl = aux_control_register(ddiPort);
+	printf("ARC: AUX port=%u ctl=0x%08" B_PRIx32 "\n",
+		ddiPort, channelControl);
 	uint32 status = 0;
 
 	for (int tries = 0; tries < 3; tries++) {
