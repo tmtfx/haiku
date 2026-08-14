@@ -31,6 +31,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef IS_PIRATI_BUILD
+#include "ARC_logo.h"
+#endif
+
 #define TRACE_INTEL_ARC
 #ifdef TRACE_INTEL_ARC
 #	define TRACE(x...) dprintf("intel_arc: " x)
@@ -532,6 +536,64 @@ select_bars(const pci_info& info, pci_bar_info& mmioBar,
 	return foundMMIO;
 }
 
+#ifdef IS_PIRATI_BUILD
+static void
+draw_logo(DeviceInfo& di)
+{
+    SharedInfo& si = *(di.shared_info);
+    
+    if (si.videoMemArea < 0)
+        return;
+
+    // Retrieve framebuffer info from bootloader
+    struct frame_buffer_boot_info* bi = (struct frame_buffer_boot_info*)get_boot_item(
+        FRAME_BUFFER_BOOT_INFO, NULL);
+    
+    if (!bi)
+        return;
+
+    // ARC_logo array is 32-bit (RGBA/RGB32). 
+    if (bi->depth != 32)
+        return;
+
+    uint32 screenWidth = bi->width;
+    uint32 screenHeight = bi->height;
+    
+    uint32 bytesPerRow = bi->bytes_per_row;
+    if (bytesPerRow == 0)
+        bytesPerRow = screenWidth * 4;
+
+    uint32 fbPitch = bytesPerRow / 4;
+
+    uint32 logoW = ARC_logo_width;   // 640
+    uint32 logoH = ARC_logo_height;  // 240
+
+    // Centering
+    int32 startX = (int32)((screenWidth - logoW) / 2);
+	if (startX < 0) startX = 0;
+    int32 startY = (int32)((screenHeight - logoH) / 2);
+	if (startY < 0) startY = 0;
+
+	uint8* fb = (uint8*)si.frame_buffer;
+	if (fb == NULL) {
+		fb = (uint8*)bi->frame_buffer;
+	}
+	if (fb == NULL)
+		return;
+
+	for (uint32 y = 0; y < logoH && (startY + y) < screenHeight; y++) {
+		uint32 fbOffset = ((startY + y) * fbPitch + startX) * sizeof(uint32);
+		uint32 logoRowOffset = y * logoW;
+		uint32 remainingWidth = screenWidth - startX;
+		uint32 copyPixels = (logoW < remainingWidth) ? logoW : remainingWidth;
+		uint32 copySize = copyPixels * sizeof(uint32);
+
+		//user_memcpy(fb + fbOffset, (void*)&ARC_logo[logoRowOffset], copySize);
+		memcpy(fb + fbOffset, (void*)&ARC_logo[logoRowOffset], copySize);
+	}
+}
+#endif
+
 
 static status_t
 init_device(intel_arc_info& info)
@@ -664,6 +726,24 @@ init_device(intel_arc_info& info)
 
 	sharedKeeper.Detach();
 	mmioKeeper.Detach();
+	
+
+	struct frame_buffer_boot_info* bi = (struct frame_buffer_boot_info*)get_boot_item(
+FRAME_BUFFER_BOOT_INFO, NULL);
+
+	if (bi) {
+		info.shared_info->has_boot_info = true;
+		info.shared_info->boot_width = bi->width;
+		info.shared_info->boot_height = bi->height;
+		info.shared_info->boot_depth = bi->depth;
+	} else {
+		info.shared_info->has_boot_info = false;
+	}
+
+#ifdef IS_PIRATI_BUILD
+	draw_logo(info);
+	snooze(2000000);
+#endif
 
 	return B_OK;
 }

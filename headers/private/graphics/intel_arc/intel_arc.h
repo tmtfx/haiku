@@ -98,6 +98,10 @@ struct intel_arc_shared_info {
 	edid1_info		boot_edid;
 
 	char			device_identifier[32];
+	bool has_boot_info;
+	uint32 boot_width;
+	uint32 boot_height;
+	uint32 boot_depth;
 };
 
 
