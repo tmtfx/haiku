@@ -538,46 +538,43 @@ select_bars(const pci_info& info, pci_bar_info& mmioBar,
 
 #ifdef IS_PIRATI_BUILD
 static void
-draw_logo(DeviceInfo& di)
+draw_logo(intel_arc_info& info)
 {
-    SharedInfo& si = *(di.shared_info);
-    
-    if (si.videoMemArea < 0)
-        return;
+	if (info.shared_info == NULL)
+		return;
 
-    // Retrieve framebuffer info from bootloader
-    struct frame_buffer_boot_info* bi = (struct frame_buffer_boot_info*)get_boot_item(
-        FRAME_BUFFER_BOOT_INFO, NULL);
-    
-    if (!bi)
-        return;
+	intel_arc_shared_info& si = *(info.shared_info);
 
-    // ARC_logo array is 32-bit (RGBA/RGB32). 
-    if (bi->depth != 32)
-        return;
+	if (info.frame_buffer_area < B_OK)
+		return;
 
-    uint32 screenWidth = bi->width;
-    uint32 screenHeight = bi->height;
-    
-    uint32 bytesPerRow = bi->bytes_per_row;
-    if (bytesPerRow == 0)
-        bytesPerRow = screenWidth * 4;
+	// Recupera informazioni sul framebuffer dal bootloader
+	struct frame_buffer_boot_info* bi = (struct frame_buffer_boot_info*)get_boot_item(
+		FRAME_BUFFER_BOOT_INFO, NULL);
 
-    uint32 fbPitch = bytesPerRow / 4;
+	if (bi == NULL || bi->depth != 32)
+		return;
 
-    uint32 logoW = ARC_logo_width;   // 640
-    uint32 logoH = ARC_logo_height;  // 240
+	uint32 screenWidth = bi->width;
+	uint32 screenHeight = bi->height;
 
-    // Centering
-    int32 startX = (int32)((screenWidth - logoW) / 2);
+	uint32 bytesPerRow = bi->bytes_per_row;
+	if (bytesPerRow == 0)
+		bytesPerRow = screenWidth * 4;
+
+	uint32 fbPitch = bytesPerRow / sizeof(uint32);
+
+	uint32 logoW = ARC_logo_width;   // 640
+	uint32 logoH = ARC_logo_height;  // 240
+
+	// Centratura a schermo
+	int32 startX = (int32)((screenWidth - logoW) / 2);
 	if (startX < 0) startX = 0;
-    int32 startY = (int32)((screenHeight - logoH) / 2);
+	int32 startY = (int32)((screenHeight - logoH) / 2);
 	if (startY < 0) startY = 0;
 
+	// Contiene già l'indirizzo virtuale con l'offset EFI/GOP sommato
 	uint8* fb = (uint8*)si.frame_buffer;
-	if (fb == NULL) {
-		fb = (uint8*)bi->frame_buffer;
-	}
 	if (fb == NULL)
 		return;
 
@@ -588,12 +585,10 @@ draw_logo(DeviceInfo& di)
 		uint32 copyPixels = (logoW < remainingWidth) ? logoW : remainingWidth;
 		uint32 copySize = copyPixels * sizeof(uint32);
 
-		//user_memcpy(fb + fbOffset, (void*)&ARC_logo[logoRowOffset], copySize);
-		memcpy(fb + fbOffset, (void*)&ARC_logo[logoRowOffset], copySize);
+		memcpy(fb + fbOffset, (const void*)&ARC_logo[logoRowOffset * 4], copySize);
 	}
 }
 #endif
-
 
 static status_t
 init_device(intel_arc_info& info)
@@ -654,17 +649,29 @@ init_device(intel_arc_info& info)
 		size_t mapSize = frameBufferBar.size > MAX_CLONED_FRAMEBUFFER_SIZE
 			? MAX_CLONED_FRAMEBUFFER_SIZE : (size_t)frameBufferBar.size;
 
+		phys_addr_t bootFbPhys = frameBufferBar.base;
+		phys_addr_t fbOffset = 0;
+
 		frame_buffer_boot_info* bootInfo
 			= (frame_buffer_boot_info*)get_boot_item(FRAME_BUFFER_BOOT_INFO, NULL);
+
 		if (bootInfo != NULL
 			&& (phys_addr_t)bootInfo->physical_frame_buffer >= frameBufferBar.base
 			&& (phys_addr_t)bootInfo->physical_frame_buffer < frameBufferBar.base
 				+ frameBufferBar.size) {
+
+			bootFbPhys = (phys_addr_t)bootInfo->physical_frame_buffer;
+			fbOffset = bootFbPhys - frameBufferBar.base;
+
 			size_t bootSurfaceSize = (size_t)bootInfo->bytes_per_row
 				* (size_t)bootInfo->height;
-			if (bootSurfaceSize > 0
-				&& bootSurfaceSize < MAX_CLONED_FRAMEBUFFER_SIZE) {
-				mapSize = ROUND_TO_PAGE_SIZE(bootSurfaceSize);
+
+			// Assicuriamo che mapSize copra sia l'offset che la superficie del display
+			if (bootSurfaceSize > 0) {
+				mapSize = ROUND_TO_PAGE_SIZE(fbOffset + bootSurfaceSize);
+				if (mapSize > MAX_CLONED_FRAMEBUFFER_SIZE) {
+					mapSize = MAX_CLONED_FRAMEBUFFER_SIZE;
+				}
 			}
 
 			info.shared_info->current_mode.virtual_width = bootInfo->width;
@@ -674,16 +681,35 @@ init_device(intel_arc_info& info)
 			info.shared_info->bytes_per_row = bootInfo->bytes_per_row;
 		}
 
+		// Tentativo 1: Mappatura con Write-Combining (stile S3)
 		info.frame_buffer_area = map_physical_memory("intel arc framebuffer",
-			frameBufferBar.base, mapSize, B_ANY_KERNEL_ADDRESS,
+			frameBufferBar.base, mapSize,
+			B_ANY_KERNEL_BLOCK_ADDRESS | B_WRITE_COMBINING_MEMORY,
 			B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA | B_READ_AREA | B_WRITE_AREA
 				| B_CLONEABLE_AREA,
 			(void**)&info.frame_buffer);
+
+		if (info.frame_buffer_area < 0) {
+			// Tentativo 2: Fallback senza Write Combining
+			info.frame_buffer_area = map_physical_memory("intel arc framebuffer",
+				frameBufferBar.base, mapSize, B_ANY_KERNEL_BLOCK_ADDRESS,
+				B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA | B_READ_AREA | B_WRITE_AREA
+					| B_CLONEABLE_AREA,
+				(void**)&info.frame_buffer);
+		}
+
+		TRACE("Video memory, area: %" B_PRId32 ", base phys: 0x%" B_PRIxPHYSADDR
+			", fb offset: 0x%" B_PRIxPHYSADDR "\n",
+			info.frame_buffer_area, frameBufferBar.base, fbOffset);
+
 		if (info.frame_buffer_area >= B_OK) {
 			info.shared_info->frame_buffer_area = info.frame_buffer_area;
 			info.shared_info->frame_buffer_base = frameBufferBar.base;
 			info.shared_info->frame_buffer_size = mapSize;
-			info.shared_info->frame_buffer = (addr_t)info.frame_buffer;
+			info.shared_info->frame_buffer_offset = fbOffset; // Salva l'offset fisico
+
+			// L'indirizzo virtuale del primo pixel visibile considera l'offset EFI/GOP
+			info.shared_info->frame_buffer = (addr_t)info.frame_buffer + fbOffset;
 			info.shared_info->frame_buffer_bar = frameBufferBar.index;
 		} else {
 			ERROR("could not map framebuffer BAR for %s: %s\n",

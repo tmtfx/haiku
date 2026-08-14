@@ -68,6 +68,7 @@ struct intel_arc_shared_info {
 	phys_addr_t		registers_base;
 	uint64			registers_size;
 	phys_addr_t		frame_buffer_base;
+	phys_addr_t		frame_buffer_offset;
 	uint64			frame_buffer_size;
 
 	addr_t			frame_buffer;
