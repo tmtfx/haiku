@@ -24,6 +24,15 @@ sem_id		intel_arc_accelerant_retrace_semaphore(void);
 uint32		intel_arc_dpms_capabilities(void);
 uint32		intel_arc_dpms_mode(void);
 status_t	intel_arc_set_dpms_mode(uint32 mode);
+uint32		intel_arc_accelerant_engine_count(void);
+status_t	intel_arc_acquire_engine(uint32 capabilities, uint32 maxWait,
+				sync_token* syncToken, engine_token** engineToken);
+status_t	intel_arc_release_engine(engine_token* engineToken,
+				sync_token* syncToken);
+void		intel_arc_wait_engine_idle(void);
+status_t	intel_arc_get_sync_token(engine_token* engineToken,
+				sync_token* syncToken);
+status_t	intel_arc_sync_to_token(sync_token* syncToken);
 
 uint32		intel_arc_accelerant_mode_count(void);
 status_t	intel_arc_get_mode_list(display_mode* modeList);

@@ -73,6 +73,13 @@
 #define INTEL_ARC_MMIO_PORT_B					(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x4100)
 #define INTEL_ARC_MMIO_PORT_C					(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x4200)
 #define INTEL_ARC_MMIO_PORT_D					(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x4300)
+#define INTEL_ARC_MMIO_PCH_MASTER_INT_CTL		0x44200
+#define INTEL_ARC_MMIO_PIPE_INT_MASK(pipe)		(0x44404 + ((pipe) - 1) * 0x10)
+#define INTEL_ARC_MMIO_PIPE_INT_IDENTITY(pipe)	(0x44408 + ((pipe) - 1) * 0x10)
+#define INTEL_ARC_MMIO_PIPE_INT_ENABLE(pipe)	(0x4440c + ((pipe) - 1) * 0x10)
+#define INTEL_ARC_MMIO_DE_HPD_IIR				0x44478
+#define INTEL_ARC_MMIO_DE_HPD_IER				0x4447c
+#define INTEL_ARC_MMIO_SHOTPLUG_CTL_DDI			0xc4030
 
 #define INTEL_ARC_PIPE_ENABLED					(1UL << 31)
 #define INTEL_ARC_PIPE_DDI_ENABLE				(1UL << 31)
@@ -82,6 +89,14 @@
 #define INTEL_ARC_PIPE_DDI_MODE_MASK			(7 << INTEL_ARC_PIPE_DDI_MODE_SHIFT)
 #define INTEL_ARC_PORT_ENABLED					(1UL << 31)
 #define INTEL_ARC_PORT_DETECTED				(1UL << 2)
+#define INTEL_ARC_MASTER_INT_GLOBAL			(1UL << 31)
+#define INTEL_ARC_MASTER_INT_PIPE_PENDING(pipe)	(1UL << (15 + (pipe)))
+#define INTEL_ARC_PIPE_INT_VBLANK				(1UL << 0)
+#define INTEL_ARC_HPD_PORT_A_ENABLE			(0x8UL << 0)
+#define INTEL_ARC_HPD_PORT_B_ENABLE			(0x8UL << 4)
+#define INTEL_ARC_HPD_PORT_C_ENABLE			(0x8UL << 8)
+#define INTEL_ARC_HPD_PORT_D_ENABLE			(0x8UL << 12)
+#define INTEL_ARC_GEN11_HPD_MASK				((0x3fUL << 16) | 0x3fUL)
 
 
 struct supported_device {
@@ -112,6 +127,8 @@ struct intel_arc_info {
 
 	area_id					frame_buffer_area;
 	uint8*					frame_buffer;
+	uint32					irq;
+	bool					irq_installed;
 };
 
 
@@ -132,7 +149,11 @@ static status_t init_device(intel_arc_info& info);
 static void uninit_device(intel_arc_info& info);
 static color_space get_color_space_for_depth(uint32 depth);
 static bool read32(const intel_arc_info& info, uint32 offset, uint32& value);
+static bool write32(const intel_arc_info& info, uint32 offset, uint32 value);
 static void probe_display_state(intel_arc_info& info);
+static int32 arc_interrupt_handler(void* data);
+static int32 release_vblank_sem(intel_arc_info& info);
+static void enable_interrupts(intel_arc_info& info, bool enable);
 extern "C" void uninit_driver(void);
 
 
@@ -273,6 +294,104 @@ read32(const intel_arc_info& info, uint32 offset, uint32& value)
 }
 
 
+static bool
+write32(const intel_arc_info& info, uint32 offset, uint32 value)
+{
+	if (info.registers == NULL
+		|| offset + sizeof(uint32) > info.shared_info->registers_size) {
+		return false;
+	}
+
+	*(volatile uint32*)(info.registers + offset) = value;
+	return true;
+}
+
+
+static int32
+release_vblank_sem(intel_arc_info& info)
+{
+	int32 count = 0;
+	if (info.shared_info->vblank_sem >= B_OK
+		&& get_sem_count(info.shared_info->vblank_sem, &count) == B_OK
+		&& count < 0) {
+		release_sem_etc(info.shared_info->vblank_sem, -count,
+			B_DO_NOT_RESCHEDULE);
+		return B_INVOKE_SCHEDULER;
+	}
+
+	return B_HANDLED_INTERRUPT;
+}
+
+
+static void
+enable_interrupts(intel_arc_info& info, bool enable)
+{
+	if (info.shared_info == NULL || info.shared_info->active_pipe < 0)
+		return;
+
+	const uint32 pipe = (uint32)info.shared_info->active_pipe + 1;
+	const uint32 value = enable ? INTEL_ARC_PIPE_INT_VBLANK : 0;
+	write32(info, INTEL_ARC_MMIO_PIPE_INT_IDENTITY(pipe), ~0U);
+	write32(info, INTEL_ARC_MMIO_PIPE_INT_ENABLE(pipe), value);
+	write32(info, INTEL_ARC_MMIO_PIPE_INT_MASK(pipe), ~value);
+
+	if (enable) {
+		write32(info, INTEL_ARC_MMIO_DE_HPD_IER, INTEL_ARC_GEN11_HPD_MASK);
+		uint32 hotplugCtl = 0;
+		read32(info, INTEL_ARC_MMIO_SHOTPLUG_CTL_DDI, hotplugCtl);
+		hotplugCtl |= INTEL_ARC_HPD_PORT_A_ENABLE | INTEL_ARC_HPD_PORT_B_ENABLE
+			| INTEL_ARC_HPD_PORT_C_ENABLE | INTEL_ARC_HPD_PORT_D_ENABLE;
+		write32(info, INTEL_ARC_MMIO_SHOTPLUG_CTL_DDI, hotplugCtl);
+		info.shared_info->hotplug_ctl = hotplugCtl;
+		write32(info, INTEL_ARC_MMIO_PCH_MASTER_INT_CTL,
+			INTEL_ARC_MASTER_INT_GLOBAL);
+	} else {
+		write32(info, INTEL_ARC_MMIO_DE_HPD_IER, 0);
+		write32(info, INTEL_ARC_MMIO_PCH_MASTER_INT_CTL, 0);
+	}
+}
+
+
+static int32
+arc_interrupt_handler(void* data)
+{
+	intel_arc_info& info = *(intel_arc_info*)data;
+	if (info.shared_info == NULL || info.shared_info->active_pipe < 0)
+		return B_UNHANDLED_INTERRUPT;
+
+	uint32 interrupt = 0;
+	if (!read32(info, INTEL_ARC_MMIO_PCH_MASTER_INT_CTL, interrupt))
+		return B_UNHANDLED_INTERRUPT;
+	if ((interrupt & INTEL_ARC_MASTER_INT_GLOBAL) == 0)
+		return B_UNHANDLED_INTERRUPT;
+
+	int32 handled = B_HANDLED_INTERRUPT;
+	const uint32 pipe = (uint32)info.shared_info->active_pipe + 1;
+	if ((interrupt & INTEL_ARC_MASTER_INT_PIPE_PENDING(pipe)) != 0) {
+		uint32 identity = 0;
+		if (read32(info, INTEL_ARC_MMIO_PIPE_INT_IDENTITY(pipe), identity)
+			&& (identity & INTEL_ARC_PIPE_INT_VBLANK) != 0) {
+			handled = release_vblank_sem(info);
+			write32(info, INTEL_ARC_MMIO_PIPE_INT_IDENTITY(pipe),
+				identity | INTEL_ARC_PIPE_INT_VBLANK);
+		}
+	}
+
+	uint32 hpdIir = 0;
+	if (read32(info, INTEL_ARC_MMIO_DE_HPD_IIR, hpdIir) && hpdIir != 0) {
+		info.shared_info->hpd_iir = hpdIir;
+		info.shared_info->hotplug_event_count++;
+		write32(info, INTEL_ARC_MMIO_DE_HPD_IIR, hpdIir);
+		uint32 hotplugCtl = 0;
+		if (read32(info, INTEL_ARC_MMIO_SHOTPLUG_CTL_DDI, hotplugCtl))
+			info.shared_info->hotplug_ctl = hotplugCtl;
+		probe_display_state(info);
+	}
+
+	return handled;
+}
+
+
 static void
 probe_display_state(intel_arc_info& info)
 {
@@ -359,6 +478,7 @@ probe_display_state(intel_arc_info& info)
 			shared.detected_port_bits |= (1 << port);
 		}
 	}
+	read32(info, INTEL_ARC_MMIO_SHOTPLUG_CTL_DDI, shared.hotplug_ctl);
 }
 
 
@@ -486,6 +606,7 @@ init_device(intel_arc_info& info)
 		return info.shared_area;
 
 	memset(info.shared_info, 0, sizeof(intel_arc_shared_info));
+	info.shared_info->vblank_sem = -1;
 	info.shared_info->vendor_id = info.pci.vendor_id;
 	info.shared_info->device_id = info.pci.device_id;
 	info.shared_info->family = info.device->family;
@@ -575,6 +696,30 @@ init_device(intel_arc_info& info)
 
 	probe_display_state(info);
 
+	info.shared_info->vblank_sem = create_sem(0, "intel arc vblank");
+	if (info.shared_info->vblank_sem >= B_OK) {
+		thread_id thread = find_thread(NULL);
+		thread_info threadInfo;
+		if (get_thread_info(thread, &threadInfo) != B_OK
+			|| set_sem_owner(info.shared_info->vblank_sem, threadInfo.team) != B_OK) {
+			delete_sem(info.shared_info->vblank_sem);
+			info.shared_info->vblank_sem = -1;
+		}
+	}
+
+	info.irq = 0;
+	info.irq_installed = false;
+	if (info.pci.u.h0.interrupt_pin != 0x00) {
+		info.irq = info.pci.u.h0.interrupt_line;
+		if (info.irq == 0xff)
+			info.irq = 0;
+	}
+	if (info.irq != 0 && info.shared_info->vblank_sem >= B_OK
+		&& install_io_interrupt_handler(info.irq, arc_interrupt_handler, &info, 0) == B_OK) {
+		info.irq_installed = true;
+		enable_interrupts(info, true);
+	}
+
 	sharedKeeper.Detach();
 	mmioKeeper.Detach();
 
@@ -596,6 +741,17 @@ init_device(intel_arc_info& info)
 static void
 uninit_device(intel_arc_info& info)
 {
+	if (info.irq_installed) {
+		enable_interrupts(info, false);
+		remove_io_interrupt_handler(info.irq, arc_interrupt_handler, &info);
+		info.irq_installed = false;
+	}
+
+	if (info.shared_info != NULL && info.shared_info->vblank_sem >= B_OK) {
+		delete_sem(info.shared_info->vblank_sem);
+		info.shared_info->vblank_sem = -1;
+	}
+
 	if (info.frame_buffer_area >= B_OK) {
 		vm_change_clones_to_null_areas(info.frame_buffer_area);
 		delete_area(info.frame_buffer_area);

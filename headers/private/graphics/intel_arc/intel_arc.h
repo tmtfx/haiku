@@ -40,6 +40,7 @@ struct intel_arc_shared_info {
 	display_mode	current_mode;
 	uint32			bytes_per_row;
 	uint32			dpms_mode;
+	sem_id			vblank_sem;
 
 	area_id			registers_area;
 	area_id			frame_buffer_area;
@@ -86,6 +87,9 @@ struct intel_arc_shared_info {
 	uint32			plane_image_size[4];
 	uint32			plane_surface[4];
 	uint32			port_state[4];
+	uint32			hotplug_ctl;
+	uint32			hpd_iir;
+	uint32			hotplug_event_count;
 	uint8			dpcd[8];
 	uint8			dpcd_max_lane_count;
 	uint8			dpcd_sink_count;

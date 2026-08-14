@@ -39,6 +39,8 @@
 
 
 accelerant_info* gInfo;
+static engine_token sEngineToken = {1, 0, NULL};
+static uint64 sSyncCounter = 1;
 
 /*
  * AUX/DDC implementation below is a standalone procedural adaptation of the
@@ -520,7 +522,67 @@ intel_arc_get_accelerant_device_info(accelerant_device_info* info)
 sem_id
 intel_arc_accelerant_retrace_semaphore(void)
 {
-	return -1;
+	return gInfo->shared_info != NULL ? gInfo->shared_info->vblank_sem : -1;
+}
+
+
+uint32
+intel_arc_accelerant_engine_count(void)
+{
+	return 1;
+}
+
+
+status_t
+intel_arc_acquire_engine(uint32 capabilities, uint32 maxWait,
+	sync_token* syncToken, engine_token** engineToken)
+{
+	(void)capabilities;
+	(void)maxWait;
+
+	if (syncToken != NULL)
+		intel_arc_sync_to_token(syncToken);
+
+	*engineToken = &sEngineToken;
+	return B_OK;
+}
+
+
+status_t
+intel_arc_release_engine(engine_token* engineToken, sync_token* syncToken)
+{
+	if (syncToken != NULL)
+		return intel_arc_get_sync_token(engineToken, syncToken);
+
+	return B_OK;
+}
+
+
+void
+intel_arc_wait_engine_idle(void)
+{
+}
+
+
+status_t
+intel_arc_get_sync_token(engine_token* engineToken, sync_token* syncToken)
+{
+	if (engineToken == NULL || syncToken == NULL)
+		return B_BAD_VALUE;
+
+	syncToken->engine_id = engineToken->engine_id;
+	syncToken->counter = sSyncCounter++;
+	memset(syncToken->opaque, 0, sizeof(syncToken->opaque));
+	return B_OK;
+}
+
+
+status_t
+intel_arc_sync_to_token(sync_token* syncToken)
+{
+	(void)syncToken;
+	intel_arc_wait_engine_idle();
+	return B_OK;
 }
 
 
@@ -760,6 +822,18 @@ get_accelerant_hook(uint32 feature, void* /*data*/)
 			return (void*)intel_arc_get_accelerant_device_info;
 		case B_ACCELERANT_RETRACE_SEMAPHORE:
 			return (void*)intel_arc_accelerant_retrace_semaphore;
+		case B_ACCELERANT_ENGINE_COUNT:
+			return (void*)intel_arc_accelerant_engine_count;
+		case B_ACQUIRE_ENGINE:
+			return (void*)intel_arc_acquire_engine;
+		case B_RELEASE_ENGINE:
+			return (void*)intel_arc_release_engine;
+		case B_WAIT_ENGINE_IDLE:
+			return (void*)intel_arc_wait_engine_idle;
+		case B_GET_SYNC_TOKEN:
+			return (void*)intel_arc_get_sync_token;
+		case B_SYNC_TO_TOKEN:
+			return (void*)intel_arc_sync_to_token;
 		case B_DPMS_CAPABILITIES:
 			return (void*)intel_arc_dpms_capabilities;
 		case B_DPMS_MODE:
