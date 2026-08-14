@@ -31,6 +31,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+
 #define TRACE_INTEL_ARC
 #ifdef TRACE_INTEL_ARC
 #	define TRACE(x...) dprintf("intel_arc: " x)
@@ -40,12 +41,16 @@
 #define ERROR(x...) dprintf("intel_arc: " x)
 
 #define MAX_DEVICES 8
-#define MAX_CLONED_FRAMEBUFFER_SIZE (256 * 1024 * 1024)
+#define MAX_CLONED_FRAMEBUFFER_SIZE (64 * 1024 * 1024)
 #define ROUND_TO_PAGE_SIZE(x) (((x) + (B_PAGE_SIZE) - 1) & ~((B_PAGE_SIZE) - 1))
 
 /*
  * Raw display/MMIO offsets below are a minimal, MIT-compatible reinterpretation
- * of register definitions for Intel Display Engine.
+ * of register definitions from:
+ *   headers/private/graphics/intel_extreme/intel_extreme.h
+ *
+ * They are used only for non-destructive bring-up introspection:
+ * reading current pipe state, attached DDI path, and active mode sizing.
  */
 #define INTEL_ARC_MMIO_PIPE_BLOCK_BASE			0x60000
 #define INTEL_ARC_MMIO_PLANE_BLOCK_BASE			0x70000
@@ -72,8 +77,12 @@
 #define INTEL_ARC_MMIO_PIPE_INT_MASK(pipe)		(0x44404 + ((pipe) - 1) * 0x10)
 #define INTEL_ARC_MMIO_PIPE_INT_IDENTITY(pipe)	(0x44408 + ((pipe) - 1) * 0x10)
 #define INTEL_ARC_MMIO_PIPE_INT_ENABLE(pipe)	(0x4440c + ((pipe) - 1) * 0x10)
+#define INTEL_ARC_MMIO_DE_HPD_IIR				0x44478
+#define INTEL_ARC_MMIO_DE_HPD_IER				0x4447c
+#define INTEL_ARC_MMIO_SHOTPLUG_CTL_DDI			0xc4030
 
 #define INTEL_ARC_PIPE_ENABLED					(1UL << 31)
+#define INTEL_ARC_PIPE_DDI_ENABLE				(1UL << 31)
 #define INTEL_ARC_PIPE_DDI_SELECT_SHIFT		28
 #define INTEL_ARC_PIPE_DDI_SELECT_MASK			(7 << INTEL_ARC_PIPE_DDI_SELECT_SHIFT)
 #define INTEL_ARC_PIPE_DDI_MODE_SHIFT			24
@@ -83,6 +92,11 @@
 #define INTEL_ARC_MASTER_INT_GLOBAL			(1UL << 31)
 #define INTEL_ARC_MASTER_INT_PIPE_PENDING(pipe)	(1UL << (15 + (pipe)))
 #define INTEL_ARC_PIPE_INT_VBLANK				(1UL << 0)
+#define INTEL_ARC_HPD_PORT_A_ENABLE			(0x8UL << 0)
+#define INTEL_ARC_HPD_PORT_B_ENABLE			(0x8UL << 4)
+#define INTEL_ARC_HPD_PORT_C_ENABLE			(0x8UL << 8)
+#define INTEL_ARC_HPD_PORT_D_ENABLE			(0x8UL << 12)
+#define INTEL_ARC_GEN11_HPD_MASK				((0x3fUL << 16) | 0x3fUL)
 
 
 struct supported_device {
@@ -157,6 +171,14 @@ static device_hooks sDeviceHooks = {
 };
 
 
+/*
+ * ARC PCI IDs collected from public hardware ID databases and release coverage:
+ *  - https://pci-ids.ucw.cz/read/PC/8086
+ *  - https://github.com/pciutils/pciids
+ *  - https://www.phoronix.com/news/Three-More-Battlemage-IDs
+ *  - https://wccftech.com/intel-adds-big-battlemage-bmg-g31-gpu-support-four-device-ids-spotted/
+ *  - src/data/ids/pci.ids in this repository
+ */
 static const supported_device kSupportedDevices[] = {
 	{ 0x5690, INTEL_ARC_FAMILY_ALCHEMIST, "Arc A770M" },
 	{ 0x5691, INTEL_ARC_FAMILY_ALCHEMIST, "Arc A730M" },
@@ -232,6 +254,11 @@ set_pci_config(pci_info* info, uint8 offset, uint8 size, uint32 value)
 static color_space
 get_color_space_for_depth(uint32 depth)
 {
+	/*
+	 * Reinterpreted from framebuffer/vesa depth conversion helpers:
+	 *  - src/add-ons/kernel/drivers/graphics/framebuffer/framebuffer.cpp
+	 *  - src/add-ons/kernel/drivers/graphics/vesa/vesa.cpp
+	 */
 	switch (depth) {
 		case 1:
 			return B_GRAY1;
@@ -254,7 +281,6 @@ get_color_space_for_depth(uint32 depth)
 	}
 }
 
-
 static bool
 read32(const intel_arc_info& info, uint32 offset, uint32& value)
 {
@@ -264,10 +290,6 @@ read32(const intel_arc_info& info, uint32 offset, uint32& value)
 	}
 
 	value = *(volatile uint32*)(info.registers + offset);
-	// Controllo protezione bus fault / D3cold power down State
-	if (value == 0xFFFFFFFF)
-		return false;
-
 	return true;
 }
 
@@ -314,9 +336,17 @@ enable_interrupts(intel_arc_info& info, bool enable)
 	write32(info, INTEL_ARC_MMIO_PIPE_INT_MASK(pipe), ~value);
 
 	if (enable) {
+		write32(info, INTEL_ARC_MMIO_DE_HPD_IER, INTEL_ARC_GEN11_HPD_MASK);
+		uint32 hotplugCtl = 0;
+		read32(info, INTEL_ARC_MMIO_SHOTPLUG_CTL_DDI, hotplugCtl);
+		hotplugCtl |= INTEL_ARC_HPD_PORT_A_ENABLE | INTEL_ARC_HPD_PORT_B_ENABLE
+			| INTEL_ARC_HPD_PORT_C_ENABLE | INTEL_ARC_HPD_PORT_D_ENABLE;
+		write32(info, INTEL_ARC_MMIO_SHOTPLUG_CTL_DDI, hotplugCtl);
+		info.shared_info->hotplug_ctl = hotplugCtl;
 		write32(info, INTEL_ARC_MMIO_PCH_MASTER_INT_CTL,
 			INTEL_ARC_MASTER_INT_GLOBAL);
 	} else {
+		write32(info, INTEL_ARC_MMIO_DE_HPD_IER, 0);
 		write32(info, INTEL_ARC_MMIO_PCH_MASTER_INT_CTL, 0);
 	}
 }
@@ -347,6 +377,17 @@ arc_interrupt_handler(void* data)
 		}
 	}
 
+	uint32 hpdIir = 0;
+	if (read32(info, INTEL_ARC_MMIO_DE_HPD_IIR, hpdIir) && hpdIir != 0) {
+		info.shared_info->hpd_iir = hpdIir;
+		info.shared_info->hotplug_event_count++;
+		write32(info, INTEL_ARC_MMIO_DE_HPD_IIR, hpdIir);
+		uint32 hotplugCtl = 0;
+		if (read32(info, INTEL_ARC_MMIO_SHOTPLUG_CTL_DDI, hotplugCtl))
+			info.shared_info->hotplug_ctl = hotplugCtl;
+		probe_display_state(info);
+	}
+
 	return handled;
 }
 
@@ -363,20 +404,34 @@ probe_display_state(intel_arc_info& info)
 
 	for (uint32 pipe = 0; pipe < shared.pipe_count; pipe++) {
 		const uint32 stride = pipe * INTEL_ARC_MMIO_PIPE_OFFSET;
-		read32(info, INTEL_ARC_MMIO_PIPE_A_HTOTAL + stride, shared.pipe_h_total[pipe]);
-		read32(info, INTEL_ARC_MMIO_PIPE_A_HBLANK + stride, shared.pipe_h_blank[pipe]);
-		read32(info, INTEL_ARC_MMIO_PIPE_A_HSYNC + stride, shared.pipe_h_sync[pipe]);
-		read32(info, INTEL_ARC_MMIO_PIPE_A_VTOTAL + stride, shared.pipe_v_total[pipe]);
-		read32(info, INTEL_ARC_MMIO_PIPE_A_VBLANK + stride, shared.pipe_v_blank[pipe]);
-		read32(info, INTEL_ARC_MMIO_PIPE_A_VSYNC + stride, shared.pipe_v_sync[pipe]);
-		read32(info, INTEL_ARC_MMIO_PIPE_A_CONTROL + stride, shared.pipe_control[pipe]);
-		read32(info, INTEL_ARC_MMIO_PIPE_A_SIZE + stride, shared.pipe_size[pipe]);
-		read32(info, INTEL_ARC_MMIO_PIPE_A_DDI_FUNC_CTL + stride, shared.pipe_ddi_func_ctl[pipe]);
-		read32(info, INTEL_ARC_MMIO_PLANE_A_CONTROL + stride, shared.plane_control[pipe]);
-		read32(info, INTEL_ARC_MMIO_PLANE_A_STRIDE + stride, shared.plane_stride[pipe]);
-		read32(info, INTEL_ARC_MMIO_PLANE_A_POS + stride, shared.plane_pos[pipe]);
-		read32(info, INTEL_ARC_MMIO_PLANE_A_IMAGE_SIZE + stride, shared.plane_image_size[pipe]);
-		read32(info, INTEL_ARC_MMIO_PLANE_A_SURFACE + stride, shared.plane_surface[pipe]);
+		read32(info, INTEL_ARC_MMIO_PIPE_A_HTOTAL + stride,
+			shared.pipe_h_total[pipe]);
+		read32(info, INTEL_ARC_MMIO_PIPE_A_HBLANK + stride,
+			shared.pipe_h_blank[pipe]);
+		read32(info, INTEL_ARC_MMIO_PIPE_A_HSYNC + stride,
+			shared.pipe_h_sync[pipe]);
+		read32(info, INTEL_ARC_MMIO_PIPE_A_VTOTAL + stride,
+			shared.pipe_v_total[pipe]);
+		read32(info, INTEL_ARC_MMIO_PIPE_A_VBLANK + stride,
+			shared.pipe_v_blank[pipe]);
+		read32(info, INTEL_ARC_MMIO_PIPE_A_VSYNC + stride,
+			shared.pipe_v_sync[pipe]);
+		read32(info, INTEL_ARC_MMIO_PIPE_A_CONTROL + stride,
+			shared.pipe_control[pipe]);
+		read32(info, INTEL_ARC_MMIO_PIPE_A_SIZE + stride,
+			shared.pipe_size[pipe]);
+		read32(info, INTEL_ARC_MMIO_PIPE_A_DDI_FUNC_CTL + stride,
+			shared.pipe_ddi_func_ctl[pipe]);
+		read32(info, INTEL_ARC_MMIO_PLANE_A_CONTROL + stride,
+			shared.plane_control[pipe]);
+		read32(info, INTEL_ARC_MMIO_PLANE_A_STRIDE + stride,
+			shared.plane_stride[pipe]);
+		read32(info, INTEL_ARC_MMIO_PLANE_A_POS + stride,
+			shared.plane_pos[pipe]);
+		read32(info, INTEL_ARC_MMIO_PLANE_A_IMAGE_SIZE + stride,
+			shared.plane_image_size[pipe]);
+		read32(info, INTEL_ARC_MMIO_PLANE_A_SURFACE + stride,
+			shared.plane_surface[pipe]);
 
 		if (shared.active_pipe >= 0)
 			continue;
@@ -423,6 +478,11 @@ probe_display_state(intel_arc_info& info)
 			shared.detected_port_bits |= (1 << port);
 		}
 	}
+	read32(info, INTEL_ARC_MMIO_SHOTPLUG_CTL_DDI, shared.hotplug_ctl);
+	dprintf("active_pipe=%d active_ddi=%u ddi_ctl=%#" B_PRIx32 " detected=%#x\n",
+		shared.active_pipe, shared.active_ddi_port, 
+		shared.active_pipe >= 0 ? shared.pipe_ddi_func_ctl[shared.active_pipe] : 0,
+		shared.detected_port_bits);
 }
 
 
@@ -502,6 +562,8 @@ select_bars(const pci_info& info, pci_bar_info& mmioBar,
 		const bool prefetchable
 			= (bar.flags & PCI_address_prefetchable) != 0;
 
+		// Heuristic: ARC exposes a small non-prefetchable MMIO BAR and a large
+		// prefetchable VRAM/aperture BAR. Prefer that split when present.
 		if (!prefetchable && !foundMMIO) {
 			mmioBar = bar;
 			foundMMIO = true;
@@ -580,6 +642,8 @@ init_device(intel_arc_info& info)
 		info.shared_info = NULL;
 		return info.registers_area;
 	}
+	dprintf("MMIO base=%#" B_PRIxPHYSADDR " size=%#" B_PRIx64 " area=%" B_PRId32 "\n",
+		mmioBar.base, (uint64)mmioBar.size, info.registers_area);
 
 	info.shared_info->registers_area = info.registers_area;
 	info.shared_info->registers_base = mmioBar.base;
@@ -665,6 +729,17 @@ init_device(intel_arc_info& info)
 	sharedKeeper.Detach();
 	mmioKeeper.Detach();
 
+	TRACE("initialized %s (%04x:%04x), MMIO BAR %d @ %#" B_PRIxPHYSADDR
+		", framebuffer BAR %d @ %#" B_PRIxPHYSADDR
+		", active pipe %d size %#" B_PRIx32 " ddi %#" B_PRIx32 "\n",
+		info.device->name, info.pci.vendor_id, info.pci.device_id,
+		(int)info.shared_info->mmio_bar, info.shared_info->registers_base,
+		(int)info.shared_info->frame_buffer_bar,
+		info.shared_info->frame_buffer_base, (int)info.shared_info->active_pipe,
+		info.shared_info->active_pipe >= 0
+			? info.shared_info->pipe_size[info.shared_info->active_pipe] : 0,
+		info.shared_info->active_pipe >= 0
+			? info.shared_info->pipe_ddi_func_ctl[info.shared_info->active_pipe] : 0);
 	return B_OK;
 }
 
@@ -887,9 +962,6 @@ control_hook(void* cookie, uint32 msg, void* buf, size_t len)
 
 		case INTEL_ARC_GET_PRIVATE_DATA:
 		{
-			if (!IS_USER_ADDRESS(buf) || len < sizeof(intel_arc_get_private_data))
-				return B_BAD_ADDRESS;
-
 			intel_arc_get_private_data data;
 			if (user_memcpy(&data, buf, sizeof(data)) < B_OK)
 				return B_BAD_ADDRESS;
@@ -911,25 +983,14 @@ control_hook(void* cookie, uint32 msg, void* buf, size_t len)
 			if (info->frame_buffer_area < B_OK)
 				return B_UNSUPPORTED;
 
-			if (!IS_USER_ADDRESS(buf) || len < sizeof(area_info))
-				return B_BAD_ADDRESS;
-
 			void* address = NULL;
 			area_id area = vm_clone_area(B_CURRENT_TEAM,
 				"intel arc cloned framebuffer", &address, B_ANY_ADDRESS,
-				B_READ_AREA | B_WRITE_AREA, REGION_NO_PRIVATE_MAP,
-				info->frame_buffer_area, false);
+				B_READ_AREA | B_WRITE_AREA, 0, info->frame_buffer_area, true);
 			if (area < B_OK)
 				return area;
 
-			area_info areaInfo;
-			status_t status = get_area_info(area, &areaInfo);
-			if (status != B_OK) {
-				delete_area(area);
-				return status;
-			}
-
-			return user_memcpy(buf, &areaInfo, sizeof(area_info));
+			return _user_get_area_info(area, (area_info*)buf);
 		}
 	}
 
