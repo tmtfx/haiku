@@ -57,7 +57,18 @@
 #define INTEL_ARC_MMIO_PIPE_OFFSET				0x1000
 #define INTEL_ARC_MMIO_PIPE_A_SIZE				(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x001c)
 #define INTEL_ARC_MMIO_PIPE_A_DDI_FUNC_CTL		(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0400)
+#define INTEL_ARC_MMIO_PIPE_A_HTOTAL			(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0000)
+#define INTEL_ARC_MMIO_PIPE_A_HBLANK			(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0004)
+#define INTEL_ARC_MMIO_PIPE_A_HSYNC				(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0008)
+#define INTEL_ARC_MMIO_PIPE_A_VTOTAL			(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x000c)
+#define INTEL_ARC_MMIO_PIPE_A_VBLANK			(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0010)
+#define INTEL_ARC_MMIO_PIPE_A_VSYNC				(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0014)
 #define INTEL_ARC_MMIO_PIPE_A_CONTROL			(INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x0008)
+#define INTEL_ARC_MMIO_PLANE_A_CONTROL			(INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x0180)
+#define INTEL_ARC_MMIO_PLANE_A_STRIDE			(INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x0188)
+#define INTEL_ARC_MMIO_PLANE_A_POS				(INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x018c)
+#define INTEL_ARC_MMIO_PLANE_A_IMAGE_SIZE		(INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x0190)
+#define INTEL_ARC_MMIO_PLANE_A_SURFACE			(INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x019c)
 #define INTEL_ARC_MMIO_PORT_A					(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x4000)
 #define INTEL_ARC_MMIO_PORT_B					(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x4100)
 #define INTEL_ARC_MMIO_PORT_C					(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x4200)
@@ -270,15 +281,38 @@ probe_display_state(intel_arc_info& info)
 	shared.active_pipe = -1;
 	shared.active_ddi_port = 0;
 	shared.active_ddi_mode = 0;
+	shared.dpms_mode = B_DPMS_ON;
 
 	for (uint32 pipe = 0; pipe < shared.pipe_count; pipe++) {
 		const uint32 stride = pipe * INTEL_ARC_MMIO_PIPE_OFFSET;
+		read32(info, INTEL_ARC_MMIO_PIPE_A_HTOTAL + stride,
+			shared.pipe_h_total[pipe]);
+		read32(info, INTEL_ARC_MMIO_PIPE_A_HBLANK + stride,
+			shared.pipe_h_blank[pipe]);
+		read32(info, INTEL_ARC_MMIO_PIPE_A_HSYNC + stride,
+			shared.pipe_h_sync[pipe]);
+		read32(info, INTEL_ARC_MMIO_PIPE_A_VTOTAL + stride,
+			shared.pipe_v_total[pipe]);
+		read32(info, INTEL_ARC_MMIO_PIPE_A_VBLANK + stride,
+			shared.pipe_v_blank[pipe]);
+		read32(info, INTEL_ARC_MMIO_PIPE_A_VSYNC + stride,
+			shared.pipe_v_sync[pipe]);
 		read32(info, INTEL_ARC_MMIO_PIPE_A_CONTROL + stride,
 			shared.pipe_control[pipe]);
 		read32(info, INTEL_ARC_MMIO_PIPE_A_SIZE + stride,
 			shared.pipe_size[pipe]);
 		read32(info, INTEL_ARC_MMIO_PIPE_A_DDI_FUNC_CTL + stride,
 			shared.pipe_ddi_func_ctl[pipe]);
+		read32(info, INTEL_ARC_MMIO_PLANE_A_CONTROL + stride,
+			shared.plane_control[pipe]);
+		read32(info, INTEL_ARC_MMIO_PLANE_A_STRIDE + stride,
+			shared.plane_stride[pipe]);
+		read32(info, INTEL_ARC_MMIO_PLANE_A_POS + stride,
+			shared.plane_pos[pipe]);
+		read32(info, INTEL_ARC_MMIO_PLANE_A_IMAGE_SIZE + stride,
+			shared.plane_image_size[pipe]);
+		read32(info, INTEL_ARC_MMIO_PLANE_A_SURFACE + stride,
+			shared.plane_surface[pipe]);
 
 		if (shared.active_pipe >= 0)
 			continue;

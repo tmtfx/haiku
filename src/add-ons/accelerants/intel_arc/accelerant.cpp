@@ -40,9 +40,30 @@ accelerant_info* gInfo;
  */
 
 #define INTEL_ARC_MMIO_PIPE_BLOCK_BASE			0x60000
+#define INTEL_ARC_MMIO_PIPE_OFFSET				0x1000
 #define INTEL_ARC_MMIO_AUX_CH_CTL_A				(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x4010)
 #define INTEL_ARC_MMIO_AUX_CH_DATA1_A			(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x4014)
 #define INTEL_ARC_MMIO_AUX_CHANNEL_STRIDE		0x100
+#define INTEL_ARC_MMIO_PIPE_A_HTOTAL			(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0000)
+#define INTEL_ARC_MMIO_PIPE_A_HBLANK			(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0004)
+#define INTEL_ARC_MMIO_PIPE_A_HSYNC				(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0008)
+#define INTEL_ARC_MMIO_PIPE_A_VTOTAL			(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x000c)
+#define INTEL_ARC_MMIO_PIPE_A_VBLANK			(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0010)
+#define INTEL_ARC_MMIO_PIPE_A_VSYNC				(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0014)
+#define INTEL_ARC_MMIO_PIPE_A_SIZE				(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x001c)
+#define INTEL_ARC_MMIO_PIPE_A_DDI_FUNC_CTL		(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0400)
+#define INTEL_ARC_MMIO_DDI_PIPE_A_DATA_M		(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0030)
+#define INTEL_ARC_MMIO_DDI_PIPE_A_DATA_N		(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0034)
+#define INTEL_ARC_MMIO_DDI_PIPE_A_LINK_M		(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0040)
+#define INTEL_ARC_MMIO_DDI_PIPE_A_LINK_N		(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0044)
+#define INTEL_ARC_MMIO_PLANE_BLOCK_BASE			0x70000
+#define INTEL_ARC_MMIO_PIPE_A_CONTROL			(INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x0008)
+#define INTEL_ARC_MMIO_PLANE_A_CONTROL			(INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x0180)
+#define INTEL_ARC_MMIO_PLANE_A_BASE				(INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x0184)
+#define INTEL_ARC_MMIO_PLANE_A_STRIDE			(INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x0188)
+#define INTEL_ARC_MMIO_PLANE_A_POS				(INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x018c)
+#define INTEL_ARC_MMIO_PLANE_A_IMAGE_SIZE		(INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x0190)
+#define INTEL_ARC_MMIO_PLANE_A_SURFACE			(INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x019c)
 
 #define INTEL_ARC_DP_AUX_CTL_BUSY				(1U << 31)
 #define INTEL_ARC_DP_AUX_CTL_DONE				(1U << 30)
@@ -54,12 +75,37 @@ accelerant_info* gInfo;
 #define INTEL_ARC_DP_AUX_CTL_MSG_SIZE_MASK		(0x1fU << 20)
 #define INTEL_ARC_DP_AUX_CTL_FW_SYNC_PULSE_SKL(c) (((c) - 1) << 5)
 #define INTEL_ARC_DP_AUX_CTL_SYNC_PULSE_SKL(c)	((c) - 1)
+#define INTEL_ARC_DDI_MN_TU_SIZE_MASK			(0x3fU << 25)
+#define INTEL_ARC_PIPE_ENABLED					(1U << 31)
+#define INTEL_ARC_PIPE_DDI_FUNC_CTL_ENABLE		(1U << 31)
+#define INTEL_ARC_PIPE_DDI_SELECT_MASK			(7U << 28)
+#define INTEL_ARC_PIPE_DDI_MODESEL_MASK			(7U << 24)
+#define INTEL_ARC_PIPE_DDI_MODE_DP_SST			2U
+#define INTEL_ARC_PIPE_DDI_MODE_DP_MST			3U
+#define INTEL_ARC_PIPE_DDI_BPC_MASK				(7U << 20)
+#define INTEL_ARC_PIPE_DDI_DP_WIDTH_MASK		(7U << 1)
+#define INTEL_ARC_PIPE_DDI_DP_WIDTH_SHIFT		1
+#define INTEL_ARC_DISPLAY_CONTROL_ENABLED		(1U << 31)
+#define INTEL_ARC_DISPLAY_CONTROL_COLOR_MASK_SKY (0x0fU << 24)
+#define INTEL_ARC_DISPLAY_CONTROL_CMAP8_SKY		(0x0cU << 24)
+#define INTEL_ARC_DISPLAY_CONTROL_RGB16_SKY		(0x0eU << 24)
+#define INTEL_ARC_DISPLAY_CONTROL_RGB32_SKY		(0x04U << 24)
 
 
 static bool read_register(uint32 offset, uint32& value);
 static void write_register(uint32 offset, uint32 value);
+static status_t wait_for_clear(uint32 offset, uint32 mask, bigtime_t timeout);
+static status_t wait_for_set(uint32 offset, uint32 mask, bigtime_t timeout);
 static uint32 aux_control_register(uint8 ddiPort);
 static uint32 aux_data_register(uint8 ddiPort, uint8 index);
+static uint32 pipe_register(uint32 base, int8 pipe);
+static status_t apply_dpms_off(void);
+static status_t apply_dpms_on(void);
+static bool is_mode_in_list(const display_mode& mode, display_mode* match = NULL);
+static uint32 bytes_per_pixel_for_space(color_space space);
+static uint32 plane_color_format_for_space(color_space space);
+static status_t configure_dp_link(display_mode* mode);
+static status_t set_sink_power(uint8 ddiPort, uint8 value);
 static status_t read_edid_from_hardware(void);
 static status_t read_edid_from_port(uint8 ddiPort, edid1_info& edid);
 static status_t read_dpcd_caps_from_port(uint8 ddiPort);
@@ -305,6 +351,34 @@ intel_arc_accelerant_retrace_semaphore(void)
 
 
 uint32
+intel_arc_dpms_capabilities(void)
+{
+	return B_DPMS_ON | B_DPMS_OFF;
+}
+
+
+uint32
+intel_arc_dpms_mode(void)
+{
+	return gInfo->shared_info->dpms_mode;
+}
+
+
+status_t
+intel_arc_set_dpms_mode(uint32 mode)
+{
+	switch (mode) {
+		case B_DPMS_ON:
+			return apply_dpms_on();
+		case B_DPMS_OFF:
+			return apply_dpms_off();
+		default:
+			return B_UNSUPPORTED;
+	}
+}
+
+
+uint32
 intel_arc_accelerant_mode_count(void)
 {
 	return gInfo->shared_info->mode_count;
@@ -324,12 +398,122 @@ intel_arc_get_mode_list(display_mode* modeList)
 
 
 status_t
+intel_arc_propose_display_mode(display_mode* target, display_mode* low,
+	display_mode* high)
+{
+	(void)low;
+	(void)high;
+
+	display_mode match;
+	if (!is_mode_in_list(*target, &match))
+		return B_BAD_VALUE;
+
+	*target = match;
+	return B_OK;
+}
+
+
+status_t
+intel_arc_get_preferred_mode(display_mode* mode)
+{
+	if (gInfo->shared_info->mode_count == 0)
+		return B_ENTRY_NOT_FOUND;
+
+	*mode = gInfo->mode_list[0];
+	return B_OK;
+}
+
+
+status_t
 intel_arc_set_display_mode(display_mode* mode)
 {
-	if (mode != NULL && *mode == gInfo->shared_info->current_mode)
+	if (mode == NULL)
+		return B_BAD_VALUE;
+	if (*mode == gInfo->shared_info->current_mode)
 		return B_OK;
 
-	return B_UNSUPPORTED;
+	display_mode target = *mode;
+	status_t status = intel_arc_propose_display_mode(&target, &target, &target);
+	if (status != B_OK)
+		return status;
+
+	if (gInfo->shared_info->active_pipe < 0)
+		return B_UNSUPPORTED;
+
+	status = apply_dpms_off();
+	if (status != B_OK)
+		return status;
+
+	const int8 pipe = gInfo->shared_info->active_pipe;
+	const uint32 pipeOffset = (uint32)pipe * INTEL_ARC_MMIO_PIPE_OFFSET;
+	const uint32 bytesPerPixel
+		= bytes_per_pixel_for_space((color_space)target.space);
+	if (bytesPerPixel == 0)
+		return B_BAD_VALUE;
+
+	gInfo->shared_info->current_mode = target;
+	gInfo->shared_info->bytes_per_row = target.virtual_width * bytesPerPixel;
+	gInfo->shared_info->pipe_h_total[pipe]
+		= ((uint32)(target.timing.h_total - 1) << 16)
+			| ((uint32)target.timing.h_display - 1);
+	gInfo->shared_info->pipe_h_blank[pipe]
+		= ((uint32)(target.timing.h_total - 1) << 16)
+			| ((uint32)target.timing.h_display - 1);
+	gInfo->shared_info->pipe_h_sync[pipe]
+		= ((uint32)(target.timing.h_sync_end - 1) << 16)
+			| ((uint32)target.timing.h_sync_start - 1);
+	gInfo->shared_info->pipe_v_total[pipe]
+		= ((uint32)(target.timing.v_total - 1) << 16)
+			| ((uint32)target.timing.v_display - 1);
+	gInfo->shared_info->pipe_v_blank[pipe]
+		= ((uint32)(target.timing.v_total - 1) << 16)
+			| ((uint32)target.timing.v_display - 1);
+	gInfo->shared_info->pipe_v_sync[pipe]
+		= ((uint32)(target.timing.v_sync_end - 1) << 16)
+			| ((uint32)target.timing.v_sync_start - 1);
+	gInfo->shared_info->pipe_size[pipe]
+		= ((uint32)(target.timing.v_display - 1) << 16)
+			| ((uint32)target.timing.h_display - 1);
+	gInfo->shared_info->plane_stride[pipe] = gInfo->shared_info->bytes_per_row;
+	gInfo->shared_info->plane_pos[pipe] = 0;
+	gInfo->shared_info->plane_image_size[pipe]
+		= ((uint32)(target.timing.v_display - 1) << 16)
+			| ((uint32)target.timing.h_display - 1);
+	gInfo->shared_info->plane_control[pipe]
+		= (gInfo->shared_info->plane_control[pipe]
+			& ~INTEL_ARC_DISPLAY_CONTROL_COLOR_MASK_SKY)
+		| plane_color_format_for_space((color_space)target.space);
+
+	write_register(INTEL_ARC_MMIO_PIPE_A_HTOTAL + pipeOffset,
+		gInfo->shared_info->pipe_h_total[pipe]);
+	write_register(INTEL_ARC_MMIO_PIPE_A_HBLANK + pipeOffset,
+		gInfo->shared_info->pipe_h_blank[pipe]);
+	write_register(INTEL_ARC_MMIO_PIPE_A_HSYNC + pipeOffset,
+		gInfo->shared_info->pipe_h_sync[pipe]);
+	write_register(INTEL_ARC_MMIO_PIPE_A_VTOTAL + pipeOffset,
+		gInfo->shared_info->pipe_v_total[pipe]);
+	write_register(INTEL_ARC_MMIO_PIPE_A_VBLANK + pipeOffset,
+		gInfo->shared_info->pipe_v_blank[pipe]);
+	write_register(INTEL_ARC_MMIO_PIPE_A_VSYNC + pipeOffset,
+		gInfo->shared_info->pipe_v_sync[pipe]);
+	write_register(INTEL_ARC_MMIO_PIPE_A_SIZE + pipeOffset,
+		gInfo->shared_info->pipe_size[pipe]);
+
+	if ((((gInfo->shared_info->pipe_ddi_func_ctl[pipe]
+			& INTEL_ARC_PIPE_DDI_MODESEL_MASK) >> 24)
+			== INTEL_ARC_PIPE_DDI_MODE_DP_SST)
+		|| (((gInfo->shared_info->pipe_ddi_func_ctl[pipe]
+			& INTEL_ARC_PIPE_DDI_MODESEL_MASK) >> 24)
+			== INTEL_ARC_PIPE_DDI_MODE_DP_MST)) {
+		status = configure_dp_link(&target);
+		if (status != B_OK)
+			return status;
+	}
+
+	status = apply_dpms_on();
+	if (status == B_OK)
+		*mode = target;
+	return status;
 }
 
 
@@ -402,11 +586,21 @@ get_accelerant_hook(uint32 feature, void* /*data*/)
 			return (void*)intel_arc_get_accelerant_device_info;
 		case B_ACCELERANT_RETRACE_SEMAPHORE:
 			return (void*)intel_arc_accelerant_retrace_semaphore;
+		case B_DPMS_CAPABILITIES:
+			return (void*)intel_arc_dpms_capabilities;
+		case B_DPMS_MODE:
+			return (void*)intel_arc_dpms_mode;
+		case B_SET_DPMS_MODE:
+			return (void*)intel_arc_set_dpms_mode;
 
 		case B_ACCELERANT_MODE_COUNT:
 			return (void*)intel_arc_accelerant_mode_count;
 		case B_GET_MODE_LIST:
 			return (void*)intel_arc_get_mode_list;
+		case B_PROPOSE_DISPLAY_MODE:
+			return (void*)intel_arc_propose_display_mode;
+		case B_GET_PREFERRED_DISPLAY_MODE:
+			return (void*)intel_arc_get_preferred_mode;
 		case B_SET_DISPLAY_MODE:
 			return (void*)intel_arc_set_display_mode;
 		case B_GET_DISPLAY_MODE:
@@ -445,6 +639,309 @@ write_register(uint32 offset, uint32 value)
 	}
 
 	*(volatile uint32*)(gInfo->registers + offset) = value;
+}
+
+
+static status_t
+wait_for_clear(uint32 offset, uint32 mask, bigtime_t timeout)
+{
+	const bigtime_t deadline = system_time() + timeout;
+	uint32 value = 0;
+	while (system_time() < deadline) {
+		if (!read_register(offset, value))
+			return B_ERROR;
+		if ((value & mask) == 0)
+			return B_OK;
+		snooze(100);
+	}
+	return B_TIMED_OUT;
+}
+
+
+static status_t
+wait_for_set(uint32 offset, uint32 mask, bigtime_t timeout)
+{
+	const bigtime_t deadline = system_time() + timeout;
+	uint32 value = 0;
+	while (system_time() < deadline) {
+		if (!read_register(offset, value))
+			return B_ERROR;
+		if ((value & mask) == mask)
+			return B_OK;
+		snooze(100);
+	}
+	return B_TIMED_OUT;
+}
+
+
+static uint32
+pipe_register(uint32 base, int8 pipe)
+{
+	return base + (uint32)pipe * INTEL_ARC_MMIO_PIPE_OFFSET;
+}
+
+
+static bool
+is_mode_in_list(const display_mode& mode, display_mode* match)
+{
+	for (uint32 i = 0; i < gInfo->shared_info->mode_count; i++) {
+		const display_mode& current = gInfo->mode_list[i];
+		if (current.virtual_width != mode.virtual_width
+			|| current.virtual_height != mode.virtual_height
+			|| current.space != mode.space) {
+			continue;
+		}
+
+		if (match != NULL)
+			*match = current;
+		return true;
+	}
+
+	return false;
+}
+
+
+static uint32
+bytes_per_pixel_for_space(color_space space)
+{
+	switch (space) {
+		case B_CMAP8:
+		case B_GRAY8:
+			return 1;
+		case B_RGB16_LITTLE:
+		case B_RGB16_BIG:
+		case B_RGB15_LITTLE:
+		case B_RGB15_BIG:
+			return 2;
+		case B_RGB24_LITTLE:
+		case B_RGB24_BIG:
+			return 3;
+		case B_RGB32_LITTLE:
+		case B_RGB32_BIG:
+		default:
+			return 4;
+	}
+}
+
+
+static uint32
+plane_color_format_for_space(color_space space)
+{
+	switch (space) {
+		case B_CMAP8:
+			return INTEL_ARC_DISPLAY_CONTROL_CMAP8_SKY;
+		case B_RGB16_LITTLE:
+		case B_RGB16_BIG:
+			return INTEL_ARC_DISPLAY_CONTROL_RGB16_SKY;
+		case B_RGB32_LITTLE:
+		case B_RGB32_BIG:
+		default:
+			return INTEL_ARC_DISPLAY_CONTROL_RGB32_SKY;
+	}
+}
+
+
+static status_t
+configure_dp_link(display_mode* mode)
+{
+	if (gInfo->shared_info->active_pipe < 0)
+		return B_UNSUPPORTED;
+
+	const int8 pipe = gInfo->shared_info->active_pipe;
+	const uint32 pipeOffset = (uint32)pipe * INTEL_ARC_MMIO_PIPE_OFFSET;
+	const uint32 pipeFunc = gInfo->shared_info->pipe_ddi_func_ctl[pipe];
+	uint32 bitsPerPixel = 24;
+	switch ((pipeFunc & INTEL_ARC_PIPE_DDI_BPC_MASK) >> 20) {
+		case 0:
+			bitsPerPixel = 24;
+			break;
+		case 1:
+			bitsPerPixel = 30;
+			break;
+		case 2:
+			bitsPerPixel = 18;
+			break;
+		case 3:
+			bitsPerPixel = 36;
+			break;
+		default:
+			break;
+	}
+
+	uint32 lanes
+		= ((pipeFunc & INTEL_ARC_PIPE_DDI_DP_WIDTH_MASK)
+			>> INTEL_ARC_PIPE_DDI_DP_WIDTH_SHIFT) + 1;
+	if (lanes == 0 || lanes > 4)
+		lanes = 4;
+
+	uint32 linkBandwidth = 270000;
+	if (gInfo->shared_info->has_dpcd && gInfo->shared_info->dpcd_max_link_rate != 0)
+		linkBandwidth = dp_decode_link_rate(gInfo->shared_info->dpcd_max_link_rate);
+
+	const uint32 bps = mode->timing.pixel_clock * bitsPerPixel * 21 / 20;
+	const uint32 requiredLanes = (bps + (linkBandwidth * 8) - 1)
+		/ (linkBandwidth * 8);
+	if (requiredLanes > lanes)
+		return B_BAD_VALUE;
+
+	uint64 linkSpeed = (uint64)lanes * linkBandwidth * 8;
+	uint64 retN = 1;
+	while (retN < linkSpeed)
+		retN <<= 1;
+	if (retN > 0x800000)
+		retN = 0x800000;
+	uint64 retM = (uint64)mode->timing.pixel_clock * retN * bitsPerPixel
+		/ linkSpeed;
+	while (retN > 0xffffff || retM > 0xffffff) {
+		retN >>= 1;
+		retM >>= 1;
+	}
+	write_register(INTEL_ARC_MMIO_DDI_PIPE_A_DATA_M + pipeOffset,
+		(uint32)retM | INTEL_ARC_DDI_MN_TU_SIZE_MASK);
+	write_register(INTEL_ARC_MMIO_DDI_PIPE_A_DATA_N + pipeOffset,
+		(uint32)retN);
+
+	linkSpeed = linkBandwidth;
+	retN = 1;
+	while (retN < linkSpeed)
+		retN <<= 1;
+	if (retN > 0x800000)
+		retN = 0x800000;
+	retM = (uint64)mode->timing.pixel_clock * retN / linkSpeed;
+	while (retN > 0xffffff || retM > 0xffffff) {
+		retN >>= 1;
+		retM >>= 1;
+	}
+	write_register(INTEL_ARC_MMIO_DDI_PIPE_A_LINK_M + pipeOffset, (uint32)retM);
+	write_register(INTEL_ARC_MMIO_DDI_PIPE_A_LINK_N + pipeOffset, (uint32)retN);
+
+	if (gInfo->shared_info->has_dpcd) {
+		uint8 value = dp_encode_link_rate(linkBandwidth);
+		(void)set_sink_power(gInfo->shared_info->active_ddi_port, DP_SET_POWER_D0);
+
+		dp_aux_msg message;
+		memset(&message, 0, sizeof(message));
+		message.address = DP_LINK_RATE;
+		message.request = DP_AUX_NATIVE_WRITE;
+		message.buffer = &value;
+		message.size = 1;
+		if (aux_transfer(gInfo->shared_info->active_ddi_port, &message) < B_OK)
+			return B_ERROR;
+
+		value = lanes & DP_LANE_COUNT_MASK;
+		message.address = DP_LANE_COUNT;
+		if (aux_transfer(gInfo->shared_info->active_ddi_port, &message) < B_OK)
+			return B_ERROR;
+
+		value = DP_TRAINING_PATTERN_DISABLE;
+		message.address = DP_TRAINING_PATTERN_SET;
+		if (aux_transfer(gInfo->shared_info->active_ddi_port, &message) < B_OK)
+			return B_ERROR;
+	}
+
+	return B_OK;
+}
+
+
+static status_t
+set_sink_power(uint8 ddiPort, uint8 value)
+{
+	if (!gInfo->shared_info->has_dpcd || ddiPort == 0)
+		return B_OK;
+
+	dp_aux_msg message;
+	memset(&message, 0, sizeof(message));
+	message.address = DP_SET_POWER;
+	message.request = DP_AUX_NATIVE_WRITE;
+	message.buffer = &value;
+	message.size = 1;
+	ssize_t result = aux_transfer(ddiPort, &message);
+	return result < B_OK ? (status_t)result : B_OK;
+}
+
+
+static status_t
+apply_dpms_off(void)
+{
+	if (gInfo->shared_info->active_pipe < 0)
+		return B_UNSUPPORTED;
+
+	const int8 pipe = gInfo->shared_info->active_pipe;
+	const uint32 planeControlReg = pipe_register(INTEL_ARC_MMIO_PLANE_A_CONTROL, pipe);
+	const uint32 pipeDdiReg = pipe_register(INTEL_ARC_MMIO_PIPE_A_DDI_FUNC_CTL, pipe);
+	const uint32 pipeControlReg = pipe_register(INTEL_ARC_MMIO_PIPE_A_CONTROL, pipe);
+
+	write_register(planeControlReg,
+		gInfo->shared_info->plane_control[pipe] & ~INTEL_ARC_DISPLAY_CONTROL_ENABLED);
+	(void)wait_for_clear(planeControlReg, INTEL_ARC_DISPLAY_CONTROL_ENABLED, 20000);
+
+	write_register(pipeDdiReg,
+		gInfo->shared_info->pipe_ddi_func_ctl[pipe] & ~INTEL_ARC_PIPE_DDI_FUNC_CTL_ENABLE);
+	(void)wait_for_clear(pipeDdiReg, INTEL_ARC_PIPE_DDI_FUNC_CTL_ENABLE, 20000);
+
+	write_register(pipeControlReg,
+		gInfo->shared_info->pipe_control[pipe] & ~INTEL_ARC_PIPE_ENABLED);
+	(void)wait_for_clear(pipeControlReg, INTEL_ARC_PIPE_ENABLED, 20000);
+
+	(void)set_sink_power(gInfo->shared_info->active_ddi_port, DP_SET_POWER_D3);
+	gInfo->shared_info->dpms_mode = B_DPMS_OFF;
+	return B_OK;
+}
+
+
+static status_t
+apply_dpms_on(void)
+{
+	if (gInfo->shared_info->active_pipe < 0)
+		return B_UNSUPPORTED;
+
+	const int8 pipe = gInfo->shared_info->active_pipe;
+
+	(void)set_sink_power(gInfo->shared_info->active_ddi_port, DP_SET_POWER_D0);
+
+	write_register(pipe_register(INTEL_ARC_MMIO_PIPE_A_HTOTAL, pipe),
+		gInfo->shared_info->pipe_h_total[pipe]);
+	write_register(pipe_register(INTEL_ARC_MMIO_PIPE_A_HBLANK, pipe),
+		gInfo->shared_info->pipe_h_blank[pipe]);
+	write_register(pipe_register(INTEL_ARC_MMIO_PIPE_A_HSYNC, pipe),
+		gInfo->shared_info->pipe_h_sync[pipe]);
+	write_register(pipe_register(INTEL_ARC_MMIO_PIPE_A_VTOTAL, pipe),
+		gInfo->shared_info->pipe_v_total[pipe]);
+	write_register(pipe_register(INTEL_ARC_MMIO_PIPE_A_VBLANK, pipe),
+		gInfo->shared_info->pipe_v_blank[pipe]);
+	write_register(pipe_register(INTEL_ARC_MMIO_PIPE_A_VSYNC, pipe),
+		gInfo->shared_info->pipe_v_sync[pipe]);
+	write_register(pipe_register(INTEL_ARC_MMIO_PIPE_A_SIZE, pipe),
+		gInfo->shared_info->pipe_size[pipe]);
+
+	const uint32 pipeControlReg = pipe_register(INTEL_ARC_MMIO_PIPE_A_CONTROL, pipe);
+	const uint32 pipeDdiReg = pipe_register(INTEL_ARC_MMIO_PIPE_A_DDI_FUNC_CTL, pipe);
+	const uint32 planeControlReg = pipe_register(INTEL_ARC_MMIO_PLANE_A_CONTROL, pipe);
+	const uint32 planeBaseReg = pipe_register(INTEL_ARC_MMIO_PLANE_A_BASE, pipe);
+	const uint32 planeStrideReg = pipe_register(INTEL_ARC_MMIO_PLANE_A_STRIDE, pipe);
+	const uint32 planePosReg = pipe_register(INTEL_ARC_MMIO_PLANE_A_POS, pipe);
+	const uint32 planeImageReg = pipe_register(INTEL_ARC_MMIO_PLANE_A_IMAGE_SIZE, pipe);
+	const uint32 planeSurfaceReg = pipe_register(INTEL_ARC_MMIO_PLANE_A_SURFACE, pipe);
+
+	write_register(pipeControlReg,
+		gInfo->shared_info->pipe_control[pipe] | INTEL_ARC_PIPE_ENABLED);
+	(void)wait_for_set(pipeControlReg, INTEL_ARC_PIPE_ENABLED, 20000);
+
+	write_register(pipeDdiReg,
+		gInfo->shared_info->pipe_ddi_func_ctl[pipe] | INTEL_ARC_PIPE_DDI_FUNC_CTL_ENABLE);
+	(void)wait_for_set(pipeDdiReg, INTEL_ARC_PIPE_DDI_FUNC_CTL_ENABLE, 20000);
+
+	write_register(planeStrideReg, gInfo->shared_info->plane_stride[pipe]);
+	write_register(planePosReg, gInfo->shared_info->plane_pos[pipe]);
+	write_register(planeImageReg, gInfo->shared_info->plane_image_size[pipe]);
+	write_register(planeSurfaceReg, gInfo->shared_info->plane_surface[pipe]);
+	write_register(planeBaseReg, gInfo->shared_info->plane_surface[pipe]);
+	write_register(planeControlReg,
+		gInfo->shared_info->plane_control[pipe] | INTEL_ARC_DISPLAY_CONTROL_ENABLED);
+	(void)wait_for_set(planeControlReg, INTEL_ARC_DISPLAY_CONTROL_ENABLED, 20000);
+
+	gInfo->shared_info->dpms_mode = B_DPMS_ON;
+	return B_OK;
 }
 
 

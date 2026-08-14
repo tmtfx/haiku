@@ -21,9 +21,15 @@ status_t	intel_arc_clone_accelerant(void* info);
 void		intel_arc_uninit_accelerant(void);
 status_t	intel_arc_get_accelerant_device_info(accelerant_device_info* info);
 sem_id		intel_arc_accelerant_retrace_semaphore(void);
+uint32		intel_arc_dpms_capabilities(void);
+uint32		intel_arc_dpms_mode(void);
+status_t	intel_arc_set_dpms_mode(uint32 mode);
 
 uint32		intel_arc_accelerant_mode_count(void);
 status_t	intel_arc_get_mode_list(display_mode* modeList);
+status_t	intel_arc_propose_display_mode(display_mode* target,
+				display_mode* low, display_mode* high);
+status_t	intel_arc_get_preferred_mode(display_mode* mode);
 status_t	intel_arc_set_display_mode(display_mode* mode);
 status_t	intel_arc_get_display_mode(display_mode* mode);
 status_t	intel_arc_get_edid_info(void* info, size_t size, uint32* version);

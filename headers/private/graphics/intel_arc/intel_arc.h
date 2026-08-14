@@ -39,6 +39,7 @@ struct intel_arc_shared_info {
 	uint32			mode_count;
 	display_mode	current_mode;
 	uint32			bytes_per_row;
+	uint32			dpms_mode;
 
 	area_id			registers_area;
 	area_id			frame_buffer_area;
@@ -73,6 +74,17 @@ struct intel_arc_shared_info {
 	uint32			pipe_control[4];
 	uint32			pipe_size[4];
 	uint32			pipe_ddi_func_ctl[4];
+	uint32			pipe_h_total[4];
+	uint32			pipe_h_blank[4];
+	uint32			pipe_h_sync[4];
+	uint32			pipe_v_total[4];
+	uint32			pipe_v_blank[4];
+	uint32			pipe_v_sync[4];
+	uint32			plane_control[4];
+	uint32			plane_stride[4];
+	uint32			plane_pos[4];
+	uint32			plane_image_size[4];
+	uint32			plane_surface[4];
 	uint32			port_state[4];
 	uint8			dpcd[8];
 	uint8			dpcd_max_lane_count;
