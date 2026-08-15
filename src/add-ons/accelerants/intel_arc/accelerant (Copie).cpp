@@ -1,5 +1,5 @@
 /*
- * Copyright 2026, Haiku and the Pirati Del Frico contributors.
+ * Copyright 2026, Haiku contributors.
  * Distributed under the terms of the MIT License.
  *
  * This accelerant is intentionally minimal but functional. Structure and
@@ -15,6 +15,7 @@
  *  - https://raw.githubusercontent.com/torvalds/linux/master/drivers/gpu/drm/i915/display/intel_cx0_phy.c
  *  - https://raw.githubusercontent.com/torvalds/linux/master/drivers/gpu/drm/i915/display/intel_cx0_phy_regs.h
  *
+ * No GPL-only source was used.
  */
 
 #include "accelerant_protos.h"
@@ -36,12 +37,16 @@
 
 #include <AutoDeleterOS.h>
 
-//#define ACC_TRACE(x...) printf("intel_arc.accelerant: " x)
-//#define ACC_ERROR(x...) printf("intel_arc.accelerant ERROR: " x)
 
 accelerant_info* gInfo;
 static engine_token sEngineToken = {1, 0, NULL};
 static uint64 sSyncCounter = 1;
+
+/*
+ * AUX/DDC implementation below is a standalone procedural adaptation of the
+ * MIT-licensed logic in src/add-ons/accelerants/intel_extreme/Ports.cpp.
+ * It intentionally keeps only the pieces needed for EDID/DPCD reads on ARC.
+ */
 
 #define INTEL_ARC_MMIO_PIPE_BLOCK_BASE			0x60000
 #define INTEL_ARC_MMIO_PIPE_OFFSET				0x1000
@@ -195,12 +200,14 @@ static uint64 sSyncCounter = 1;
 #define INTEL_ARC_PHY_C20_VDR_CUSTOM_WIDTH		0xD02
 #define INTEL_ARC_PHY_C20_CUSTOM_WIDTH(val)		((uint8)(val) & 0x3)
 
+
 struct arc_mit_buf_trans_entry {
 	uint8	main;
 	uint8	pre;
 	uint8	post;
 };
 
+// From MIT-licensed upstream intel_ddi_buf_trans.c (_dg2_snps_trans / _dg2_snps_trans_uhbr).
 static const arc_mit_buf_trans_entry kDg2SnpsDp14Trans[] = {
 	{25, 0, 0}, {32, 0, 6}, {35, 0, 10}, {43, 0, 17}, {35, 0, 0},
 	{45, 0, 8}, {48, 0, 14}, {47, 0, 0}, {55, 0, 7}, {62, 0, 0}
@@ -213,11 +220,13 @@ static const arc_mit_buf_trans_entry kDg2SnpsUhbrTrans[] = {
 	{45, 4, 4}
 };
 
+// From MIT-licensed upstream intel_ddi_buf_trans.c (_mtl_c10_trans_dp14).
 static const arc_mit_buf_trans_entry kMtlC10Dp14Trans[] = {
 	{26, 0, 0}, {33, 0, 6}, {38, 0, 11}, {43, 0, 19}, {39, 0, 0},
 	{45, 0, 7}, {46, 0, 13}, {46, 0, 0}, {55, 0, 7}, {62, 0, 0}
 };
 
+// From MIT-licensed upstream intel_ddi_buf_trans.c (_mtl_c20_trans_dp14 / _mtl_c20_trans_uhbr).
 static const arc_mit_buf_trans_entry kMtlC20Dp14Trans[] = {
 	{20, 0, 0}, {24, 0, 4}, {30, 0, 9}, {34, 0, 14}, {29, 0, 0},
 	{34, 0, 5}, {38, 0, 10}, {36, 0, 0}, {40, 0, 6}, {48, 0, 0}
@@ -229,6 +238,7 @@ static const arc_mit_buf_trans_entry kMtlC20UhbrTrans[] = {
 	{44, 4, 0}, {40, 4, 4}, {37, 4, 7}, {33, 4, 11}, {40, 8, 0},
 	{30, 2, 2}
 };
+
 
 static bool read_register(uint32 offset, uint32& value);
 static void write_register(uint32 offset, uint32 value);
@@ -294,23 +304,23 @@ operator==(const display_mode& left, const display_mode& right)
 		&& left.v_display_start == right.v_display_start;
 }
 
+
 static bool
 is_mode_supported(display_mode* mode)
 {
 	return mode != NULL && *mode == gInfo->shared_info->current_mode;
 }
 
+
 static status_t
 create_mode_list(void)
 {
-	debug_printf("intel_arc.accelerant: create_mode_list() entering\n");
 	display_mode mode = gInfo->shared_info->current_mode;
 	const color_space kSupportedSpaces[] = {
 		B_RGB32_LITTLE, B_RGB16_LITTLE, B_CMAP8
 	};
 	if (mode.virtual_width == 0 || mode.virtual_height == 0
 		|| mode.space == B_NO_COLOR_SPACE) {
-		debug_printf("intel_arc.accelerant: Current mode is invalid, setting fallback 1024x768@60Hz\n");
 		mode.virtual_width = 1024;
 		mode.virtual_height = 768;
 		mode.space = B_RGB32;
@@ -319,40 +329,33 @@ create_mode_list(void)
 		if (gInfo->shared_info->bytes_per_row == 0)
 			gInfo->shared_info->bytes_per_row = mode.virtual_width * 4;
 	} else {
-		debug_printf("intel_arc.accelerant: Using boot mode: %ux%u, pixel_clock=%u kHz\n",
-			mode.virtual_width, mode.virtual_height, mode.timing.pixel_clock);
 		compute_display_timing(mode.virtual_width, mode.virtual_height, 60,
 			false, &mode.timing);
 	}
 	gInfo->shared_info->current_mode = mode;
 	if (gInfo->has_edid) {
-		debug_printf("intel_arc.accelerant: EDID available, generating modes from EDID\n");
 		gInfo->mode_list_area = create_display_modes("intel arc modes",
 			&gInfo->edid_info, NULL, 0, kSupportedSpaces,
 			sizeof(kSupportedSpaces) / sizeof(kSupportedSpaces[0]), NULL,
 			&gInfo->mode_list, &gInfo->shared_info->mode_count);
 	} else {
-		debug_printf("intel_arc.accelerant: No EDID available, generating fallback display modes\n");
 		fill_display_mode(mode.virtual_width, mode.virtual_height, &mode);
 		gInfo->mode_list_area = create_display_modes("intel arc modes", NULL,
 			&mode, 1, kSupportedSpaces,
 			sizeof(kSupportedSpaces) / sizeof(kSupportedSpaces[0]),
 			is_mode_supported, &gInfo->mode_list, &gInfo->shared_info->mode_count);
 	}
-	if (gInfo->mode_list_area < B_OK) {
-		debug_printf("intel_arc.accelerant ERROR: Failed to create display modes area: %s\n", strerror(gInfo->mode_list_area));
+	if (gInfo->mode_list_area < B_OK)
 		return gInfo->mode_list_area;
-	}
 
-	debug_printf("intel_arc.accelerant: Created %u display modes successfully\n", gInfo->shared_info->mode_count);
 	gInfo->shared_info->mode_list_area = gInfo->mode_list_area;
 	return B_OK;
 }
 
+
 static status_t
 init_common(int device, bool isClone)
 {
-	debug_printf("intel_arc.accelerant: init_common(device=%d, isClone=%d)\n", device, isClone);
 	gInfo = (accelerant_info*)malloc(sizeof(accelerant_info));
 	if (gInfo == NULL)
 		return B_NO_MEMORY;
@@ -370,29 +373,23 @@ init_common(int device, bool isClone)
 
 	intel_arc_get_private_data data;
 	data.magic = INTEL_ARC_PRIVATE_DATA_MAGIC;
-	if (ioctl(device, INTEL_ARC_GET_PRIVATE_DATA, &data, sizeof(data)) != 0) {
-		debug_printf("intel_arc.accelerant ERROR: IOCTL INTEL_ARC_GET_PRIVATE_DATA failed\n");
+	if (ioctl(device, INTEL_ARC_GET_PRIVATE_DATA, &data, sizeof(data)) != 0)
 		return B_ERROR;
-	}
 
 	AreaDeleter sharedDeleter(clone_area("intel arc shared info",
 		(void**)&gInfo->shared_info, B_ANY_ADDRESS, B_READ_AREA | B_WRITE_AREA,
 		data.shared_info_area));
 	status_t status = gInfo->shared_info_area = sharedDeleter.Get();
-	if (status < B_OK) {
-		debug_printf("intel_arc.accelerant ERROR: Failed to clone shared info area: %s\n", strerror(status));
+	if (status < B_OK)
 		return status;
-	}
 
 	if (gInfo->shared_info->registers_area >= B_OK) {
 		AreaDeleter regsDeleter(clone_area("intel arc regs", (void**)&gInfo->registers,
 			B_ANY_ADDRESS, B_READ_AREA | B_WRITE_AREA,
 			gInfo->shared_info->registers_area));
 		status = gInfo->regs_area = regsDeleter.Get();
-		if (status < B_OK) {
-			debug_printf("intel_arc.accelerant ERROR: Failed to clone registers area: %s\n", strerror(status));
+		if (status < B_OK)
 			return status;
-		}
 		regsDeleter.Detach();
 	}
 
@@ -404,10 +401,10 @@ init_common(int device, bool isClone)
 	return B_OK;
 }
 
+
 static void
 uninit_common(void)
 {
-	debug_printf("intel_arc.accelerant: uninit_common()\n");
 	if (gInfo->frame_buffer_area >= B_OK)
 		delete_area(gInfo->frame_buffer_area);
 	if (gInfo->regs_area >= B_OK)
@@ -422,10 +419,10 @@ uninit_common(void)
 	gInfo = NULL;
 }
 
+
 status_t
 intel_arc_init_accelerant(int device)
 {
-	debug_printf("intel_arc.accelerant: intel_arc_init_accelerant() start\n");
 	status_t status = init_common(device, false);
 	if (status != B_OK)
 		return status;
@@ -439,22 +436,36 @@ intel_arc_init_accelerant(int device)
 	}
 
 	area_info info;
-	status = ioctl(gInfo->device, INTEL_ARC_CLONE_FRAME_BUFFER, &info, sizeof(info));
+	status = ioctl(gInfo->device, INTEL_ARC_CLONE_FRAME_BUFFER, &info,
+		sizeof(info));
 	if (status == B_OK) {
 		gInfo->frame_buffer_area = info.area;
 		gInfo->frame_buffer = info.address;
-		debug_printf("intel_arc.accelerant: Cloned Framebuffer area: %" B_PRId32 " at %p\n", info.area, info.address);
-	} else {
-		debug_printf("intel_arc.accelerant ERROR: Failed to clone framebuffer: %s\n", strerror(status));
 	}
 	
-	debug_printf("intel_arc.accelerant: Summary: Pipe=%d, DDI Port=%u, Detected Ports Mask=0x%02x\n",
-		gInfo->shared_info->active_pipe,
-		gInfo->shared_info->active_ddi_port,
+	printf("ARC: registers_area=%" B_PRId32 "\n",
+		gInfo->shared_info->registers_area);
+
+	printf("ARC: registers_base=%" B_PRIu64 "\n",
+		(uint64)gInfo->shared_info->registers_base);
+
+	printf("ARC: registers_size=%" B_PRIu64 "\n",
+		(uint64)gInfo->shared_info->registers_size);
+
+	printf("ARC: regs=%p\n", gInfo->registers);
+
+	printf("ARC: active_pipe=%d\n",
+		gInfo->shared_info->active_pipe);
+
+	printf("ARC: active_ddi_port=%u\n",
+		gInfo->shared_info->active_ddi_port);
+
+	printf("ARC: detected_port_bits=0x%02x\n",
 		gInfo->shared_info->detected_port_bits);
 
 	return B_OK;
 }
+
 
 ssize_t
 intel_arc_accelerant_clone_info_size(void)
@@ -462,16 +473,17 @@ intel_arc_accelerant_clone_info_size(void)
 	return B_PATH_NAME_LENGTH;
 }
 
+
 void
 intel_arc_get_accelerant_clone_info(void* info)
 {
 	ioctl(gInfo->device, INTEL_ARC_GET_DEVICE_NAME, info, B_PATH_NAME_LENGTH);
 }
 
+
 status_t
 intel_arc_clone_accelerant(void* data)
 {
-	debug_printf("intel_arc.accelerant: intel_arc_clone_accelerant()\n");
 	char path[B_PATH_NAME_LENGTH];
 	snprintf(path, sizeof(path), "/dev/%s", (const char*)data);
 
@@ -496,7 +508,8 @@ intel_arc_clone_accelerant(void* data)
 	}
 
 	area_info info;
-	status = ioctl(gInfo->device, INTEL_ARC_CLONE_FRAME_BUFFER, &info, sizeof(info));
+	status = ioctl(gInfo->device, INTEL_ARC_CLONE_FRAME_BUFFER, &info,
+		sizeof(info));
 	if (status == B_OK) {
 		gInfo->frame_buffer_area = info.area;
 		gInfo->frame_buffer = info.address;
@@ -505,14 +518,15 @@ intel_arc_clone_accelerant(void* data)
 	return B_OK;
 }
 
+
 void
 intel_arc_uninit_accelerant(void)
 {
-	debug_printf("intel_arc.accelerant: intel_arc_uninit_accelerant()\n");
 	if (gInfo->mode_list_area >= B_OK)
 		delete_area(gInfo->mode_list_area);
 	uninit_common();
 }
+
 
 status_t
 intel_arc_get_accelerant_device_info(accelerant_device_info* info)
@@ -529,17 +543,20 @@ intel_arc_get_accelerant_device_info(accelerant_device_info* info)
 	return B_OK;
 }
 
+
 sem_id
 intel_arc_accelerant_retrace_semaphore(void)
 {
 	return gInfo->shared_info != NULL ? gInfo->shared_info->vblank_sem : -1;
 }
 
+
 uint32
 intel_arc_accelerant_engine_count(void)
 {
 	return 1;
 }
+
 
 status_t
 intel_arc_acquire_engine(uint32 capabilities, uint32 maxWait,
@@ -555,6 +572,7 @@ intel_arc_acquire_engine(uint32 capabilities, uint32 maxWait,
 	return B_OK;
 }
 
+
 status_t
 intel_arc_release_engine(engine_token* engineToken, sync_token* syncToken)
 {
@@ -564,10 +582,12 @@ intel_arc_release_engine(engine_token* engineToken, sync_token* syncToken)
 	return B_OK;
 }
 
+
 void
 intel_arc_wait_engine_idle(void)
 {
 }
+
 
 status_t
 intel_arc_get_sync_token(engine_token* engineToken, sync_token* syncToken)
@@ -581,6 +601,7 @@ intel_arc_get_sync_token(engine_token* engineToken, sync_token* syncToken)
 	return B_OK;
 }
 
+
 status_t
 intel_arc_sync_to_token(sync_token* syncToken)
 {
@@ -589,11 +610,13 @@ intel_arc_sync_to_token(sync_token* syncToken)
 	return B_OK;
 }
 
+
 uint32
 intel_arc_dpms_capabilities(void)
 {
 	return B_DPMS_ON | B_DPMS_OFF;
 }
+
 
 uint32
 intel_arc_dpms_mode(void)
@@ -602,10 +625,10 @@ intel_arc_dpms_mode(void)
 	return gInfo->shared_info->dpms_mode;
 }
 
+
 status_t
 intel_arc_set_dpms_mode(uint32 mode)
 {
-	debug_printf("intel_arc.accelerant: intel_arc_set_dpms_mode(mode=%u)\n", mode);
 	(void)handle_hotplug_event();
 	switch (mode) {
 		case B_DPMS_ON:
@@ -617,12 +640,14 @@ intel_arc_set_dpms_mode(uint32 mode)
 	}
 }
 
+
 uint32
 intel_arc_accelerant_mode_count(void)
 {
 	(void)handle_hotplug_event();
 	return gInfo->shared_info->mode_count;
 }
+
 
 status_t
 intel_arc_get_mode_list(display_mode* modeList)
@@ -636,6 +661,7 @@ intel_arc_get_mode_list(display_mode* modeList)
 	return B_OK;
 }
 
+
 status_t
 intel_arc_propose_display_mode(display_mode* target, display_mode* low,
 	display_mode* high)
@@ -645,15 +671,13 @@ intel_arc_propose_display_mode(display_mode* target, display_mode* low,
 	(void)high;
 
 	display_mode match;
-	if (!is_mode_in_list(*target, &match)) {
-		debug_printf("intel_arc.accelerant ERROR: Proposed mode %ux%u not found in list\n",
-			target->virtual_width, target->virtual_height);
+	if (!is_mode_in_list(*target, &match))
 		return B_BAD_VALUE;
-	}
 
 	*target = match;
 	return B_OK;
 }
+
 
 status_t
 intel_arc_get_preferred_mode(display_mode* mode)
@@ -666,101 +690,100 @@ intel_arc_get_preferred_mode(display_mode* mode)
 	return B_OK;
 }
 
+
 status_t
 intel_arc_set_display_mode(display_mode* mode)
 {
 	if (mode == NULL)
 		return B_BAD_VALUE;
-	debug_printf("intel_arc.accelerant: >>> SET_DISPLAY_MODE requested: %ux%u, pixel_clock=%u kHz <<<\n",
-		mode->virtual_width, mode->virtual_height, mode->timing.pixel_clock);
-
-	debug_printf("intel_arc.accelerant: Timing: HTotal=%u, HDisplay=%u, HSyncStart=%u, HSyncEnd=%u\n",
-		mode->timing.h_total, mode->timing.h_display, mode->timing.h_sync_start, mode->timing.h_sync_end);
-	debug_printf("intel_arc.accelerant: Timing: VTotal=%u, VDisplay=%u, VSyncStart=%u, VSyncEnd=%u\n",
-		mode->timing.v_total, mode->timing.v_display, mode->timing.v_sync_start, mode->timing.v_sync_end);
-
 	(void)handle_hotplug_event();
+	if (*mode == gInfo->shared_info->current_mode)
+		return B_OK;
 
 	display_mode target = *mode;
 	status_t status = intel_arc_propose_display_mode(&target, &target, &target);
 	if (status != B_OK)
 		return status;
 
-	if (gInfo->shared_info->active_pipe < 0) {
-		debug_printf("intel_arc.accelerant ERROR: No active pipe found in shared info!\n");
+	if (gInfo->shared_info->active_pipe < 0)
 		return B_UNSUPPORTED;
-	}
 
 	status = apply_dpms_off();
 	if (status != B_OK)
-		debug_printf("intel_arc.accelerant ERROR: apply_dpms_off() returned %s\n", strerror(status));
+		return status;
 
 	const int8 pipe = gInfo->shared_info->active_pipe;
 	const uint32 pipeOffset = (uint32)pipe * INTEL_ARC_MMIO_PIPE_OFFSET;
-	const uint32 bytesPerPixel = bytes_per_pixel_for_space((color_space)target.space);
+	const uint32 bytesPerPixel
+		= bytes_per_pixel_for_space((color_space)target.space);
 	if (bytesPerPixel == 0)
 		return B_BAD_VALUE;
 
 	gInfo->shared_info->current_mode = target;
 	gInfo->shared_info->bytes_per_row = target.virtual_width * bytesPerPixel;
-	
-	// Regilations Pipe Timings
 	gInfo->shared_info->pipe_h_total[pipe]
-		= ((uint32)(target.timing.h_total - 1) << 16) | ((uint32)target.timing.h_display - 1);
+		= ((uint32)(target.timing.h_total - 1) << 16)
+			| ((uint32)target.timing.h_display - 1);
 	gInfo->shared_info->pipe_h_blank[pipe]
-		= ((uint32)(target.timing.h_total - 1) << 16) | ((uint32)target.timing.h_display - 1);
+		= ((uint32)(target.timing.h_total - 1) << 16)
+			| ((uint32)target.timing.h_display - 1);
 	gInfo->shared_info->pipe_h_sync[pipe]
-		= ((uint32)(target.timing.h_sync_end - 1) << 16) | ((uint32)target.timing.h_sync_start - 1);
+		= ((uint32)(target.timing.h_sync_end - 1) << 16)
+			| ((uint32)target.timing.h_sync_start - 1);
 	gInfo->shared_info->pipe_v_total[pipe]
-		= ((uint32)(target.timing.v_total - 1) << 16) | ((uint32)target.timing.v_display - 1);
+		= ((uint32)(target.timing.v_total - 1) << 16)
+			| ((uint32)target.timing.v_display - 1);
 	gInfo->shared_info->pipe_v_blank[pipe]
-		= ((uint32)(target.timing.v_total - 1) << 16) | ((uint32)target.timing.v_display - 1);
+		= ((uint32)(target.timing.v_total - 1) << 16)
+			| ((uint32)target.timing.v_display - 1);
 	gInfo->shared_info->pipe_v_sync[pipe]
-		= ((uint32)(target.timing.v_sync_end - 1) << 16) | ((uint32)target.timing.v_sync_start - 1);
+		= ((uint32)(target.timing.v_sync_end - 1) << 16)
+			| ((uint32)target.timing.v_sync_start - 1);
 	gInfo->shared_info->pipe_size[pipe]
-		= ((uint32)(target.timing.v_display - 1) << 16) | ((uint32)target.timing.h_display - 1);
+		= ((uint32)(target.timing.v_display - 1) << 16)
+			| ((uint32)target.timing.h_display - 1);
 	gInfo->shared_info->plane_stride[pipe] = gInfo->shared_info->bytes_per_row;
 	gInfo->shared_info->plane_pos[pipe] = 0;
 	gInfo->shared_info->plane_image_size[pipe]
-		= ((uint32)(target.timing.v_display - 1) << 16) | ((uint32)target.timing.h_display - 1);
+		= ((uint32)(target.timing.v_display - 1) << 16)
+			| ((uint32)target.timing.h_display - 1);
 	gInfo->shared_info->plane_control[pipe]
-		= (gInfo->shared_info->plane_control[pipe] & ~INTEL_ARC_DISPLAY_CONTROL_COLOR_MASK_SKY)
+		= (gInfo->shared_info->plane_control[pipe]
+			& ~INTEL_ARC_DISPLAY_CONTROL_COLOR_MASK_SKY)
 		| plane_color_format_for_space((color_space)target.space);
 
-	write_register(INTEL_ARC_MMIO_PIPE_A_HTOTAL + pipeOffset, gInfo->shared_info->pipe_h_total[pipe]);
-	write_register(INTEL_ARC_MMIO_PIPE_A_HBLANK + pipeOffset, gInfo->shared_info->pipe_h_blank[pipe]);
-	write_register(INTEL_ARC_MMIO_PIPE_A_HSYNC + pipeOffset, gInfo->shared_info->pipe_h_sync[pipe]);
-	write_register(INTEL_ARC_MMIO_PIPE_A_VTOTAL + pipeOffset, gInfo->shared_info->pipe_v_total[pipe]);
-	write_register(INTEL_ARC_MMIO_PIPE_A_VBLANK + pipeOffset, gInfo->shared_info->pipe_v_blank[pipe]);
-	write_register(INTEL_ARC_MMIO_PIPE_A_VSYNC + pipeOffset, gInfo->shared_info->pipe_v_sync[pipe]);
-	write_register(INTEL_ARC_MMIO_PIPE_A_SIZE + pipeOffset, gInfo->shared_info->pipe_size[pipe]);
+	write_register(INTEL_ARC_MMIO_PIPE_A_HTOTAL + pipeOffset,
+		gInfo->shared_info->pipe_h_total[pipe]);
+	write_register(INTEL_ARC_MMIO_PIPE_A_HBLANK + pipeOffset,
+		gInfo->shared_info->pipe_h_blank[pipe]);
+	write_register(INTEL_ARC_MMIO_PIPE_A_HSYNC + pipeOffset,
+		gInfo->shared_info->pipe_h_sync[pipe]);
+	write_register(INTEL_ARC_MMIO_PIPE_A_VTOTAL + pipeOffset,
+		gInfo->shared_info->pipe_v_total[pipe]);
+	write_register(INTEL_ARC_MMIO_PIPE_A_VBLANK + pipeOffset,
+		gInfo->shared_info->pipe_v_blank[pipe]);
+	write_register(INTEL_ARC_MMIO_PIPE_A_VSYNC + pipeOffset,
+		gInfo->shared_info->pipe_v_sync[pipe]);
+	write_register(INTEL_ARC_MMIO_PIPE_A_SIZE + pipeOffset,
+		gInfo->shared_info->pipe_size[pipe]);
 
-	debug_printf("intel_arc.accelerant: Configuring link for Active Pipe %d (FuncCtl: 0x%08X)\n",
-		pipe, gInfo->shared_info->pipe_ddi_func_ctl[pipe]);
-
-	uint32 modeSel = (gInfo->shared_info->pipe_ddi_func_ctl[pipe] & INTEL_ARC_PIPE_DDI_MODESEL_MASK) >> 24;
-	debug_printf("intel_arc.accelerant: Detected DDI ModeSel: %u\n", modeSel);
-
-	if (modeSel == INTEL_ARC_PIPE_DDI_MODE_DP_SST || modeSel == INTEL_ARC_PIPE_DDI_MODE_DP_MST) {
-		debug_printf("intel_arc.accelerant: Mode is DP, calling configure_dp_link()\n");
+	if ((((gInfo->shared_info->pipe_ddi_func_ctl[pipe]
+			& INTEL_ARC_PIPE_DDI_MODESEL_MASK) >> 24)
+			== INTEL_ARC_PIPE_DDI_MODE_DP_SST)
+		|| (((gInfo->shared_info->pipe_ddi_func_ctl[pipe]
+			& INTEL_ARC_PIPE_DDI_MODESEL_MASK) >> 24)
+			== INTEL_ARC_PIPE_DDI_MODE_DP_MST)) {
 		status = configure_dp_link(&target);
-		if (status != B_OK) {
-			debug_printf("intel_arc.accelerant ERROR: configure_dp_link failed: %s\n", strerror(status));
+		if (status != B_OK)
 			return status;
-		}
-	} else {
-		debug_printf("intel_arc.accelerant: Mode is NOT DisplayPort (likely HDMI/DVI), skipping DP link training\n");
 	}
 
 	status = apply_dpms_on();
-	if (status == B_OK) {
+	if (status == B_OK)
 		*mode = target;
-		debug_printf("intel_arc.accelerant: SET_DISPLAY_MODE completed successfully!\n");
-	} else {
-		debug_printf("intel_arc.accelerant ERROR: apply_dpms_on() failed: %s\n", strerror(status));
-	}
 	return status;
 }
+
 
 status_t
 intel_arc_get_display_mode(display_mode* mode)
@@ -769,6 +792,7 @@ intel_arc_get_display_mode(display_mode* mode)
 	*mode = gInfo->shared_info->current_mode;
 	return B_OK;
 }
+
 
 status_t
 intel_arc_get_edid_info(void* info, size_t size, uint32* version)
@@ -784,6 +808,7 @@ intel_arc_get_edid_info(void* info, size_t size, uint32* version)
 	return B_OK;
 }
 
+
 status_t
 intel_arc_get_frame_buffer_config(frame_buffer_config* config)
 {
@@ -797,11 +822,13 @@ intel_arc_get_frame_buffer_config(frame_buffer_config* config)
 	return B_OK;
 }
 
+
 status_t
 intel_arc_get_pixel_clock_limits(display_mode* mode, uint32* low, uint32* high)
 {
 	(void)handle_hotplug_event();
-	uint32 totalPixel = (uint32)mode->timing.h_total * (uint32)mode->timing.v_total;
+	uint32 totalPixel = (uint32)mode->timing.h_total
+		* (uint32)mode->timing.v_total;
 	uint32 clockLimit = 2000000;
 
 	*low = totalPixel * 48L / 1000L;
@@ -811,6 +838,7 @@ intel_arc_get_pixel_clock_limits(display_mode* mode, uint32* low, uint32* high)
 	*high = clockLimit;
 	return B_OK;
 }
+
 
 extern "C" void*
 get_accelerant_hook(uint32 feature, void* /*data*/)
@@ -872,6 +900,7 @@ get_accelerant_hook(uint32 feature, void* /*data*/)
 	return NULL;
 }
 
+
 static bool
 read_register(uint32 offset, uint32& value)
 {
@@ -884,6 +913,7 @@ read_register(uint32 offset, uint32& value)
 	return true;
 }
 
+
 static void
 write_register(uint32 offset, uint32 value)
 {
@@ -894,6 +924,7 @@ write_register(uint32 offset, uint32 value)
 
 	*(volatile uint32*)(gInfo->registers + offset) = value;
 }
+
 
 static status_t
 wait_for_clear(uint32 offset, uint32 mask, bigtime_t timeout)
@@ -907,9 +938,9 @@ wait_for_clear(uint32 offset, uint32 mask, bigtime_t timeout)
 			return B_OK;
 		snooze(100);
 	}
-	debug_printf("intel_arc.accelerant ERROR: wait_for_clear timed out on reg 0x%08X (mask 0x%08X)\n", offset, mask);
 	return B_TIMED_OUT;
 }
+
 
 static status_t
 wait_for_set(uint32 offset, uint32 mask, bigtime_t timeout)
@@ -923,15 +954,16 @@ wait_for_set(uint32 offset, uint32 mask, bigtime_t timeout)
 			return B_OK;
 		snooze(100);
 	}
-	debug_printf("intel_arc.accelerant ERROR: wait_for_set timed out on reg 0x%08X (mask 0x%08X)\n", offset, mask);
 	return B_TIMED_OUT;
 }
+
 
 static uint32
 pipe_register(uint32 base, int8 pipe)
 {
 	return base + (uint32)pipe * INTEL_ARC_MMIO_PIPE_OFFSET;
 }
+
 
 static bool
 is_mode_in_list(const display_mode& mode, display_mode* match)
@@ -951,6 +983,7 @@ is_mode_in_list(const display_mode& mode, display_mode* match)
 
 	return false;
 }
+
 
 static uint32
 bytes_per_pixel_for_space(color_space space)
@@ -974,6 +1007,7 @@ bytes_per_pixel_for_space(color_space space)
 	}
 }
 
+
 static uint32
 plane_color_format_for_space(color_space space)
 {
@@ -990,12 +1024,10 @@ plane_color_format_for_space(color_space space)
 	}
 }
 
+
 static status_t
 configure_dp_link(display_mode* mode)
 {
-	debug_printf("intel_arc.accelerant: configure_dp_link() entering for mode %ux%u@%uHz\n",
-		mode->virtual_width, mode->virtual_height, mode->timing.pixel_clock);
-
 	if (gInfo->shared_info->active_pipe < 0)
 		return B_UNSUPPORTED;
 
@@ -1004,14 +1036,25 @@ configure_dp_link(display_mode* mode)
 	const uint32 pipeFunc = gInfo->shared_info->pipe_ddi_func_ctl[pipe];
 	uint32 bitsPerPixel = 24;
 	switch ((pipeFunc & INTEL_ARC_PIPE_DDI_BPC_MASK) >> 20) {
-		case 0: bitsPerPixel = 24; break;
-		case 1: bitsPerPixel = 30; break;
-		case 2: bitsPerPixel = 18; break;
-		case 3: bitsPerPixel = 36; break;
-		default: break;
+		case 0:
+			bitsPerPixel = 24;
+			break;
+		case 1:
+			bitsPerPixel = 30;
+			break;
+		case 2:
+			bitsPerPixel = 18;
+			break;
+		case 3:
+			bitsPerPixel = 36;
+			break;
+		default:
+			break;
 	}
 
-	uint32 maxLanes = ((pipeFunc & INTEL_ARC_PIPE_DDI_DP_WIDTH_MASK) >> INTEL_ARC_PIPE_DDI_DP_WIDTH_SHIFT) + 1;
+	uint32 maxLanes
+		= ((pipeFunc & INTEL_ARC_PIPE_DDI_DP_WIDTH_MASK)
+			>> INTEL_ARC_PIPE_DDI_DP_WIDTH_SHIFT) + 1;
 	if (gInfo->shared_info->has_dpcd && gInfo->shared_info->dpcd_max_lane_count != 0)
 		maxLanes = min_c(maxLanes, (uint32)gInfo->shared_info->dpcd_max_lane_count);
 	if (maxLanes == 0 || maxLanes > 4)
@@ -1021,14 +1064,32 @@ configure_dp_link(display_mode* mode)
 	if (gInfo->shared_info->has_dpcd && gInfo->shared_info->dpcd_max_link_rate != 0)
 		maxLinkRate = decode_link_rate(gInfo->shared_info->dpcd_max_link_rate);
 
-	debug_printf("intel_arc.accelerant: DP Config: maxLanes=%u, maxLinkRate=%u kHz, bpp=%u\n", maxLanes, maxLinkRate, bitsPerPixel);
-
 	const uint32 candidateRates[] = {810000, 540000, 270000, 162000};
+	const uint32 uhbrCandidateRates[] = {2000000, 1350000, 1000000};
 	uint32 linkBandwidth = 0;
 	uint32 lanes = 0;
 	const uint32 bps = mode->timing.pixel_clock * bitsPerPixel * 21 / 20;
-
+	if (gInfo->shared_info->family == INTEL_ARC_FAMILY_BATTLEMAGE
+		&& maxLinkRate > 810000) {
+		for (size_t i = 0; i < sizeof(uhbrCandidateRates) / sizeof(uhbrCandidateRates[0]); i++) {
+			if (uhbrCandidateRates[i] > maxLinkRate)
+				continue;
+			for (uint32 candidateLanes = 1; candidateLanes <= 4; candidateLanes <<= 1) {
+				if (candidateLanes > maxLanes)
+					continue;
+				if (bps <= uhbrCandidateRates[i] * candidateLanes * 8) {
+					linkBandwidth = uhbrCandidateRates[i];
+					lanes = candidateLanes;
+					break;
+				}
+			}
+			if (lanes != 0)
+				break;
+		}
+	}
 	for (size_t i = 0; i < sizeof(candidateRates) / sizeof(candidateRates[0]); i++) {
+		if (lanes != 0)
+			break;
 		if (candidateRates[i] > maxLinkRate)
 			continue;
 		for (uint32 candidateLanes = 1; candidateLanes <= 4; candidateLanes <<= 1) {
@@ -1043,12 +1104,8 @@ configure_dp_link(display_mode* mode)
 		if (lanes != 0)
 			break;
 	}
-	if (lanes == 0) {
-		debug_printf("intel_arc.accelerant ERROR: Could not compute valid DP lanes and link bandwidth for bps=%u\n", bps);
+	if (lanes == 0)
 		return B_BAD_VALUE;
-	}
-
-	debug_printf("intel_arc.accelerant: Selected DP link Bandwidth: %u kHz, Lanes: %u\n", linkBandwidth, lanes);
 
 	uint64 linkSpeed = (uint64)lanes * linkBandwidth * 8;
 	uint64 retN = 1;
@@ -1056,15 +1113,16 @@ configure_dp_link(display_mode* mode)
 		retN <<= 1;
 	if (retN > 0x800000)
 		retN = 0x800000;
-	uint64 retM = (uint64)mode->timing.pixel_clock * retN * bitsPerPixel / linkSpeed;
+	uint64 retM = (uint64)mode->timing.pixel_clock * retN * bitsPerPixel
+		/ linkSpeed;
 	while (retN > 0xffffff || retM > 0xffffff) {
 		retN >>= 1;
 		retM >>= 1;
 	}
-	
-	debug_printf("intel_arc.accelerant: Writing Data M/N: M=0x%" B_PRIx64 ", N=0x%" B_PRIx64 "\n", retM, retN);
-	write_register(INTEL_ARC_MMIO_DDI_PIPE_A_DATA_M + pipeOffset, (uint32)retM | INTEL_ARC_DDI_MN_TU_SIZE_MASK);
-	write_register(INTEL_ARC_MMIO_DDI_PIPE_A_DATA_N + pipeOffset, (uint32)retN);
+	write_register(INTEL_ARC_MMIO_DDI_PIPE_A_DATA_M + pipeOffset,
+		(uint32)retM | INTEL_ARC_DDI_MN_TU_SIZE_MASK);
+	write_register(INTEL_ARC_MMIO_DDI_PIPE_A_DATA_N + pipeOffset,
+		(uint32)retN);
 
 	linkSpeed = linkBandwidth;
 	retN = 1;
@@ -1077,38 +1135,31 @@ configure_dp_link(display_mode* mode)
 		retN >>= 1;
 		retM >>= 1;
 	}
-	
-	debug_printf("intel_arc.accelerant: Writing Link M/N: M=0x%" B_PRIx64 ", N=0x%" B_PRIx64 "\n", retM, retN);
 	write_register(INTEL_ARC_MMIO_DDI_PIPE_A_LINK_M + pipeOffset, (uint32)retM);
 	write_register(INTEL_ARC_MMIO_DDI_PIPE_A_LINK_N + pipeOffset, (uint32)retN);
 
 	if (gInfo->shared_info->has_dpcd) {
-		debug_printf("intel_arc.accelerant: Has DPCD -> Programming Port DPLL and Link Training\n");
 		status_t status = program_port_dpll(gInfo->shared_info->active_ddi_port);
-		if (status != B_OK) {
-			debug_printf("intel_arc.accelerant ERROR: program_port_dpll failed: %s\n", strerror(status));
+		if (status != B_OK)
 			return status;
-		}
 
 		status = program_ddi_buffer(gInfo->shared_info->active_ddi_port, pipe, lanes, true);
-		if (status != B_OK) {
-			debug_printf("intel_arc.accelerant ERROR: program_ddi_buffer failed: %s\n", strerror(status));
+		if (status != B_OK)
 			return status;
-		}
 
 		status = perform_dp_link_training(linkBandwidth, lanes);
-		if (status != B_OK) {
-			debug_printf("intel_arc.accelerant ERROR: perform_dp_link_training failed: %s\n", strerror(status));
+		if (status != B_OK)
 			return status;
-		}
 
 		gInfo->shared_info->pipe_ddi_func_ctl[pipe]
-			= (gInfo->shared_info->pipe_ddi_func_ctl[pipe] & ~INTEL_ARC_PIPE_DDI_DP_WIDTH_MASK)
+			= (gInfo->shared_info->pipe_ddi_func_ctl[pipe]
+				& ~INTEL_ARC_PIPE_DDI_DP_WIDTH_MASK)
 			| ((lanes - 1) << INTEL_ARC_PIPE_DDI_DP_WIDTH_SHIFT);
 	}
 
 	return B_OK;
 }
+
 
 static status_t
 handle_hotplug_event(void)
@@ -1116,10 +1167,11 @@ handle_hotplug_event(void)
 	if (gInfo == NULL || gInfo->shared_info == NULL)
 		return B_NO_INIT;
 
-	if (gInfo->last_hotplug_event_count == gInfo->shared_info->hotplug_event_count)
+	if (gInfo->last_hotplug_event_count
+		== gInfo->shared_info->hotplug_event_count) {
 		return B_OK;
+	}
 
-	debug_printf("intel_arc.accelerant: Hotplug event detected (count=%u)\n", gInfo->shared_info->hotplug_event_count);
 	gInfo->last_hotplug_event_count = gInfo->shared_info->hotplug_event_count;
 
 	if (gInfo->shared_info->active_pipe < 0)
@@ -1131,7 +1183,8 @@ handle_hotplug_event(void)
 	if (activePort == 0)
 		return B_OK;
 
-	if (activePort <= 4 && (gInfo->shared_info->detected_port_bits & (1 << activePort)) == 0) {
+	if (activePort <= 4
+		&& (gInfo->shared_info->detected_port_bits & (1 << activePort)) == 0) {
 		gInfo->has_edid = false;
 		return B_OK;
 	}
@@ -1143,6 +1196,7 @@ handle_hotplug_event(void)
 
 	return configure_dp_link(&gInfo->shared_info->current_mode);
 }
+
 
 static status_t
 write_dpcd(uint32 address, const void* buffer, size_t size)
@@ -1160,6 +1214,7 @@ write_dpcd(uint32 address, const void* buffer, size_t size)
 	return result < B_OK ? (status_t)result : B_OK;
 }
 
+
 static status_t
 read_dpcd(uint32 address, void* buffer, size_t size)
 {
@@ -1176,6 +1231,7 @@ read_dpcd(uint32 address, void* buffer, size_t size)
 	return result < B_OK ? (status_t)result : B_OK;
 }
 
+
 static bool
 dp_clock_recovery_ok(const uint8* status, uint32 lanes)
 {
@@ -1189,6 +1245,7 @@ dp_clock_recovery_ok(const uint8* status, uint32 lanes)
 	}
 	return true;
 }
+
 
 static bool
 dp_channel_eq_ok(const uint8* status, uint32 lanes)
@@ -1204,47 +1261,69 @@ dp_channel_eq_ok(const uint8* status, uint32 lanes)
 	return (status[2] & DP_INTERLANE_ALIGN_DONE) != 0;
 }
 
+
 static void
 dp_get_adjust_request(const uint8* status, uint8 lane, uint8* voltage,
 	uint8* emphasis)
 {
 	const uint8 request = status[4 + lane / 2];
 	if ((lane & 1) == 0) {
-		*voltage = (request & DP_ADJ_VCC_SWING_LANEA_MASK) >> DP_ADJ_VCC_SWING_LANEA_SHIFT;
-		*emphasis = (request & DP_ADJ_PRE_EMPHASIS_LANEA_MASK) >> DP_ADJ_PRE_EMPHASIS_LANEA_SHIFT;
+		*voltage = (request & DP_ADJ_VCC_SWING_LANEA_MASK)
+			>> DP_ADJ_VCC_SWING_LANEA_SHIFT;
+		*emphasis = (request & DP_ADJ_PRE_EMPHASIS_LANEA_MASK)
+			>> DP_ADJ_PRE_EMPHASIS_LANEA_SHIFT;
 	} else {
-		*voltage = (request & DP_ADJ_VCC_SRING_LANEB_MASK) >> DP_ADJ_VCC_SWING_LANEB_SHIFT;
-		*emphasis = (request & DP_ADJ_PRE_EMPHASIS_LANEB_MASK) >> DP_ADJ_PRE_EMPHASIS_LANEB_SHIFT;
+		*voltage = (request & DP_ADJ_VCC_SRING_LANEB_MASK)
+			>> DP_ADJ_VCC_SWING_LANEB_SHIFT;
+		*emphasis = (request & DP_ADJ_PRE_EMPHASIS_LANEB_MASK)
+			>> DP_ADJ_PRE_EMPHASIS_LANEB_SHIFT;
 	}
 }
+
 
 static uint32
 decode_link_rate(uint8 rawLinkRate)
 {
 	switch (rawLinkRate) {
-		case DP_LINK_RATE_162: return 162000;
-		case DP_LINK_RATE_270: return 270000;
-		case DP_LINK_RATE_540: return 540000;
-		case INTEL_ARC_DP_LINK_RATE_810: return 810000;
-		case INTEL_ARC_DP_LINK_RATE_1350: return 1350000;
-		case INTEL_ARC_DP_LINK_RATE_2000: return 2000000;
-		default: return 162000;
+		case DP_LINK_RATE_162:
+			return 162000;
+		case DP_LINK_RATE_270:
+			return 270000;
+		case DP_LINK_RATE_540:
+			return 540000;
+		case INTEL_ARC_DP_LINK_RATE_810:
+			return 810000;
+		case INTEL_ARC_DP_LINK_RATE_1350:
+			return 1350000;
+		case INTEL_ARC_DP_LINK_RATE_2000:
+			return 2000000;
+		default:
+			return 162000;
 	}
 }
+
 
 static uint8
 encode_link_rate(uint32 linkRate)
 {
 	switch (linkRate) {
-		case 162000: return DP_LINK_RATE_162;
-		case 270000: return DP_LINK_RATE_270;
-		case 540000: return DP_LINK_RATE_540;
-		case 810000: return INTEL_ARC_DP_LINK_RATE_810;
-		case 1350000: return INTEL_ARC_DP_LINK_RATE_1350;
-		case 2000000: return INTEL_ARC_DP_LINK_RATE_2000;
-		default: return DP_LINK_RATE_162;
+		case 162000:
+			return DP_LINK_RATE_162;
+		case 270000:
+			return DP_LINK_RATE_270;
+		case 540000:
+			return DP_LINK_RATE_540;
+		case 810000:
+			return INTEL_ARC_DP_LINK_RATE_810;
+		case 1350000:
+			return INTEL_ARC_DP_LINK_RATE_1350;
+		case 2000000:
+			return INTEL_ARC_DP_LINK_RATE_2000;
+		default:
+			return DP_LINK_RATE_162;
 	}
 }
+
 
 static uint8
 c20_dp_rate(uint32 linkRate)
@@ -1261,6 +1340,7 @@ c20_dp_rate(uint32 linkRate)
 	}
 }
 
+
 static uint8
 c20_custom_width(uint32 linkRate)
 {
@@ -1268,6 +1348,7 @@ c20_custom_width(uint32 linkRate)
 		return 2;
 	return 0;
 }
+
 
 static int
 dp14_level_index(uint8 voltage, uint8 emphasis)
@@ -1283,14 +1364,22 @@ dp14_level_index(uint8 voltage, uint8 emphasis)
 	return kLevelMap[voltage][emphasis];
 }
 
+
 static status_t
 apply_snps_phy_levels(uint8 ddiPort, const uint8* laneSettings, uint32 lanes,
 	bool uhbr)
 {
-	debug_printf("intel_arc.accelerant: apply_snps_phy_levels(ddiPort=%u, lanes=%u, uhbr=%d)\n", ddiPort, lanes, uhbr);
-	const arc_mit_buf_trans_entry* table = uhbr ? kDg2SnpsUhbrTrans : kDg2SnpsDp14Trans;
-	const size_t tableCount = uhbr ? B_COUNT_OF(kDg2SnpsUhbrTrans) : B_COUNT_OF(kDg2SnpsDp14Trans);
+	const arc_mit_buf_trans_entry* table = uhbr
+		? kDg2SnpsUhbrTrans : kDg2SnpsDp14Trans;
+	const size_t tableCount = uhbr ? B_COUNT_OF(kDg2SnpsUhbrTrans)
+		: B_COUNT_OF(kDg2SnpsDp14Trans);
 
+	/*
+	 * Provisional port-to-PHY mapping for DG2's two SNPS PHY blocks:
+	 * DDI B/C -> PHY A, DDI D/E/F/G -> PHY B. This matches the two-PHY
+	 * topology exposed by the MIT upstream register definitions and can be
+	 * refined later when full port discovery lands.
+	 */
 	const uint32 phyBase = ddiPort <= 2
 		? INTEL_ARC_MMIO_SNPS_PHY_A_BASE : INTEL_ARC_MMIO_SNPS_PHY_B_BASE;
 
@@ -1309,6 +1398,7 @@ apply_snps_phy_levels(uint8 ddiPort, const uint8* laneSettings, uint32 lanes,
 
 	return B_OK;
 }
+
 
 static uint32
 cx0_port_base(uint8 ddiPort, uint8 lane, bool timer)
@@ -1331,6 +1421,7 @@ cx0_port_base(uint8 ddiPort, uint8 lane, bool timer)
 	return (timer ? kTimerBase[ddiPort - 1] : kCtlBase[ddiPort - 1]) + lane * 4;
 }
 
+
 static status_t
 cx0_write(uint8 ddiPort, uint8 laneMask, uint16 addr, uint8 data, bool committed)
 {
@@ -1351,10 +1442,12 @@ cx0_write(uint8 ddiPort, uint8 laneMask, uint16 addr, uint8 data, bool committed
 			continue;
 		}
 
-		write_register(statusReg, INTEL_ARC_CX0_P2M_RESPONSE_READY | INTEL_ARC_CX0_P2M_ERROR_SET);
+		write_register(statusReg, INTEL_ARC_CX0_P2M_RESPONSE_READY
+			| INTEL_ARC_CX0_P2M_ERROR_SET);
 
 		write_register(ctlReg, INTEL_ARC_CX0_M2P_TRANSACTION_PENDING
-			| (committed ? INTEL_ARC_CX0_M2P_COMMAND_WRITE_COMMITTED : INTEL_ARC_CX0_M2P_COMMAND_WRITE_UNCOMMITTED)
+			| (committed ? INTEL_ARC_CX0_M2P_COMMAND_WRITE_COMMITTED
+				: INTEL_ARC_CX0_M2P_COMMAND_WRITE_UNCOMMITTED)
 			| INTEL_ARC_CX0_M2P_DATA(data)
 			| INTEL_ARC_CX0_M2P_ADDRESS(addr));
 
@@ -1366,12 +1459,15 @@ cx0_write(uint8 ddiPort, uint8 laneMask, uint16 addr, uint8 data, bool committed
 
 		if (committed) {
 			uint32 status = 0;
-			if (wait_for_set(statusReg, INTEL_ARC_CX0_P2M_RESPONSE_READY, INTEL_ARC_CX0_MSGBUS_TIMEOUT_MS) != B_OK)
+			if (wait_for_set(statusReg, INTEL_ARC_CX0_P2M_RESPONSE_READY,
+					INTEL_ARC_CX0_MSGBUS_TIMEOUT_MS) != B_OK) {
 				return B_TIMED_OUT;
+			}
 			if (!read_register(statusReg, status))
 				return B_ERROR;
 			if ((status & INTEL_ARC_CX0_P2M_ERROR_SET) != 0
-				|| ((status & INTEL_ARC_CX0_P2M_COMMAND_TYPE_MASK) >> 27) != INTEL_ARC_CX0_P2M_COMMAND_WRITE_ACK) {
+				|| ((status & INTEL_ARC_CX0_P2M_COMMAND_TYPE_MASK) >> 27)
+					!= INTEL_ARC_CX0_P2M_COMMAND_WRITE_ACK) {
 				return B_ERROR;
 			}
 		}
@@ -1380,19 +1476,17 @@ cx0_write(uint8 ddiPort, uint8 laneMask, uint16 addr, uint8 data, bool committed
 	return B_OK;
 }
 
+
 static status_t
 perform_dp_link_training(uint32 linkRate, uint32 lanes)
 {
-	debug_printf("intel_arc.accelerant: perform_dp_link_training(linkRate=%u, lanes=%u) start\n", linkRate, lanes);
 	uint8 laneSettings[4] = {0, 0, 0, 0};
 	uint8 status[DP_LINK_STATUS_SIZE];
 
 	uint8 value = encode_link_rate(linkRate);
 	status_t result = write_dpcd(DP_LINK_RATE, &value, 1);
-	if (result != B_OK) {
-		debug_printf("intel_arc.accelerant ERROR: write_dpcd DP_LINK_RATE failed: %s\n", strerror(result));
+	if (result != B_OK)
 		return result;
-	}
 
 	value = lanes & DP_LANE_COUNT_MASK;
 	result = write_dpcd(DP_LANE_COUNT, &value, 1);
@@ -1408,42 +1502,41 @@ perform_dp_link_training(uint32 linkRate, uint32 lanes)
 	if (result != B_OK)
 		return result;
 	result = apply_ddi_source_levels(gInfo->shared_info->active_ddi_port,
-		gInfo->shared_info->active_pipe, lanes, laneSettings, linkRate);
+	gInfo->shared_info->active_pipe, lanes, laneSettings, linkRate);
 	if (result != B_OK)
-		return result;
+	return result;
 
-	debug_printf("intel_arc.accelerant: DP Link Training: Phase 1 (Clock Recovery)\n");
 	for (int attempt = 0; attempt < 5; attempt++) {
 		snooze(400);
 		result = read_dpcd(DP_LANE_STATUS_0_1, status, DP_LINK_STATUS_SIZE);
 		if (result != B_OK)
 			return result;
-		if (dp_clock_recovery_ok(status, lanes)) {
-			debug_printf("intel_arc.accelerant: Clock Recovery SUCCESS on attempt %d\n", attempt + 1);
+		if (dp_clock_recovery_ok(status, lanes))
 			break;
-		}
 
 		for (uint32 lane = 0; lane < lanes; lane++) {
-			uint8 voltage, emphasis;
+			uint8 voltage;
+			uint8 emphasis;
 			dp_get_adjust_request(status, lane, &voltage, &emphasis);
 			laneSettings[lane] = (voltage & 0x3) | ((emphasis & 0x3) << 3);
-			if (voltage == 3) laneSettings[lane] |= DP_TRAIN_MAX_SWING_EN;
-			if (emphasis == 3) laneSettings[lane] |= DP_TRAIN_MAX_EMPHASIS_EN;
+			if (voltage == 3)
+				laneSettings[lane] |= DP_TRAIN_MAX_SWING_EN;
+			if (emphasis == 3)
+				laneSettings[lane] |= DP_TRAIN_MAX_EMPHASIS_EN;
 		}
 
 		result = write_dpcd(DP_TRAINING_LANE0_SET, laneSettings, lanes);
-		if (result != B_OK) return result;
+		if (result != B_OK)
+			return result;
 		result = apply_ddi_source_levels(gInfo->shared_info->active_ddi_port,
 			gInfo->shared_info->active_pipe, lanes, laneSettings, linkRate);
-		if (result != B_OK) return result;
+		if (result != B_OK)
+			return result;
 
-		if (attempt == 4) {
-			debug_printf("intel_arc.accelerant ERROR: Clock Recovery FAILED after 5 attempts!\n");
+		if (attempt == 4)
 			return B_ERROR;
-		}
 	}
 
-	debug_printf("intel_arc.accelerant: DP Link Training: Phase 2 (Channel Equalization)\n");
 	value = DP_TRAINING_PATTERN_2;
 	result = write_dpcd(DP_TRAINING_PATTERN_SET, &value, 1);
 	if (result != B_OK)
@@ -1454,47 +1547,49 @@ perform_dp_link_training(uint32 linkRate, uint32 lanes)
 		result = read_dpcd(DP_LANE_STATUS_0_1, status, DP_LINK_STATUS_SIZE);
 		if (result != B_OK)
 			return result;
-		if (dp_channel_eq_ok(status, lanes)) {
-			debug_printf("intel_arc.accelerant: Channel Equalization SUCCESS on attempt %d\n", attempt + 1);
+		if (dp_channel_eq_ok(status, lanes))
 			break;
-		}
 
 		for (uint32 lane = 0; lane < lanes; lane++) {
-			uint8 voltage, emphasis;
+			uint8 voltage;
+			uint8 emphasis;
 			dp_get_adjust_request(status, lane, &voltage, &emphasis);
 			laneSettings[lane] = (voltage & 0x3) | ((emphasis & 0x3) << 3);
-			if (voltage == 3) laneSettings[lane] |= DP_TRAIN_MAX_SWING_EN;
-			if (emphasis == 3) laneSettings[lane] |= DP_TRAIN_MAX_EMPHASIS_EN;
+			if (voltage == 3)
+				laneSettings[lane] |= DP_TRAIN_MAX_SWING_EN;
+			if (emphasis == 3)
+				laneSettings[lane] |= DP_TRAIN_MAX_EMPHASIS_EN;
 		}
 
 		result = write_dpcd(DP_TRAINING_LANE0_SET, laneSettings, lanes);
-		if (result != B_OK) return result;
+		if (result != B_OK)
+			return result;
 		result = apply_ddi_source_levels(gInfo->shared_info->active_ddi_port,
 			gInfo->shared_info->active_pipe, lanes, laneSettings, linkRate);
-		if (result != B_OK) return result;
+		if (result != B_OK)
+			return result;
 
-		if (attempt == 4) {
-			debug_printf("intel_arc.accelerant ERROR: Channel Equalization FAILED after 5 attempts!\n");
+		if (attempt == 4)
 			return B_ERROR;
-		}
 	}
 
 	value = DP_TRAINING_PATTERN_DISABLE;
 	result = write_dpcd(DP_TRAINING_PATTERN_SET, &value, 1);
-	debug_printf("intel_arc.accelerant: DP Link Training COMPLETED SUCCESSFULLY!\n");
 	return result;
 }
+
 
 static bool
 compute_displayport_dpll(int* pDiv, int* qDiv, int* kDiv, float* dco)
 {
+	// Reinterpreted from TigerLakePLL.cpp / ComputeDisplayPortDpll().
 	*pDiv = 3;
 	*qDiv = 1;
 	*kDiv = 2;
-	*dco = 8090.0f;
-	debug_printf("intel_arc.accelerant: compute_displayport_dpll(): P=%d, Q=%d, K=%d, DCO=%.1f\n", *pDiv, *qDiv, *kDiv, *dco);
+	*dco = 8090;
 	return true;
 }
+
 
 static status_t
 cx0_rmw(uint8 ddiPort, uint8 laneMask, uint16 addr, uint8 clear, uint8 set,
@@ -1509,31 +1604,38 @@ cx0_rmw(uint8 ddiPort, uint8 laneMask, uint16 addr, uint8 clear, uint8 set,
 		uint8 oldValue = 0;
 		if (ctlReg == 0)
 			return B_BAD_VALUE;
-		if (wait_for_clear(ctlReg, INTEL_ARC_CX0_M2P_TRANSACTION_PENDING, INTEL_ARC_CX0_MSGBUS_TIMEOUT_MS) != B_OK)
+		if (wait_for_clear(ctlReg, INTEL_ARC_CX0_M2P_TRANSACTION_PENDING,
+				INTEL_ARC_CX0_MSGBUS_TIMEOUT_MS) != B_OK) {
 			return B_TIMED_OUT;
+		}
 
-		write_register(statusReg, INTEL_ARC_CX0_P2M_RESPONSE_READY | INTEL_ARC_CX0_P2M_ERROR_SET);
+		write_register(statusReg, INTEL_ARC_CX0_P2M_RESPONSE_READY
+			| INTEL_ARC_CX0_P2M_ERROR_SET);
 		write_register(ctlReg, INTEL_ARC_CX0_M2P_TRANSACTION_PENDING
 			| INTEL_ARC_CX0_M2P_COMMAND_READ
 			| INTEL_ARC_CX0_M2P_ADDRESS(addr));
-		if (wait_for_set(statusReg, INTEL_ARC_CX0_P2M_RESPONSE_READY, INTEL_ARC_CX0_MSGBUS_TIMEOUT_MS) != B_OK)
+		if (wait_for_set(statusReg, INTEL_ARC_CX0_P2M_RESPONSE_READY,
+				INTEL_ARC_CX0_MSGBUS_TIMEOUT_MS) != B_OK) {
 			return B_TIMED_OUT;
-
+		}
 		uint32 status = 0;
 		if (!read_register(statusReg, status))
 			return B_ERROR;
 		if ((status & INTEL_ARC_CX0_P2M_ERROR_SET) != 0
-			|| ((status & INTEL_ARC_CX0_P2M_COMMAND_TYPE_MASK) >> 27) != INTEL_ARC_CX0_P2M_COMMAND_READ_ACK) {
+			|| ((status & INTEL_ARC_CX0_P2M_COMMAND_TYPE_MASK) >> 27)
+				!= INTEL_ARC_CX0_P2M_COMMAND_READ_ACK) {
 			return B_ERROR;
 		}
 		oldValue = (status & INTEL_ARC_CX0_P2M_DATA_MASK) >> 16;
 
-		status_t result = cx0_write(ddiPort, 1 << lane, addr, (oldValue & ~clear) | set, committed);
+		status_t result = cx0_write(ddiPort, 1 << lane, addr,
+			(oldValue & ~clear) | set, committed);
 		if (result != B_OK)
 			return result;
 	}
 	return B_OK;
 }
+
 
 static status_t
 apply_c10_phy_levels(uint8 ddiPort, uint32 linkRate, const uint8* laneSettings,
@@ -1543,17 +1645,21 @@ apply_c10_phy_levels(uint8 ddiPort, uint32 linkRate, const uint8* laneSettings,
 
 	status_t status = cx0_rmw(ddiPort, laneMask, INTEL_ARC_C10_VDR_CONTROL(1),
 		0, INTEL_ARC_C10_VDR_CTRL_MSGBUS_ACCESS, true);
-	if (status != B_OK) return status;
+	if (status != B_OK)
+		return status;
 
 	const uint8 txVboost = (linkRate == 540000 || linkRate == 810000) ? 5 : 4;
 	const uint8 termCtl = (linkRate == 540000 || linkRate == 810000) ? 5 : 2;
 	status = cx0_rmw(ddiPort, laneMask, INTEL_ARC_C10_VDR_CMN(3),
-		INTEL_ARC_C10_CMN3_TXVBOOST_MASK, INTEL_ARC_C10_CMN3_TXVBOOST(txVboost), false);
-	if (status != B_OK) return status;
-
+		INTEL_ARC_C10_CMN3_TXVBOOST_MASK,
+		INTEL_ARC_C10_CMN3_TXVBOOST(txVboost), false);
+	if (status != B_OK)
+		return status;
 	status = cx0_rmw(ddiPort, laneMask, INTEL_ARC_C10_VDR_TX(1),
-		INTEL_ARC_C10_TX1_TERMCTL_MASK, INTEL_ARC_C10_TX1_TERMCTL(termCtl), true);
-	if (status != B_OK) return status;
+		INTEL_ARC_C10_TX1_TERMCTL_MASK,
+		INTEL_ARC_C10_TX1_TERMCTL(termCtl), true);
+	if (status != B_OK)
+		return status;
 
 	for (uint32 ln = 0; ln < lanes; ln++) {
 		const uint8 voltage = laneSettings[ln] & 0x3;
@@ -1565,26 +1671,35 @@ apply_c10_phy_levels(uint8 ddiPort, uint32 linkRate, const uint8* laneSettings,
 		const int lane = ln / 2;
 		const int tx = ln % 2;
 		const uint8 singleLaneMask = lane == 0 ? 0x1 : 0x2;
-		status = cx0_rmw(ddiPort, singleLaneMask, INTEL_ARC_CX0_VDROVRD_CTL(lane, tx, 0),
-			INTEL_ARC_C10_PHY_OVRD_LEVEL_MASK, INTEL_ARC_C10_PHY_OVRD_LEVEL(kMtlC10Dp14Trans[level].pre), true);
-		if (status != B_OK) return status;
-
-		status = cx0_rmw(ddiPort, singleLaneMask, INTEL_ARC_CX0_VDROVRD_CTL(lane, tx, 1),
-			INTEL_ARC_C10_PHY_OVRD_LEVEL_MASK, INTEL_ARC_C10_PHY_OVRD_LEVEL(kMtlC10Dp14Trans[level].main), true);
-		if (status != B_OK) return status;
-
-		status = cx0_rmw(ddiPort, singleLaneMask, INTEL_ARC_CX0_VDROVRD_CTL(lane, tx, 2),
-			INTEL_ARC_C10_PHY_OVRD_LEVEL_MASK, INTEL_ARC_C10_PHY_OVRD_LEVEL(kMtlC10Dp14Trans[level].post), true);
-		if (status != B_OK) return status;
+		status = cx0_rmw(ddiPort, singleLaneMask,
+			INTEL_ARC_CX0_VDROVRD_CTL(lane, tx, 0),
+			INTEL_ARC_C10_PHY_OVRD_LEVEL_MASK,
+			INTEL_ARC_C10_PHY_OVRD_LEVEL(kMtlC10Dp14Trans[level].pre), true);
+		if (status != B_OK)
+			return status;
+		status = cx0_rmw(ddiPort, singleLaneMask,
+			INTEL_ARC_CX0_VDROVRD_CTL(lane, tx, 1),
+			INTEL_ARC_C10_PHY_OVRD_LEVEL_MASK,
+			INTEL_ARC_C10_PHY_OVRD_LEVEL(kMtlC10Dp14Trans[level].main), true);
+		if (status != B_OK)
+			return status;
+		status = cx0_rmw(ddiPort, singleLaneMask,
+			INTEL_ARC_CX0_VDROVRD_CTL(lane, tx, 2),
+			INTEL_ARC_C10_PHY_OVRD_LEVEL_MASK,
+			INTEL_ARC_C10_PHY_OVRD_LEVEL(kMtlC10Dp14Trans[level].post), true);
+		if (status != B_OK)
+			return status;
 	}
 
 	status = cx0_rmw(ddiPort, laneMask, INTEL_ARC_C10_VDR_OVRD, 0,
 		INTEL_ARC_C10_VDR_OVRD_TX1 | INTEL_ARC_C10_VDR_OVRD_TX2, true);
-	if (status != B_OK) return status;
+	if (status != B_OK)
+		return status;
 
 	return cx0_rmw(ddiPort, laneMask, INTEL_ARC_C10_VDR_CONTROL(1), 0,
 		INTEL_ARC_C10_VDR_CTRL_UPDATE_CFG, true);
 }
+
 
 static status_t
 apply_c20_phy_levels(uint8 ddiPort, uint32 linkRate, const uint8* laneSettings,
@@ -1596,14 +1711,19 @@ apply_c20_phy_levels(uint8 ddiPort, uint32 linkRate, const uint8* laneSettings,
 	const size_t tableCount = linkRate > 810000 ? B_COUNT_OF(kMtlC20UhbrTrans)
 		: B_COUNT_OF(kMtlC20Dp14Trans);
 
-	status_t status = cx0_rmw(ddiPort, laneMask, INTEL_ARC_PHY_C20_VDR_CUSTOM_WIDTH, 0x3,
+	status_t status = cx0_rmw(ddiPort, laneMask,
+		INTEL_ARC_PHY_C20_VDR_CUSTOM_WIDTH, 0x3,
 		INTEL_ARC_PHY_C20_CUSTOM_WIDTH(c20_custom_width(linkRate)), true);
-	if (status != B_OK) return status;
+	if (status != B_OK)
+		return status;
 
-	status = cx0_rmw(ddiPort, laneMask, INTEL_ARC_PHY_C20_VDR_CUSTOM_SERDES_RATE,
+	// Toggle contexts so the updated UHBR/DP mode configuration is latched.
+	status = cx0_rmw(ddiPort, laneMask,
+		INTEL_ARC_PHY_C20_VDR_CUSTOM_SERDES_RATE,
 		INTEL_ARC_PHY_C20_IS_DP | (0xf << 1),
 		INTEL_ARC_PHY_C20_IS_DP | INTEL_ARC_PHY_C20_DP_RATE(c20_dp_rate(linkRate)), true);
-	if (status != B_OK) return status;
+	if (status != B_OK)
+		return status;
 
 	for (uint32 ln = 0; ln < lanes; ln++) {
 		const uint8 voltage = laneSettings[ln] & 0x3;
@@ -1615,60 +1735,67 @@ apply_c20_phy_levels(uint8 ddiPort, uint32 linkRate, const uint8* laneSettings,
 		const int lane = ln / 2;
 		const int tx = ln % 2;
 		const uint8 singleLaneMask = lane == 0 ? 0x1 : 0x2;
-		status = cx0_rmw(ddiPort, singleLaneMask, INTEL_ARC_CX0_VDROVRD_CTL(lane, tx, 0),
-			INTEL_ARC_C10_PHY_OVRD_LEVEL_MASK, INTEL_ARC_C10_PHY_OVRD_LEVEL(table[level].pre), true);
-		if (status != B_OK) return status;
-
-		status = cx0_rmw(ddiPort, singleLaneMask, INTEL_ARC_CX0_VDROVRD_CTL(lane, tx, 1),
-			INTEL_ARC_C10_PHY_OVRD_LEVEL_MASK, INTEL_ARC_C10_PHY_OVRD_LEVEL(table[level].main), true);
-		if (status != B_OK) return status;
-
-		status = cx0_rmw(ddiPort, singleLaneMask, INTEL_ARC_CX0_VDROVRD_CTL(lane, tx, 2),
-			INTEL_ARC_C10_PHY_OVRD_LEVEL_MASK, INTEL_ARC_C10_PHY_OVRD_LEVEL(table[level].post), true);
-		if (status != B_OK) return status;
+		status = cx0_rmw(ddiPort, singleLaneMask,
+			INTEL_ARC_CX0_VDROVRD_CTL(lane, tx, 0),
+			INTEL_ARC_C10_PHY_OVRD_LEVEL_MASK,
+			INTEL_ARC_C10_PHY_OVRD_LEVEL(table[level].pre), true);
+		if (status != B_OK)
+			return status;
+		status = cx0_rmw(ddiPort, singleLaneMask,
+			INTEL_ARC_CX0_VDROVRD_CTL(lane, tx, 1),
+			INTEL_ARC_C10_PHY_OVRD_LEVEL_MASK,
+			INTEL_ARC_C10_PHY_OVRD_LEVEL(table[level].main), true);
+		if (status != B_OK)
+			return status;
+		status = cx0_rmw(ddiPort, singleLaneMask,
+			INTEL_ARC_CX0_VDROVRD_CTL(lane, tx, 2),
+			INTEL_ARC_C10_PHY_OVRD_LEVEL_MASK,
+			INTEL_ARC_C10_PHY_OVRD_LEVEL(table[level].post), true);
+		if (status != B_OK)
+			return status;
 	}
 
 	status = cx0_rmw(ddiPort, laneMask, INTEL_ARC_C10_VDR_OVRD, 0,
 		INTEL_ARC_C10_VDR_OVRD_TX1 | INTEL_ARC_C10_VDR_OVRD_TX2, true);
-	if (status != B_OK) return status;
+	if (status != B_OK)
+		return status;
 
 	return cx0_rmw(ddiPort, laneMask, INTEL_ARC_PHY_C20_VDR_CUSTOM_SERDES_RATE,
 		INTEL_ARC_PHY_C20_CONTEXT_TOGGLE, INTEL_ARC_PHY_C20_CONTEXT_TOGGLE, true);
 }
+
 
 static status_t
 apply_ddi_source_levels(uint8 ddiPort, int8 pipe, uint32 lanes,
 	const uint8* laneSettings, uint32 linkRate)
 {
 	(void)pipe;
-	debug_printf("intel_arc.accelerant: apply_ddi_source_levels(ddiPort=%u, family=%u)\n",
-		ddiPort, gInfo->shared_info->family);
-
 	if (gInfo->shared_info->family == INTEL_ARC_FAMILY_ALCHEMIST)
 		return apply_snps_phy_levels(ddiPort, laneSettings, lanes, linkRate > 810000);
 	if (gInfo->shared_info->family == INTEL_ARC_FAMILY_BATTLEMAGE)
 		return linkRate > 810000
 			? apply_c20_phy_levels(ddiPort, linkRate, laneSettings, lanes)
 			: apply_c10_phy_levels(ddiPort, linkRate, laneSettings, lanes);
-
 	return B_UNSUPPORTED;
 }
+
 
 static status_t
 program_port_dpll(uint8 ddiPort)
 {
-	debug_printf("intel_arc.accelerant: program_port_dpll(ddiPort=%u) entering\n", ddiPort);
-	if (ddiPort < 1 || ddiPort > 3) {
-		debug_printf("intel_arc.accelerant: Port %u does not use standard TGL DPLL registers\n", ddiPort);
+	if (ddiPort < 1 || ddiPort > 3)
 		return B_OK;
-	}
 
 	int pDiv, qDiv, kDiv;
 	float dco;
 	if (!compute_displayport_dpll(&pDiv, &qDiv, &kDiv, &dco))
 		return B_ERROR;
 
-	uint32 cfg0 = 0, cfg1 = 0, enable = 0, ssc = 0, dpllIndex = 0;
+	uint32 cfg0 = 0;
+	uint32 cfg1 = 0;
+	uint32 enable = 0;
+	uint32 ssc = 0;
+	uint32 dpllIndex = 0;
 	switch (ddiPort) {
 		case 1:
 			dpllIndex = 0;
@@ -1695,7 +1822,8 @@ program_port_dpll(uint8 ddiPort)
 
 	uint32 refKHz = 19200;
 	uint32 dcoInt = (uint32)floorf(dco / (refKHz / 1000.0f));
-	uint32 dcoFrac = (uint32)ceilf((dco / (refKHz / 1000.0f) - dcoInt) * (1 << 15));
+	uint32 dcoFrac = (uint32)ceilf((dco / (refKHz / 1000.0f) - dcoInt)
+		* (1 << 15));
 	uint32 dcoReg = dcoInt | (dcoFrac << INTEL_ARC_TGL_DPLL_DCO_FRACTION_SHIFT);
 
 	uint32 dividers = 0;
@@ -1713,34 +1841,24 @@ program_port_dpll(uint8 ddiPort)
 		default: return B_BAD_VALUE;
 	}
 	if (qDiv != 1)
-		dividers |= ((uint32)qDiv << INTEL_ARC_TGL_DPLL_QDIV_RATIO_SHIFT) | INTEL_ARC_TGL_DPLL_QDIV_ENABLE;
-
-	debug_printf("intel_arc.accelerant: Programming DPLL %u: dcoReg=0x%08X, dividers=0x%08X\n", dpllIndex, dcoReg, dividers);
+		dividers |= ((uint32)qDiv << INTEL_ARC_TGL_DPLL_QDIV_RATIO_SHIFT)
+			| INTEL_ARC_TGL_DPLL_QDIV_ENABLE;
 
 	uint32 value = 0;
 	read_register(enable, value);
 	write_register(enable, value & ~INTEL_ARC_TGL_DPLL_ENABLE);
 	(void)wait_for_clear(enable, INTEL_ARC_TGL_DPLL_LOCK, 50000);
-
 	read_register(enable, value);
 	write_register(enable, value | INTEL_ARC_TGL_DPLL_POWER_ENABLE);
 	(void)wait_for_set(enable, INTEL_ARC_TGL_DPLL_POWER_STATE, 50000);
-
 	read_register(ssc, value);
 	write_register(ssc, value & ~INTEL_ARC_TGL_DPLL_SSC_ENABLE);
-
 	write_register(cfg0, dcoReg);
 	write_register(cfg1, dividers);
-
+	read_register(cfg1, value);
 	read_register(enable, value);
 	write_register(enable, value | INTEL_ARC_TGL_DPLL_ENABLE);
-	status_t status = wait_for_set(enable, INTEL_ARC_TGL_DPLL_LOCK, 50000);
-	if (status != B_OK) {
-		debug_printf("intel_arc.accelerant ERROR: DPLL %u failed to lock!\n", dpllIndex);
-		return status;
-	}
-
-	debug_printf("intel_arc.accelerant: DPLL %u locked successfully!\n", dpllIndex);
+	(void)wait_for_set(enable, INTEL_ARC_TGL_DPLL_LOCK, 50000);
 
 	read_register(INTEL_ARC_TGL_DPCLKA_CFGCR0, value);
 	switch (ddiPort) {
@@ -1764,16 +1882,18 @@ program_port_dpll(uint8 ddiPort)
 			write_register(INTEL_ARC_TGL_DPCLKA_CFGCR0, value);
 			value &= ~INTEL_ARC_TGL_DPCLKA_DDIC_CLOCK_OFF;
 			break;
+		default:
+			break;
 	}
 	write_register(INTEL_ARC_TGL_DPCLKA_CFGCR0, value);
+	(void)dpllIndex;
 	return B_OK;
 }
+
 
 static status_t
 program_ddi_buffer(uint8 ddiPort, int8 pipe, uint32 lanes, bool enable)
 {
-	debug_printf("intel_arc.accelerant: program_ddi_buffer(ddiPort=%u, pipe=%d, lanes=%u, enable=%d)\n",
-		ddiPort, pipe, lanes, enable);
 	if (ddiPort > 6)
 		return B_BAD_VALUE;
 
@@ -1788,16 +1908,14 @@ program_ddi_buffer(uint8 ddiPort, int8 pipe, uint32 lanes, bool enable)
 		value |= INTEL_ARC_DDI_BUF_CTL_ENABLE;
 	else
 		value &= ~INTEL_ARC_DDI_BUF_CTL_ENABLE;
-
 	write_register(reg, value);
 	if (ddiPort > 0 && ddiPort <= 4)
 		gInfo->shared_info->port_state[ddiPort - 1] = value;
-
 	if (enable)
-		return wait_for_clear(reg, INTEL_ARC_DDI_BUF_IS_IDLE, 50000);
-
+		(void)wait_for_clear(reg, INTEL_ARC_DDI_BUF_IS_IDLE, 50000);
 	return B_OK;
 }
+
 
 static status_t
 set_sink_power(uint8 ddiPort, uint8 value)
@@ -1805,14 +1923,13 @@ set_sink_power(uint8 ddiPort, uint8 value)
 	if (!gInfo->shared_info->has_dpcd || ddiPort == 0)
 		return B_OK;
 
-	debug_printf("intel_arc.accelerant: set_sink_power(ddiPort=%u, value=0x%02x)\n", ddiPort, value);
 	return write_dpcd(DP_SET_POWER, &value, 1);
 }
+
 
 static status_t
 apply_dpms_off(void)
 {
-	debug_printf("intel_arc.accelerant: apply_dpms_off() entering\n");
 	if (gInfo->shared_info->active_pipe < 0)
 		return B_UNSUPPORTED;
 
@@ -1839,10 +1956,10 @@ apply_dpms_off(void)
 	return B_OK;
 }
 
+
 static status_t
 apply_dpms_on(void)
 {
-	debug_printf("intel_arc.accelerant: apply_dpms_on() entering\n");
 	if (gInfo->shared_info->active_pipe < 0)
 		return B_UNSUPPORTED;
 
@@ -1896,30 +2013,33 @@ apply_dpms_on(void)
 	(void)wait_for_set(planeControlReg, INTEL_ARC_DISPLAY_CONTROL_ENABLED, 20000);
 
 	gInfo->shared_info->dpms_mode = B_DPMS_ON;
-	debug_printf("intel_arc.accelerant: apply_dpms_on() finished successfully\n");
 	return B_OK;
 }
+
 
 static uint32
 aux_control_register(uint8 ddiPort)
 {
-	return INTEL_ARC_MMIO_AUX_CH_CTL_A + ddiPort * INTEL_ARC_MMIO_AUX_CHANNEL_STRIDE;
+	return INTEL_ARC_MMIO_AUX_CH_CTL_A
+		+ ddiPort * INTEL_ARC_MMIO_AUX_CHANNEL_STRIDE;
 }
+
 
 static uint32
 aux_data_register(uint8 ddiPort, uint8 index)
 {
-	return INTEL_ARC_MMIO_AUX_CH_DATA1_A + ddiPort * INTEL_ARC_MMIO_AUX_CHANNEL_STRIDE + index * 4;
+	return INTEL_ARC_MMIO_AUX_CH_DATA1_A
+		+ ddiPort * INTEL_ARC_MMIO_AUX_CHANNEL_STRIDE + index * 4;
 }
+
 
 static status_t
 read_edid_from_hardware(void)
 {
-	debug_printf("intel_arc.accelerant: read_edid_from_hardware() entering\n");
 	if (gInfo->registers == NULL) {
 		if (gInfo->shared_info->has_boot_edid) {
-			debug_printf("intel_arc.accelerant: Using boot EDID\n");
-			memcpy(&gInfo->edid_info, &gInfo->shared_info->boot_edid, sizeof(edid1_info));
+			memcpy(&gInfo->edid_info, &gInfo->shared_info->boot_edid,
+				sizeof(edid1_info));
 			gInfo->has_edid = true;
 			return B_OK;
 		}
@@ -1928,15 +2048,26 @@ read_edid_from_hardware(void)
 		return B_ENTRY_NOT_FOUND;
 	}
 
+	//uint8 candidates[7];
 	size_t candidateCount = 0;
 	uint8 candidates[4];
 	
-	if (gInfo->shared_info->active_pipe >= 0 && gInfo->shared_info->active_ddi_port < 4)
+	// Prima prova la porta effettivamente associata al pipe attivo.
+	if (gInfo->shared_info->active_pipe >= 0 && gInfo->shared_info->active_ddi_port < 4) {
 		candidates[candidateCount++] = gInfo->shared_info->active_ddi_port;
+	}
+	
+	if (gInfo->shared_info->active_ddi_port < 4)
+		candidates[candidateCount++] = gInfo->shared_info->active_ddi_port;
+	//if (gInfo->shared_info->active_ddi_port != 0)
+	//	candidates[candidateCount++] = gInfo->shared_info->active_ddi_port;
 
 	for (uint8 port = 0; port < 4; port++) {
 		if ((gInfo->shared_info->detected_port_bits & (1 << port)) == 0)
 			continue;
+	//for (uint8 port = 1; port <= 3; port++) {
+	//	if ((gInfo->shared_info->detected_port_bits & (1 << port)) == 0)
+	//		continue;
 
 		bool alreadyQueued = false;
 		for (size_t i = 0; i < candidateCount; i++) {
@@ -1949,27 +2080,37 @@ read_edid_from_hardware(void)
 			candidates[candidateCount++] = port;
 	}
 
+	/*
+	for (uint8 port = 1; port <= 6; port++) {
+		bool alreadyQueued = false;
+		for (size_t i = 0; i < candidateCount; i++) {
+			if (candidates[i] == port) {
+				alreadyQueued = true;
+				break;
+			}
+		}
+		if (!alreadyQueued)
+			candidates[candidateCount++] = port;
+	}*/
+
 	for (size_t i = 0; i < candidateCount; i++) {
-		debug_printf("intel_arc.accelerant: Attempting EDID read on candidate DDI Port %u\n", candidates[i]);
 		if (read_edid_from_port(candidates[i], gInfo->edid_info) == B_OK) {
-			debug_printf("intel_arc.accelerant: Successfully read EDID from DDI Port %u\n", candidates[i]);
 			read_dpcd_caps_from_port(candidates[i]);
 			gInfo->has_edid = true;
 			return B_OK;
 		}
 	}
-
 	if (gInfo->shared_info->has_boot_edid) {
-		debug_printf("intel_arc.accelerant: Hardware EDID read failed, falling back to boot EDID\n");
-		memcpy(&gInfo->edid_info, &gInfo->shared_info->boot_edid, sizeof(edid1_info));
+		memcpy(&gInfo->edid_info, &gInfo->shared_info->boot_edid,
+			sizeof(edid1_info));
 		gInfo->has_edid = true;
 		return B_OK;
 	}
 
-	debug_printf("intel_arc.accelerant ERROR: Could not read EDID from any port\n");
 	gInfo->has_edid = false;
 	return B_ENTRY_NOT_FOUND;
 }
+
 
 static status_t
 read_edid_from_port(uint8 ddiPort, edid1_info& edid)
@@ -1977,7 +2118,7 @@ read_edid_from_port(uint8 ddiPort, edid1_info& edid)
 	if (ddiPort > 6)
 		return B_BAD_VALUE;
 		
-	debug_printf("intel_arc.accelerant: read_edid_from_port(ddiPort=%u)\n", ddiPort);
+	printf("ARC: read EDID DDI port %u\n", ddiPort);
 
 	i2c_bus bus;
 	ddc2_init_timing(&bus);
@@ -1988,10 +2129,10 @@ read_edid_from_port(uint8 ddiPort, edid1_info& edid)
 	return ddc2_read_edid1(&bus, &edid, NULL, NULL);
 }
 
+
 static status_t
 read_dpcd_caps_from_port(uint8 ddiPort)
 {
-	debug_printf("intel_arc.accelerant: read_dpcd_caps_from_port(ddiPort=%u)\n", ddiPort);
 	uint8 buffer[8];
 	dp_aux_msg message;
 	memset(&message, 0, sizeof(message));
@@ -2003,10 +2144,8 @@ read_dpcd_caps_from_port(uint8 ddiPort)
 	message.size = sizeof(buffer);
 
 	ssize_t result = aux_transfer(ddiPort, &message);
-	if (result < (ssize_t)sizeof(buffer)) {
-		debug_printf("intel_arc.accelerant ERROR: aux_transfer DPCD read failed: %s\n", strerror(result < B_OK ? (status_t)result : B_ERROR));
+	if (result < (ssize_t)sizeof(buffer))
 		return result < B_OK ? (status_t)result : B_ERROR;
-	}
 
 	gInfo->shared_info->has_dpcd = true;
 	memcpy(gInfo->shared_info->dpcd, buffer, sizeof(buffer));
@@ -2014,14 +2153,9 @@ read_dpcd_caps_from_port(uint8 ddiPort)
 	gInfo->shared_info->dpcd_max_link_rate = buffer[1];
 	gInfo->shared_info->dpcd_max_lane_count = buffer[2] & DP_MAX_LANE_COUNT_MASK;
 	gInfo->shared_info->dpcd_sink_count = buffer[7] & DP_SINK_COUNT_MASK;
-
-	debug_printf("intel_arc.accelerant: DPCD Caps: Rev=0x%02x, MaxLinkRate=0x%02x, MaxLanes=%u\n",
-		gInfo->shared_info->dpcd_revision,
-		gInfo->shared_info->dpcd_max_link_rate,
-		gInfo->shared_info->dpcd_max_lane_count);
-
 	return B_OK;
 }
+
 
 static status_t
 aux_send_receive(const i2c_bus* bus, uint32 slaveAddress,
@@ -2114,6 +2248,7 @@ nextRead:
 	return B_OK;
 }
 
+
 static ssize_t
 aux_transfer(uint8 ddiPort, dp_aux_msg* message)
 {
@@ -2138,7 +2273,8 @@ aux_transfer(uint8 ddiPort, dp_aux_msg* message)
 	if (message->size > 0 && message->buffer == NULL)
 		return B_BAD_VALUE;
 
-	transmitBuffer[0] = (message->request << 4) | ((message->address >> 16) & 0x0f);
+	transmitBuffer[0] = (message->request << 4)
+		| ((message->address >> 16) & 0x0f);
 	transmitBuffer[1] = (message->address >> 8) & 0xff;
 	transmitBuffer[2] = message->address & 0xff;
 	transmitBuffer[3] = message->size != 0 ? (message->size - 1) : 0;
@@ -2153,17 +2289,20 @@ aux_transfer(uint8 ddiPort, dp_aux_msg* message)
 				receiveSize = 2;
 				if (message->buffer != NULL)
 					memcpy(transmitBuffer + 4, message->buffer, message->size);
-				result = aux_transfer(ddiPort, transmitBuffer, transmitSize, receiveBuffer, receiveSize);
+				result = aux_transfer(ddiPort, transmitBuffer, transmitSize,
+					receiveBuffer, receiveSize);
 				if (result > 0) {
 					message->reply = receiveBuffer[0] >> 4;
-					result = result > 1 ? min_c((ssize_t)receiveBuffer[1], (ssize_t)message->size) : (ssize_t)message->size;
+					result = result > 1 ? min_c((ssize_t)receiveBuffer[1],
+						(ssize_t)message->size) : (ssize_t)message->size;
 				}
 				break;
 
 			case DP_AUX_NATIVE_READ:
 			case DP_AUX_I2C_READ:
 				receiveSize = message->size + 1;
-				result = aux_transfer(ddiPort, transmitBuffer, transmitSize, receiveBuffer, receiveSize);
+				result = aux_transfer(ddiPort, transmitBuffer, transmitSize,
+					receiveBuffer, receiveSize);
 				if (result > 0) {
 					message->reply = receiveBuffer[0] >> 4;
 					result--;
@@ -2197,11 +2336,14 @@ aux_transfer(uint8 ddiPort, dp_aux_msg* message)
 	return B_IO_ERROR;
 }
 
+
 static ssize_t
 aux_transfer(uint8 ddiPort, uint8* transmitBuffer, uint8 transmitSize,
 	uint8* receiveBuffer, uint8 receiveSize)
 {
 	const uint32 channelControl = aux_control_register(ddiPort);
+	printf("ARC: AUX port=%u ctl=0x%08" B_PRIx32 "\n",
+		ddiPort, channelControl);
 	uint32 status = 0;
 
 	for (int tries = 0; tries < 3; tries++) {
@@ -2230,9 +2372,12 @@ aux_transfer(uint8 ddiPort, uint8* transmitBuffer, uint8 transmitSize,
 	for (uint8 retry = 0; retry < 5; retry++) {
 		for (uint8 i = 0; i < transmitSize;) {
 			uint32 data = ((uint32)transmitBuffer[i++]) << 24;
-			if (i < transmitSize) data |= ((uint32)transmitBuffer[i++]) << 16;
-			if (i < transmitSize) data |= ((uint32)transmitBuffer[i++]) << 8;
-			if (i < transmitSize) data |= transmitBuffer[i++];
+			if (i < transmitSize)
+				data |= ((uint32)transmitBuffer[i++]) << 16;
+			if (i < transmitSize)
+				data |= ((uint32)transmitBuffer[i++]) << 8;
+			if (i < transmitSize)
+				data |= transmitBuffer[i++];
 			write_register(aux_data_register(ddiPort, (i - 1) / 4), data);
 		}
 
@@ -2267,7 +2412,8 @@ aux_transfer(uint8 ddiPort, uint8* transmitBuffer, uint8 transmitSize,
 	if ((status & INTEL_ARC_DP_AUX_CTL_TIMEOUT_ERROR) != 0)
 		return B_TIMEOUT;
 
-	uint8 bytes = (status & INTEL_ARC_DP_AUX_CTL_MSG_SIZE_MASK) >> INTEL_ARC_DP_AUX_CTL_MSG_SIZE_SHIFT;
+	uint8 bytes = (status & INTEL_ARC_DP_AUX_CTL_MSG_SIZE_MASK)
+		>> INTEL_ARC_DP_AUX_CTL_MSG_SIZE_SHIFT;
 	if (bytes == 0 || bytes > 20)
 		return B_BUSY;
 	if (bytes > receiveSize)
@@ -2278,9 +2424,12 @@ aux_transfer(uint8 ddiPort, uint8* transmitBuffer, uint8 transmitSize,
 		if (!read_register(aux_data_register(ddiPort, i / 4), data))
 			return B_ERROR;
 		receiveBuffer[i++] = data >> 24;
-		if (i < bytes) receiveBuffer[i++] = data >> 16;
-		if (i < bytes) receiveBuffer[i++] = data >> 8;
-		if (i < bytes) receiveBuffer[i++] = data;
+		if (i < bytes)
+			receiveBuffer[i++] = data >> 16;
+		if (i < bytes)
+			receiveBuffer[i++] = data >> 8;
+		if (i < bytes)
+			receiveBuffer[i++] = data;
 	}
 
 	return bytes;

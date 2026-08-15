@@ -1,5 +1,5 @@
 /*
- * Copyright 2026, Haiku contributors.
+ * Copyright 2026, Haiku and the Pirati Del Frico contributors.
  * Distributed under the terms of the MIT License.
  *
  * This file was implemented for Haiku by reusing only MIT-compatible
