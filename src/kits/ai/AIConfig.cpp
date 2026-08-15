@@ -128,21 +128,6 @@ static bool _GetAPIKeyFromKeyStore(const char* pluginName, BString& out)
     out.SetTo(pwd);
     return true;
 }
-/*
-static bool _GetAPIKeyFromKeyStore(const char* pluginName, BString& out)
-{
-    BKeyStore keyStore;
-    BPasswordKey password;
-    // Identifier = pluginName, SecondaryIdentifier = kAPIIdentifier
-    password.SetTo("", B_KEY_PURPOSE_GENERIC, pluginName, kAPIIdentifier);
-    status_t res = keyStore.GetEncryptedKey(kAIKeyring, B_KEY_TYPE_PASSWORD,
-        pluginName, kAPIIdentifier, password);
-    if (res != B_OK) return false;
-    const char* pwd = password.Password();
-    if (!pwd) return false;
-    out.SetTo(pwd);
-    return true;
-}*/
 
 // Helper: store or remove API key
 static bool _StoreAPIKeyToKeyStore(const char* engine, const char* apiKey)
