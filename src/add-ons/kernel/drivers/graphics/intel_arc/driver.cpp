@@ -354,7 +354,7 @@ arc_interrupt_handler(void* data)
 	return handled;
 }
 
-
+/*
 static void
 probe_display_state(intel_arc_info& info)
 {
@@ -428,6 +428,157 @@ probe_display_state(intel_arc_info& info)
 		}
 	}
 }
+*/
+static void
+probe_display_state(intel_arc_info& info)
+{
+	// 1. LOG INIZIALIZZAZIONE
+    dprintf("DEBUG: Entering probe_display_state.\n");
+
+	intel_arc_shared_info& shared = *info.shared_info;
+	shared.pipe_count = 4;
+	shared.active_pipe = -1;
+	shared.active_ddi_port = 0;
+	shared.active_ddi_mode = 0;
+	shared.dpms_mode = B_DPMS_ON;
+
+    // Reset e log delle variabili chiave prima del ciclo
+    dprintf("DEBUG: Initializing shared info fields.\n");
+
+
+	for (uint32 pipe = 0; pipe < shared.pipe_count; pipe++) {
+        // LOG INIZIO PIPE LOOP
+		dprintf("DEBUG: Processing Pipe %u\n", pipe);
+
+		const uint32 stride = pipe * INTEL_ARC_MMIO_PIPE_OFFSET;
+        
+        // 2. LEGGERE I REGISTRI E LOGGARLI
+        read32(info, INTEL_ARC_MMIO_PIPE_A_HTOTAL + stride, shared.pipe_h_total[pipe]);
+		dprintf("DEBUG: Pipe %u HTotal read: 0x%X\n", pipe, shared.pipe_h_total[pipe]);
+
+        read32(info, INTEL_ARC_MMIO_PIPE_A_HBLANK + stride, shared.pipe_h_blank[pipe]);
+		dprintf("DEBUG: Pipe %u HBlank read: 0x%X\n", pipe, shared.pipe_h_blank[pipe]);
+
+        read32(info, INTEL_ARC_MMIO_PIPE_A_HSYNC + stride, shared.pipe_h_sync[pipe]);
+		dprintf("DEBUG: Pipe %u HSync read: 0x%X\n", pipe, shared.pipe_h_sync[pipe]);
+
+        read32(info, INTEL_ARC_MMIO_PIPE_A_VTOTAL + stride, shared.pipe_v_total[pipe]);
+		dprintf("DEBUG: Pipe %u VTotal read: 0x%X\n", pipe, shared.pipe_v_total[pipe]);
+
+        read32(info, INTEL_ARC_MMIO_PIPE_A_VBLANK + stride, shared.pipe_v_blank[pipe]);
+		dprintf("DEBUG: Pipe %u VBlank read: 0x%X\n", pipe, shared.pipe_v_blank[pipe]);
+
+        read32(info, INTEL_ARC_MMIO_PIPE_A_VSYNC + stride, shared.pipe_v_sync[pipe]);
+		dprintf("DEBUG: Pipe %u VSync read: 0x%X\n", pipe, shared.pipe_v_sync[pipe]);
+
+        read32(info, INTEL_ARC_MMIO_PIPE_A_CONTROL + stride, shared.pipe_control[pipe]);
+		dprintf("DEBUG: Pipe %u Control read: 0x%X (Enabled: %d)\n", pipe, shared.pipe_control[pipe], (shared.pipe_control[pipe] & INTEL_ARC_PIPE_ENABLED) != 0);
+
+        read32(info, INTEL_ARC_MMIO_PIPE_A_SIZE + stride, shared.pipe_size[pipe]);
+		dprintf("DEBUG: Pipe %u Size read: 0x%X\n", pipe, shared.pipe_size[pipe]);
+
+        read32(info, INTEL_ARC_MMIO_PIPE_A_DDI_FUNC_CTL + stride, shared.pipe_ddi_func_ctl[pipe]);
+		dprintf("DEBUG: Pipe %u DDI FuncCtl read: 0x%X\n", pipe, shared.pipe_ddi_func_ctl[pipe]);
+
+        read32(info, INTEL_ARC_MMIO_PLANE_A_CONTROL + stride, shared.plane_control[pipe]);
+		dprintf("DEBUG: Pipe %u Plane Control read: 0x%X\n", pipe, shared.plane_control[pipe]);
+
+        read32(info, INTEL_ARC_MMIO_PLANE_A_STRIDE + stride, shared.plane_stride[pipe]);
+		dprintf("DEBUG: Pipe %u Plane Stride read: 0x%X\n", pipe, shared.plane_stride[pipe]);
+
+        read32(info, INTEL_ARC_MMIO_PLANE_A_POS + stride, shared.plane_pos[pipe]);
+		dprintf("DEBUG: Pipe %u Plane Pos read: 0x%X\n", pipe, shared.plane_pos[pipe]);
+
+        read32(info, INTEL_ARC_MMIO_PLANE_A_IMAGE_SIZE + stride, shared.plane_image_size[pipe]);
+		dprintf("DEBUG: Pipe %u Image Size read: 0x%X\n", pipe, shared.plane_image_size[pipe]);
+
+        read32(info, INTEL_ARC_MMIO_PLANE_A_SURFACE + stride, shared.plane_surface[pipe]);
+		dprintf("DEBUG: Pipe %u Surface read: 0x%X\n", pipe, shared.plane_surface[pipe]);
+
+        // LOGIC CHECKING START
+		if (shared.active_pipe >= 0) {
+            dprintf("DEBUG: Skipping Pipe %u because an active pipe was already found.\n", pipe);
+			continue;
+		}
+
+		if ((shared.pipe_control[pipe] & INTEL_ARC_PIPE_ENABLED) == 0) {
+            dprintf("DEBUG: Skipping Pipe %u because the PIPE_ENABLED bit is clear (Control: 0x%X).\n", pipe, shared.pipe_control[pipe]);
+			continue;
+		}
+
+		if (shared.pipe_size[pipe] == 0) {
+            dprintf("DEBUG: Skipping Pipe %u because pipe size is zero (Size: 0x%X).\n", pipe, shared.pipe_size[pipe]);
+			continue;
+		}
+
+        // LOGIC SUCCESS PATH
+		shared.active_pipe = pipe;
+		shared.active_ddi_port
+			= (shared.pipe_ddi_func_ctl[pipe] & INTEL_ARC_PIPE_DDI_SELECT_MASK)
+				>> INTEL_ARC_PIPE_DDI_SELECT_SHIFT;
+		shared.active_ddi_mode
+			= (shared.pipe_ddi_func_ctl[pipe] & INTEL_ARC_PIPE_DDI_MODE_MASK)
+				>> INTEL_ARC_PIPE_DDI_MODE_SHIFT;
+
+        dprintf("DEBUG: Pipe %u identified as ACTIVE PIPE.\n", pipe);
+		dprintf("DEBUG: Active DDI Port detected: %u\n", shared.active_ddi_port);
+		dprintf("DEBUG: Active DDI Mode detected: %u\n", shared.active_ddi_mode);
+
+        // Calcolo e Log risoluzione
+		const uint32 width = (shared.pipe_size[pipe] & 0xffff) + 1;
+		const uint32 height = (shared.pipe_size[pipe] >> 16) + 1;
+		if (width != 0 && height != 0) {
+			shared.current_mode.virtual_width = width;
+			shared.current_mode.virtual_height = height;
+			dprintf("DEBUG: Calculated Resolution for Pipe %u: %u x %u\n", pipe, width, height);
+
+            if (shared.current_mode.space == B_NO_COLOR_SPACE) {
+                shared.current_mode.space = B_RGB32;
+                dprintf("DEBUG: Color space corrected to RGB32.\n");
+            }
+			if (shared.bytes_per_row == 0) {
+				shared.bytes_per_row = width * 4;
+                dprintf("DEBUG: Bytes per row set to %u (Width * 4).\n", shared.bytes_per_row);
+			}
+		} else {
+            dprintf("WARNING: Pipe %u failed resolution check (W=%u, H=%u).\n", pipe, width, height);
+        }
+	} // FINE PIPE LOOP
+
+    // PORT LOGIC START
+    dprintf("\nDEBUG: Starting Port Detection Loop.\n");
+
+	static const uint32 kPortRegisters[4] = {
+		INTEL_ARC_MMIO_PORT_A,
+		INTEL_ARC_MMIO_PORT_B,
+		INTEL_ARC_MMIO_PORT_C,
+		INTEL_ARC_MMIO_PORT_D
+	};
+
+	shared.detected_port_bits = 0;
+	for (uint32 port = 0; port < 4; port++) {
+        // LOG INIZIO PORT LOOP
+        dprintf("DEBUG: Checking Port %u...\n", port);
+
+		if (!read32(info, kPortRegisters[port], shared.port_state[port])) {
+            dprintf("WARNING: Failed to read state for Port %u.\n", port);
+			continue;
+		}
+        
+        // LOG STADO REGISTRO PORTA
+        dprintf("DEBUG: State register for Port %u: 0x%X\n", port, shared.port_state[port]);
+
+
+		if ((shared.port_state[port] & (INTEL_ARC_PORT_ENABLED | INTEL_ARC_PORT_DETECTED)) != 0) {
+            dprintf("SUCCESS: Port %u is detected and enabled.\n", port);
+			shared.detected_port_bits |= (1 << port);
+		} else {
+            dprintf("INFO: Port %u is inactive or undetected.\n", port);
+        }
+	} // FINE PORT LOOP
+
+    dprintf("\nDEBUG: probe_display_state finished execution.\n");
+}
 
 
 static status_t
@@ -460,28 +611,57 @@ get_next_supported_device(int32* cookie, pci_info& info,
 static bool
 get_bar_info(const pci_info& info, int32 index, pci_bar_info& bar)
 {
+	dprintf("DEBUG: Starting get_bar_info() for BAR %d\n", index);
+	
 	memset(&bar, 0, sizeof(bar));
 	bar.index = index;
 	bar.consumed = 1;
 
-	if (index < 0 || index >= 6)
+	if (index < 0 || index >= 6) {
+		dprintf("DEBUG: Invalid BAR index %d (out of range [0-5])\n", index);
 		return false;
+	}
 
 	bar.flags = info.u.h0.base_register_flags[index];
 	bar.size = info.u.h0.base_register_sizes[index];
+	dprintf("DEBUG: BAR %d - Flags: 0x%X, Size: 0x%lX\n", index, bar.flags, bar.size);
+	 
 	if ((bar.flags & PCI_address_space) != 0 || bar.size == 0) {
+		dprintf("DEBUG: BAR %d skipped - Invalid flags (not addressable) or Size=0\n", index);
 		return false;
 	}
 
 	bar.base = info.u.h0.base_registers[index];
+	dprintf("DEBUG: BAR %d - Base Address (Low): 0x%lX\n", index, bar.base);
 
 	if ((bar.flags & PCI_address_type) == PCI_address_type_64 && index < 5) {
+		dprintf("DEBUG: BAR %d - Using 64-bit addressing (combining registers %d and %d)\n", index, index, index + 1);
+		
 		bar.base |= (uint64)info.u.h0.base_registers[index + 1] << 32;
+		dprintf("DEBUG: BAR %d - Base Address (High): 0x%X\n", index, info.u.h0.base_registers[index + 1]);
+		dprintf("DEBUG: BAR %d - Combined Base Address: 0x%lX\n",
+				index, bar.base);
+		
 		bar.size |= (uint64)info.u.h0.base_register_sizes[index + 1] << 32;
+		dprintf("DEBUG: BAR %d - Size (High): 0x%X\n", index, info.u.h0.base_register_sizes[index + 1]);
+		dprintf("DEBUG: BAR %d - Combined Size: 0x%lX\n", index, bar.size);
 		bar.consumed = 2;
 	}
 
-	return bar.base != 0 && bar.size != 0;
+	//return bar.base != 0 && bar.size != 0;
+	if (bar.base == 0 || bar.size == 0) {
+        dprintf("DEBUG: BAR %d invalid - Base=0 or Size=0\n", index);
+        return false;
+    }
+
+    dprintf("DEBUG: get_bar_info() completed for BAR %d - Success!\n", index);
+    dprintf("DEBUG: Final BAR Info - Index:%d, Flags:0x%X, Base:0x%lX, Size:0x%lX\n",
+            bar.index,
+            bar.flags,
+            bar.base,
+            bar.size);
+
+    return true;
 }
 
 
