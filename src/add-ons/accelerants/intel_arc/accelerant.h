@@ -163,7 +163,8 @@
 #define INTEL_ARC_PHY_C20_VDR_CUSTOM_WIDTH		0xD02
 #define INTEL_ARC_PHY_C20_CUSTOM_WIDTH(val)		((uint8)(val) & 0x3)
 
-
+#define INTEL_ARC_PLANE_TILED_MASK   (0x7 << 10)
+#define INTEL_ARC_PLANE_LINEAR       (0x0 << 10)
 
 struct arc_mit_buf_trans_entry {
 	uint8	main;
