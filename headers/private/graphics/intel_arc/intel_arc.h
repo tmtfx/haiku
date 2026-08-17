@@ -97,6 +97,7 @@ struct intel_arc_shared_info {
 	uint8			dpcd_max_link_rate;
 
 	edid1_info		boot_edid;
+	frame_buffer_config fbc;
 
 	char			device_identifier[32];
 	bool has_boot_info;
