@@ -525,8 +525,12 @@ probe_display_state(intel_arc_info& info)
 		dprintf("DEBUG: Active DDI Mode detected: %u\n", shared.active_ddi_mode);
 
         // Calcolo e Log risoluzione
-		const uint32 width = (shared.pipe_size[pipe] & 0xffff) + 1;
-		const uint32 height = (shared.pipe_size[pipe] >> 16) + 1;
+        // 1. Estrazione corretta secondo il layout hardware Intel (Display IP 13/14)
+        // Height si trova nei 16 bit bassi [15:0], Width nei 16 bit alti [31:16]
+        const uint32 height = (shared.pipe_size[pipe] & 0xffff) + 1;
+        const uint32 width = ((shared.pipe_size[pipe] >> 16) & 0xffff) + 1;
+		//const uint32 width = (shared.pipe_size[pipe] & 0xffff) + 1;
+		//const uint32 height = (shared.pipe_size[pipe] >> 16) + 1;
 		if (width != 0 && height != 0) {
 			shared.current_mode.virtual_width = width;
 			shared.current_mode.virtual_height = height;
