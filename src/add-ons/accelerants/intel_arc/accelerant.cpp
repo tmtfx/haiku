@@ -16,6 +16,7 @@
  *  - https://raw.githubusercontent.com/torvalds/linux/master/drivers/gpu/drm/i915/display/intel_cx0_phy_regs.h
  *
  */
+#include <OS.h>
 
 #include "accelerant_protos.h"
 #include "accelerant.h"
@@ -36,6 +37,7 @@
 
 #include <AutoDeleterOS.h>
 
+#define CALLED() debug_printf("SM750_ACC: CALLED %s\n", __FUNCTION__)
 //#define ACC_TRACE(x...) printf("intel_arc.accelerant: " x)
 //#define ACC_ERROR(x...) printf("intel_arc.accelerant ERROR: " x)
 
@@ -43,163 +45,7 @@ accelerant_info* gInfo;
 static engine_token sEngineToken = {1, 0, NULL};
 static uint64 sSyncCounter = 1;
 
-#define INTEL_ARC_MMIO_PIPE_BLOCK_BASE			0x60000
-#define INTEL_ARC_MMIO_PIPE_OFFSET				0x1000
-#define INTEL_ARC_MMIO_AUX_CH_CTL_A				(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x4010)
-#define INTEL_ARC_MMIO_AUX_CH_DATA1_A			(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x4014)
-#define INTEL_ARC_MMIO_AUX_CHANNEL_STRIDE		0x100
-#define INTEL_ARC_MMIO_PIPE_A_HTOTAL			(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0000)
-#define INTEL_ARC_MMIO_PIPE_A_HBLANK			(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0004)
-#define INTEL_ARC_MMIO_PIPE_A_HSYNC				(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0008)
-#define INTEL_ARC_MMIO_PIPE_A_VTOTAL			(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x000c)
-#define INTEL_ARC_MMIO_PIPE_A_VBLANK			(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0010)
-#define INTEL_ARC_MMIO_PIPE_A_VSYNC				(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0014)
-#define INTEL_ARC_MMIO_PIPE_A_SIZE				(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x001c)
-#define INTEL_ARC_MMIO_PIPE_A_DDI_FUNC_CTL		(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0400)
-#define INTEL_ARC_MMIO_DDI_PIPE_A_DATA_M		(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0030)
-#define INTEL_ARC_MMIO_DDI_PIPE_A_DATA_N		(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0034)
-#define INTEL_ARC_MMIO_DDI_PIPE_A_LINK_M		(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0040)
-#define INTEL_ARC_MMIO_DDI_PIPE_A_LINK_N		(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0044)
-#define INTEL_ARC_MMIO_DDI_BUF_CTL_A			(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x4000)
-#define INTEL_ARC_MMIO_SNPS_PHY_A_BASE			0x168000
-#define INTEL_ARC_MMIO_SNPS_PHY_B_BASE			0x169000
-#define INTEL_ARC_MMIO_SNPS_PHY_TX_EQ(base, lane)	((base) + 0x300 + (lane) * 0x10)
-#define INTEL_ARC_MMIO_PLANE_BLOCK_BASE			0x70000
-#define INTEL_ARC_MMIO_PIPE_A_CONTROL			(INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x0008)
-#define INTEL_ARC_MMIO_PLANE_A_CONTROL			(INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x0180)
-#define INTEL_ARC_MMIO_PLANE_A_BASE				(INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x0184)
-#define INTEL_ARC_MMIO_PLANE_A_STRIDE			(INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x0188)
-#define INTEL_ARC_MMIO_PLANE_A_POS				(INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x018c)
-#define INTEL_ARC_MMIO_PLANE_A_IMAGE_SIZE		(INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x0190)
-#define INTEL_ARC_MMIO_PLANE_A_SURFACE			(INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x019c)
 
-#define INTEL_ARC_DP_AUX_CTL_BUSY				(1U << 31)
-#define INTEL_ARC_DP_AUX_CTL_DONE				(1U << 30)
-#define INTEL_ARC_DP_AUX_CTL_INTERRUPT			(1U << 29)
-#define INTEL_ARC_DP_AUX_CTL_TIMEOUT_ERROR		(1U << 28)
-#define INTEL_ARC_DP_AUX_CTL_TIMEOUT_1600US		(3U << 26)
-#define INTEL_ARC_DP_AUX_CTL_RECEIVE_ERROR		(1U << 25)
-#define INTEL_ARC_DP_AUX_CTL_MSG_SIZE_SHIFT		20
-#define INTEL_ARC_DP_AUX_CTL_MSG_SIZE_MASK		(0x1fU << 20)
-#define INTEL_ARC_DP_AUX_CTL_FW_SYNC_PULSE_SKL(c) (((c) - 1) << 5)
-#define INTEL_ARC_DP_AUX_CTL_SYNC_PULSE_SKL(c)	((c) - 1)
-#define INTEL_ARC_DDI_MN_TU_SIZE_MASK			(0x3fU << 25)
-#define INTEL_ARC_PIPE_ENABLED					(1U << 31)
-#define INTEL_ARC_PIPE_DDI_FUNC_CTL_ENABLE		(1U << 31)
-#define INTEL_ARC_PIPE_DDI_SELECT_MASK			(7U << 28)
-#define INTEL_ARC_PIPE_DDI_MODESEL_MASK			(7U << 24)
-#define INTEL_ARC_PIPE_DDI_MODE_DP_SST			2U
-#define INTEL_ARC_PIPE_DDI_MODE_DP_MST			3U
-#define INTEL_ARC_PIPE_DDI_BPC_MASK				(7U << 20)
-#define INTEL_ARC_PIPE_DDI_DP_WIDTH_MASK		(7U << 1)
-#define INTEL_ARC_PIPE_DDI_DP_WIDTH_SHIFT		1
-#define INTEL_ARC_DISPLAY_CONTROL_ENABLED		(1U << 31)
-#define INTEL_ARC_DISPLAY_CONTROL_COLOR_MASK_SKY (0x0fU << 24)
-#define INTEL_ARC_DISPLAY_CONTROL_CMAP8_SKY		(0x0cU << 24)
-#define INTEL_ARC_DISPLAY_CONTROL_RGB16_SKY		(0x0eU << 24)
-#define INTEL_ARC_DISPLAY_CONTROL_RGB32_SKY		(0x04U << 24)
-#define INTEL_ARC_DDI_BUF_CTL_ENABLE			(1U << 31)
-#define INTEL_ARC_DDI_BUF_TRANS_SELECT(n)		((uint32)(n) << 24)
-#define INTEL_ARC_DDI_PORT_WIDTH(width)			(((uint32)(width) - 1) << 1)
-#define INTEL_ARC_DDI_BUF_IS_IDLE				(1U << 7)
-#define INTEL_ARC_DDI_BUF_EMP_MASK				(0xfU << 24)
-
-#define INTEL_ARC_DP_LINK_RATE_810				0x1e
-#define INTEL_ARC_DP_LINK_RATE_1350				0x2a
-#define INTEL_ARC_DP_LINK_RATE_2000				0x32
-
-#define INTEL_ARC_TGL_DPCLKA_CFGCR0				0x164280
-#define INTEL_ARC_TGL_DPCLKA_DDIC_CLOCK_OFF		(1U << 24)
-#define INTEL_ARC_TGL_DPCLKA_DDIB_CLOCK_OFF		(1U << 11)
-#define INTEL_ARC_TGL_DPCLKA_DDIA_CLOCK_OFF		(1U << 10)
-#define INTEL_ARC_TGL_DPCLKA_DDIC_CLOCK_SELECT	(3U << 4)
-#define INTEL_ARC_TGL_DPCLKA_DDIB_CLOCK_SELECT	(3U << 2)
-#define INTEL_ARC_TGL_DPCLKA_DDIB_CLOCK_SELECT_SHIFT 2
-#define INTEL_ARC_TGL_DPCLKA_DDIA_CLOCK_SELECT	(3U << 0)
-
-#define INTEL_ARC_TGL_DPLL0_CFGCR0				0x164284
-#define INTEL_ARC_TGL_DPLL1_CFGCR0				0x16428C
-#define INTEL_ARC_TGL_DPLL4_CFGCR0				0x164294
-#define INTEL_ARC_TGL_DPLL_DCO_FRACTION_SHIFT	10
-#define INTEL_ARC_TGL_DPLL0_CFGCR1				0x164288
-#define INTEL_ARC_TGL_DPLL1_CFGCR1				0x164290
-#define INTEL_ARC_TGL_DPLL4_CFGCR1				0x164298
-#define INTEL_ARC_TGL_DPLL_QDIV_RATIO_SHIFT		10
-#define INTEL_ARC_TGL_DPLL_QDIV_ENABLE			(1U << 9)
-#define INTEL_ARC_TGL_DPLL_KDIV_1				(1U << 6)
-#define INTEL_ARC_TGL_DPLL_KDIV_2				(2U << 6)
-#define INTEL_ARC_TGL_DPLL_KDIV_3				(4U << 6)
-#define INTEL_ARC_TGL_DPLL_PDIV_2				(1U << 2)
-#define INTEL_ARC_TGL_DPLL_PDIV_3				(2U << 2)
-#define INTEL_ARC_TGL_DPLL_PDIV_5				(4U << 2)
-#define INTEL_ARC_TGL_DPLL_PDIV_7				(8U << 2)
-#define INTEL_ARC_TGL_DPLL0_ENABLE				0x46010
-#define INTEL_ARC_TGL_DPLL1_ENABLE				0x46014
-#define INTEL_ARC_TGL_DPLL4_ENABLE				0x46018
-#define INTEL_ARC_TGL_DPLL_ENABLE				(1U << 31)
-#define INTEL_ARC_TGL_DPLL_LOCK					(1U << 30)
-#define INTEL_ARC_TGL_DPLL_POWER_ENABLE			(1U << 27)
-#define INTEL_ARC_TGL_DPLL_POWER_STATE			(1U << 26)
-#define INTEL_ARC_TGL_DPLL0_SPREAD_SPECTRUM		0x164B10
-#define INTEL_ARC_TGL_DPLL1_SPREAD_SPECTRUM		0x164C10
-#define INTEL_ARC_TGL_DPLL4_SPREAD_SPECTRUM		0x164E10
-#define INTEL_ARC_TGL_DPLL_SSC_ENABLE			(1U << 9)
-
-#define INTEL_ARC_CX0_M2P_CTL_A_LN0			0x64040
-#define INTEL_ARC_CX0_M2P_CTL_B_LN0			0x64140
-#define INTEL_ARC_CX0_M2P_CTL_USBC1_LN0			0x16F240
-#define INTEL_ARC_CX0_M2P_CTL_USBC2_LN0			0x16F440
-#define INTEL_ARC_CX0_P2M_STATUS_OFFSET			0x8
-#define INTEL_ARC_CX0_TIMER_A_LN0				0x640d8
-#define INTEL_ARC_CX0_TIMER_B_LN0				0x641d8
-#define INTEL_ARC_CX0_TIMER_USBC1_LN0			0x16f258
-#define INTEL_ARC_CX0_TIMER_USBC2_LN0			0x16f458
-#define INTEL_ARC_CX0_M2P_TRANSACTION_PENDING		(1U << 31)
-#define INTEL_ARC_CX0_M2P_COMMAND_WRITE_UNCOMMITTED	(0x1U << 27)
-#define INTEL_ARC_CX0_M2P_COMMAND_WRITE_COMMITTED	(0x2U << 27)
-#define INTEL_ARC_CX0_M2P_COMMAND_READ			(0x3U << 27)
-#define INTEL_ARC_CX0_M2P_DATA(val)				(((uint32)(val) & 0xff) << 16)
-#define INTEL_ARC_CX0_M2P_TRANSACTION_RESET		(1U << 15)
-#define INTEL_ARC_CX0_M2P_ADDRESS(val)			((uint32)(val) & 0xfff)
-#define INTEL_ARC_CX0_P2M_RESPONSE_READY			(1U << 31)
-#define INTEL_ARC_CX0_P2M_COMMAND_READ_ACK		0x4U
-#define INTEL_ARC_CX0_P2M_COMMAND_WRITE_ACK		0x5U
-#define INTEL_ARC_CX0_P2M_COMMAND_TYPE_MASK		(0xfU << 27)
-#define INTEL_ARC_CX0_P2M_DATA_MASK				(0xffU << 16)
-#define INTEL_ARC_CX0_P2M_ERROR_SET				(1U << 15)
-#define INTEL_ARC_CX0_MSGBUS_TIMEOUT_MS			1000
-#define INTEL_ARC_CX0_TIMER_VALUE				0x0000a000
-
-#define INTEL_ARC_C10_VDR_CMN(idx)				(0xC20 + (idx))
-#define INTEL_ARC_C10_CMN3_TXVBOOST_MASK		(7U << 5)
-#define INTEL_ARC_C10_CMN3_TXVBOOST(val)		(((uint8)(val) & 0x7) << 5)
-#define INTEL_ARC_C10_VDR_TX(idx)				(0xC30 + (idx))
-#define INTEL_ARC_C10_TX1_TERMCTL_MASK			(7U << 5)
-#define INTEL_ARC_C10_TX1_TERMCTL(val)			(((uint8)(val) & 0x7) << 5)
-#define INTEL_ARC_C10_VDR_CONTROL(idx)			(0xC70 + (idx) - 1)
-#define INTEL_ARC_C10_VDR_CTRL_MSGBUS_ACCESS	(1U << 2)
-#define INTEL_ARC_C10_VDR_CTRL_MASTER_LANE		(1U << 1)
-#define INTEL_ARC_C10_VDR_CTRL_UPDATE_CFG		(1U << 0)
-#define INTEL_ARC_C10_VDR_OVRD					0xD71
-#define INTEL_ARC_C10_VDR_OVRD_TX1				(1U << 0)
-#define INTEL_ARC_C10_VDR_OVRD_TX2				(1U << 2)
-#define INTEL_ARC_C10_VDR_PRE_OVRD_TX1			0xD80
-#define INTEL_ARC_C10_PHY_OVRD_LEVEL_MASK		0x3fU
-#define INTEL_ARC_C10_PHY_OVRD_LEVEL(val)		((uint8)(val) & 0x3f)
-#define INTEL_ARC_CX0_VDROVRD_CTL(lane, tx, control) \
-	(INTEL_ARC_C10_VDR_PRE_OVRD_TX1 + (((lane) ^ (tx)) * 0x10) + (control))
-#define INTEL_ARC_PHY_C20_VDR_CUSTOM_SERDES_RATE	0xD00
-#define INTEL_ARC_PHY_C20_IS_DP					(1U << 6)
-#define INTEL_ARC_PHY_C20_DP_RATE(val)			(((uint8)(val) & 0xf) << 1)
-#define INTEL_ARC_PHY_C20_CONTEXT_TOGGLE			(1U << 0)
-#define INTEL_ARC_PHY_C20_VDR_CUSTOM_WIDTH		0xD02
-#define INTEL_ARC_PHY_C20_CUSTOM_WIDTH(val)		((uint8)(val) & 0x3)
-
-struct arc_mit_buf_trans_entry {
-	uint8	main;
-	uint8	pre;
-	uint8	post;
-};
 
 static const arc_mit_buf_trans_entry kDg2SnpsDp14Trans[] = {
 	{25, 0, 0}, {32, 0, 6}, {35, 0, 10}, {43, 0, 17}, {35, 0, 0},
@@ -282,6 +128,8 @@ static status_t aux_send_receive(const i2c_bus* bus, uint32 slaveAddress,
 static ssize_t aux_transfer(uint8 ddiPort, dp_aux_msg* message);
 static ssize_t aux_transfer(uint8 ddiPort, uint8* transmitBuffer,
 	uint8 transmitSize, uint8* receiveBuffer, uint8 receiveSize);
+static status_t
+intel_arc_program_hdmi_dpll(accelerant_info* info, int dpll_id, uint32 pixel_clock_khz);
 
 
 static bool
@@ -299,14 +147,14 @@ is_mode_supported(display_mode* mode)
 {
 	return mode != NULL && *mode == gInfo->shared_info->current_mode;
 }
-
+/*
 static status_t
 create_mode_list(void)
 {
 	debug_printf("intel_arc.accelerant: create_mode_list() entering\n");
 	display_mode mode = gInfo->shared_info->current_mode;
 	const color_space kSupportedSpaces[] = {
-		B_RGB32_LITTLE, B_RGB16_LITTLE, B_CMAP8
+		B_RGB32, B_RGB16, B_CMAP8
 	};
 	if (mode.virtual_width == 0 || mode.virtual_height == 0
 		|| mode.space == B_NO_COLOR_SPACE) {
@@ -347,7 +195,294 @@ create_mode_list(void)
 	debug_printf("intel_arc.accelerant: Created %u display modes successfully\n", gInfo->shared_info->mode_count);
 	gInfo->shared_info->mode_list_area = gInfo->mode_list_area;
 	return B_OK;
+}*/
+/* modo creato sbagliato
+ * h_display e v_display rimangono quelli impostati nella pipe (nel mio caso a 1920x1080)
+ * quindi la risoluzione viene scalata per riempire quella risoluzione, ma viene visualizzata con un pitch sbagliato
+ * per avere un vero modo/risoluzione bisogna mettere h_display alla risoluzione corretta altrimenti il monitor si configura
+ *a 1920 x 1080 invece che 1280x1024 per esempio
+ */
+static status_t
+create_mode_list(void)
+{
+	display_mode mode = gInfo->shared_info->current_mode;
+	debug_printf("==================================================\n");
+	debug_printf("intel_arc.accelerant: >>> CREATE MODE LIST <<<\n");
+	debug_printf("intel_arc.accelerant: >>> PREVIOUS MODE: <<<\n");
+	debug_printf("  - Virtual Size : %u x %u\n", mode.virtual_width, mode.virtual_height);
+	debug_printf("  - Display Start: (%u, %u)\n", mode.h_display_start, mode.v_display_start);
+	debug_printf("  - Color Space  : 0x%08X\n", mode.space);
+	debug_printf("  - Flags        : 0x%08X\n", mode.flags);
+	debug_printf("  --- Timing Details ---\n");
+	debug_printf("  - Pixel Clock  : %u kHz\n", mode.timing.pixel_clock);
+	debug_printf("  - Horizontal   : Display=%u, SyncStart=%u, SyncEnd=%u, Total=%u\n",
+		mode.timing.h_display, mode.timing.h_sync_start,
+		mode.timing.h_sync_end, mode.timing.h_total);
+	debug_printf("  - Vertical     : Display=%u, SyncStart=%u, SyncEnd=%u, Total=%u\n",
+		mode.timing.v_display, mode.timing.v_sync_start,
+		mode.timing.v_sync_end, mode.timing.v_total);
+	debug_printf("  - Sync Flags   : 0x%08X\n", mode.timing.flags);
+	debug_printf("==================================================\n");
+	if (mode.virtual_width == 0 || mode.virtual_height == 0) {
+		if (gInfo->shared_info->has_boot_info
+			&& gInfo->shared_info->boot_width > 0
+			&& gInfo->shared_info->boot_height > 0) {
+			debug_printf("intel_arc.accelerant: Using boot framebuffer mode for mode list:\n");
+			mode.virtual_width = gInfo->shared_info->boot_width;
+			mode.virtual_height = gInfo->shared_info->boot_height;
+			mode.space = gInfo->shared_info->boot_depth >= 24 ? B_RGB32 : B_RGB16;
+			debug_printf("intel_arc.accelerant: mode.virtual_width %u, mode.virtual_height %u\n", mode.virtual_width,mode.virtual_height);
+		} else {
+			debug_printf("intel_arc.accelerant: Boot mode unavailable, falling back to 1024x768\n");
+			memset(&mode, 0, sizeof(mode));
+			mode.virtual_width = 1024;
+			mode.virtual_height = 768;
+			mode.space = B_RGB32;
+		}
+	}
+
+	if (mode.space == B_NO_COLOR_SPACE)
+		mode.space = B_RGB32;
+
+	mode.h_display_start = 0;
+	mode.v_display_start = 0;
+	mode.flags = 0;
+
+	if (mode.timing.h_display == 0 || mode.timing.v_display == 0) {
+		debug_printf("intel_arc.accelerant: i timings sono vuoti li configuro dal virtual_width/height\n");
+		//debug_printf("intel_arc.accelerant: forzo i timings dal virtual_width/height %u %u\n",mode.virtual_width,mode.virtual_height);
+		mode.timing.h_display = mode.virtual_width;
+		mode.timing.v_display = mode.virtual_height;
+	}
+
+	const int8 pipe = gInfo->shared_info->active_pipe;
+	if (pipe >= 0) {
+		const uint32 hTotal = gInfo->shared_info->pipe_h_total[pipe];
+		const uint32 hSync = gInfo->shared_info->pipe_h_sync[pipe];
+		const uint32 vTotal = gInfo->shared_info->pipe_v_total[pipe];
+		const uint32 vSync = gInfo->shared_info->pipe_v_sync[pipe];
+
+		if (hTotal != 0 && vTotal != 0) {
+			mode.timing.h_display = (hTotal & 0xffff) + 1;
+			mode.timing.h_total = (hTotal >> 16) + 1;
+			mode.timing.h_sync_start = (hSync & 0xffff) + 1;
+			mode.timing.h_sync_end = (hSync >> 16) + 1;
+			mode.timing.v_display = (vTotal & 0xffff) + 1;
+			mode.timing.v_total = (vTotal >> 16) + 1;
+			mode.timing.v_sync_start = (vSync & 0xffff) + 1;
+			mode.timing.v_sync_end = (vSync >> 16) + 1;
+		}
+	}
+
+	if (mode.timing.h_total == 0 || mode.timing.v_total == 0) {
+		compute_display_timing(mode.virtual_width, mode.virtual_height, 60, false,
+			&mode.timing);
+	}
+
+	if (mode.timing.pixel_clock == 0) {
+		mode.timing.pixel_clock = ((uint32)mode.timing.h_total
+			* (uint32)mode.timing.v_total * 60) / 1000;
+	}
+
+	const uint32 bytesPerPixel = bytes_per_pixel_for_space((color_space)mode.space);
+	if (gInfo->shared_info->bytes_per_row == 0)
+		gInfo->shared_info->bytes_per_row = mode.virtual_width * bytesPerPixel;
+	debug_printf("intel_arc.accelerant: Bytes Per Row: %u",gInfo->shared_info->bytes_per_row);
+	gInfo->shared_info->current_mode = mode;
+	debug_printf("intel_arc.accelerant: >>> CREATE MODE LIST <<<\n");
+	debug_printf("intel_arc.accelerant: >>> NEW MODE: <<<\n");
+	debug_printf("  - Virtual Size : %u x %u\n", mode.virtual_width, mode.virtual_height);
+	debug_printf("  - Display Start: (%u, %u)\n", mode.h_display_start, mode.v_display_start);
+	debug_printf("  - Color Space  : 0x%08X\n", mode.space);
+	debug_printf("  - Flags        : 0x%08X\n", mode.flags);
+	debug_printf("  --- Timing Details ---\n");
+	debug_printf("  - Pixel Clock  : %u kHz\n", mode.timing.pixel_clock);
+	debug_printf("  - Horizontal   : Display=%u, SyncStart=%u, SyncEnd=%u, Total=%u\n",
+		mode.timing.h_display, mode.timing.h_sync_start,
+		mode.timing.h_sync_end, mode.timing.h_total);
+	debug_printf("  - Vertical     : Display=%u, SyncStart=%u, SyncEnd=%u, Total=%u\n",
+		mode.timing.v_display, mode.timing.v_sync_start,
+		mode.timing.v_sync_end, mode.timing.v_total);
+	debug_printf("  - Sync Flags   : 0x%08X\n", mode.timing.flags);
+	debug_printf("==================================================\n");
+
+	const color_space supportedSpace[] = { (color_space)mode.space };
+	gInfo->mode_list_area = create_display_modes("intel arc modes", NULL,
+		&mode, 1, supportedSpace, 1, is_mode_supported, &gInfo->mode_list,
+		&gInfo->shared_info->mode_count);
+
+	if (gInfo->mode_list_area < B_OK) {
+		debug_printf("intel_arc.accelerant ERROR: create_display_modes failed: %s\n",
+			strerror(gInfo->mode_list_area));
+		return gInfo->mode_list_area;
+	}
+
+	gInfo->shared_info->mode_list_area = gInfo->mode_list_area;
+	debug_printf("intel_arc.accelerant: Passthrough mode list created with %u mode(s)\n",
+		gInfo->shared_info->mode_count);
+	
+	return B_OK;
 }
+/*
+static status_t
+create_mode_list(void)
+{
+    display_mode mode = gInfo->shared_info->current_mode;
+
+    debug_printf("==================================================\n");
+    debug_printf("intel_arc.accelerant: >>> CREATE MODE LIST <<<\n");
+    debug_printf("intel_arc.accelerant: >>> PREVIOUS MODE: <<<\n");
+    debug_printf("   - Virtual Size : %u x %u\n", mode.virtual_width, mode.virtual_height);
+    debug_printf("   - Color Space  : 0x%08X\n", mode.space);
+    debug_printf("==================================================\n");
+
+    // 1. Fallback su Boot Info / Default se la dimensione virtuale è zero
+    if (mode.virtual_width == 0 || mode.virtual_height == 0) {
+        if (gInfo->shared_info->has_boot_info
+            && gInfo->shared_info->boot_width > 0
+            && gInfo->shared_info->boot_height > 0) {
+            debug_printf("intel_arc.accelerant: Using boot framebuffer mode\n");
+            mode.virtual_width = gInfo->shared_info->boot_width;
+            mode.virtual_height = gInfo->shared_info->boot_height;
+            mode.space = gInfo->shared_info->boot_depth >= 24 ? B_RGB32 : B_RGB16;
+        } else {
+            debug_printf("intel_arc.accelerant: Fallback to 1024x768\n");
+            memset(&mode, 0, sizeof(mode));
+            mode.virtual_width = 1024;
+            mode.virtual_height = 768;
+            mode.space = B_RGB32;
+        }
+    }
+
+    if (mode.space == B_NO_COLOR_SPACE)
+        mode.space = B_RGB32;
+
+    mode.h_display_start = 0;
+    mode.v_display_start = 0;
+    mode.flags = 0;
+
+    // 2. Forza i display timing a combaciare esattamente con la dimensione virtuale trovata
+    mode.timing.h_display = mode.virtual_width;
+    mode.timing.v_display = mode.virtual_height;
+
+    // 3. Genera un timing VESA/GTF valido per la risoluzione VERA (1280x1024)
+    // Non sovrascrivere h_display con registri HTOTAL disallineati dal VBIOS
+    compute_display_timing(mode.virtual_width, mode.virtual_height, 60, false, &mode.timing);
+
+    // 4. Calcolo corretto del Pixel Clock se non presente
+    if (mode.timing.pixel_clock == 0) {
+        mode.timing.pixel_clock = ((uint32)mode.timing.h_total
+            * (uint32)mode.timing.v_total * 60) / 1000;
+    }
+
+    // 5. Preserva il Pitch/Stride calcolato nel Kernel Probe (5120 byte per 1280px RGB32)
+    const uint32 bytesPerPixel = bytes_per_pixel_for_space((color_space)mode.space);
+    //if (gInfo->shared_info->bytes_per_row == 0)
+        gInfo->shared_info->bytes_per_row = mode.virtual_width * bytesPerPixel;
+
+    gInfo->shared_info->current_mode = mode;
+
+    debug_printf("intel_arc.accelerant: >>> NEW MODE GENERATED: <<<\n");
+    debug_printf("   - Virtual Size : %u x %u\n", mode.virtual_width, mode.virtual_height);
+    debug_printf("   - Pitch (Bytes/Row) : %u\n", gInfo->shared_info->bytes_per_row);
+    debug_printf("   - Timing HDisplay: %u, HTotal: %u\n", mode.timing.h_display, mode.timing.h_total);
+    debug_printf("   - Timing VDisplay: %u, VTotal: %u\n", mode.timing.v_display, mode.timing.v_total);
+    debug_printf("   - Pixel Clock   : %u kHz\n", mode.timing.pixel_clock);
+    debug_printf("==================================================\n");
+
+    const color_space supportedSpace[] = { (color_space)mode.space };
+    gInfo->mode_list_area = create_display_modes("intel arc modes", NULL,
+        &mode, 1, supportedSpace, 1, NULL , &gInfo->mode_list, //is_mode_supported
+        &gInfo->shared_info->mode_count);
+
+    if (gInfo->mode_list_area < B_OK) {
+        debug_printf("intel_arc.accelerant ERROR: create_display_modes failed: %s\n",
+            strerror(gInfo->mode_list_area));
+        return gInfo->mode_list_area;
+    }
+
+    gInfo->shared_info->mode_list_area = gInfo->mode_list_area;
+    debug_printf("intel_arc.accelerant: Passthrough mode list created with %u mode(s)\n",
+        gInfo->shared_info->mode_count);
+
+    return B_OK;
+}*/
+/* in questa versione creiamo i modi corretti con h_display corretto.
+ * il problema è che non scriviamo correttamente i registri per quello lo schermo si spegne
+
+static status_t
+create_mode_list(void)
+{
+    debug_printf("intel_arc.accelerant: create_mode_list() entering\n");
+
+    display_mode mode = gInfo->shared_info->current_mode;
+    const color_space kSupportedSpaces[] = {
+        B_RGB32, B_RGB16, B_CMAP8
+    };
+    const uint32 kNumSupportedSpaces = sizeof(kSupportedSpaces) / sizeof(kSupportedSpaces[0]);
+
+    // 1. Sanificazione della modalità iniziale ricavata dai registri/boot
+    if (mode.virtual_width == 0 || mode.virtual_height == 0
+        || mode.space == B_NO_COLOR_SPACE) {
+        debug_printf("intel_arc.accelerant: Current mode invalid, setting fallback 1024x768@60Hz\n");
+        mode.virtual_width = 1024;
+        mode.virtual_height = 768;
+        mode.space = B_RGB32;
+    } else {
+        debug_printf("intel_arc.accelerant: Valid active mode detected: %ux%u\n",
+            mode.virtual_width, mode.virtual_height);
+    }
+
+    // Garantisci timings VESA coerenti per la modalità iniziale
+    mode.timing.h_display = mode.virtual_width;
+    mode.timing.v_display = mode.virtual_height;
+    compute_display_timing(mode.virtual_width, mode.virtual_height, 60, false, &mode.timing);
+
+    if (mode.timing.pixel_clock == 0) {
+        mode.timing.pixel_clock = ((uint32)mode.timing.h_total
+            * (uint32)mode.timing.v_total * 60) / 1000;
+    }
+
+    // Preserva lo stride rilevato dall'hardware nel kernel
+    if (gInfo->shared_info->bytes_per_row == 0) {
+        const uint32 bpp = bytes_per_pixel_for_space((color_space)mode.space);
+        gInfo->shared_info->bytes_per_row = mode.virtual_width * (bpp > 0 ? bpp : 4);
+    }
+
+    gInfo->shared_info->current_mode = mode;
+
+    // 2. Controllo presenza EDID (sia Hardware che Bootloader Fallback)
+    const bool hasValidEdid = gInfo->has_edid || gInfo->shared_info->has_boot_edid;
+    edid1_info* targetEdid = gInfo->has_edid ? &gInfo->edid_info : &gInfo->shared_info->boot_edid;
+
+    if (hasValidEdid) {
+        debug_printf("intel_arc.accelerant: EDID available (%s), parsing full mode list\n",
+            gInfo->has_edid ? "Hardware" : "Bootloader");
+
+        // Genera tutte le risoluzioni dichiarate dal monitor tramite l'EDID
+        gInfo->mode_list_area = create_display_modes("intel arc modes",
+            targetEdid, NULL, 0, kSupportedSpaces, kNumSupportedSpaces,
+            NULL , &gInfo->mode_list, &gInfo->shared_info->mode_count);//is_mode_supported
+    } else {
+        debug_printf("intel_arc.accelerant: No EDID found, generating single active mode fallback\n");
+
+        gInfo->mode_list_area = create_display_modes("intel arc modes",
+            NULL, &mode, 1, kSupportedSpaces, kNumSupportedSpaces,
+            is_mode_supported, &gInfo->mode_list, &gInfo->shared_info->mode_count);
+    }
+
+    if (gInfo->mode_list_area < B_OK) {
+        debug_printf("intel_arc.accelerant ERROR: Failed to create display modes area: %s\n",
+            strerror(gInfo->mode_list_area));
+        return gInfo->mode_list_area;
+    }
+
+    gInfo->shared_info->mode_list_area = gInfo->mode_list_area;
+    debug_printf("intel_arc.accelerant: Created %u display modes successfully\n",
+        gInfo->shared_info->mode_count);
+
+    return B_OK;
+}*/
 
 static status_t
 init_common(int device, bool isClone)
@@ -640,6 +775,7 @@ status_t
 intel_arc_propose_display_mode(display_mode* target, display_mode* low,
 	display_mode* high)
 {
+	CALLED();
 	(void)handle_hotplug_event();
 	(void)low;
 	(void)high;
@@ -654,7 +790,7 @@ intel_arc_propose_display_mode(display_mode* target, display_mode* low,
 	*target = match;
 	return B_OK;
 }
-
+/*
 status_t
 intel_arc_get_preferred_mode(display_mode* mode)
 {
@@ -664,6 +800,62 @@ intel_arc_get_preferred_mode(display_mode* mode)
 
 	*mode = gInfo->mode_list[0];
 	return B_OK;
+}*/
+
+status_t
+intel_arc_get_preferred_mode(display_mode* mode)
+{
+    (void)handle_hotplug_event();
+
+    if (gInfo->shared_info->mode_count == 0 || gInfo->mode_list == NULL)
+        return B_ENTRY_NOT_FOUND;
+
+    if (mode == NULL)
+        return B_BAD_VALUE;
+
+    // 1. Se abbiamo le informazioni di boot, cerchiamo la modalità corrispondente
+    if (gInfo->shared_info->has_boot_info 
+        && gInfo->shared_info->boot_width > 0 
+        && gInfo->shared_info->boot_height > 0) {
+
+        const uint32 targetWidth = gInfo->shared_info->boot_width;
+        const uint32 targetHeight = gInfo->shared_info->boot_height;
+        const color_space targetSpace = (gInfo->shared_info->boot_depth >= 24) 
+            ? B_RGB32 : B_RGB16;
+
+        // Cerca prima un match perfetto (Risoluzione + Color Space)
+        for (uint32 i = 0; i < gInfo->shared_info->mode_count; i++) {
+            if (gInfo->mode_list[i].virtual_width == targetWidth
+                && gInfo->mode_list[i].virtual_height == targetHeight
+                && gInfo->mode_list[i].space == targetSpace) {
+                
+                *mode = gInfo->mode_list[i];
+                debug_printf("intel_arc.accelerant: Preferred mode matched boot resolution: %ux%u (index %u)\n",
+                    targetWidth, targetHeight, i);
+                return B_OK;
+            }
+        }
+
+        // Cerca un match secondario (Solo Risoluzione, se lo spazio colore varia)
+        for (uint32 i = 0; i < gInfo->shared_info->mode_count; i++) {
+            if (gInfo->mode_list[i].virtual_width == targetWidth
+                && gInfo->mode_list[i].virtual_height == targetHeight) {
+                
+                *mode = gInfo->mode_list[i];
+                debug_printf("intel_arc.accelerant: Preferred mode matched boot size: %ux%u\n",
+                    targetWidth, targetHeight);
+                return B_OK;
+            }
+        }
+    }
+
+    // 2. Fallback: Se la risoluzione di boot non è presente nell'EDID o non è definita,
+    // usiamo la prima modalità valida dell'elenco
+    *mode = gInfo->mode_list[0];
+    debug_printf("intel_arc.accelerant: Preferred mode fallback to mode_list[0]: %ux%u\n",
+        mode->virtual_width, mode->virtual_height);
+
+    return B_OK;
 }
 
 status_t
@@ -671,6 +863,7 @@ intel_arc_set_display_mode(display_mode* mode)
 {
 	if (mode == NULL)
 		return B_BAD_VALUE;
+
 	debug_printf("intel_arc.accelerant: >>> SET_DISPLAY_MODE requested: %ux%u, pixel_clock=%u kHz <<<\n",
 		mode->virtual_width, mode->virtual_height, mode->timing.pixel_clock);
 
@@ -683,8 +876,10 @@ intel_arc_set_display_mode(display_mode* mode)
 
 	display_mode target = *mode;
 	status_t status = intel_arc_propose_display_mode(&target, &target, &target);
-	if (status != B_OK)
+	if (status != B_OK) {
+		debug_printf("propose display mode failed\n");
 		return status;
+	}
 
 	if (gInfo->shared_info->active_pipe < 0) {
 		debug_printf("intel_arc.accelerant ERROR: No active pipe found in shared info!\n");
@@ -700,6 +895,8 @@ intel_arc_set_display_mode(display_mode* mode)
 	const uint32 bytesPerPixel = bytes_per_pixel_for_space((color_space)target.space);
 	if (bytesPerPixel == 0)
 		return B_BAD_VALUE;
+	debug_printf("Arc Driver: app_server pitch = %" B_PRIu32 ", calculated pitch = %" B_PRIu32 "\n",
+    	gInfo->shared_info->bytes_per_row, (target.virtual_width * bytesPerPixel + 63) & ~63);
 
 	gInfo->shared_info->current_mode = target;
 	gInfo->shared_info->bytes_per_row = target.virtual_width * bytesPerPixel;
@@ -719,14 +916,51 @@ intel_arc_set_display_mode(display_mode* mode)
 		= ((uint32)(target.timing.v_sync_end - 1) << 16) | ((uint32)target.timing.v_sync_start - 1);
 	gInfo->shared_info->pipe_size[pipe]
 		= ((uint32)(target.timing.v_display - 1) << 16) | ((uint32)target.timing.h_display - 1);
-	gInfo->shared_info->plane_stride[pipe] = gInfo->shared_info->bytes_per_row;
+	// modifica applicata:
+	//gInfo->shared_info->pipe_size[pipe]
+    //    = ((uint32)(target.timing.h_display - 1) << 16) | ((uint32)target.timing.v_display - 1);
+    //-------------------
+    //modifiche da stride
+	//gInfo->shared_info->plane_stride[pipe] = gInfo->shared_info->bytes_per_row;
+	//debug_printf("intel_arc.accelerant: scritto in gInfo->shared_info->plane_stride[pipe] %u\n",gInfo->shared_info->bytes_per_row);
+	// modifica applicata:
+	const uint32 bytesPerRow = (target.virtual_width * bytesPerPixel + 63) & ~63;
+	gInfo->shared_info->bytes_per_row = bytesPerRow;
+	gInfo->shared_info->plane_stride[pipe] = bytesPerRow / 64;
+    //-------------------
 	gInfo->shared_info->plane_pos[pipe] = 0;
-	gInfo->shared_info->plane_image_size[pipe]
-		= ((uint32)(target.timing.v_display - 1) << 16) | ((uint32)target.timing.h_display - 1);
-	gInfo->shared_info->plane_control[pipe]
-		= (gInfo->shared_info->plane_control[pipe] & ~INTEL_ARC_DISPLAY_CONTROL_COLOR_MASK_SKY)
-		| plane_color_format_for_space((color_space)target.space);
+	//modifiche da stride
+	//gInfo->shared_info->plane_image_size[pipe]
+	//	= ((uint32)(target.timing.v_display - 1) << 16)
+	//		| ((uint32)target.timing.h_display - 1);
+	// modifica applicata:
+	//gInfo->shared_info->plane_image_size[pipe]
+    //    = ((uint32)(target.timing.h_display - 1) << 16) | ((uint32)target.timing.v_display - 1);
+	//gInfo->shared_info->plane_image_size[pipe]
+	//    = ((uint32)(target.virtual_height - 1) << 16) | ((uint32)(target.virtual_width - 1));
 
+    gInfo->shared_info->plane_control[pipe] &= ~INTEL_ARC_PLANE_TILED_MASK;
+	gInfo->shared_info->plane_control[pipe] |= INTEL_ARC_PLANE_LINEAR;
+    //-------------------
+	gInfo->shared_info->plane_control[pipe]
+		= (gInfo->shared_info->plane_control[pipe]
+			& ~INTEL_ARC_DISPLAY_CONTROL_COLOR_MASK_SKY)
+		| plane_color_format_for_space((color_space)target.space);
+	// A. Disabilita lo Scaler
+	write_register(INTEL_ARC_MMIO_PS_CTRL_A + (pipe * 0x1000), 0); //disattiva scaler hardware
+	//const uint32 hDisplay = target.timing.h_display; // 1280
+	//const uint32 vDisplay = target.timing.v_display; // 1024
+	debug_printf("intel_arc.accelerant: imposto pipe_size e plane_image_size con virtual_width e virtual_height invece che timing.h_display e v_display\n");
+	const uint32 hDisplay = target.virtual_width; // 1280
+	const uint32 vDisplay = target.virtual_height; // 1024
+
+	const uint32 nativeSize = ((vDisplay - 1) << 16) | (hDisplay - 1);
+
+	// La Pipe e il Piano devono avere LA STESSA dimensione fisica
+	gInfo->shared_info->pipe_size[pipe] = nativeSize;
+	gInfo->shared_info->plane_image_size[pipe] = nativeSize;
+	//gInfo->shared_info->plane_control[pipe] |= INTEL_ARC_PLANE_ENABLE; // Attiva PLANE_CTL_ENABLE
+/*
 	write_register(INTEL_ARC_MMIO_PIPE_A_HTOTAL + pipeOffset, gInfo->shared_info->pipe_h_total[pipe]);
 	write_register(INTEL_ARC_MMIO_PIPE_A_HBLANK + pipeOffset, gInfo->shared_info->pipe_h_blank[pipe]);
 	write_register(INTEL_ARC_MMIO_PIPE_A_HSYNC + pipeOffset, gInfo->shared_info->pipe_h_sync[pipe]);
@@ -734,6 +968,46 @@ intel_arc_set_display_mode(display_mode* mode)
 	write_register(INTEL_ARC_MMIO_PIPE_A_VBLANK + pipeOffset, gInfo->shared_info->pipe_v_blank[pipe]);
 	write_register(INTEL_ARC_MMIO_PIPE_A_VSYNC + pipeOffset, gInfo->shared_info->pipe_v_sync[pipe]);
 	write_register(INTEL_ARC_MMIO_PIPE_A_SIZE + pipeOffset, gInfo->shared_info->pipe_size[pipe]);
+	//modifiche da stride
+	write_register(INTEL_ARC_MMIO_PLANE_A_STRIDE + pipeOffset, gInfo->shared_info->plane_stride[pipe]);
+    write_register(INTEL_ARC_MMIO_PLANE_A_POS + pipeOffset, gInfo->shared_info->plane_pos[pipe]);
+    write_register(INTEL_ARC_MMIO_PLANE_A_IMAGE_SIZE + pipeOffset, gInfo->shared_info->plane_image_size[pipe]);
+    write_register(INTEL_ARC_MMIO_PLANE_A_CONTROL + pipeOffset, gInfo->shared_info->plane_control[pipe]);
+	*/
+	// B. Scrivi i Timing della Pipe (1280x1024 VESA)
+	write_register(INTEL_ARC_MMIO_PIPE_A_HTOTAL + pipeOffset, gInfo->shared_info->pipe_h_total[pipe]);
+	write_register(INTEL_ARC_MMIO_PIPE_A_HBLANK + pipeOffset, gInfo->shared_info->pipe_h_blank[pipe]);
+	write_register(INTEL_ARC_MMIO_PIPE_A_HSYNC + pipeOffset, gInfo->shared_info->pipe_h_sync[pipe]);
+	write_register(INTEL_ARC_MMIO_PIPE_A_VTOTAL + pipeOffset, gInfo->shared_info->pipe_v_total[pipe]);
+	write_register(INTEL_ARC_MMIO_PIPE_A_VBLANK + pipeOffset, gInfo->shared_info->pipe_v_blank[pipe]);
+	write_register(INTEL_ARC_MMIO_PIPE_A_VSYNC + pipeOffset, gInfo->shared_info->pipe_v_sync[pipe]);
+	write_register(INTEL_ARC_MMIO_PIPE_A_SIZE + pipeOffset, gInfo->shared_info->pipe_size[pipe]);
+	// C. Scrivi la superficie del Piano (1280x1024)
+	write_register(INTEL_ARC_MMIO_PLANE_A_POS + pipeOffset, 0);
+	write_register(INTEL_ARC_MMIO_PLANE_A_IMAGE_SIZE + pipeOffset, gInfo->shared_info->plane_image_size[pipe]);
+	write_register(INTEL_ARC_MMIO_PLANE_A_STRIDE + pipeOffset, gInfo->shared_info->plane_stride[pipe]);
+	write_register(INTEL_ARC_MMIO_PLANE_A_OFFSET + pipeOffset, 0);
+	write_register(INTEL_ARC_MMIO_PLANE_A_CONTROL + pipeOffset, gInfo->shared_info->plane_control[pipe] | (1U << 31));
+    
+    uint32 fbAddress = gInfo->shared_info->frame_buffer_base + gInfo->shared_info->frame_buffer_offset;
+    write_register(INTEL_ARC_MMIO_PLANE_A_SURFACE + pipeOffset, fbAddress);
+    
+    uint32 ddiFuncCtl = gInfo->shared_info->pipe_ddi_func_ctl[pipe];
+
+    if ((target.timing.flags & B_POSITIVE_HSYNC) != 0)
+        ddiFuncCtl |= INTEL_ARC_DDI_HSYNC_POLARITY_POSITIVE;
+    else
+        ddiFuncCtl &= ~INTEL_ARC_DDI_HSYNC_POLARITY_POSITIVE;
+
+    if ((target.timing.flags & B_POSITIVE_VSYNC) != 0)
+        ddiFuncCtl |= INTEL_ARC_DDI_VSYNC_POLARITY_POSITIVE;
+    else
+        ddiFuncCtl &= ~INTEL_ARC_DDI_VSYNC_POLARITY_POSITIVE;
+
+    // Salva lo stato aggiornato nella struttura condivisa e scrivi il registro MMIO
+    gInfo->shared_info->pipe_ddi_func_ctl[pipe] = ddiFuncCtl;
+    write_register(INTEL_ARC_MMIO_PIPE_A_DDI_FUNC_CTL + pipeOffset, ddiFuncCtl);
+    //-------------------
 
 	debug_printf("intel_arc.accelerant: Configuring link for Active Pipe %d (FuncCtl: 0x%08X)\n",
 		pipe, gInfo->shared_info->pipe_ddi_func_ctl[pipe]);
@@ -750,17 +1024,124 @@ intel_arc_set_display_mode(display_mode* mode)
 		}
 	} else {
 		debug_printf("intel_arc.accelerant: Mode is NOT DisplayPort (likely HDMI/DVI), skipping DP link training\n");
+		status = intel_arc_program_hdmi_dpll(gInfo, pipe, target.timing.pixel_clock);
+    	if (status != B_OK) {
+        	debug_printf("intel_arc.accelerant ERROR: intel_arc_program_hdmi_dpll failed: %s\n", strerror(status));
+        	return status;
+    	}
 	}
 
 	status = apply_dpms_on();
 	if (status == B_OK) {
 		*mode = target;
+		gInfo->shared_info->fbc.frame_buffer = (void*)gInfo->shared_info->frame_buffer;
+    	gInfo->shared_info->fbc.bytes_per_row = gInfo->shared_info->bytes_per_row;
+    	gInfo->shared_info->fbc.frame_buffer_dma = (void *)(gInfo->shared_info->frame_buffer_base 
+    + gInfo->shared_info->frame_buffer_offset);
 		debug_printf("intel_arc.accelerant: SET_DISPLAY_MODE completed successfully!\n");
 	} else {
 		debug_printf("intel_arc.accelerant ERROR: apply_dpms_on() failed: %s\n", strerror(status));
 	}
 	return status;
 }
+/* old
+status_t
+intel_arc_set_display_mode(display_mode* mode)
+{
+	if (mode == NULL)
+		return B_BAD_VALUE;
+	(void)handle_hotplug_event();
+	if (*mode == gInfo->shared_info->current_mode)
+		return B_OK;
+
+	display_mode target = *mode;
+	status_t status = intel_arc_propose_display_mode(&target, &target, &target);
+	if (status != B_OK)
+		return status;
+
+	if (gInfo->shared_info->active_pipe < 0)
+		return B_UNSUPPORTED;
+
+	status = apply_dpms_off();
+	if (status != B_OK)
+		return status;
+
+	const int8 pipe = gInfo->shared_info->active_pipe;
+	const uint32 pipeOffset = (uint32)pipe * INTEL_ARC_MMIO_PIPE_OFFSET;
+	const uint32 bytesPerPixel
+		= bytes_per_pixel_for_space((color_space)target.space);
+	if (bytesPerPixel == 0)
+		return B_BAD_VALUE;
+
+	gInfo->shared_info->current_mode = target;
+	gInfo->shared_info->bytes_per_row = target.virtual_width * bytesPerPixel;
+	gInfo->shared_info->pipe_h_total[pipe]
+		= ((uint32)(target.timing.h_total - 1) << 16)
+			| ((uint32)target.timing.h_display - 1);
+	gInfo->shared_info->pipe_h_blank[pipe]
+		= ((uint32)(target.timing.h_total - 1) << 16)
+			| ((uint32)target.timing.h_display - 1);
+	gInfo->shared_info->pipe_h_sync[pipe]
+		= ((uint32)(target.timing.h_sync_end - 1) << 16)
+			| ((uint32)target.timing.h_sync_start - 1);
+	gInfo->shared_info->pipe_v_total[pipe]
+		= ((uint32)(target.timing.v_total - 1) << 16)
+			| ((uint32)target.timing.v_display - 1);
+	gInfo->shared_info->pipe_v_blank[pipe]
+		= ((uint32)(target.timing.v_total - 1) << 16)
+			| ((uint32)target.timing.v_display - 1);
+	gInfo->shared_info->pipe_v_sync[pipe]
+		= ((uint32)(target.timing.v_sync_end - 1) << 16)
+			| ((uint32)target.timing.v_sync_start - 1);
+	gInfo->shared_info->pipe_size[pipe]
+		= ((uint32)(target.timing.v_display - 1) << 16)
+			| ((uint32)target.timing.h_display - 1);
+	gInfo->shared_info->plane_stride[pipe] = gInfo->shared_info->bytes_per_row;
+	gInfo->shared_info->plane_pos[pipe] = 0;
+	gInfo->shared_info->plane_image_size[pipe]
+		= ((uint32)(target.timing.v_display - 1) << 16)
+			| ((uint32)target.timing.h_display - 1);
+	gInfo->shared_info->plane_control[pipe]
+		= (gInfo->shared_info->plane_control[pipe]
+			& ~INTEL_ARC_DISPLAY_CONTROL_COLOR_MASK_SKY)
+		| plane_color_format_for_space((color_space)target.space);
+
+	write_register(INTEL_ARC_MMIO_PIPE_A_HTOTAL + pipeOffset,
+		gInfo->shared_info->pipe_h_total[pipe]);
+	write_register(INTEL_ARC_MMIO_PIPE_A_HBLANK + pipeOffset,
+		gInfo->shared_info->pipe_h_blank[pipe]);
+	write_register(INTEL_ARC_MMIO_PIPE_A_HSYNC + pipeOffset,
+		gInfo->shared_info->pipe_h_sync[pipe]);
+	write_register(INTEL_ARC_MMIO_PIPE_A_VTOTAL + pipeOffset,
+		gInfo->shared_info->pipe_v_total[pipe]);
+	write_register(INTEL_ARC_MMIO_PIPE_A_VBLANK + pipeOffset,
+		gInfo->shared_info->pipe_v_blank[pipe]);
+	write_register(INTEL_ARC_MMIO_PIPE_A_VSYNC + pipeOffset,
+		gInfo->shared_info->pipe_v_sync[pipe]);
+	write_register(INTEL_ARC_MMIO_PIPE_A_SIZE + pipeOffset,
+		gInfo->shared_info->pipe_size[pipe]);
+
+	if ((((gInfo->shared_info->pipe_ddi_func_ctl[pipe]
+			& INTEL_ARC_PIPE_DDI_MODESEL_MASK) >> 24)
+			== INTEL_ARC_PIPE_DDI_MODE_DP_SST)
+		|| (((gInfo->shared_info->pipe_ddi_func_ctl[pipe]
+			& INTEL_ARC_PIPE_DDI_MODESEL_MASK) >> 24)
+			== INTEL_ARC_PIPE_DDI_MODE_DP_MST)) {
+		status = configure_dp_link(&target);
+		if (status != B_OK)
+			return status;
+	}
+
+	status = apply_dpms_on();
+	if (status == B_OK){
+		*mode = target;
+		gInfo->shared_info->fbc.frame_buffer = (void*)gInfo->shared_info->frame_buffer;
+		gInfo->shared_info->fbc.bytes_per_row = gInfo->shared_info->bytes_per_row;
+		gInfo->shared_info->fbc.frame_buffer_dma = (void *)(gInfo->shared_info->frame_buffer_base 
+			+ gInfo->shared_info->frame_buffer_offset);
+	}
+	return status;
+}*/
 
 status_t
 intel_arc_get_display_mode(display_mode* mode)
@@ -788,12 +1169,13 @@ status_t
 intel_arc_get_frame_buffer_config(frame_buffer_config* config)
 {
 	(void)handle_hotplug_event();
+	if (!config) return B_BAD_VALUE;
 	if (gInfo->frame_buffer == NULL)
 		return B_UNSUPPORTED;
-
-	config->frame_buffer = gInfo->frame_buffer;
-	config->frame_buffer_dma = NULL;
-	config->bytes_per_row = gInfo->shared_info->bytes_per_row;
+	*config = gInfo->shared_info->fbc;
+	//config->frame_buffer = gInfo->frame_buffer;
+	//config->frame_buffer_dma = NULL;
+	//config->bytes_per_row = gInfo->shared_info->bytes_per_row;
 	return B_OK;
 }
 
@@ -1808,7 +2190,7 @@ set_sink_power(uint8 ddiPort, uint8 value)
 	debug_printf("intel_arc.accelerant: set_sink_power(ddiPort=%u, value=0x%02x)\n", ddiPort, value);
 	return write_dpcd(DP_SET_POWER, &value, 1);
 }
-
+/* original
 static status_t
 apply_dpms_off(void)
 {
@@ -1898,6 +2280,112 @@ apply_dpms_on(void)
 	gInfo->shared_info->dpms_mode = B_DPMS_ON;
 	debug_printf("intel_arc.accelerant: apply_dpms_on() finished successfully\n");
 	return B_OK;
+}*/
+static status_t
+apply_dpms_off(void)
+{
+    debug_printf("intel_arc.accelerant: apply_dpms_off() entering\n");
+    if (gInfo->shared_info->active_pipe < 0)
+        return B_UNSUPPORTED;
+
+    const int8 pipe = gInfo->shared_info->active_pipe;
+    const uint32 planeControlReg = pipe_register(INTEL_ARC_MMIO_PLANE_A_CONTROL, pipe);
+    const uint32 planeSurfaceReg = pipe_register(INTEL_ARC_MMIO_PLANE_A_SURFACE, pipe);
+    const uint32 pipeDdiReg = pipe_register(INTEL_ARC_MMIO_PIPE_A_DDI_FUNC_CTL, pipe);
+    const uint32 pipeControlReg = pipe_register(INTEL_ARC_MMIO_PIPE_A_CONTROL, pipe);
+
+    // 1. Disabilita il Piano e forza il latch con la scrittura di SURFACE
+    write_register(planeControlReg,
+        gInfo->shared_info->plane_control[pipe] & ~INTEL_ARC_DISPLAY_CONTROL_ENABLED);
+    write_register(planeSurfaceReg, gInfo->shared_info->plane_surface[pipe]);
+    (void)wait_for_clear(planeControlReg, INTEL_ARC_DISPLAY_CONTROL_ENABLED, 20000);
+
+    // 2. Disabilita la funzione DDI del Transcoder e il Buffer PHY
+    write_register(pipeDdiReg,
+        gInfo->shared_info->pipe_ddi_func_ctl[pipe] & ~INTEL_ARC_PIPE_DDI_FUNC_CTL_ENABLE);
+    (void)wait_for_clear(pipeDdiReg, INTEL_ARC_PIPE_DDI_FUNC_CTL_ENABLE, 20000);
+    (void)program_ddi_buffer(gInfo->shared_info->active_ddi_port, pipe, 4, false);
+
+    // 3. Disabilita la Pipe
+    write_register(pipeControlReg,
+        gInfo->shared_info->pipe_control[pipe] & ~INTEL_ARC_PIPE_ENABLED);
+    (void)wait_for_clear(pipeControlReg, INTEL_ARC_PIPE_ENABLED, 20000);
+
+    (void)set_sink_power(gInfo->shared_info->active_ddi_port, DP_SET_POWER_D3);
+    gInfo->shared_info->dpms_mode = B_DPMS_OFF;
+    return B_OK;
+}
+
+static status_t
+apply_dpms_on(void)
+{
+    debug_printf("intel_arc.accelerant: apply_dpms_on() entering\n");
+    if (gInfo->shared_info->active_pipe < 0)
+        return B_UNSUPPORTED;
+
+    const int8 pipe = gInfo->shared_info->active_pipe;
+
+    (void)set_sink_power(gInfo->shared_info->active_ddi_port, DP_SET_POWER_D0);
+
+    // 1. Timing della Pipe
+    write_register(pipe_register(INTEL_ARC_MMIO_PIPE_A_HTOTAL, pipe),
+        gInfo->shared_info->pipe_h_total[pipe]);
+    write_register(pipe_register(INTEL_ARC_MMIO_PIPE_A_HBLANK, pipe),
+        gInfo->shared_info->pipe_h_blank[pipe]);
+    write_register(pipe_register(INTEL_ARC_MMIO_PIPE_A_HSYNC, pipe),
+        gInfo->shared_info->pipe_h_sync[pipe]);
+    write_register(pipe_register(INTEL_ARC_MMIO_PIPE_A_VTOTAL, pipe),
+        gInfo->shared_info->pipe_v_total[pipe]);
+    write_register(pipe_register(INTEL_ARC_MMIO_PIPE_A_VBLANK, pipe),
+        gInfo->shared_info->pipe_v_blank[pipe]);
+    write_register(pipe_register(INTEL_ARC_MMIO_PIPE_A_VSYNC, pipe),
+        gInfo->shared_info->pipe_v_sync[pipe]);
+    write_register(pipe_register(INTEL_ARC_MMIO_PIPE_A_SIZE, pipe),
+        gInfo->shared_info->pipe_size[pipe]);
+
+    const uint32 pipeControlReg = pipe_register(INTEL_ARC_MMIO_PIPE_A_CONTROL, pipe);
+    const uint32 pipeDdiReg = pipe_register(INTEL_ARC_MMIO_PIPE_A_DDI_FUNC_CTL, pipe);
+    const uint32 planeControlReg = pipe_register(INTEL_ARC_MMIO_PLANE_A_CONTROL, pipe);
+    const uint32 planeStrideReg = pipe_register(INTEL_ARC_MMIO_PLANE_A_STRIDE, pipe);
+    const uint32 planePosReg = pipe_register(INTEL_ARC_MMIO_PLANE_A_POS, pipe);
+    const uint32 planeImageReg = pipe_register(INTEL_ARC_MMIO_PLANE_A_IMAGE_SIZE, pipe);
+    const uint32 planeSurfaceReg = pipe_register(INTEL_ARC_MMIO_PLANE_A_SURFACE, pipe);
+
+    // 2. Abilita Pipe
+    write_register(pipeControlReg,
+        gInfo->shared_info->pipe_control[pipe] | INTEL_ARC_PIPE_ENABLED);
+    (void)wait_for_set(pipeControlReg, INTEL_ARC_PIPE_ENABLED, 20000);
+
+    // 3. Abilita Transcoder DDI
+    const uint32 ddiFuncCtl = gInfo->shared_info->pipe_ddi_func_ctl[pipe];
+    write_register(pipeDdiReg, ddiFuncCtl | INTEL_ARC_PIPE_DDI_FUNC_CTL_ENABLE);
+    (void)wait_for_set(pipeDdiReg, INTEL_ARC_PIPE_DDI_FUNC_CTL_ENABLE, 20000);
+
+    // 4. Determina le Lane PHY: 4 fisse per HDMI/TMDS, dinamiche per DisplayPort
+    uint8 lanes = 4; // HDMI richiede sempre 4 lane (3 dati + 1 clock)
+    const uint32 modeSel = (ddiFuncCtl & INTEL_ARC_PIPE_DDI_MODESEL_MASK) >> 24;
+    if (modeSel == INTEL_ARC_PIPE_DDI_MODE_DP_SST || modeSel == INTEL_ARC_PIPE_DDI_MODE_DP_MST) {
+        lanes = ((ddiFuncCtl & INTEL_ARC_PIPE_DDI_DP_WIDTH_MASK)
+            >> INTEL_ARC_PIPE_DDI_DP_WIDTH_SHIFT) + 1;
+    }
+
+    (void)program_ddi_buffer(gInfo->shared_info->active_ddi_port, pipe, lanes, true);
+
+    // 5. Configura e Abilita il Piano (SURFACE va scritto PER ULTIMO come trigger di Latch)
+    write_register(planeStrideReg, gInfo->shared_info->plane_stride[pipe]);
+    write_register(planePosReg, gInfo->shared_info->plane_pos[pipe]);
+    write_register(planeImageReg, gInfo->shared_info->plane_image_size[pipe]);
+    write_register(planeControlReg,
+        gInfo->shared_info->plane_control[pipe] | INTEL_ARC_DISPLAY_CONTROL_ENABLED);
+    
+    // La scrittura del registro SURFACE esegue l'arm/latch hardware dei registri del piano
+    write_register(planeSurfaceReg, gInfo->shared_info->plane_surface[pipe]);
+
+    (void)wait_for_set(planeControlReg, INTEL_ARC_DISPLAY_CONTROL_ENABLED, 20000);
+
+    gInfo->shared_info->dpms_mode = B_DPMS_ON;
+    debug_printf("intel_arc.accelerant: apply_dpms_on() finished successfully\n");
+    return B_OK;
 }
 
 static uint32
@@ -2284,4 +2772,125 @@ aux_transfer(uint8 ddiPort, uint8* transmitBuffer, uint8 transmitSize,
 	}
 
 	return bytes;
+}
+
+
+static inline uint32
+read32(accelerant_info* info, uint32 offset)
+{
+	return *(volatile uint32*)(info->registers + offset);
+}
+
+static inline void
+write32(accelerant_info* info, uint32 offset, uint32 value)
+{
+	*(volatile uint32*)(info->registers + offset) = value;
+}
+
+static status_t
+intel_arc_program_hdmi_dpll(accelerant_info* info, int dpll_id, uint32 pixel_clock_khz)
+{
+	uint32 cfgcr0_reg, cfgcr1_reg, enable_reg;
+
+	switch (dpll_id) {
+		case 0:
+			cfgcr0_reg = INTEL_ARC_TGL_DPLL0_CFGCR0;
+			cfgcr1_reg = INTEL_ARC_TGL_DPLL0_CFGCR1;
+			enable_reg = INTEL_ARC_TGL_DPLL0_ENABLE;
+			break;
+		case 1:
+			cfgcr0_reg = INTEL_ARC_TGL_DPLL1_CFGCR0;
+			cfgcr1_reg = INTEL_ARC_TGL_DPLL1_CFGCR1;
+			enable_reg = INTEL_ARC_TGL_DPLL1_ENABLE;
+			break;
+		case 4:
+			cfgcr0_reg = INTEL_ARC_TGL_DPLL4_CFGCR0;
+			cfgcr1_reg = INTEL_ARC_TGL_DPLL4_CFGCR1;
+			enable_reg = INTEL_ARC_TGL_DPLL4_ENABLE;
+			break;
+		default:
+			return B_BAD_VALUE;
+	}
+
+	// 1. Disabilita il DPLL se attivo per riconfigurarlo
+	uint32 val = read32(info, enable_reg);
+	if ((val & INTEL_ARC_TGL_DPLL_ENABLE) != 0) {
+		val &= ~INTEL_ARC_TGL_DPLL_ENABLE;
+		write32(info, enable_reg, val);
+		snooze(10);
+	}
+
+	// 2. Abilita la potenza del DPLL e attendi lo stato OK
+	val |= INTEL_ARC_TGL_DPLL_POWER_ENABLE;
+	write32(info, enable_reg, val);
+
+	int timeout = 1000;
+	while (--timeout > 0) {
+		if ((read32(info, enable_reg) & INTEL_ARC_TGL_DPLL_POWER_STATE) != 0)
+			break;
+		snooze(1);
+	}
+	if (timeout == 0)
+		return B_TIMED_OUT;
+
+	// 3. Calcolo divisori e frequenza DCO (RefClk = 24 MHz)
+	// Per HDMI/TMDS: F_dco = PixelClock * 5 * P * K * Q
+	uint32 pdiv = INTEL_ARC_TGL_DPLL_PDIV_2;
+	uint32 kdiv = INTEL_ARC_TGL_DPLL_KDIV_1;
+	uint32 qdiv = 1;
+	uint32 p_val = 2;
+	uint32 k_val = 1;
+
+	if (pixel_clock_khz < 50000) {
+		pdiv = INTEL_ARC_TGL_DPLL_PDIV_7;
+		p_val = 7;
+		kdiv = INTEL_ARC_TGL_DPLL_KDIV_2;
+		k_val = 2;
+	} else if (pixel_clock_khz < 100000) {
+		pdiv = INTEL_ARC_TGL_DPLL_PDIV_5;
+		p_val = 5;
+		kdiv = INTEL_ARC_TGL_DPLL_KDIV_1;
+		k_val = 1;
+	} else if (pixel_clock_khz < 150000) {
+		pdiv = INTEL_ARC_TGL_DPLL_PDIV_3;
+		p_val = 3;
+		kdiv = INTEL_ARC_TGL_DPLL_KDIV_1;
+		k_val = 1;
+	}
+
+	const uint32 ref_clk_khz = 24000;
+	uint64 dco_freq_khz = (uint64)pixel_clock_khz * 5 * p_val * k_val * qdiv;
+
+	uint32 dco_int = (uint32)(dco_freq_khz / ref_clk_khz);
+	uint32 dco_frac = (uint32)(((dco_freq_khz % ref_clk_khz) << INTEL_ARC_TGL_DPLL_DCO_FRACTION_SHIFT) / ref_clk_khz);
+
+	// 4. Scrittura registri CFGCR0 e CFGCR1
+	uint32 cfgcr0 = (dco_int & 0x1FF) | (dco_frac << INTEL_ARC_TGL_DPLL_DCO_FRACTION_SHIFT);
+	uint32 cfgcr1 = pdiv | kdiv | (qdiv << INTEL_ARC_TGL_DPLL_QDIV_RATIO_SHIFT) | INTEL_ARC_TGL_DPLL_QDIV_ENABLE;
+
+	write32(info, cfgcr0_reg, cfgcr0);
+	write32(info, cfgcr1_reg, cfgcr1);
+
+	// 5. Abilita il DPLL e attendi il Lock del PLL
+	val = read32(info, enable_reg);
+	val |= INTEL_ARC_TGL_DPLL_ENABLE;
+	write32(info, enable_reg, val);
+
+	timeout = 1000;
+	while (--timeout > 0) {
+		if ((read32(info, enable_reg) & INTEL_ARC_TGL_DPLL_LOCK) != 0)
+			break;
+		snooze(1);
+	}
+	if (timeout == 0)
+		return B_TIMED_OUT;
+
+	// 6. Instradamento clock su DPCLKA_CFGCR0 (sblocco DDI A/B/C)
+	uint32 dpclka = read32(info, INTEL_ARC_TGL_DPCLKA_CFGCR0);
+	dpclka &= ~(INTEL_ARC_TGL_DPCLKA_DDIA_CLOCK_OFF
+		| INTEL_ARC_TGL_DPCLKA_DDIB_CLOCK_OFF
+		| INTEL_ARC_TGL_DPCLKA_DDIC_CLOCK_OFF);
+	write32(info, INTEL_ARC_TGL_DPCLKA_CFGCR0, dpclka);
+
+	return B_OK;
 }

@@ -354,7 +354,7 @@ arc_interrupt_handler(void* data)
 	return handled;
 }
 
-/*
+/* orig
 static void
 probe_display_state(intel_arc_info& info)
 {
@@ -429,6 +429,7 @@ probe_display_state(intel_arc_info& info)
 	}
 }
 */
+/* orig con logs
 static void
 probe_display_state(intel_arc_info& info)
 {
@@ -580,6 +581,187 @@ probe_display_state(intel_arc_info& info)
             dprintf("INFO: Port %u is inactive or undetected.\n", port);
         }
 	} // FINE PORT LOOP
+
+    dprintf("\nDEBUG: probe_display_state finished execution.\n");
+}*/
+/* gestione colore */
+static void
+probe_display_state(intel_arc_info& info)
+{
+    // 1. LOG INIZIALIZZAZIONE
+    dprintf("DEBUG: Entering probe_display_state.\n");
+
+    intel_arc_shared_info& shared = *info.shared_info;
+    shared.pipe_count = 4;
+    shared.active_pipe = -1;
+    shared.active_ddi_port = 0;
+    shared.active_ddi_mode = 0;
+    shared.dpms_mode = B_DPMS_ON;
+
+    // Reset e log delle variabili chiave prima del ciclo
+    dprintf("DEBUG: Initializing shared info fields.\n");
+
+    for (uint32 pipe = 0; pipe < shared.pipe_count; pipe++) {
+        // LOG INIZIO PIPE LOOP
+        dprintf("DEBUG: Processing Pipe %u\n", pipe);
+
+        const uint32 stride = pipe * INTEL_ARC_MMIO_PIPE_OFFSET;
+
+        // 2. LEGGERE I REGISTRI E LOGGARLI
+        read32(info, INTEL_ARC_MMIO_PIPE_A_HTOTAL + stride, shared.pipe_h_total[pipe]);
+        dprintf("DEBUG: Pipe %u HTotal read: 0x%X\n", pipe, shared.pipe_h_total[pipe]);
+
+        read32(info, INTEL_ARC_MMIO_PIPE_A_HBLANK + stride, shared.pipe_h_blank[pipe]);
+        dprintf("DEBUG: Pipe %u HBlank read: 0x%X\n", pipe, shared.pipe_h_blank[pipe]);
+
+        read32(info, INTEL_ARC_MMIO_PIPE_A_HSYNC + stride, shared.pipe_h_sync[pipe]);
+        dprintf("DEBUG: Pipe %u HSync read: 0x%X\n", pipe, shared.pipe_h_sync[pipe]);
+
+        read32(info, INTEL_ARC_MMIO_PIPE_A_VTOTAL + stride, shared.pipe_v_total[pipe]);
+        dprintf("DEBUG: Pipe %u VTotal read: 0x%X\n", pipe, shared.pipe_v_total[pipe]);
+
+        read32(info, INTEL_ARC_MMIO_PIPE_A_VBLANK + stride, shared.pipe_v_blank[pipe]);
+        dprintf("DEBUG: Pipe %u VBlank read: 0x%X\n", pipe, shared.pipe_v_blank[pipe]);
+
+        read32(info, INTEL_ARC_MMIO_PIPE_A_VSYNC + stride, shared.pipe_v_sync[pipe]);
+        dprintf("DEBUG: Pipe %u VSync read: 0x%X\n", pipe, shared.pipe_v_sync[pipe]);
+
+        read32(info, INTEL_ARC_MMIO_PIPE_A_CONTROL + stride, shared.pipe_control[pipe]);
+        dprintf("DEBUG: Pipe %u Control read: 0x%X (Enabled: %d)\n", pipe,
+            shared.pipe_control[pipe], (shared.pipe_control[pipe] & INTEL_ARC_PIPE_ENABLED) != 0);
+
+        read32(info, INTEL_ARC_MMIO_PIPE_A_SIZE + stride, shared.pipe_size[pipe]);
+        dprintf("DEBUG: Pipe %u Size read: 0x%X\n", pipe, shared.pipe_size[pipe]);
+
+        read32(info, INTEL_ARC_MMIO_PIPE_A_DDI_FUNC_CTL + stride, shared.pipe_ddi_func_ctl[pipe]);
+        dprintf("DEBUG: Pipe %u DDI FuncCtl read: 0x%X\n", pipe, shared.pipe_ddi_func_ctl[pipe]);
+
+        read32(info, INTEL_ARC_MMIO_PLANE_A_CONTROL + stride, shared.plane_control[pipe]);
+        dprintf("DEBUG: Pipe %u Plane Control read: 0x%X\n", pipe, shared.plane_control[pipe]);
+
+        read32(info, INTEL_ARC_MMIO_PLANE_A_STRIDE + stride, shared.plane_stride[pipe]);
+        dprintf("DEBUG: Pipe %u Plane Stride read: 0x%X\n", pipe, shared.plane_stride[pipe]);
+
+        read32(info, INTEL_ARC_MMIO_PLANE_A_POS + stride, shared.plane_pos[pipe]);
+        dprintf("DEBUG: Pipe %u Plane Pos read: 0x%X\n", pipe, shared.plane_pos[pipe]);
+
+        read32(info, INTEL_ARC_MMIO_PLANE_A_IMAGE_SIZE + stride, shared.plane_image_size[pipe]);
+        dprintf("DEBUG: Pipe %u Image Size read: 0x%X\n", pipe, shared.plane_image_size[pipe]);
+
+        read32(info, INTEL_ARC_MMIO_PLANE_A_SURFACE + stride, shared.plane_surface[pipe]);
+        dprintf("DEBUG: Pipe %u Surface read: 0x%X\n", pipe, shared.plane_surface[pipe]);
+
+        // LOGIC CHECKING START
+        if (shared.active_pipe >= 0) {
+            dprintf("DEBUG: Skipping Pipe %u because an active pipe was already found.\n", pipe);
+            continue;
+        }
+
+        if ((shared.pipe_control[pipe] & INTEL_ARC_PIPE_ENABLED) == 0) {
+            dprintf("DEBUG: Skipping Pipe %u because the PIPE_ENABLED bit is clear (Control: 0x%X).\n",
+                pipe, shared.pipe_control[pipe]);
+            continue;
+        }
+
+        if (shared.pipe_size[pipe] == 0) {
+            dprintf("DEBUG: Skipping Pipe %u because pipe size is zero (Size: 0x%X).\n",
+                pipe, shared.pipe_size[pipe]);
+            continue;
+        }
+
+        // LOGIC SUCCESS PATH
+        shared.active_pipe = pipe;
+        shared.active_ddi_port
+            = (shared.pipe_ddi_func_ctl[pipe] & INTEL_ARC_PIPE_DDI_SELECT_MASK)
+                >> INTEL_ARC_PIPE_DDI_SELECT_SHIFT;
+        shared.active_ddi_mode
+            = (shared.pipe_ddi_func_ctl[pipe] & INTEL_ARC_PIPE_DDI_MODE_MASK)
+                >> INTEL_ARC_PIPE_DDI_MODE_SHIFT;
+
+        dprintf("DEBUG: Pipe %u identified as ACTIVE PIPE.\n", pipe);
+        dprintf("DEBUG: Active DDI Port detected: %u\n", shared.active_ddi_port);
+        dprintf("DEBUG: Active DDI Mode detected: %u\n", shared.active_ddi_mode);
+
+        // Calcolo e Log risoluzione (Layout hardware Intel Xe: Height [15:0], Width [31:16])
+        const uint32 height = (shared.pipe_size[pipe] & 0xffff) + 1;
+        const uint32 width = ((shared.pipe_size[pipe] >> 16) & 0xffff) + 1;
+
+        if (width != 0 && height != 0) {
+            shared.current_mode.virtual_width = width;
+            shared.current_mode.virtual_height = height;
+            dprintf("DEBUG: Calculated Resolution for Pipe %u: %u x %u\n", pipe, width, height);
+
+            // Decodifica dello Spazio Colore da PLANE_CTL (bit 27:24)
+            const uint32 planeCtl = shared.plane_control[pipe];
+            const uint32 pixelFormat = (planeCtl >> 24) & 0x0F;
+            color_space hwColorSpace = B_NO_COLOR_SPACE;
+
+            switch (pixelFormat) {
+                case 0x4:
+                case 0x6:
+                    hwColorSpace = B_RGB32;
+                    break;
+                case 0x8:
+                    hwColorSpace = B_RGB32_BIG;
+                    break;
+                case 0xC:
+                    hwColorSpace = B_RGBA32;
+                    break;
+                default:
+                    break;
+            }
+
+            if (hwColorSpace != B_NO_COLOR_SPACE) {
+                shared.current_mode.space = hwColorSpace;
+                dprintf("DEBUG: Color space read from PLANE_CTL (0x%X): %d\n", pixelFormat, hwColorSpace);
+            } else if (shared.current_mode.space == B_NO_COLOR_SPACE) {
+                shared.current_mode.space = B_RGB32;
+                dprintf("DEBUG: Color space fallback set to RGB32.\n");
+            }
+
+            // Calcolo/Verifica Stride (Bytes Per Row) da PLANE_STRIDE
+            const uint32 planeStrideVal = shared.plane_stride[pipe];
+            if (planeStrideVal > 0) {
+                // Su Intel Xe, PLANE_STRIDE è in unità di 64 byte (tile stride)
+                shared.bytes_per_row = planeStrideVal * 64;
+                dprintf("DEBUG: Bytes per row read from PLANE_STRIDE: %u\n", shared.bytes_per_row);
+            } else if (shared.bytes_per_row == 0) {
+                shared.bytes_per_row = width * 4;
+                dprintf("DEBUG: Bytes per row fallback set to %u (Width * 4).\n", shared.bytes_per_row);
+            }
+        } else {
+            dprintf("WARNING: Pipe %u failed resolution check (W=%u, H=%u).\n", pipe, width, height);
+        }
+    } // FINE PIPE LOOP
+
+    // PORT LOGIC START
+    dprintf("\nDEBUG: Starting Port Detection Loop.\n");
+
+    static const uint32 kPortRegisters[4] = {
+        INTEL_ARC_MMIO_PORT_A,
+        INTEL_ARC_MMIO_PORT_B,
+        INTEL_ARC_MMIO_PORT_C,
+        INTEL_ARC_MMIO_PORT_D
+    };
+
+    shared.detected_port_bits = 0;
+    for (uint32 port = 0; port < 4; port++) {
+        dprintf("DEBUG: Checking Port %u...\n", port);
+
+        if (!read32(info, kPortRegisters[port], shared.port_state[port])) {
+            dprintf("WARNING: Failed to read state for Port %u.\n", port);
+            continue;
+        }
+
+        dprintf("DEBUG: State register for Port %u: 0x%X\n", port, shared.port_state[port]);
+
+        if ((shared.port_state[port] & (INTEL_ARC_PORT_ENABLED | INTEL_ARC_PORT_DETECTED)) != 0) {
+            dprintf("SUCCESS: Port %u is detected and enabled.\n", port);
+            shared.detected_port_bits |= (1 << port);
+        } else {
+            dprintf("INFO: Port %u is inactive or undetected.\n", port);
+        }
+    } // FINE PORT LOOP
 
     dprintf("\nDEBUG: probe_display_state finished execution.\n");
 }
@@ -863,6 +1045,8 @@ init_device(intel_arc_info& info)
 			info.shared_info->current_mode.space
 				= get_color_space_for_depth(bootInfo->depth);
 			info.shared_info->bytes_per_row = bootInfo->bytes_per_row;
+			dprintf("Arc Driver: app_server pitch = %" B_PRIu32 ", calculated pitch = %" B_PRIu32 "\n",
+    			info.shared_info->bytes_per_row, (info.shared_info->current_mode.virtual_width * 4 + 63) & ~63); //boot in B_RGB32
 		}
 
 		// Tentativo 1: Mappatura con Write-Combining (stile S3)
