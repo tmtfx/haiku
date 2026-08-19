@@ -200,8 +200,7 @@ create_mode_list(void)
  * h_display e v_display rimangono quelli impostati nella pipe (nel mio caso a 1920x1080)
  * quindi la risoluzione viene scalata per riempire quella risoluzione, ma viene visualizzata con un pitch sbagliato
  * per avere un vero modo/risoluzione bisogna mettere h_display alla risoluzione corretta altrimenti il monitor si configura
- *a 1920 x 1080 invece che 1280x1024 per esempio
- */
+ *a 1920 x 1080 invece che 1280x1024 per esempio */
 static status_t
 create_mode_list(void)
 {
@@ -285,8 +284,10 @@ create_mode_list(void)
 	}
 
 	const uint32 bytesPerPixel = bytes_per_pixel_for_space((color_space)mode.space);
-	if (gInfo->shared_info->bytes_per_row == 0)
-		gInfo->shared_info->bytes_per_row = mode.virtual_width * bytesPerPixel;
+	if (gInfo->shared_info->bytes_per_row == 0){
+		//gInfo->shared_info->bytes_per_row = mode.virtual_width * bytesPerPixel;
+		gInfo->shared_info->bytes_per_row  = (mode.virtual_width * bytesPerPixel + 63) & ~63;
+	}
 	debug_printf("intel_arc.accelerant: Bytes Per Row: %u",gInfo->shared_info->bytes_per_row);
 	gInfo->shared_info->current_mode = mode;
 	debug_printf("intel_arc.accelerant: >>> CREATE MODE LIST <<<\n");
@@ -306,7 +307,7 @@ create_mode_list(void)
 	debug_printf("  - Sync Flags   : 0x%08X\n", mode.timing.flags);
 	debug_printf("==================================================\n");
 
-	const color_space supportedSpace[] = { (color_space)mode.space };
+	const color_space supportedSpace[] = { B_RGB32, B_RGB16 };//{ (color_space)mode.space };
 	gInfo->mode_list_area = create_display_modes("intel arc modes", NULL,
 		&mode, 1, supportedSpace, 1, is_mode_supported, &gInfo->mode_list,
 		&gInfo->shared_info->mode_count);
@@ -323,7 +324,7 @@ create_mode_list(void)
 	
 	return B_OK;
 }
-/*
+/* 1 sola risoluzione?
 static status_t
 create_mode_list(void)
 {
@@ -361,7 +362,8 @@ create_mode_list(void)
     mode.v_display_start = 0;
     mode.flags = 0;
 
-    // 2. Forza i display timing a combaciare esattamente con la dimensione virtuale trovata
+    // 2. Forza temporaneamente i display timing a combaciare esattamente con la dimensione virtuale trovata
+    // verranno ricalcolati da compute_display_timing
     mode.timing.h_display = mode.virtual_width;
     mode.timing.v_display = mode.virtual_height;
 
@@ -407,9 +409,10 @@ create_mode_list(void)
 
     return B_OK;
 }*/
-/* in questa versione creiamo i modi corretti con h_display corretto.
+/* questa dovrebbe essere quella che dovrebbe andare
+ * in questa versione creiamo i modi corretti con h_display corretto.
  * il problema è che non scriviamo correttamente i registri per quello lo schermo si spegne
-
+*
 static status_t
 create_mode_list(void)
 {
@@ -434,6 +437,7 @@ create_mode_list(void)
     }
 
     // Garantisci timings VESA coerenti per la modalità iniziale
+    // temporaneamente? forse compute_display_timing sovrascrive questi due valori:
     mode.timing.h_display = mode.virtual_width;
     mode.timing.v_display = mode.virtual_height;
     compute_display_timing(mode.virtual_width, mode.virtual_height, 60, false, &mode.timing);
@@ -899,23 +903,30 @@ intel_arc_set_display_mode(display_mode* mode)
     	gInfo->shared_info->bytes_per_row, (target.virtual_width * bytesPerPixel + 63) & ~63);
 
 	gInfo->shared_info->current_mode = target;
-	gInfo->shared_info->bytes_per_row = target.virtual_width * bytesPerPixel;
+	//gInfo->shared_info->bytes_per_row = target.virtual_width * bytesPerPixel;
 	
 	// Regilations Pipe Timings
 	gInfo->shared_info->pipe_h_total[pipe]
 		= ((uint32)(target.timing.h_total - 1) << 16) | ((uint32)target.timing.h_display - 1);
+	debug_printf("intel_arc.accelerant: H_TOTAL impostato a 0x%X\n", gInfo->shared_info->pipe_h_total[pipe]);
 	gInfo->shared_info->pipe_h_blank[pipe]
 		= ((uint32)(target.timing.h_total - 1) << 16) | ((uint32)target.timing.h_display - 1);
+	debug_printf("intel_arc.accelerant: H_BLANK impostato a 0x%X\n", gInfo->shared_info->pipe_h_blank[pipe]);
 	gInfo->shared_info->pipe_h_sync[pipe]
 		= ((uint32)(target.timing.h_sync_end - 1) << 16) | ((uint32)target.timing.h_sync_start - 1);
+	debug_printf("intel_arc.accelerant: H_SYNC impostato a 0x%X\n", gInfo->shared_info->pipe_h_sync[pipe]);
 	gInfo->shared_info->pipe_v_total[pipe]
 		= ((uint32)(target.timing.v_total - 1) << 16) | ((uint32)target.timing.v_display - 1);
+	debug_printf("intel_arc.accelerant: V_TOTAL impostato a 0x%X\n", gInfo->shared_info->pipe_v_total[pipe]);
 	gInfo->shared_info->pipe_v_blank[pipe]
 		= ((uint32)(target.timing.v_total - 1) << 16) | ((uint32)target.timing.v_display - 1);
+	debug_printf("intel_arc.accelerant: V_BLANK impostato a 0x%X\n", gInfo->shared_info->pipe_v_blank[pipe]);
 	gInfo->shared_info->pipe_v_sync[pipe]
 		= ((uint32)(target.timing.v_sync_end - 1) << 16) | ((uint32)target.timing.v_sync_start - 1);
-	gInfo->shared_info->pipe_size[pipe]
-		= ((uint32)(target.timing.v_display - 1) << 16) | ((uint32)target.timing.h_display - 1);
+	debug_printf("intel_arc.accelerant: V_SYNC impostato a 0x%X\n", gInfo->shared_info->pipe_v_sync[pipe]);
+	//gInfo->shared_info->pipe_size[pipe]
+	//	= ((uint32)(target.timing.v_display - 1) << 16) | ((uint32)target.timing.h_display - 1);
+	
 	// modifica applicata:
 	//gInfo->shared_info->pipe_size[pipe]
     //    = ((uint32)(target.timing.h_display - 1) << 16) | ((uint32)target.timing.v_display - 1);
@@ -924,9 +935,11 @@ intel_arc_set_display_mode(display_mode* mode)
 	//gInfo->shared_info->plane_stride[pipe] = gInfo->shared_info->bytes_per_row;
 	//debug_printf("intel_arc.accelerant: scritto in gInfo->shared_info->plane_stride[pipe] %u\n",gInfo->shared_info->bytes_per_row);
 	// modifica applicata:
-	const uint32 bytesPerRow = (target.virtual_width * bytesPerPixel + 63) & ~63;
+	const uint32 bytesPerRow = (target.virtual_width * bytesPerPixel + 63) & ~63;//(mode->timing.h_display * bytesPerPixel + 63) & ~63;
 	gInfo->shared_info->bytes_per_row = bytesPerRow;
 	gInfo->shared_info->plane_stride[pipe] = bytesPerRow / 64;
+	gInfo->shared_info->fbc.bytes_per_row = bytesPerRow;
+	
     //-------------------
 	gInfo->shared_info->plane_pos[pipe] = 0;
 	//modifiche da stride
@@ -938,9 +951,10 @@ intel_arc_set_display_mode(display_mode* mode)
     //    = ((uint32)(target.timing.h_display - 1) << 16) | ((uint32)target.timing.v_display - 1);
 	//gInfo->shared_info->plane_image_size[pipe]
 	//    = ((uint32)(target.virtual_height - 1) << 16) | ((uint32)(target.virtual_width - 1));
-
+	debug_printf("intel_arc.accelerant: PLANE_CONTROL prima di modificare i parametri: 0x%X\n",gInfo->shared_info->plane_control[pipe]);
     gInfo->shared_info->plane_control[pipe] &= ~INTEL_ARC_PLANE_TILED_MASK;
 	gInfo->shared_info->plane_control[pipe] |= INTEL_ARC_PLANE_LINEAR;
+		debug_printf("intel_arc.accelerant: PLANE_CONTROL dopo modifica parametri TILED_MASK e LINEAR: 0x%X\n",gInfo->shared_info->plane_control[pipe]);
     //-------------------
 	gInfo->shared_info->plane_control[pipe]
 		= (gInfo->shared_info->plane_control[pipe]
@@ -950,15 +964,23 @@ intel_arc_set_display_mode(display_mode* mode)
 	write_register(INTEL_ARC_MMIO_PS_CTRL_A + (pipe * 0x1000), 0); //disattiva scaler hardware
 	//const uint32 hDisplay = target.timing.h_display; // 1280
 	//const uint32 vDisplay = target.timing.v_display; // 1024
-	debug_printf("intel_arc.accelerant: imposto pipe_size e plane_image_size con virtual_width e virtual_height invece che timing.h_display e v_display\n");
+	//debug_printf("intel_arc.accelerant: imposto pipe_size e plane_image_size con virtual_width e virtual_height invece che timing.h_display e v_display\n");
 	const uint32 hDisplay = target.virtual_width; // 1280
 	const uint32 vDisplay = target.virtual_height; // 1024
+	//const uint32 thDisplay = target.timing.h_display; // 1280
+	//const uint32 tvDisplay = target.timing.v_display; // 1024
+	
 
 	const uint32 nativeSize = ((vDisplay - 1) << 16) | (hDisplay - 1);
+	const uint32 nativeSizeforPipe = ((hDisplay - 1) << 16) | (vDisplay - 1);
+	//const uint32 nativeSize = ((tvDisplay - 1) << 16) | (thDisplay - 1);
 
 	// La Pipe e il Piano devono avere LA STESSA dimensione fisica
-	gInfo->shared_info->pipe_size[pipe] = nativeSize;
+	gInfo->shared_info->pipe_size[pipe] = nativeSizeforPipe;
+	debug_printf("intel_arc.accelerant: PIPE_SIZE impostato a 0x%X\n", gInfo->shared_info->pipe_size[pipe]);
 	gInfo->shared_info->plane_image_size[pipe] = nativeSize;
+	debug_printf("intel_arc.accelerant: PLANE_IMAGE_SIZE impostato a 0x%X\n", gInfo->shared_info->plane_image_size[pipe]);
+	
 	//gInfo->shared_info->plane_control[pipe] |= INTEL_ARC_PLANE_ENABLE; // Attiva PLANE_CTL_ENABLE
 /*
 	write_register(INTEL_ARC_MMIO_PIPE_A_HTOTAL + pipeOffset, gInfo->shared_info->pipe_h_total[pipe]);
@@ -1035,7 +1057,7 @@ intel_arc_set_display_mode(display_mode* mode)
 	if (status == B_OK) {
 		*mode = target;
 		gInfo->shared_info->fbc.frame_buffer = (void*)gInfo->shared_info->frame_buffer;
-    	gInfo->shared_info->fbc.bytes_per_row = gInfo->shared_info->bytes_per_row;
+    	//gInfo->shared_info->fbc.bytes_per_row = gInfo->shared_info->bytes_per_row; // fatto prima
     	gInfo->shared_info->fbc.frame_buffer_dma = (void *)(gInfo->shared_info->frame_buffer_base 
     + gInfo->shared_info->frame_buffer_offset);
 		debug_printf("intel_arc.accelerant: SET_DISPLAY_MODE completed successfully!\n");

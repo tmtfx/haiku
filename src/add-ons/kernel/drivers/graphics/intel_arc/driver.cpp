@@ -64,6 +64,7 @@
 #define INTEL_ARC_MMIO_PIPE_A_VSYNC				(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0014)
 #define INTEL_ARC_MMIO_PIPE_A_CONTROL			(INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x0008)
 #define INTEL_ARC_MMIO_PLANE_A_CONTROL			(INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x0180)
+#define INTEL_ARC_MMIO_PLANE_A_COLOR_CTL        (INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x0184)
 #define INTEL_ARC_MMIO_PLANE_A_STRIDE			(INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x0188)
 #define INTEL_ARC_MMIO_PLANE_A_POS				(INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x018c)
 #define INTEL_ARC_MMIO_PLANE_A_IMAGE_SIZE		(INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x0190)
@@ -650,6 +651,9 @@ probe_display_state(intel_arc_info& info)
 
         read32(info, INTEL_ARC_MMIO_PLANE_A_SURFACE + stride, shared.plane_surface[pipe]);
         dprintf("DEBUG: Pipe %u Surface read: 0x%X\n", pipe, shared.plane_surface[pipe]);
+        
+        read32(info, INTEL_ARC_MMIO_PLANE_A_COLOR_CTL + stride, shared.plane_surface[pipe]);
+        dprintf("DEBUG: Pipe %u Plane A Color control read: 0x%X\n", pipe, shared.plane_surface[pipe]);
 
         // LOGIC CHECKING START
         if (shared.active_pipe >= 0) {
