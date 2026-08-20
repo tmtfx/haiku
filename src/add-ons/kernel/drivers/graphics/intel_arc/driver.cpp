@@ -15,6 +15,7 @@
  */
 
 #include "intel_arc.h"
+#include "intel_arc_logo.h"
 
 #include <boot_item.h>
 #include <frame_buffer_console.h>
@@ -892,8 +893,10 @@ draw_logo(intel_arc_info& info)
 
 	uint32 fbPitch = bytesPerRow / sizeof(uint32);
 
-	uint32 logoW = ARC_logo_width;   // 640
-	uint32 logoH = ARC_logo_height;  // 240
+	uint32 logoW = kBitmapWidth;   // 960
+	uint32 logoH = kBitmapHeight;  // 523
+	
+	if (logoW>screenWidth || logoH>screenHeight) return;
 
 	// Centratura a schermo
 	int32 startX = (int32)((screenWidth - logoW) / 2);
@@ -905,16 +908,29 @@ draw_logo(intel_arc_info& info)
 	uint8* fb = (uint8*)si.frame_buffer;
 	if (fb == NULL)
 		return;
+		
+	const uint8* logoBits = kintel_arc_logo_pngBits;
 
 	for (uint32 y = 0; y < logoH && (startY + y) < screenHeight; y++) {
-		uint32 fbOffset = ((startY + y) * fbPitch + startX) * sizeof(uint32);
-		uint32 logoRowOffset = y * logoW;
-		uint32 remainingWidth = screenWidth - startX;
-		uint32 copyPixels = (logoW < remainingWidth) ? logoW : remainingWidth;
-		uint32 copySize = copyPixels * sizeof(uint32);
+        uint32 fbOffset = (startY + y) * bytesPerRow + startX * sizeof(uint32);
+        uint32* dst = (uint32*)(fb + fbOffset);
 
-		memcpy(fb + fbOffset, (const void*)&ARC_logo[logoRowOffset * 4], copySize);
-	}
+        uint32 remainingWidth = screenWidth - startX;
+        uint32 copyPixels = (logoW < remainingWidth) ? logoW : remainingWidth;
+
+        uint32 logoRowOffset = y * logoW * 4; // 4 byte per pixel
+
+        for (uint32 x = 0; x < copyPixels; x++) {
+            uint32 pxIndex = logoRowOffset + (x * 4);
+            uint8 r = logoBits[pxIndex + 0];
+            uint8 g = logoBits[pxIndex + 1];
+            uint8 b = logoBits[pxIndex + 2];
+            // uint8 a = logoBits[pxIndex + 3]; // Se non serve il blending Alpha, ignoriamo A
+
+            // Haiku / EFI GOP in 32-bit usa solitamente il formato BGRx / BGRA32
+            dst[x] = (255 << 24) | (r << 16) | (g << 8) | b;
+        }
+    }
 }
 #endif
 
