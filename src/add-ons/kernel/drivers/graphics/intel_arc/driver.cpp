@@ -15,7 +15,7 @@
  */
 
 #include "intel_arc.h"
-#include "intel_arc_logo.h"
+
 
 #include <boot_item.h>
 #include <frame_buffer_console.h>
@@ -33,7 +33,7 @@
 #include <string.h>
 
 #ifdef IS_PIRATI_BUILD
-#include "ARC_logo.h"
+#include "intel_arc_logo.h"
 #endif
 
 #define TRACE_INTEL_ARC
@@ -891,7 +891,7 @@ draw_logo(intel_arc_info& info)
 	if (bytesPerRow == 0)
 		bytesPerRow = screenWidth * 4;
 
-	uint32 fbPitch = bytesPerRow / sizeof(uint32);
+	//uint32 fbPitch = bytesPerRow / sizeof(uint32);
 
 	uint32 logoW = kBitmapWidth;   // 960
 	uint32 logoH = kBitmapHeight;  // 523
@@ -909,7 +909,7 @@ draw_logo(intel_arc_info& info)
 	if (fb == NULL)
 		return;
 		
-	const uint8* logoBits = kintel_arc_logo_pngBits;
+	const uint8* logoBits = kintel_arc_logo_Bits;
 
 	for (uint32 y = 0; y < logoH && (startY + y) < screenHeight; y++) {
         uint32 fbOffset = (startY + y) * bytesPerRow + startX * sizeof(uint32);
