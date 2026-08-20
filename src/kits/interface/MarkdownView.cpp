@@ -34,7 +34,9 @@ BMarkdownView::SetMarkdown(const char* markdownText)
     state.view = this;
     
     // Recuperiamo il font base impostato sulla vista
-    GetFontAndColor(0, &state.baseFont);
+    //GetFontAndColor(0, &state.baseFont); no diventa incrementale
+    SetFontAndColor(be_plain_font);
+    GetFont(&state.baseFont);
     state.currentFont = state.baseFont;
     
     // Colori di default basati sul tema di sistema
