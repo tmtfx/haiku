@@ -818,11 +818,13 @@ intel_arc_set_display_mode(display_mode* mode)
     // Legge il valore attuale del registro per preservare gli altri flag hardware
     if (read_register(gammaModeReg, gammaValue)) {
         if (target.space == B_COLOR_8_BIT) {
+        	debug_printf("intel_arc.accelerant: CLEARING GAMMAMODE for 8-bits color space\n");
             // Bit [1:0] = 00b -> Forza la Pipe in Legacy Palette 8-bit Mode
             gammaValue &= ~3U;
         } else {
             // Per 16/24/32 bit rispristina/imposta il bypass o Direct Gamma
             // (Bit [1:0] = 01b o valore di default per colori diretti)
+            debug_printf("intel_arc.accelerant: DIRECT GAMMA for NON-8bits color space\n");
             gammaValue = (gammaValue & ~3U) | 1U;
         }
         write_register(gammaModeReg, gammaValue);
