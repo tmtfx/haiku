@@ -148,12 +148,14 @@ is_mode_supported(display_mode* mode)
 	return mode != NULL && *mode == gInfo->shared_info->current_mode;
 }
 
-/* in questa versione ereditiamo la modalità dal boot e la salviamo assieme alle modalità
- * ottenute dall'edid. (questo comporta che la modalità ereditata ed errata con h_display a 
- * 1920 x 1080 ma risoluzione virtuale a 1280x1024 sovrascrive la modalità dell'edid nativa 
- * di quella risoluzione (1280x1024). Se provo a cambiare risoluzione scegliendo unda di 
- * quelle elencate il monitor va in out of range. La gestione colori RGB32 e RGB16 funziona
- * CMAP8 va ridefinita visto che i colori passano sul verdino
+/* create_mode_list erediitaria
+ * in questa versione ereditiamo la modalità dal boot e la salviamo assieme alle modalità
+ * ottenute dall'edid. Questo comporta che la modalità ereditata (ed nel mio caso errata) 
+ * con h_display a 1920 x 1080 ma risoluzione virtuale a 1280x1024 sovrascrive la modalità
+ * dell'edid nativa di quella risoluzione (1280x1024).
+ * Se provo a cambiare risoluzione scegliendo unda di quelle elencate il monitor va in 
+ * out of range. La gestione colori RGB32 e RGB16 funziona CMAP8 va ridefinita visto che i
+ * colori passano sul verdino...
  */
 static status_t
 create_mode_list(void)
@@ -205,13 +207,7 @@ create_mode_list(void)
 	mode.h_display_start = 0;
 	mode.v_display_start = 0;
 	mode.flags = 0;
-/*
-    // Garantisci timings VESA coerenti per la modalità iniziale
-    // temporaneamente? forse compute_display_timing sovrascrive questi due valori:
-    mode.timing.h_display = mode.virtual_width;
-    mode.timing.v_display = mode.virtual_height;
-    compute_display_timing(mode.virtual_width, mode.virtual_height, 60, false, &mode.timing);
-*/
+
     const int8 pipe = gInfo->shared_info->active_pipe;
 	if (pipe >= 0) {
 		const uint32 hTotal = gInfo->shared_info->pipe_h_total[pipe];
@@ -230,7 +226,10 @@ create_mode_list(void)
 			mode.timing.v_sync_end = (vSync >> 16) + 1;
 		}
 	}
-	
+	// --------------- for test ----------------
+	// mode.virtual_width = mode.timing.h_display;
+	// mode.virtual_height = mode.timing.v_display;
+	// -----------------------------------------
 	if (mode.timing.h_total == 0 || mode.timing.v_total == 0) {
 		compute_display_timing(mode.virtual_width, mode.virtual_height, 60, false,
 			&mode.timing);
@@ -795,20 +794,6 @@ intel_arc_set_display_mode(display_mode* mode)
 	debug_printf("intel_arc.accelerant: PLANE_IMAGE_SIZE impostato a 0x%X\n", gInfo->shared_info->plane_image_size[pipe]);
 	
 	//gInfo->shared_info->plane_control[pipe] |= INTEL_ARC_PLANE_ENABLE; // Attiva PLANE_CTL_ENABLE
-/*
-	write_register(INTEL_ARC_MMIO_PIPE_A_HTOTAL + pipeOffset, gInfo->shared_info->pipe_h_total[pipe]);
-	write_register(INTEL_ARC_MMIO_PIPE_A_HBLANK + pipeOffset, gInfo->shared_info->pipe_h_blank[pipe]);
-	write_register(INTEL_ARC_MMIO_PIPE_A_HSYNC + pipeOffset, gInfo->shared_info->pipe_h_sync[pipe]);
-	write_register(INTEL_ARC_MMIO_PIPE_A_VTOTAL + pipeOffset, gInfo->shared_info->pipe_v_total[pipe]);
-	write_register(INTEL_ARC_MMIO_PIPE_A_VBLANK + pipeOffset, gInfo->shared_info->pipe_v_blank[pipe]);
-	write_register(INTEL_ARC_MMIO_PIPE_A_VSYNC + pipeOffset, gInfo->shared_info->pipe_v_sync[pipe]);
-	write_register(INTEL_ARC_MMIO_PIPE_A_SIZE + pipeOffset, gInfo->shared_info->pipe_size[pipe]);
-	//modifiche da stride
-	write_register(INTEL_ARC_MMIO_PLANE_A_STRIDE + pipeOffset, gInfo->shared_info->plane_stride[pipe]);
-    write_register(INTEL_ARC_MMIO_PLANE_A_POS + pipeOffset, gInfo->shared_info->plane_pos[pipe]);
-    write_register(INTEL_ARC_MMIO_PLANE_A_IMAGE_SIZE + pipeOffset, gInfo->shared_info->plane_image_size[pipe]);
-    write_register(INTEL_ARC_MMIO_PLANE_A_CONTROL + pipeOffset, gInfo->shared_info->plane_control[pipe]);
-	*/
 	// B. Scrivi i Timing della Pipe (1280x1024 VESA)
 	write_register(INTEL_ARC_MMIO_PIPE_A_HTOTAL + pipeOffset, gInfo->shared_info->pipe_h_total[pipe]);
 	write_register(INTEL_ARC_MMIO_PIPE_A_HBLANK + pipeOffset, gInfo->shared_info->pipe_h_blank[pipe]);
@@ -826,6 +811,26 @@ intel_arc_set_display_mode(display_mode* mode)
     
     uint32 fbAddress = gInfo->shared_info->frame_buffer_base + gInfo->shared_info->frame_buffer_offset;
     write_register(INTEL_ARC_MMIO_PLANE_A_SURFACE + pipeOffset, fbAddress);
+    
+    const uint32 gammaModeReg = INTEL_ARC_GAMMA_MODE_BASE + (pipe * 0x1000);
+    uint32 gammaValue = 0;
+
+    // Legge il valore attuale del registro per preservare gli altri flag hardware
+    if (read_register(gammaModeReg, gammaValue)) {
+        if (target.space == B_COLOR_8_BIT) {
+            // Bit [1:0] = 00b -> Forza la Pipe in Legacy Palette 8-bit Mode
+            gammaValue &= ~3U;
+        } else {
+            // Per 16/24/32 bit rispristina/imposta il bypass o Direct Gamma
+            // (Bit [1:0] = 01b o valore di default per colori diretti)
+            gammaValue = (gammaValue & ~3U) | 1U;
+        }
+        write_register(gammaModeReg, gammaValue);
+    } else {
+        // Fallback in caso di fallimento della lettura
+        if (target.space == B_COLOR_8_BIT)
+            write_register(gammaModeReg, 0);
+    }
     
     uint32 ddiFuncCtl = gInfo->shared_info->pipe_ddi_func_ctl[pipe];
 
@@ -1029,6 +1034,44 @@ intel_arc_get_pixel_clock_limits(display_mode* mode, uint32* low, uint32* high)
 	return B_OK;
 }
 
+status_t
+intel_arc_set_indexed_colors(uint32 count, uint8 first,
+    uint8* color_data, uint32 flags)
+{
+    if (color_data == NULL)
+        return B_BAD_VALUE;
+
+    if (first + count > 256)
+        return B_BAD_VALUE;
+
+    // Recupera la pipe attualmente attiva per lo schermo
+    uint32 pipe = gInfo->shared_info->active_pipe;
+
+    // Indirizzo base dei registri LGC_PALETTE per la pipe attiva
+    // Offset: 0x4A000 + (pipe * 0x400)
+    uint32 paletteBase = INTEL_ARC_LGC_PALETTE_BASE + (pipe * 0x400);
+
+    for (uint32 i = 0; i < count; i++) {
+        uint8 index = first + i;
+        
+        if (index > 255)
+            break;
+
+        // L'array color_data contiene triplette consecutive R, G, B
+        uint8 r = color_data[i * 3 + 0];
+        uint8 g = color_data[i * 3 + 1];
+        uint8 b = color_data[i * 3 + 2];
+
+        // Formato registro Intel LGC_PALETTE: [23:16] Red, [15:8] Green, [7:0] Blue
+        uint32 colorValue = ((uint32)r << 16) | ((uint32)g << 8) | (uint32)b;
+
+        // Scrittura del registro della tavolozza (4 byte per voce)
+        write_register(paletteBase + (index * 4), colorValue);
+    }
+
+    return B_OK;
+}
+
 extern "C" void*
 get_accelerant_hook(uint32 feature, void* /*data*/)
 {
@@ -1084,6 +1127,8 @@ get_accelerant_hook(uint32 feature, void* /*data*/)
 			return (void*)intel_arc_get_frame_buffer_config;
 		case B_GET_PIXEL_CLOCK_LIMITS:
 			return (void*)intel_arc_get_pixel_clock_limits;
+		case B_SET_INDEXED_COLORS:
+			return (void*)intel_arc_set_indexed_colors;
 	}
 
 	return NULL;

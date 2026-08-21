@@ -225,6 +225,9 @@
 #define INTEL_ARC_PLANE_TILED_MASK   (0x7 << 10)
 #define INTEL_ARC_PLANE_LINEAR       (0x0 << 10)
 
+#define INTEL_ARC_LGC_PALETTE_BASE				0x4A000
+#define INTEL_ARC_GAMMA_MODE_BASE				0x60090
+
 struct arc_mit_buf_trans_entry {
 	uint8	main;
 	uint8	pre;
