@@ -70,6 +70,7 @@ private:
 
 		BString						fSessionPassword;
 		bool						fHasSessionPassword;
+		bool						fSessionPasswordValidated;
 };
 
 
