@@ -934,68 +934,71 @@ select_bars(const pci_info& info, pci_bar_info& mmioBar,
 static void
 draw_logo(intel_arc_info& info)
 {
-	if (info.shared_info == NULL)
-		return;
+    if (info.shared_info == NULL)
+        return;
 
-	intel_arc_shared_info& si = *(info.shared_info);
+    struct frame_buffer_boot_info* bi = (struct frame_buffer_boot_info*)get_boot_item(
+        FRAME_BUFFER_BOOT_INFO, NULL);
 
-	if (info.frame_buffer_area < B_OK)
-		return;
+    if (bi == NULL || bi->depth != 32 || bi->physical_frame_buffer == 0)
+        return;
 
-	// Recupera informazioni sul framebuffer dal bootloader
-	struct frame_buffer_boot_info* bi = (struct frame_buffer_boot_info*)get_boot_item(
-		FRAME_BUFFER_BOOT_INFO, NULL);
+    uint32 screenWidth = bi->width;
+    uint32 screenHeight = bi->height;
 
-	if (bi == NULL || bi->depth != 32)
-		return;
+    uint32 bytesPerRow = bi->bytes_per_row;
+    if (bytesPerRow == 0)
+        bytesPerRow = screenWidth * 4;
 
-	uint32 screenWidth = bi->width;
-	uint32 screenHeight = bi->height;
+    uint32 logoW = kBitmapWidth;   // 960
+    uint32 logoH = kBitmapHeight;  // 523
+    
+    if (logoW > screenWidth || logoH > screenHeight) 
+        return;
 
-	uint32 bytesPerRow = bi->bytes_per_row;
-	if (bytesPerRow == 0)
-		bytesPerRow = screenWidth * 4;
+    int32 startX = (screenWidth - logoW) / 2;
+    if (startX < 0) startX = 0;
+    int32 startY = (screenHeight - logoH) / 2;
+    if (startY < 0) startY = 0;
 
-	//uint32 fbPitch = bytesPerRow / sizeof(uint32);
+    // --- MAPPATURA KERNEL DEDICATA ---
+    void* kFbPtr = NULL;
+    size_t fbSize = bytesPerRow * screenHeight;
+    area_id kFbArea = map_physical_memory(
+        "kernel_draw_logo_fb",
+        bi->physical_frame_buffer,
+        fbSize,
+        B_ANY_KERNEL_ADDRESS,
+        B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA,
+        &kFbPtr
+    );
 
-	uint32 logoW = kBitmapWidth;   // 960
-	uint32 logoH = kBitmapHeight;  // 523
-	
-	if (logoW>screenWidth || logoH>screenHeight) return;
+    if (kFbArea < B_OK || kFbPtr == NULL)
+        return;
 
-	// Centratura a schermo
-	int32 startX = (int32)((screenWidth - logoW) / 2);
-	if (startX < 0) startX = 0;
-	int32 startY = (int32)((screenHeight - logoH) / 2);
-	if (startY < 0) startY = 0;
+    uint8* fb = (uint8*)kFbPtr;
+    const uint8* logoBits = kintel_arc_logo_Bits;
 
-	// Contiene già l'indirizzo virtuale con l'offset EFI/GOP sommato
-	uint8* fb = (uint8*)si.frame_buffer;
-	if (fb == NULL)
-		return;
-		
-	const uint8* logoBits = kintel_arc_logo_Bits;
-
-	for (uint32 y = 0; y < logoH && (startY + y) < screenHeight; y++) {
+    for (uint32 y = 0; y < logoH && (startY + y) < screenHeight; y++) {
         uint32 fbOffset = (startY + y) * bytesPerRow + startX * sizeof(uint32);
         uint32* dst = (uint32*)(fb + fbOffset);
 
         uint32 remainingWidth = screenWidth - startX;
         uint32 copyPixels = (logoW < remainingWidth) ? logoW : remainingWidth;
-
-        uint32 logoRowOffset = y * logoW * 4; // 4 byte per pixel
+        uint32 logoRowOffset = y * logoW * 4;
 
         for (uint32 x = 0; x < copyPixels; x++) {
             uint32 pxIndex = logoRowOffset + (x * 4);
-            uint8 r = logoBits[pxIndex + 0];
+            uint8 b = logoBits[pxIndex + 0];
             uint8 g = logoBits[pxIndex + 1];
-            uint8 b = logoBits[pxIndex + 2];
-            // uint8 a = logoBits[pxIndex + 3]; // Se non serve il blending Alpha, ignoriamo A
+            uint8 r = logoBits[pxIndex + 2];
 
-            // Haiku / EFI GOP in 32-bit usa solitamente il formato BGRx / BGRA32
             dst[x] = (255 << 24) | (r << 16) | (g << 8) | b;
         }
     }
+
+    // Smonta l'area temporanea Kernel
+    delete_area(kFbArea);
 }
 #endif
 
