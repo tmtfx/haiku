@@ -147,60 +147,14 @@ is_mode_supported(display_mode* mode)
 {
 	return mode != NULL && *mode == gInfo->shared_info->current_mode;
 }
-/*
-static status_t
-create_mode_list(void)
-{
-	debug_printf("intel_arc.accelerant: create_mode_list() entering\n");
-	display_mode mode = gInfo->shared_info->current_mode;
-	const color_space kSupportedSpaces[] = {
-		B_RGB32, B_RGB16, B_CMAP8
-	};
-	if (mode.virtual_width == 0 || mode.virtual_height == 0
-		|| mode.space == B_NO_COLOR_SPACE) {
-		debug_printf("intel_arc.accelerant: Current mode is invalid, setting fallback 1024x768@60Hz\n");
-		mode.virtual_width = 1024;
-		mode.virtual_height = 768;
-		mode.space = B_RGB32;
-		compute_display_timing(mode.virtual_width, mode.virtual_height, 60,
-			false, &mode.timing);
-		if (gInfo->shared_info->bytes_per_row == 0)
-			gInfo->shared_info->bytes_per_row = mode.virtual_width * 4;
-	} else {
-		debug_printf("intel_arc.accelerant: Using boot mode: %ux%u, pixel_clock=%u kHz\n",
-			mode.virtual_width, mode.virtual_height, mode.timing.pixel_clock);
-		compute_display_timing(mode.virtual_width, mode.virtual_height, 60,
-			false, &mode.timing);
-	}
-	gInfo->shared_info->current_mode = mode;
-	if (gInfo->has_edid) {
-		debug_printf("intel_arc.accelerant: EDID available, generating modes from EDID\n");
-		gInfo->mode_list_area = create_display_modes("intel arc modes",
-			&gInfo->edid_info, NULL, 0, kSupportedSpaces,
-			sizeof(kSupportedSpaces) / sizeof(kSupportedSpaces[0]), NULL,
-			&gInfo->mode_list, &gInfo->shared_info->mode_count);
-	} else {
-		debug_printf("intel_arc.accelerant: No EDID available, generating fallback display modes\n");
-		fill_display_mode(mode.virtual_width, mode.virtual_height, &mode);
-		gInfo->mode_list_area = create_display_modes("intel arc modes", NULL,
-			&mode, 1, kSupportedSpaces,
-			sizeof(kSupportedSpaces) / sizeof(kSupportedSpaces[0]),
-			is_mode_supported, &gInfo->mode_list, &gInfo->shared_info->mode_count);
-	}
-	if (gInfo->mode_list_area < B_OK) {
-		debug_printf("intel_arc.accelerant ERROR: Failed to create display modes area: %s\n", strerror(gInfo->mode_list_area));
-		return gInfo->mode_list_area;
-	}
 
-	debug_printf("intel_arc.accelerant: Created %u display modes successfully\n", gInfo->shared_info->mode_count);
-	gInfo->shared_info->mode_list_area = gInfo->mode_list_area;
-	return B_OK;
-}*/
-/* modo creato sbagliato
- * h_display e v_display rimangono quelli impostati nella pipe (nel mio caso a 1920x1080)
- * quindi la risoluzione viene scalata per riempire quella risoluzione, ma viene visualizzata con un pitch sbagliato
- * per avere un vero modo/risoluzione bisogna mettere h_display alla risoluzione corretta altrimenti il monitor si configura
- *a 1920 x 1080 invece che 1280x1024 per esempio */
+/* in questa versione ereditiamo la modalità dal boot e la salviamo assieme alle modalità
+ * ottenute dall'edid. (questo comporta che la modalità ereditata ed errata con h_display a 
+ * 1920 x 1080 ma risoluzione virtuale a 1280x1024 sovrascrive la modalità dell'edid nativa 
+ * di quella risoluzione (1280x1024). Se provo a cambiare risoluzione scegliendo unda di 
+ * quelle elencate il monitor va in out of range. La gestione colori RGB32 e RGB16 funziona
+ * CMAP8 va ridefinita visto che i colori passano sul verdino
+ */
 static status_t
 create_mode_list(void)
 {
@@ -222,7 +176,16 @@ create_mode_list(void)
 		mode.timing.v_sync_end, mode.timing.v_total);
 	debug_printf("  - Sync Flags   : 0x%08X\n", mode.timing.flags);
 	debug_printf("==================================================\n");
-	if (mode.virtual_width == 0 || mode.virtual_height == 0) {
+	
+
+	
+    const color_space kSupportedSpaces[] = {
+        B_RGB32, B_RGB16, B_CMAP8
+    };
+    const uint32 kNumSupportedSpaces = sizeof(kSupportedSpaces) / sizeof(kSupportedSpaces[0]);
+
+    // 1. Sanificazione della modalità iniziale ricavata dai registri/boot
+ 	if (mode.virtual_width == 0 || mode.virtual_height == 0) {
 		if (gInfo->shared_info->has_boot_info
 			&& gInfo->shared_info->boot_width > 0
 			&& gInfo->shared_info->boot_height > 0) {
@@ -239,22 +202,17 @@ create_mode_list(void)
 			mode.space = B_RGB32;
 		}
 	}
-
-	if (mode.space == B_NO_COLOR_SPACE)
-		mode.space = B_RGB32;
-
 	mode.h_display_start = 0;
 	mode.v_display_start = 0;
 	mode.flags = 0;
-
-	if (mode.timing.h_display == 0 || mode.timing.v_display == 0) {
-		debug_printf("intel_arc.accelerant: i timings sono vuoti li configuro dal virtual_width/height\n");
-		//debug_printf("intel_arc.accelerant: forzo i timings dal virtual_width/height %u %u\n",mode.virtual_width,mode.virtual_height);
-		mode.timing.h_display = mode.virtual_width;
-		mode.timing.v_display = mode.virtual_height;
-	}
-
-	const int8 pipe = gInfo->shared_info->active_pipe;
+/*
+    // Garantisci timings VESA coerenti per la modalità iniziale
+    // temporaneamente? forse compute_display_timing sovrascrive questi due valori:
+    mode.timing.h_display = mode.virtual_width;
+    mode.timing.v_display = mode.virtual_height;
+    compute_display_timing(mode.virtual_width, mode.virtual_height, 60, false, &mode.timing);
+*/
+    const int8 pipe = gInfo->shared_info->active_pipe;
 	if (pipe >= 0) {
 		const uint32 hTotal = gInfo->shared_info->pipe_h_total[pipe];
 		const uint32 hSync = gInfo->shared_info->pipe_h_sync[pipe];
@@ -272,22 +230,23 @@ create_mode_list(void)
 			mode.timing.v_sync_end = (vSync >> 16) + 1;
 		}
 	}
-
+	
 	if (mode.timing.h_total == 0 || mode.timing.v_total == 0) {
 		compute_display_timing(mode.virtual_width, mode.virtual_height, 60, false,
 			&mode.timing);
 	}
+	
+    if (mode.timing.pixel_clock == 0) {
+        mode.timing.pixel_clock = ((uint32)mode.timing.h_total
+            * (uint32)mode.timing.v_total * 60) / 1000;
+    }
 
-	if (mode.timing.pixel_clock == 0) {
-		mode.timing.pixel_clock = ((uint32)mode.timing.h_total
-			* (uint32)mode.timing.v_total * 60) / 1000;
-	}
-
-	const uint32 bytesPerPixel = bytes_per_pixel_for_space((color_space)mode.space);
+    // Preserva lo stride rilevato dall'hardware nel kernel
+    const uint32 bytesPerPixel = bytes_per_pixel_for_space((color_space)mode.space);
 	if (gInfo->shared_info->bytes_per_row == 0){
-		//gInfo->shared_info->bytes_per_row = mode.virtual_width * bytesPerPixel;
 		gInfo->shared_info->bytes_per_row  = (mode.virtual_width * bytesPerPixel + 63) & ~63;
 	}
+	
 	debug_printf("intel_arc.accelerant: Bytes Per Row: %u",gInfo->shared_info->bytes_per_row);
 	gInfo->shared_info->current_mode = mode;
 	debug_printf("intel_arc.accelerant: >>> CREATE MODE LIST <<<\n");
@@ -307,152 +266,6 @@ create_mode_list(void)
 	debug_printf("  - Sync Flags   : 0x%08X\n", mode.timing.flags);
 	debug_printf("==================================================\n");
 
-	const color_space supportedSpace[] = { B_RGB32, B_RGB16 };//{ (color_space)mode.space };
-	gInfo->mode_list_area = create_display_modes("intel arc modes", NULL,
-		&mode, 1, supportedSpace, 1, is_mode_supported, &gInfo->mode_list,
-		&gInfo->shared_info->mode_count);
-
-	if (gInfo->mode_list_area < B_OK) {
-		debug_printf("intel_arc.accelerant ERROR: create_display_modes failed: %s\n",
-			strerror(gInfo->mode_list_area));
-		return gInfo->mode_list_area;
-	}
-
-	gInfo->shared_info->mode_list_area = gInfo->mode_list_area;
-	debug_printf("intel_arc.accelerant: Passthrough mode list created with %u mode(s)\n",
-		gInfo->shared_info->mode_count);
-	
-	return B_OK;
-}
-/* 1 sola risoluzione?
-static status_t
-create_mode_list(void)
-{
-    display_mode mode = gInfo->shared_info->current_mode;
-
-    debug_printf("==================================================\n");
-    debug_printf("intel_arc.accelerant: >>> CREATE MODE LIST <<<\n");
-    debug_printf("intel_arc.accelerant: >>> PREVIOUS MODE: <<<\n");
-    debug_printf("   - Virtual Size : %u x %u\n", mode.virtual_width, mode.virtual_height);
-    debug_printf("   - Color Space  : 0x%08X\n", mode.space);
-    debug_printf("==================================================\n");
-
-    // 1. Fallback su Boot Info / Default se la dimensione virtuale è zero
-    if (mode.virtual_width == 0 || mode.virtual_height == 0) {
-        if (gInfo->shared_info->has_boot_info
-            && gInfo->shared_info->boot_width > 0
-            && gInfo->shared_info->boot_height > 0) {
-            debug_printf("intel_arc.accelerant: Using boot framebuffer mode\n");
-            mode.virtual_width = gInfo->shared_info->boot_width;
-            mode.virtual_height = gInfo->shared_info->boot_height;
-            mode.space = gInfo->shared_info->boot_depth >= 24 ? B_RGB32 : B_RGB16;
-        } else {
-            debug_printf("intel_arc.accelerant: Fallback to 1024x768\n");
-            memset(&mode, 0, sizeof(mode));
-            mode.virtual_width = 1024;
-            mode.virtual_height = 768;
-            mode.space = B_RGB32;
-        }
-    }
-
-    if (mode.space == B_NO_COLOR_SPACE)
-        mode.space = B_RGB32;
-
-    mode.h_display_start = 0;
-    mode.v_display_start = 0;
-    mode.flags = 0;
-
-    // 2. Forza temporaneamente i display timing a combaciare esattamente con la dimensione virtuale trovata
-    // verranno ricalcolati da compute_display_timing
-    mode.timing.h_display = mode.virtual_width;
-    mode.timing.v_display = mode.virtual_height;
-
-    // 3. Genera un timing VESA/GTF valido per la risoluzione VERA (1280x1024)
-    // Non sovrascrivere h_display con registri HTOTAL disallineati dal VBIOS
-    compute_display_timing(mode.virtual_width, mode.virtual_height, 60, false, &mode.timing);
-
-    // 4. Calcolo corretto del Pixel Clock se non presente
-    if (mode.timing.pixel_clock == 0) {
-        mode.timing.pixel_clock = ((uint32)mode.timing.h_total
-            * (uint32)mode.timing.v_total * 60) / 1000;
-    }
-
-    // 5. Preserva il Pitch/Stride calcolato nel Kernel Probe (5120 byte per 1280px RGB32)
-    const uint32 bytesPerPixel = bytes_per_pixel_for_space((color_space)mode.space);
-    //if (gInfo->shared_info->bytes_per_row == 0)
-        gInfo->shared_info->bytes_per_row = mode.virtual_width * bytesPerPixel;
-
-    gInfo->shared_info->current_mode = mode;
-
-    debug_printf("intel_arc.accelerant: >>> NEW MODE GENERATED: <<<\n");
-    debug_printf("   - Virtual Size : %u x %u\n", mode.virtual_width, mode.virtual_height);
-    debug_printf("   - Pitch (Bytes/Row) : %u\n", gInfo->shared_info->bytes_per_row);
-    debug_printf("   - Timing HDisplay: %u, HTotal: %u\n", mode.timing.h_display, mode.timing.h_total);
-    debug_printf("   - Timing VDisplay: %u, VTotal: %u\n", mode.timing.v_display, mode.timing.v_total);
-    debug_printf("   - Pixel Clock   : %u kHz\n", mode.timing.pixel_clock);
-    debug_printf("==================================================\n");
-
-    const color_space supportedSpace[] = { (color_space)mode.space };
-    gInfo->mode_list_area = create_display_modes("intel arc modes", NULL,
-        &mode, 1, supportedSpace, 1, NULL , &gInfo->mode_list, //is_mode_supported
-        &gInfo->shared_info->mode_count);
-
-    if (gInfo->mode_list_area < B_OK) {
-        debug_printf("intel_arc.accelerant ERROR: create_display_modes failed: %s\n",
-            strerror(gInfo->mode_list_area));
-        return gInfo->mode_list_area;
-    }
-
-    gInfo->shared_info->mode_list_area = gInfo->mode_list_area;
-    debug_printf("intel_arc.accelerant: Passthrough mode list created with %u mode(s)\n",
-        gInfo->shared_info->mode_count);
-
-    return B_OK;
-}*/
-/* questa dovrebbe essere quella che dovrebbe andare
- * in questa versione creiamo i modi corretti con h_display corretto.
- * il problema è che non scriviamo correttamente i registri per quello lo schermo si spegne
-*
-static status_t
-create_mode_list(void)
-{
-    debug_printf("intel_arc.accelerant: create_mode_list() entering\n");
-
-    display_mode mode = gInfo->shared_info->current_mode;
-    const color_space kSupportedSpaces[] = {
-        B_RGB32, B_RGB16, B_CMAP8
-    };
-    const uint32 kNumSupportedSpaces = sizeof(kSupportedSpaces) / sizeof(kSupportedSpaces[0]);
-
-    // 1. Sanificazione della modalità iniziale ricavata dai registri/boot
-    if (mode.virtual_width == 0 || mode.virtual_height == 0
-        || mode.space == B_NO_COLOR_SPACE) {
-        debug_printf("intel_arc.accelerant: Current mode invalid, setting fallback 1024x768@60Hz\n");
-        mode.virtual_width = 1024;
-        mode.virtual_height = 768;
-        mode.space = B_RGB32;
-    } else {
-        debug_printf("intel_arc.accelerant: Valid active mode detected: %ux%u\n",
-            mode.virtual_width, mode.virtual_height);
-    }
-
-    // Garantisci timings VESA coerenti per la modalità iniziale
-    // temporaneamente? forse compute_display_timing sovrascrive questi due valori:
-    mode.timing.h_display = mode.virtual_width;
-    mode.timing.v_display = mode.virtual_height;
-    compute_display_timing(mode.virtual_width, mode.virtual_height, 60, false, &mode.timing);
-
-    if (mode.timing.pixel_clock == 0) {
-        mode.timing.pixel_clock = ((uint32)mode.timing.h_total
-            * (uint32)mode.timing.v_total * 60) / 1000;
-    }
-
-    // Preserva lo stride rilevato dall'hardware nel kernel
-    if (gInfo->shared_info->bytes_per_row == 0) {
-        const uint32 bpp = bytes_per_pixel_for_space((color_space)mode.space);
-        gInfo->shared_info->bytes_per_row = mode.virtual_width * (bpp > 0 ? bpp : 4);
-    }
-
     gInfo->shared_info->current_mode = mode;
 
     // 2. Controllo presenza EDID (sia Hardware che Bootloader Fallback)
@@ -465,7 +278,7 @@ create_mode_list(void)
 
         // Genera tutte le risoluzioni dichiarate dal monitor tramite l'EDID
         gInfo->mode_list_area = create_display_modes("intel arc modes",
-            targetEdid, NULL, 0, kSupportedSpaces, kNumSupportedSpaces,
+            targetEdid, &mode, 1, kSupportedSpaces, kNumSupportedSpaces, //NULL, 0
             NULL , &gInfo->mode_list, &gInfo->shared_info->mode_count);//is_mode_supported
     } else {
         debug_printf("intel_arc.accelerant: No EDID found, generating single active mode fallback\n");
@@ -486,7 +299,7 @@ create_mode_list(void)
         gInfo->shared_info->mode_count);
 
     return B_OK;
-}*/
+}
 
 static status_t
 init_common(int device, bool isClone)
