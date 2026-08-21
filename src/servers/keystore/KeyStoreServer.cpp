@@ -75,12 +75,13 @@ static const uint32 kDefaultAppFlags = kFlagGetKey | kFlagEnumerateKeys
 #include <sstream>
 
 // Helper interno per stampare i buffer in esadecimale nei log
+/*
 static std::string _BufToHex(const uint8_t* buf, size_t len) {
     std::ostringstream ss;
     for (size_t i = 0; i < len; ++i)
         ss << std::hex << std::setw(2) << std::setfill('0') << (int)buf[i];
     return ss.str();
-}
+}*/
 
 static void LogDebug(const char* format, ...) {
     FILE* f = fopen("/boot/home/keystore_debug.log", "a");
@@ -98,7 +99,7 @@ KeyStoreServer::KeyStoreServer()
 	BApplication(kKeyStoreServerSignature),
 	fMasterKeyring(NULL),
 	fKeyrings(20),
-	fHasSessionPassword(false)
+	fHasSessionPassword(false),
 	fSessionPasswordValidated(false)
 {
 	BPath path;
