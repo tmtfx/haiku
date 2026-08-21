@@ -36,6 +36,51 @@
 #include "intel_arc_logo.h"
 #endif
 
+
+/*
+ * Raw display/MMIO offsets below are a minimal, MIT-compatible reinterpretation
+ * of register definitions for Intel Display Engine.
+ */
+/*
+#define INTEL_ARC_MMIO_PIPE_BLOCK_BASE			0x60000
+#define INTEL_ARC_MMIO_PLANE_BLOCK_BASE			0x70000
+#define INTEL_ARC_MMIO_PIPE_OFFSET				0x1000
+#define INTEL_ARC_MMIO_PIPE_A_SIZE				(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x001c)
+#define INTEL_ARC_MMIO_PIPE_A_DDI_FUNC_CTL		(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0400)
+#define INTEL_ARC_MMIO_PIPE_A_HTOTAL			(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0000)
+#define INTEL_ARC_MMIO_PIPE_A_HBLANK			(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0004)
+#define INTEL_ARC_MMIO_PIPE_A_HSYNC				(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0008)
+#define INTEL_ARC_MMIO_PIPE_A_VTOTAL			(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x000c)
+#define INTEL_ARC_MMIO_PIPE_A_VBLANK			(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0010)
+#define INTEL_ARC_MMIO_PIPE_A_VSYNC				(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0014)
+#define INTEL_ARC_MMIO_PIPE_A_CONTROL			(INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x0008)
+#define INTEL_ARC_MMIO_PLANE_A_CONTROL			(INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x0180)
+#define INTEL_ARC_MMIO_PLANE_A_COLOR_CTL        (INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x0184)
+#define INTEL_ARC_MMIO_PLANE_A_STRIDE			(INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x0188)
+#define INTEL_ARC_MMIO_PLANE_A_POS				(INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x018c)
+#define INTEL_ARC_MMIO_PLANE_A_IMAGE_SIZE		(INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x0190)
+#define INTEL_ARC_MMIO_PLANE_A_SURFACE			(INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x019c)
+#define INTEL_ARC_MMIO_PORT_A					(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x4000)
+#define INTEL_ARC_MMIO_PORT_B					(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x4100)
+#define INTEL_ARC_MMIO_PORT_C					(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x4200)
+#define INTEL_ARC_MMIO_PORT_D					(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x4300)
+#define INTEL_ARC_MMIO_PCH_MASTER_INT_CTL		0x44200
+#define INTEL_ARC_MMIO_PIPE_INT_MASK(pipe)		(0x44404 + ((pipe) - 1) * 0x10)
+#define INTEL_ARC_MMIO_PIPE_INT_IDENTITY(pipe)	(0x44408 + ((pipe) - 1) * 0x10)
+#define INTEL_ARC_MMIO_PIPE_INT_ENABLE(pipe)	(0x4440c + ((pipe) - 1) * 0x10)
+
+#define INTEL_ARC_PIPE_ENABLED					(1UL << 31)
+#define INTEL_ARC_PIPE_DDI_SELECT_SHIFT		28
+#define INTEL_ARC_PIPE_DDI_SELECT_MASK			(7 << INTEL_ARC_PIPE_DDI_SELECT_SHIFT)
+#define INTEL_ARC_PIPE_DDI_MODE_SHIFT			24
+#define INTEL_ARC_PIPE_DDI_MODE_MASK			(7 << INTEL_ARC_PIPE_DDI_MODE_SHIFT)
+#define INTEL_ARC_PORT_ENABLED					(1UL << 31)
+#define INTEL_ARC_PORT_DETECTED				(1UL << 2)
+#define INTEL_ARC_MASTER_INT_GLOBAL			(1UL << 31)
+#define INTEL_ARC_MASTER_INT_PIPE_PENDING(pipe)	(1UL << (15 + (pipe)))
+#define INTEL_ARC_PIPE_INT_VBLANK				(1UL << 0)
+*/
+
 #define TRACE_INTEL_ARC
 #ifdef TRACE_INTEL_ARC
 #	define TRACE(x...) dprintf("intel_arc: " x)
@@ -389,7 +434,7 @@ probe_display_state(intel_arc_info& info)
 	}
 }
 */
-/* orig con logs
+/* orig con logs */
 static void
 probe_display_state(intel_arc_info& info)
 {
@@ -543,8 +588,8 @@ probe_display_state(intel_arc_info& info)
 	} // FINE PORT LOOP
 
     dprintf("\nDEBUG: probe_display_state finished execution.\n");
-}*/
-/* gestione colore */
+}
+/* gestione colore 
 static void
 probe_display_state(intel_arc_info& info)
 {
@@ -652,6 +697,26 @@ probe_display_state(intel_arc_info& info)
         if (width != 0 && height != 0) {
             shared.current_mode.virtual_width = width;
             shared.current_mode.virtual_height = height;
+            
+            const uint32 hTotal = shared.pipe_h_total[pipe];
+		    const uint32 hSync = shared.pipe_h_sync[pipe];
+			const uint32 vTotal = shared.pipe_v_total[pipe];
+			const uint32 vSync = shared.pipe_v_sync[pipe];
+
+			if (hTotal != 0 && vTotal != 0) {
+				shared.current_mode.timing.h_display = (hTotal & 0xffff) + 1;
+				shared.current_mode.timing.h_total = (hTotal >> 16) + 1;
+				shared.current_mode.timing.h_sync_start = (hSync & 0xffff) + 1;
+				shared.current_mode.timing.h_sync_end = (hSync >> 16) + 1;
+				shared.current_mode.timing.v_display = (vTotal & 0xffff) + 1;
+				shared.current_mode.timing.v_total = (vTotal >> 16) + 1;
+				shared.current_mode.timing.v_sync_start = (vSync & 0xffff) + 1;
+				shared.current_mode.timing.v_sync_end = (vSync >> 16) + 1;
+			}
+			if (shared.current_mode.timing.pixel_clock == 0) {
+				shared.current_mode.timing.pixel_clock = ((uint32)shared.current_mode.timing.h_total
+					* (uint32)shared.current_mode.timing.v_total * 60) / 1000;
+			}
             dprintf("DEBUG: Calculated Resolution for Pipe %u: %u x %u\n", pipe, width, height);
 
             // Decodifica dello Spazio Colore da PLANE_CTL (bit 27:24)
@@ -727,7 +792,7 @@ probe_display_state(intel_arc_info& info)
     } // FINE PORT LOOP
 
     dprintf("\nDEBUG: probe_display_state finished execution.\n");
-}
+}*/
 
 
 static status_t
