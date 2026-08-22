@@ -59,6 +59,28 @@ status_t	intel_arc_release_overlay(overlay_token token);
 status_t	intel_arc_configure_overlay(overlay_token token,
 				const overlay_buffer* buffer, const overlay_window* window,
 				const overlay_view* view);
+		
+// global funcs
+bool		read_register(uint32 offset, uint32& value);
+void		write_register(uint32 offset, uint32 value);
+status_t	wait_for_clear(uint32 offset, uint32 mask, bigtime_t timeout);
+status_t	wait_for_set(uint32 offset, uint32 mask, bigtime_t timeout);
+uint32		aux_data_register(uint8 ddiPort, uint8 index);
+uint32		aux_control_register(uint8 ddiPort);
+uint32		pipe_register(uint32 base, int8 pipe);
+status_t	write_dpcd(uint32 address, const void* buffer, size_t size);
+status_t	read_dpcd(uint32 address, void* buffer, size_t size);
+status_t	program_ddi_buffer(uint8 ddiPort, int8 pipe, uint32 lanes, bool enable);
+
+//accelerant
+status_t	handle_hotplug_event(void);
+
+//dpms
+status_t	apply_dpms_off(void);
+status_t	apply_dpms_on(void);
+
+//overlay
+status_t	init_overlay_memory_manager(void);
 
 #ifdef __cplusplus
 }

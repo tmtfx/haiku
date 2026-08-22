@@ -316,5 +316,21 @@ struct accelerant_info {
 	uint32					last_hotplug_event_count;
 };
 
+struct intel_arc_overlay_state {
+	overlay_token	token;
+	bool			configured;
+	const overlay_buffer* buffer;
+	overlay_window	window;
+	overlay_view	view;
+};
+
+
+struct intel_arc_overlay_buffer {
+	overlay_buffer publicBuffer;
+	uint32 blockID;
+	uint32 offset;
+	size_t size;
+};
+
 
 extern accelerant_info* gInfo;
