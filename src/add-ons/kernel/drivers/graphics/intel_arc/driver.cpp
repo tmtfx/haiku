@@ -1078,12 +1078,14 @@ init_device(intel_arc_info& info)
 			size_t bootSurfaceSize = (size_t)bootInfo->bytes_per_row
 				* (size_t)bootInfo->height;
 
-			// Assicuriamo che mapSize copra sia l'offset che la superficie del display
+			// Assicuriamo che mapSize copra almeno la superficie di boot, ma non
+			// riduciamo la mappatura al solo GOP framebuffer: il preflet può
+			// selezionare modalità con framebuffer più grande e una clone area
+			// troppo piccola causa page fault lato app_server.
 			if (bootSurfaceSize > 0) {
-				mapSize = ROUND_TO_PAGE_SIZE(fbOffset + bootSurfaceSize);
-				if (mapSize > MAX_CLONED_FRAMEBUFFER_SIZE) {
-					mapSize = MAX_CLONED_FRAMEBUFFER_SIZE;
-				}
+				size_t bootMapSize = ROUND_TO_PAGE_SIZE(fbOffset + bootSurfaceSize);
+				if (bootMapSize > mapSize)
+					mapSize = min_c(bootMapSize, (size_t)MAX_CLONED_FRAMEBUFFER_SIZE);
 			}
 
 			info.shared_info->current_mode.virtual_width = bootInfo->width;
