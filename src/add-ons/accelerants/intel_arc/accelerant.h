@@ -70,7 +70,29 @@
 /* Synopsys PHY Registers (DG2 / Alchemist) */
 #define INTEL_ARC_MMIO_SNPS_PHY_A_BASE          0x168000
 #define INTEL_ARC_MMIO_SNPS_PHY_B_BASE          0x169000
+#define INTEL_ARC_MMIO_SNPS_PHY_MPLLB_CP(base)      ((base) + 0x000)
+#define INTEL_ARC_MMIO_SNPS_PHY_MPLLB_DIV(base)     ((base) + 0x004)
+#define INTEL_ARC_MMIO_SNPS_PHY_MPLLB_FRACN1(base)  ((base) + 0x008)
+#define INTEL_ARC_MMIO_SNPS_PHY_MPLLB_FRACN2(base)  ((base) + 0x00c)
+#define INTEL_ARC_MMIO_SNPS_PHY_MPLLB_SSCEN(base)   ((base) + 0x014)
+#define INTEL_ARC_MMIO_SNPS_PHY_MPLLB_SSCSTEP(base) ((base) + 0x018)
+#define INTEL_ARC_MMIO_SNPS_PHY_MPLLB_DIV2(base)    ((base) + 0x01c)
+#define INTEL_ARC_MMIO_SNPS_PHY_REF_CONTROL(base)   ((base) + 0x188)
 #define INTEL_ARC_MMIO_SNPS_PHY_TX_EQ(base, lane) ((base) + 0x300 + (lane) * 0x10)
+#define INTEL_ARC_SNPS_PHY_MPLLB_FORCE_EN       (1U << 31)
+#define INTEL_ARC_SNPS_PHY_MPLLB_DIV_CLK_EN     (1U << 30)
+#define INTEL_ARC_SNPS_PHY_MPLLB_DIV5_CLK_EN    (1U << 29)
+#define INTEL_ARC_SNPS_PHY_MPLLB_V2I_SHIFT      26
+#define INTEL_ARC_SNPS_PHY_MPLLB_FREQ_VCO_SHIFT 24
+#define INTEL_ARC_SNPS_PHY_MPLLB_PMIX_EN        (1U << 10)
+#define INTEL_ARC_SNPS_PHY_MPLLB_DP2_MODE       (1U << 9)
+#define INTEL_ARC_SNPS_PHY_MPLLB_WORD_DIV2_EN   (1U << 8)
+#define INTEL_ARC_SNPS_PHY_MPLLB_TX_CLK_DIV_SHIFT 5
+#define INTEL_ARC_SNPS_PHY_MPLLB_SHIM_DIV32_CLK_SEL (1U << 0)
+#define INTEL_ARC_SNPS_PHY_MPLLB_FRACN_EN       (1U << 31)
+#define INTEL_ARC_SNPS_PHY_MPLLB_FRACN_CGG_UPDATE_EN (1U << 30)
+#define INTEL_ARC_SNPS_PHY_MPLLB_SSC_EN         (1U << 31)
+#define INTEL_ARC_SNPS_PHY_MPLLB_SSC_UP_SPREAD  (1U << 30)
 /* Plane Block Base & Universal Plane Registers (Pipe A, Plane 1) */
 #define INTEL_ARC_MMIO_PLANE_BLOCK_BASE         0x70000
 #define INTEL_ARC_MMIO_PIPE_A_CONTROL           (INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x0008) // 0x70008 (PIPECONF)
@@ -81,12 +103,30 @@
 #define INTEL_ARC_MMIO_PLANE_A_IMAGE_SIZE       (INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x0190) // 0x70190 (PLANE_SIZE)
 #define INTEL_ARC_MMIO_PLANE_A_SURFACE          (INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x019c) // 0x7019C (PLANE_SURF - VERO BASE ADDRESS)
 #define INTEL_ARC_MMIO_PLANE_A_OFFSET           (INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x01a4) // 0x701A4 (PLANE_OFFSET)
-/* Hardware Scaler */
-#define INTEL_ARC_MMIO_PS_CTRL_A                0x68180
+/* Pipe scaler registers (sparse per-pipe layout, not pipe-offset based) */
+#define INTEL_ARC_MMIO_PS_1A_CTRL               0x68180
+#define INTEL_ARC_MMIO_PS_2A_CTRL               0x68280
+#define INTEL_ARC_MMIO_PS_1B_CTRL               0x68980
+#define INTEL_ARC_MMIO_PS_2B_CTRL               0x68A80
+#define INTEL_ARC_MMIO_PS_1C_CTRL               0x69180
+#define INTEL_ARC_MMIO_PS_2C_CTRL               0x69280
+#define INTEL_ARC_MMIO_PS_1A_WIN_POS            0x68170
+#define INTEL_ARC_MMIO_PS_2A_WIN_POS            0x68270
+#define INTEL_ARC_MMIO_PS_1B_WIN_POS            0x68970
+#define INTEL_ARC_MMIO_PS_2B_WIN_POS            0x68A70
+#define INTEL_ARC_MMIO_PS_1C_WIN_POS            0x69170
+#define INTEL_ARC_MMIO_PS_2C_WIN_POS            0x69270
+#define INTEL_ARC_MMIO_PS_1A_WIN_SIZE           0x68174
+#define INTEL_ARC_MMIO_PS_2A_WIN_SIZE           0x68274
+#define INTEL_ARC_MMIO_PS_1B_WIN_SIZE           0x68974
+#define INTEL_ARC_MMIO_PS_2B_WIN_SIZE           0x68A74
+#define INTEL_ARC_MMIO_PS_1C_WIN_SIZE           0x69174
+#define INTEL_ARC_MMIO_PS_2C_WIN_SIZE           0x69274
 /* Flags */
 #define INTEL_ARC_PLANE_ENABLE                  (1U << 31)
 #define INTEL_ARC_DDI_HSYNC_POLARITY_POSITIVE   (1U << 16)
 #define INTEL_ARC_DDI_VSYNC_POLARITY_POSITIVE   (1U << 17)
+#define INTEL_ARC_PS_SCALER_ENABLE              (1U << 31)
 
 #define INTEL_ARC_DP_AUX_CTL_BUSY				(1U << 31)
 #define INTEL_ARC_DP_AUX_CTL_DONE				(1U << 30)
