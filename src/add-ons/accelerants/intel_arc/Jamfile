@@ -9,10 +9,11 @@ UsePrivateHeaders [ FDirName graphics common ] ;
 UsePrivateHeaders shared ;
 
 Addon intel_arc.accelerant :
+	accelerant.cpp
 	global.cpp
 	dpms.cpp
+	display.cpp
 	overlay.cpp
-	accelerant.cpp
 	memory_manager_wrapper.c
 	: libaccelerantscommon.a
 ;

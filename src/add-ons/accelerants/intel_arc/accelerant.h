@@ -288,6 +288,10 @@
 #define INTEL_ARC_LGC_PALETTE_BASE				0x4A000
 #define INTEL_ARC_GAMMA_MODE_BASE				0x60090
 
+#define INTEL_SNPS_PHY_HDMI_4999MHZ 4999999900ULL
+#define INTEL_SNPS_PHY_HDMI_16GHZ 16000000000ULL
+#define INTEL_SNPS_PHY_HDMI_9999MHZ (2 * INTEL_SNPS_PHY_HDMI_4999MHZ)
+
 struct arc_mit_buf_trans_entry {
 	uint8	main;
 	uint8	pre;
@@ -330,6 +334,22 @@ struct intel_arc_overlay_buffer {
 	uint32 blockID;
 	uint32 offset;
 	size_t size;
+};
+
+
+struct snps_mpllb_state {
+	uint32 mpllb_cp;
+	uint32 mpllb_div;
+	uint32 mpllb_div2;
+	uint32 mpllb_fracn1;
+	uint32 mpllb_fracn2;
+	uint32 mpllb_sscen;
+	uint32 mpllb_sscstep;
+};
+
+struct snps_hdmi_table_entry {
+	uint32 clockKHz;
+	snps_mpllb_state state;
 };
 
 

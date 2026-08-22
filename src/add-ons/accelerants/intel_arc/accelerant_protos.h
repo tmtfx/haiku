@@ -82,6 +82,12 @@ status_t	apply_dpms_on(void);
 //overlay
 status_t	init_overlay_memory_manager(void);
 
+//display
+status_t	create_mode_list(void);
+status_t	read_edid_from_hardware(void);
+status_t	intel_arc_set_indexed_colors(uint32 count, uint8 first,
+			uint8* color_data, uint32 flags);
+
 #ifdef __cplusplus
 }
 #endif
