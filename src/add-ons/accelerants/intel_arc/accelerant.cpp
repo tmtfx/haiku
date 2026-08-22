@@ -44,6 +44,8 @@
 accelerant_info* gInfo;
 static engine_token sEngineToken = {1, 0, NULL};
 static uint64 sSyncCounter = 1;
+static int32 sOverlayChannelUsed = 0;
+static int32 sOverlayToken = 0;
 
 
 
@@ -1238,6 +1240,162 @@ intel_arc_get_pixel_clock_limits(display_mode* mode, uint32* low, uint32* high)
 	return B_OK;
 }
 
+uint32
+intel_arc_overlay_count(const display_mode* mode)
+{
+	(void)mode;
+	// The software-side API plumbing exists, but the hardware video plane is
+	// not wired up yet, so do not advertise overlay availability to app_server.
+	return 0;
+}
+
+const uint32*
+intel_arc_overlay_supported_spaces(const display_mode* mode)
+{
+	(void)mode;
+	static const uint32 kSupportedSpaces[] = {
+		B_YCbCr422,
+		B_RGB32,
+		B_YCbCr420,
+		0
+	};
+	return kSupportedSpaces;
+}
+
+uint32
+intel_arc_overlay_supported_features(uint32 colorSpace)
+{
+	(void)colorSpace;
+	return 0;
+}
+
+struct intel_arc_overlay_buffer {
+	overlay_buffer publicBuffer;
+	void* storage;
+	size_t size;
+};
+
+const overlay_buffer*
+intel_arc_allocate_overlay_buffer(color_space colorSpace, uint16 width,
+	uint16 height)
+{
+	if (width == 0 || height == 0)
+		return NULL;
+
+	size_t bytesPerRow = 0;
+	size_t size = 0;
+	switch (colorSpace) {
+		case B_YCbCr422:
+			bytesPerRow = ((size_t)width * 2 + 63) & ~63;
+			size = bytesPerRow * height;
+			break;
+		case B_RGB32:
+			bytesPerRow = ((size_t)width * 4 + 63) & ~63;
+			size = bytesPerRow * height;
+			break;
+		case B_YCbCr420:
+			bytesPerRow = ((size_t)width + 63) & ~63;
+			size = bytesPerRow * height + ((bytesPerRow * height) / 2);
+			break;
+		default:
+			return NULL;
+	}
+
+	intel_arc_overlay_buffer* buffer
+		= (intel_arc_overlay_buffer*)calloc(1, sizeof(intel_arc_overlay_buffer));
+	if (buffer == NULL)
+		return NULL;
+
+	buffer->storage = malloc(size);
+	if (buffer->storage == NULL) {
+		free(buffer);
+		return NULL;
+	}
+
+	buffer->size = size;
+	buffer->publicBuffer.space = colorSpace;
+	buffer->publicBuffer.width = width;
+	buffer->publicBuffer.height = height;
+	buffer->publicBuffer.bytes_per_row = bytesPerRow;
+	buffer->publicBuffer.buffer = buffer->storage;
+	buffer->publicBuffer.buffer_dma = NULL;
+	return &buffer->publicBuffer;
+}
+
+status_t
+intel_arc_release_overlay_buffer(const overlay_buffer* buffer)
+{
+	if (buffer == NULL)
+		return B_BAD_VALUE;
+
+	intel_arc_overlay_buffer* privateBuffer = (intel_arc_overlay_buffer*)buffer;
+	free(privateBuffer->storage);
+	free(privateBuffer);
+	return B_OK;
+}
+
+status_t
+intel_arc_get_overlay_constraints(const display_mode* mode,
+	const overlay_buffer* buffer, overlay_constraints* constraints)
+{
+	if (mode == NULL || buffer == NULL || constraints == NULL)
+		return B_BAD_VALUE;
+
+	memset(constraints, 0, sizeof(*constraints));
+
+	constraints->view.h_alignment = 1;
+	constraints->view.v_alignment = 0;
+	constraints->view.width_alignment = 1;
+	constraints->view.height_alignment = 0;
+	constraints->view.width.min = 16;
+	constraints->view.height.min = 16;
+	constraints->view.width.max = buffer->width;
+	constraints->view.height.max = buffer->height;
+
+	constraints->window.h_alignment = 1;
+	constraints->window.v_alignment = 0;
+	constraints->window.width_alignment = 1;
+	constraints->window.height_alignment = 0;
+	constraints->window.width.min = 16;
+	constraints->window.height.min = 16;
+	constraints->window.width.max = mode->virtual_width;
+	constraints->window.height.max = mode->virtual_height;
+
+	constraints->h_scale.min = 0.25f;
+	constraints->h_scale.max = 8.0f;
+	constraints->v_scale.min = 0.25f;
+	constraints->v_scale.max = 8.0f;
+	return B_OK;
+}
+
+overlay_token
+intel_arc_allocate_overlay(void)
+{
+	if (atomic_or(&sOverlayChannelUsed, 1) != 0)
+		return NULL;
+	return (overlay_token)(addr_t)++sOverlayToken;
+}
+
+status_t
+intel_arc_release_overlay(overlay_token token)
+{
+	if (token == NULL)
+		return B_BAD_VALUE;
+	atomic_and(&sOverlayChannelUsed, 0);
+	return B_OK;
+}
+
+status_t
+intel_arc_configure_overlay(overlay_token token, const overlay_buffer* buffer,
+	const overlay_window* window, const overlay_view* view)
+{
+	(void)token;
+	(void)buffer;
+	(void)window;
+	(void)view;
+	return B_UNSUPPORTED;
+}
+
 status_t
 intel_arc_set_indexed_colors(uint32 count, uint8 first,
     uint8* color_data, uint32 flags)
@@ -1331,6 +1489,24 @@ get_accelerant_hook(uint32 feature, void* /*data*/)
 			return (void*)intel_arc_get_frame_buffer_config;
 		case B_GET_PIXEL_CLOCK_LIMITS:
 			return (void*)intel_arc_get_pixel_clock_limits;
+		case B_OVERLAY_COUNT:
+			return (void*)intel_arc_overlay_count;
+		case B_OVERLAY_SUPPORTED_SPACES:
+			return (void*)intel_arc_overlay_supported_spaces;
+		case B_OVERLAY_SUPPORTED_FEATURES:
+			return (void*)intel_arc_overlay_supported_features;
+		case B_ALLOCATE_OVERLAY_BUFFER:
+			return (void*)intel_arc_allocate_overlay_buffer;
+		case B_RELEASE_OVERLAY_BUFFER:
+			return (void*)intel_arc_release_overlay_buffer;
+		case B_GET_OVERLAY_CONSTRAINTS:
+			return (void*)intel_arc_get_overlay_constraints;
+		case B_ALLOCATE_OVERLAY:
+			return (void*)intel_arc_allocate_overlay;
+		case B_RELEASE_OVERLAY:
+			return (void*)intel_arc_release_overlay;
+		case B_CONFIGURE_OVERLAY:
+			return (void*)intel_arc_configure_overlay;
 		case B_SET_INDEXED_COLORS:
 			return (void*)intel_arc_set_indexed_colors;
 	}
