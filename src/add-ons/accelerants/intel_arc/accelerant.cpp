@@ -52,6 +52,8 @@ static const arc_mit_buf_trans_entry kDg2SnpsDp14Trans[] = {
 	{45, 0, 8}, {48, 0, 14}, {47, 0, 0}, {55, 0, 7}, {62, 0, 0}
 };
 
+static const arc_mit_buf_trans_entry kDg2SnpsHdmiDefaultTrans = {62, 0, 0};
+
 static const arc_mit_buf_trans_entry kDg2SnpsUhbrTrans[] = {
 	{62, 0, 0}, {55, 0, 7}, {50, 0, 12}, {44, 0, 18}, {35, 0, 21},
 	{59, 3, 0}, {53, 3, 6}, {48, 3, 11}, {42, 5, 15}, {37, 5, 20},
@@ -117,6 +119,7 @@ static bool compute_displayport_dpll(int* pDiv, int* qDiv, int* kDiv, float* dco
 static status_t program_port_dpll(uint8 ddiPort);
 static status_t program_ddi_buffer(uint8 ddiPort, int8 pipe, uint32 lanes, bool enable);
 static status_t configure_dp_link(display_mode* mode);
+static status_t apply_hdmi_phy_levels(uint8 ddiPort, int8 pipe);
 static status_t handle_hotplug_event(void);
 static status_t set_sink_power(uint8 ddiPort, uint8 value);
 static status_t read_edid_from_hardware(void);
@@ -129,7 +132,18 @@ static ssize_t aux_transfer(uint8 ddiPort, dp_aux_msg* message);
 static ssize_t aux_transfer(uint8 ddiPort, uint8* transmitBuffer,
 	uint8 transmitSize, uint8* receiveBuffer, uint8 receiveSize);
 static status_t
-intel_arc_program_hdmi_dpll(accelerant_info* info, int dpll_id, uint32 pixel_clock_khz);
+intel_arc_program_hdmi_dpll(accelerant_info* info, uint8 ddiPort, uint32 pixel_clock_khz);
+static bool mode_matches_exactly(const display_mode& left, const display_mode& right);
+static void sanitize_mode_geometry(display_mode& mode, const char* origin);
+static void log_pipe_plane_state(const char* origin, int8 pipe);
+static uint32 scaler_control_register(int8 pipe, uint32 scalerIndex);
+static uint32 scaler_window_pos_register(int8 pipe, uint32 scalerIndex);
+static uint32 scaler_window_size_register(int8 pipe, uint32 scalerIndex);
+static status_t get_combo_dpll_registers(uint8 ddiPort, uint32& cfg0, uint32& cfg1,
+	uint32& enable, uint32& ssc, uint32& clockOffMask, uint32& clockSelectMask,
+	uint32& clockSelectValue, uint32& dpllId);
+static uint32 snps_phy_base_for_ddi_port(uint8 ddiPort);
+static uint32 snps_phy_enable_reg_for_ddi_port(uint8 ddiPort);
 
 
 static bool
@@ -140,6 +154,149 @@ operator==(const display_mode& left, const display_mode& right)
 		&& left.virtual_height == right.virtual_height
 		&& left.h_display_start == right.h_display_start
 		&& left.v_display_start == right.v_display_start;
+}
+
+static bool
+mode_matches_exactly(const display_mode& left, const display_mode& right)
+{
+	return left == right
+		&& left.flags == right.flags
+		&& left.timing.pixel_clock == right.timing.pixel_clock
+		&& left.timing.h_display == right.timing.h_display
+		&& left.timing.h_sync_start == right.timing.h_sync_start
+		&& left.timing.h_sync_end == right.timing.h_sync_end
+		&& left.timing.h_total == right.timing.h_total
+		&& left.timing.v_display == right.timing.v_display
+		&& left.timing.v_sync_start == right.timing.v_sync_start
+		&& left.timing.v_sync_end == right.timing.v_sync_end
+		&& left.timing.v_total == right.timing.v_total
+		&& left.timing.flags == right.timing.flags;
+}
+
+static void
+sanitize_mode_geometry(display_mode& mode, const char* origin)
+{
+	if (mode.virtual_width == 0 || mode.virtual_height == 0)
+		return;
+
+	const bool missingTiming = mode.timing.h_display == 0
+		|| mode.timing.v_display == 0
+		|| mode.timing.h_total == 0
+		|| mode.timing.v_total == 0;
+	const bool mismatchedGeometry = mode.timing.h_display != 0
+		&& mode.timing.v_display != 0
+		&& (mode.virtual_width != mode.timing.h_display
+			|| mode.virtual_height != mode.timing.v_display);
+
+	if (!missingTiming && !mismatchedGeometry)
+		return;
+
+	if (mismatchedGeometry) {
+		debug_printf("intel_arc.accelerant: %s: timing %ux%u disagrees with virtual %ux%u, recomputing timings\n",
+			origin, mode.timing.h_display, mode.timing.v_display,
+			mode.virtual_width, mode.virtual_height);
+	}
+
+	compute_display_timing(mode.virtual_width, mode.virtual_height, 60, false,
+		&mode.timing);
+}
+
+static void
+log_pipe_plane_state(const char* origin, int8 pipe)
+{
+	if (pipe < 0)
+		return;
+
+	const uint32 pipeOffset = (uint32)pipe * INTEL_ARC_MMIO_PIPE_OFFSET;
+	struct register_log {
+		const char*	name;
+		uint32		offset;
+	} registers[] = {
+		{"PIPE_HTOTAL", INTEL_ARC_MMIO_PIPE_A_HTOTAL + pipeOffset},
+		{"PIPE_HSYNC", INTEL_ARC_MMIO_PIPE_A_HSYNC + pipeOffset},
+		{"PIPE_VTOTAL", INTEL_ARC_MMIO_PIPE_A_VTOTAL + pipeOffset},
+		{"PIPE_VSYNC", INTEL_ARC_MMIO_PIPE_A_VSYNC + pipeOffset},
+		{"PIPE_SIZE", INTEL_ARC_MMIO_PIPE_A_SIZE + pipeOffset},
+		{"PIPE_DDI_FUNC_CTL", INTEL_ARC_MMIO_PIPE_A_DDI_FUNC_CTL + pipeOffset},
+		{"PLANE_CTL", INTEL_ARC_MMIO_PLANE_A_CONTROL + pipeOffset},
+		{"PLANE_STRIDE", INTEL_ARC_MMIO_PLANE_A_STRIDE + pipeOffset},
+		{"PLANE_POS", INTEL_ARC_MMIO_PLANE_A_POS + pipeOffset},
+		{"PLANE_SIZE", INTEL_ARC_MMIO_PLANE_A_IMAGE_SIZE + pipeOffset},
+		{"PLANE_SURFACE", INTEL_ARC_MMIO_PLANE_A_SURFACE + pipeOffset},
+		{"PS_1_CTRL", scaler_control_register(pipe, 1)},
+		{"PS_1_WIN_POS", scaler_window_pos_register(pipe, 1)},
+		{"PS_1_WIN_SIZE", scaler_window_size_register(pipe, 1)},
+		{"PS_2_CTRL", scaler_control_register(pipe, 2)},
+		{"PS_2_WIN_POS", scaler_window_pos_register(pipe, 2)},
+		{"PS_2_WIN_SIZE", scaler_window_size_register(pipe, 2)}
+	};
+
+	debug_printf("intel_arc.accelerant: %s: register snapshot for pipe %" B_PRId8 "\n",
+		origin, pipe);
+	for (size_t i = 0; i < B_COUNT_OF(registers); i++) {
+		uint32 value = 0;
+		if (read_register(registers[i].offset, value)) {
+			debug_printf("  - %s [0x%05" B_PRIx32 "] = 0x%08" B_PRIx32 "\n",
+				registers[i].name, registers[i].offset, value);
+		} else {
+			debug_printf("  - %s [0x%05" B_PRIx32 "] = <read failed>\n",
+				registers[i].name, registers[i].offset);
+		}
+	}
+}
+
+static uint32
+scaler_control_register(int8 pipe, uint32 scalerIndex)
+{
+	switch (pipe) {
+		case 0:
+			return scalerIndex == 2
+				? INTEL_ARC_MMIO_PS_2A_CTRL : INTEL_ARC_MMIO_PS_1A_CTRL;
+		case 1:
+			return scalerIndex == 2
+				? INTEL_ARC_MMIO_PS_2B_CTRL : INTEL_ARC_MMIO_PS_1B_CTRL;
+		case 2:
+			return scalerIndex == 2
+				? INTEL_ARC_MMIO_PS_2C_CTRL : INTEL_ARC_MMIO_PS_1C_CTRL;
+		default:
+			return 0;
+	}
+}
+
+static uint32
+scaler_window_pos_register(int8 pipe, uint32 scalerIndex)
+{
+	switch (pipe) {
+		case 0:
+			return scalerIndex == 2
+				? INTEL_ARC_MMIO_PS_2A_WIN_POS : INTEL_ARC_MMIO_PS_1A_WIN_POS;
+		case 1:
+			return scalerIndex == 2
+				? INTEL_ARC_MMIO_PS_2B_WIN_POS : INTEL_ARC_MMIO_PS_1B_WIN_POS;
+		case 2:
+			return scalerIndex == 2
+				? INTEL_ARC_MMIO_PS_2C_WIN_POS : INTEL_ARC_MMIO_PS_1C_WIN_POS;
+		default:
+			return 0;
+	}
+}
+
+static uint32
+scaler_window_size_register(int8 pipe, uint32 scalerIndex)
+{
+	switch (pipe) {
+		case 0:
+			return scalerIndex == 2
+				? INTEL_ARC_MMIO_PS_2A_WIN_SIZE : INTEL_ARC_MMIO_PS_1A_WIN_SIZE;
+		case 1:
+			return scalerIndex == 2
+				? INTEL_ARC_MMIO_PS_2B_WIN_SIZE : INTEL_ARC_MMIO_PS_1B_WIN_SIZE;
+		case 2:
+			return scalerIndex == 2
+				? INTEL_ARC_MMIO_PS_2C_WIN_SIZE : INTEL_ARC_MMIO_PS_1C_WIN_SIZE;
+		default:
+			return 0;
+	}
 }
 
 static bool
@@ -161,6 +318,7 @@ static status_t
 create_mode_list(void)
 {
 	display_mode mode = gInfo->shared_info->current_mode;
+	sanitize_mode_geometry(mode, "create_mode_list");
 	debug_printf("==================================================\n");
 	debug_printf("intel_arc.accelerant: >>> CREATE MODE LIST <<<\n");
 	debug_printf("intel_arc.accelerant: >>> PREVIOUS MODE: <<<\n");
@@ -214,6 +372,7 @@ create_mode_list(void)
 		const uint32 hSync = gInfo->shared_info->pipe_h_sync[pipe];
 		const uint32 vTotal = gInfo->shared_info->pipe_v_total[pipe];
 		const uint32 vSync = gInfo->shared_info->pipe_v_sync[pipe];
+		log_pipe_plane_state("create_mode_list inherited state", pipe);
 
 		if (hTotal != 0 && vTotal != 0) {
 			mode.timing.h_display = (hTotal & 0xffff) + 1;
@@ -226,6 +385,7 @@ create_mode_list(void)
 			mode.timing.v_sync_end = (vSync >> 16) + 1;
 		}
 	}
+	sanitize_mode_geometry(mode, "create_mode_list inherited registers");
 	// --------------- for test ----------------
 	// mode.virtual_width = mode.timing.h_display;
 	// mode.virtual_height = mode.timing.v_display;
@@ -558,6 +718,11 @@ intel_arc_set_dpms_mode(uint32 mode)
 {
 	debug_printf("intel_arc.accelerant: intel_arc_set_dpms_mode(mode=%u)\n", mode);
 	(void)handle_hotplug_event();
+	if (gInfo->shared_info->dpms_mode == mode) {
+		debug_printf("intel_arc.accelerant: DPMS already in requested state %u, skipping\n",
+			mode);
+		return B_OK;
+	}
 	switch (mode) {
 		case B_DPMS_ON:
 			return apply_dpms_on();
@@ -696,6 +861,7 @@ intel_arc_set_display_mode(display_mode* mode)
 		debug_printf("propose display mode failed\n");
 		return status;
 	}
+	sanitize_mode_geometry(target, "intel_arc_set_display_mode");
 
 	if (gInfo->shared_info->active_pipe < 0) {
 		debug_printf("intel_arc.accelerant ERROR: No active pipe found in shared info!\n");
@@ -773,12 +939,13 @@ intel_arc_set_display_mode(display_mode* mode)
 			& ~INTEL_ARC_DISPLAY_CONTROL_COLOR_MASK_SKY)
 		| plane_color_format_for_space((color_space)target.space);
 	// A. Disabilita lo Scaler
-	write_register(INTEL_ARC_MMIO_PS_CTRL_A + (pipe * 0x1000), 0); //disattiva scaler hardware
+	write_register(scaler_control_register(pipe, 1), 0);
+	write_register(scaler_control_register(pipe, 2), 0);
 	//const uint32 hDisplay = target.timing.h_display; // 1280
 	//const uint32 vDisplay = target.timing.v_display; // 1024
 	//debug_printf("intel_arc.accelerant: imposto pipe_size e plane_image_size con virtual_width e virtual_height invece che timing.h_display e v_display\n");
-	const uint32 hDisplay = target.virtual_width; // 1280
-	const uint32 vDisplay = target.virtual_height; // 1024
+	const uint32 hDisplay = target.timing.h_display;
+	const uint32 vDisplay = target.timing.v_display;
 	//const uint32 thDisplay = target.timing.h_display; // 1280
 	//const uint32 tvDisplay = target.timing.v_display; // 1024
 	
@@ -792,6 +959,7 @@ intel_arc_set_display_mode(display_mode* mode)
 	debug_printf("intel_arc.accelerant: PIPE_SIZE impostato a 0x%X\n", gInfo->shared_info->pipe_size[pipe]);
 	gInfo->shared_info->plane_image_size[pipe] = nativeSize;
 	debug_printf("intel_arc.accelerant: PLANE_IMAGE_SIZE impostato a 0x%X\n", gInfo->shared_info->plane_image_size[pipe]);
+	log_pipe_plane_state("intel_arc_set_display_mode before MMIO writes", pipe);
 	
 	//gInfo->shared_info->plane_control[pipe] |= INTEL_ARC_PLANE_ENABLE; // Attiva PLANE_CTL_ENABLE
 	// B. Scrivi i Timing della Pipe (1280x1024 VESA)
@@ -849,6 +1017,7 @@ intel_arc_set_display_mode(display_mode* mode)
     // Salva lo stato aggiornato nella struttura condivisa e scrivi il registro MMIO
     gInfo->shared_info->pipe_ddi_func_ctl[pipe] = ddiFuncCtl;
     write_register(INTEL_ARC_MMIO_PIPE_A_DDI_FUNC_CTL + pipeOffset, ddiFuncCtl);
+	log_pipe_plane_state("intel_arc_set_display_mode after MMIO writes", pipe);
     //-------------------
 
 	debug_printf("intel_arc.accelerant: Configuring link for Active Pipe %d (FuncCtl: 0x%08X)\n",
@@ -866,11 +1035,18 @@ intel_arc_set_display_mode(display_mode* mode)
 		}
 	} else {
 		debug_printf("intel_arc.accelerant: Mode is NOT DisplayPort (likely HDMI/DVI), skipping DP link training\n");
-		status = intel_arc_program_hdmi_dpll(gInfo, pipe, target.timing.pixel_clock);
+		status = intel_arc_program_hdmi_dpll(gInfo,
+			gInfo->shared_info->active_ddi_port, target.timing.pixel_clock);
     	if (status != B_OK) {
         	debug_printf("intel_arc.accelerant ERROR: intel_arc_program_hdmi_dpll failed: %s\n", strerror(status));
         	return status;
     	}
+
+		status = apply_hdmi_phy_levels(gInfo->shared_info->active_ddi_port, pipe);
+		if (status != B_OK) {
+			debug_printf("intel_arc.accelerant ERROR: apply_hdmi_phy_levels failed: %s\n", strerror(status));
+			return status;
+		}
 	}
 
 	status = apply_dpms_on();
@@ -1200,6 +1376,8 @@ pipe_register(uint32 base, int8 pipe)
 static bool
 is_mode_in_list(const display_mode& mode, display_mode* match)
 {
+	const display_mode* fallback = NULL;
+
 	for (uint32 i = 0; i < gInfo->shared_info->mode_count; i++) {
 		const display_mode& current = gInfo->mode_list[i];
 		if (current.virtual_width != mode.virtual_width
@@ -1208,8 +1386,19 @@ is_mode_in_list(const display_mode& mode, display_mode* match)
 			continue;
 		}
 
+		if (mode_matches_exactly(current, mode)) {
+			if (match != NULL)
+				*match = current;
+			return true;
+		}
+
+		if (fallback == NULL)
+			fallback = &current;
+	}
+
+	if (fallback != NULL) {
 		if (match != NULL)
-			*match = current;
+			*match = *fallback;
 		return true;
 	}
 
@@ -1555,8 +1744,7 @@ apply_snps_phy_levels(uint8 ddiPort, const uint8* laneSettings, uint32 lanes,
 	const arc_mit_buf_trans_entry* table = uhbr ? kDg2SnpsUhbrTrans : kDg2SnpsDp14Trans;
 	const size_t tableCount = uhbr ? B_COUNT_OF(kDg2SnpsUhbrTrans) : B_COUNT_OF(kDg2SnpsDp14Trans);
 
-	const uint32 phyBase = ddiPort <= 2
-		? INTEL_ARC_MMIO_SNPS_PHY_A_BASE : INTEL_ARC_MMIO_SNPS_PHY_B_BASE;
+	const uint32 phyBase = snps_phy_base_for_ddi_port(ddiPort);
 
 	for (uint32 lane = 0; lane < lanes && lane < 4; lane++) {
 		uint8 voltage = laneSettings[lane] & 0x3;
@@ -1919,10 +2107,35 @@ apply_ddi_source_levels(uint8 ddiPort, int8 pipe, uint32 lanes,
 }
 
 static status_t
+apply_hdmi_phy_levels(uint8 ddiPort, int8 pipe)
+{
+	const uint32 modeSel = (gInfo->shared_info->pipe_ddi_func_ctl[pipe]
+		& INTEL_ARC_PIPE_DDI_MODESEL_MASK) >> 24;
+	if (modeSel == INTEL_ARC_PIPE_DDI_MODE_DP_SST
+		|| modeSel == INTEL_ARC_PIPE_DDI_MODE_DP_MST) {
+		return B_OK;
+	}
+
+	if (gInfo->shared_info->family != INTEL_ARC_FAMILY_ALCHEMIST)
+		return B_OK;
+
+	const uint32 phyBase = snps_phy_base_for_ddi_port(ddiPort);
+	const uint32 value = ((uint32)kDg2SnpsHdmiDefaultTrans.main << 18)
+		| ((uint32)kDg2SnpsHdmiDefaultTrans.post << 10)
+		| ((uint32)kDg2SnpsHdmiDefaultTrans.pre << 2);
+	for (uint32 lane = 0; lane < 4; lane++)
+		write_register(INTEL_ARC_MMIO_SNPS_PHY_TX_EQ(phyBase, lane), value);
+
+	debug_printf("intel_arc.accelerant: HDMI PHY levels applied: phyBase=0x%05" B_PRIx32 ", txeq=0x%08" B_PRIx32 "\n",
+		phyBase, value);
+	return B_OK;
+}
+
+static status_t
 program_port_dpll(uint8 ddiPort)
 {
 	debug_printf("intel_arc.accelerant: program_port_dpll(ddiPort=%u) entering\n", ddiPort);
-	if (ddiPort < 1 || ddiPort > 3) {
+	if (ddiPort > 2) {
 		debug_printf("intel_arc.accelerant: Port %u does not use standard TGL DPLL registers\n", ddiPort);
 		return B_OK;
 	}
@@ -1933,29 +2146,11 @@ program_port_dpll(uint8 ddiPort)
 		return B_ERROR;
 
 	uint32 cfg0 = 0, cfg1 = 0, enable = 0, ssc = 0, dpllIndex = 0;
-	switch (ddiPort) {
-		case 1:
-			dpllIndex = 0;
-			cfg0 = INTEL_ARC_TGL_DPLL0_CFGCR0;
-			cfg1 = INTEL_ARC_TGL_DPLL0_CFGCR1;
-			enable = INTEL_ARC_TGL_DPLL0_ENABLE;
-			ssc = INTEL_ARC_TGL_DPLL0_SPREAD_SPECTRUM;
-			break;
-		case 2:
-			dpllIndex = 1;
-			cfg0 = INTEL_ARC_TGL_DPLL1_CFGCR0;
-			cfg1 = INTEL_ARC_TGL_DPLL1_CFGCR1;
-			enable = INTEL_ARC_TGL_DPLL1_ENABLE;
-			ssc = INTEL_ARC_TGL_DPLL1_SPREAD_SPECTRUM;
-			break;
-		case 3:
-			dpllIndex = 4;
-			cfg0 = INTEL_ARC_TGL_DPLL4_CFGCR0;
-			cfg1 = INTEL_ARC_TGL_DPLL4_CFGCR1;
-			enable = INTEL_ARC_TGL_DPLL4_ENABLE;
-			ssc = INTEL_ARC_TGL_DPLL4_SPREAD_SPECTRUM;
-			break;
-	}
+	uint32 clockOffMask = 0, clockSelectMask = 0, clockSelectValue = 0;
+	status_t status = get_combo_dpll_registers(ddiPort, cfg0, cfg1, enable, ssc,
+		clockOffMask, clockSelectMask, clockSelectValue, dpllIndex);
+	if (status != B_OK)
+		return status;
 
 	uint32 refKHz = 19200;
 	uint32 dcoInt = (uint32)floorf(dco / (refKHz / 1000.0f));
@@ -1998,7 +2193,7 @@ program_port_dpll(uint8 ddiPort)
 
 	read_register(enable, value);
 	write_register(enable, value | INTEL_ARC_TGL_DPLL_ENABLE);
-	status_t status = wait_for_set(enable, INTEL_ARC_TGL_DPLL_LOCK, 50000);
+	status = wait_for_set(enable, INTEL_ARC_TGL_DPLL_LOCK, 50000);
 	if (status != B_OK) {
 		debug_printf("intel_arc.accelerant ERROR: DPLL %u failed to lock!\n", dpllIndex);
 		return status;
@@ -2007,28 +2202,11 @@ program_port_dpll(uint8 ddiPort)
 	debug_printf("intel_arc.accelerant: DPLL %u locked successfully!\n", dpllIndex);
 
 	read_register(INTEL_ARC_TGL_DPCLKA_CFGCR0, value);
-	switch (ddiPort) {
-		case 1:
-			value |= INTEL_ARC_TGL_DPCLKA_DDIA_CLOCK_OFF;
-			value &= ~INTEL_ARC_TGL_DPCLKA_DDIA_CLOCK_SELECT;
-			write_register(INTEL_ARC_TGL_DPCLKA_CFGCR0, value);
-			value &= ~INTEL_ARC_TGL_DPCLKA_DDIA_CLOCK_OFF;
-			break;
-		case 2:
-			value |= INTEL_ARC_TGL_DPCLKA_DDIB_CLOCK_OFF;
-			value &= ~INTEL_ARC_TGL_DPCLKA_DDIB_CLOCK_SELECT;
-			value |= 1 << INTEL_ARC_TGL_DPCLKA_DDIB_CLOCK_SELECT_SHIFT;
-			write_register(INTEL_ARC_TGL_DPCLKA_CFGCR0, value);
-			value &= ~INTEL_ARC_TGL_DPCLKA_DDIB_CLOCK_OFF;
-			break;
-		case 3:
-			value |= INTEL_ARC_TGL_DPCLKA_DDIC_CLOCK_OFF;
-			value &= ~INTEL_ARC_TGL_DPCLKA_DDIC_CLOCK_SELECT;
-			value |= 2 << 4;
-			write_register(INTEL_ARC_TGL_DPCLKA_CFGCR0, value);
-			value &= ~INTEL_ARC_TGL_DPCLKA_DDIC_CLOCK_OFF;
-			break;
-	}
+	value |= clockOffMask;
+	value &= ~clockSelectMask;
+	value |= clockSelectValue;
+	write_register(INTEL_ARC_TGL_DPCLKA_CFGCR0, value);
+	value &= ~clockOffMask;
 	write_register(INTEL_ARC_TGL_DPCLKA_CFGCR0, value);
 	return B_OK;
 }
@@ -2044,9 +2222,14 @@ program_ddi_buffer(uint8 ddiPort, int8 pipe, uint32 lanes, bool enable)
 	const uint32 reg = INTEL_ARC_MMIO_DDI_BUF_CTL_A + ddiPort * 0x100;
 	uint32 value = 0;
 	read_register(reg, value);
+	const uint32 modeSel = (gInfo->shared_info->pipe_ddi_func_ctl[pipe]
+		& INTEL_ARC_PIPE_DDI_MODESEL_MASK) >> 24;
+	const bool isDp = modeSel == INTEL_ARC_PIPE_DDI_MODE_DP_SST
+		|| modeSel == INTEL_ARC_PIPE_DDI_MODE_DP_MST;
+	const uint32 transSelect = isDp ? 0 : 9;
 	value &= ~INTEL_ARC_DDI_PORT_WIDTH(4);
 	value &= ~INTEL_ARC_DDI_BUF_TRANS_SELECT(0x7);
-	value |= INTEL_ARC_DDI_BUF_TRANS_SELECT(pipe);
+	value |= INTEL_ARC_DDI_BUF_TRANS_SELECT(transSelect);
 	value |= INTEL_ARC_DDI_PORT_WIDTH(lanes);
 	if (enable)
 		value |= INTEL_ARC_DDI_BUF_CTL_ENABLE;
@@ -2054,6 +2237,8 @@ program_ddi_buffer(uint8 ddiPort, int8 pipe, uint32 lanes, bool enable)
 		value &= ~INTEL_ARC_DDI_BUF_CTL_ENABLE;
 
 	write_register(reg, value);
+	debug_printf("intel_arc.accelerant: DDI_BUF_CTL[%u] = 0x%08" B_PRIx32 " (modeSel=%" B_PRIu32 ", trans=%" B_PRIu32 ")\n",
+		ddiPort, value, modeSel, transSelect);
 	if (ddiPort > 0 && ddiPort <= 4)
 		gInfo->shared_info->port_state[ddiPort - 1] = value;
 
@@ -2669,30 +2854,270 @@ write32(accelerant_info* info, uint32 offset, uint32 value)
 	*(volatile uint32*)(info->registers + offset) = value;
 }
 
-static status_t
-intel_arc_program_hdmi_dpll(accelerant_info* info, int dpll_id, uint32 pixel_clock_khz)
-{
-	uint32 cfgcr0_reg, cfgcr1_reg, enable_reg;
+struct snps_mpllb_state {
+	uint32 mpllb_cp;
+	uint32 mpllb_div;
+	uint32 mpllb_div2;
+	uint32 mpllb_fracn1;
+	uint32 mpllb_fracn2;
+	uint32 mpllb_sscen;
+	uint32 mpllb_sscstep;
+};
 
-	switch (dpll_id) {
+struct snps_hdmi_table_entry {
+	uint32 clockKHz;
+	snps_mpllb_state state;
+};
+
+static const snps_hdmi_table_entry kDg2HdmiPllTable[] = {
+	{65000, {0x0e801cf8, 0x2b000060, 0x00009048, 0x4000ffff, 0x00000000, 0x40000000, 0x00000000}},
+	{106500, {0x0c801cf8, 0x28000460, 0x0000908a, 0xc000ffff, 0x33333333, 0x40000000, 0x00000000}},
+	{108000, {0x0c801cf8, 0x28000460, 0x0000908c, 0xc000ffff, 0x66666666, 0x40000000, 0x00000000}},
+};
+
+#define INTEL_SNPS_PHY_HDMI_4999MHZ 4999999900ULL
+#define INTEL_SNPS_PHY_HDMI_16GHZ 16000000000ULL
+#define INTEL_SNPS_PHY_HDMI_9999MHZ (2 * INTEL_SNPS_PHY_HDMI_4999MHZ)
+
+static uint64
+divide_round_up_u64(uint64 value, uint64 divisor)
+{
+	return (value + divisor - 1) / divisor;
+}
+
+static uint64
+divide_round_closest_u64(uint64 value, uint64 divisor)
+{
+	return (value + divisor / 2) / divisor;
+}
+
+static uint64
+interpolate_u64(uint64 x, uint64 x1, uint64 x2, uint64 y1, uint64 y2)
+{
+	const uint64 dydx = divide_round_up_u64((y2 - y1) * 100000ULL, x2 - x1);
+	return y1 + divide_round_up_u64(dydx * (x - x1), 100000ULL);
+}
+
+static uint32
+snps_phy_base_for_ddi_port(uint8 ddiPort)
+{
+	return INTEL_ARC_MMIO_SNPS_PHY_A_BASE + ddiPort * 0x1000;
+}
+
+static uint32
+snps_phy_enable_reg_for_ddi_port(uint8 ddiPort)
+{
+	switch (ddiPort) {
 		case 0:
-			cfgcr0_reg = INTEL_ARC_TGL_DPLL0_CFGCR0;
-			cfgcr1_reg = INTEL_ARC_TGL_DPLL0_CFGCR1;
-			enable_reg = INTEL_ARC_TGL_DPLL0_ENABLE;
-			break;
+			return INTEL_ARC_TGL_DPLL0_ENABLE;
 		case 1:
-			cfgcr0_reg = INTEL_ARC_TGL_DPLL1_CFGCR0;
-			cfgcr1_reg = INTEL_ARC_TGL_DPLL1_CFGCR1;
-			enable_reg = INTEL_ARC_TGL_DPLL1_ENABLE;
-			break;
-		case 4:
-			cfgcr0_reg = INTEL_ARC_TGL_DPLL4_CFGCR0;
-			cfgcr1_reg = INTEL_ARC_TGL_DPLL4_CFGCR1;
-			enable_reg = INTEL_ARC_TGL_DPLL4_ENABLE;
-			break;
+			return INTEL_ARC_TGL_DPLL1_ENABLE;
+		case 2:
+			return INTEL_ARC_TGL_DPLL4_ENABLE;
 		default:
-			return B_BAD_VALUE;
+			return INTEL_ARC_TGL_DPLL1_ENABLE;
 	}
+}
+
+static uint32
+clamp_u32(uint32 value, uint32 low, uint32 high)
+{
+	if (value < low)
+		return low;
+	if (value > high)
+		return high;
+	return value;
+}
+
+static void
+compute_snps_hdmi_mpllb(uint32 pixelClockKHz, snps_mpllb_state& state)
+{
+	for (size_t i = 0; i < B_COUNT_OF(kDg2HdmiPllTable); i++) {
+		const uint32 tableClock = kDg2HdmiPllTable[i].clockKHz;
+		const uint32 delta = pixelClockKHz > tableClock
+			? pixelClockKHz - tableClock : tableClock - pixelClockKHz;
+		if (delta <= 1000) {
+			state = kDg2HdmiPllTable[i].state;
+			debug_printf("intel_arc.accelerant: compute_snps_hdmi_mpllb(): snapped %" B_PRIu32 " kHz to upstream DG2 HDMI table %" B_PRIu32 " kHz\n",
+				pixelClockKHz, tableClock);
+			return;
+		}
+	}
+
+	static const uint64 dg2CurveFreqHz[2][8] = {
+		{2500000000ULL, 3000000000ULL, 3000000000ULL, 3500000000ULL, 3500000000ULL,
+			4000000000ULL, 4000000000ULL, 5000000000ULL},
+		{4000000000ULL, 4600000000ULL, 4601000000ULL, 5400000000ULL, 5401000000ULL,
+			6600000000ULL, 6601000000ULL, 8001000000ULL}
+	};
+	static const uint64 dg2Curve0[2][8] = {
+		{34149871ULL, 39803269ULL, 36034544ULL, 40601014ULL, 35646940ULL, 40016109ULL, 35127987ULL, 41889522ULL},
+		{70000000ULL, 78770454ULL, 70451838ULL, 80427119ULL, 70991400ULL, 84230173ULL, 72945921ULL, 87064218ULL}
+	};
+	static const uint64 dg2Curve1[2][8] = {
+		{85177000000000ULL, 79385227160000ULL, 95672603580000ULL, 88857207160000ULL,
+			109379790900000ULL, 103528193900000ULL, 131941242400000ULL, 117279000000000ULL},
+		{60255000000000ULL, 55569000000000ULL, 72036000000000ULL, 69509000000000ULL,
+			81785000000000ULL, 731030000000000ULL, 96591000000000ULL, 69077000000000ULL}
+	};
+	static const uint64 dg2Curve2[2][8] = {
+		{2186930000ULL, 2835287134ULL, 2395395343ULL, 2932270687ULL, 2351887545ULL, 2861031697ULL, 2294149152ULL, 3091730000ULL},
+		{4560000000ULL, 5570000000ULL, 4610000000ULL, 5770000000ULL, 4670000000ULL, 6240000000ULL, 4890000000ULL, 6600000000ULL}
+	};
+
+	const uint64 pixelClockHz = (uint64)pixelClockKHz * 1000ULL;
+	const uint64 dataRate = pixelClockHz * 10ULL;
+
+	uint32 mpllAnaV2i;
+	uint32 txClkDiv;
+	if (dataRate <= INTEL_SNPS_PHY_HDMI_9999MHZ) {
+		mpllAnaV2i = 2;
+		txClkDiv = (uint32)floor(log2((double)INTEL_SNPS_PHY_HDMI_9999MHZ / (double)dataRate));
+	} else {
+		mpllAnaV2i = 3;
+		txClkDiv = (uint32)floor(log2((double)INTEL_SNPS_PHY_HDMI_16GHZ / (double)dataRate));
+	}
+
+	uint64 vcoClock = (dataRate << txClkDiv) >> 1;
+	const uint32 refClk = 100000000;
+	const uint32 refClkDiv = 1;
+	const uint32 refClkPostscalar = refClk >> refClkDiv;
+	const uint32 vcoDivRefclkInteger = (uint32)(vcoClock / refClkPostscalar);
+	const uint64 vcoClockRemainder = vcoClock % refClkPostscalar;
+	const uint32 vcoDivRefclkFracn = (uint32)((vcoClockRemainder << 32) / refClkPostscalar);
+	uint32 fracnQuot = vcoDivRefclkFracn >> 16;
+	uint32 fracnRem = vcoDivRefclkFracn & 0xffff;
+	fracnRem = fracnRem - (fracnRem >> 15);
+	const uint32 fracnDen = 0xffff;
+	const bool fracnEn = fracnQuot != 0 || fracnRem != 0;
+	const bool pmixEn = fracnEn;
+	const uint32 multiplier = (vcoDivRefclkInteger - 16) * 2;
+
+	const int curveSet = (int)mpllAnaV2i - 2;
+	int segment = 0;
+	int anaFreqVco = 0;
+	for (int i = 0; i < 8; i += 2) {
+		if (vcoClock <= dg2CurveFreqHz[curveSet][i + 1]) {
+			segment = i;
+			anaFreqVco = 3 - (i >> 1);
+			break;
+		}
+	}
+
+	const uint64 curve0 = interpolate_u64(vcoClock,
+		dg2CurveFreqHz[curveSet][segment], dg2CurveFreqHz[curveSet][segment + 1],
+		dg2Curve0[curveSet][segment], dg2Curve0[curveSet][segment + 1]);
+	const uint64 curve2 = interpolate_u64(vcoClock,
+		dg2CurveFreqHz[curveSet][segment], dg2CurveFreqHz[curveSet][segment + 1],
+		dg2Curve2[curveSet][segment], dg2Curve2[curveSet][segment + 1]);
+	uint64 curve1 = interpolate_u64(vcoClock,
+		dg2CurveFreqHz[curveSet][segment], dg2CurveFreqHz[curveSet][segment + 1],
+		dg2Curve1[curveSet][segment], dg2Curve1[curveSet][segment + 1]);
+	curve1 /= 100ULL;
+
+	const uint64 vcoDivRefclkFloat = vcoClock * (1000000000000ULL / refClkPostscalar);
+	const uint64 curve2Scaled1 = (curve2 * (4 - mpllAnaV2i)) / 16000ULL;
+	const uint64 curve2Scaled2 = (curve2 * (4 - mpllAnaV2i)) / 160ULL;
+	const uint64 scaledVcoDivRefclk1 = 112008301ULL * (vcoDivRefclkFloat / 100000ULL);
+	const uint64 adjustedVcoClock1 = 1000000000000ULL
+		* divide_round_up_u64(scaledVcoDivRefclk1,
+			curve0 * divide_round_up_u64(curve1, 1000000000ULL));
+	const uint32 anaCpInt = clamp_u32((uint32)divide_round_closest_u64(
+		adjustedVcoClock1 / curve2Scaled1, 1000000000000ULL), 1, 127);
+
+	const uint64 curve2ScaledInt = curve2Scaled1 * anaCpInt;
+	const uint64 interpolatedProduct = curve1
+		* (curve2ScaledInt * (curve0 / 1000000000ULL));
+	const uint64 scaledInterpolatedSqrt = (uint64)sqrtl(
+		(long double)(divide_round_up_u64(interpolatedProduct, vcoDivRefclkFloat)
+			* (1000000000000ULL / 55ULL)));
+	const uint64 scaledVcoDivRefclk2 = divide_round_up_u64(vcoDivRefclkFloat, 1000000ULL);
+	const uint64 adjustedVcoClock2 = 1460281ULL * divide_round_up_u64(
+		scaledInterpolatedSqrt * scaledVcoDivRefclk2, curve1);
+	const uint32 anaCpProp = clamp_u32((uint32)divide_round_up_u64(
+		adjustedVcoClock2, curve2Scaled2), 1, 127);
+	const uint32 anaCpIntGs = 64;
+	const uint32 anaCpPropGs = 124;
+
+	state.mpllb_cp
+		= ((anaCpInt & 0x7f) << 25)
+		| ((anaCpIntGs & 0x7f) << 17)
+		| ((anaCpProp & 0x7f) << 9)
+		| ((anaCpPropGs & 0x7f) << 1);
+	state.mpllb_div
+		= INTEL_ARC_SNPS_PHY_MPLLB_DIV5_CLK_EN
+		| ((mpllAnaV2i & 0x3) << INTEL_ARC_SNPS_PHY_MPLLB_V2I_SHIFT)
+		| ((anaFreqVco & 0x3) << INTEL_ARC_SNPS_PHY_MPLLB_FREQ_VCO_SHIFT)
+		| ((txClkDiv & 0x7) << INTEL_ARC_SNPS_PHY_MPLLB_TX_CLK_DIV_SHIFT)
+		| (pmixEn ? INTEL_ARC_SNPS_PHY_MPLLB_PMIX_EN : 0);
+	state.mpllb_div2
+		= ((1U & 0x7) << 15)
+		| ((refClkDiv & 0x7) << 12)
+		| (multiplier & 0xfff);
+	state.mpllb_fracn1
+		= INTEL_ARC_SNPS_PHY_MPLLB_FRACN_CGG_UPDATE_EN
+		| (fracnEn ? INTEL_ARC_SNPS_PHY_MPLLB_FRACN_EN : 0)
+		| (fracnDen & 0xffff);
+	state.mpllb_fracn2
+		= ((fracnRem & 0xffff) << 16)
+		| (fracnQuot & 0xffff);
+	state.mpllb_sscen = INTEL_ARC_SNPS_PHY_MPLLB_SSC_UP_SPREAD;
+	state.mpllb_sscstep = 0;
+}
+
+static status_t
+intel_arc_program_hdmi_dpll(accelerant_info* info, uint8 ddiPort, uint32 pixel_clock_khz)
+{
+	if (gInfo->shared_info->family == INTEL_ARC_FAMILY_ALCHEMIST) {
+		const uint32 phyBase = snps_phy_base_for_ddi_port(ddiPort);
+		const uint32 enableReg = snps_phy_enable_reg_for_ddi_port(ddiPort);
+		snps_mpllb_state state = {};
+		compute_snps_hdmi_mpllb(pixel_clock_khz, state);
+
+		debug_printf("intel_arc.accelerant: intel_arc_program_hdmi_dpll(): SNPS MPLLB path ddiPort=%u phyBase=0x%05" B_PRIx32 " pixel_clock=%" B_PRIu32 " kHz\n",
+			ddiPort, phyBase, pixel_clock_khz);
+
+		uint32 enableValue = read32(info, enableReg);
+		write32(info, enableReg, enableValue & ~INTEL_ARC_TGL_DPLL_ENABLE);
+		write32(info, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_DIV(phyBase),
+			state.mpllb_div & ~INTEL_ARC_SNPS_PHY_MPLLB_FORCE_EN);
+		(void)wait_for_clear(enableReg, INTEL_ARC_TGL_DPLL_LOCK, 5000);
+
+		write32(info, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_CP(phyBase), state.mpllb_cp);
+		write32(info, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_DIV(phyBase), state.mpllb_div);
+		write32(info, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_DIV2(phyBase), state.mpllb_div2);
+		write32(info, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_SSCEN(phyBase), state.mpllb_sscen);
+		write32(info, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_SSCSTEP(phyBase), state.mpllb_sscstep);
+		write32(info, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_FRACN1(phyBase), state.mpllb_fracn1);
+		write32(info, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_FRACN2(phyBase), state.mpllb_fracn2);
+
+		enableValue = read32(info, enableReg) | INTEL_ARC_TGL_DPLL_ENABLE;
+		write32(info, enableReg, enableValue);
+		write32(info, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_DIV(phyBase),
+			state.mpllb_div | INTEL_ARC_SNPS_PHY_MPLLB_FORCE_EN);
+
+		status_t status = wait_for_set(enableReg, INTEL_ARC_TGL_DPLL_LOCK, 5000);
+		debug_printf("intel_arc.accelerant: HDMI MPLLB regs: CP=0x%08" B_PRIx32 ", DIV=0x%08" B_PRIx32 ", DIV2=0x%08" B_PRIx32 ", FRACN1=0x%08" B_PRIx32 ", FRACN2=0x%08" B_PRIx32 ", SSCEN=0x%08" B_PRIx32 ", ENABLE=0x%08" B_PRIx32 "\n",
+			read32(info, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_CP(phyBase)),
+			read32(info, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_DIV(phyBase)),
+			read32(info, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_DIV2(phyBase)),
+			read32(info, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_FRACN1(phyBase)),
+			read32(info, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_FRACN2(phyBase)),
+			read32(info, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_SSCEN(phyBase)),
+			read32(info, enableReg));
+		return status;
+	}
+
+	uint32 cfgcr0_reg = 0, cfgcr1_reg = 0, enable_reg = 0, ssc_reg = 0;
+	uint32 clockOffMask = 0, clockSelectMask = 0, clockSelectValue = 0, dpllId = 0;
+	status_t status = get_combo_dpll_registers(ddiPort, cfgcr0_reg, cfgcr1_reg,
+		enable_reg, ssc_reg, clockOffMask, clockSelectMask, clockSelectValue,
+		dpllId);
+	if (status != B_OK)
+		return status;
+
+	debug_printf("intel_arc.accelerant: intel_arc_program_hdmi_dpll(ddiPort=%u, dpll=%u, pixel_clock=%u kHz)\n",
+		ddiPort, dpllId, pixel_clock_khz);
 
 	// 1. Disabilita il DPLL se attivo per riconfigurarlo
 	uint32 val = read32(info, enable_reg);
@@ -2714,6 +3139,10 @@ intel_arc_program_hdmi_dpll(accelerant_info* info, int dpll_id, uint32 pixel_clo
 	}
 	if (timeout == 0)
 		return B_TIMED_OUT;
+
+	// HDMI non usa SSC.
+	val = read32(info, ssc_reg);
+	write32(info, ssc_reg, val & ~INTEL_ARC_TGL_DPLL_SSC_ENABLE);
 
 	// 3. Calcolo divisori e frequenza DCO (RefClk = 24 MHz)
 	// Per HDMI/TMDS: F_dco = PixelClock * 5 * P * K * Q
@@ -2767,12 +3196,63 @@ intel_arc_program_hdmi_dpll(accelerant_info* info, int dpll_id, uint32 pixel_clo
 	if (timeout == 0)
 		return B_TIMED_OUT;
 
-	// 6. Instradamento clock su DPCLKA_CFGCR0 (sblocco DDI A/B/C)
+	debug_printf("intel_arc.accelerant: HDMI DPLL regs: CFG0=0x%08" B_PRIx32 ", CFG1=0x%08" B_PRIx32 ", ENABLE=0x%08" B_PRIx32 "\n",
+		read32(info, cfgcr0_reg), read32(info, cfgcr1_reg), read32(info, enable_reg));
+
+	// 6. Instradamento clock sul combo DDI corretto
 	uint32 dpclka = read32(info, INTEL_ARC_TGL_DPCLKA_CFGCR0);
-	dpclka &= ~(INTEL_ARC_TGL_DPCLKA_DDIA_CLOCK_OFF
-		| INTEL_ARC_TGL_DPCLKA_DDIB_CLOCK_OFF
-		| INTEL_ARC_TGL_DPCLKA_DDIC_CLOCK_OFF);
+	debug_printf("intel_arc.accelerant: HDMI DPCLKA before routing: 0x%08" B_PRIx32 "\n", dpclka);
+	dpclka |= clockOffMask;
+	dpclka &= ~clockSelectMask;
+	dpclka |= clockSelectValue;
 	write32(info, INTEL_ARC_TGL_DPCLKA_CFGCR0, dpclka);
+	dpclka &= ~clockOffMask;
+	write32(info, INTEL_ARC_TGL_DPCLKA_CFGCR0, dpclka);
+	debug_printf("intel_arc.accelerant: HDMI DPCLKA after routing: 0x%08" B_PRIx32 "\n",
+		read32(info, INTEL_ARC_TGL_DPCLKA_CFGCR0));
 
 	return B_OK;
+}
+
+static status_t
+get_combo_dpll_registers(uint8 ddiPort, uint32& cfg0, uint32& cfg1, uint32& enable,
+	uint32& ssc, uint32& clockOffMask, uint32& clockSelectMask,
+	uint32& clockSelectValue, uint32& dpllId)
+{
+	switch (ddiPort) {
+		case 0:
+			dpllId = 0;
+			cfg0 = INTEL_ARC_TGL_DPLL0_CFGCR0;
+			cfg1 = INTEL_ARC_TGL_DPLL0_CFGCR1;
+			enable = INTEL_ARC_TGL_DPLL0_ENABLE;
+			ssc = INTEL_ARC_TGL_DPLL0_SPREAD_SPECTRUM;
+			clockOffMask = INTEL_ARC_TGL_DPCLKA_DDIA_CLOCK_OFF;
+			clockSelectMask = INTEL_ARC_TGL_DPCLKA_DDIA_CLOCK_SELECT;
+			clockSelectValue = 0;
+			return B_OK;
+		case 1:
+			dpllId = 1;
+			cfg0 = INTEL_ARC_TGL_DPLL1_CFGCR0;
+			cfg1 = INTEL_ARC_TGL_DPLL1_CFGCR1;
+			enable = INTEL_ARC_TGL_DPLL1_ENABLE;
+			ssc = INTEL_ARC_TGL_DPLL1_SPREAD_SPECTRUM;
+			clockOffMask = INTEL_ARC_TGL_DPCLKA_DDIB_CLOCK_OFF;
+			clockSelectMask = INTEL_ARC_TGL_DPCLKA_DDIB_CLOCK_SELECT;
+			clockSelectValue = 1 << INTEL_ARC_TGL_DPCLKA_DDIB_CLOCK_SELECT_SHIFT;
+			return B_OK;
+		case 2:
+			dpllId = 4;
+			cfg0 = INTEL_ARC_TGL_DPLL4_CFGCR0;
+			cfg1 = INTEL_ARC_TGL_DPLL4_CFGCR1;
+			enable = INTEL_ARC_TGL_DPLL4_ENABLE;
+			ssc = INTEL_ARC_TGL_DPLL4_SPREAD_SPECTRUM;
+			clockOffMask = INTEL_ARC_TGL_DPCLKA_DDIC_CLOCK_OFF;
+			clockSelectMask = INTEL_ARC_TGL_DPCLKA_DDIC_CLOCK_SELECT;
+			clockSelectValue = 2 << 4;
+			return B_OK;
+		default:
+			debug_printf("intel_arc.accelerant: unsupported combo DDI port %u for DPLL routing\n",
+				ddiPort);
+			return B_BAD_VALUE;
+	}
 }
