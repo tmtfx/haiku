@@ -8,6 +8,7 @@
 #pragma once
 
 #include "intel_arc.h"
+#include <memory_manager.h>
 #include <edid.h>
 
 /*
@@ -289,6 +290,7 @@ struct accelerant_info {
 
 	area_id					frame_buffer_area;
 	void*					frame_buffer;
+	mem_info*				overlay_mem_mgr;
 
 	edid1_info				edid_info;
 	bool					has_edid;

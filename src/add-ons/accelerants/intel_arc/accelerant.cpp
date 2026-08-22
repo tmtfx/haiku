@@ -46,6 +46,26 @@ static engine_token sEngineToken = {1, 0, NULL};
 static uint64 sSyncCounter = 1;
 static int32 sOverlayChannelUsed = 0;
 static int32 sOverlayToken = 0;
+enum { INTEL_ARC_MAX_OVERLAY_BUFFERS = 8 };
+
+struct intel_arc_overlay_state {
+	overlay_token	token;
+	bool			configured;
+	const overlay_buffer* buffer;
+	overlay_window	window;
+	overlay_view	view;
+};
+
+static intel_arc_overlay_state sOverlayState = {};
+
+struct intel_arc_overlay_buffer {
+	overlay_buffer publicBuffer;
+	uint32 blockID;
+	uint32 offset;
+	size_t size;
+};
+
+static intel_arc_overlay_buffer sOverlayBuffers[INTEL_ARC_MAX_OVERLAY_BUFFERS];
 
 
 
@@ -92,6 +112,7 @@ static status_t apply_dpms_on(void);
 static bool is_mode_in_list(const display_mode& mode, display_mode* match = NULL);
 static uint32 bytes_per_pixel_for_space(color_space space);
 static uint32 plane_color_format_for_space(color_space space);
+static status_t init_overlay_memory_manager(void);
 static status_t write_dpcd(uint32 address, const void* buffer, size_t size);
 static status_t read_dpcd(uint32 address, void* buffer, size_t size);
 static uint32 decode_link_rate(uint8 rawLinkRate);
@@ -489,6 +510,47 @@ create_mode_list(void)
 }
 
 static status_t
+init_overlay_memory_manager(void)
+{
+	if (gInfo == NULL || gInfo->shared_info == NULL || gInfo->frame_buffer == NULL)
+		return B_NO_INIT;
+	if (gInfo->overlay_mem_mgr != NULL)
+		return B_OK;
+
+	uint32 maxWidth = gInfo->shared_info->current_mode.virtual_width;
+	uint32 maxHeight = gInfo->shared_info->current_mode.virtual_height;
+	for (uint32 i = 0; gInfo->mode_list != NULL
+		&& i < gInfo->shared_info->mode_count; i++) {
+		maxWidth = max_c(maxWidth, gInfo->mode_list[i].virtual_width);
+		maxHeight = max_c(maxHeight, gInfo->mode_list[i].virtual_height);
+	}
+
+	const uint32 reserveBytesPerRow = (maxWidth * 4 + 63) & ~63;
+	const uint64 reserveSize = (uint64)gInfo->shared_info->frame_buffer_offset
+		+ (uint64)reserveBytesPerRow * maxHeight;
+	uint32 heapStart = ((uint32)reserveSize + B_PAGE_SIZE - 1)
+		& ~(B_PAGE_SIZE - 1);
+	if (heapStart >= gInfo->shared_info->frame_buffer_size)
+		return B_NO_MEMORY;
+
+	uint32 heapSize = (uint32)min_c(
+		gInfo->shared_info->frame_buffer_size - heapStart,
+		(uint64)0xffffffffU);
+	if (heapSize < 4096)
+		return B_NO_MEMORY;
+
+	gInfo->overlay_mem_mgr = mem_init("intel_arc_overlay_vram", heapStart,
+		heapSize, 64, 128);
+	if (gInfo->overlay_mem_mgr == NULL)
+		return B_NO_MEMORY;
+
+	memset(sOverlayBuffers, 0, sizeof(sOverlayBuffers));
+	debug_printf("intel_arc.accelerant: overlay VRAM heap start=0x%08" B_PRIx32
+		", size=%" B_PRIu32 "\n", heapStart, heapSize);
+	return B_OK;
+}
+
+static status_t
 init_common(int device, bool isClone)
 {
 	debug_printf("intel_arc.accelerant: init_common(device=%d, isClone=%d)\n", device, isClone);
@@ -504,6 +566,7 @@ init_common(int device, bool isClone)
 	gInfo->regs_area = -1;
 	gInfo->mode_list_area = -1;
 	gInfo->frame_buffer_area = -1;
+	gInfo->overlay_mem_mgr = NULL;
 	gInfo->has_edid = false;
 	gInfo->last_hotplug_event_count = 0;
 
@@ -547,6 +610,10 @@ static void
 uninit_common(void)
 {
 	debug_printf("intel_arc.accelerant: uninit_common()\n");
+	if (gInfo->overlay_mem_mgr != NULL) {
+		mem_destroy(gInfo->overlay_mem_mgr);
+		gInfo->overlay_mem_mgr = NULL;
+	}
 	if (gInfo->frame_buffer_area >= B_OK)
 		delete_area(gInfo->frame_buffer_area);
 	if (gInfo->regs_area >= B_OK)
@@ -583,6 +650,10 @@ intel_arc_init_accelerant(int device)
 		gInfo->frame_buffer_area = info.area;
 		gInfo->frame_buffer = info.address;
 		debug_printf("intel_arc.accelerant: Cloned Framebuffer area: %" B_PRId32 " at %p\n", info.area, info.address);
+		status_t overlayStatus = init_overlay_memory_manager();
+		if (overlayStatus != B_OK)
+			debug_printf("intel_arc.accelerant: overlay VRAM heap unavailable: %s\n",
+				strerror(overlayStatus));
 	} else {
 		debug_printf("intel_arc.accelerant ERROR: Failed to clone framebuffer: %s\n", strerror(status));
 	}
@@ -639,6 +710,10 @@ intel_arc_clone_accelerant(void* data)
 	if (status == B_OK) {
 		gInfo->frame_buffer_area = info.area;
 		gInfo->frame_buffer = info.address;
+		status_t overlayStatus = init_overlay_memory_manager();
+		if (overlayStatus != B_OK)
+			debug_printf("intel_arc.accelerant: overlay VRAM heap unavailable in clone: %s\n",
+				strerror(overlayStatus));
 	}
 
 	return B_OK;
@@ -1244,9 +1319,7 @@ uint32
 intel_arc_overlay_count(const display_mode* mode)
 {
 	(void)mode;
-	// The software-side API plumbing exists, but the hardware video plane is
-	// not wired up yet, so do not advertise overlay availability to app_server.
-	return 0;
+	return 4;
 }
 
 const uint32*
@@ -1265,21 +1338,25 @@ intel_arc_overlay_supported_spaces(const display_mode* mode)
 uint32
 intel_arc_overlay_supported_features(uint32 colorSpace)
 {
-	(void)colorSpace;
-	return 0;
+	switch (colorSpace) {
+		case B_YCbCr422:
+		case B_YCbCr420:
+		case B_RGB32:
+			return B_OVERLAY_COLOR_KEY
+				| B_OVERLAY_HORIZONTAL_FILTERING
+				| B_OVERLAY_VERTICAL_FILTERING;
+		default:
+			return 0;
+	}
 }
-
-struct intel_arc_overlay_buffer {
-	overlay_buffer publicBuffer;
-	void* storage;
-	size_t size;
-};
 
 const overlay_buffer*
 intel_arc_allocate_overlay_buffer(color_space colorSpace, uint16 width,
 	uint16 height)
 {
 	if (width == 0 || height == 0)
+		return NULL;
+	if (gInfo->overlay_mem_mgr == NULL && init_overlay_memory_manager() != B_OK)
 		return NULL;
 
 	size_t bytesPerRow = 0;
@@ -1301,24 +1378,36 @@ intel_arc_allocate_overlay_buffer(color_space colorSpace, uint16 width,
 			return NULL;
 	}
 
-	intel_arc_overlay_buffer* buffer
-		= (intel_arc_overlay_buffer*)calloc(1, sizeof(intel_arc_overlay_buffer));
-	if (buffer == NULL)
+	int slot = -1;
+	for (int i = 0; i < INTEL_ARC_MAX_OVERLAY_BUFFERS; i++) {
+		if (sOverlayBuffers[i].blockID == 0) {
+			slot = i;
+			break;
+		}
+	}
+	if (slot < 0)
 		return NULL;
 
-	buffer->storage = malloc(size);
-	if (buffer->storage == NULL) {
-		free(buffer);
+	uint32 blockID = 0;
+	uint32 offset = 0;
+	if (mem_alloc(gInfo->overlay_mem_mgr, size + 63, (void*)'OVLY',
+		&blockID, &offset) != B_OK) {
 		return NULL;
 	}
+	const uint32 alignedOffset = (offset + 63) & ~63U;
 
+	intel_arc_overlay_buffer* buffer = &sOverlayBuffers[slot];
+	memset(buffer, 0, sizeof(*buffer));
+	buffer->blockID = blockID;
+	buffer->offset = alignedOffset;
 	buffer->size = size;
 	buffer->publicBuffer.space = colorSpace;
 	buffer->publicBuffer.width = width;
 	buffer->publicBuffer.height = height;
 	buffer->publicBuffer.bytes_per_row = bytesPerRow;
-	buffer->publicBuffer.buffer = buffer->storage;
-	buffer->publicBuffer.buffer_dma = NULL;
+	buffer->publicBuffer.buffer = (void*)((addr_t)gInfo->frame_buffer + alignedOffset);
+	buffer->publicBuffer.buffer_dma = (void*)(addr_t)(
+		gInfo->shared_info->frame_buffer_base + alignedOffset);
 	return &buffer->publicBuffer;
 }
 
@@ -1328,10 +1417,16 @@ intel_arc_release_overlay_buffer(const overlay_buffer* buffer)
 	if (buffer == NULL)
 		return B_BAD_VALUE;
 
+	if (sOverlayState.buffer == buffer) {
+		sOverlayState.buffer = NULL;
+		sOverlayState.configured = false;
+	}
+
 	intel_arc_overlay_buffer* privateBuffer = (intel_arc_overlay_buffer*)buffer;
-	free(privateBuffer->storage);
-	free(privateBuffer);
-	return B_OK;
+	status_t status = mem_free(gInfo->overlay_mem_mgr, privateBuffer->blockID,
+		(void*)'OVLY');
+	memset(privateBuffer, 0, sizeof(*privateBuffer));
+	return status;
 }
 
 status_t
@@ -1373,15 +1468,21 @@ intel_arc_allocate_overlay(void)
 {
 	if (atomic_or(&sOverlayChannelUsed, 1) != 0)
 		return NULL;
-	return (overlay_token)(addr_t)++sOverlayToken;
+	sOverlayState.token = (overlay_token)(addr_t)++sOverlayToken;
+	sOverlayState.configured = false;
+	sOverlayState.buffer = NULL;
+	return sOverlayState.token;
 }
 
 status_t
 intel_arc_release_overlay(overlay_token token)
 {
-	if (token == NULL)
+	if (token == NULL || token != sOverlayState.token)
 		return B_BAD_VALUE;
 	atomic_and(&sOverlayChannelUsed, 0);
+	sOverlayState.token = NULL;
+	sOverlayState.configured = false;
+	sOverlayState.buffer = NULL;
 	return B_OK;
 }
 
@@ -1389,11 +1490,55 @@ status_t
 intel_arc_configure_overlay(overlay_token token, const overlay_buffer* buffer,
 	const overlay_window* window, const overlay_view* view)
 {
-	(void)token;
-	(void)buffer;
-	(void)window;
-	(void)view;
-	return B_UNSUPPORTED;
+	if (token == NULL || token != sOverlayState.token)
+		return B_BAD_VALUE;
+
+	if (buffer == NULL) {
+		sOverlayState.buffer = NULL;
+		sOverlayState.configured = false;
+		return B_OK;
+	}
+
+	if (window == NULL || view == NULL)
+		return B_BAD_VALUE;
+
+	const uint32 supportedFeatures
+		= intel_arc_overlay_supported_features(buffer->space);
+	if ((window->flags & ~supportedFeatures) != 0)
+		return B_BAD_VALUE;
+
+	display_mode currentMode;
+	status_t status = intel_arc_get_display_mode(&currentMode);
+	if (status != B_OK)
+		return status;
+
+	overlay_constraints constraints;
+	status = intel_arc_get_overlay_constraints(&currentMode, buffer, &constraints);
+	if (status != B_OK)
+		return status;
+
+	if (view->width < constraints.view.width.min
+		|| view->width > constraints.view.width.max
+		|| view->height < constraints.view.height.min
+		|| view->height > constraints.view.height.max
+		|| window->width < constraints.window.width.min
+		|| window->width > constraints.window.width.max
+		|| window->height < constraints.window.height.min
+		|| window->height > constraints.window.height.max) {
+		return B_BAD_VALUE;
+	}
+
+	sOverlayState.buffer = buffer;
+	sOverlayState.window = *window;
+	sOverlayState.view = *view;
+	sOverlayState.configured = true;
+
+	debug_printf("intel_arc.accelerant: configure_overlay token=%p space=0x%08" B_PRIx32
+		" view=%ux%u window=%ux%u flags=0x%08" B_PRIx32
+		" (state only, hardware plane not wired yet)\n",
+		token, buffer->space, view->width, view->height, window->width,
+		window->height, window->flags);
+	return B_OK;
 }
 
 status_t
