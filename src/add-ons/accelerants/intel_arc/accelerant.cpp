@@ -134,6 +134,7 @@ static ssize_t aux_transfer(uint8 ddiPort, uint8* transmitBuffer,
 static status_t
 intel_arc_program_hdmi_dpll(accelerant_info* info, uint8 ddiPort, uint32 pixel_clock_khz);
 static bool mode_matches_exactly(const display_mode& left, const display_mode& right);
+static uint32 refresh_rate_for_mode(const display_mode& mode);
 static void sanitize_mode_geometry(display_mode& mode, const char* origin);
 static void log_pipe_plane_state(const char* origin, int8 pipe);
 static uint32 scaler_control_register(int8 pipe, uint32 scalerIndex);
@@ -173,6 +174,26 @@ mode_matches_exactly(const display_mode& left, const display_mode& right)
 		&& left.timing.flags == right.timing.flags;
 }
 
+static uint32
+refresh_rate_for_mode(const display_mode& mode)
+{
+	if (mode.timing.pixel_clock == 0 || mode.timing.h_total == 0
+		|| mode.timing.v_total == 0) {
+		return 60;
+	}
+
+	const uint64 totalPixels = (uint64)mode.timing.h_total
+		* (uint64)mode.timing.v_total;
+	if (totalPixels == 0)
+		return 60;
+
+	uint32 refresh = (uint32)(((uint64)mode.timing.pixel_clock * 1000ULL
+		+ totalPixels / 2) / totalPixels);
+	if (refresh < 25 || refresh > 240)
+		return 60;
+	return refresh;
+}
+
 static void
 sanitize_mode_geometry(display_mode& mode, const char* origin)
 {
@@ -197,7 +218,8 @@ sanitize_mode_geometry(display_mode& mode, const char* origin)
 			mode.virtual_width, mode.virtual_height);
 	}
 
-	compute_display_timing(mode.virtual_width, mode.virtual_height, 60, false,
+	const uint32 refresh = mismatchedGeometry ? 60 : refresh_rate_for_mode(mode);
+	compute_display_timing(mode.virtual_width, mode.virtual_height, refresh, false,
 		&mode.timing);
 }
 
@@ -391,13 +413,14 @@ create_mode_list(void)
 	// mode.virtual_height = mode.timing.v_display;
 	// -----------------------------------------
 	if (mode.timing.h_total == 0 || mode.timing.v_total == 0) {
-		compute_display_timing(mode.virtual_width, mode.virtual_height, 60, false,
+		compute_display_timing(mode.virtual_width, mode.virtual_height,
+			refresh_rate_for_mode(mode), false,
 			&mode.timing);
 	}
 	
     if (mode.timing.pixel_clock == 0) {
         mode.timing.pixel_clock = ((uint32)mode.timing.h_total
-            * (uint32)mode.timing.v_total * 60) / 1000;
+            * (uint32)mode.timing.v_total * refresh_rate_for_mode(mode)) / 1000;
     }
 
     // Preserva lo stride rilevato dall'hardware nel kernel
@@ -436,8 +459,11 @@ create_mode_list(void)
             gInfo->has_edid ? "Hardware" : "Bootloader");
 
         // Genera tutte le risoluzioni dichiarate dal monitor tramite l'EDID
+        // senza reintrodurre la modalità ereditata dal GOP come seed: se il
+        // seed ha timing incoerenti può sovrascrivere la vera mode EDID con la
+        // stessa risoluzione ma pixel clock differente.
         gInfo->mode_list_area = create_display_modes("intel arc modes",
-            targetEdid, &mode, 1, kSupportedSpaces, kNumSupportedSpaces, //NULL, 0
+            targetEdid, NULL, 0, kSupportedSpaces, kNumSupportedSpaces,
             NULL , &gInfo->mode_list, &gInfo->shared_info->mode_count);//is_mode_supported
     } else {
         debug_printf("intel_arc.accelerant: No EDID found, generating single active mode fallback\n");
