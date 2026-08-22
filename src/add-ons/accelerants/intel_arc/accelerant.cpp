@@ -107,6 +107,7 @@ static status_t wait_for_set(uint32 offset, uint32 mask, bigtime_t timeout);
 static uint32 aux_control_register(uint8 ddiPort);
 static uint32 aux_data_register(uint8 ddiPort, uint8 index);
 static uint32 pipe_register(uint32 base, int8 pipe);
+static uint32 overlay_plane_register(uint32 base, int8 pipe);
 static status_t apply_dpms_off(void);
 static status_t apply_dpms_on(void);
 static bool is_mode_in_list(const display_mode& mode, display_mode* match = NULL);
@@ -512,6 +513,11 @@ create_mode_list(void)
 static status_t
 init_overlay_memory_manager(void)
 {
+	debug_printf("intel_arc.accelerant: init_overlay_memory_manager(frame_buffer=%p, mode_list=%p, current=%ux%u)\n",
+		gInfo != NULL ? gInfo->frame_buffer : NULL,
+		gInfo != NULL ? gInfo->mode_list : NULL,
+		gInfo != NULL && gInfo->shared_info != NULL ? gInfo->shared_info->current_mode.virtual_width : 0,
+		gInfo != NULL && gInfo->shared_info != NULL ? gInfo->shared_info->current_mode.virtual_height : 0);
 	if (gInfo == NULL || gInfo->shared_info == NULL || gInfo->frame_buffer == NULL)
 		return B_NO_INIT;
 	if (gInfo->overlay_mem_mgr != NULL)
@@ -1318,46 +1324,66 @@ intel_arc_get_pixel_clock_limits(display_mode* mode, uint32* low, uint32* high)
 uint32
 intel_arc_overlay_count(const display_mode* mode)
 {
-	(void)mode;
+	debug_printf("intel_arc.accelerant: overlay_count(mode=%p", mode);
+	if (mode != NULL) {
+		debug_printf(", %ux%u space=0x%08" B_PRIx32,
+			mode->virtual_width, mode->virtual_height, mode->space);
+	}
+	debug_printf(") -> 4\n");
 	return 4;
 }
 
 const uint32*
 intel_arc_overlay_supported_spaces(const display_mode* mode)
 {
-	(void)mode;
 	static const uint32 kSupportedSpaces[] = {
 		B_YCbCr422,
 		B_RGB32,
 		B_YCbCr420,
 		0
 	};
+	debug_printf("intel_arc.accelerant: overlay_supported_spaces(mode=%p", mode);
+	if (mode != NULL) {
+		debug_printf(", %ux%u space=0x%08" B_PRIx32,
+			mode->virtual_width, mode->virtual_height, mode->space);
+	}
+	debug_printf(") -> [0x%08" B_PRIx32 ", 0x%08" B_PRIx32 ", 0x%08" B_PRIx32 "]\n",
+		kSupportedSpaces[0], kSupportedSpaces[1], kSupportedSpaces[2]);
 	return kSupportedSpaces;
 }
 
 uint32
 intel_arc_overlay_supported_features(uint32 colorSpace)
 {
+	uint32 features = 0;
 	switch (colorSpace) {
 		case B_YCbCr422:
 		case B_YCbCr420:
 		case B_RGB32:
-			return B_OVERLAY_COLOR_KEY
+			features = B_OVERLAY_COLOR_KEY
 				| B_OVERLAY_HORIZONTAL_FILTERING
 				| B_OVERLAY_VERTICAL_FILTERING;
+			break;
 		default:
-			return 0;
+			break;
 	}
+	debug_printf("intel_arc.accelerant: overlay_supported_features(space=0x%08" B_PRIx32
+		") -> 0x%08" B_PRIx32 "\n", colorSpace, features);
+	return features;
 }
 
 const overlay_buffer*
 intel_arc_allocate_overlay_buffer(color_space colorSpace, uint16 width,
 	uint16 height)
 {
+	debug_printf("intel_arc.accelerant: allocate_overlay_buffer(space=0x%08" B_PRIx32
+		", width=%u, height=%u)\n", (uint32)colorSpace, width, height);
 	if (width == 0 || height == 0)
 		return NULL;
-	if (gInfo->overlay_mem_mgr == NULL && init_overlay_memory_manager() != B_OK)
+	if (gInfo->overlay_mem_mgr == NULL && init_overlay_memory_manager() != B_OK) {
+		debug_printf("intel_arc.accelerant: allocate_overlay_buffer failed: overlay_mem_mgr unavailable\n");
 		return NULL;
+	}
 
 	size_t bytesPerRow = 0;
 	size_t size = 0;
@@ -1375,6 +1401,8 @@ intel_arc_allocate_overlay_buffer(color_space colorSpace, uint16 width,
 			size = bytesPerRow * height + ((bytesPerRow * height) / 2);
 			break;
 		default:
+			debug_printf("intel_arc.accelerant: allocate_overlay_buffer unsupported space 0x%08" B_PRIx32 "\n",
+				(uint32)colorSpace);
 			return NULL;
 	}
 
@@ -1385,13 +1413,17 @@ intel_arc_allocate_overlay_buffer(color_space colorSpace, uint16 width,
 			break;
 		}
 	}
-	if (slot < 0)
+	if (slot < 0) {
+		debug_printf("intel_arc.accelerant: allocate_overlay_buffer failed: no free overlay slots\n");
 		return NULL;
+	}
 
 	uint32 blockID = 0;
 	uint32 offset = 0;
 	if (mem_alloc(gInfo->overlay_mem_mgr, size + 63, (void*)'OVLY',
 		&blockID, &offset) != B_OK) {
+		debug_printf("intel_arc.accelerant: allocate_overlay_buffer failed: mem_alloc(%zu) failed\n",
+			size + 63);
 		return NULL;
 	}
 	const uint32 alignedOffset = (offset + 63) & ~63U;
@@ -1408,12 +1440,17 @@ intel_arc_allocate_overlay_buffer(color_space colorSpace, uint16 width,
 	buffer->publicBuffer.buffer = (void*)((addr_t)gInfo->frame_buffer + alignedOffset);
 	buffer->publicBuffer.buffer_dma = (void*)(addr_t)(
 		gInfo->shared_info->frame_buffer_base + alignedOffset);
+	debug_printf("intel_arc.accelerant: allocate_overlay_buffer success slot=%d blockID=%" B_PRIu32
+		" offset=0x%08" B_PRIx32 " aligned=0x%08" B_PRIx32 " bpr=%zu size=%zu buffer=%p dma=%p\n",
+		slot, blockID, offset, alignedOffset, bytesPerRow, size,
+		buffer->publicBuffer.buffer, buffer->publicBuffer.buffer_dma);
 	return &buffer->publicBuffer;
 }
 
 status_t
 intel_arc_release_overlay_buffer(const overlay_buffer* buffer)
 {
+	debug_printf("intel_arc.accelerant: release_overlay_buffer(buffer=%p)\n", buffer);
 	if (buffer == NULL)
 		return B_BAD_VALUE;
 
@@ -1425,6 +1462,9 @@ intel_arc_release_overlay_buffer(const overlay_buffer* buffer)
 	intel_arc_overlay_buffer* privateBuffer = (intel_arc_overlay_buffer*)buffer;
 	status_t status = mem_free(gInfo->overlay_mem_mgr, privateBuffer->blockID,
 		(void*)'OVLY');
+	debug_printf("intel_arc.accelerant: release_overlay_buffer blockID=%" B_PRIu32
+		" offset=0x%08" B_PRIx32 " status=%s\n", privateBuffer->blockID,
+		privateBuffer->offset, strerror(status));
 	memset(privateBuffer, 0, sizeof(*privateBuffer));
 	return status;
 }
@@ -1433,6 +1473,8 @@ status_t
 intel_arc_get_overlay_constraints(const display_mode* mode,
 	const overlay_buffer* buffer, overlay_constraints* constraints)
 {
+	debug_printf("intel_arc.accelerant: get_overlay_constraints(mode=%p, buffer=%p, constraints=%p)\n",
+		mode, buffer, constraints);
 	if (mode == NULL || buffer == NULL || constraints == NULL)
 		return B_BAD_VALUE;
 
@@ -1460,29 +1502,43 @@ intel_arc_get_overlay_constraints(const display_mode* mode,
 	constraints->h_scale.max = 8.0f;
 	constraints->v_scale.min = 0.25f;
 	constraints->v_scale.max = 8.0f;
+	debug_printf("intel_arc.accelerant: overlay constraints view=%ux%u..%ux%u window=%ux%u..%ux%u scale=[%.2f..%.2f]/[%.2f..%.2f]\n",
+		constraints->view.width.min, constraints->view.height.min,
+		constraints->view.width.max, constraints->view.height.max,
+		constraints->window.width.min, constraints->window.height.min,
+		constraints->window.width.max, constraints->window.height.max,
+		constraints->h_scale.min, constraints->h_scale.max,
+		constraints->v_scale.min, constraints->v_scale.max);
 	return B_OK;
 }
 
 overlay_token
 intel_arc_allocate_overlay(void)
 {
+	debug_printf("intel_arc.accelerant: allocate_overlay() channelUsed=%" B_PRId32
+		" currentToken=%" B_PRId32 "\n", sOverlayChannelUsed, sOverlayToken);
 	if (atomic_or(&sOverlayChannelUsed, 1) != 0)
 		return NULL;
 	sOverlayState.token = (overlay_token)(addr_t)++sOverlayToken;
 	sOverlayState.configured = false;
 	sOverlayState.buffer = NULL;
+	debug_printf("intel_arc.accelerant: allocate_overlay() -> token=%p\n",
+		sOverlayState.token);
 	return sOverlayState.token;
 }
 
 status_t
 intel_arc_release_overlay(overlay_token token)
 {
+	debug_printf("intel_arc.accelerant: release_overlay(token=%p, current=%p)\n",
+		token, sOverlayState.token);
 	if (token == NULL || token != sOverlayState.token)
 		return B_BAD_VALUE;
 	atomic_and(&sOverlayChannelUsed, 0);
 	sOverlayState.token = NULL;
 	sOverlayState.configured = false;
 	sOverlayState.buffer = NULL;
+	debug_printf("intel_arc.accelerant: release_overlay() done\n");
 	return B_OK;
 }
 
@@ -1490,10 +1546,26 @@ status_t
 intel_arc_configure_overlay(overlay_token token, const overlay_buffer* buffer,
 	const overlay_window* window, const overlay_view* view)
 {
+	debug_printf("intel_arc.accelerant: configure_overlay(token=%p, buffer=%p, window=%p, view=%p)\n",
+		token, buffer, window, view);
 	if (token == NULL || token != sOverlayState.token)
 		return B_BAD_VALUE;
 
 	if (buffer == NULL) {
+		const int8 pipe = gInfo->shared_info->active_pipe;
+		if (pipe >= 0) {
+			const uint32 planeCtlReg = overlay_plane_register(
+				INTEL_ARC_MMIO_PLANE_B_CONTROL, pipe);
+			const uint32 planeSurfReg = overlay_plane_register(
+				INTEL_ARC_MMIO_PLANE_B_SURFACE, pipe);
+			uint32 control = 0;
+			(void)read_register(planeCtlReg, control);
+			debug_printf("intel_arc.accelerant: configure_overlay disable plane pipe=%" B_PRId8
+				" ctlReg=0x%08" B_PRIx32 " oldCtl=0x%08" B_PRIx32 "\n",
+				pipe, planeCtlReg, control);
+			write_register(planeCtlReg, control & ~INTEL_ARC_DISPLAY_CONTROL_ENABLED);
+			write_register(planeSurfReg, 0);
+		}
 		sOverlayState.buffer = NULL;
 		sOverlayState.configured = false;
 		return B_OK;
@@ -1502,10 +1574,22 @@ intel_arc_configure_overlay(overlay_token token, const overlay_buffer* buffer,
 	if (window == NULL || view == NULL)
 		return B_BAD_VALUE;
 
+	debug_printf("intel_arc.accelerant: overlay params space=0x%08" B_PRIx32
+		" bpr=%" B_PRIu32 " dma=%p win=[%d,%d %ux%u off LTRB=%u,%u,%u,%u flags=0x%08" B_PRIx32
+		"] view=[%u,%u %ux%u]\n",
+		buffer->space, buffer->bytes_per_row, buffer->buffer_dma,
+		window->h_start, window->v_start, window->width, window->height,
+		window->offset_left, window->offset_top, window->offset_right,
+		window->offset_bottom, window->flags,
+		view->h_start, view->v_start, view->width, view->height);
+
 	const uint32 supportedFeatures
 		= intel_arc_overlay_supported_features(buffer->space);
-	if ((window->flags & ~supportedFeatures) != 0)
+	if ((window->flags & ~supportedFeatures) != 0) {
+		debug_printf("intel_arc.accelerant: configure_overlay rejected flags 0x%08" B_PRIx32
+			" supported=0x%08" B_PRIx32 "\n", window->flags, supportedFeatures);
 		return B_BAD_VALUE;
+	}
 
 	display_mode currentMode;
 	status_t status = intel_arc_get_display_mode(&currentMode);
@@ -1525,6 +1609,7 @@ intel_arc_configure_overlay(overlay_token token, const overlay_buffer* buffer,
 		|| window->width > constraints.window.width.max
 		|| window->height < constraints.window.height.min
 		|| window->height > constraints.window.height.max) {
+		debug_printf("intel_arc.accelerant: configure_overlay rejected by constraints\n");
 		return B_BAD_VALUE;
 	}
 
@@ -1533,11 +1618,80 @@ intel_arc_configure_overlay(overlay_token token, const overlay_buffer* buffer,
 	sOverlayState.view = *view;
 	sOverlayState.configured = true;
 
+	const int8 pipe = gInfo->shared_info->active_pipe;
+	if (pipe < 0)
+		return B_UNSUPPORTED;
+
+	uint32 planeCtl = INTEL_ARC_DISPLAY_CONTROL_ENABLED | INTEL_ARC_PLANE_LINEAR;
+	uint32 colorCtl = 0;
+	switch (buffer->space) {
+		case B_YCbCr422:
+			planeCtl |= INTEL_ARC_PLANE_CTL_FORMAT_YUV422
+				| INTEL_ARC_PLANE_CTL_YUV422_ORDER_YUYV;
+			colorCtl |= INTEL_ARC_PLANE_CTL_COLOR_KEY_ALPHA_ENABLE
+				| INTEL_ARC_PLANE_COLOR_CSC_MODE_YUV601_TO_RGB601;
+			break;
+		case B_RGB32:
+			planeCtl |= INTEL_ARC_PLANE_CTL_FORMAT_XRGB_8888;
+			break;
+		default:
+			debug_printf("intel_arc.accelerant: configure_overlay unsupported programmed space=0x%08" B_PRIx32 "\n",
+				buffer->space);
+			return B_UNSUPPORTED;
+	}
+
+	if ((window->flags & B_OVERLAY_COLOR_KEY) != 0) {
+		planeCtl |= INTEL_ARC_PLANE_CTL_KEY_ENABLE_DESTINATION;
+	}
+
+	const uint32 planeCtlReg = overlay_plane_register(INTEL_ARC_MMIO_PLANE_B_CONTROL, pipe);
+	const uint32 planeStrideReg = overlay_plane_register(INTEL_ARC_MMIO_PLANE_B_STRIDE, pipe);
+	const uint32 planePosReg = overlay_plane_register(INTEL_ARC_MMIO_PLANE_B_POS, pipe);
+	const uint32 planeSizeReg = overlay_plane_register(INTEL_ARC_MMIO_PLANE_B_IMAGE_SIZE, pipe);
+	const uint32 planeKeyValReg = overlay_plane_register(INTEL_ARC_MMIO_PLANE_B_KEYVAL, pipe);
+	const uint32 planeKeyMskReg = overlay_plane_register(INTEL_ARC_MMIO_PLANE_B_KEYMSK, pipe);
+	const uint32 planeKeyMaxReg = overlay_plane_register(INTEL_ARC_MMIO_PLANE_B_KEYMAX, pipe);
+	const uint32 planeSurfReg = overlay_plane_register(INTEL_ARC_MMIO_PLANE_B_SURFACE, pipe);
+	const uint32 planeOffsetReg = overlay_plane_register(INTEL_ARC_MMIO_PLANE_B_OFFSET, pipe);
+	const uint32 planeColorCtlReg = overlay_plane_register(INTEL_ARC_MMIO_PLANE_B_COLOR_CTL, pipe);
+
+	const uint32 pos = ((uint32)(window->v_start & 0xffff) << 16)
+		| (uint16)window->h_start;
+	const uint32 sizeReg = ((uint32)(window->height - 1) << 16)
+		| (uint32)(window->width - 1);
+	const uint32 keyVal = ((uint32)window->red.value << 16)
+		| ((uint32)window->green.value << 8)
+		| (uint32)window->blue.value;
+	const uint32 keyMask = ((uint32)window->red.mask << 16)
+		| ((uint32)window->green.mask << 8)
+		| (uint32)window->blue.mask;
+
+	write_register(planeStrideReg, buffer->bytes_per_row / 64);
+	write_register(planePosReg, pos);
+	write_register(planeSizeReg, sizeReg);
+	write_register(planeOffsetReg,
+		((uint32)view->v_start << 16) | (uint32)view->h_start);
+	write_register(planeKeyValReg, keyVal);
+	write_register(planeKeyMskReg, keyMask);
+	write_register(planeKeyMaxReg, 0);
+	write_register(planeColorCtlReg, colorCtl);
+	write_register(planeCtlReg, planeCtl);
+	write_register(planeSurfReg, (uint32)(addr_t)buffer->buffer_dma);
+	uint32 verifyCtl = 0;
+	uint32 verifySurf = 0;
+	uint32 verifyStride = 0;
+	(void)read_register(planeCtlReg, verifyCtl);
+	(void)read_register(planeSurfReg, verifySurf);
+	(void)read_register(planeStrideReg, verifyStride);
+
 	debug_printf("intel_arc.accelerant: configure_overlay token=%p space=0x%08" B_PRIx32
 		" view=%ux%u window=%ux%u flags=0x%08" B_PRIx32
-		" (state only, hardware plane not wired yet)\n",
+		" planeCtl=0x%08" B_PRIx32 " surface=0x%08" B_PRIx32
+		" verifyCtl=0x%08" B_PRIx32 " verifySurf=0x%08" B_PRIx32
+		" verifyStride=0x%08" B_PRIx32 "\n",
 		token, buffer->space, view->width, view->height, window->width,
-		window->height, window->flags);
+		window->height, window->flags, planeCtl,
+		(uint32)(addr_t)buffer->buffer_dma, verifyCtl, verifySurf, verifyStride);
 	return B_OK;
 }
 
@@ -1680,6 +1834,12 @@ write_register(uint32 offset, uint32 value)
 	}
 
 	*(volatile uint32*)(gInfo->registers + offset) = value;
+}
+
+static uint32
+overlay_plane_register(uint32 base, int8 pipe)
+{
+	return base + (uint32)pipe * INTEL_ARC_MMIO_PIPE_OFFSET;
 }
 
 static status_t
