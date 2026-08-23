@@ -38,71 +38,32 @@
 #include <AutoDeleterOS.h>
 
 #define CALLED() debug_printf("INTEL_ARC_ACC: CALLED %s\n", __FUNCTION__)
-//#define ACC_TRACE(x...) printf("intel_arc.accelerant: " x)
-//#define ACC_ERROR(x...) printf("intel_arc.accelerant ERROR: " x)
-
 accelerant_info* gInfo;
 static engine_token sEngineToken = {1, 0, NULL};
 static uint64 sSyncCounter = 1;
 
+static void
+uninit_common(void)
+{
+	debug_printf("intel_arc.accelerant: uninit_common()\n");
+	if (gInfo->overlay_mem_mgr != NULL) {
+		mem_destroy(gInfo->overlay_mem_mgr);
+		gInfo->overlay_mem_mgr = NULL;
+	}
+	if (!gInfo->is_clone) gInfo->shared_info->accelerant_in_use = false;
+	if (gInfo->frame_buffer_area >= B_OK)
+		delete_area(gInfo->frame_buffer_area);
+	if (gInfo->regs_area >= B_OK)
+		delete_area(gInfo->regs_area);
+	if (gInfo->shared_info_area >= B_OK)
+		delete_area(gInfo->shared_info_area);
 
-/*
-static bool is_mode_in_list(const display_mode& mode, display_mode* match = NULL);
-static uint32 bytes_per_pixel_for_space(color_space space);
-static uint32 plane_color_format_for_space(color_space space);
+	if (gInfo->is_clone)
+		close(gInfo->device);
 
-static uint32 decode_link_rate(uint8 rawLinkRate);
-static uint8 encode_link_rate(uint32 linkRate);
-static uint8 c20_dp_rate(uint32 linkRate);
-static uint8 c20_custom_width(uint32 linkRate);
-static bool dp_clock_recovery_ok(const uint8* status, uint32 lanes);
-static bool dp_channel_eq_ok(const uint8* status, uint32 lanes);
-static void dp_get_adjust_request(const uint8* status, uint8 lane,
-	uint8* voltage, uint8* emphasis);
-static int dp14_level_index(uint8 voltage, uint8 emphasis);
-static status_t apply_snps_phy_levels(uint8 ddiPort, const uint8* laneSettings,
-	uint32 lanes, bool uhbr);
-static uint32 cx0_port_base(uint8 ddiPort, uint8 lane, bool timer);
-static status_t cx0_write(uint8 ddiPort, uint8 laneMask, uint16 addr, uint8 data,
-	bool committed);
-static status_t apply_c20_phy_levels(uint8 ddiPort, uint32 linkRate,
-	const uint8* laneSettings, uint32 lanes);
-static status_t cx0_rmw(uint8 ddiPort, uint8 laneMask, uint16 addr, uint8 clear,
-	uint8 set, bool committed);
-static status_t apply_c10_phy_levels(uint8 ddiPort, uint32 linkRate,
-	const uint8* laneSettings, uint32 lanes);
-static status_t apply_ddi_source_levels(uint8 ddiPort, int8 pipe, uint32 lanes,
-	const uint8* laneSettings, uint32 linkRate);
-static status_t perform_dp_link_training(uint32 linkRate, uint32 lanes);
-static bool compute_displayport_dpll(int* pDiv, int* qDiv, int* kDiv, float* dco);
-static status_t program_port_dpll(uint8 ddiPort);
-static status_t configure_dp_link(display_mode* mode);
-static status_t apply_hdmi_phy_levels(uint8 ddiPort, int8 pipe);
-static status_t read_edid_from_hardware(void);
-static status_t read_edid_from_port(uint8 ddiPort, edid1_info& edid);
-static status_t read_dpcd_caps_from_port(uint8 ddiPort);
-static status_t aux_send_receive(const i2c_bus* bus, uint32 slaveAddress,
-	const uint8* writeBuffer, size_t writeLength, uint8* readBuffer,
-	size_t readLength);
-static ssize_t aux_transfer(uint8 ddiPort, dp_aux_msg* message);
-static ssize_t aux_transfer(uint8 ddiPort, uint8* transmitBuffer,
-	uint8 transmitSize, uint8* receiveBuffer, uint8 receiveSize);
-static status_t
-intel_arc_program_hdmi_dpll(accelerant_info* info, uint8 ddiPort, uint32 pixel_clock_khz);
-static bool mode_matches_exactly(const display_mode& left, const display_mode& right);
-static uint32 refresh_rate_for_mode(const display_mode& mode);
-static void sanitize_mode_geometry(display_mode& mode, const char* origin);
-static void log_pipe_plane_state(const char* origin, int8 pipe);
-static uint32 scaler_control_register(int8 pipe, uint32 scalerIndex);
-static uint32 scaler_window_pos_register(int8 pipe, uint32 scalerIndex);
-static uint32 scaler_window_size_register(int8 pipe, uint32 scalerIndex);
-static status_t get_combo_dpll_registers(uint8 ddiPort, uint32& cfg0, uint32& cfg1,
-	uint32& enable, uint32& ssc, uint32& clockOffMask, uint32& clockSelectMask,
-	uint32& clockSelectValue, uint32& dpllId);
-static uint32 snps_phy_base_for_ddi_port(uint8 ddiPort);
-static uint32 snps_phy_enable_reg_for_ddi_port(uint8 ddiPort);
-*/
-
+	free(gInfo);
+	gInfo = NULL;
+}
 
 
 static status_t
@@ -155,32 +116,44 @@ init_common(int device, bool isClone)
 
 	if (gInfo->shared_info != NULL)
 		gInfo->last_hotplug_event_count = gInfo->shared_info->hotplug_event_count;
-
+	
 	infoDeleter.Detach();
 	sharedDeleter.Detach();
-	return B_OK;
-}
 
-static void
-uninit_common(void)
-{
-	debug_printf("intel_arc.accelerant: uninit_common()\n");
-	if (gInfo->overlay_mem_mgr != NULL) {
-		mem_destroy(gInfo->overlay_mem_mgr);
-		gInfo->overlay_mem_mgr = NULL;
+	if (!isClone) {
+		read_edid_from_hardware();
+
+		status = create_mode_list();
+		if (status != B_OK) {
+			uninit_common();
+			return status;
+		}
+		/* why cloning if frame buffer has B_READ_AREA and B_WRITE_AREA ?
+		area_info info;
+		status = ioctl(gInfo->device, INTEL_ARC_CLONE_FRAME_BUFFER, &info, sizeof(info));
+		if (status == B_OK) {
+			gInfo->frame_buffer_area = info.area;
+			gInfo->frame_buffer = info.address;
+			debug_printf("intel_arc.accelerant: Cloned Framebuffer area: %" B_PRId32 " at %p\n", info.area, info.address);
+			status_t overlayStatus = init_overlay_memory_manager();
+			if (overlayStatus != B_OK)
+				debug_printf("intel_arc.accelerant: overlay VRAM heap unavailable: %s\n", strerror(overlayStatus));
+		} else {
+			debug_printf("intel_arc.accelerant ERROR: Failed to clone framebuffer: %s\n", strerror(status));
+		}*/
+		gInfo->frame_buffer_area = gInfo->shared_info->frame_buffer_area;
+		gInfo->frame_buffer = (void*)gInfo->shared_info->frame_buffer;
+	} else {
+		read_edid_from_hardware();
+		
+		status = create_mode_list();
+		if (status != B_OK) {
+			uninit_common();
+			return status;
+		}
 	}
-	if (gInfo->frame_buffer_area >= B_OK)
-		delete_area(gInfo->frame_buffer_area);
-	if (gInfo->regs_area >= B_OK)
-		delete_area(gInfo->regs_area);
-	if (gInfo->shared_info_area >= B_OK)
-		delete_area(gInfo->shared_info_area);
-
-	if (gInfo->is_clone)
-		close(gInfo->device);
-
-	free(gInfo);
-	gInfo = NULL;
+	
+	return B_OK;
 }
 
 status_t
@@ -190,28 +163,11 @@ intel_arc_init_accelerant(int device)
 	status_t status = init_common(device, false);
 	if (status != B_OK)
 		return status;
-
-	read_edid_from_hardware();
-
-	status = create_mode_list();
-	if (status != B_OK) {
-		uninit_common();
-		return status;
-	}
-
-	area_info info;
-	status = ioctl(gInfo->device, INTEL_ARC_CLONE_FRAME_BUFFER, &info, sizeof(info));
-	if (status == B_OK) {
-		gInfo->frame_buffer_area = info.area;
-		gInfo->frame_buffer = info.address;
-		debug_printf("intel_arc.accelerant: Cloned Framebuffer area: %" B_PRId32 " at %p\n", info.area, info.address);
-		status_t overlayStatus = init_overlay_memory_manager();
-		if (overlayStatus != B_OK)
-			debug_printf("intel_arc.accelerant: overlay VRAM heap unavailable: %s\n",
-				strerror(overlayStatus));
-	} else {
-		debug_printf("intel_arc.accelerant ERROR: Failed to clone framebuffer: %s\n", strerror(status));
-	}
+	//if (gInfo->shared_info->accelerant_in_use) {
+    //     uninit_common();
+    //     return B_NOT_ALLOWED;
+    //}
+	gInfo->shared_info->accelerant_in_use = true;
 	
 	debug_printf("intel_arc.accelerant: Summary: Pipe=%d, DDI Port=%u, Detected Ports Mask=0x%02x\n",
 		gInfo->shared_info->active_pipe,

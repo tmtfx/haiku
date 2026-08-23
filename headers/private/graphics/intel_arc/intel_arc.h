@@ -148,6 +148,7 @@ struct intel_arc_shared_info {
 	uint32 boot_width;
 	uint32 boot_height;
 	uint32 boot_depth;
+	bool accelerant_in_use;
 };
 
 

@@ -1185,7 +1185,8 @@ FRAME_BUFFER_BOOT_INFO, NULL);
     info.shared_info->fbc.frame_buffer_dma = (void *)(info.shared_info->frame_buffer_base 
     + info.shared_info->frame_buffer_offset);
     info.shared_info->fbc.bytes_per_row = info.shared_info->bytes_per_row;
-
+	info.shared_info->accelerant_in_use=false;
+	
 #ifdef IS_PIRATI_BUILD
 	draw_logo(info);
 	snooze(2000000);
