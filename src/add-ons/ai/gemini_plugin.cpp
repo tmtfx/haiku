@@ -849,6 +849,8 @@ gemini_stream_thread_func(void* data)
                 executionLoop = false;
                 break;
             }
+            fprintf(stderr, "[GEMINI MCP DEBUG] Target URL: %s\n", targetUrl.String());
+			fprintf(stderr, "[GEMINI MCP DEBUG] Payload inviato:\n%s\n", payload.String());
 
             BHttpRequest* http = dynamic_cast<BHttpRequest*>(req);
             if (http) {
@@ -884,12 +886,28 @@ gemini_stream_thread_func(void* data)
             if (httpStatusCode != 200 || !parseOk) {
                 fprintf(stderr, "[GEMINI STREAM WORKER] Errore di rete/HTTP (Status %" B_PRId32 ") o JSON malformato.\n", httpStatusCode);
                 DispatchError(args->server_messenger, httpStatusCode, sessionID, ctxId, rawResponse);
+                fprintf(stderr, "[GEMINI MCP DEBUG] Risposta HTTP %" B_PRId32 " dal server Gemini:\n%s\n", httpStatusCode, rawResponse.String());
                 
                 // Segnala errore visibile anche sul notify_path prima di uscire
                 BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
-                if (streamFile.InitCheck() == B_OK) {
+                /*if (streamFile.InitCheck() == B_OK) {
                     BString guiError;
                     guiError.SetToFormat("\n[Errore API Gemini (%d)]\n", httpStatusCode);
+                    streamFile.Write(guiError.String(), guiError.Length());
+                }*/
+                if (streamFile.InitCheck() == B_OK) {
+                    BString guiError;
+                    BMessage errorDetails;
+                    const char* apiErrorText = nullptr;
+                    if (parseOk && parsedJson.FindMessage("error", &errorDetails) == B_OK) {
+                        errorDetails.FindString("message", &apiErrorText);
+                    }
+
+                    if (apiErrorText && apiErrorText[0] != '\0') {
+                        guiError.SetToFormat("\n[Errore API Gemini (%d): %s]\n", httpStatusCode, apiErrorText);
+                    } else {
+                        guiError.SetToFormat("\n[Errore API Gemini (%d)]\n", httpStatusCode);
+                    }
                     streamFile.Write(guiError.String(), guiError.Length());
                 }
 
