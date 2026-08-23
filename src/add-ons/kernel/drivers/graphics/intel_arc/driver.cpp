@@ -1443,7 +1443,7 @@ control_hook(void* cookie, uint32 msg, void* buf, size_t len)
 			void* address = NULL;
 			area_id area = vm_clone_area(B_CURRENT_TEAM,
 				"intel arc cloned framebuffer", &address, B_ANY_ADDRESS,
-				B_READ_AREA | B_WRITE_AREA, REGION_NO_PRIVATE_MAP,
+				B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA, REGION_NO_PRIVATE_MAP,
 				info->frame_buffer_area, false);
 			if (area < B_OK)
 				return area;
