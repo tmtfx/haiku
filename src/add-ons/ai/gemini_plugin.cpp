@@ -332,7 +332,11 @@ void BuildPayloadFromContext(const BMessage* config, const char* currentPrompt, 
                     BString escapedThought = EscapeStringForJson(thoughtSig);
 
                     tempCall << "{\"role\":\"model\",\"parts\":[";
-                    tempCall << "{\"functionCall\":{\"name\":\"" << name << "\",\"args\":" << cleanArgs << "},";
+                    tempCall << "{\"functionCall\":{";
+                    tempCall << "\"name\":\"" << name << "\",";
+                    tempCall << "\"args\":" << cleanArgs << ",";
+                    tempCall << "\"thought_signature\":\"" << escapedThought << "\"";
+                    tempCall << "},";
                     tempCall << "\"thought_signature\":\"" << escapedThought << "\"}";
                     tempCall << "]}";
                 } else {
@@ -935,7 +939,9 @@ gemini_stream_thread_func(void* data)
                     functionCallObj.FindMessage("args", &argsMsg);
                     
                     const char* thoughtSig = nullptr;
-                    partZero.FindString("thought_signature", &thoughtSig);
+                    if (functionCallObj.FindString("thought_signature", &thoughtSig) != B_OK) {
+                        partZero.FindString("thought_signature", &thoughtSig);
+                    }
 
                     BMessage reqExec(MSG_EXECUTE_TOOL);
                     reqExec.AddString("name", toolName);
