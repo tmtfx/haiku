@@ -49,7 +49,7 @@ status_t	intel_arc_get_pixel_clock_limits(display_mode* mode, uint32* low,
 uint32		intel_arc_overlay_count(const display_mode* mode);
 const uint32*	intel_arc_overlay_supported_spaces(const display_mode* mode);
 uint32		intel_arc_overlay_supported_features(uint32 colorSpace);
-const overlay_buffer* intel_arc_allocate_overlay_buffer(color_space colorSpace,
+overlay_buffer* intel_arc_allocate_overlay_buffer(color_space colorSpace,
 				uint16 width, uint16 height);
 status_t	intel_arc_release_overlay_buffer(const overlay_buffer* buffer);
 status_t	intel_arc_get_overlay_constraints(const display_mode* mode,
