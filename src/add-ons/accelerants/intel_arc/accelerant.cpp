@@ -141,6 +141,9 @@ init_common(int device, bool isClone)
 		} else {
 			debug_printf("intel_arc.accelerant ERROR: Failed to clone framebuffer: %s\n", strerror(status));
 		}*/
+		status_t overlayStatus = init_overlay_memory_manager();
+		if (overlayStatus != B_OK)
+			debug_printf("intel_arc.accelerant: overlay VRAM heap unavailable: %s\n", strerror(overlayStatus));
 		gInfo->frame_buffer_area = gInfo->shared_info->frame_buffer_area;
 		gInfo->frame_buffer = (void*)gInfo->shared_info->frame_buffer;
 	} else {
