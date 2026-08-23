@@ -247,13 +247,15 @@ intel_arc_overlay_supported_spaces(const display_mode* mode)
 		B_YCbCr420,
 		0
 	};
-	debug_printf("intel_arc.accelerant: overlay_supported_spaces(mode=%p", mode);
-	if (mode != NULL) {
-		debug_printf(", %ux%u space=0x%08" B_PRIx32,
-			mode->virtual_width, mode->virtual_height, mode->space);
-	}
-	debug_printf(") -> [0x%08" B_PRIx32 ", 0x%08" B_PRIx32 ", 0x%08" B_PRIx32 "]\n",
+	//debug_printf("intel_arc.accelerant: overlay_supported_spaces(mode=%p", mode);
+	//if (mode != NULL) {
+	//	debug_printf(", %ux%u space=0x%08" B_PRIx32,
+	//		mode->virtual_width, mode->virtual_height, mode->space);
+	//}
+	debug_printf("intel_arc.accelerant: overlay_supported_spaces [0x%08" B_PRIx32 ", 0x%08" B_PRIx32 ", 0x%08" B_PRIx32 "]\n",
 		kSupportedSpaces[0], kSupportedSpaces[1], kSupportedSpaces[2]);
+	//debug_printf(") -> [0x%08" B_PRIx32 ", 0x%08" B_PRIx32 ", 0x%08" B_PRIx32 "]\n",
+	//	kSupportedSpaces[0], kSupportedSpaces[1], kSupportedSpaces[2]);
 	return kSupportedSpaces;
 }
 
@@ -277,7 +279,7 @@ intel_arc_overlay_supported_features(uint32 colorSpace)
 	return features;
 }
 
-const overlay_buffer*
+overlay_buffer*
 intel_arc_allocate_overlay_buffer(color_space colorSpace, uint16 width,
 	uint16 height)
 {
