@@ -23,6 +23,7 @@ HaikuSubInclude glteapot ;
 HaikuSubInclude gradients ;
 HaikuSubInclude haiku3d ;
 HaikuSubInclude haikudepot ;
+HaikuSubInclude hmcp ;
 HaikuSubInclude icon-o-matic ;
 HaikuSubInclude installer ;
 HaikuSubInclude launchbox ;

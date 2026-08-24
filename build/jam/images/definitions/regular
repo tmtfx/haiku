@@ -98,6 +98,7 @@ SYSTEM_DEMOS += [ FFilterByBuildFeatures
 	FontDemo
 	GLTeapot@mesa
 	$(HAIKU_INCLUDE_TRADEMARKS)Haiku3d@mesa
+	HaikuMCPClient
 	Mandelbrot
 	OverlayImage
 	Pairs
