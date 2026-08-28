@@ -601,6 +601,12 @@ plane_color_format_for_space(color_space space)
 	}
 }
 
+/*
+ * Note: We cannot use Haiku's standard dp_decode_link_rate() from <dp.h>
+ * because it currently only supports rates up to 5.4 GHz (HBR2).
+ * Modern Intel Arc (Alchemist/Battlemage) requires HBR3 (8.1 GHz)
+ * and DP 2.0 UHBR rates (13.5 GHz and 20.0 GHz), which are supported here.
+ */
 static uint32
 decode_link_rate(uint8 rawLinkRate)
 {
@@ -673,6 +679,12 @@ static status_t
 program_port_dpll(uint8 ddiPort)
 {
 	debug_printf("intel_arc.accelerant: program_port_dpll(ddiPort=%u) entering\n", ddiPort);
+	if (gInfo->shared_info->family == INTEL_ARC_FAMILY_ALCHEMIST
+		|| gInfo->shared_info->family == INTEL_ARC_FAMILY_BATTLEMAGE) {
+		debug_printf("intel_arc.accelerant: Alchemist/Battlemage does not use Tiger Lake DPLL registers, DPLL programmed by driver\n");
+		return B_OK;
+	}
+
 	if (ddiPort > 2) {
 		debug_printf("intel_arc.accelerant: Port %u does not use standard TGL DPLL registers\n", ddiPort);
 		return B_OK;
@@ -749,6 +761,12 @@ program_port_dpll(uint8 ddiPort)
 	return B_OK;
 }
 
+/*
+ * Note: We cannot use Haiku's standard dp_encode_link_rate() from <dp.h>
+ * because it currently only supports rates up to 5.4 GHz (HBR2).
+ * Modern Intel Arc (Alchemist/Battlemage) requires HBR3 (8.1 GHz)
+ * and DP 2.0 UHBR rates (13.5 GHz and 20.0 GHz), which are supported here.
+ */
 static uint8
 encode_link_rate(uint32 linkRate)
 {
@@ -1464,6 +1482,11 @@ compute_snps_hdmi_mpllb(uint32 pixelClockKHz, snps_mpllb_state& state)
 static status_t
 intel_arc_program_hdmi_dpll(accelerant_info* info, uint8 ddiPort, uint32 pixel_clock_khz)
 {
+	if (gInfo->shared_info->family == INTEL_ARC_FAMILY_BATTLEMAGE) {
+		debug_printf("intel_arc.accelerant: Battlemage does not use Combo DPLL registers, DPLL programmed by driver\n");
+		return B_OK;
+	}
+
 	if (gInfo->shared_info->family == INTEL_ARC_FAMILY_ALCHEMIST) {
 		const uint32 phyBase = snps_phy_base_for_ddi_port(ddiPort);
 		const uint32 enableReg = snps_phy_enable_reg_for_ddi_port(ddiPort);
@@ -2280,12 +2303,15 @@ read_edid_from_hardware(void)
 	}
 
 	size_t candidateCount = 0;
-	uint8 candidates[4];
+	uint8 candidates[6];
 	
-	if (gInfo->shared_info->active_pipe >= 0 && gInfo->shared_info->active_ddi_port < 4)
+	if (gInfo->shared_info->active_pipe >= 0
+		&& gInfo->shared_info->active_ddi_port > 0
+		&& gInfo->shared_info->active_ddi_port <= 4) {
 		candidates[candidateCount++] = gInfo->shared_info->active_ddi_port;
+	}
 
-	for (uint8 port = 0; port < 4; port++) {
+	for (uint8 port = 1; port <= 4; port++) {
 		if ((gInfo->shared_info->detected_port_bits & (1 << port)) == 0)
 			continue;
 
@@ -2338,11 +2364,13 @@ handle_hotplug_event(void)
 	if (gInfo->shared_info->active_pipe < 0)
 		return B_OK;
 
-	(void)read_edid_from_hardware();
-
 	const uint8 activePort = gInfo->shared_info->active_ddi_port;
-	if (activePort == 0)
+	if (activePort == 0) {
+		gInfo->has_edid = false;
 		return B_OK;
+	}
+
+	(void)read_edid_from_hardware();
 
 	if (activePort <= 4 && (gInfo->shared_info->detected_port_bits & (1 << activePort)) == 0) {
 		gInfo->has_edid = false;
@@ -2354,7 +2382,11 @@ handle_hotplug_event(void)
 		return B_OK;
 	}
 
-	return configure_dp_link(&gInfo->shared_info->current_mode);
+	if (gInfo->shared_info->has_dpcd) {
+		return configure_dp_link(&gInfo->shared_info->current_mode);
+	}
+
+	return B_OK;
 }
 
 //static 
