@@ -144,6 +144,39 @@ c20_dp_rate(uint32 linkRate)
 	}
 }
 
+// ************** BATTLEMAGE ****************
+// Parametri C10 PHY PLL per frequenze DisplayPort standard
+struct intel_c10_dp_pll_state {
+    uint8 tx0;
+    uint8 tx1;
+    uint8 pll0;
+    uint8 pll1;
+    uint8 cmn0;
+};
+
+// Tabelle dei coefficienti C10 per le rate standard DP
+static bool
+get_c10_dp_mpllb_state(uint32 linkRateKhz, intel_c10_dp_pll_state* state)
+{
+    switch (linkRateKhz) {
+        case 162000: // RBR 1.62 Gbps
+            *state = { .tx0 = 0x9A, .tx1 = 0x00, .pll0 = 0xC4, .pll1 = 0x21, .cmn0 = 0x05 };
+            return true;
+        case 270000: // HBR 2.70 Gbps
+            *state = { .tx0 = 0x9A, .tx1 = 0x00, .pll0 = 0x48, .pll1 = 0x21, .cmn0 = 0x05 };
+            return true;
+        case 540000: // HBR2 5.40 Gbps
+            *state = { .tx0 = 0x9A, .tx1 = 0x00, .pll0 = 0x48, .pll1 = 0x21, .cmn0 = 0x05 };
+            return true;
+        case 810000: // HBR3 8.10 Gbps
+            *state = { .tx0 = 0x9A, .tx1 = 0x00, .pll0 = 0x48, .pll1 = 0x21, .cmn0 = 0x05 };
+            return true;
+        default:
+            return false;
+    }
+}
+// ******************************************
+
 static uint32
 refresh_rate_for_mode(const display_mode& mode)
 {
@@ -621,144 +654,176 @@ decode_link_rate(uint8 rawLinkRate)
 	}
 }
 
-static bool
-compute_displayport_dpll(int* pDiv, int* qDiv, int* kDiv, float* dco)
+static status_t
+program_battlemage_cx0_dpll(uint8 ddiPort, uint32 linkRateKhz)
 {
-	*pDiv = 3;
-	*qDiv = 1;
-	*kDiv = 2;
-	*dco = 8090.0f;
-	debug_printf("intel_arc.accelerant: compute_displayport_dpll(): P=%d, Q=%d, K=%d, DCO=%.1f\n", *pDiv, *qDiv, *kDiv, *dco);
-	return true;
+    intel_c10_dp_pll_state state = {};
+    if (!get_c10_dp_mpllb_state(linkRateKhz, &state)) {
+        debug_printf("intel_arc.accelerant ERROR: BMG Unsupported DP link rate %u kHz\n", linkRateKhz);
+        return B_BAD_VALUE;
+    }
+
+    const uint32 portClkCtl = INTEL_ARC_BMG_PORT_CLOCK_CTL(ddiPort);
+    const uint32 cx0Base = INTEL_ARC_BMG_CX0_LN0_PHY_BASE(ddiPort);
+
+    // 1. Spegni il clock di porta e disabilita la PHY CX0 per riconfigurazione
+    uint32 val = read32(gInfo, portClkCtl);
+    val &= ~(BMG_PORT_CLOCK_CTL_ENABLE | BMG_PORT_CLOCK_CTL_LINK_CLK_EN);
+    write32(gInfo, portClkCtl, val);
+    (void)wait_for_clear(portClkCtl, BMG_PORT_CLOCK_CTL_LOCK, 5000);
+
+    // 2. Scrittura dei registri C10 PHY per le lane
+    write32(gInfo, cx0Base + INTEL_ARC_BMG_CX0_C10_PLL0, state.pll0);
+    write32(gInfo, cx0Base + INTEL_ARC_BMG_CX0_C10_PLL1, state.pll1);
+    write32(gInfo, cx0Base + INTEL_ARC_BMG_CX0_C10_TX0,  state.tx0);
+    write32(gInfo, cx0Base + INTEL_ARC_BMG_CX0_C10_TX1,  state.tx1);
+    write32(gInfo, cx0Base + INTEL_ARC_BMG_CX0_C10_CMN0, state.cmn0);
+
+    // 3. Abilita la PHY in modalità C10
+    val = read32(gInfo, portClkCtl);
+    val |= BMG_PORT_CLOCK_CTL_ENABLE | BMG_PORT_CLOCK_CTL_MODE_C10;
+    write32(gInfo, portClkCtl, val);
+
+    // 4. Attendi il Lock della PLL
+    status_t status = wait_for_set(portClkCtl, BMG_PORT_CLOCK_CTL_LOCK, 10000);
+    if (status != B_OK) {
+        debug_printf("intel_arc.accelerant ERROR: BMG CX0 PHY failed to lock on port %u!\n", ddiPort);
+        return status;
+    }
+
+    // 5. Abilita l'uscita del clock verso il controller DDI
+    val = read32(gInfo, portClkCtl);
+    val |= BMG_PORT_CLOCK_CTL_LINK_CLK_EN;
+    write32(gInfo, portClkCtl, val);
+
+    return B_OK;
 }
 
-static status_t
-get_combo_dpll_registers(uint8 ddiPort, uint32& cfg0, uint32& cfg1, uint32& enable,
-	uint32& ssc, uint32& clockOffMask, uint32& clockSelectMask,
-	uint32& clockSelectValue, uint32& dpllId)
+static bool
+compute_snps_dp_mpllb(uint32 linkRateKhz, snps_mpllb_state* state)
+{
+    if (state == nullptr)
+        return false;
+
+    memset(state, 0, sizeof(snps_mpllb_state));
+
+    switch (linkRateKhz) {
+        case 162000: // RBR (1.62 Gbps)
+            state->mpllb_cp       = 0x00002008;
+            state->mpllb_div      = 0x0000A000;
+            state->mpllb_div2     = 0x00000000;
+            state->mpllb_sscen    = 0x00000000;
+            state->mpllb_sscstep  = 0x00000000;
+            state->mpllb_fracn1   = 0x00000000;
+            state->mpllb_fracn2   = 0x00000000;
+            return true;
+
+        case 270000: // HBR (2.70 Gbps)
+            state->mpllb_cp       = 0x00002008;
+            state->mpllb_div      = 0x0000A001;
+            state->mpllb_div2     = 0x00000000;
+            state->mpllb_sscen    = 0x00000000;
+            state->mpllb_sscstep  = 0x00000000;
+            state->mpllb_fracn1   = 0x00000000;
+            state->mpllb_fracn2   = 0x00000000;
+            return true;
+
+        case 540000: // HBR2 (5.40 Gbps)
+            state->mpllb_cp       = 0x00002008;
+            state->mpllb_div      = 0x0000A002;
+            state->mpllb_div2     = 0x00000000;
+            state->mpllb_sscen    = 0x00000000;
+            state->mpllb_sscstep  = 0x00000000;
+            state->mpllb_fracn1   = 0x00000000;
+            state->mpllb_fracn2   = 0x00000000;
+            return true;
+
+        case 810000: // HBR3 (8.10 Gbps)
+            state->mpllb_cp       = 0x00002008;
+            state->mpllb_div      = 0x0000A003;
+            state->mpllb_div2     = 0x00000000;
+            state->mpllb_sscen    = 0x00000000;
+            state->mpllb_sscstep  = 0x00000000;
+            state->mpllb_fracn1   = 0x00000000;
+            state->mpllb_fracn2   = 0x00000000;
+            return true;
+
+        default:
+            return false;
+    }
+}
+
+static uint32
+snps_phy_enable_reg_for_ddi_port(uint8 ddiPort)
 {
 	switch (ddiPort) {
 		case 0:
-			dpllId = 0;
-			cfg0 = INTEL_ARC_TGL_DPLL0_CFGCR0;
-			cfg1 = INTEL_ARC_TGL_DPLL0_CFGCR1;
-			enable = INTEL_ARC_TGL_DPLL0_ENABLE;
-			ssc = INTEL_ARC_TGL_DPLL0_SPREAD_SPECTRUM;
-			clockOffMask = INTEL_ARC_TGL_DPCLKA_DDIA_CLOCK_OFF;
-			clockSelectMask = INTEL_ARC_TGL_DPCLKA_DDIA_CLOCK_SELECT;
-			clockSelectValue = 0;
-			return B_OK;
+			return INTEL_ARC_TGL_DPLL0_ENABLE;
 		case 1:
-			dpllId = 1;
-			cfg0 = INTEL_ARC_TGL_DPLL1_CFGCR0;
-			cfg1 = INTEL_ARC_TGL_DPLL1_CFGCR1;
-			enable = INTEL_ARC_TGL_DPLL1_ENABLE;
-			ssc = INTEL_ARC_TGL_DPLL1_SPREAD_SPECTRUM;
-			clockOffMask = INTEL_ARC_TGL_DPCLKA_DDIB_CLOCK_OFF;
-			clockSelectMask = INTEL_ARC_TGL_DPCLKA_DDIB_CLOCK_SELECT;
-			clockSelectValue = 1 << INTEL_ARC_TGL_DPCLKA_DDIB_CLOCK_SELECT_SHIFT;
-			return B_OK;
+			return INTEL_ARC_TGL_DPLL1_ENABLE;
 		case 2:
-			dpllId = 4;
-			cfg0 = INTEL_ARC_TGL_DPLL4_CFGCR0;
-			cfg1 = INTEL_ARC_TGL_DPLL4_CFGCR1;
-			enable = INTEL_ARC_TGL_DPLL4_ENABLE;
-			ssc = INTEL_ARC_TGL_DPLL4_SPREAD_SPECTRUM;
-			clockOffMask = INTEL_ARC_TGL_DPCLKA_DDIC_CLOCK_OFF;
-			clockSelectMask = INTEL_ARC_TGL_DPCLKA_DDIC_CLOCK_SELECT;
-			clockSelectValue = 2 << 4;
-			return B_OK;
+			return INTEL_ARC_TGL_DPLL4_ENABLE;
 		default:
-			debug_printf("intel_arc.accelerant: unsupported combo DDI port %u for DPLL routing\n",
-				ddiPort);
-			return B_BAD_VALUE;
+			return INTEL_ARC_TGL_DPLL1_ENABLE;
 	}
 }
 
+
 static status_t
-program_port_dpll(uint8 ddiPort)
+program_port_dpll(uint8 ddiPort, uint32 linkRateKhz)
 {
-	debug_printf("intel_arc.accelerant: program_port_dpll(ddiPort=%u) entering\n", ddiPort);
-	if (gInfo->shared_info->family == INTEL_ARC_FAMILY_ALCHEMIST
-		|| gInfo->shared_info->family == INTEL_ARC_FAMILY_BATTLEMAGE) {
-		debug_printf("intel_arc.accelerant: Alchemist/Battlemage does not use Tiger Lake DPLL registers, DPLL programmed by driver\n");
-		return B_OK;
-	}
+    debug_printf("intel_arc.accelerant: program_port_dpll(ddiPort=%u, linkRate=%u kHz)\n",
+        ddiPort, linkRateKhz);
 
-	if (ddiPort > 2) {
-		debug_printf("intel_arc.accelerant: Port %u does not use standard TGL DPLL registers\n", ddiPort);
-		return B_OK;
-	}
+    // --- 1. ARCHITETTURA ALCHEMIST (DG2 - SNPS PHY) ---
+    if (gInfo->shared_info->family == INTEL_ARC_FAMILY_ALCHEMIST) {
+        const uint32 phyBase = snps_phy_base_for_ddi_port(ddiPort);
+        const uint32 enableReg = snps_phy_enable_reg_for_ddi_port(ddiPort);
 
-	int pDiv, qDiv, kDiv;
-	float dco;
-	if (!compute_displayport_dpll(&pDiv, &qDiv, &kDiv, &dco))
-		return B_ERROR;
+        snps_mpllb_state state = {};
+        if (!compute_snps_dp_mpllb(linkRateKhz, &state)) {
+            debug_printf("intel_arc.accelerant ERROR: Invalid DP link rate %u kHz\n", linkRateKhz);
+            return B_BAD_VALUE;
+        }
 
-	uint32 cfg0 = 0, cfg1 = 0, enable = 0, ssc = 0, dpllIndex = 0;
-	uint32 clockOffMask = 0, clockSelectMask = 0, clockSelectValue = 0;
-	status_t status = get_combo_dpll_registers(ddiPort, cfg0, cfg1, enable, ssc,
-		clockOffMask, clockSelectMask, clockSelectValue, dpllIndex);
-	if (status != B_OK)
-		return status;
+        uint32 enableValue = read32(gInfo, enableReg);
+        write32(gInfo, enableReg, enableValue & ~INTEL_ARC_TGL_DPLL_ENABLE);
+        write32(gInfo, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_DIV(phyBase),
+            state.mpllb_div & ~INTEL_ARC_SNPS_PHY_MPLLB_FORCE_EN);
+        (void)wait_for_clear(enableReg, INTEL_ARC_TGL_DPLL_LOCK, 5000);
 
-	uint32 refKHz = 19200;
-	uint32 dcoInt = (uint32)floorf(dco / (refKHz / 1000.0f));
-	uint32 dcoFrac = (uint32)ceilf((dco / (refKHz / 1000.0f) - dcoInt) * (1 << 15));
-	uint32 dcoReg = dcoInt | (dcoFrac << INTEL_ARC_TGL_DPLL_DCO_FRACTION_SHIFT);
+        write32(gInfo, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_CP(phyBase), state.mpllb_cp);
+        write32(gInfo, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_DIV(phyBase), state.mpllb_div);
+        write32(gInfo, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_DIV2(phyBase), state.mpllb_div2);
+        write32(gInfo, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_SSCEN(phyBase), state.mpllb_sscen);
+        write32(gInfo, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_SSCSTEP(phyBase), state.mpllb_sscstep);
+        write32(gInfo, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_FRACN1(phyBase), state.mpllb_fracn1);
+        write32(gInfo, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_FRACN2(phyBase), state.mpllb_fracn2);
 
-	uint32 dividers = 0;
-	switch (pDiv) {
-		case 2: dividers |= INTEL_ARC_TGL_DPLL_PDIV_2; break;
-		case 3: dividers |= INTEL_ARC_TGL_DPLL_PDIV_3; break;
-		case 5: dividers |= INTEL_ARC_TGL_DPLL_PDIV_5; break;
-		case 7: dividers |= INTEL_ARC_TGL_DPLL_PDIV_7; break;
-		default: return B_BAD_VALUE;
-	}
-	switch (kDiv) {
-		case 1: dividers |= INTEL_ARC_TGL_DPLL_KDIV_1; break;
-		case 2: dividers |= INTEL_ARC_TGL_DPLL_KDIV_2; break;
-		case 3: dividers |= INTEL_ARC_TGL_DPLL_KDIV_3; break;
-		default: return B_BAD_VALUE;
-	}
-	if (qDiv != 1)
-		dividers |= ((uint32)qDiv << INTEL_ARC_TGL_DPLL_QDIV_RATIO_SHIFT) | INTEL_ARC_TGL_DPLL_QDIV_ENABLE;
+        enableValue = read32(gInfo, enableReg) | INTEL_ARC_TGL_DPLL_ENABLE;
+        write32(gInfo, enableReg, enableValue);
+        write32(gInfo, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_DIV(phyBase),
+            state.mpllb_div | INTEL_ARC_SNPS_PHY_MPLLB_FORCE_EN);
 
-	debug_printf("intel_arc.accelerant: Programming DPLL %u: dcoReg=0x%08X, dividers=0x%08X\n", dpllIndex, dcoReg, dividers);
+        status_t status = wait_for_set(enableReg, INTEL_ARC_TGL_DPLL_LOCK, 5000);
+        if (status != B_OK) {
+            debug_printf("intel_arc.accelerant ERROR: SNPS PHY MPLLB failed to lock!\n");
+            return status;
+        }
 
-	uint32 value = 0;
-	read_register(enable, value);
-	write_register(enable, value & ~INTEL_ARC_TGL_DPLL_ENABLE);
-	(void)wait_for_clear(enable, INTEL_ARC_TGL_DPLL_LOCK, 50000);
+        uint32 dpclka = read32(gInfo, INTEL_ARC_TGL_DPCLKA_CFGCR0);
+        dpclka &= ~(1U << (ddiPort + 16));
+        write32(gInfo, INTEL_ARC_TGL_DPCLKA_CFGCR0, dpclka);
 
-	read_register(enable, value);
-	write_register(enable, value | INTEL_ARC_TGL_DPLL_POWER_ENABLE);
-	(void)wait_for_set(enable, INTEL_ARC_TGL_DPLL_POWER_STATE, 50000);
+        return B_OK;
+    }
 
-	read_register(ssc, value);
-	write_register(ssc, value & ~INTEL_ARC_TGL_DPLL_SSC_ENABLE);
+    // --- 2. ARCHITETTURA BATTLEMAGE (Xe2 - CX0 PHY) ---
+    if (gInfo->shared_info->family == INTEL_ARC_FAMILY_BATTLEMAGE) {
+        return program_battlemage_cx0_dpll(ddiPort, linkRateKhz);
+    }
 
-	write_register(cfg0, dcoReg);
-	write_register(cfg1, dividers);
-
-	read_register(enable, value);
-	write_register(enable, value | INTEL_ARC_TGL_DPLL_ENABLE);
-	status = wait_for_set(enable, INTEL_ARC_TGL_DPLL_LOCK, 50000);
-	if (status != B_OK) {
-		debug_printf("intel_arc.accelerant ERROR: DPLL %u failed to lock!\n", dpllIndex);
-		return status;
-	}
-
-	debug_printf("intel_arc.accelerant: DPLL %u locked successfully!\n", dpllIndex);
-
-	read_register(INTEL_ARC_TGL_DPCLKA_CFGCR0, value);
-	value |= clockOffMask;
-	value &= ~clockSelectMask;
-	value |= clockSelectValue;
-	write_register(INTEL_ARC_TGL_DPCLKA_CFGCR0, value);
-	value &= ~clockOffMask;
-	write_register(INTEL_ARC_TGL_DPCLKA_CFGCR0, value);
-	return B_OK;
+    return B_BAD_TYPE;
 }
 
 /*
@@ -1292,7 +1357,7 @@ configure_dp_link(display_mode* mode)
 
 	if (gInfo->shared_info->has_dpcd) {
 		debug_printf("intel_arc.accelerant: Has DPCD -> Programming Port DPLL and Link Training\n");
-		status_t status = program_port_dpll(gInfo->shared_info->active_ddi_port);
+		status_t status = program_port_dpll(gInfo->shared_info->active_ddi_port, linkBandwidth);
 		if (status != B_OK) {
 			debug_printf("intel_arc.accelerant ERROR: program_port_dpll failed: %s\n", strerror(status));
 			return status;
@@ -1316,21 +1381,6 @@ configure_dp_link(display_mode* mode)
 	}
 
 	return B_OK;
-}
-
-static uint32
-snps_phy_enable_reg_for_ddi_port(uint8 ddiPort)
-{
-	switch (ddiPort) {
-		case 0:
-			return INTEL_ARC_TGL_DPLL0_ENABLE;
-		case 1:
-			return INTEL_ARC_TGL_DPLL1_ENABLE;
-		case 2:
-			return INTEL_ARC_TGL_DPLL4_ENABLE;
-		default:
-			return INTEL_ARC_TGL_DPLL1_ENABLE;
-	}
 }
 
 static uint32
@@ -1527,110 +1577,7 @@ intel_arc_program_hdmi_dpll(accelerant_info* info, uint8 ddiPort, uint32 pixel_c
 		return status;
 	}
 
-	uint32 cfgcr0_reg = 0, cfgcr1_reg = 0, enable_reg = 0, ssc_reg = 0;
-	uint32 clockOffMask = 0, clockSelectMask = 0, clockSelectValue = 0, dpllId = 0;
-	status_t status = get_combo_dpll_registers(ddiPort, cfgcr0_reg, cfgcr1_reg,
-		enable_reg, ssc_reg, clockOffMask, clockSelectMask, clockSelectValue,
-		dpllId);
-	if (status != B_OK)
-		return status;
-
-	debug_printf("intel_arc.accelerant: intel_arc_program_hdmi_dpll(ddiPort=%u, dpll=%u, pixel_clock=%u kHz)\n",
-		ddiPort, dpllId, pixel_clock_khz);
-
-	// 1. Disabilita il DPLL se attivo per riconfigurarlo
-	uint32 val = read32(info, enable_reg);
-	if ((val & INTEL_ARC_TGL_DPLL_ENABLE) != 0) {
-		val &= ~INTEL_ARC_TGL_DPLL_ENABLE;
-		write32(info, enable_reg, val);
-		snooze(10);
-	}
-
-	// 2. Abilita la potenza del DPLL e attendi lo stato OK
-	val |= INTEL_ARC_TGL_DPLL_POWER_ENABLE;
-	write32(info, enable_reg, val);
-
-	int timeout = 1000;
-	while (--timeout > 0) {
-		if ((read32(info, enable_reg) & INTEL_ARC_TGL_DPLL_POWER_STATE) != 0)
-			break;
-		snooze(1);
-	}
-	if (timeout == 0)
-		return B_TIMED_OUT;
-
-	// HDMI non usa SSC.
-	val = read32(info, ssc_reg);
-	write32(info, ssc_reg, val & ~INTEL_ARC_TGL_DPLL_SSC_ENABLE);
-
-	// 3. Calcolo divisori e frequenza DCO (RefClk = 24 MHz)
-	// Per HDMI/TMDS: F_dco = PixelClock * 5 * P * K * Q
-	uint32 pdiv = INTEL_ARC_TGL_DPLL_PDIV_2;
-	uint32 kdiv = INTEL_ARC_TGL_DPLL_KDIV_1;
-	uint32 qdiv = 1;
-	uint32 p_val = 2;
-	uint32 k_val = 1;
-
-	if (pixel_clock_khz < 50000) {
-		pdiv = INTEL_ARC_TGL_DPLL_PDIV_7;
-		p_val = 7;
-		kdiv = INTEL_ARC_TGL_DPLL_KDIV_2;
-		k_val = 2;
-	} else if (pixel_clock_khz < 100000) {
-		pdiv = INTEL_ARC_TGL_DPLL_PDIV_5;
-		p_val = 5;
-		kdiv = INTEL_ARC_TGL_DPLL_KDIV_1;
-		k_val = 1;
-	} else if (pixel_clock_khz < 150000) {
-		pdiv = INTEL_ARC_TGL_DPLL_PDIV_3;
-		p_val = 3;
-		kdiv = INTEL_ARC_TGL_DPLL_KDIV_1;
-		k_val = 1;
-	}
-
-	const uint32 ref_clk_khz = 24000;
-	uint64 dco_freq_khz = (uint64)pixel_clock_khz * 5 * p_val * k_val * qdiv;
-
-	uint32 dco_int = (uint32)(dco_freq_khz / ref_clk_khz);
-	uint32 dco_frac = (uint32)(((dco_freq_khz % ref_clk_khz) << INTEL_ARC_TGL_DPLL_DCO_FRACTION_SHIFT) / ref_clk_khz);
-
-	// 4. Scrittura registri CFGCR0 e CFGCR1
-	uint32 cfgcr0 = (dco_int & 0x1FF) | (dco_frac << INTEL_ARC_TGL_DPLL_DCO_FRACTION_SHIFT);
-	uint32 cfgcr1 = pdiv | kdiv | (qdiv << INTEL_ARC_TGL_DPLL_QDIV_RATIO_SHIFT) | INTEL_ARC_TGL_DPLL_QDIV_ENABLE;
-
-	write32(info, cfgcr0_reg, cfgcr0);
-	write32(info, cfgcr1_reg, cfgcr1);
-
-	// 5. Abilita il DPLL e attendi il Lock del PLL
-	val = read32(info, enable_reg);
-	val |= INTEL_ARC_TGL_DPLL_ENABLE;
-	write32(info, enable_reg, val);
-
-	timeout = 1000;
-	while (--timeout > 0) {
-		if ((read32(info, enable_reg) & INTEL_ARC_TGL_DPLL_LOCK) != 0)
-			break;
-		snooze(1);
-	}
-	if (timeout == 0)
-		return B_TIMED_OUT;
-
-	debug_printf("intel_arc.accelerant: HDMI DPLL regs: CFG0=0x%08" B_PRIx32 ", CFG1=0x%08" B_PRIx32 ", ENABLE=0x%08" B_PRIx32 "\n",
-		read32(info, cfgcr0_reg), read32(info, cfgcr1_reg), read32(info, enable_reg));
-
-	// 6. Instradamento clock sul combo DDI corretto
-	uint32 dpclka = read32(info, INTEL_ARC_TGL_DPCLKA_CFGCR0);
-	debug_printf("intel_arc.accelerant: HDMI DPCLKA before routing: 0x%08" B_PRIx32 "\n", dpclka);
-	dpclka |= clockOffMask;
-	dpclka &= ~clockSelectMask;
-	dpclka |= clockSelectValue;
-	write32(info, INTEL_ARC_TGL_DPCLKA_CFGCR0, dpclka);
-	dpclka &= ~clockOffMask;
-	write32(info, INTEL_ARC_TGL_DPCLKA_CFGCR0, dpclka);
-	debug_printf("intel_arc.accelerant: HDMI DPCLKA after routing: 0x%08" B_PRIx32 "\n",
-		read32(info, INTEL_ARC_TGL_DPCLKA_CFGCR0));
-
-	return B_OK;
+	return B_UNSUPPORTED;
 }
 
 static status_t

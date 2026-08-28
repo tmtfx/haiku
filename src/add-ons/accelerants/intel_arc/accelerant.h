@@ -220,6 +220,7 @@
 #define INTEL_ARC_TGL_DPLL_PDIV_3				(2U << 2)
 #define INTEL_ARC_TGL_DPLL_PDIV_5				(4U << 2)
 #define INTEL_ARC_TGL_DPLL_PDIV_7				(8U << 2)
+#define INTEL_ARC_TGL_DPLL_BASE_ENABLE			0x46010
 #define INTEL_ARC_TGL_DPLL0_ENABLE				0x46010
 #define INTEL_ARC_TGL_DPLL1_ENABLE				0x46014
 #define INTEL_ARC_TGL_DPLL4_ENABLE				0x46018
@@ -291,6 +292,19 @@
 #define INTEL_SNPS_PHY_HDMI_4999MHZ 4999999900ULL
 #define INTEL_SNPS_PHY_HDMI_16GHZ 16000000000ULL
 #define INTEL_SNPS_PHY_HDMI_9999MHZ (2 * INTEL_SNPS_PHY_HDMI_4999MHZ)
+
+#define INTEL_ARC_BMG_PORT_CLOCK_CTL(port)      (0x640E0 + ((port) * 0x100))
+#define   BMG_PORT_CLOCK_CTL_ENABLE              (1U << 31)
+#define   BMG_PORT_CLOCK_CTL_LOCK                (1U << 30)
+#define   BMG_PORT_CLOCK_CTL_LINK_CLK_EN         (1U << 26)
+#define   BMG_PORT_CLOCK_CTL_MODE_C10            (0U << 24)
+
+#define INTEL_ARC_BMG_CX0_LN0_PHY_BASE(port)    (0x168000 + ((port) * 0x1000))
+#define INTEL_ARC_BMG_CX0_C10_PLL0               0x000
+#define INTEL_ARC_BMG_CX0_C10_PLL1               0x004
+#define INTEL_ARC_BMG_CX0_C10_TX0                0x010
+#define INTEL_ARC_BMG_CX0_C10_TX1                0x014
+#define INTEL_ARC_BMG_CX0_C10_CMN0               0x020
 
 struct arc_mit_buf_trans_entry {
 	uint8	main;
