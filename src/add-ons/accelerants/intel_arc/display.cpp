@@ -352,6 +352,41 @@ bytes_per_pixel_for_space(color_space space)
 	}
 }
 
+static void
+log_boot_dp_registers(int8 pipe, uint8 ddiPort)
+{
+    if (pipe < 0)
+        return;
+
+    const uint32 pipeOffset = (uint32)pipe * INTEL_ARC_MMIO_PIPE_OFFSET;
+
+    uint32 dataM = 0, dataN = 0;
+    uint32 linkM = 0, linkN = 0;
+    uint32 dpTpCtl = 0;
+
+    read_register(INTEL_ARC_MMIO_DDI_PIPE_A_DATA_M + pipeOffset, dataM);
+    read_register(INTEL_ARC_MMIO_DDI_PIPE_A_DATA_N + pipeOffset, dataN);
+    read_register(INTEL_ARC_MMIO_DDI_PIPE_A_LINK_M + pipeOffset, linkM);
+    read_register(INTEL_ARC_MMIO_DDI_PIPE_A_LINK_N + pipeOffset, linkN);
+
+    // Inizializzazione registro DP_TP_CTL per il Transcoder/DDI attivo
+    const uint32 tpCtlReg = INTEL_ARC_MMIO_DP_TP_CTL(pipe);
+    read_register(tpCtlReg, dpTpCtl);
+
+    debug_printf("intel_arc.accelerant: === BOOT DP SNAPSHOT (Pipe %" B_PRId8 ", DDI %u) ===\n", pipe, ddiPort);
+    debug_printf("  - PIPE DATA_M  [0x%05" B_PRIx32 "] = 0x%08" B_PRIx32 "\n",
+        INTEL_ARC_MMIO_DDI_PIPE_A_DATA_M + pipeOffset, dataM);
+    debug_printf("  - PIPE DATA_N  [0x%05" B_PRIx32 "] = 0x%08" B_PRIx32 "\n",
+        INTEL_ARC_MMIO_DDI_PIPE_A_DATA_N + pipeOffset, dataN);
+    debug_printf("  - PIPE LINK_M  [0x%05" B_PRIx32 "] = 0x%08" B_PRIx32 "\n",
+        INTEL_ARC_MMIO_DDI_PIPE_A_LINK_M + pipeOffset, linkM);
+    debug_printf("  - PIPE LINK_N  [0x%05" B_PRIx32 "] = 0x%08" B_PRIx32 "\n",
+        INTEL_ARC_MMIO_DDI_PIPE_A_LINK_N + pipeOffset, linkN);
+    debug_printf("  - DP_TP_CTL    [0x%05" B_PRIx32 "] = 0x%08" B_PRIx32 "\n",
+        tpCtlReg, dpTpCtl);
+    debug_printf("intel_arc.accelerant: =======================================\n");
+}
+
 status_t
 create_mode_list(void)
 {
@@ -411,6 +446,7 @@ create_mode_list(void)
 		const uint32 vTotal = gInfo->shared_info->pipe_v_total[pipe];
 		const uint32 vSync = gInfo->shared_info->pipe_v_sync[pipe];
 		log_pipe_plane_state("create_mode_list inherited state", pipe);
+		log_boot_dp_registers(pipe, gInfo->shared_info->active_ddi_port);
 
 		if (hTotal != 0 && vTotal != 0) {
 			mode.timing.h_display = (hTotal & 0xffff) + 1;
@@ -698,7 +734,61 @@ program_battlemage_cx0_dpll(uint8 ddiPort, uint32 linkRateKhz)
 
     return B_OK;
 }
+static bool
+compute_snps_dp_mpllb(uint32 linkRateKhz, snps_mpllb_state* state)
+{
+    if (state == NULL)
+        return false;
 
+    memset(state, 0, sizeof(snps_mpllb_state));
+
+    switch (linkRateKhz) {
+        case 162000: // RBR (1.62 Gbps)
+            state->mpllb_cp      = 0x028218d0;
+            state->mpllb_div     = 0x00000010;
+            state->mpllb_div2    = 0x000020a0;
+            state->mpllb_sscen   = 0x00000000;
+            state->mpllb_sscstep = 0x00000000;
+            state->mpllb_fracn1  = 0x00000000;
+            state->mpllb_fracn2  = 0x00000000;
+            return true;
+
+        case 270000: // HBR (2.7 Gbps) - Il tuo caso attuale
+            state->mpllb_cp      = 0x088228fe;
+            state->mpllb_div     = 0x00000020;
+            state->mpllb_div2    = 0x000020b8;
+            state->mpllb_sscen   = 0x00000000;
+            state->mpllb_sscstep = 0x00000000;
+            state->mpllb_fracn1  = 0x40000001;
+            state->mpllb_fracn2  = 0x00000000;
+            return true;
+
+        case 540000: // HBR2 (5.4 Gbps) - VCO 5.4 GHz, Div /2
+            state->mpllb_cp      = 0x088228fe;
+            state->mpllb_div     = 0x00000010; // Corretto: 0x10 invece di 0x00
+            state->mpllb_div2    = 0x000020b8;
+            state->mpllb_sscen   = 0x00000000;
+            state->mpllb_sscstep = 0x00000000;
+            state->mpllb_fracn1  = 0x40000001;
+            state->mpllb_fracn2  = 0x00000000;
+            return true;
+
+        case 810000: // HBR3 (8.1 Gbps) - VCO 8.1 GHz, Div /1
+            state->mpllb_cp      = 0x088228fe;
+            state->mpllb_div     = 0x00000000; // 0x00 e' corretto grazie al VCO a 8.1GHz
+            state->mpllb_div2    = 0x00002070;
+            state->mpllb_sscen   = 0x00000000;
+            state->mpllb_sscstep = 0x00000000;
+            state->mpllb_fracn1  = 0x00000000;
+            state->mpllb_fracn2  = 0x00000000;
+            return true;
+
+        default:
+            debug_printf("intel_arc.accelerant: Unsupported DP link rate %u kHz\n", linkRateKhz);
+            return false;
+    }
+}
+/*
 static bool
 compute_snps_dp_mpllb(uint32 linkRateKhz, snps_mpllb_state* state)
 {
@@ -780,7 +870,7 @@ compute_snps_dp_mpllb(uint32 linkRateKhz, snps_mpllb_state* state)
             debug_printf("intel_arc.accelerant: Unsupported DP link rate %u kHz\n", linkRateKhz);
             return false;
     }
-}
+}*/
 
 static uint32
 snps_phy_enable_reg_for_ddi_port(uint8 ddiPort)
@@ -796,6 +886,120 @@ snps_phy_enable_reg_for_ddi_port(uint8 ddiPort)
 			return INTEL_ARC_TGL_DPLL1_ENABLE;
 	}
 }
+/* program_port_dpll versione con logs */
+static status_t
+program_port_dpll(uint8 ddiPort, uint32 linkRateKhz)
+{
+    debug_printf("intel_arc.accelerant: program_port_dpll(ddiPort=%u, linkRate=%u kHz)\n",
+        ddiPort, linkRateKhz);
+
+    // --- 1. ARCHITETTURA ALCHEMIST (DG2 - SNPS PHY) ---
+    if (gInfo->shared_info->family == INTEL_ARC_FAMILY_ALCHEMIST) {
+        const uint32 phyBase = snps_phy_base_for_ddi_port(ddiPort);
+        const uint32 divReg = INTEL_ARC_MMIO_SNPS_PHY_MPLLB_DIV(phyBase);
+
+        snps_mpllb_state state = {};
+        if (!compute_snps_dp_mpllb(linkRateKhz, &state)) {
+            debug_printf("intel_arc.accelerant ERROR: Invalid DP link rate %u kHz\n", linkRateKhz);
+            return B_BAD_VALUE;
+        }
+
+        uint32 valBefore = 0;
+        uint32 valAfter = 0;
+
+        // A. Reset / Disabilita FORCE_EN e DIV_CLK_EN nel registro DIV per preparare la scrittura
+        valBefore = read32(gInfo, divReg);
+        uint32 divVal = valBefore & ~(INTEL_ARC_SNPS_PHY_MPLLB_FORCE_EN | INTEL_ARC_SNPS_PHY_MPLLB_DIV_CLK_EN);
+        write32(gInfo, divReg, divVal);
+        valAfter = read32(gInfo, divReg);
+        debug_printf("intel_arc.accelerant: program_port_dpll: MPLLB_DIV (Reset) [0x%" B_PRIx32 "] | before: 0x%08" B_PRIx32 " | write: 0x%08" B_PRIx32 " | after: 0x%08" B_PRIx32 "\n",
+            divReg, valBefore, divVal, valAfter);
+
+        // B. Scrittura parametri di configurazione SNPS PHY MPLLB
+
+        // MPLLB_CP
+        const uint32 cpReg = INTEL_ARC_MMIO_SNPS_PHY_MPLLB_CP(phyBase);
+        valBefore = read32(gInfo, cpReg);
+        write32(gInfo, cpReg, state.mpllb_cp);
+        valAfter = read32(gInfo, cpReg);
+        debug_printf("intel_arc.accelerant: program_port_dpll: MPLLB_CP [0x%" B_PRIx32 "] | before: 0x%08" B_PRIx32 " | write: 0x%08" B_PRIx32 " | after: 0x%08" B_PRIx32 "\n",
+            cpReg, valBefore, state.mpllb_cp, valAfter);
+
+        // MPLLB_DIV (Configurazione frequenza)
+        valBefore = read32(gInfo, divReg);
+        uint32 targetDiv = (valBefore & ~0x000000FF) | (state.mpllb_div & 0x000000FF); //state.mpllb_div & ~(INTEL_ARC_SNPS_PHY_MPLLB_FORCE_EN | INTEL_ARC_SNPS_PHY_MPLLB_DIV_CLK_EN);
+        write32(gInfo, divReg, targetDiv);
+        valAfter = read32(gInfo, divReg);
+        debug_printf("intel_arc.accelerant: program_port_dpll: MPLLB_DIV (Config) [0x%" B_PRIx32 "] | before: 0x%08" B_PRIx32 " | write: 0x%08" B_PRIx32 " | after: 0x%08" B_PRIx32 "\n",
+            divReg, valBefore, targetDiv, valAfter);
+
+        // MPLLB_DIV2
+        const uint32 div2Reg = INTEL_ARC_MMIO_SNPS_PHY_MPLLB_DIV2(phyBase);
+        valBefore = read32(gInfo, div2Reg);
+        write32(gInfo, div2Reg, state.mpllb_div2);
+        valAfter = read32(gInfo, div2Reg);
+        debug_printf("intel_arc.accelerant: program_port_dpll: MPLLB_DIV2 [0x%" B_PRIx32 "] | before: 0x%08" B_PRIx32 " | write: 0x%08" B_PRIx32 " | after: 0x%08" B_PRIx32 "\n",
+            div2Reg, valBefore, state.mpllb_div2, valAfter);
+
+        // MPLLB_SSCEN
+        const uint32 sscenReg = INTEL_ARC_MMIO_SNPS_PHY_MPLLB_SSCEN(phyBase);
+        valBefore = read32(gInfo, sscenReg);
+        write32(gInfo, sscenReg, state.mpllb_sscen);
+        valAfter = read32(gInfo, sscenReg);
+        debug_printf("intel_arc.accelerant: program_port_dpll: MPLLB_SSCEN [0x%" B_PRIx32 "] | before: 0x%08" B_PRIx32 " | write: 0x%08" B_PRIx32 " | after: 0x%08" B_PRIx32 "\n",
+            sscenReg, valBefore, state.mpllb_sscen, valAfter);
+
+        // MPLLB_SSCSTEP
+        const uint32 sscstepReg = INTEL_ARC_MMIO_SNPS_PHY_MPLLB_SSCSTEP(phyBase);
+        valBefore = read32(gInfo, sscstepReg);
+        write32(gInfo, sscstepReg, state.mpllb_sscstep);
+        valAfter = read32(gInfo, sscstepReg);
+        debug_printf("intel_arc.accelerant: program_port_dpll: MPLLB_SSCSTEP [0x%" B_PRIx32 "] | before: 0x%08" B_PRIx32 " | write: 0x%08" B_PRIx32 " | after: 0x%08" B_PRIx32 "\n",
+            sscstepReg, valBefore, state.mpllb_sscstep, valAfter);
+
+        // MPLLB_FRACN1
+        const uint32 fracn1Reg = INTEL_ARC_MMIO_SNPS_PHY_MPLLB_FRACN1(phyBase);
+        valBefore = read32(gInfo, fracn1Reg);
+        write32(gInfo, fracn1Reg, state.mpllb_fracn1);
+        valAfter = read32(gInfo, fracn1Reg);
+        debug_printf("intel_arc.accelerant: program_port_dpll: MPLLB_FRACN1 [0x%" B_PRIx32 "] | before: 0x%08" B_PRIx32 " | write: 0x%08" B_PRIx32 " | after: 0x%08" B_PRIx32 "\n",
+            fracn1Reg, valBefore, state.mpllb_fracn1, valAfter);
+
+        // MPLLB_FRACN2
+        const uint32 fracn2Reg = INTEL_ARC_MMIO_SNPS_PHY_MPLLB_FRACN2(phyBase);
+        valBefore = read32(gInfo, fracn2Reg);
+        write32(gInfo, fracn2Reg, state.mpllb_fracn2);
+        valAfter = read32(gInfo, fracn2Reg);
+        debug_printf("intel_arc.accelerant: program_port_dpll: MPLLB_FRACN2 [0x%" B_PRIx32 "] | before: 0x%08" B_PRIx32 " | write: 0x%08" B_PRIx32 " | after: 0x%08" B_PRIx32 "\n",
+            fracn2Reg, valBefore, state.mpllb_fracn2, valAfter);
+
+        // C. Abilita la MPLLB impostando FORCE_EN (bit 31) e DIV_CLK_EN (bit 30)
+        valBefore = read32(gInfo, divReg);
+        uint32 enableDivVal = valBefore | INTEL_ARC_SNPS_PHY_MPLLB_FORCE_EN | INTEL_ARC_SNPS_PHY_MPLLB_DIV_CLK_EN; //state.mpllb_div | INTEL_ARC_SNPS_PHY_MPLLB_FORCE_EN | INTEL_ARC_SNPS_PHY_MPLLB_DIV_CLK_EN;
+        write32(gInfo, divReg, enableDivVal);
+        valAfter = read32(gInfo, divReg);
+        debug_printf("intel_arc.accelerant: program_port_dpll: MPLLB_DIV (Enable) [0x%" B_PRIx32 "] | before: 0x%08" B_PRIx32 " | write: 0x%08" B_PRIx32 " | after: 0x%08" B_PRIx32 "\n",
+            divReg, valBefore, enableDivVal, valAfter);
+
+        // D. Attendi che il clock SNPS PHY sia agganciato (bit DIV_CLK_EN)
+        status_t status = wait_for_set(divReg, INTEL_ARC_SNPS_PHY_MPLLB_DIV_CLK_EN, 5000);
+        if (status != B_OK) {
+            debug_printf("intel_arc.accelerant ERROR: SNPS PHY MPLLB failed to lock (DIV_CLK_EN not set)!\n");
+            return status;
+        }
+
+        debug_printf("intel_arc.accelerant: SNPS PHY MPLLB successfully locked for port %u\n", ddiPort);
+        return B_OK;
+    }
+
+    // --- 2. ARCHITETTURA BATTLEMAGE (Xe2 - CX0 PHY) ---
+    if (gInfo->shared_info->family == INTEL_ARC_FAMILY_BATTLEMAGE) {
+        return program_battlemage_cx0_dpll(ddiPort, linkRateKhz);
+    }
+
+    return B_BAD_TYPE;
+}
+/* funziona ma senza logs
 static status_t
 program_port_dpll(uint8 ddiPort, uint32 linkRateKhz)
 {
@@ -815,8 +1019,10 @@ program_port_dpll(uint8 ddiPort, uint32 linkRateKhz)
 
         // A. Reset / Disabilita FORCE_EN e DIV_CLK_EN nel registro DIV per preparare la scrittura
         uint32 divVal = read32(gInfo, divReg);
+        debug_printf("intel_arc.accelerant: program_port_dpll: INTEL_ARC_MMIO_SNPS_PHY_MPLLB_DIV (before): %" B_PRIx32 "\n",divVal);
         divVal &= ~(INTEL_ARC_SNPS_PHY_MPLLB_FORCE_EN | INTEL_ARC_SNPS_PHY_MPLLB_DIV_CLK_EN);
         write32(gInfo, divReg, divVal);
+        debug_printf("intel_arc.accelerant: program_port_dpll: INTEL_ARC_MMIO_SNPS_PHY_MPLLB_DIV (after): %" B_PRIx32 "\n",divVal);
 
         // B. Scrittura parametri di configurazione SNPS PHY MPLLB
         write32(gInfo, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_CP(phyBase), state.mpllb_cp);
@@ -849,7 +1055,7 @@ program_port_dpll(uint8 ddiPort, uint32 linkRateKhz)
     }
 
     return B_BAD_TYPE;
-}
+}*/
 /* vecchia con riferimenti a TGL
 static status_t
 program_port_dpll(uint8 ddiPort, uint32 linkRateKhz)
@@ -1741,14 +1947,7 @@ configure_dp_link(display_mode* mode)
         retN >>= 1;
         retM >>= 1;
     }
-    /*
-    uint64 mdata, ndata;
-    
-    mdata = *(volatile uint64*)(gInfo->registers + INTEL_ARC_MMIO_DDI_PIPE_A_DATA_M + pipeOffset);
-    debug_printf("intel_arc.accelerant: PIPE DATA_M is 0x%" B_PRIx64 "\n", mdata);
-    
-    ndata = *(volatile uint64*)(gInfo->registers + INTEL_ARC_MMIO_DDI_PIPE_A_DATA_N + pipeOffset);
-    debug_printf("intel_arc.accelerant: PIPE DATA_N is 0x%" B_PRIx64 "\n", ndata);*/
+
     	uint32 mdata = 0, ndata = 0;
     	read_register(INTEL_ARC_MMIO_DDI_PIPE_A_DATA_M + pipeOffset, mdata);
 	read_register(INTEL_ARC_MMIO_DDI_PIPE_A_DATA_N + pipeOffset, ndata);
@@ -1761,15 +1960,10 @@ configure_dp_link(display_mode* mode)
     const uint32 dataMReg = tuValue | ((uint32)retM & 0x00FFFFFF);
     const uint32 dataNReg = (uint32)retN & 0x00FFFFFF;
 
-    debug_printf("intel_arc.accelerant: Writing Data M/N: Reg DATA_M=0x%" B_PRIx32 " (calculated M=0x%" B_PRIx64 "), Reg DATA_N=0x%" B_PRIx32 "\n",
-        dataMReg, retM, dataNReg);
+    debug_printf("intel_arc.accelerant: Writing Data M/N: Reg DATA_M=0x%" B_PRIx32 " (calculated M=0x%" B_PRIx64 "), Reg DATA_N=0x%" B_PRIx32 "\n", dataMReg, retM, dataNReg);
 
     write_register(INTEL_ARC_MMIO_DDI_PIPE_A_DATA_M + pipeOffset, dataMReg);
     write_register(INTEL_ARC_MMIO_DDI_PIPE_A_DATA_N + pipeOffset, dataNReg);
-    
-    //debug_printf("intel_arc.accelerant: Writing Data M/N: M=0x%" B_PRIx64 ", N=0x%" B_PRIx64 "\n", retM, retN);
-    //write_register(INTEL_ARC_MMIO_DDI_PIPE_A_DATA_M + pipeOffset, (uint32)retM | INTEL_ARC_DDI_MN_TU_SIZE_MASK);
-    //write_register(INTEL_ARC_MMIO_DDI_PIPE_A_DATA_N + pipeOffset, (uint32)retN);
 
     linkSpeed = linkBandwidth;
     retN = 1;
@@ -1782,14 +1976,6 @@ configure_dp_link(display_mode* mode)
         retN >>= 1;
         retM >>= 1;
     }
-    /*
-    uint64 mlink, nlink;
-    mlink = *(volatile uint64*)(gInfo->registers + INTEL_ARC_MMIO_DDI_PIPE_A_LINK_M + pipeOffset);
-    debug_printf("intel_arc.accelerant: PIPE LINK_M is 0x%" B_PRIx64 "\n", mlink);
-    
-    nlink = *(volatile uint64*)(gInfo->registers + INTEL_ARC_MMIO_DDI_PIPE_A_LINK_N + pipeOffset);
-    debug_printf("intel_arc.accelerant: PIPE LINK_N is 0x%" B_PRIx64 "\n", nlink);
-    */
 	uint32 mlink =0 ,nlink = 0;
 	read_register(INTEL_ARC_MMIO_DDI_PIPE_A_LINK_M + pipeOffset, mlink);
 	read_register(INTEL_ARC_MMIO_DDI_PIPE_A_LINK_N + pipeOffset, nlink);
@@ -1800,14 +1986,23 @@ configure_dp_link(display_mode* mode)
     debug_printf("intel_arc.accelerant: Writing Link M/N: M=0x%" B_PRIx64 ", N=0x%" B_PRIx64 "\n", retM, retN);
     write_register(INTEL_ARC_MMIO_DDI_PIPE_A_LINK_M + pipeOffset, (uint32)retM);
     write_register(INTEL_ARC_MMIO_DDI_PIPE_A_LINK_N + pipeOffset, (uint32)retN);
+    
+    // DISABILITA PRIMA IL DDI BUFFER per isolare la PHY dal clock in fase di riprogrammazione
+    status_t status = program_ddi_buffer(gInfo->shared_info->active_ddi_port, pipe, lanes, false);
+    if (status != B_OK) {
+        debug_printf("intel_arc.accelerant ERROR: Failed to disable DDI buffer before DPLL program\n");
+        return status;
+    }
 
     debug_printf("intel_arc.accelerant: Programming Port DPLL for DDI Port %u (Rate: %u kHz)\n",
         gInfo->shared_info->active_ddi_port, linkBandwidth);
-    status_t status = program_port_dpll(gInfo->shared_info->active_ddi_port, linkBandwidth);
+    status = program_port_dpll(gInfo->shared_info->active_ddi_port, linkBandwidth);
     if (status != B_OK) {
         debug_printf("intel_arc.accelerant ERROR: program_port_dpll failed: %s\n", strerror(status));
         return status;
     }
+    
+    snooze(100);
 
     status = program_ddi_buffer(gInfo->shared_info->active_ddi_port, pipe, lanes, true);
     if (status != B_OK) {
@@ -2158,18 +2353,13 @@ intel_arc_set_display_mode(display_mode* mode)
 	// A. Disabilita lo Scaler
 	write_register(scaler_control_register(pipe, 1), 0);
 	write_register(scaler_control_register(pipe, 2), 0);
-	//const uint32 hDisplay = target.timing.h_display; // 1280
-	//const uint32 vDisplay = target.timing.v_display; // 1024
-	//debug_printf("intel_arc.accelerant: imposto pipe_size e plane_image_size con virtual_width e virtual_height invece che timing.h_display e v_display\n");
+
 	const uint32 hDisplay = target.timing.h_display;
 	const uint32 vDisplay = target.timing.v_display;
-	//const uint32 thDisplay = target.timing.h_display; // 1280
-	//const uint32 tvDisplay = target.timing.v_display; // 1024
 	
 
 	const uint32 nativeSize = ((vDisplay - 1) << 16) | (hDisplay - 1);
 	const uint32 nativeSizeforPipe = ((hDisplay - 1) << 16) | (vDisplay - 1);
-	//const uint32 nativeSize = ((tvDisplay - 1) << 16) | (thDisplay - 1);
 
 	// La Pipe e il Piano devono avere LA STESSA dimensione fisica
 	gInfo->shared_info->pipe_size[pipe] = nativeSizeforPipe;
@@ -2178,7 +2368,6 @@ intel_arc_set_display_mode(display_mode* mode)
 	debug_printf("intel_arc.accelerant: PLANE_IMAGE_SIZE impostato a 0x%X\n", gInfo->shared_info->plane_image_size[pipe]);
 	log_pipe_plane_state("intel_arc_set_display_mode before MMIO writes", pipe);
 	
-	//gInfo->shared_info->plane_control[pipe] |= INTEL_ARC_PLANE_ENABLE; // Attiva PLANE_CTL_ENABLE
 	// B. Scrivi i Timing della Pipe (1280x1024 VESA)
 	write_register(INTEL_ARC_MMIO_PIPE_A_HTOTAL + pipeOffset, gInfo->shared_info->pipe_h_total[pipe]);
 	write_register(INTEL_ARC_MMIO_PIPE_A_HBLANK + pipeOffset, gInfo->shared_info->pipe_h_blank[pipe]);
@@ -2192,10 +2381,13 @@ intel_arc_set_display_mode(display_mode* mode)
 	write_register(INTEL_ARC_MMIO_PLANE_A_IMAGE_SIZE + pipeOffset, gInfo->shared_info->plane_image_size[pipe]);
 	write_register(INTEL_ARC_MMIO_PLANE_A_STRIDE + pipeOffset, gInfo->shared_info->plane_stride[pipe]);
 	write_register(INTEL_ARC_MMIO_PLANE_A_OFFSET + pipeOffset, 0);
-	write_register(INTEL_ARC_MMIO_PLANE_A_CONTROL + pipeOffset, gInfo->shared_info->plane_control[pipe] | (1U << 31));
-    
-    uint32 fbAddress = gInfo->shared_info->frame_buffer_base + gInfo->shared_info->frame_buffer_offset;
-    write_register(INTEL_ARC_MMIO_PLANE_A_SURFACE + pipeOffset, fbAddress);
+	//write_register(INTEL_ARC_MMIO_PLANE_A_CONTROL + pipeOffset, gInfo->shared_info->plane_control[pipe] | (1U << 31));
+	// QUAAAAAA andava prima ripristina riga sopra per hdmi ok
+	const uint32 disabledPlaneCtl = gInfo->shared_info->plane_control[pipe] & ~(1U << 31);
+    	write_register(INTEL_ARC_MMIO_PLANE_A_CONTROL + pipeOffset, disabledPlaneCtl);
+    // QUAAA reinserisci queste due righe qui sotto per far andare l'hdmi
+    //uint32 fbAddress = gInfo->shared_info->frame_buffer_base + gInfo->shared_info->frame_buffer_offset;
+    //write_register(INTEL_ARC_MMIO_PLANE_A_SURFACE + pipeOffset, fbAddress);
     
     const uint32 gammaModeReg = INTEL_ARC_GAMMA_MODE_BASE + (pipe * 0x1000);
     uint32 gammaValue = 0;
@@ -2230,6 +2422,10 @@ intel_arc_set_display_mode(display_mode* mode)
         ddiFuncCtl |= INTEL_ARC_DDI_VSYNC_POLARITY_POSITIVE;
     else
         ddiFuncCtl &= ~INTEL_ARC_DDI_VSYNC_POLARITY_POSITIVE;
+        
+    // QUAAAAAA rimuovi questa riga per far andare l'hdmi
+    // Disabilita il bit ENABLE (Bit 31) su PIPE_DDI_FUNC_CTL prima del Link Training
+    ddiFuncCtl &= ~INTEL_ARC_PIPE_DDI_FUNC_CTL_ENABLE; // Bit 31 = 0
 
     // Salva lo stato aggiornato nella struttura condivisa e scrivi il registro MMIO
     gInfo->shared_info->pipe_ddi_func_ctl[pipe] = ddiFuncCtl;
@@ -2265,6 +2461,21 @@ intel_arc_set_display_mode(display_mode* mode)
 			return status;
 		}
 	}
+	// QUAAAAA rimuovi per far andare hdmi
+	// ORA CHE IL LINK TRAPPING È COMPLETATO E IN NORMAL:
+    // 1. Abilita il Transcoder / Pipe DDI
+    ddiFuncCtl |= INTEL_ARC_PIPE_DDI_FUNC_CTL_ENABLE;
+    gInfo->shared_info->pipe_ddi_func_ctl[pipe] = ddiFuncCtl;
+    write_register(INTEL_ARC_MMIO_PIPE_A_DDI_FUNC_CTL + pipeOffset, ddiFuncCtl);
+
+    // 2. Abilita il Plane e carica l'indirizzo della superficie
+    const uint32 enabledPlaneCtl = gInfo->shared_info->plane_control[pipe] | (1U << 31);
+    write_register(INTEL_ARC_MMIO_PLANE_A_CONTROL + pipeOffset, enabledPlaneCtl);
+
+    uint32 fbAddress = gInfo->shared_info->frame_buffer_base + gInfo->shared_info->frame_buffer_offset;
+    write_register(INTEL_ARC_MMIO_PLANE_A_SURFACE + pipeOffset, fbAddress);
+    
+    //// FIN QUAAAAAAAA
 
 	status = apply_dpms_on();
 	if (status == B_OK) {
