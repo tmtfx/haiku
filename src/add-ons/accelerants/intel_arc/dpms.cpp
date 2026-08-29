@@ -100,11 +100,17 @@ apply_dpms_on(void)
     // 4. Determina le Lane PHY: 4 fisse per HDMI/TMDS, dinamiche per DisplayPort
     uint8 lanes = 4; // HDMI richiede sempre 4 lane (3 dati + 1 clock)
     const uint32 modeSel = (ddiFuncCtl & INTEL_ARC_PIPE_DDI_MODESEL_MASK) >> 24;
+    //if (modeSel == INTEL_ARC_PIPE_DDI_MODE_DP_SST || modeSel == INTEL_ARC_PIPE_DDI_MODE_DP_MST) {
+    //    lanes = ((ddiFuncCtl & INTEL_ARC_PIPE_DDI_DP_WIDTH_MASK)
+    //        >> INTEL_ARC_PIPE_DDI_DP_WIDTH_SHIFT) + 1;
+    //}
     if (modeSel == INTEL_ARC_PIPE_DDI_MODE_DP_SST || modeSel == INTEL_ARC_PIPE_DDI_MODE_DP_MST) {
-        lanes = ((ddiFuncCtl & INTEL_ARC_PIPE_DDI_DP_WIDTH_MASK)
-            >> INTEL_ARC_PIPE_DDI_DP_WIDTH_SHIFT) + 1;
+ 	uint32 width = (ddiFuncCtl >> 1) & 0x7;
+	if (width == 0) lanes = 1;
+	else if (width == 1) lanes = 2;
+	else if (width == 3) lanes = 4;
     }
-
+    debug_printf("intel_arc.accelerant: dpms, programming ddi buffer with active_ddi_port %d, pipe %d, lanes %d\n",gInfo->shared_info->active_ddi_port, pipe, lanes);
     (void)program_ddi_buffer(gInfo->shared_info->active_ddi_port, pipe, lanes, true);
 
     // 5. Configura e Abilita il Piano (SURFACE va scritto PER ULTIMO come trigger di Latch)
