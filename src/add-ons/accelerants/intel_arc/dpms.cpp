@@ -127,7 +127,7 @@ apply_dpms_on(void)
     // 5. Programma DDI Buffer PHY
     debug_printf("intel_arc.accelerant: dpms, programming ddi buffer with active_ddi_port %d, pipe %d, lanes %d\n",
         gInfo->shared_info->active_ddi_port, pipe, lanes);
-    //(void)program_ddi_buffer(gInfo->shared_info->active_ddi_port, pipe, lanes, true);
+    (void)program_ddi_buffer(gInfo->shared_info->active_ddi_port, pipe, lanes, true);
 
     // 6. Configura e Abilita il Piano Graphics
     write_register(planeStrideReg, gInfo->shared_info->plane_stride[pipe]);
