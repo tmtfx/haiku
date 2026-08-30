@@ -553,6 +553,22 @@ probe_display_state(intel_arc_info& info)
 		} else {
             dprintf("WARNING: Pipe %u failed resolution check (W=%u, H=%u).\n", pipe, width, height);
         }
+        	// Estrazione lane dallo stato hardware al boot
+		const uint32 ddiWidth = (shared.pipe_ddi_func_ctl[pipe] >> 1) & 0x7;
+
+		if (ddiWidth == 0) {
+			dprintf("DEBUG: Display Port Lanes set to 1\n");
+			shared.dp_lanes[pipe] = 1;
+		} else if (ddiWidth == 1) {
+			dprintf("DEBUG: Display Port Lanes set to 2\n");
+			shared.dp_lanes[pipe] = 2;
+		} else if (ddiWidth == 3) {
+			dprintf("DEBUG: Display Port Lanes set to 4\n");
+			shared.dp_lanes[pipe] = 4;
+		} else {
+			dprintf("DEBUG: dp_lanes set to fallback (2)\n");
+			shared.dp_lanes[pipe] = 2;
+		}
 	} // FINE PIPE LOOP
 
     // PORT LOGIC START

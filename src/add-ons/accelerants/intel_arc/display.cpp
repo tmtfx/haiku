@@ -1598,273 +1598,7 @@ perform_dp_link_training(uint32 linkRate, uint32 lanes)
     return result;
 }
 
-/* manca il transcoder
-static status_t
-perform_dp_link_training(uint32 linkRate, uint32 lanes)
-{
-	debug_printf("intel_arc.accelerant: perform_dp_link_training(linkRate=%u, lanes=%u) start\n", linkRate, lanes);
-	uint8 laneSettings[4] = {0, 0, 0, 0};
-	uint8 status[DP_LINK_STATUS_SIZE];
 
-	uint8 value = encode_link_rate(linkRate);
-	status_t result = write_dpcd(DP_LINK_RATE, &value, 1);
-	if (result != B_OK) {
-		debug_printf("intel_arc.accelerant ERROR: write_dpcd DP_LINK_RATE failed: %s\n", strerror(result));
-		return result;
-	}
-
-	value = lanes & DP_LANE_COUNT_MASK;
-	result = write_dpcd(DP_LANE_COUNT, &value, 1);
-	if (result != B_OK)
-		return result;
-
-	value = DP_TRAINING_PATTERN_1;
-	result = write_dpcd(DP_TRAINING_PATTERN_SET, &value, 1);
-	if (result != B_OK)
-		return result;
-
-	result = write_dpcd(DP_TRAINING_LANE0_SET, laneSettings, lanes);
-	if (result != B_OK)
-		return result;
-	result = apply_ddi_source_levels(gInfo->shared_info->active_ddi_port,
-		gInfo->shared_info->active_pipe, lanes, laneSettings, linkRate);
-	if (result != B_OK)
-		return result;
-
-	debug_printf("intel_arc.accelerant: DP Link Training: Phase 1 (Clock Recovery)\n");
-	for (int attempt = 0; attempt < 5; attempt++) {
-		snooze(400);
-		result = read_dpcd(DP_LANE_STATUS_0_1, status, DP_LINK_STATUS_SIZE);
-		if (result != B_OK){
-			debug_printf("read_dpcd failed DP_LANE_STATUS_0_1: 0x%" B_PRIx32 "\n", result);
-			return result;
-		}
-		if (dp_clock_recovery_ok(status, lanes)) {
-			debug_printf("intel_arc.accelerant: Clock Recovery SUCCESS on attempt %d\n", attempt + 1);
-			break;
-		}
-
-		for (uint32 lane = 0; lane < lanes; lane++) {
-			uint8 voltage, emphasis;
-			dp_get_adjust_request(status, lane, &voltage, &emphasis);
-			laneSettings[lane] = (voltage & 0x3) | ((emphasis & 0x3) << 3);
-			if (voltage == 3) laneSettings[lane] |= DP_TRAIN_MAX_SWING_EN;
-			if (emphasis == 3) laneSettings[lane] |= DP_TRAIN_MAX_EMPHASIS_EN;
-		}
-
-		result = write_dpcd(DP_TRAINING_LANE0_SET, laneSettings, lanes);
-		if (result != B_OK){
-			debug_printf("write_dpcd failed DP_TRAINING_LANE0_SET: 0x%" B_PRIx32 "\n", result);
-			return result;
-		}
-		result = apply_ddi_source_levels(gInfo->shared_info->active_ddi_port,
-			gInfo->shared_info->active_pipe, lanes, laneSettings, linkRate);
-		if (result != B_OK){
-			debug_printf("apply_ddi_source_levels failed: 0x%" B_PRIx32 "\n", result);
-			return result;
-		}
-
-		if (attempt == 4) {
-			debug_printf("intel_arc.accelerant ERROR: Clock Recovery FAILED after 5 attempts!\n");
-			return B_ERROR;
-		}
-	}
-
-	debug_printf("intel_arc.accelerant: DP Link Training: Phase 2 (Channel Equalization)\n");
-	value = DP_TRAINING_PATTERN_2;
-	result = write_dpcd(DP_TRAINING_PATTERN_SET, &value, 1);
-	if (result != B_OK)
-		return result;
-
-	for (int attempt = 0; attempt < 5; attempt++) {
-		snooze(400);
-		result = read_dpcd(DP_LANE_STATUS_0_1, status, DP_LINK_STATUS_SIZE);
-		if (result != B_OK){
-			debug_printf("read_dpcd failed DP_LANE_STATUS_0_1: 0x%" B_PRIx32 "\n", result);
-			return result;
-		}
-		if (dp_channel_eq_ok(status, lanes)) {
-			debug_printf("intel_arc.accelerant: Channel Equalization SUCCESS on attempt %d\n", attempt + 1);
-			break;
-		}
-
-		for (uint32 lane = 0; lane < lanes; lane++) {
-			uint8 voltage, emphasis;
-			dp_get_adjust_request(status, lane, &voltage, &emphasis);
-			laneSettings[lane] = (voltage & 0x3) | ((emphasis & 0x3) << 3);
-			if (voltage == 3) laneSettings[lane] |= DP_TRAIN_MAX_SWING_EN;
-			if (emphasis == 3) laneSettings[lane] |= DP_TRAIN_MAX_EMPHASIS_EN;
-		}
-
-		result = write_dpcd(DP_TRAINING_LANE0_SET, laneSettings, lanes);
-		if (result != B_OK){
-			debug_printf("write_dpcd failed DP_TRAINING_LANE0_SET: 0x%" B_PRIx32 "\n", result);
-			return result;
-		}
-		result = apply_ddi_source_levels(gInfo->shared_info->active_ddi_port,
-			gInfo->shared_info->active_pipe, lanes, laneSettings, linkRate);
-		if (result != B_OK){
-			debug_printf("apply_ddi_source_levels failed: 0x%" B_PRIx32 "\n", result);
-			return result;
-		}
-
-		if (attempt == 4) {
-			debug_printf("intel_arc.accelerant ERROR: Channel Equalization FAILED after 5 attempts!\n");
-			return B_ERROR;
-		}
-	}
-
-	value = DP_TRAINING_PATTERN_DISABLE;
-	result = write_dpcd(DP_TRAINING_PATTERN_SET, &value, 1);
-	debug_printf("intel_arc.accelerant: DP Link Training COMPLETED SUCCESSFULLY!\n");
-	return result;
-}*/
-/* errore calcolo maxlanes?
-static status_t
-configure_dp_link(display_mode* mode)
-{
-	debug_printf("intel_arc.accelerant: configure_dp_link() entering for mode %ux%u@%uHz\n",
-		mode->virtual_width, mode->virtual_height, mode->timing.pixel_clock);
-
-	const int8 pipe = gInfo->shared_info->active_pipe;
-	if (gInfo->shared_info->active_pipe < 0) {
-		debug_printf("intel_arc.accelerant: active pipe < 0\n");
-		return B_UNSUPPORTED;
-	}
-
-	const uint32 pipeOffset = (uint32)pipe * INTEL_ARC_MMIO_PIPE_OFFSET;
-	debug_printf("intel_arc.accelerant: pipeOffset %" B_PRIx32 "\n", pipeOffset);
-	const uint32 pipeFunc = gInfo->shared_info->pipe_ddi_func_ctl[pipe];
-	debug_printf("intel_arc.accelerant: pipe_ddi_func_ctl[%d] %" B_PRIx32 "\n", pipe, pipeFunc);
-	uint32 bitsPerPixel = 24;
-	switch ((pipeFunc & INTEL_ARC_PIPE_DDI_BPC_MASK) >> 20) {
-		case 0: bitsPerPixel = 24; break;
-		case 1: bitsPerPixel = 30; break;
-		case 2: bitsPerPixel = 18; break;
-		case 3: bitsPerPixel = 36; break;
-		default: break;
-	}
-
-	uint32 maxLanes = ((pipeFunc & INTEL_ARC_PIPE_DDI_DP_WIDTH_MASK) >> INTEL_ARC_PIPE_DDI_DP_WIDTH_SHIFT) + 1;
-	if (gInfo->shared_info->has_dpcd && gInfo->shared_info->dpcd_max_lane_count != 0)
-		maxLanes = min_c(maxLanes, (uint32)gInfo->shared_info->dpcd_max_lane_count);
-	if (maxLanes == 0 || maxLanes > 4)
-		maxLanes = 4;
-
-	uint32 maxLinkRate = 270000;
-	if (gInfo->shared_info->has_dpcd && gInfo->shared_info->dpcd_max_link_rate != 0){
-		maxLinkRate = decode_link_rate(gInfo->shared_info->dpcd_max_link_rate);
-		debug_printf("intel_arc.accelerant: maxLinkRate retrieved from dpcd\n");
-	} else {
-		debug_printf("intel_arc.accelerant: cannot get maxLinkRate from dpcd\n");
-	}
-
-	debug_printf("intel_arc.accelerant: DP Config: maxLanes=%u, maxLinkRate=%u kHz, bpp=%u\n", maxLanes, maxLinkRate, bitsPerPixel);
-
-	const uint32 candidateRates[] = {810000, 540000, 270000, 162000};
-	uint32 linkBandwidth = 0;
-	uint32 lanes = 0;
-	const uint32 bps = mode->timing.pixel_clock * bitsPerPixel * 21 / 20;
-
-	for (size_t i = 0; i < sizeof(candidateRates) / sizeof(candidateRates[0]); i++) {
-		if (candidateRates[i] > maxLinkRate)
-			continue;
-		for (uint32 candidateLanes = 1; candidateLanes <= 4; candidateLanes <<= 1) {
-			if (candidateLanes > maxLanes)
-				continue;
-			if (bps <= candidateRates[i] * candidateLanes * 8) {
-				linkBandwidth = candidateRates[i];
-				lanes = candidateLanes;
-				break;
-			}
-		}
-		if (lanes != 0)
-			break;
-	}
-	if (lanes == 0) {
-		debug_printf("intel_arc.accelerant ERROR: Could not compute valid DP lanes and link bandwidth for bps=%u\n", bps);
-		return B_BAD_VALUE;
-	}
-
-	debug_printf("intel_arc.accelerant: Selected DP link Bandwidth: %u kHz, Lanes: %u\n", linkBandwidth, lanes);
-
-	uint64 linkSpeed = (uint64)lanes * linkBandwidth * 8;
-	uint64 retN = 1;
-	while (retN < linkSpeed)
-		retN <<= 1;
-	if (retN > 0x800000)
-		retN = 0x800000;
-	uint64 retM = (uint64)mode->timing.pixel_clock * retN * bitsPerPixel / linkSpeed;
-	while (retN > 0xffffff || retM > 0xffffff) {
-		retN >>= 1;
-		retM >>= 1;
-	}
-	uint64 mdata, ndata;
-	
-	mdata = *(volatile uint64*)(gInfo->registers + INTEL_ARC_MMIO_DDI_PIPE_A_DATA_M + pipeOffset);
-	debug_printf("intel_arc.accelerant: PIPE DATA_M is 0x%" B_PRIx64 "\n",mdata);
-	
-	ndata = *(volatile uint64*)(gInfo->registers + INTEL_ARC_MMIO_DDI_PIPE_A_DATA_N + pipeOffset);
-	debug_printf("intel_arc.accelerant: PIPE DATA_N is 0x%" B_PRIx64 "\n",ndata);
-	
-	debug_printf("intel_arc.accelerant: Writing Data M/N: M=0x%" B_PRIx64 ", N=0x%" B_PRIx64 "\n", retM, retN);
-	write_register(INTEL_ARC_MMIO_DDI_PIPE_A_DATA_M + pipeOffset, (uint32)retM | INTEL_ARC_DDI_MN_TU_SIZE_MASK);
-	write_register(INTEL_ARC_MMIO_DDI_PIPE_A_DATA_N + pipeOffset, (uint32)retN);
-
-	linkSpeed = linkBandwidth;
-	retN = 1;
-	while (retN < linkSpeed)
-		retN <<= 1;
-	if (retN > 0x800000)
-		retN = 0x800000;
-	retM = (uint64)mode->timing.pixel_clock * retN / linkSpeed;
-	while (retN > 0xffffff || retM > 0xffffff) {
-		retN >>= 1;
-		retM >>= 1;
-	}
-	uint64 mlink, nlink;
-	mlink = *(volatile uint64*)(gInfo->registers + INTEL_ARC_MMIO_DDI_PIPE_A_LINK_M + pipeOffset);
-	debug_printf("intel_arc.accelerant: PIPE LINK_M is 0x%" B_PRIx64 "\n",mlink);
-	
-	nlink = *(volatile uint64*)(gInfo->registers + INTEL_ARC_MMIO_DDI_PIPE_A_LINK_N + pipeOffset);
-	debug_printf("intel_arc.accelerant: PIPE LINK_N is 0x%" B_PRIx64 "\n",nlink);
-
-	debug_printf("intel_arc.accelerant: Writing Link M/N: M=0x%" B_PRIx64 ", N=0x%" B_PRIx64 "\n", retM, retN);
-	write_register(INTEL_ARC_MMIO_DDI_PIPE_A_LINK_M + pipeOffset, (uint32)retM);
-	write_register(INTEL_ARC_MMIO_DDI_PIPE_A_LINK_N + pipeOffset, (uint32)retN);
-
-	debug_printf("intel_arc.accelerant: Programming Port DPLL for DDI Port %u (Rate: %u kHz)\n",
-		gInfo->shared_info->active_ddi_port, linkBandwidth);
-	status_t status = program_port_dpll(gInfo->shared_info->active_ddi_port, linkBandwidth);
-	if (status != B_OK) {
-		debug_printf("intel_arc.accelerant ERROR: program_port_dpll failed: %s\n", strerror(status));
-		return status;
-	}
-
-	status = program_ddi_buffer(gInfo->shared_info->active_ddi_port, pipe, lanes, true);
-	if (status != B_OK) {
-		debug_printf("intel_arc.accelerant ERROR: program_ddi_buffer failed: %s\n", strerror(status));
-		return status;
-	}
-
-	gInfo->shared_info->pipe_ddi_func_ctl[pipe]
-		= (gInfo->shared_info->pipe_ddi_func_ctl[pipe] & ~INTEL_ARC_PIPE_DDI_DP_WIDTH_MASK)
-		| ((lanes - 1) << INTEL_ARC_PIPE_DDI_DP_WIDTH_SHIFT);
-	debug_printf("intel_arc.accelerant: pipe_ddi_func_ctl[%d] set as %" B_PRIx32 "\n", pipe, gInfo->shared_info->pipe_ddi_func_ctl[pipe]);
-
-	if (gInfo->shared_info->has_dpcd) {
-		debug_printf("intel_arc.accelerant: Performing DP Link Training (Lanes=%u, Rate=%u kHz)\n", lanes, linkBandwidth);
-		status = perform_dp_link_training(linkBandwidth, lanes);
-		if (status != B_OK) {
-			debug_printf("intel_arc.accelerant ERROR: perform_dp_link_training failed: %s\n", strerror(status));
-			return status;
-		}
-	} else {
-		debug_printf("intel_arc.accelerant: Skipping DP Link Training (DPCD unavailable, assuming GOP state)\n");
-	}
-
-	return B_OK;
-}*/
 static status_t
 configure_dp_link(display_mode* mode)
 {
@@ -1933,6 +1667,15 @@ configure_dp_link(display_mode* mode)
         debug_printf("intel_arc.accelerant ERROR: Could not compute valid DP lanes and link bandwidth for bps=%u\n", bps);
         return B_BAD_VALUE;
     }
+    // new
+    gInfo->shared_info->dp_lanes[pipe] = lanes;
+    //uint32 ddiWidthBits = 0;
+    //if (lanes == 2) ddiWidthBits = (1 << 1);
+    //else if (lanes == 4) ddiWidthBits = (3 << 1);
+
+    //gInfo->shared_info->pipe_ddi_func_ctl[pipe] &= ~(0x7 << 1);
+    //gInfo->shared_info->pipe_ddi_func_ctl[pipe] |= ddiWidthBits;
+    // -------
 
     debug_printf("intel_arc.accelerant: Selected DP link Bandwidth: %u kHz, Lanes: %u\n", linkBandwidth, lanes);
 
@@ -2004,16 +1747,16 @@ configure_dp_link(display_mode* mode)
     
     snooze(100);
 
+    gInfo->shared_info->pipe_ddi_func_ctl[pipe]
+        = (gInfo->shared_info->pipe_ddi_func_ctl[pipe] & ~INTEL_ARC_PIPE_DDI_DP_WIDTH_MASK)
+        | ((lanes - 1) << INTEL_ARC_PIPE_DDI_DP_WIDTH_SHIFT);
+    debug_printf("intel_arc.accelerant: pipe_ddi_func_ctl[%d] set as %" B_PRIx32 "\n", pipe, gInfo->shared_info->pipe_ddi_func_ctl[pipe]);
+    
     status = program_ddi_buffer(gInfo->shared_info->active_ddi_port, pipe, lanes, true);
     if (status != B_OK) {
         debug_printf("intel_arc.accelerant ERROR: program_ddi_buffer failed: %s\n", strerror(status));
         return status;
     }
-
-    gInfo->shared_info->pipe_ddi_func_ctl[pipe]
-        = (gInfo->shared_info->pipe_ddi_func_ctl[pipe] & ~INTEL_ARC_PIPE_DDI_DP_WIDTH_MASK)
-        | ((lanes - 1) << INTEL_ARC_PIPE_DDI_DP_WIDTH_SHIFT);
-    debug_printf("intel_arc.accelerant: pipe_ddi_func_ctl[%d] set as %" B_PRIx32 "\n", pipe, gInfo->shared_info->pipe_ddi_func_ctl[pipe]);
 
     if (gInfo->shared_info->has_dpcd) {
         debug_printf("intel_arc.accelerant: Performing DP Link Training (Lanes=%u, Rate=%u kHz)\n", lanes, linkBandwidth);
@@ -2314,33 +2057,14 @@ intel_arc_set_display_mode(display_mode* mode)
 	gInfo->shared_info->pipe_v_sync[pipe]
 		= ((uint32)(target.timing.v_sync_end - 1) << 16) | ((uint32)target.timing.v_sync_start - 1);
 	debug_printf("intel_arc.accelerant: V_SYNC impostato a 0x%X\n", gInfo->shared_info->pipe_v_sync[pipe]);
-	//gInfo->shared_info->pipe_size[pipe]
-	//	= ((uint32)(target.timing.v_display - 1) << 16) | ((uint32)target.timing.h_display - 1);
-	
-	// modifica applicata:
-	//gInfo->shared_info->pipe_size[pipe]
-    //    = ((uint32)(target.timing.h_display - 1) << 16) | ((uint32)target.timing.v_display - 1);
-    //-------------------
-    //modifiche da stride
-	//gInfo->shared_info->plane_stride[pipe] = gInfo->shared_info->bytes_per_row;
-	//debug_printf("intel_arc.accelerant: scritto in gInfo->shared_info->plane_stride[pipe] %u\n",gInfo->shared_info->bytes_per_row);
-	// modifica applicata:
-	const uint32 bytesPerRow = (target.virtual_width * bytesPerPixel + 63) & ~63;//(mode->timing.h_display * bytesPerPixel + 63) & ~63;
+
+	const uint32 bytesPerRow = (target.virtual_width * bytesPerPixel + 63) & ~63;
 	gInfo->shared_info->bytes_per_row = bytesPerRow;
 	gInfo->shared_info->plane_stride[pipe] = bytesPerRow / 64;
 	gInfo->shared_info->fbc.bytes_per_row = bytesPerRow;
 	
-    //-------------------
 	gInfo->shared_info->plane_pos[pipe] = 0;
-	//modifiche da stride
-	//gInfo->shared_info->plane_image_size[pipe]
-	//	= ((uint32)(target.timing.v_display - 1) << 16)
-	//		| ((uint32)target.timing.h_display - 1);
-	// modifica applicata:
-	//gInfo->shared_info->plane_image_size[pipe]
-    //    = ((uint32)(target.timing.h_display - 1) << 16) | ((uint32)target.timing.v_display - 1);
-	//gInfo->shared_info->plane_image_size[pipe]
-	//    = ((uint32)(target.virtual_height - 1) << 16) | ((uint32)(target.virtual_width - 1));
+
 	debug_printf("intel_arc.accelerant: PLANE_CONTROL prima di modificare i parametri: 0x%X\n",gInfo->shared_info->plane_control[pipe]);
     gInfo->shared_info->plane_control[pipe] &= ~INTEL_ARC_PLANE_TILED_MASK;
 	gInfo->shared_info->plane_control[pipe] |= INTEL_ARC_PLANE_LINEAR;
@@ -2381,13 +2105,10 @@ intel_arc_set_display_mode(display_mode* mode)
 	write_register(INTEL_ARC_MMIO_PLANE_A_IMAGE_SIZE + pipeOffset, gInfo->shared_info->plane_image_size[pipe]);
 	write_register(INTEL_ARC_MMIO_PLANE_A_STRIDE + pipeOffset, gInfo->shared_info->plane_stride[pipe]);
 	write_register(INTEL_ARC_MMIO_PLANE_A_OFFSET + pipeOffset, 0);
-	//write_register(INTEL_ARC_MMIO_PLANE_A_CONTROL + pipeOffset, gInfo->shared_info->plane_control[pipe] | (1U << 31));
-	// QUAAAAAA andava prima ripristina riga sopra per hdmi ok
+
 	const uint32 disabledPlaneCtl = gInfo->shared_info->plane_control[pipe] & ~(1U << 31);
     	write_register(INTEL_ARC_MMIO_PLANE_A_CONTROL + pipeOffset, disabledPlaneCtl);
-    // QUAAA reinserisci queste due righe qui sotto per far andare l'hdmi
-    //uint32 fbAddress = gInfo->shared_info->frame_buffer_base + gInfo->shared_info->frame_buffer_offset;
-    //write_register(INTEL_ARC_MMIO_PLANE_A_SURFACE + pipeOffset, fbAddress);
+
     
     const uint32 gammaModeReg = INTEL_ARC_GAMMA_MODE_BASE + (pipe * 0x1000);
     uint32 gammaValue = 0;
@@ -2423,7 +2144,6 @@ intel_arc_set_display_mode(display_mode* mode)
     else
         ddiFuncCtl &= ~INTEL_ARC_DDI_VSYNC_POLARITY_POSITIVE;
         
-    // QUAAAAAA rimuovi questa riga per far andare l'hdmi
     // Disabilita il bit ENABLE (Bit 31) su PIPE_DDI_FUNC_CTL prima del Link Training
     ddiFuncCtl &= ~INTEL_ARC_PIPE_DDI_FUNC_CTL_ENABLE; // Bit 31 = 0
 
@@ -2461,7 +2181,6 @@ intel_arc_set_display_mode(display_mode* mode)
 			return status;
 		}
 	}
-	// QUAAAAA rimuovi per far andare hdmi
 	// ORA CHE IL LINK TRAPPING È COMPLETATO E IN NORMAL:
     // 1. Abilita il Transcoder / Pipe DDI
     ddiFuncCtl |= INTEL_ARC_PIPE_DDI_FUNC_CTL_ENABLE;
@@ -2474,14 +2193,11 @@ intel_arc_set_display_mode(display_mode* mode)
 
     uint32 fbAddress = gInfo->shared_info->frame_buffer_base + gInfo->shared_info->frame_buffer_offset;
     write_register(INTEL_ARC_MMIO_PLANE_A_SURFACE + pipeOffset, fbAddress);
-    
-    //// FIN QUAAAAAAAA
 
 	status = apply_dpms_on();
 	if (status == B_OK) {
 		*mode = target;
 		gInfo->shared_info->fbc.frame_buffer = (void*)gInfo->shared_info->frame_buffer;
-    	//gInfo->shared_info->fbc.bytes_per_row = gInfo->shared_info->bytes_per_row; // fatto prima
     	gInfo->shared_info->fbc.frame_buffer_dma = (void *)(gInfo->shared_info->frame_buffer_base 
     + gInfo->shared_info->frame_buffer_offset);
 		debug_printf("intel_arc.accelerant: SET_DISPLAY_MODE completed successfully!\n");
@@ -2521,9 +2237,6 @@ intel_arc_get_frame_buffer_config(frame_buffer_config* config)
 	if (gInfo->frame_buffer == NULL)
 		return B_UNSUPPORTED;
 	*config = gInfo->shared_info->fbc;
-	//config->frame_buffer = gInfo->frame_buffer;
-	//config->frame_buffer_dma = NULL;
-	//config->bytes_per_row = gInfo->shared_info->bytes_per_row;
 	return B_OK;
 }
 

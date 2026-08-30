@@ -68,7 +68,7 @@
 #define INTEL_ARC_MASTER_INT_GLOBAL			(1UL << 31)
 #define INTEL_ARC_MASTER_INT_PIPE_PENDING(pipe)	(1UL << (15 + (pipe)))
 #define INTEL_ARC_PIPE_INT_VBLANK				(1UL << 0)
-
+#define INTEL_ARC_MAX_PIPES				4
 
 
 enum intel_arc_family {
@@ -139,6 +139,7 @@ struct intel_arc_shared_info {
 	uint8			dpcd_max_lane_count;
 	uint8			dpcd_sink_count;
 	uint8			dpcd_max_link_rate;
+	uint8			dp_lanes[INTEL_ARC_MAX_PIPES];
 
 	edid1_info		boot_edid;
 	frame_buffer_config fbc;

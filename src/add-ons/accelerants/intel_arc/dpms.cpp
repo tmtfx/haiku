@@ -105,10 +105,15 @@ apply_dpms_on(void)
     //        >> INTEL_ARC_PIPE_DDI_DP_WIDTH_SHIFT) + 1;
     //}
     if (modeSel == INTEL_ARC_PIPE_DDI_MODE_DP_SST || modeSel == INTEL_ARC_PIPE_DDI_MODE_DP_MST) {
- 	uint32 width = (ddiFuncCtl >> 1) & 0x7;
-	if (width == 0) lanes = 1;
-	else if (width == 1) lanes = 2;
-	else if (width == 3) lanes = 4;
+	//invece di ricalcolarlo usiamo il valore salvato nella shared_info
+	lanes = gInfo->shared_info->dp_lanes[pipe];
+	if (lanes == 0) {
+		debug_printf("intel_arc.accelerant: dpms ricalcolo lanes\n");
+		uint32 width = (ddiFuncCtl >> 1) & 0x7;
+		if (width == 0) lanes = 1;
+		else if (width == 1) lanes = 2;
+		else if (width == 3) lanes = 4;
+		}
     }
     debug_printf("intel_arc.accelerant: dpms, programming ddi buffer with active_ddi_port %d, pipe %d, lanes %d\n",gInfo->shared_info->active_ddi_port, pipe, lanes);
     (void)program_ddi_buffer(gInfo->shared_info->active_ddi_port, pipe, lanes, true);
