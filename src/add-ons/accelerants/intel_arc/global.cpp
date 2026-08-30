@@ -1,5 +1,5 @@
 #include <OS.h>
-
+#include "intel_arc.h"
 #include "accelerant_protos.h"
 #include "accelerant.h"
 
@@ -84,3 +84,38 @@ uint32 pipe_register(uint32 base, int8 pipe)
 	return base + (uint32)pipe * INTEL_ARC_MMIO_PIPE_OFFSET;
 }
 
+uint32
+pipe_ddi_decode_bpp(uint32 regValue)
+{
+    uint32 bpcCode = (regValue & INTEL_ARC_PIPE_DDI_BPC_MASK) >> INTEL_ARC_PIPE_DDI_BPC_SHIFT;
+    switch (bpcCode) {
+        case 0:  return 24; // 8 bpc
+        case 1:  return 30; // 10 bpc
+        case 2:  return 18; // 6 bpc
+        case 3:  return 36; // 12 bpc
+        default: return 24;
+    }
+}
+
+uint32
+pipe_ddi_encode_dp_width(uint32 lanes)
+{
+    switch (lanes) {
+        case 4:  return INTEL_ARC_PIPE_DDI_DP_WIDTH_4;
+        case 2:  return INTEL_ARC_PIPE_DDI_DP_WIDTH_2;
+        case 1:
+        default: return INTEL_ARC_PIPE_DDI_DP_WIDTH_1;
+    }
+}
+
+uint32
+pipe_ddi_decode_dp_width(uint32 regValue)
+{
+    uint32 widthCode = (regValue & INTEL_ARC_PIPE_DDI_DP_WIDTH_MASK) >> INTEL_ARC_PIPE_DDI_DP_WIDTH_SHIFT;
+    switch (widthCode) {
+        case 3:  return 4;
+        case 1:  return 2;
+        case 0:
+        default: return 1;
+    }
+}

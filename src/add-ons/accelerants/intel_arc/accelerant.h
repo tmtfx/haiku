@@ -118,8 +118,8 @@
 
 /* Flags */
 #define INTEL_ARC_PLANE_ENABLE                  (1U << 31)
-#define INTEL_ARC_DDI_HSYNC_POLARITY_POSITIVE   (1U << 16)
-#define INTEL_ARC_DDI_VSYNC_POLARITY_POSITIVE   (1U << 17)
+//#define INTEL_ARC_DDI_HSYNC_POLARITY_POSITIVE   (1U << 16) // in intel_arc.h
+//#define INTEL_ARC_DDI_VSYNC_POLARITY_POSITIVE   (1U << 17) // in intel_arc.h
 #define INTEL_ARC_PS_SCALER_ENABLE              (1U << 31)
 
 #define INTEL_ARC_DP_AUX_CTL_BUSY				(1U << 31)
@@ -140,7 +140,7 @@
 #define INTEL_ARC_PIPE_ENABLED					(1U << 31)
 #endif
 
-#define INTEL_ARC_PIPE_DDI_FUNC_CTL_ENABLE		(1U << 31)
+#define INTEL_ARC_PIPE_DDI_FUNC_CTL_ENABLE		(1U << 31) //in intel_arc.h INTEL_ARC_PIPE_DDI_FUNC_ENABLE
 
 //#define INTEL_ARC_PIPE_DDI_SELECT_MASK			(7U << 28) //in intel_arc.h
 #ifdef INTEL_ARC_PIPE_DDI_SELECT_MASK
@@ -148,12 +148,19 @@
 #define INTEL_ARC_PIPE_DDI_SELECT_MASK			(7U << 28)
 #endif
 
+// 2. DDI_BUF_CTL (Registro Buffer Fisico 0x64000)
+#define INTEL_ARC_DDI_BUF_PORT_WIDTH_SHIFT      16
+#define INTEL_ARC_DDI_BUF_PORT_WIDTH_MASK       (0xFU << INTEL_ARC_DDI_BUF_PORT_WIDTH_SHIFT)
+
 #define INTEL_ARC_PIPE_DDI_MODESEL_MASK			(7U << 24)
 #define INTEL_ARC_PIPE_DDI_MODE_DP_SST			2U
 #define INTEL_ARC_PIPE_DDI_MODE_DP_MST			3U
-#define INTEL_ARC_PIPE_DDI_BPC_MASK				(7U << 20)
-#define INTEL_ARC_PIPE_DDI_DP_WIDTH_MASK		(7U << 1)
-#define INTEL_ARC_PIPE_DDI_DP_WIDTH_SHIFT		1
+//#define INTEL_ARC_PIPE_DDI_BPC_MASK				(7U << 20) //in intel_arc.h
+//#define INTEL_ARC_PIPE_DDI_DP_WIDTH_MASK		(7U << 1)
+//#define INTEL_ARC_PIPE_DDI_DP_WIDTH_SHIFT		1 
+//#define INTEL_ARC_PIPE_DDI_DP_WIDTH_SHIFT		19 // vien fuori all'improvviso che i bit sono 21:19... inutile dire che sono balle
+// 								messo in intel_arc.h
+//#define INTEL_ARC_PIPE_DDI_DP_WIDTH_MASK     (0x7 << INTEL_ARC_PIPE_DDI_DP_WIDTH_SHIFT) //in intel_arc.h
 #define INTEL_ARC_DISPLAY_CONTROL_ENABLED		(1U << 31)
 #define INTEL_ARC_DISPLAY_CONTROL_COLOR_MASK_SKY (0x0fU << 24)
 #define INTEL_ARC_DISPLAY_CONTROL_CMAP8_SKY		(0x0cU << 24)

@@ -71,6 +71,9 @@ uint32		pipe_register(uint32 base, int8 pipe);
 status_t	write_dpcd(uint32 address, const void* buffer, size_t size);
 status_t	read_dpcd(uint32 address, void* buffer, size_t size);
 status_t	program_ddi_buffer(uint8 ddiPort, int8 pipe, uint32 lanes, bool enable);
+uint32		pipe_ddi_decode_bpp(uint32 regValue);
+uint32		pipe_ddi_encode_dp_width(uint32 lanes);
+uint32		pipe_ddi_decode_dp_width(uint32 regValue);
 
 //accelerant
 status_t	handle_hotplug_event(void);

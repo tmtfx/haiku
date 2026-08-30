@@ -153,6 +153,45 @@ struct intel_c10_dp_pll_state {
     uint8 pll1;
     uint8 cmn0;
 };
+/* these are globals
+// Helper per la codifica sicura del numero di lane DP
+static inline uint32
+pipe_ddi_encode_dp_width(uint32 lanes)
+{
+    switch (lanes) {
+        case 4:  return INTEL_ARC_PIPE_DDI_DP_WIDTH_4;
+        case 2:  return INTEL_ARC_PIPE_DDI_DP_WIDTH_2;
+        case 1:
+        default: return INTEL_ARC_PIPE_DDI_DP_WIDTH_1;
+    }
+}
+
+// Helper per la decodifica del numero di lane registrato
+static inline uint32
+pipe_ddi_decode_dp_width(uint32 regValue)
+{
+    uint32 widthCode = (regValue & INTEL_ARC_PIPE_DDI_DP_WIDTH_MASK) >> INTEL_ARC_PIPE_DDI_DP_WIDTH_SHIFT;
+    switch (widthCode) {
+        case 3:  return 4;
+        case 1:  return 2;
+        case 0:
+        default: return 1;
+    }
+}
+
+// Helper per la lettura BPC
+static inline uint32
+pipe_ddi_decode_bpp(uint32 regValue)
+{
+    uint32 bpcCode = (regValue & INTEL_ARC_PIPE_DDI_BPC_MASK) >> INTEL_ARC_PIPE_DDI_BPC_SHIFT;
+    switch (bpcCode) {
+        case 0:  return 24; // 8 bpc
+        case 1:  return 30; // 10 bpc
+        case 2:  return 18; // 6 bpc
+        case 3:  return 36; // 12 bpc
+        default: return 24;
+    }
+}*/
 
 // Tabelle dei coefficienti C10 per le rate standard DP
 static bool
@@ -477,7 +516,7 @@ create_mode_list(void)
 		gInfo->shared_info->bytes_per_row  = (mode.virtual_width * bytesPerPixel + 63) & ~63;
 	}
 	
-	debug_printf("intel_arc.accelerant: Bytes Per Row: %u",gInfo->shared_info->bytes_per_row);
+	debug_printf("intel_arc.accelerant: Bytes Per Row: %u\n",gInfo->shared_info->bytes_per_row);
 	gInfo->shared_info->current_mode = mode;
 	debug_printf("intel_arc.accelerant: >>> CREATE MODE LIST <<<\n");
 	debug_printf("intel_arc.accelerant: >>> NEW MODE: <<<\n");
@@ -1597,8 +1636,157 @@ perform_dp_link_training(uint32 linkRate, uint32 lanes)
     debug_printf("intel_arc.accelerant: DP Link Training COMPLETED SUCCESSFULLY!\n");
     return result;
 }
+static status_t
+configure_dp_link(display_mode* mode)
+{
+    debug_printf("intel_arc.accelerant: configure_dp_link() entering for mode %ux%u@%uHz\n",
+        mode->virtual_width, mode->virtual_height, mode->timing.pixel_clock);
 
+    const int8 pipe = gInfo->shared_info->active_pipe;
+    if (pipe < 0) {
+        debug_printf("intel_arc.accelerant ERROR: active pipe < 0\n");
+        return B_UNSUPPORTED;
+    }
 
+    const uint32 pipeOffset = (uint32)pipe * INTEL_ARC_MMIO_PIPE_OFFSET;
+    const uint32 pipeFunc = gInfo->shared_info->pipe_ddi_func_ctl[pipe];
+    debug_printf("intel_arc.accelerant: initial pipe_ddi_func_ctl[%d] in configure_dp_link: %" B_PRIx32 "\n", pipe, pipeFunc);
+    
+    uint32 bitsPerPixel = pipe_ddi_decode_bpp(pipeFunc);
+    gInfo->shared_info->dp_bpp[pipe] = bitsPerPixel;
+
+    // 1. Determinazione Lane Massime Hardware e DPCD
+    uint32 maxLanes = 4;
+    if (gInfo->shared_info->has_dpcd && gInfo->shared_info->dpcd_max_lane_count != 0)
+        maxLanes = min_c(maxLanes, (uint32)gInfo->shared_info->dpcd_max_lane_count);
+
+    if (maxLanes == 0 || maxLanes > 4)
+        maxLanes = 4;
+
+    uint32 maxLinkRate = 270000;
+    if (gInfo->shared_info->has_dpcd && gInfo->shared_info->dpcd_max_link_rate != 0) {
+        maxLinkRate = decode_link_rate(gInfo->shared_info->dpcd_max_link_rate);
+        debug_printf("intel_arc.accelerant: maxLinkRate retrieved from dpcd: %u kHz\n", maxLinkRate);
+    } else {
+        debug_printf("intel_arc.accelerant: cannot get maxLinkRate from dpcd, using default 270000 kHz\n");
+    }
+
+    // 2. Calcolo Banda Richiesta (BPS)
+    const uint32 bps = mode->timing.pixel_clock * bitsPerPixel * 21 / 20;
+    debug_printf("intel_arc.accelerant: DP Config: maxLanes=%u, maxLinkRate=%u kHz, bpp=%u\n", maxLanes, maxLinkRate, bitsPerPixel);
+
+    // 3. Selezione Stabile delle Lane
+    // Tenta prima di mantenere le lane stabili già negoziate al boot (es. 2 lanes)
+    uint32 lanes = gInfo->shared_info->dp_lanes[pipe];
+    if (lanes == 0 || lanes > maxLanes)
+        lanes = maxLanes;
+
+    // Se la risoluzione richiede più banda di quella fornita dalle lane attuali, incrementa
+    while (lanes < maxLanes && bps > maxLinkRate * lanes * 8) {
+        lanes <<= 1;
+    }
+
+    // Se stiamo usando troppe lane rispetto al necessario ma 1 lane basta a malapena, 
+    // manteniamo almeno 2 lane se maxLanes >= 2 per stabilità di clock
+    if (lanes == 1 && maxLanes >= 2 && bps > (maxLinkRate * 1 * 6)) {
+        lanes = 2;
+    }
+
+    uint32 linkBandwidth = maxLinkRate;
+    gInfo->shared_info->dp_lanes[pipe] = lanes;
+
+    debug_printf("intel_arc.accelerant: Selected DP Link Bandwidth: %u kHz, Lanes: %u (bps required: %u)\n", 
+        linkBandwidth, lanes, bps);
+
+    // 4. Calcolo REGISTRI DP M/N (Specifiche Hardware Intel Display)
+    // N per Data e Link sono COSTANTI hardware per Intel Gen9 / Arc
+    const uint32 dataN = 0x00800000; // 8388608
+    const uint32 linkN = 0x00080000; // 524288
+
+    const uint64 bytesPerPixel = bitsPerPixel / 8;
+    const uint64 linkBw = (uint64)linkBandwidth * lanes;
+    const uint64 streamBw = (uint64)mode->timing.pixel_clock * bytesPerPixel;
+
+    uint32 dataM = (uint32)((streamBw * dataN) / linkBw);
+    uint32 linkM = (uint32)(((uint64)mode->timing.pixel_clock * linkN) / linkBandwidth);
+
+    // Transfer Unit Size standard = 64 (0x7E000000)
+    const uint32 tuValue = 0x7E000000;
+    const uint32 dataMReg = tuValue | (dataM & 0x00FFFFFF);
+
+    debug_printf("intel_arc.accelerant: Writing DP Data M/N: DATA_M=0x%" B_PRIx32 " (M=0x%" B_PRIx32 "), DATA_N=0x%" B_PRIx32 "\n", 
+        dataMReg, dataM, dataN);
+    write_register(INTEL_ARC_MMIO_DDI_PIPE_A_DATA_M + pipeOffset, dataMReg);
+    write_register(INTEL_ARC_MMIO_DDI_PIPE_A_DATA_N + pipeOffset, dataN);
+
+    debug_printf("intel_arc.accelerant: Writing DP Link M/N: LINK_M=0x%" B_PRIx32 ", LINK_N=0x%" B_PRIx32 "\n", 
+        linkM & 0x00FFFFFF, linkN);
+    write_register(INTEL_ARC_MMIO_DDI_PIPE_A_LINK_M + pipeOffset, linkM & 0x00FFFFFF);
+    write_register(INTEL_ARC_MMIO_DDI_PIPE_A_LINK_N + pipeOffset, linkN);
+
+    // 5. Disabilita temporaneamente il DDI buffer prima di toccare la DPLL
+    status_t status = program_ddi_buffer(gInfo->shared_info->active_ddi_port, pipe, lanes, false);
+    if (status != B_OK) {
+        debug_printf("intel_arc.accelerant ERROR: Failed to disable DDI buffer before DPLL program\n");
+        return status;
+    }
+
+    // 6. Configurazione Port DPLL
+    debug_printf("intel_arc.accelerant: Programming Port DPLL for DDI Port %u (Rate: %u kHz)\n",
+        gInfo->shared_info->active_ddi_port, linkBandwidth);
+    status = program_port_dpll(gInfo->shared_info->active_ddi_port, linkBandwidth);
+    if (status != B_OK) {
+        debug_printf("intel_arc.accelerant ERROR: program_port_dpll failed: %s\n", strerror(status));
+        return status;
+    }
+
+    snooze(100);
+
+    // 7. Aggiornamento PIPE_DDI_FUNC_CTL (Width & Polarity)
+    uint32 ddiCtl = gInfo->shared_info->pipe_ddi_func_ctl[pipe];
+    
+    // Pulisce e imposta il numero di lane (bit 3:1) usando la funzione helper
+    ddiCtl &= ~INTEL_ARC_PIPE_DDI_DP_WIDTH_MASK;
+    ddiCtl |= pipe_ddi_encode_dp_width(lanes);
+
+    if (mode->timing.flags & B_POSITIVE_HSYNC)
+        ddiCtl |= INTEL_ARC_DDI_HSYNC_POLARITY_POSITIVE;
+    else
+        ddiCtl &= ~INTEL_ARC_DDI_HSYNC_POLARITY_POSITIVE;
+
+    if (mode->timing.flags & B_POSITIVE_VSYNC)
+        ddiCtl |= INTEL_ARC_DDI_VSYNC_POLARITY_POSITIVE;
+    else
+        ddiCtl &= ~INTEL_ARC_DDI_VSYNC_POLARITY_POSITIVE;
+
+    gInfo->shared_info->pipe_ddi_func_ctl[pipe] = ddiCtl;
+
+    debug_printf("intel_arc.accelerant: valore di PIPE_DDI_FUNC_CTL[%d] dopo impostazione HSYNC E VSYNC: %" B_PRIx32 "\n", pipe,ddiCtl);
+
+    write_register(INTEL_ARC_MMIO_PIPE_A_DDI_FUNC_CTL + pipeOffset, ddiCtl);
+
+    // 8. Riabilita il DDI Buffer
+    status = program_ddi_buffer(gInfo->shared_info->active_ddi_port, pipe, lanes, true);
+    if (status != B_OK) {
+        debug_printf("intel_arc.accelerant ERROR: program_ddi_buffer failed: %s\n", strerror(status));
+        return status;
+    }
+
+    // 9. Esegui il DP Link Training per stabilire la sincronizzazione
+    if (gInfo->shared_info->has_dpcd) {
+        debug_printf("intel_arc.accelerant: Performing DP Link Training (Lanes=%u, Rate=%u kHz)\n", lanes, linkBandwidth);
+        status = perform_dp_link_training(linkBandwidth, lanes);
+        if (status != B_OK) {
+            debug_printf("intel_arc.accelerant ERROR: perform_dp_link_training failed: %s\n", strerror(status));
+            return status;
+        }
+    } else {
+        debug_printf("intel_arc.accelerant: Skipping DP Link Training (DPCD unavailable)\n");
+    }
+
+    return B_OK;
+}
+/* ultima semifunzionante
 static status_t
 configure_dp_link(display_mode* mode)
 {
@@ -1614,15 +1802,11 @@ configure_dp_link(display_mode* mode)
     const uint32 pipeOffset = (uint32)pipe * INTEL_ARC_MMIO_PIPE_OFFSET;
     debug_printf("intel_arc.accelerant: pipeOffset %" B_PRIx32 "\n", pipeOffset);
     const uint32 pipeFunc = gInfo->shared_info->pipe_ddi_func_ctl[pipe];
-    debug_printf("intel_arc.accelerant: pipe_ddi_func_ctl[%d] %" B_PRIx32 "\n", pipe, pipeFunc);
-    uint32 bitsPerPixel = 24;
-    switch ((pipeFunc & INTEL_ARC_PIPE_DDI_BPC_MASK) >> 20) {
-        case 0: bitsPerPixel = 24; break;
-        case 1: bitsPerPixel = 30; break;
-        case 2: bitsPerPixel = 18; break;
-        case 3: bitsPerPixel = 36; break;
-        default: break;
-    }
+    debug_printf("intel_arc.accelerant: initial pipe_ddi_func_ctl[%d] in configure_dp_link: %" B_PRIx32 "\n", pipe, pipeFunc);
+
+    // using static inline helper func
+    uint32 bitsPerPixel = pipe_ddi_decode_bpp(pipeFunc);
+    gInfo->shared_info->dp_bpp[pipe] = bitsPerPixel;
 
     // Corretto: maxLanes viene inizializzato al massimo hardware (4) e limitato solo dal DPCD, 
     // ignorando la configurazione del registro di boot.
@@ -1747,9 +1931,26 @@ configure_dp_link(display_mode* mode)
     
     snooze(100);
 
-    gInfo->shared_info->pipe_ddi_func_ctl[pipe]
-        = (gInfo->shared_info->pipe_ddi_func_ctl[pipe] & ~INTEL_ARC_PIPE_DDI_DP_WIDTH_MASK)
-        | ((lanes - 1) << INTEL_ARC_PIPE_DDI_DP_WIDTH_SHIFT);
+    uint32 ddiCtl = gInfo->shared_info->pipe_ddi_func_ctl[pipe];
+    debug_printf("intel_arc.accelerant: valore di ddiFuncCtl dentro configure_dp_link: %" B_PRIx32 "\n",ddiCtl);
+    
+    ddiCtl &= ~INTEL_ARC_PIPE_DDI_DP_WIDTH_MASK;
+    ddiCtl |= pipe_ddi_encode_dp_width(lanes);
+    if (mode->timing.flags & B_POSITIVE_HSYNC)
+        ddiCtl |= INTEL_ARC_DDI_HSYNC_POLARITY_POSITIVE;
+    else
+        ddiCtl &= ~INTEL_ARC_DDI_HSYNC_POLARITY_POSITIVE;
+
+    if (mode->timing.flags & B_POSITIVE_VSYNC)
+        ddiCtl |= INTEL_ARC_DDI_VSYNC_POLARITY_POSITIVE;
+    else
+        ddiCtl &= ~INTEL_ARC_DDI_VSYNC_POLARITY_POSITIVE;
+
+    gInfo->shared_info->pipe_ddi_func_ctl[pipe] = ddiCtl;
+    
+    debug_printf("intel_arc.accelerant: valore di ddiFuncCtl dopo impostazione HSYNC E VSYNC: %" B_PRIx32 "\n",ddiCtl);
+    // aggiunto di recente...
+    write_register(INTEL_ARC_MMIO_PIPE_A_DDI_FUNC_CTL + pipeOffset, ddiCtl);
     debug_printf("intel_arc.accelerant: pipe_ddi_func_ctl[%d] set as %" B_PRIx32 "\n", pipe, gInfo->shared_info->pipe_ddi_func_ctl[pipe]);
     
     status = program_ddi_buffer(gInfo->shared_info->active_ddi_port, pipe, lanes, true);
@@ -1770,7 +1971,7 @@ configure_dp_link(display_mode* mode)
     }
 
     return B_OK;
-}
+}*/
 
 static uint32
 clamp_u32(uint32 value, uint32 low, uint32 high)
@@ -2032,8 +2233,8 @@ intel_arc_set_display_mode(display_mode* mode)
 	const uint32 bytesPerPixel = bytes_per_pixel_for_space((color_space)target.space);
 	if (bytesPerPixel == 0)
 		return B_BAD_VALUE;
-	debug_printf("Arc Driver: app_server pitch = %" B_PRIu32 ", calculated pitch = %" B_PRIu32 "\n",
-    	gInfo->shared_info->bytes_per_row, (target.virtual_width * bytesPerPixel + 63) & ~63);
+	//debug_printf("Arc Driver: app_server pitch = %" B_PRIu32 ", calculated pitch = %" B_PRIu32 "\n",
+    	//gInfo->shared_info->bytes_per_row, (target.virtual_width * bytesPerPixel + 63) & ~63);
 
 	gInfo->shared_info->current_mode = target;
 	//gInfo->shared_info->bytes_per_row = target.virtual_width * bytesPerPixel;
@@ -2133,7 +2334,8 @@ intel_arc_set_display_mode(display_mode* mode)
     }
     
     uint32 ddiFuncCtl = gInfo->shared_info->pipe_ddi_func_ctl[pipe];
-
+    debug_printf("intel_arc.accelerant: valore di ddiFuncCtl prima di configurare il monitor: %" B_PRIx32 "\n",ddiFuncCtl);
+/* dovrebbe impostare i bit di hsync e vsync per ora posticipiamo  lo facciamo in configure_dp_link
     if ((target.timing.flags & B_POSITIVE_HSYNC) != 0)
         ddiFuncCtl |= INTEL_ARC_DDI_HSYNC_POLARITY_POSITIVE;
     else
@@ -2143,11 +2345,13 @@ intel_arc_set_display_mode(display_mode* mode)
         ddiFuncCtl |= INTEL_ARC_DDI_VSYNC_POLARITY_POSITIVE;
     else
         ddiFuncCtl &= ~INTEL_ARC_DDI_VSYNC_POLARITY_POSITIVE;
-        
+    debug_printf("intel_arc.accelerant: valore di ddiFuncCtl DOPO la modifica HSYNC e VSYNC: %" B_PRIx32 "\n",ddiFuncCtl);
+*/
     // Disabilita il bit ENABLE (Bit 31) su PIPE_DDI_FUNC_CTL prima del Link Training
     ddiFuncCtl &= ~INTEL_ARC_PIPE_DDI_FUNC_CTL_ENABLE; // Bit 31 = 0
 
     // Salva lo stato aggiornato nella struttura condivisa e scrivi il registro MMIO
+    debug_printf("intel_arc.accelerant: valore di ddiFuncCtl prima di dp_link o program_hdmi_dpll: %" B_PRIx32 "\n",ddiFuncCtl);
     gInfo->shared_info->pipe_ddi_func_ctl[pipe] = ddiFuncCtl;
     write_register(INTEL_ARC_MMIO_PIPE_A_DDI_FUNC_CTL + pipeOffset, ddiFuncCtl);
 	log_pipe_plane_state("intel_arc_set_display_mode after MMIO writes", pipe);
@@ -2155,7 +2359,7 @@ intel_arc_set_display_mode(display_mode* mode)
 
 	debug_printf("intel_arc.accelerant: Configuring link for Active Pipe %d (FuncCtl: 0x%08X)\n",
 		pipe, gInfo->shared_info->pipe_ddi_func_ctl[pipe]);
-
+	
 	uint32 modeSel = (gInfo->shared_info->pipe_ddi_func_ctl[pipe] & INTEL_ARC_PIPE_DDI_MODESEL_MASK) >> 24;
 	debug_printf("intel_arc.accelerant: Detected DDI ModeSel: %u\n", modeSel);
 
@@ -2182,8 +2386,11 @@ intel_arc_set_display_mode(display_mode* mode)
 		}
 	}
 	// ORA CHE IL LINK TRAPPING È COMPLETATO E IN NORMAL:
+ //   rileggi ddiFuncCtl
+    ddiFuncCtl = gInfo->shared_info->pipe_ddi_func_ctl[pipe];
+    debug_printf("intel_arc.accelerant: valore di ddiFuncCtl dopo dp_link o program_hdmi_dpll: %" B_PRIx32 "\n",ddiFuncCtl);
     // 1. Abilita il Transcoder / Pipe DDI
-    ddiFuncCtl |= INTEL_ARC_PIPE_DDI_FUNC_CTL_ENABLE;
+    ddiFuncCtl |= INTEL_ARC_PIPE_DDI_FUNC_ENABLE;//INTEL_ARC_PIPE_DDI_FUNC_CTL_ENABLE;
     gInfo->shared_info->pipe_ddi_func_ctl[pipe] = ddiFuncCtl;
     write_register(INTEL_ARC_MMIO_PIPE_A_DDI_FUNC_CTL + pipeOffset, ddiFuncCtl);
 
@@ -2193,6 +2400,8 @@ intel_arc_set_display_mode(display_mode* mode)
 
     uint32 fbAddress = gInfo->shared_info->frame_buffer_base + gInfo->shared_info->frame_buffer_offset;
     write_register(INTEL_ARC_MMIO_PLANE_A_SURFACE + pipeOffset, fbAddress);
+    
+    log_pipe_plane_state("intel_arc_set_display_mode before dpms_on", pipe);
 
 	status = apply_dpms_on();
 	if (status == B_OK) {
@@ -2953,69 +3162,205 @@ program_ddi_buffer(uint8 ddiPort, int8 pipe, uint32 lanes, bool enable)
 
 	return B_OK;
 }*/
-/* NO manipola bitfield incoerenti
+/* ultima versione
 status_t
 program_ddi_buffer(uint8 ddiPort, int8 pipe, uint32 lanes, bool enable)
 {
     debug_printf("intel_arc.accelerant: program_ddi_buffer(ddiPort=%u, pipe=%d, lanes=%u, enable=%d)\n",
         ddiPort, pipe, lanes, enable);
 
-    // Assumendo ddiPort 0-indexed (0 = Port A, 1 = Port B, ecc.)
-    if (ddiPort > 5)
+    if (ddiPort > 4)
         return B_BAD_VALUE;
 
-    const uint32 reg = INTEL_ARC_MMIO_DDI_BUF_CTL_A + (ddiPort * 0x100);
+    const uint32 reg = INTEL_ARC_MMIO_DDI_BUF_CTL_A + ddiPort * 0x100;
     uint32 value = 0;
     read_register(reg, value);
 
-    const uint32 modeSel = (gInfo->shared_info->pipe_ddi_func_ctl[pipe]
-        & INTEL_ARC_PIPE_DDI_MODESEL_MASK) >> 24;
-    const bool isDp = (modeSel == INTEL_ARC_PIPE_DDI_MODE_DP_SST
-        || modeSel == INTEL_ARC_PIPE_DDI_MODE_DP_MST);
+    const bool isCurrentlyEnabled = (value & INTEL_ARC_DDI_BUF_CTL_ENABLE) != 0;
 
-    // 1. Converti il conteggio delle lane nel bitfield hardware Intel (0=x1, 1=x2, 3=x4)
-    uint32 widthParam = 0;
-    switch (lanes) {
-        case 1:  widthParam = 0; break;
-        case 2:  widthParam = 1; break;
-        case 4:  widthParam = 3; break;
-        default: widthParam = 3; break;
-    }
-
-    // 2. Correzione Maschere: Pulisci 4 bit per TransSelect (0xF) e 3 bit per Port Width (0x7)
-    const uint32 transSelect = isDp ? 0 : 9;
-    
-    // Resetta sia i bit di Width che di TransSelect prima dell'OR
-    value &= ~(0x7U << 24); // Rimuove i bit di PORT_WIDTH (bits 26:24)
-    value &= ~(0xFU << 16); // Rimuove i bit di TRANS_SELECT (bits 19:16 - 4 bit totali)
-
-    value |= (widthParam << 24);
-    value |= (transSelect << 16);
-
-    if (enable)
-        value |= INTEL_ARC_DDI_BUF_CTL_ENABLE;
-    else
-        value &= ~INTEL_ARC_DDI_BUF_CTL_ENABLE;
-
-    write_register(reg, value);
-    debug_printf("intel_arc.accelerant: DDI_BUF_CTL[%u] = 0x%08" B_PRIx32 " (modeSel=%" B_PRIu32 ", trans=%" B_PRIu32 ")\n",
-        ddiPort, value, modeSel, transSelect);
-
-    // Salva lo stato (corretto per indicizzazione 0-based)
-    if (ddiPort < 4)
-        gInfo->shared_info->port_state[ddiPort] = value;
-
-    // 3. Attesa transizione di stato
     if (enable) {
-        status_t status = wait_for_clear(reg, INTEL_ARC_DDI_BUF_IS_IDLE, 50000);
-        if (status != B_OK) {
-            debug_printf("intel_arc.accelerant ERROR: Timeout in attesa che DDI_BUF_IS_IDLE si azzeri su porta %u\n", ddiPort);
-            return status;
+        // Aggiorna la configurazione delle lane (Bits 3:1 - DDI Port Width)
+        value &= ~INTEL_ARC_PIPE_DDI_DP_WIDTH_MASK;
+        value |= pipe_ddi_encode_dp_width(lanes);
+
+        // Se non è ancora abilitato, lo abilita e attende che esca dallo stato IDLE
+        if (!isCurrentlyEnabled) {
+            value |= INTEL_ARC_DDI_BUF_CTL_ENABLE;
+            write_register(reg, value);
+
+            // Attesa che DDI_BUF_IS_IDLE (bit 7) si azzeri (porta attiva)
+            status_t status = wait_for_clear(reg, INTEL_ARC_DDI_BUF_IS_IDLE, 50000);
+            if (status != B_OK) {
+                debug_printf("intel_arc.accelerant ERROR: DDI_BUF_CTL[%u] timed out waiting for IDLE clear (0x%08" B_PRIx32 ")!\n",
+                    ddiPort, value);
+                return status;
+            }
+        } else {
+            // Se già abilitato, applica l'eventuale aggiornamento delle lane
+            write_register(reg, value);
+        }
+    } else {
+        // Se è abilitato, lo disabilita e attende il ritorno in IDLE
+        if (isCurrentlyEnabled) {
+            value &= ~INTEL_ARC_DDI_BUF_CTL_ENABLE;
+            write_register(reg, value);
+
+            // Attende che la porta ritorni in IDLE (bit 7 diventa 1)
+            status_t status = wait_for_set(reg, INTEL_ARC_DDI_BUF_IS_IDLE, 50000);
+            if (status != B_OK) {
+                debug_printf("intel_arc.accelerant ERROR: DDI_BUF_CTL[%u] timed out waiting for IDLE set!\n", ddiPort);
+                return status;
+            }
         }
     }
 
+    // Rilegge il registro reale dall'hardware per verificare l'effettivo stato MMIO
+    read_register(reg, value);
+    debug_printf("intel_arc.accelerant: DDI_BUF_CTL[%u] = 0x%08" B_PRIx32 " OK\n", ddiPort, value);
+
+    if (ddiPort > 0 && ddiPort <= 4)
+        gInfo->shared_info->port_state[ddiPort - 1] = value;
+
     return B_OK;
 }*/
+/* versione con lanes ai bit 21:19  peccato che non sono quelli i bit corretti!
+status_t
+program_ddi_buffer(uint8 ddiPort, int8 pipe, uint32 lanes, bool enable)
+{
+    debug_printf("intel_arc.accelerant: program_ddi_buffer(ddiPort=%u, pipe=%d, lanes=%u, enable=%d)\n",
+        ddiPort, pipe, lanes, enable);
+
+    if (ddiPort > 4)
+        return B_BAD_VALUE;
+
+    const uint32 reg = INTEL_ARC_MMIO_DDI_BUF_CTL_A + ddiPort * 0x100;
+    uint32 value = 0;
+    read_register(reg, value);
+
+    const bool isCurrentlyEnabled = (value & INTEL_ARC_DDI_BUF_CTL_ENABLE) != 0;
+
+    if (enable) {
+        // Aggiorna la configurazione delle lane (Bits 21:19 - DDI Port Width)
+        // 1 lane = 0x0, 2 lanes = 0x1, 4 lanes = 0x3
+        uint32 portWidthCode = 0;
+        if (lanes == 2)
+            portWidthCode = 1;
+        else if (lanes == 4)
+            portWidthCode = 3;
+
+        value &= ~(0x7 << 19);               // Maschera di pulizia sui bit 21:19
+        value |= (portWidthCode << 19);      // Imposta le lane corrette
+
+        // Se non è ancora abilitato, lo abilita e attende che esca dallo stato IDLE
+        if (!isCurrentlyEnabled) {
+            value |= INTEL_ARC_DDI_BUF_CTL_ENABLE;
+            write_register(reg, value);
+
+            // Attesa che DDI_BUF_IS_IDLE (bit 7) si azzeri (porta attiva)
+            status_t status = wait_for_clear(reg, INTEL_ARC_DDI_BUF_IS_IDLE, 50000);
+            if (status != B_OK) {
+                debug_printf("intel_arc.accelerant ERROR: DDI_BUF_CTL[%u] timed out waiting for IDLE clear (0x%08" B_PRIx32 ")!\n",
+                    ddiPort, value);
+                return status;
+            }
+        } else {
+            // Se già abilitato, applica l'eventuale aggiornamento delle lane
+            write_register(reg, value);
+        }
+    } else {
+        // Se è abilitato, lo disabilita e attende il ritorno in IDLE
+        if (isCurrentlyEnabled) {
+            value &= ~INTEL_ARC_DDI_BUF_CTL_ENABLE;
+            write_register(reg, value);
+
+            // Attende che la porta ritorni in IDLE (bit 7 diventa 1)
+            status_t status = wait_for_set(reg, INTEL_ARC_DDI_BUF_IS_IDLE, 50000);
+            if (status != B_OK) {
+                debug_printf("intel_arc.accelerant ERROR: DDI_BUF_CTL[%u] timed out waiting for IDLE set!\n", ddiPort);
+                return status;
+            }
+        }
+    }
+
+    // Rilegge il registro reale dall'hardware per verificare l'effettivo stato MMIO
+    read_register(reg, value);
+    debug_printf("intel_arc.accelerant: DDI_BUF_CTL[%u] = 0x%08" B_PRIx32 " OK\n", ddiPort, value);
+
+    if (ddiPort > 0 && ddiPort <= 4)
+        gInfo->shared_info->port_state[ddiPort - 1] = value;
+
+    return B_OK;
+}*/
+status_t
+program_ddi_buffer(uint8 ddiPort, int8 pipe, uint32 lanes, bool enable)
+{
+    debug_printf("intel_arc.accelerant: program_ddi_buffer(ddiPort=%u, pipe=%d, lanes=%" B_PRIu32 ", enable=%d)\n",
+        ddiPort, pipe, lanes, enable);
+
+    if (ddiPort > 6)
+        return B_BAD_VALUE;
+
+    const uint32 reg = INTEL_ARC_MMIO_DDI_BUF_CTL_A + ddiPort * 0x100;
+    uint32 value = 0;
+    read_register(reg, value);
+    debug_printf("PROGRAM_DDI_BUFFER: value before 0x%" B_PRIx32 "\n", value);
+
+    const bool isCurrentlyEnabled = (value & INTEL_ARC_DDI_BUF_CTL_ENABLE) != 0;
+
+    if (enable) {
+        // Codifica delle lane per DDI_BUF_CTL (Bits 3:1)
+        // 1 lane = 0x0, 2 lanes = 0x1, 4 lanes = 0x3
+        uint32 portWidthValue = 0;
+        if (lanes == 2)
+            portWidthValue = 1;
+        else if (lanes == 4)
+            portWidthValue = 3;
+
+        // Pulizia e impostazione dei bit 3:1 con le macro dedicate
+        value &= ~INTEL_ARC_DDI_BUF_PORT_WIDTH_MASK;
+        value |= (portWidthValue << INTEL_ARC_DDI_BUF_PORT_WIDTH_SHIFT);
+
+        // Se non è ancora abilitato, lo abilita e attende che esca dallo stato IDLE
+        if (!isCurrentlyEnabled) {
+            value |= INTEL_ARC_DDI_BUF_CTL_ENABLE;
+            write_register(reg, value);
+
+            // Attesa che DDI_BUF_IS_IDLE (bit 7) si azzeri (porta attiva)
+            status_t status = wait_for_clear(reg, INTEL_ARC_DDI_BUF_IS_IDLE, 50000);
+            if (status != B_OK) {
+                debug_printf("intel_arc.accelerant ERROR: DDI_BUF_CTL[%u] timed out waiting for IDLE clear (0x%08" B_PRIx32 ")!\n",
+                    ddiPort, value);
+                return status;
+            }
+        } else {
+            // Se già abilitato, applica l'aggiornamento della configurazione PHY
+            write_register(reg, value);
+        }
+    } else {
+        // Se è abilitato, lo disabilita e attende il ritorno in IDLE
+        if (isCurrentlyEnabled) {
+            value &= ~INTEL_ARC_DDI_BUF_CTL_ENABLE;
+            write_register(reg, value);
+
+            // Attende che la porta ritorni in IDLE (bit 7 diventa 1)
+            status_t status = wait_for_set(reg, INTEL_ARC_DDI_BUF_IS_IDLE, 50000);
+            if (status != B_OK) {
+                debug_printf("intel_arc.accelerant ERROR: DDI_BUF_CTL[%u] timed out waiting for IDLE set!\n", ddiPort);
+                return status;
+            }
+        }
+    }
+
+    // Rilegge il registro reale dall'hardware per verificare l'effettivo stato MMIO
+    read_register(reg, value);
+    debug_printf("intel_arc.accelerant: DDI_BUF_CTL[%u] = 0x%08" B_PRIx32 " OK\n", ddiPort, value);
+
+    if (ddiPort > 0 && ddiPort <= 4)
+        gInfo->shared_info->port_state[ddiPort - 1] = value;
+
+    return B_OK;
+}
+/* funziona ma riscrivo
 status_t
 program_ddi_buffer(uint8 ddiPort, int8 pipe, uint32 lanes, bool enable)
 {
@@ -3028,6 +3373,7 @@ program_ddi_buffer(uint8 ddiPort, int8 pipe, uint32 lanes, bool enable)
     const uint32 reg = INTEL_ARC_MMIO_DDI_BUF_CTL_A + ddiPort * 0x100;
     uint32 value = 0;
     read_register(reg, value);
+    debug_printf("PROGRAM_DDI_BUFFER: value before %" B_PRIx32 "\n",value);
 
     const bool isCurrentlyEnabled = (value & INTEL_ARC_DDI_BUF_CTL_ENABLE) != 0;
 
@@ -3082,7 +3428,7 @@ program_ddi_buffer(uint8 ddiPort, int8 pipe, uint32 lanes, bool enable)
         gInfo->shared_info->port_state[ddiPort - 1] = value;
 
     return B_OK;
-}
+}*/
 /*
 status_t
 program_ddi_buffer(uint8 ddiPort, int8 pipe, uint32 lanes, bool enable)
@@ -3122,63 +3468,6 @@ program_ddi_buffer(uint8 ddiPort, int8 pipe, uint32 lanes, bool enable)
     }
 
     debug_printf("intel_arc.accelerant: DDI_BUF_CTL[%u] = 0x%08" B_PRIx32 " OK\n", ddiPort, value);
-    if (ddiPort > 0 && ddiPort <= 4)
-        gInfo->shared_info->port_state[ddiPort - 1] = value;
-
-    return B_OK;
-}*/
-/* evo2
-status_t
-program_ddi_buffer(uint8 ddiPort, int8 pipe, uint32 lanes, bool enable)
-{
-    debug_printf("intel_arc.accelerant: program_ddi_buffer(ddiPort=%u, pipe=%d, lanes=%u, enable=%d)\n",
-        ddiPort, pipe, lanes, enable);
-    if (ddiPort > 6)
-        return B_BAD_VALUE;
-
-    const uint32 reg = INTEL_ARC_MMIO_DDI_BUF_CTL_A + ddiPort * 0x100;
-    uint32 value = 0;
-    read_register(reg, value);
-
-    if (enable) {
-        // 1. Traduzione corretta delle Lane in codifica Intel (1->0, 2->1, 4->3)
-        uint32 portWidthValue = 0;
-        switch (lanes) {
-            case 1: portWidthValue = 0; break;
-            case 2: portWidthValue = 1; break;
-            case 4: portWidthValue = 3; break;
-            default: portWidthValue = 3; break;
-        }
-
-        // Pulisce la maschera port width e applica il valore bitfield corretto
-        value &= ~INTEL_ARC_DDI_PORT_WIDTH_MASK;
-        value |= (portWidthValue << INTEL_ARC_DDI_PORT_WIDTH_SHIFT);
-
-        // Abilita il DDI Buffer (non toccare transSelect su Arc)
-        value |= INTEL_ARC_DDI_BUF_CTL_ENABLE;
-        write_register(reg, value);
-
-        // Attende che la porta esca dallo stato IDLE (bit IS_IDLE diventa 0)
-        status_t status = wait_for_clear(reg, INTEL_ARC_DDI_BUF_IS_IDLE, 50000);
-        if (status != B_OK) {
-            debug_printf("intel_arc.accelerant ERROR: DDI_BUF_CTL[%u] timed out waiting for IDLE clear! (DPLL missing lock?)\n", ddiPort);
-            return status;
-        }
-    } else {
-        // Disabilitazione del Buffer
-        value &= ~INTEL_ARC_DDI_BUF_CTL_ENABLE;
-        write_register(reg, value);
-
-        // Attende che la porta ritorni in IDLE (bit IS_IDLE diventa 1)
-        status_t status = wait_for_set(reg, INTEL_ARC_DDI_BUF_IS_IDLE, 50000);
-        if (status != B_OK) {
-            debug_printf("intel_arc.accelerant ERROR: DDI_BUF_CTL[%u] timed out waiting for IDLE set!\n", ddiPort);
-            return status;
-        }
-    }
-
-    debug_printf("intel_arc.accelerant: DDI_BUF_CTL[%u] updated to 0x%08" B_PRIx32 "\n", ddiPort, value);
-
     if (ddiPort > 0 && ddiPort <= 4)
         gInfo->shared_info->port_state[ddiPort - 1] = value;
 

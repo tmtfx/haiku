@@ -61,14 +61,41 @@
 #define INTEL_ARC_PIPE_ENABLED					(1UL << 31)
 #define INTEL_ARC_PIPE_DDI_SELECT_SHIFT		28
 #define INTEL_ARC_PIPE_DDI_SELECT_MASK			(7 << INTEL_ARC_PIPE_DDI_SELECT_SHIFT)
-#define INTEL_ARC_PIPE_DDI_MODE_SHIFT			24
-#define INTEL_ARC_PIPE_DDI_MODE_MASK			(7 << INTEL_ARC_PIPE_DDI_MODE_SHIFT)
+//#define INTEL_ARC_PIPE_DDI_MODE_SHIFT			24
+//#define INTEL_ARC_PIPE_DDI_MODE_MASK			(7 << INTEL_ARC_PIPE_DDI_MODE_SHIFT)
 #define INTEL_ARC_PORT_ENABLED					(1UL << 31)
 #define INTEL_ARC_PORT_DETECTED				(1UL << 2)
 #define INTEL_ARC_MASTER_INT_GLOBAL			(1UL << 31)
 #define INTEL_ARC_MASTER_INT_PIPE_PENDING(pipe)	(1UL << (15 + (pipe)))
 #define INTEL_ARC_PIPE_INT_VBLANK				(1UL << 0)
 #define INTEL_ARC_MAX_PIPES				4
+
+#define INTEL_ARC_PIPE_DDI_FUNC_ENABLE           (1U << 31)
+
+#define INTEL_ARC_PIPE_DDI_MODE_SHIFT            24
+#define INTEL_ARC_PIPE_DDI_MODE_MASK             (0x7U << INTEL_ARC_PIPE_DDI_MODE_SHIFT)
+#define INTEL_ARC_PIPE_DDI_MODE_HDMI             (0U << INTEL_ARC_PIPE_DDI_MODE_SHIFT)
+//#define INTEL_ARC_PIPE_DDI_MODE_DP_SST           (1U << INTEL_ARC_PIPE_DDI_MODE_SHIFT)
+//#define INTEL_ARC_PIPE_DDI_MODE_DP_MST           (2U << INTEL_ARC_PIPE_DDI_MODE_SHIFT)
+#define INTEL_ARC_PIPE_DDI_MODE_FDI              (3U << INTEL_ARC_PIPE_DDI_MODE_SHIFT)
+
+#define INTEL_ARC_PIPE_DDI_BPC_SHIFT             20
+#define INTEL_ARC_PIPE_DDI_BPC_MASK              (0x7U << INTEL_ARC_PIPE_DDI_BPC_SHIFT)
+#define INTEL_ARC_PIPE_DDI_BPC_8                 (0U << INTEL_ARC_PIPE_DDI_BPC_SHIFT)
+#define INTEL_ARC_PIPE_DDI_BPC_10                (1U << INTEL_ARC_PIPE_DDI_BPC_SHIFT)
+#define INTEL_ARC_PIPE_DDI_BPC_6                 (2U << INTEL_ARC_PIPE_DDI_BPC_SHIFT)
+#define INTEL_ARC_PIPE_DDI_BPC_12                (3U << INTEL_ARC_PIPE_DDI_BPC_SHIFT)
+
+#define INTEL_ARC_PIPE_DDI_DP_WIDTH_SHIFT        1 // non è 19 zio cribbio con 1 funziona?
+#define INTEL_ARC_PIPE_DDI_DP_WIDTH_MASK         (0x7U << INTEL_ARC_PIPE_DDI_DP_WIDTH_SHIFT)
+#define INTEL_ARC_PIPE_DDI_DP_WIDTH_1            (0U << INTEL_ARC_PIPE_DDI_DP_WIDTH_SHIFT)
+#define INTEL_ARC_PIPE_DDI_DP_WIDTH_2            (1U << INTEL_ARC_PIPE_DDI_DP_WIDTH_SHIFT)
+#define INTEL_ARC_PIPE_DDI_DP_WIDTH_4            (3U << INTEL_ARC_PIPE_DDI_DP_WIDTH_SHIFT)
+
+#define INTEL_ARC_DDI_VSYNC_POLARITY_POSITIVE    (1U << 17)
+#define INTEL_ARC_DDI_HSYNC_POLARITY_POSITIVE    (1U << 16)
+
+
 
 
 enum intel_arc_family {
@@ -140,6 +167,7 @@ struct intel_arc_shared_info {
 	uint8			dpcd_sink_count;
 	uint8			dpcd_max_link_rate;
 	uint8			dp_lanes[INTEL_ARC_MAX_PIPES];
+	uint32			dp_bpp[INTEL_ARC_MAX_PIPES];
 
 	edid1_info		boot_edid;
 	frame_buffer_config fbc;

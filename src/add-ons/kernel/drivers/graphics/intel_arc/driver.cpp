@@ -554,7 +554,9 @@ probe_display_state(intel_arc_info& info)
             dprintf("WARNING: Pipe %u failed resolution check (W=%u, H=%u).\n", pipe, width, height);
         }
         	// Estrazione lane dallo stato hardware al boot
-		const uint32 ddiWidth = (shared.pipe_ddi_func_ctl[pipe] >> 1) & 0x7;
+        	// in origine il valore veniva estratto così ma sembra non sia corretto (SEMBRA)
+		const uint32 ddiWidth = (shared.pipe_ddi_func_ctl[pipe] >> 1) & 0x7; // bit 3:1
+		//const uint32 ddiWidth = (shared.pipe_ddi_func_ctl[pipe] >> 19) & 0x7;
 
 		if (ddiWidth == 0) {
 			dprintf("DEBUG: Display Port Lanes set to 1\n");
