@@ -28,6 +28,8 @@
 #include <util/AreaKeeper.h>
 #include <vesa_info.h>
 
+#include <driver_settings.h>
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -54,6 +56,15 @@
 #define MAX_CLONED_FRAMEBUFFER_SIZE (256 * 1024 * 1024)
 #define ROUND_TO_PAGE_SIZE(x) (((x) + (B_PAGE_SIZE) - 1) & ~((B_PAGE_SIZE) - 1))
 
+
+
+static intel_arc_settings current_settings = {    
+    "trident.accelerant",	// accelerant filename
+    false,					// dumprom, function still not integrated
+    0,						// memory, override builtin memory size detection in MB
+    true,					// hardcursor, if true use on-chip hardware cursor
+    32,						// cursorbits, number of bits used to draw bitmap cursor
+};
 
 struct supported_device {
 	uint16		device_id;
@@ -182,6 +193,23 @@ static mutex gLock;
 static char* gDeviceNames[MAX_DEVICES + 1];
 static intel_arc_info* gDeviceInfo[MAX_DEVICES];
 
+static void
+load_settings(void)
+{
+    void* handle = load_driver_settings("intel_arc");
+    if (handle != NULL) {
+        
+        current_settings.hardcursor = get_driver_boolean_parameter(
+            handle, "hardcursor", current_settings.hardcursor, current_settings.hardcursor);
+
+        const char* value_str = get_driver_parameter(handle, "cursorbits", "32", "32"); //default HC bits on intel_arc
+        if (value_str != nullptr) {
+            current_settings.cursorbits = (uint32)atoi(value_str);
+        }
+        
+        unload_driver_settings(handle);
+    }
+}
 
 static inline uint32
 get_pci_config(pci_info* info, uint8 offset, uint8 size)
@@ -994,6 +1022,11 @@ init_device(intel_arc_info& info)
 		return info.shared_area;
 
 	memset(info.shared_info, 0, sizeof(intel_arc_shared_info));
+	load_settings();
+	//memcpy(&info.shared_info->settings, &current_settings, sizeof(intel_arc_settings));
+	info.shared_info->settings = current_settings;
+    info.shared_info->bDisableHdwCursor = !info.shared_info->settings.hardcursor;
+    
 	info.shared_info->vblank_sem = -1;
 	info.shared_info->vendor_id = info.pci.vendor_id;
 	info.shared_info->device_id = info.pci.device_id;
@@ -1143,10 +1176,7 @@ init_device(intel_arc_info& info)
 		enable_interrupts(info, true);
 	}
 
-	sharedKeeper.Detach();
-	mmioKeeper.Detach();
 	
-
 	struct frame_buffer_boot_info* bi = (struct frame_buffer_boot_info*)get_boot_item(
 FRAME_BUFFER_BOOT_INFO, NULL);
 
@@ -1168,6 +1198,11 @@ FRAME_BUFFER_BOOT_INFO, NULL);
 	draw_logo(info);
 	snooze(2000000);
 #endif
+
+	sharedKeeper.Detach();
+	mmioKeeper.Detach();
+	
+
 
 	return B_OK;
 }

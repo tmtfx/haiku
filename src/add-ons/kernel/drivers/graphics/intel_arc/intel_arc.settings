@@ -1,0 +1,15 @@
+# Settings file for the Intel ARC driver and accelerant
+#
+# This file should be moved to the directory
+# ~/config/settings/kernel/drivers/
+#
+
+# trident.driver parameters:
+#accelerant "intel_arc.accelerant"    # selects accelerant filename to be used
+dumprom     false                # dump bios rom to ~/trident.rom // not yet implemented
+
+# intel_arc.accelerant parameters:
+#memory     8                   # in MB, override builtin memory size detection (es. 4, 6, 8) // not yet implemented
+hardcursor  true                 # if true use on-chip hardware cursor
+cursorbits  32                  # number of bits used to draw bitmap cursor
+
