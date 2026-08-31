@@ -178,7 +178,7 @@ static void draw_logo(DeviceInfo& di)
 static void
 load_settings(void)
 {
-    void* handle = load_driver_settings("trident");
+    void* handle = load_driver_settings("trident.settings");
     if (handle != NULL) {
         
         current_settings.hardcursor = get_driver_boolean_parameter(
