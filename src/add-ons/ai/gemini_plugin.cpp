@@ -933,22 +933,33 @@ gemini_stream_thread_func(void* data)
         bool executionLoop = true;
         while (executionLoop) {
             if (args->server_messenger.IsValid()) {
-                BMessage checkAbortMsg('CHAB');
-                if (ctxId) checkAbortMsg.AddString("context_id", ctxId);
-                
-                BMessage abortReply;
-                if (args->server_messenger.SendMessage(&checkAbortMsg, &abortReply) == B_OK) {
-                    int32 status = B_OK;
-                    if (abortReply.FindInt32("status", &status) == B_OK && status == B_CANCELED) {
-                        fprintf(stderr, "[GEMINI STREAM WORKER] Rilevata interruzione asincrona dall'utente.\n");
-                        if (args->notify_path) {
-                            BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_ERASE_FILE);
-                            if (streamFile.InitCheck() == B_OK) {
-                                streamFile.Write("<<STREAM_ABORT>>", 16);
-                            }
-                        }
-                        goto thread_cleanup;
-                    }
+            	bool who = false;
+                BMessage checkAbortMsg(MSG_CHECK_ABORT);
+                if (ctxId && strlen(ctxId) > 0) {
+					checkAbortMsg.AddString("context_id", ctxId);
+					who = true;
+				}
+				if (sessionID > -1) {
+					checkAbortMsg.AddInt32("session_id", sessionID);
+					who = true;
+				}
+                if (who) {
+                	BMessage abortReply;
+	                if (args->server_messenger.SendMessage(&checkAbortMsg, &abortReply) == B_OK) {
+    	                int32 status = B_OK;
+        	            if (abortReply.FindInt32("status", &status) == B_OK && status == B_CANCELED) {
+            	            fprintf(stderr, "[GEMINI STREAM WORKER] Rilevata interruzione asincrona dall'utente.\n");
+                	        if (args->notify_path) {
+                    	        BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_ERASE_FILE);
+                        	    if (streamFile.InitCheck() == B_OK) {
+                            	    streamFile.Write("<<STREAM_ABORT>>", 16);
+                            	}
+                        	}
+                        	goto thread_cleanup;
+                    	}
+                	}
+                } else {
+                	fprintf(stderr, "Non so chi controllare per la interruzione!\n");
                 }
             }
 
@@ -1034,112 +1045,6 @@ gemini_stream_thread_func(void* data)
                 break;
             }
 
-            // Parsing della risposta del candidato Gemini
-			/* questo genera loop infinito di chiamate
-			BMessage candidates, candZero, contentMsg, partsMsg;
-			bool hasCandidates = (parsedJson.FindMessage("candidates", &candidates) == B_OK)
-				&& (candidates.FindMessage("0", &candZero) == B_OK || candidates.FindMessage("msg", 0, &candZero) == B_OK)
-				&& (candZero.FindMessage("content", &contentMsg) == B_OK)
-				&& (contentMsg.FindMessage("parts", &partsMsg) == B_OK);
-			if (hasCandidates) {
-				BMessage functionCallObj;
-				const char* toolName = nullptr;
-				const char* textContent = nullptr;
-				const char* thoughtSig = nullptr;
-				bool hasFunctionCall = false;
-
-				// Cicliamo su tutte le parti restituite per raccogliere firma e chiamata a funzione
-				BMessage partItem;
-				int32 partIndex = 0;
-				while (partsMsg.FindMessage(BString().SetToFormat("%" B_PRId32, partIndex).String(), &partItem) == B_OK ||
-						partsMsg.FindMessage("msg", partIndex, &partItem) == B_OK) {
-					// Estrazione firma (separata o annidata)
-					if (thoughtSig == nullptr) {
-						partItem.FindString("thoughtSignature", &thoughtSig);
-						if (thoughtSig == nullptr) {
-							partItem.FindString("thought_signature", &thoughtSig);
-							if (thoughtSig == nullptr) {
-								fprintf(stderr, "\nNel loop non trovo la firma del pensiero!\n\n");
-							} else {
-								fprintf(stderr,"\nNel loop trovo e assegno la firma del pensiero al secondo colpo: %s\n\n", thoughtSig);
-							}
-						} else {
-							fprintf(stderr,"\nNel loop trovo al primo colpo e assegno la firma del pensiero: %s\n\n", thoughtSig);
-						}
-					}
-					// Estrazione chiamata a funzione
-					if (!hasFunctionCall && partItem.FindMessage("functionCall", &partItem) == B_OK) { // o partItem.FindMessage("functionCall", &functionCallObj)
-						if (partItem.FindMessage("functionCall", &functionCallObj) == B_OK) {
-							if (functionCallObj.FindString("name", &toolName) == B_OK) {
-								hasFunctionCall = true;
-							}
-						} else if (partItem.FindString("name", &toolName) == B_OK) {
-							functionCallObj = partItem;
-							hasFunctionCall = true;
-						}
-					}
-					if (textContent == nullptr) {
-						partItem.FindString("text", &textContent);
-					}
-					partIndex++;
-				}
-				if (hasFunctionCall && toolName != nullptr) {
-					fprintf(stderr, "\nFUNCTION CALL con TOOLNAME\n");
-					BMessage argsMsg;
-					functionCallObj.FindMessage("args", &argsMsg);     
-					if (thoughtSig == nullptr) {
-						functionCallObj.FindString("thoughtSignature", &thoughtSig);
-						fprintf(stderr,"\nNell'oggetto della functionCall trovo al primo colpo e assegno la firma del pensiero: %s\n\n", thoughtSig);
-						if (thoughtSig == nullptr) {
-							functionCallObj.FindString("thought_signature", &thoughtSig);
-							fprintf(stderr,"\nNell'oggetto della functionCall trovo e assegno la firma del pensiero al secondo colpo %s\n\n", thoughtSig);
-						}
-					}
-					//BString safeThoughtSig(toolName);
-					BMessage reqExec(MSG_EXECUTE_TOOL);
-					fprintf(stderr, "\nEseguo comando %s\n\n",toolName);
-					reqExec.AddString("name", toolName);
-					reqExec.AddMessage("arguments", &argsMsg);
-					if (ctxId) reqExec.AddString("context_id", ctxId);
-					BMessage replyExec;
-					BString toolResultBuf;
-					if (args->server_messenger.SendMessage(&reqExec, &replyExec) == B_OK) {
-						const char* resStr = replyExec.FindString("result");
-						if (resStr && strlen(resStr) > 0) {
-							BString testStr(resStr);
-							testStr.Trim();
-							fprintf(stderr, "\nStrumenti ritornati: %s\n\n\n",testStr.String());
-							//if (testStr.StartsWith("{") || testStr.StartsWith("[")) {
-								toolResultBuf = resStr;
-							//} else {
-							//	toolResultBuf = "Operazione completata con successo.";
-							//}
-						} else {
-							toolResultBuf = "{\"error\":\"Il comando sul server ha restituito una risposta vuota.\"}";
-						}
-					} else {
-						toolResultBuf = "{\"error\":\"Esecuzione dello strumento fallita via IPC BMessenger\"}";
-					}
-					BString safeToolName = toolName;
-					BString safeThoughtSig = thoughtSig;
-					
-					AppendToolCallToContext(args->context_copy, safeToolName.String(), &argsMsg, safeThoughtSig.String());
-					fprintf(stderr, "\nAppendToolResponseToContext con toolName %s\n\n", safeToolName.String());
-					AppendToolResponseToContext(args->context_copy, safeToolName.String(), toolResultBuf.String());
-				} else if (textContent != nullptr) {
-					fprintf(stderr, "\nTEXT CONTENT NULL:\n");
-					BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
-					if (streamFile.InitCheck() == B_OK) {
-						streamFile.Write(textContent, strlen(textContent));
-						streamFile.Flush();
-					}
-					executionLoop = false;
-				}
-			} else {
-				fprintf(stderr, "[GEMINI STREAM WORKER] Risposta priva di candidati o non valida.\n");
-				DispatchError(args->server_messenger, httpStatusCode, sessionID, ctxId, rawResponse);
-				executionLoop = false;
-			}*/
 			// Parsing della risposta del candidato Gemini
             BMessage candidates, candZero, contentMsg, partsMsg;
             bool hasCandidates = (parsedJson.FindMessage("candidates", &candidates) == B_OK)
