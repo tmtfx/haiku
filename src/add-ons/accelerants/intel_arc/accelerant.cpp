@@ -403,6 +403,20 @@ get_accelerant_hook(uint32 feature, void* /*data*/)
 			return (void*)intel_arc_configure_overlay;
 		case B_SET_INDEXED_COLORS:
 			return (void*)intel_arc_set_indexed_colors;
+		// HW CUR
+		case B_SET_CURSOR_SHAPE:
+            return (void*)(gInfo->shared_info->bDisableHdwCursor ? NULL : SetCursorShape);
+        case B_MOVE_CURSOR:
+            return (void*)(gInfo->shared_info->bDisableHdwCursor ? NULL : MoveCursor);
+        case B_SHOW_CURSOR:
+            return (void*)(gInfo->shared_info->bDisableHdwCursor ? NULL : ShowCursor);
+
+#ifdef IS_PIRATI_BUILD
+        case B_SET_CURSOR_BITMAP:
+            return (void*)(gInfo->shared_info->bDisableHdwCursor ? NULL : SetCursorBitmap);
+        case B_GET_CURSOR_BITS:
+            return (void*)(gInfo->shared_info->bDisableHdwCursor ? NULL : GetCursorBits);
+#endif
 	}
 
 	return NULL;

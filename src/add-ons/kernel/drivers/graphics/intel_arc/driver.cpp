@@ -41,45 +41,6 @@
  * Raw display/MMIO offsets below are a minimal, MIT-compatible reinterpretation
  * of register definitions for Intel Display Engine.
  */
-/*
-#define INTEL_ARC_MMIO_PIPE_BLOCK_BASE			0x60000
-#define INTEL_ARC_MMIO_PLANE_BLOCK_BASE			0x70000
-#define INTEL_ARC_MMIO_PIPE_OFFSET				0x1000
-#define INTEL_ARC_MMIO_PIPE_A_SIZE				(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x001c)
-#define INTEL_ARC_MMIO_PIPE_A_DDI_FUNC_CTL		(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0400)
-#define INTEL_ARC_MMIO_PIPE_A_HTOTAL			(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0000)
-#define INTEL_ARC_MMIO_PIPE_A_HBLANK			(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0004)
-#define INTEL_ARC_MMIO_PIPE_A_HSYNC				(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0008)
-#define INTEL_ARC_MMIO_PIPE_A_VTOTAL			(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x000c)
-#define INTEL_ARC_MMIO_PIPE_A_VBLANK			(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0010)
-#define INTEL_ARC_MMIO_PIPE_A_VSYNC				(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0014)
-#define INTEL_ARC_MMIO_PIPE_A_CONTROL			(INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x0008)
-#define INTEL_ARC_MMIO_PLANE_A_CONTROL			(INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x0180)
-#define INTEL_ARC_MMIO_PLANE_A_COLOR_CTL        (INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x0184)
-#define INTEL_ARC_MMIO_PLANE_A_STRIDE			(INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x0188)
-#define INTEL_ARC_MMIO_PLANE_A_POS				(INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x018c)
-#define INTEL_ARC_MMIO_PLANE_A_IMAGE_SIZE		(INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x0190)
-#define INTEL_ARC_MMIO_PLANE_A_SURFACE			(INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x019c)
-#define INTEL_ARC_MMIO_PORT_A					(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x4000)
-#define INTEL_ARC_MMIO_PORT_B					(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x4100)
-#define INTEL_ARC_MMIO_PORT_C					(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x4200)
-#define INTEL_ARC_MMIO_PORT_D					(INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x4300)
-#define INTEL_ARC_MMIO_PCH_MASTER_INT_CTL		0x44200
-#define INTEL_ARC_MMIO_PIPE_INT_MASK(pipe)		(0x44404 + ((pipe) - 1) * 0x10)
-#define INTEL_ARC_MMIO_PIPE_INT_IDENTITY(pipe)	(0x44408 + ((pipe) - 1) * 0x10)
-#define INTEL_ARC_MMIO_PIPE_INT_ENABLE(pipe)	(0x4440c + ((pipe) - 1) * 0x10)
-
-#define INTEL_ARC_PIPE_ENABLED					(1UL << 31)
-#define INTEL_ARC_PIPE_DDI_SELECT_SHIFT		28
-#define INTEL_ARC_PIPE_DDI_SELECT_MASK			(7 << INTEL_ARC_PIPE_DDI_SELECT_SHIFT)
-#define INTEL_ARC_PIPE_DDI_MODE_SHIFT			24
-#define INTEL_ARC_PIPE_DDI_MODE_MASK			(7 << INTEL_ARC_PIPE_DDI_MODE_SHIFT)
-#define INTEL_ARC_PORT_ENABLED					(1UL << 31)
-#define INTEL_ARC_PORT_DETECTED				(1UL << 2)
-#define INTEL_ARC_MASTER_INT_GLOBAL			(1UL << 31)
-#define INTEL_ARC_MASTER_INT_PIPE_PENDING(pipe)	(1UL << (15 + (pipe)))
-#define INTEL_ARC_PIPE_INT_VBLANK				(1UL << 0)
-*/
 
 #define TRACE_INTEL_ARC
 #ifdef TRACE_INTEL_ARC
@@ -535,8 +496,6 @@ probe_display_state(intel_arc_info& info)
         // Height si trova nei 16 bit bassi [15:0], Width nei 16 bit alti [31:16]
         const uint32 height = (shared.pipe_size[pipe] & 0xffff) + 1;
         const uint32 width = ((shared.pipe_size[pipe] >> 16) & 0xffff) + 1;
-		//const uint32 width = (shared.pipe_size[pipe] & 0xffff) + 1;
-		//const uint32 height = (shared.pipe_size[pipe] >> 16) + 1;
 		if (width != 0 && height != 0) {
 			shared.current_mode.virtual_width = width;
 			shared.current_mode.virtual_height = height;
@@ -554,7 +513,7 @@ probe_display_state(intel_arc_info& info)
             dprintf("WARNING: Pipe %u failed resolution check (W=%u, H=%u).\n", pipe, width, height);
         }
         	// Estrazione lane dallo stato hardware al boot
-        	// in origine il valore veniva estratto così ma sembra non sia corretto (SEMBRA)
+        	// Verificare da manuali se il lane width è ai bit 3:1 o 21:19
 		const uint32 ddiWidth = (shared.pipe_ddi_func_ctl[pipe] >> 1) & 0x7; // bit 3:1
 		//const uint32 ddiWidth = (shared.pipe_ddi_func_ctl[pipe] >> 19) & 0x7;
 

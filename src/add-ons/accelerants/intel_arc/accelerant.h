@@ -281,6 +281,22 @@
 #define INTEL_SNPS_PHY_HDMI_16GHZ 16000000000ULL
 #define INTEL_SNPS_PHY_HDMI_9999MHZ (2 * INTEL_SNPS_PHY_HDMI_4999MHZ)
 
+// Offsets Registri Cursor Plane (Pipe A base = 0x70080, Stride Pipe = 0x1000)
+#define INTEL_ARC_MMIO_CUR_CTL_A         0x70080
+#define INTEL_ARC_MMIO_CUR_SURF_A        0x70084
+#define INTEL_ARC_MMIO_CUR_POS_A         0x70088
+
+// Bits per CUR_CTL (Mode selection bits 5:0)
+#define MCURSOR_MODE_DISABLE             0x00
+#define MCURSOR_MODE_64_ARGB8888         0x02  // 64x64 32bpp ARGB
+#define MCURSOR_MODE_128_ARGB8888        0x07  // 128x128 32bpp ARGB
+#define MCURSOR_MODE_256_ARGB8888        0x0A  // 256x256 32bpp ARGB
+#define MCURSOR_PIPE_SELECT_SHIFT        28
+
+// Posizione x/y in CUR_POS
+#define CUR_POS_SIGN_X                   (1 << 15)
+#define CUR_POS_SIGN_Y                   (1 << 31)
+
 #define INTEL_ARC_BMG_PORT_CLOCK_CTL(port)      (0x640E0 + ((port) * 0x100))
 #define   BMG_PORT_CLOCK_CTL_ENABLE              (1U << 31)
 #define   BMG_PORT_CLOCK_CTL_LOCK                (1U << 30)
