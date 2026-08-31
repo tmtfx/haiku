@@ -75,12 +75,13 @@ static const uint32 kDefaultAppFlags = kFlagGetKey | kFlagEnumerateKeys
 #include <sstream>
 
 // Helper interno per stampare i buffer in esadecimale nei log
+/*
 static std::string _BufToHex(const uint8_t* buf, size_t len) {
     std::ostringstream ss;
     for (size_t i = 0; i < len; ++i)
         ss << std::hex << std::setw(2) << std::setfill('0') << (int)buf[i];
     return ss.str();
-}
+}*/
 
 static void LogDebug(const char* format, ...) {
     FILE* f = fopen("/boot/home/keystore_debug.log", "a");
@@ -98,7 +99,8 @@ KeyStoreServer::KeyStoreServer()
 	BApplication(kKeyStoreServerSignature),
 	fMasterKeyring(NULL),
 	fKeyrings(20),
-	fHasSessionPassword(false)
+	fHasSessionPassword(false),
+	fSessionPasswordValidated(false)
 {
 	BPath path;
 	if (find_directory(B_USER_SETTINGS_DIRECTORY, &path) != B_OK)
@@ -487,6 +489,7 @@ KeyStoreServer::MessageReceived(BMessage* message)
 
 		case KEY_STORE_GET_ENCRYPTED_KEY:
 		{
+			
 			// Ensure we have the session password before decrypting.
 			result = _GetOrAskSessionPassword();
 			if (result != B_OK)
@@ -513,7 +516,7 @@ KeyStoreServer::MessageReceived(BMessage* message)
 			// Decrypt in-place before returning to caller.
 			result = _DecryptKeyData(keyMessage);
 			if (result == B_OK) {
-				fprintf(stderr,"decifratura andata a buon fine, rispondo al mittente\n");
+				//fprintf(stderr,"decifratura andata a buon fine, rispondo al mittente\n");
 				reply.AddMessage("key", &keyMessage);
 			} else {
 				fprintf(stderr, "decifratura fallita!!!\n");
@@ -950,36 +953,37 @@ static const uint8 kEmptyStringBlake2b64[64] = {
 status_t
 KeyStoreServer::_GetOrAskSessionPassword()
 {
-	LogDebug("[DEBUG] Inizio _GetOrAskSessionPassword, fHasSessionPassword: %d\n", fHasSessionPassword);
-	if (fHasSessionPassword)
+	//LogDebug("[DEBUG] Inizio _GetOrAskSessionPassword, fHasSessionPassword: %d\n", fHasSessionPassword);
+	if (fHasSessionPassword && fSessionPasswordValidated)
 		return B_OK;
 
 	// Verifichiamo se l'utente ha configurato una password vuota all'installazione (oscuramento).
 	// Se la password è vuota, l'hash memorizzato in shadow coincide con blake2b(salt).
+	const void* shadowSalt = NULL;
+	ssize_t saltLen = 0;
+	const void* shadowHash = NULL;
+	ssize_t hashLen = 0;
 	BPath settingsDir;
 	if (find_directory(B_USER_SETTINGS_DIRECTORY, &settingsDir) == B_OK) {
-		LogDebug("[DEBUG] settingsDir: %s\n", settingsDir.Path());
+		//LogDebug("[DEBUG] settingsDir: %s\n", settingsDir.Path());
 		BPath shadowPath(settingsDir.Path(), "shadow");
 		BFile shadowFile(shadowPath.Path(), B_READ_ONLY);
 		if (shadowFile.InitCheck() == B_OK) {
-			LogDebug("[DEBUG] shadow file trovato\n");
+			//LogDebug("[DEBUG] shadow file trovato\n");
 			BMessage shadowMsg;
 			if (shadowMsg.Unflatten(&shadowFile) == B_OK) {
-				LogDebug("[DEBUG] shadow unflattened\n");
-				const void* shadowSalt = NULL;
-				ssize_t saltLen = 0;
-				const void* shadowHash = NULL;
-				ssize_t hashLen = 0;
+				//LogDebug("[DEBUG] shadow unflattened\n");
+				
 				if (shadowMsg.FindData("salt", B_RAW_TYPE, &shadowSalt, &saltLen) == B_OK && saltLen == 16 &&
 					shadowMsg.FindData("hash", B_RAW_TYPE, &shadowHash, &hashLen) == B_OK && hashLen == 64) {
-					LogDebug("[DEBUG] salt e hash trovati in shadow. saltLen: %zd, hashLen: %zd\n", saltLen, hashLen);
+					//LogDebug("[DEBUG] salt e hash trovati in shadow. saltLen: %zd, hashLen: %zd\n", saltLen, hashLen);
 					
 					char saltHex[33];
 					for (int i = 0; i < 16; i++) sprintf(saltHex + i*2, "%02x", ((const uint8*)shadowSalt)[i]);
 					char hashHex[129];
 					for (int i = 0; i < 64; i++) sprintf(hashHex + i*2, "%02x", ((const uint8*)shadowHash)[i]);
-					LogDebug("[DEBUG] shadow salt: %s\n", saltHex);
-					LogDebug("[DEBUG] shadow hash: %s\n", hashHex);
+					//LogDebug("[DEBUG] shadow salt: %s\n", saltHex);
+					//LogDebug("[DEBUG] shadow hash: %s\n", hashHex);
 					
 					BCrypto crypto;
 					if (crypto.InitCheck() == B_OK) {
@@ -987,12 +991,13 @@ KeyStoreServer::_GetOrAskSessionPassword()
 						if (crypto.Digest(B_CRYPTO_BLAKE2B, shadowSalt, 16, computedHash) == B_OK) {
 							char compHex[129];
 							for (int i = 0; i < 64; i++) sprintf(compHex + i*2, "%02x", computedHash[i]);
-							LogDebug("[DEBUG] computed hash: %s\n", compHex);
+							//LogDebug("[DEBUG] computed hash: %s\n", compHex);
 							
 							if (memcmp(computedHash, shadowHash, 64) == 0) {
-								LogDebug("[DEBUG] Match! Password vuota rilevata. Imposto fSessionPassword = \"\"\n");
+								//LogDebug("[DEBUG] Match! Password vuota rilevata. Imposto fSessionPassword = \"\"\n");
 								fSessionPassword = "";
 								fHasSessionPassword = true;
+								fSessionPasswordValidated = true;
 								return B_OK;
 							} else {
 								LogDebug("[DEBUG] Hash NON corrisponde.\n");
@@ -1035,10 +1040,63 @@ KeyStoreServer::_GetOrAskSessionPassword()
 		return B_BAD_VALUE;
 	}
 	
-	fSessionPassword = password;
-	fHasSessionPassword = true;
-	LogDebug("[DEBUG] Password impostata da finestra: %s\n", fSessionPassword.String());
-	return B_OK;
+	fSessionPasswordValidated = false;
+	// validazione password
+	const char* passw = password.String();
+	size_t passLen = strlen(passw);
+	size_t inputLen = passLen + saltLen;
+	uint8* input = new(std::nothrow) uint8[inputLen];
+	if (input == NULL) {
+        LogDebug("[DEBUG] Impossibile allocare memoria per il buffer di hashing\n");
+        return B_NO_MEMORY;
+    }
+	memcpy(input, passw, passLen);
+	memcpy(input + passLen, shadowSalt, saltLen);
+	BCrypto crypto;
+    status_t err = crypto.InitCheck();
+    if (err != B_OK) {
+        delete[] input;
+        LogDebug("[DEBUG] BCrypto InitCheck fallito durante la validazione\n");
+        return err;
+    }
+
+    uint8 hash[64];
+	err = crypto.Digest(B_CRYPTO_BLAKE2B, input, inputLen, hash);
+    delete[] input; // Libera la memoria dinamica allocata
+
+    if (err != B_OK) {
+        LogDebug("[DEBUG] Crypto Digest fallito durante la validazione\n");
+        return err;
+    }
+
+    // Logging esadecimale (facoltativo, con dimensione array corretta a 129)
+    char hashHex[129];
+    for (int i = 0; i < 64; i++) {
+        sprintf(hashHex + i * 2, "%02x", hash[i]);
+    }
+    LogDebug("[DEBUG] Hash calcolato da input: %s\n", hashHex);
+    
+    // Confronto binario tra hash calcolato e shadowHash memorizzato
+    if (memcmp(hash, shadowHash, 64) == 0) {
+        LogDebug("[DEBUG] Password corretta! Validazione riuscita.\n");
+        fSessionPassword = password;
+        fHasSessionPassword = true;
+        fSessionPasswordValidated = true;
+        return B_OK;
+    } else {
+        LogDebug("[DEBUG] Password errata. Hash non corrispondente.\n");
+        fSessionPassword = password;
+        fHasSessionPassword = true;
+        fSessionPasswordValidated = false;
+        return B_PERMISSION_DENIED;
+    }
+	
+	
+	//fSessionPassword = password;
+	//fSessionPasswordValidated = false;
+	//fHasSessionPassword = true;
+	//LogDebug("[DEBUG] Password impostata da finestra: %s\n", fSessionPassword.String());
+	//return B_OK;
 }
 
 
@@ -1046,7 +1104,7 @@ KeyStoreServer::_GetOrAskSessionPassword()
 status_t
 KeyStoreServer::_EncryptKeyData(BMessage& keyMessage)
 {
-    fprintf(stderr, "[DEBUG SERVER] === INIZIO _EncryptKeyData (OpenSSL RSA) ===\n");
+    //fprintf(stderr, "[DEBUG SERVER] === INIZIO _EncryptKeyData (OpenSSL RSA) ===\n");
 
     // 1. Recuperiamo i dati in chiaro dal messaggio
     const void* plainData = NULL;
@@ -1145,14 +1203,14 @@ KeyStoreServer::_EncryptKeyData(BMessage& keyMessage)
     keyMessage.SetBool("encrypted", true);
 
     delete[] outBuf;
-    fprintf(stderr, "[DEBUG SERVER] Cifratura RSA completata con successo! Ciphertext len: %zu\n", outLen);
-    fprintf(stderr, "[DEBUG SERVER] === FINE _EncryptKeyData ===\n");
+    //fprintf(stderr, "[DEBUG SERVER] Cifratura RSA completata con successo! Ciphertext len: %zu\n", outLen);
+    //fprintf(stderr, "[DEBUG SERVER] === FINE _EncryptKeyData ===\n");
     return B_OK;
 }
 status_t
 KeyStoreServer::_DecryptKeyData(BMessage& keyMessage)
 {
-    fprintf(stderr, "[DEBUG CRYPTO-READ] === INIZIO _DecryptKeyData (RSA Asimmetrico) ===\n");
+    //fprintf(stderr, "[DEBUG CRYPTO-READ] === INIZIO _DecryptKeyData (RSA Asimmetrico) ===\n");
 
     // 1. Verifichiamo se il record è marcato come cifrato
     bool encrypted = false;
@@ -1169,8 +1227,8 @@ KeyStoreServer::_DecryptKeyData(BMessage& keyMessage)
         return B_BAD_DATA;
     }
 
-    fprintf(stderr, "[DEBUG CRYPTO-READ] Ciphertext RSA recuperato (Len: %" B_PRIdSSIZE "): %s\n", 
-        encLen, _BufToHex((const uint8_t*)encData, encLen).c_str());
+    //fprintf(stderr, "[DEBUG CRYPTO-READ] Ciphertext RSA recuperato (Len: %" B_PRIdSSIZE "): %s\n", 
+    //    encLen, _BufToHex((const uint8_t*)encData, encLen).c_str());
 
     // ==========================================================
     // ESTRAZIONE VOLATILE DELLA CHIAVE PRIVATA RSA (ON-DEMAND)
@@ -1180,7 +1238,7 @@ KeyStoreServer::_DecryptKeyData(BMessage& keyMessage)
         fprintf(stderr, "[DEBUG CRYPTO-READ] ERRORE CRITICO: Impossibile sbloccare la chiave privata RSA dal master file!\n");
         return B_NOT_ALLOWED; 
     }
-    fprintf(stderr, "[DEBUG CRYPTO-READ] Chiave privata RSA sbloccata correttamente ed estratta in RAM.\n");
+    //fprintf(stderr, "[DEBUG CRYPTO-READ] Chiave privata RSA sbloccata correttamente ed estratta in RAM.\n");
 
     // 3. Inizializziamo il contesto di decifratura OpenSSL EVP
     EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new(privateKey, NULL);
@@ -1245,14 +1303,14 @@ KeyStoreServer::_DecryptKeyData(BMessage& keyMessage)
     EVP_PKEY_CTX_free(ctx);
     EVP_PKEY_free(privateKey); // <--- La chiave privata RSA non esiste più nella RAM del server
     
-    fprintf(stderr, "[DEBUG CRYPTO-READ] === FINE _DecryptKeyData (Memoria ripulita) ===\n");
+    //fprintf(stderr, "[DEBUG CRYPTO-READ] === FINE _DecryptKeyData (Memoria ripulita) ===\n");
     return result;
 }
 
 EVP_PKEY*
 KeyStoreServer::_DecryptMasterPrivateKey()
 {
-	LogDebug("[DEBUG] Inizio _DecryptMasterPrivateKey\n");
+	//LogDebug("[DEBUG] Inizio _DecryptMasterPrivateKey\n");
     status_t sessionCheck = _GetOrAskSessionPassword();
     
     if (sessionCheck != B_OK || !fHasSessionPassword) {
@@ -1283,7 +1341,7 @@ KeyStoreServer::_DecryptMasterPrivateKey()
     // Rigeneriamo la chiave AES-256 (1000 round SHA256 manuali con OpenSSL)
     size_t passLen = fSessionPassword.Length();
     size_t inputLen = passLen + 16;
-    LogDebug("[DEBUG] passLen: %zu, inputLen: %zu\n", passLen, inputLen);
+    //LogDebug("[DEBUG] passLen: %zu, inputLen: %zu\n", passLen, inputLen);
     uint8_t* kdfInput = new(std::nothrow) uint8_t[inputLen];
     if (kdfInput == NULL) return NULL;
 
@@ -1305,7 +1363,7 @@ KeyStoreServer::_DecryptMasterPrivateKey()
 
     char aesKeyHex[65];
     for (int i = 0; i < 32; i++) sprintf(aesKeyHex + i*2, "%02x", aesKey[i]);
-    LogDebug("[DEBUG] aesKey derivata: %s\n", aesKeyHex);
+    //LogDebug("[DEBUG] aesKey derivata: %s\n", aesKeyHex);
 
     // ==========================================
     // LIVELLO 2: Estrazione e Decifratura OpenSSL Nativa
@@ -1322,7 +1380,7 @@ KeyStoreServer::_DecryptMasterPrivateKey()
         LogDebug("[DEBUG] GetAttrInfo fallito\n");
         return NULL;
     }
-    LogDebug("[DEBUG] Dimensione attributo crypto:private_key: %lld\n", attrInfo.size);
+    //LogDebug("[DEBUG] Dimensione attributo crypto:private_key: %lld\n", attrInfo.size);
 
     uint8_t* attrData = new(std::nothrow) uint8_t[attrInfo.size];
     if (attrData == NULL) return NULL;
@@ -1340,8 +1398,8 @@ KeyStoreServer::_DecryptMasterPrivateKey()
     
     char ivHex[33];
     for (int i = 0; i < 16; i++) sprintf(ivHex + i*2, "%02x", iv[i]);
-    LogDebug("[DEBUG] IV letto: %s\n", ivHex);
-    LogDebug("[DEBUG] encPrivLen: %zu\n", encPrivLen);
+    //LogDebug("[DEBUG] IV letto: %s\n", ivHex);
+    //LogDebug("[DEBUG] encPrivLen: %zu\n", encPrivLen);
 
     uint8_t* privDer = new(std::nothrow) uint8_t[encPrivLen];
     if (privDer == NULL) {
@@ -1381,19 +1439,19 @@ KeyStoreServer::_DecryptMasterPrivateKey()
         return NULL;
     }
 
-    LogDebug("[DEBUG] Decifrato con successo! Output len: %d\n", privLen);
+    //LogDebug("[DEBUG] Decifrato con successo! Output len: %d\n", privLen);
     char derHex[13];
     for (int i = 0; i < 4 && i < privLen; i++) sprintf(derHex + i*2, "%02x", privDer[i]);
-    LogDebug("[DEBUG] Primi byte decifrati: %s\n", derHex);
+    //LogDebug("[DEBUG] Primi byte decifrati: %s\n", derHex);
 
     // Proviamo a ricostruire la chiave
     const unsigned char* p = privDer;
     EVP_PKEY* privKey = d2i_PrivateKey(EVP_PKEY_RSA, NULL, &p, privLen);
     if (privKey == NULL) {
         LogDebug("[DEBUG] d2i_PrivateKey fallito\n");
-    } else {
-        LogDebug("[DEBUG] EVP_PKEY ricostruito con successo!\n");
-    }
+    } //else {
+    //    LogDebug("[DEBUG] EVP_PKEY ricostruito con successo!\n");
+    //}
 
     secure_memzero_server(privDer, privLen);
     delete[] privDer;

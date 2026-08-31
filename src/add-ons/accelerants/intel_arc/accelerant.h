@@ -1,0 +1,358 @@
+/*
+ * Copyright 2026, Haiku contributors.
+ * Distributed under the terms of the MIT License.
+ *
+ * Minimal shared accelerant state for intel_arc.accelerant.
+ */
+
+#pragma once
+
+#include "intel_arc.h"
+#include <memory_manager.h>
+#include <edid.h>
+
+/* Pipe & Transcoder Block Base (Transcoder A) */
+#define INTEL_ARC_MMIO_PIPE_BLOCK_BASE          0x60000
+#define INTEL_ARC_MMIO_PIPE_OFFSET              0x1000
+/* DisplayPort AUX Channel Registers (Display 13+) */
+#define INTEL_ARC_MMIO_AUX_CH_CTL_A             (INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x4010) // 0x64010
+#define INTEL_ARC_MMIO_AUX_CH_DATA1_A           (INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x4014) // 0x64014
+#define INTEL_ARC_MMIO_AUX_CHANNEL_STRIDE       0x100
+/* Transcoder Timing Registers (Pipe A) */
+#define INTEL_ARC_MMIO_PIPE_A_HTOTAL            (INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0000) // 0x60000
+#define INTEL_ARC_MMIO_PIPE_A_HBLANK           (INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0004) // 0x60004
+#define INTEL_ARC_MMIO_PIPE_A_HSYNC            (INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0008) // 0x60008
+#define INTEL_ARC_MMIO_PIPE_A_VTOTAL            (INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x000c) // 0x6000C
+#define INTEL_ARC_MMIO_PIPE_A_VBLANK            (INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0010) // 0x60010
+#define INTEL_ARC_MMIO_PIPE_A_VSYNC             (INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0014) // 0x60014
+#define INTEL_ARC_MMIO_PIPE_A_SIZE              (INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x001c) // 0x6001C
+/* Transcoder Control & Data M/N Registers */
+#define INTEL_ARC_MMIO_PIPE_A_DDI_FUNC_CTL      (INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0400) // 0x60400
+#define INTEL_ARC_MMIO_DDI_PIPE_A_DATA_M        (INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0030) // 0x60030
+#define INTEL_ARC_MMIO_DDI_PIPE_A_DATA_N        (INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0034) // 0x60034
+#define INTEL_ARC_MMIO_DDI_PIPE_A_LINK_M        (INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0040) // 0x60040
+#define INTEL_ARC_MMIO_DDI_PIPE_A_LINK_N        (INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0044) // 0x60044
+#define INTEL_ARC_MMIO_DDI_BUF_CTL_A            (INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x4000) // 0x64000
+/* Synopsys PHY Registers (DG2 / Alchemist) */
+#define INTEL_ARC_MMIO_SNPS_PHY_A_BASE          0x168000
+#define INTEL_ARC_MMIO_SNPS_PHY_B_BASE          0x169000
+#define INTEL_ARC_MMIO_SNPS_PHY_MPLLB_CP(base)      ((base) + 0x000)
+#define INTEL_ARC_MMIO_SNPS_PHY_MPLLB_DIV(base)     ((base) + 0x004)
+#define INTEL_ARC_MMIO_SNPS_PHY_MPLLB_FRACN1(base)  ((base) + 0x008)
+#define INTEL_ARC_MMIO_SNPS_PHY_MPLLB_FRACN2(base)  ((base) + 0x00c)
+#define INTEL_ARC_MMIO_SNPS_PHY_MPLLB_SSCEN(base)   ((base) + 0x014)
+#define INTEL_ARC_MMIO_SNPS_PHY_MPLLB_SSCSTEP(base) ((base) + 0x018)
+#define INTEL_ARC_MMIO_SNPS_PHY_MPLLB_DIV2(base)    ((base) + 0x01c)
+#define INTEL_ARC_MMIO_SNPS_PHY_REF_CONTROL(base)   ((base) + 0x188)
+#define INTEL_ARC_MMIO_SNPS_PHY_TX_EQ(base, lane) ((base) + 0x300 + (lane) * 0x10)
+#define INTEL_ARC_SNPS_PHY_MPLLB_FORCE_EN       (1U << 31)
+#define INTEL_ARC_SNPS_PHY_MPLLB_DIV_CLK_EN     (1U << 30)
+#define INTEL_ARC_SNPS_PHY_MPLLB_DIV5_CLK_EN    (1U << 29)
+#define INTEL_ARC_SNPS_PHY_MPLLB_V2I_SHIFT      26
+#define INTEL_ARC_SNPS_PHY_MPLLB_FREQ_VCO_SHIFT 24
+#define INTEL_ARC_SNPS_PHY_MPLLB_PMIX_EN        (1U << 10)
+#define INTEL_ARC_SNPS_PHY_MPLLB_DP2_MODE       (1U << 9)
+#define INTEL_ARC_SNPS_PHY_MPLLB_WORD_DIV2_EN   (1U << 8)
+#define INTEL_ARC_SNPS_PHY_MPLLB_TX_CLK_DIV_SHIFT 5
+#define INTEL_ARC_SNPS_PHY_MPLLB_SHIM_DIV32_CLK_SEL (1U << 0)
+#define INTEL_ARC_SNPS_PHY_MPLLB_FRACN_EN       (1U << 31)
+#define INTEL_ARC_SNPS_PHY_MPLLB_FRACN_CGG_UPDATE_EN (1U << 30)
+#define INTEL_ARC_SNPS_PHY_MPLLB_SSC_EN         (1U << 31)
+#define INTEL_ARC_SNPS_PHY_MPLLB_SSC_UP_SPREAD  (1U << 30)
+/* Plane Block Base & Universal Plane Registers (Pipe A, Plane 1) */
+#define INTEL_ARC_MMIO_PLANE_BLOCK_BASE         0x70000
+#define INTEL_ARC_MMIO_PIPE_A_CONTROL           (INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x0008) // 0x70008 (PIPECONF)
+#define INTEL_ARC_MMIO_PLANE_A_CONTROL          (INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x0180) // 0x70180 (PLANE_CTL)
+#define INTEL_ARC_MMIO_PLANE_A_STRIDE           (INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x0188) // 0x70188 (PLANE_STRIDE)
+#define INTEL_ARC_MMIO_PLANE_A_POS              (INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x018c) // 0x7018C (PLANE_POS)
+#define INTEL_ARC_MMIO_PLANE_A_IMAGE_SIZE       (INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x0190) // 0x70190 (PLANE_SIZE)
+#define INTEL_ARC_MMIO_PLANE_A_KEYVAL           (INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x0194)
+#define INTEL_ARC_MMIO_PLANE_A_KEYMSK           (INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x0198)
+#define INTEL_ARC_MMIO_PLANE_A_SURFACE          (INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x019c) // 0x7019C (PLANE_SURF - VERO BASE ADDRESS)
+#define INTEL_ARC_MMIO_PLANE_A_KEYMAX           (INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x01a0)
+#define INTEL_ARC_MMIO_PLANE_A_OFFSET           (INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x01a4) // 0x701A4 (PLANE_OFFSET)
+#define INTEL_ARC_MMIO_PLANE_B_CONTROL          (INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x0280)
+#define INTEL_ARC_MMIO_PLANE_B_STRIDE           (INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x0288)
+#define INTEL_ARC_MMIO_PLANE_B_POS              (INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x028c)
+#define INTEL_ARC_MMIO_PLANE_B_IMAGE_SIZE       (INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x0290)
+#define INTEL_ARC_MMIO_PLANE_B_KEYVAL           (INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x0294)
+#define INTEL_ARC_MMIO_PLANE_B_KEYMSK           (INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x0298)
+#define INTEL_ARC_MMIO_PLANE_B_SURFACE          (INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x029c)
+#define INTEL_ARC_MMIO_PLANE_B_KEYMAX           (INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x02a0)
+#define INTEL_ARC_MMIO_PLANE_B_OFFSET           (INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x02a4)
+#define INTEL_ARC_MMIO_PLANE_B_COLOR_CTL        (INTEL_ARC_MMIO_PLANE_BLOCK_BASE + 0x02cc)
+/* Pipe scaler registers (sparse per-pipe layout, not pipe-offset based) */
+#define INTEL_ARC_MMIO_PS_1A_CTRL               0x68180
+#define INTEL_ARC_MMIO_PS_2A_CTRL               0x68280
+#define INTEL_ARC_MMIO_PS_1B_CTRL               0x68980
+#define INTEL_ARC_MMIO_PS_2B_CTRL               0x68A80
+#define INTEL_ARC_MMIO_PS_1C_CTRL               0x69180
+#define INTEL_ARC_MMIO_PS_2C_CTRL               0x69280
+#define INTEL_ARC_MMIO_PS_1A_WIN_POS            0x68170
+#define INTEL_ARC_MMIO_PS_2A_WIN_POS            0x68270
+#define INTEL_ARC_MMIO_PS_1B_WIN_POS            0x68970
+#define INTEL_ARC_MMIO_PS_2B_WIN_POS            0x68A70
+#define INTEL_ARC_MMIO_PS_1C_WIN_POS            0x69170
+#define INTEL_ARC_MMIO_PS_2C_WIN_POS            0x69270
+#define INTEL_ARC_MMIO_PS_1A_WIN_SIZE           0x68174
+#define INTEL_ARC_MMIO_PS_2A_WIN_SIZE           0x68274
+#define INTEL_ARC_MMIO_PS_1B_WIN_SIZE           0x68974
+#define INTEL_ARC_MMIO_PS_2B_WIN_SIZE           0x68A74
+#define INTEL_ARC_MMIO_PS_1C_WIN_SIZE           0x69174
+#define INTEL_ARC_MMIO_PS_2C_WIN_SIZE           0x69274
+
+/* DisplayPort Transport Pattern Registers (Per-Transcoder) */
+#define INTEL_ARC_MMIO_DP_TP_CTL(pipe)           (INTEL_ARC_MMIO_PIPE_BLOCK_BASE + ((pipe) * INTEL_ARC_MMIO_PIPE_OFFSET) + 0x0540)
+#define INTEL_ARC_MMIO_DP_TP_STATUS(pipe)        (INTEL_ARC_MMIO_PIPE_BLOCK_BASE + ((pipe) * INTEL_ARC_MMIO_PIPE_OFFSET) + 0x0544)
+
+/* DP_TP_CTL Bitfields */
+#define INTEL_ARC_DP_TP_CTL_ENABLE               (1U << 31)
+#define INTEL_ARC_DP_TP_CTL_MODE_SST           (0 << 27)
+#define INTEL_ARC_DP_TP_CTL_MODE_MST           (1 << 27)
+#define INTEL_ARC_DP_TP_CTL_LINK_TRAIN_PAT4      (4U << 27)
+#define INTEL_ARC_DP_TP_CTL_LINK_TRAIN_MASK    (7 << 8)
+#define INTEL_ARC_DP_TP_CTL_LINK_TRAIN_PAT1    (0 << 8)
+#define INTEL_ARC_DP_TP_CTL_LINK_TRAIN_PAT2    (1 << 8)
+#define INTEL_ARC_DP_TP_CTL_LINK_TRAIN_PAT3    (2 << 8)
+#define INTEL_ARC_DP_TP_CTL_LINK_TRAIN_NORMAL  (3 << 8)
+
+/* Flags */
+#define INTEL_ARC_PLANE_ENABLE                  (1U << 31)
+//#define INTEL_ARC_DDI_HSYNC_POLARITY_POSITIVE   (1U << 16) // in intel_arc.h
+//#define INTEL_ARC_DDI_VSYNC_POLARITY_POSITIVE   (1U << 17) // in intel_arc.h
+#define INTEL_ARC_PS_SCALER_ENABLE              (1U << 31)
+
+#define INTEL_ARC_DP_AUX_CTL_BUSY				(1U << 31)
+#define INTEL_ARC_DP_AUX_CTL_DONE				(1U << 30)
+#define INTEL_ARC_DP_AUX_CTL_INTERRUPT			(1U << 29)
+#define INTEL_ARC_DP_AUX_CTL_TIMEOUT_ERROR		(1U << 28)
+#define INTEL_ARC_DP_AUX_CTL_TIMEOUT_1600US		(3U << 26)
+#define INTEL_ARC_DP_AUX_CTL_RECEIVE_ERROR		(1U << 25)
+#define INTEL_ARC_DP_AUX_CTL_MSG_SIZE_SHIFT		20
+#define INTEL_ARC_DP_AUX_CTL_MSG_SIZE_MASK		(0x1fU << 20)
+#define INTEL_ARC_DP_AUX_CTL_FW_SYNC_PULSE_SKL(c) (((c) - 1) << 5)
+#define INTEL_ARC_DP_AUX_CTL_SYNC_PULSE_SKL(c)	((c) - 1)
+#define INTEL_ARC_DDI_MN_TU_SIZE_MASK			(0x3fU << 25)
+
+//#define INTEL_ARC_PIPE_ENABLED					(1U << 31) //in intel_arc.h
+#ifdef INTEL_ARC_PIPE_ENABLED
+#undef INTEL_ARC_PIPE_ENABLED
+#define INTEL_ARC_PIPE_ENABLED					(1U << 31)
+#endif
+
+#define INTEL_ARC_PIPE_DDI_FUNC_CTL_ENABLE		(1U << 31) //in intel_arc.h INTEL_ARC_PIPE_DDI_FUNC_ENABLE
+
+//#define INTEL_ARC_PIPE_DDI_SELECT_MASK			(7U << 28) //in intel_arc.h
+#ifdef INTEL_ARC_PIPE_DDI_SELECT_MASK
+#undef INTEL_ARC_PIPE_DDI_SELECT_MASK
+#define INTEL_ARC_PIPE_DDI_SELECT_MASK			(7U << 28)
+#endif
+
+// 2. DDI_BUF_CTL (Registro Buffer Fisico 0x64000)
+#define INTEL_ARC_DDI_BUF_PORT_WIDTH_SHIFT      16
+#define INTEL_ARC_DDI_BUF_PORT_WIDTH_MASK       (0xFU << INTEL_ARC_DDI_BUF_PORT_WIDTH_SHIFT)
+
+#define INTEL_ARC_PIPE_DDI_MODESEL_MASK			(7U << 24)
+#define INTEL_ARC_PIPE_DDI_MODE_DP_SST			2U
+#define INTEL_ARC_PIPE_DDI_MODE_DP_MST			3U
+//#define INTEL_ARC_PIPE_DDI_BPC_MASK				(7U << 20) //in intel_arc.h
+//#define INTEL_ARC_PIPE_DDI_DP_WIDTH_MASK		(7U << 1)
+//#define INTEL_ARC_PIPE_DDI_DP_WIDTH_SHIFT		1 
+//#define INTEL_ARC_PIPE_DDI_DP_WIDTH_SHIFT		19 // vien fuori all'improvviso che i bit sono 21:19... inutile dire che sono balle
+// 								messo in intel_arc.h
+//#define INTEL_ARC_PIPE_DDI_DP_WIDTH_MASK     (0x7 << INTEL_ARC_PIPE_DDI_DP_WIDTH_SHIFT) //in intel_arc.h
+#define INTEL_ARC_DISPLAY_CONTROL_ENABLED		(1U << 31)
+#define INTEL_ARC_DISPLAY_CONTROL_COLOR_MASK_SKY (0x0fU << 24)
+#define INTEL_ARC_DISPLAY_CONTROL_CMAP8_SKY		(0x0cU << 24)
+#define INTEL_ARC_DISPLAY_CONTROL_RGB16_SKY		(0x0eU << 24)
+#define INTEL_ARC_DISPLAY_CONTROL_RGB32_SKY		(0x04U << 24)
+#define INTEL_ARC_PLANE_CTL_FORMAT_YUV422       (0x0U << 24)
+#define INTEL_ARC_PLANE_CTL_FORMAT_XRGB_8888    (0x4U << 24)
+#define INTEL_ARC_PLANE_CTL_FORMAT_NV12         (0x1U << 24)
+#define INTEL_ARC_PLANE_CTL_KEY_ENABLE_DESTINATION (0x2U << 21)
+#define INTEL_ARC_PLANE_CTL_YUV422_ORDER_YUYV   (0x0U << 16)
+#define INTEL_ARC_PLANE_CTL_COLOR_KEY_ALPHA_ENABLE (1U << 31)
+#define INTEL_ARC_PLANE_COLOR_CSC_MODE_YUV601_TO_RGB601 (0x1U << 17)
+#define INTEL_ARC_DDI_BUF_CTL_ENABLE			(1U << 31)
+#define INTEL_ARC_DDI_BUF_TRANS_SELECT(n)		((uint32)(n) << 24)
+#define INTEL_ARC_DDI_PORT_WIDTH(width)			(((uint32)(width) - 1) << 1)
+#define INTEL_ARC_DDI_BUF_IS_IDLE				(1U << 7)
+#define INTEL_ARC_DDI_BUF_EMP_MASK				(0xfU << 24)
+
+#define INTEL_ARC_DP_LINK_RATE_810				0x1e
+#define INTEL_ARC_DP_LINK_RATE_1350				0x2a
+#define INTEL_ARC_DP_LINK_RATE_2000				0x32
+
+#define INTEL_ARC_TGL_DPCLKA_CFGCR0				0x164280
+#define INTEL_ARC_TGL_DPCLKA_DDIC_CLOCK_OFF		(1U << 24)
+#define INTEL_ARC_TGL_DPCLKA_DDIB_CLOCK_OFF		(1U << 11)
+#define INTEL_ARC_TGL_DPCLKA_DDIA_CLOCK_OFF		(1U << 10)
+#define INTEL_ARC_TGL_DPCLKA_DDIC_CLOCK_SELECT	(3U << 4)
+#define INTEL_ARC_TGL_DPCLKA_DDIB_CLOCK_SELECT	(3U << 2)
+#define INTEL_ARC_TGL_DPCLKA_DDIB_CLOCK_SELECT_SHIFT 2
+#define INTEL_ARC_TGL_DPCLKA_DDIA_CLOCK_SELECT	(3U << 0)
+
+#define INTEL_ARC_TGL_DPLL0_CFGCR0				0x164284
+#define INTEL_ARC_TGL_DPLL1_CFGCR0				0x16428C
+#define INTEL_ARC_TGL_DPLL4_CFGCR0				0x164294
+#define INTEL_ARC_TGL_DPLL_DCO_FRACTION_SHIFT	10
+#define INTEL_ARC_TGL_DPLL0_CFGCR1				0x164288
+#define INTEL_ARC_TGL_DPLL1_CFGCR1				0x164290
+#define INTEL_ARC_TGL_DPLL4_CFGCR1				0x164298
+#define INTEL_ARC_TGL_DPLL_QDIV_RATIO_SHIFT		10
+#define INTEL_ARC_TGL_DPLL_QDIV_ENABLE			(1U << 9)
+#define INTEL_ARC_TGL_DPLL_KDIV_1				(1U << 6)
+#define INTEL_ARC_TGL_DPLL_KDIV_2				(2U << 6)
+#define INTEL_ARC_TGL_DPLL_KDIV_3				(4U << 6)
+#define INTEL_ARC_TGL_DPLL_PDIV_2				(1U << 2)
+#define INTEL_ARC_TGL_DPLL_PDIV_3				(2U << 2)
+#define INTEL_ARC_TGL_DPLL_PDIV_5				(4U << 2)
+#define INTEL_ARC_TGL_DPLL_PDIV_7				(8U << 2)
+#define INTEL_ARC_TGL_DPLL_BASE_ENABLE			0x46010
+#define INTEL_ARC_TGL_DPLL0_ENABLE				0x46010
+#define INTEL_ARC_TGL_DPLL1_ENABLE				0x46014
+#define INTEL_ARC_TGL_DPLL4_ENABLE				0x46018
+#define INTEL_ARC_TGL_DPLL_ENABLE				(1U << 31)
+#define INTEL_ARC_TGL_DPLL_LOCK					(1U << 30)
+#define INTEL_ARC_TGL_DPLL_POWER_ENABLE			(1U << 27)
+#define INTEL_ARC_TGL_DPLL_POWER_STATE			(1U << 26)
+#define INTEL_ARC_TGL_DPLL0_SPREAD_SPECTRUM		0x164B10
+#define INTEL_ARC_TGL_DPLL1_SPREAD_SPECTRUM		0x164C10
+#define INTEL_ARC_TGL_DPLL4_SPREAD_SPECTRUM		0x164E10
+#define INTEL_ARC_TGL_DPLL_SSC_ENABLE			(1U << 9)
+
+#define INTEL_ARC_CX0_M2P_CTL_A_LN0			0x64040
+#define INTEL_ARC_CX0_M2P_CTL_B_LN0			0x64140
+#define INTEL_ARC_CX0_M2P_CTL_USBC1_LN0			0x16F240
+#define INTEL_ARC_CX0_M2P_CTL_USBC2_LN0			0x16F440
+#define INTEL_ARC_CX0_P2M_STATUS_OFFSET			0x8
+#define INTEL_ARC_CX0_TIMER_A_LN0				0x640d8
+#define INTEL_ARC_CX0_TIMER_B_LN0				0x641d8
+#define INTEL_ARC_CX0_TIMER_USBC1_LN0			0x16f258
+#define INTEL_ARC_CX0_TIMER_USBC2_LN0			0x16f458
+#define INTEL_ARC_CX0_M2P_TRANSACTION_PENDING		(1U << 31)
+#define INTEL_ARC_CX0_M2P_COMMAND_WRITE_UNCOMMITTED	(0x1U << 27)
+#define INTEL_ARC_CX0_M2P_COMMAND_WRITE_COMMITTED	(0x2U << 27)
+#define INTEL_ARC_CX0_M2P_COMMAND_READ			(0x3U << 27)
+#define INTEL_ARC_CX0_M2P_DATA(val)				(((uint32)(val) & 0xff) << 16)
+#define INTEL_ARC_CX0_M2P_TRANSACTION_RESET		(1U << 15)
+#define INTEL_ARC_CX0_M2P_ADDRESS(val)			((uint32)(val) & 0xfff)
+#define INTEL_ARC_CX0_P2M_RESPONSE_READY			(1U << 31)
+#define INTEL_ARC_CX0_P2M_COMMAND_READ_ACK		0x4U
+#define INTEL_ARC_CX0_P2M_COMMAND_WRITE_ACK		0x5U
+#define INTEL_ARC_CX0_P2M_COMMAND_TYPE_MASK		(0xfU << 27)
+#define INTEL_ARC_CX0_P2M_DATA_MASK				(0xffU << 16)
+#define INTEL_ARC_CX0_P2M_ERROR_SET				(1U << 15)
+#define INTEL_ARC_CX0_MSGBUS_TIMEOUT_MS			1000
+#define INTEL_ARC_CX0_TIMER_VALUE				0x0000a000
+
+#define INTEL_ARC_C10_VDR_CMN(idx)				(0xC20 + (idx))
+#define INTEL_ARC_C10_CMN3_TXVBOOST_MASK		(7U << 5)
+#define INTEL_ARC_C10_CMN3_TXVBOOST(val)		(((uint8)(val) & 0x7) << 5)
+#define INTEL_ARC_C10_VDR_TX(idx)				(0xC30 + (idx))
+#define INTEL_ARC_C10_TX1_TERMCTL_MASK			(7U << 5)
+#define INTEL_ARC_C10_TX1_TERMCTL(val)			(((uint8)(val) & 0x7) << 5)
+#define INTEL_ARC_C10_VDR_CONTROL(idx)			(0xC70 + (idx) - 1)
+#define INTEL_ARC_C10_VDR_CTRL_MSGBUS_ACCESS	(1U << 2)
+#define INTEL_ARC_C10_VDR_CTRL_MASTER_LANE		(1U << 1)
+#define INTEL_ARC_C10_VDR_CTRL_UPDATE_CFG		(1U << 0)
+#define INTEL_ARC_C10_VDR_OVRD					0xD71
+#define INTEL_ARC_C10_VDR_OVRD_TX1				(1U << 0)
+#define INTEL_ARC_C10_VDR_OVRD_TX2				(1U << 2)
+#define INTEL_ARC_C10_VDR_PRE_OVRD_TX1			0xD80
+#define INTEL_ARC_C10_PHY_OVRD_LEVEL_MASK		0x3fU
+#define INTEL_ARC_C10_PHY_OVRD_LEVEL(val)		((uint8)(val) & 0x3f)
+#define INTEL_ARC_CX0_VDROVRD_CTL(lane, tx, control) \
+	(INTEL_ARC_C10_VDR_PRE_OVRD_TX1 + (((lane) ^ (tx)) * 0x10) + (control))
+#define INTEL_ARC_PHY_C20_VDR_CUSTOM_SERDES_RATE	0xD00
+#define INTEL_ARC_PHY_C20_IS_DP					(1U << 6)
+#define INTEL_ARC_PHY_C20_DP_RATE(val)			(((uint8)(val) & 0xf) << 1)
+#define INTEL_ARC_PHY_C20_CONTEXT_TOGGLE			(1U << 0)
+#define INTEL_ARC_PHY_C20_VDR_CUSTOM_WIDTH		0xD02
+#define INTEL_ARC_PHY_C20_CUSTOM_WIDTH(val)		((uint8)(val) & 0x3)
+
+#define INTEL_ARC_PLANE_TILED_MASK   (0x7 << 10)
+#define INTEL_ARC_PLANE_LINEAR       (0x0 << 10)
+
+#define INTEL_ARC_LGC_PALETTE_BASE				0x4A000
+#define INTEL_ARC_GAMMA_MODE_BASE				0x60090
+
+#define INTEL_SNPS_PHY_HDMI_4999MHZ 4999999900ULL
+#define INTEL_SNPS_PHY_HDMI_16GHZ 16000000000ULL
+#define INTEL_SNPS_PHY_HDMI_9999MHZ (2 * INTEL_SNPS_PHY_HDMI_4999MHZ)
+
+#define INTEL_ARC_BMG_PORT_CLOCK_CTL(port)      (0x640E0 + ((port) * 0x100))
+#define   BMG_PORT_CLOCK_CTL_ENABLE              (1U << 31)
+#define   BMG_PORT_CLOCK_CTL_LOCK                (1U << 30)
+#define   BMG_PORT_CLOCK_CTL_LINK_CLK_EN         (1U << 26)
+#define   BMG_PORT_CLOCK_CTL_MODE_C10            (0U << 24)
+
+#define INTEL_ARC_BMG_CX0_LN0_PHY_BASE(port)    (0x168000 + ((port) * 0x1000))
+#define INTEL_ARC_BMG_CX0_C10_PLL0               0x000
+#define INTEL_ARC_BMG_CX0_C10_PLL1               0x004
+#define INTEL_ARC_BMG_CX0_C10_TX0                0x010
+#define INTEL_ARC_BMG_CX0_C10_TX1                0x014
+#define INTEL_ARC_BMG_CX0_C10_CMN0               0x020
+
+struct arc_mit_buf_trans_entry {
+	uint8	main;
+	uint8	pre;
+	uint8	post;
+};
+
+struct accelerant_info {
+	int						device;
+	bool					is_clone;
+
+	area_id					shared_info_area;
+	intel_arc_shared_info*	shared_info;
+
+	area_id					regs_area;
+	uint8*					registers;
+
+	area_id					mode_list_area;
+	display_mode*			mode_list;
+
+	area_id					frame_buffer_area;
+	void*					frame_buffer;
+	mem_info*				overlay_mem_mgr;
+
+	edid1_info				edid_info;
+	bool					has_edid;
+	uint32					last_hotplug_event_count;
+};
+
+struct intel_arc_overlay_state {
+	overlay_token	token;
+	bool			configured;
+	const overlay_buffer* buffer;
+	overlay_window	window;
+	overlay_view	view;
+};
+
+
+struct intel_arc_overlay_buffer {
+	overlay_buffer publicBuffer;
+	uint32 blockID;
+	uint32 offset;
+	size_t size;
+};
+
+
+struct snps_mpllb_state {
+	uint32 mpllb_cp;
+	uint32 mpllb_div;
+	uint32 mpllb_div2;
+	uint32 mpllb_fracn1;
+	uint32 mpllb_fracn2;
+	uint32 mpllb_sscen;
+	uint32 mpllb_sscstep;
+};
+
+struct snps_hdmi_table_entry {
+	uint32 clockKHz;
+	snps_mpllb_state state;
+};
+
+
+extern accelerant_info* gInfo;

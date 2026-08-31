@@ -224,7 +224,22 @@ static char* dupstr_or_null(const char* s) {
     if (p) memcpy(p, s, n);
     return p;
 }
+/* Questo invece di:
+"parts": [
+  {
+    "thoughtSignature": "EpUECpIE...",
+    "functionCall": {
+      "name": "get_system_stats",
+      "args": {}
+    }
+  }
+]
 
+fa:
+"parts": [
+  { "thoughtSignature": "EpUECpIE..." },
+  { "functionCall": { "name": "get_system_stats", "args": {} } }
+]
 void AppendToolCallToContext(BMessage* context, const char* name, const BMessage* argsMsg, const char* thoughtSignature = nullptr) {
     BMessage messagesMsg;
     if (context->FindMessage("messages", &messagesMsg) != B_OK) {
@@ -248,7 +263,32 @@ void AppendToolCallToContext(BMessage* context, const char* name, const BMessage
     messagesMsg.AddMessage("msg", &toolCallMsg);
     context->RemoveName("messages");
     context->AddMessage("messages", &messagesMsg);
+}*/
+void AppendToolCallToContext(BMessage* context, const char* name, const BMessage* argsMsg, const char* thoughtSignature = nullptr) {
+    BMessage messagesMsg;
+    if (context->FindMessage("messages", &messagesMsg) != B_OK) {
+        // Inizializza se non esiste ancora
+        messagesMsg = BMessage();
+    }
+    
+    BMessage toolCallMsg;
+    toolCallMsg.AddString("type", "functionCall");
+    toolCallMsg.AddString("name", name);
+    if (argsMsg) {
+        toolCallMsg.AddMessage("args", argsMsg);
+    }
+    
+    if (thoughtSignature && strlen(thoughtSignature) > 0 && (unsigned char)thoughtSignature[0] >= 32) {
+        toolCallMsg.AddString("thought_signature", thoughtSignature);
+    }
+    
+    messagesMsg.AddMessage("msg", &toolCallMsg);
+    
+    context->RemoveName("messages");
+    context->AddMessage("messages", &messagesMsg);
 }
+
+/*
 void AppendToolResponseToContext(BMessage* context, const char* name, const char* responseJson) {
     BMessage messagesMsg;
     if (context->FindMessage("messages", &messagesMsg) != B_OK) {
@@ -266,7 +306,26 @@ void AppendToolResponseToContext(BMessage* context, const char* name, const char
     context->RemoveName("messages");
     context->AddMessage("messages", &messagesMsg);
 }
+*/
 
+
+void AppendToolResponseToContext(BMessage* context, const char* name, const char* responseJson) {
+    BMessage messagesMsg;
+    if (context->FindMessage("messages", &messagesMsg) != B_OK) {
+        messagesMsg = BMessage();
+    }
+    
+    BMessage toolRespMsg;
+    toolRespMsg.AddString("type", "functionResponse");
+    toolRespMsg.AddString("name", name);
+    toolRespMsg.AddString("response", responseJson);
+    
+    messagesMsg.AddMessage("msg", &toolRespMsg);
+    
+    context->RemoveName("messages");
+    context->AddMessage("messages", &messagesMsg);
+}
+/*
 static BString EscapeStringForJson(const char* input) {
     if (!input) return "";
     BString escaped;
@@ -283,7 +342,65 @@ static BString EscapeStringForJson(const char* input) {
         p++;
     }
     return escaped;
+}*/
+static BString EscapeStringForJson(const char* input) {
+    if (!input) return "";
+    BString escaped;
+    const char* p = input;
+    while (*p) {
+        switch (*p) {
+            case '\\': escaped << "\\\\"; break;
+            case '"':  escaped << "\\\""; break;
+            case '\n': escaped << "\\n"; break;
+            case '\r': escaped << "\\r"; break;
+            case '\t': escaped << "\\t"; break;
+            case '\b': escaped << "\\b"; break;
+            case '\f': escaped << "\\f"; break;
+            default:   
+                if ((unsigned char)*p < 32) {
+                    // Converte i caratteri di controllo ASCII in \u00XX (es. ESC -> \u001b)
+                    char hex[7];
+                    snprintf(hex, sizeof(hex), "\\u%04x", (unsigned char)*p);
+                    escaped << hex;
+                } else {
+                    escaped << *p;
+                }
+                break;
+        }
+        p++;
+    }
+    return escaped;
 }
+/*
+static BString EscapeStringForJson(const char* input) {
+    if (!input) return "";
+    BString escaped;
+    const unsigned char* p = (const unsigned char*)input;
+
+    while (*p) {
+        switch (*p) {
+            case '\\': escaped << "\\\\"; break;
+            case '"':  escaped << "\\\""; break;
+            case '\b': escaped << "\\b";  break;
+            case '\f': escaped << "\\f";  break;
+            case '\n': escaped << "\\n";  break;
+            case '\r': escaped << "\\r";  break;
+            case '\t': escaped << "\\t";  break;
+            default:
+                if (*p < 0x20) {
+                    // Control character: trasforma in \u00XX
+                    char hexBuf[7];
+                    snprintf(hexBuf, sizeof(hexBuf), "\\u%04x", *p);
+                    escaped << hexBuf;
+                } else {
+                    escaped << (char)*p;
+                }
+                break;
+        }
+        p++;
+    }
+    return escaped;
+}*/
 
 // Funzione helper per iniettare l'intero storico dei messaggi salvato nel BMessage nel JSON di Gemini
 void BuildPayloadFromContext(const BMessage* config, const char* currentPrompt, BString& outPayload, const BString* geminiToolsJson = nullptr){
@@ -328,20 +445,20 @@ void BuildPayloadFromContext(const BMessage* config, const char* currentPrompt, 
                 cleanArgs.ReplaceAll("\r", "\\r");
                 
                 BString tempCall;
-                if (thoughtSig && thoughtSig[0] != '\0') {
-                    BString escapedThought = EscapeStringForJson(thoughtSig);
+		if (thoughtSig && thoughtSig[0] != '\0') {
+			BString escapedThought = EscapeStringForJson(thoughtSig);
 
-                    tempCall << "{\"role\":\"model\",\"parts\":[";
-                    tempCall << "{\"functionCall\":{\"name\":\"" << name << "\",\"args\":" << cleanArgs << "},";
-                    tempCall << "\"thought_signature\":\"" << escapedThought << "\"}";
-                    tempCall << "]}";
-                } else {
-                    tempCall << "{\"role\":\"model\",\"parts\":[";
-                    tempCall << "{\"functionCall\":{\"name\":\"" << name << "\",\"args\":" << cleanArgs << "}}";
-                    tempCall << "]}";
-                }
-                outPayload << tempCall;
-                first = false;
+			tempCall << "{\"role\":\"model\",\"parts\":[";
+			tempCall << "{\"functionCall\":{\"name\":\"" << name << "\",\"args\":" << cleanArgs << "}";
+			tempCall << ",\"thoughtSignature\":\"" << escapedThought << "\"},";
+			tempCall << "]}";
+		} else {
+			tempCall << "{\"role\":\"model\",\"parts\":[";
+			tempCall << "{\"functionCall\":{\"name\":\"" << name << "\",\"args\":" << cleanArgs << "}}";
+			tempCall << "]}";
+		}
+		outPayload << tempCall;
+		first = false;
             } 
             else if (type && strcmp(type, "functionResponse") == 0) {
                 // Storico della risposta del sistema passata all'LLM
@@ -360,11 +477,11 @@ void BuildPayloadFromContext(const BMessage* config, const char* currentPrompt, 
                 }
                 
                 BString tempCall;
-                tempCall.SetToFormat("{\"role\":\"function\",\"parts\":[{\"functionResponse\":{\"name\":\"%s\",\"response\":%s}}]}", name, formattedResponse.String());
-                outPayload << tempCall;
-                first = false;
-            } 
-            else {
+		tempCall.SetToFormat("{\"role\":\"user\",\"parts\":[{\"functionResponse\":{\"name\":\"%s\",\"response\":%s}}]}", name, formattedResponse.String());
+		outPayload << tempCall;
+		first = false;
+
+            } else {
                 // Messaggio standard di testo (User o Assistant)
                 const char* role = nullptr;
                 const char* content = nullptr;
@@ -849,6 +966,8 @@ gemini_stream_thread_func(void* data)
                 executionLoop = false;
                 break;
             }
+            fprintf(stderr, "[GEMINI MCP DEBUG] Target URL: %s\n", targetUrl.String());
+			fprintf(stderr, "[GEMINI MCP DEBUG] Payload inviato:\n%s\n", payload.String());
 
             BHttpRequest* http = dynamic_cast<BHttpRequest*>(req);
             if (http) {
@@ -880,16 +999,34 @@ gemini_stream_thread_func(void* data)
             BString rawResponse((const char*)outNetworkData.Buffer(), outNetworkData.BufferLength());
             BMessage parsedJson;
             bool parseOk = (BJson::Parse(rawResponse.String(), parsedJson) == B_OK);
+            
+            fprintf(stderr, "\n\nLa risposta grezza è: %s\n\n\n",rawResponse.String());
 
             if (httpStatusCode != 200 || !parseOk) {
                 fprintf(stderr, "[GEMINI STREAM WORKER] Errore di rete/HTTP (Status %" B_PRId32 ") o JSON malformato.\n", httpStatusCode);
                 DispatchError(args->server_messenger, httpStatusCode, sessionID, ctxId, rawResponse);
+                fprintf(stderr, "[GEMINI MCP DEBUG] Risposta HTTP %" B_PRId32 " dal server Gemini:\n%s\n", httpStatusCode, rawResponse.String());
                 
                 // Segnala errore visibile anche sul notify_path prima di uscire
                 BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
-                if (streamFile.InitCheck() == B_OK) {
+                /*if (streamFile.InitCheck() == B_OK) {
                     BString guiError;
                     guiError.SetToFormat("\n[Errore API Gemini (%d)]\n", httpStatusCode);
+                    streamFile.Write(guiError.String(), guiError.Length());
+                }*/
+                if (streamFile.InitCheck() == B_OK) {
+                    BString guiError;
+                    BMessage errorDetails;
+                    const char* apiErrorText = nullptr;
+                    if (parseOk && parsedJson.FindMessage("error", &errorDetails) == B_OK) {
+                        errorDetails.FindString("message", &apiErrorText);
+                    }
+
+                    if (apiErrorText && apiErrorText[0] != '\0') {
+                        guiError.SetToFormat("\n[Errore API Gemini (%d): %s]\n", httpStatusCode, apiErrorText);
+                    } else {
+                        guiError.SetToFormat("\n[Errore API Gemini (%d)]\n", httpStatusCode);
+                    }
                     streamFile.Write(guiError.String(), guiError.Length());
                 }
 
@@ -898,26 +1035,167 @@ gemini_stream_thread_func(void* data)
             }
 
             // Parsing della risposta del candidato Gemini
-            BMessage candidates, candZero, contentMsg, partsMsg, partZero;
+			/* questo genera loop infinito di chiamate
+			BMessage candidates, candZero, contentMsg, partsMsg;
+			bool hasCandidates = (parsedJson.FindMessage("candidates", &candidates) == B_OK)
+				&& (candidates.FindMessage("0", &candZero) == B_OK || candidates.FindMessage("msg", 0, &candZero) == B_OK)
+				&& (candZero.FindMessage("content", &contentMsg) == B_OK)
+				&& (contentMsg.FindMessage("parts", &partsMsg) == B_OK);
+			if (hasCandidates) {
+				BMessage functionCallObj;
+				const char* toolName = nullptr;
+				const char* textContent = nullptr;
+				const char* thoughtSig = nullptr;
+				bool hasFunctionCall = false;
+
+				// Cicliamo su tutte le parti restituite per raccogliere firma e chiamata a funzione
+				BMessage partItem;
+				int32 partIndex = 0;
+				while (partsMsg.FindMessage(BString().SetToFormat("%" B_PRId32, partIndex).String(), &partItem) == B_OK ||
+						partsMsg.FindMessage("msg", partIndex, &partItem) == B_OK) {
+					// Estrazione firma (separata o annidata)
+					if (thoughtSig == nullptr) {
+						partItem.FindString("thoughtSignature", &thoughtSig);
+						if (thoughtSig == nullptr) {
+							partItem.FindString("thought_signature", &thoughtSig);
+							if (thoughtSig == nullptr) {
+								fprintf(stderr, "\nNel loop non trovo la firma del pensiero!\n\n");
+							} else {
+								fprintf(stderr,"\nNel loop trovo e assegno la firma del pensiero al secondo colpo: %s\n\n", thoughtSig);
+							}
+						} else {
+							fprintf(stderr,"\nNel loop trovo al primo colpo e assegno la firma del pensiero: %s\n\n", thoughtSig);
+						}
+					}
+					// Estrazione chiamata a funzione
+					if (!hasFunctionCall && partItem.FindMessage("functionCall", &partItem) == B_OK) { // o partItem.FindMessage("functionCall", &functionCallObj)
+						if (partItem.FindMessage("functionCall", &functionCallObj) == B_OK) {
+							if (functionCallObj.FindString("name", &toolName) == B_OK) {
+								hasFunctionCall = true;
+							}
+						} else if (partItem.FindString("name", &toolName) == B_OK) {
+							functionCallObj = partItem;
+							hasFunctionCall = true;
+						}
+					}
+					if (textContent == nullptr) {
+						partItem.FindString("text", &textContent);
+					}
+					partIndex++;
+				}
+				if (hasFunctionCall && toolName != nullptr) {
+					fprintf(stderr, "\nFUNCTION CALL con TOOLNAME\n");
+					BMessage argsMsg;
+					functionCallObj.FindMessage("args", &argsMsg);     
+					if (thoughtSig == nullptr) {
+						functionCallObj.FindString("thoughtSignature", &thoughtSig);
+						fprintf(stderr,"\nNell'oggetto della functionCall trovo al primo colpo e assegno la firma del pensiero: %s\n\n", thoughtSig);
+						if (thoughtSig == nullptr) {
+							functionCallObj.FindString("thought_signature", &thoughtSig);
+							fprintf(stderr,"\nNell'oggetto della functionCall trovo e assegno la firma del pensiero al secondo colpo %s\n\n", thoughtSig);
+						}
+					}
+					//BString safeThoughtSig(toolName);
+					BMessage reqExec(MSG_EXECUTE_TOOL);
+					fprintf(stderr, "\nEseguo comando %s\n\n",toolName);
+					reqExec.AddString("name", toolName);
+					reqExec.AddMessage("arguments", &argsMsg);
+					if (ctxId) reqExec.AddString("context_id", ctxId);
+					BMessage replyExec;
+					BString toolResultBuf;
+					if (args->server_messenger.SendMessage(&reqExec, &replyExec) == B_OK) {
+						const char* resStr = replyExec.FindString("result");
+						if (resStr && strlen(resStr) > 0) {
+							BString testStr(resStr);
+							testStr.Trim();
+							fprintf(stderr, "\nStrumenti ritornati: %s\n\n\n",testStr.String());
+							//if (testStr.StartsWith("{") || testStr.StartsWith("[")) {
+								toolResultBuf = resStr;
+							//} else {
+							//	toolResultBuf = "Operazione completata con successo.";
+							//}
+						} else {
+							toolResultBuf = "{\"error\":\"Il comando sul server ha restituito una risposta vuota.\"}";
+						}
+					} else {
+						toolResultBuf = "{\"error\":\"Esecuzione dello strumento fallita via IPC BMessenger\"}";
+					}
+					BString safeToolName = toolName;
+					BString safeThoughtSig = thoughtSig;
+					
+					AppendToolCallToContext(args->context_copy, safeToolName.String(), &argsMsg, safeThoughtSig.String());
+					fprintf(stderr, "\nAppendToolResponseToContext con toolName %s\n\n", safeToolName.String());
+					AppendToolResponseToContext(args->context_copy, safeToolName.String(), toolResultBuf.String());
+				} else if (textContent != nullptr) {
+					fprintf(stderr, "\nTEXT CONTENT NULL:\n");
+					BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
+					if (streamFile.InitCheck() == B_OK) {
+						streamFile.Write(textContent, strlen(textContent));
+						streamFile.Flush();
+					}
+					executionLoop = false;
+				}
+			} else {
+				fprintf(stderr, "[GEMINI STREAM WORKER] Risposta priva di candidati o non valida.\n");
+				DispatchError(args->server_messenger, httpStatusCode, sessionID, ctxId, rawResponse);
+				executionLoop = false;
+			}*/
+			// Parsing della risposta del candidato Gemini
+            BMessage candidates, candZero, contentMsg, partsMsg;
             bool hasCandidates = (parsedJson.FindMessage("candidates", &candidates) == B_OK)
                 && (candidates.FindMessage("0", &candZero) == B_OK || candidates.FindMessage("msg", 0, &candZero) == B_OK)
                 && (candZero.FindMessage("content", &contentMsg) == B_OK)
-                && (contentMsg.FindMessage("parts", &partsMsg) == B_OK)
-                && (partsMsg.FindMessage("0", &partZero) == B_OK || partsMsg.FindMessage("msg", 0, &partZero) == B_OK);
+                && (contentMsg.FindMessage("parts", &partsMsg) == B_OK);
 
             if (hasCandidates) {
                 BMessage functionCallObj;
                 const char* toolName = nullptr;
                 const char* textContent = nullptr;
+                const char* thoughtSig = nullptr;
+                bool hasFunctionCall = false;
 
-                if (partZero.FindMessage("functionCall", &functionCallObj) == B_OK 
-                    && functionCallObj.FindString("name", &toolName) == B_OK) {
+                BMessage partItem;
+                int32 partIndex = 0;
+                while (partsMsg.FindMessage(BString().SetToFormat("%" B_PRId32, partIndex).String(), &partItem) == B_OK ||
+                        partsMsg.FindMessage("msg", partIndex, &partItem) == B_OK) {
                     
+                    // 1. Estrazione firma del pensiero (senza sovrascrivere variabili)
+                    if (thoughtSig == nullptr) {
+                        if (partItem.FindString("thoughtSignature", &thoughtSig) != B_OK) {
+                            partItem.FindString("thought_signature", &thoughtSig);
+                        }
+                    }
+
+                    // 2. Estrazione chiamata a funzione (usiamo fcTarget separato per evitare di corrompere partItem)
+                    BMessage fcTarget;
+                    if (!hasFunctionCall && partItem.FindMessage("functionCall", &fcTarget) == B_OK) {
+                        if (fcTarget.FindString("name", &toolName) == B_OK) {
+                            functionCallObj = fcTarget;
+                            hasFunctionCall = true;
+                        }
+                    } else if (!hasFunctionCall && partItem.FindString("name", &toolName) == B_OK) {
+                        functionCallObj = partItem;
+                        hasFunctionCall = true;
+                    }
+
+                    // 3. Estrazione testo
+                    if (textContent == nullptr) {
+                        partItem.FindString("text", &textContent);
+                    }
+
+                    partIndex++;
+                }
+
+                if (hasFunctionCall && toolName != nullptr) {
+                    fprintf(stderr, "\n[GEMINI MCP] Richiesta esecuzione Tool: %s\n", toolName);
                     BMessage argsMsg;
-                    functionCallObj.FindMessage("args", &argsMsg);
+                    functionCallObj.FindMessage("args", &argsMsg);     
                     
-                    const char* thoughtSig = nullptr;
-                    partZero.FindString("thought_signature", &thoughtSig);
+                    if (thoughtSig == nullptr) {
+                        if (functionCallObj.FindString("thoughtSignature", &thoughtSig) != B_OK) {
+                            functionCallObj.FindString("thought_signature", &thoughtSig);
+                        }
+                    }
 
                     BMessage reqExec(MSG_EXECUTE_TOOL);
                     reqExec.AddString("name", toolName);
@@ -926,17 +1204,10 @@ gemini_stream_thread_func(void* data)
 
                     BMessage replyExec;
                     BString toolResultBuf;
-
                     if (args->server_messenger.SendMessage(&reqExec, &replyExec) == B_OK) {
                         const char* resStr = replyExec.FindString("result");
                         if (resStr && strlen(resStr) > 0) {
-                            BString testStr(resStr);
-                            testStr.Trim();
-                            if (testStr.StartsWith("{") || testStr.StartsWith("[")) {
-                                toolResultBuf = resStr;
-                            } else {
-                                toolResultBuf = "Operazione completata con successo.";
-                            }
+                            toolResultBuf = resStr;
                         } else {
                             toolResultBuf = "{\"error\":\"Il comando sul server ha restituito una risposta vuota.\"}";
                         }
@@ -944,15 +1215,24 @@ gemini_stream_thread_func(void* data)
                         toolResultBuf = "{\"error\":\"Esecuzione dello strumento fallita via IPC BMessenger\"}";
                     }
 
-                    AppendToolCallToContext(args->context_copy, toolName, &argsMsg, thoughtSig);
-                    AppendToolResponseToContext(args->context_copy, toolName, toolResultBuf.String());
-                } 
-                else if (partZero.FindString("text", &textContent) == B_OK && textContent != nullptr) {
-                    BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
-                    if (streamFile.InitCheck() == B_OK) {
-                        streamFile.Write(textContent, strlen(textContent));
-                        streamFile.Flush();
+                    BString safeToolName = toolName;
+                    BString safeThoughtSig = thoughtSig;
+                    
+                    AppendToolCallToContext(args->context_copy, safeToolName.String(), &argsMsg, safeThoughtSig.String());
+                    AppendToolResponseToContext(args->context_copy, safeToolName.String(), toolResultBuf.String());
+
+                    // executionLoop rimane true: il ciclo prosegue inviando l'output del tool a Gemini
+                } else {
+                    // CASO TESTO / RISPOSTA FINALE: Nessuna chiamata a funzione richiesta
+                    if (textContent != nullptr && strlen(textContent) > 0) {
+                        BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
+                        if (streamFile.InitCheck() == B_OK) {
+                            streamFile.Write(textContent, strlen(textContent));
+                            streamFile.Flush();
+                        }
                     }
+
+                    // FONDAMENTALE: Interrompe il loop sincrono MCP e procede verso thread_post_actions
                     executionLoop = false;
                 }
             } else {

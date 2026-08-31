@@ -98,6 +98,7 @@ SYSTEM_DEMOS += [ FFilterByBuildFeatures
 	FontDemo
 	GLTeapot@mesa
 	$(HAIKU_INCLUDE_TRADEMARKS)Haiku3d@mesa
+	HaikuMCPClient
 	Mandelbrot
 	OverlayImage
 	Pairs
@@ -184,6 +185,7 @@ SYSTEM_ADD_ONS_ACCELERANTS += [ FFilterByBuildFeatures
 	x86,x86_64 @{
 		ati.accelerant
 		intel_810.accelerant
+		intel_arc.accelerant
 		intel_extreme.accelerant
 		matrox.accelerant
 		nvidia.accelerant
@@ -316,6 +318,7 @@ SYSTEM_ADD_ONS_DRIVERS_GRAPHICS += [ FFilterByBuildFeatures
 	x86,x86_64 @{
 		ati
 		intel_810
+		intel_arc
 		intel_extreme
 		matrox
 		nvidia

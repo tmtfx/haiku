@@ -1,0 +1,12 @@
+SubDir HAIKU_TOP src apps hmcp ;
+UseHeaders [ FDirName $(HAIKU_TOP) headers os ai ] : true ;
+
+Application HaikuMCPClient :
+    hmcp.cpp
+    MainWindow.cpp
+    :
+    be
+    localestub
+    libai_api.so
+    [ TargetLibsupc++ ]
+;

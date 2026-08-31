@@ -354,7 +354,7 @@ TBarMenuBar::MouseDown(BPoint where)
 		// Lancia SpielBar; se è già aperta la porta in primo piano
 		status_t err = be_roster->Launch(kSpielBarSignature);
 		if (err == B_ALREADY_RUNNING) {
-			BMessenger(kSpielBarSignature).SendMessage(B_SILENT_RELAUNCH);
+			BMessenger(kSpielBarSignature).SendMessage(B_QUIT_REQUESTED);
 		}
 		return; // consuma il click, non aprire il menu
 	}
