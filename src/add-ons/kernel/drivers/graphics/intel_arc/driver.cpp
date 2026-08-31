@@ -59,7 +59,7 @@
 
 
 static intel_arc_settings current_settings = {    
-    "trident.accelerant",	// accelerant filename
+    "intel_arc.accelerant",	// accelerant filename
     false,					// dumprom, function still not integrated
     0,						// memory, override builtin memory size detection in MB
     true,					// hardcursor, if true use on-chip hardware cursor
@@ -196,18 +196,21 @@ static intel_arc_info* gDeviceInfo[MAX_DEVICES];
 static void
 load_settings(void)
 {
-    void* handle = load_driver_settings("intel_arc");
+    void* handle = load_driver_settings("intel_arc.settings");
     if (handle != NULL) {
         
         current_settings.hardcursor = get_driver_boolean_parameter(
             handle, "hardcursor", current_settings.hardcursor, current_settings.hardcursor);
 
-        const char* value_str = get_driver_parameter(handle, "cursorbits", "32", "32"); //default HC bits on intel_arc
+        const char* value_str = get_driver_parameter(handle, "cursorbits", NULL, "32"); //default HC bits on intel_arc
         if (value_str != nullptr) {
             current_settings.cursorbits = (uint32)atoi(value_str);
+            dprintf("INTEL_ARC: driver settings read %d cursor bits\n",current_settings.cursorbits);
         }
         
         unload_driver_settings(handle);
+    } else {
+    	dprintf("INTEL_ARC: driver settings file not found\n");
     }
 }
 

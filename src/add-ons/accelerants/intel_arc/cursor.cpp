@@ -6,13 +6,17 @@
 #include "accelerant.h"
 #include <cstring>
 
+#define CALLED() debug_printf("INTEL_ARC_ACC: CALLED %s\n", __FUNCTION__)
 
-status_t
+void
 ShowCursor(bool isVisible)
 {
+	CALLED();
     const int8 pipe = gInfo->shared_info->active_pipe;
-    if (pipe < 0)
-        return B_ERROR;
+    if (pipe < 0){
+    	debug_printf("intel_arc SHOW_CURSOR error, pipe < 0\n");
+        return;
+    }
 
     const uint32 pipeOffset = (uint32)pipe * INTEL_ARC_MMIO_PIPE_OFFSET;
     
@@ -20,10 +24,12 @@ ShowCursor(bool isVisible)
 
     if (!isVisible) {
         // Disabilita il cursore scrivendo 0 su CUR_CTL
+        debug_printf("intel_arc SHOW_CURSOR disabling cursor...\n");
         write_register(INTEL_ARC_MMIO_CUR_CTL_A + pipeOffset, MCURSOR_MODE_DISABLE);
         write_register(INTEL_ARC_MMIO_CUR_SURF_A + pipeOffset, 0);
-        return B_OK;
+        return;
     }
+    debug_printf("intel_arc SHOW_CURSOR enabling cursor...\n");
 
     // Imposta indirizzo fisico VRAM (GGTT/LMEM) del buffer cursore (deve essere a 4K boundary)
     uint32 cursorOffset = gInfo->shared_info->cursor_physical_base;
@@ -32,16 +38,16 @@ ShowCursor(bool isVisible)
     // Abilita la modalità 64x64 32bpp ARGB
     uint32 curCtl = MCURSOR_MODE_64_ARGB8888;
     write_register(INTEL_ARC_MMIO_CUR_CTL_A + pipeOffset, curCtl);
-
-    return B_OK;
 }
 
-status_t
+void
 MoveCursor(uint16 x, uint16 y)
 {
     const int8 pipe = gInfo->shared_info->active_pipe;
-    if (pipe < 0)
-        return B_ERROR;
+    if (pipe < 0){
+    	debug_printf("intel_arc SHOW_CURSOR error, pipe < 0\n");
+        return;
+    }
 
     const uint32 pipeOffset = (uint32)pipe * INTEL_ARC_MMIO_PIPE_OFFSET;
 
@@ -66,13 +72,13 @@ MoveCursor(uint16 x, uint16 y)
     }
 
     write_register(INTEL_ARC_MMIO_CUR_POS_A + pipeOffset, curPos);
-    return B_OK;
 }
 
 status_t
 SetCursorShape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
     const uint8* andMask, const uint8* xorMask)
 {
+	CALLED();
     if (width > 64 || height > 64 || !andMask || !xorMask)
         return B_BAD_VALUE;
 
@@ -128,6 +134,7 @@ status_t
 SetCursorBitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
     color_space colorSpace, uint16 bytesPerRow, const uint8* bitmapData)
 {
+	CALLED();
     if (width > 64 || height > 64 || !bitmapData)
         return B_BAD_VALUE;
 
@@ -177,7 +184,9 @@ SetCursorBitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 uint32
 GetCursorBits(void)
 {
-    return 32;
+	CALLED();
+	debug_printf("intel_arc GET_CURSOR_BITS ritorna %d\n", gInfo->shared_info->settings.cursorbits);
+    return gInfo->shared_info->settings.cursorbits;
 }
 
 #endif // IS_PIRATI_BUILD

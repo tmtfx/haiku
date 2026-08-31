@@ -91,8 +91,8 @@ status_t	read_edid_from_hardware(void);
 status_t	intel_arc_set_indexed_colors(uint32 count, uint8 first,
 			uint8* color_data, uint32 flags);
 //hardware cursor
-status_t	ShowCursor(bool isVisible);
-status_t	MoveCursor(uint16 x, uint16 y);
+void		ShowCursor(bool isVisible);
+void		MoveCursor(uint16 x, uint16 y);
 status_t	SetCursorShape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
     const uint8* andMask, const uint8* xorMask);
 #ifdef IS_PIRATI_BUILD

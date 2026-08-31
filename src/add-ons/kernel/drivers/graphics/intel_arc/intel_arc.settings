@@ -5,7 +5,7 @@
 #
 
 # trident.driver parameters:
-#accelerant "intel_arc.accelerant"    # selects accelerant filename to be used
+#accelerant "intel_arc.accelerant"    # selects accelerant filename to be used // not implemented
 dumprom     false                # dump bios rom to ~/trident.rom // not yet implemented
 
 # intel_arc.accelerant parameters:
