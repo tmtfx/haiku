@@ -202,7 +202,7 @@ load_settings(void)
         current_settings.hardcursor = get_driver_boolean_parameter(
             handle, "hardcursor", current_settings.hardcursor, current_settings.hardcursor);
 
-        const char* value_str = get_driver_parameter(handle, "cursorbits", NULL, "32"); //default HC bits on intel_arc
+        const char* value_str = get_driver_parameter(handle, "cursorbits", "32", "32"); //default HC bits on intel_arc
         if (value_str != nullptr) {
             current_settings.cursorbits = (uint32)atoi(value_str);
             dprintf("INTEL_ARC: driver settings read %d cursor bits\n",current_settings.cursorbits);
