@@ -1423,54 +1423,71 @@ public:
 			}
 			case MSG_ABORT_SESSION:
 			{
+				bool interruptus=false;
 				BString contextId = msg->FindString("context_id");
 				if (!contextId.IsEmpty()) {
 					// Cerchiamo la sessione attiva
 					for (auto& pair : gSessions) { 
 						if (pair.second.context_id == contextId) {
 							pair.second.abort_requested = true; // Attiviamo il Kill Switch!
-							fprintf(stderr, "[AI_SERVER] [KILL SWITCH] Richiesta di interruzione ricevuta per la sessione: %s\n", contextId.String());
+							interruptus = true;
+							fprintf(stderr, "[AI_SERVER] [KILL SWITCH] Richiesta di interruzione ricevuta per la sessione del contesto: %s\n", contextId.String());
 
 							BMessage reply(B_REPLY);
 							reply.AddInt32("status", B_OK);
 							msg->SendReply(&reply);
 							break;
+						} else {
+							fprintf(stderr, "[AI_SERVER] [KILL SWITCH] ID Contesto della lista %s non corrisponde a quello richiesto %s\n",pair.second.context_id.String(), contextId.String());
 						}
 					}
 				}
 				int32 id = -1;
 				msg->FindInt32("session_id",&id);
-				if (id > -1) {
+				if ( id > -1 && !interruptus ) {
 					for (auto& pair : gSessions) { 
 						if (pair.second.id == id) {
 							pair.second.abort_requested = true; // Attiviamo il Kill Switch!
-							fprintf(stderr, "[AI_SERVER] [KILL SWITCH] Richiesta di interruzione ricevuta per la sessione: %s\n", contextId.String());
+							interruptus = true;
+							fprintf(stderr, "[AI_SERVER] [KILL SWITCH] Richiesta di interruzione ricevuta per la sessione: %d\n", id);
 
 							BMessage reply(B_REPLY);
 							reply.AddInt32("status", B_OK);
 							msg->SendReply(&reply);
 							break;
+						} else {
+							fprintf(stderr, "[AI_SERVER] [KILL SWITCH] Sessione in lista %d non corrisponde alla sessione richiesta %d\n", pair.second.id, id);
 						}
 					}
+				}
+				if (interruptus) {
+					fprintf(stderr, "[AI_SERVER] [KILL SWITCH] Richiesta di interruzione inserita nella sessione\n");
+				} else {
+					fprintf(stderr, "[AI_SERVER] [KILL SWITCH] Nessuna richiesta inviata, sessione non trovata\n");
 				}
 				break;
 			}
 			case MSG_CHECK_ABORT:
 			{
 				BString contextId = msg->FindString("context_id");
-				BMessage reply(B_REPLY);
-				reply.AddInt32("status", B_OK); // Default: non interrotto
+				int32 sessionId = -1;
+				msg->FindInt32("session_id", &sessionId);
 
-				if (!contextId.IsEmpty()) {
-					for (auto& pair : gSessions) { 
-						if (pair.second.context_id == contextId) {
-							if (pair.second.abort_requested) {
-								reply.AddInt32("status", B_CANCELED); // Segnala l'interruzione!
-							}
-							break;
+				BMessage reply(B_REPLY);
+				reply.AddInt32("status", B_OK);
+
+				for (auto& pair : gSessions) { 
+					bool matchContext = (!contextId.IsEmpty() && pair.second.context_id == contextId);
+					bool matchSession = (sessionId > -1 && pair.second.id == sessionId);
+
+					if (matchContext || matchSession) {
+						if (pair.second.abort_requested) {
+							reply.AddInt32("status", B_CANCELED);
 						}
+						break;
 					}
 				}
+
 				msg->SendReply(&reply);
 				break;
 			}
