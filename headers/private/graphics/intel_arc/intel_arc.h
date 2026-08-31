@@ -143,6 +143,14 @@ struct intel_arc_shared_info {
 	uint64			frame_buffer_size;
 
 	addr_t			frame_buffer;
+	
+	bool			bDisableHdwCursor;      // Toggle impostabile da settings/driver
+    bool			cursor_visible;
+    uint16			cursor_hot_x;
+    uint16			cursor_hot_y;
+
+    uint32			cursor_physical_base;   // Indirizzo fisico/GGTT in VRAM (allineato a 4096)
+    void*			cursor_virtual_base;    // Mappatura virtuale per accelerant
 
 	uint32			pipe_control[4];
 	uint32			pipe_size[4];
