@@ -1234,6 +1234,32 @@ FRAME_BUFFER_BOOT_INFO, NULL);
             info.shared_info->bDisableHdwCursor = true;
         }
     }
+    // Rilevamento diagnostico VRAM fisica totale (LMEM)
+    // -------------------------------------------------------------------------
+    info.shared_info->vram_size = frameBufferBar.size;
+
+    // Se ReBAR è disattivato, la BAR2 è bloccata a 256 MB.
+    // Interroghiamo i registri MMIO di Intel Arc (DG2) per leggere la VRAM reale saldata sulla scheda.
+    if (info.shared_info->vram_size <= 256 * 1024 * 1024 && info.registers != NULL) {
+        // Su Intel Arc (DG2/Xe-HPG), il registro MMIO 0x138000 / 0x100000 
+        // contiene la configurazione dei controller di memoria LMEM.
+        dprintf("intel_arc: ReBAR disabled detected\n");
+        uint32 lmemCap = info.registers[0x138000 / 4];
+
+        if (lmemCap != 0 && lmemCap != 0xFFFFFFFF) {
+            // Estragga la dimensione della VRAM in base ai blocchi LMEM attivi
+            // Esempio tipico su DG2: shift dei blocchi da 1 GB / 2 GB
+            uint64 detectedBytes = ((uint64)(lmemCap & 0xFFFF)) * 1024 * 1024 * 1024;
+            if (detectedBytes > info.shared_info->vram_size)
+                info.shared_info->vram_size = detectedBytes;
+        }
+    } else {
+    	dprintf("intel_arc: ReBAR active!\n");
+    }
+
+    dprintf("intel_arc: Physical VRAM: %" B_PRIu64 " MB | Mapped Framebuffer: %" B_PRIu64 " MB\n",
+        info.shared_info->vram_size / (1024 * 1024),
+        info.shared_info->frame_buffer_size / (1024 * 1024));
 	
 #ifdef IS_PIRATI_BUILD
 	draw_logo(info);
