@@ -94,7 +94,7 @@ status_t	intel_arc_set_indexed_colors(uint32 count, uint8 first,
 void		ShowCursor(bool isVisible);
 void		MoveCursor(uint16 x, uint16 y);
 status_t	SetCursorShape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
-    uint8* andMask, uint8* xorMask);
+    const uint8* andMask, const uint8* xorMask);
 #ifdef IS_PIRATI_BUILD
 status_t	SetCursorBitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
     color_space colorSpace, uint16 bytesPerRow, const uint8* bitmapData);

@@ -75,7 +75,7 @@ MoveCursor(uint16 x, uint16 y)
 }
 
 status_t
-SetCursorShape(uint16 width, uint16 height, uint16 hotX, uint16 hotY, uint8* andMask, uint8* xorMask)
+SetCursorShape(uint16 width, uint16 height, uint16 hotX, uint16 hotY, const uint8* andMask, const uint8* xorMask)
 {
 	CALLED();
     if (width > 64 || height > 64 || !andMask || !xorMask){
