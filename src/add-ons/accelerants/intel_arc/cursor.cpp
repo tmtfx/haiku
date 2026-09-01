@@ -75,20 +75,23 @@ MoveCursor(uint16 x, uint16 y)
 }
 
 status_t
-SetCursorShape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
-    const uint8* andMask, const uint8* xorMask)
+SetCursorShape(uint16 width, uint16 height, uint16 hotX, uint16 hotY, uint8* andMask, uint8* xorMask)
 {
 	CALLED();
-    if (width > 64 || height > 64 || !andMask || !xorMask)
+    if (width > 64 || height > 64 || !andMask || !xorMask){
+    	debug_printf("INTEL_ARC_ACC SetCursorShape ERROR too big or missing masks\n");
         return B_BAD_VALUE;
+    }
 
     gInfo->shared_info->cursor_hot_x = hotX;
     gInfo->shared_info->cursor_hot_y = hotY;
 
     // Buffer di destinazione mappato in memoria virtuale nell'accelerant
     uint32* cursorBuffer = (uint32*)gInfo->shared_info->cursor_virtual_base;
-    if (!cursorBuffer)
+    if (!cursorBuffer){
+    	debug_printf("INTEL_ARC_ACC SetCursorShape ERROR cursorBuffer is NULL!\n");
         return B_NO_INIT;
+    }
 
     // Pulisce il buffer 64x64 (4 byte per pixel = 16 KB) a trasparente puro
     memset(cursorBuffer, 0, 64 * 64 * sizeof(uint32));
@@ -135,16 +138,20 @@ SetCursorBitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
     color_space colorSpace, uint16 bytesPerRow, const uint8* bitmapData)
 {
 	CALLED();
-    if (width > 64 || height > 64 || !bitmapData)
+    if (width > 64 || height > 64 || !bitmapData){
+    	debug_printf("INTEL_ARC_ACC SetCursorBitmap ERROR bitmap too big\n");
         return B_BAD_VALUE;
+    }
 
     // Salva le coordinate dell'hotspot nella struttura condivisa
     gInfo->shared_info->cursor_hot_x = hotX;
     gInfo->shared_info->cursor_hot_y = hotY;
 
     uint32* cursorBuffer = (uint32*)gInfo->shared_info->cursor_virtual_base;
-    if (!cursorBuffer)
+    if (!cursorBuffer){
+    	debug_printf("INTEL_ARC_ACC SetCursorBitmap ERROR cursorBuffer is NULL!\n");
         return B_NO_INIT;
+    }
 
     // Azzera il buffer 64x64 ARGB8888 (16 KB)
     memset(cursorBuffer, 0, 64 * 64 * sizeof(uint32));
