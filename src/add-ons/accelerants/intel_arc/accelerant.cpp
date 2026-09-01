@@ -51,6 +51,10 @@ uninit_common(void)
 		gInfo->overlay_mem_mgr = NULL;
 	}
 	if (!gInfo->is_clone) gInfo->shared_info->accelerant_in_use = false;
+	if (gInfo->cursor_area >= B_OK) {
+		delete_area(gInfo->cursor_area);
+		gInfo->cursor_area = -1;
+	}
 	if (gInfo->frame_buffer_area >= B_OK)
 		delete_area(gInfo->frame_buffer_area);
 	if (gInfo->regs_area >= B_OK)
@@ -113,6 +117,29 @@ init_common(int device, bool isClone)
 		}
 		regsDeleter.Detach();
 	}
+	
+	gInfo->cursor_area = -1;
+    if (!gInfo->shared_info->bDisableHdwCursor && gInfo->shared_info->cursor_area >= B_OK) {
+        AreaDeleter cursorDeleter(clone_area("intel arc userland cursor",
+            &gInfo->shared_info->cursor_virtual_base,
+            B_ANY_ADDRESS, B_READ_AREA | B_WRITE_AREA,
+            gInfo->shared_info->cursor_area));
+
+        status = gInfo->cursor_area = cursorDeleter.Get();
+        if (status < B_OK) {
+            debug_printf("intel_arc.accelerant WARNING: Failed to clone cursor area: %s. Disabling HW cursor.\n",
+                strerror(status));
+            gInfo->shared_info->bDisableHdwCursor = true;
+            gInfo->shared_info->cursor_virtual_base = NULL;
+        } else {
+            cursorDeleter.Detach();
+            debug_printf("intel_arc.accelerant: Cursor area cloned at Userland Virt: %p\n",
+                gInfo->shared_info->cursor_virtual_base);
+        }
+    } else {
+        gInfo->shared_info->cursor_virtual_base = NULL;
+    }
+	
 
 	if (gInfo->shared_info != NULL)
 		gInfo->last_hotplug_event_count = gInfo->shared_info->hotplug_event_count;

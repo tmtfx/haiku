@@ -156,9 +156,11 @@ struct intel_arc_shared_info {
     uint16			cursor_hot_x;
     uint16			cursor_hot_y;
 
-    uint32			cursor_physical_base;   // Indirizzo fisico/GGTT in VRAM (allineato a 4096)
-    void*			cursor_virtual_base;    // Mappatura virtuale per accelerant
-	
+    area_id			cursor_area;                 // ID dell'area creata dal kernel
+    void*			cursor_virtual_base_kernel;  // Puntatore kernel (opzionale)
+    void*			cursor_virtual_base;         // Mappatura virtuale per accelerant (Userland)
+    uint32			cursor_physical_base;        // Indirizzo fisico/GGTT letto da CUR_SURF
+    
 	intel_arc_settings settings;
 	
 	uint32			pipe_control[4];

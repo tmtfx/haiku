@@ -1197,6 +1197,44 @@ FRAME_BUFFER_BOOT_INFO, NULL);
     info.shared_info->fbc.bytes_per_row = info.shared_info->bytes_per_row;
 	info.shared_info->accelerant_in_use=false;
 	
+	if (!info.shared_info->bDisableHdwCursor) {
+        AreaKeeper cursorKeeper;
+        size_t cursorSize = B_PAGE_SIZE * 4; // 16 KB
+
+        info.cursor_area = cursorKeeper.Create("intel arc cursor buffer",
+            &info.shared_info->cursor_virtual_base_kernel,
+            B_ANY_KERNEL_ADDRESS,
+            cursorSize,
+            B_FULL_LOCK | B_CONTIGUOUS,
+            B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA | B_CLONEABLE_AREA);
+
+        if (info.cursor_area >= B_OK) {
+            physical_entry pe;
+            status_t status = get_memory_map(
+                info.shared_info->cursor_virtual_base_kernel,
+                cursorSize, &pe, 1);
+
+            if (status == B_OK) {
+                info.shared_info->cursor_area = info.cursor_area;
+                info.shared_info->cursor_physical_base = (uint32)pe.address;
+                cursorKeeper.Detach();
+
+                dprintf("intel_arc: Cursor buffer allocated - Phys: 0x%" B_PRIx32
+                    ", Virt Kernel: %p\n",
+                    info.shared_info->cursor_physical_base,
+                    info.shared_info->cursor_virtual_base_kernel);
+            } else {
+                ERROR("intel_arc: Failed to get memory map for cursor buffer: %s\n",
+                    strerror(status));
+                info.shared_info->bDisableHdwCursor = true;
+            }
+        } else {
+            ERROR("intel_arc: Failed to allocate contiguous cursor area: %s\n",
+                strerror(info.cursor_area));
+            info.shared_info->bDisableHdwCursor = true;
+        }
+    }
+	
 #ifdef IS_PIRATI_BUILD
 	draw_logo(info);
 	snooze(2000000);
