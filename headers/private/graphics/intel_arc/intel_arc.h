@@ -151,6 +151,8 @@ struct intel_arc_shared_info {
 
 	addr_t			frame_buffer;
 	
+	uint64			vram_size;            // VRAM fisica totale (es. 16 GB)
+    
 	bool			bDisableHdwCursor;      // Toggle impostabile da settings/driver
     bool			cursor_visible;
     uint16			cursor_hot_x;
