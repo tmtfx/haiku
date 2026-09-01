@@ -21,11 +21,6 @@ overlay_plane_register(uint32 base, int8 pipe)
 	return base + (uint32)pipe * INTEL_ARC_MMIO_PIPE_OFFSET;
 }
 
-
-
-
-
-
 status_t
 init_overlay_memory_manager(void)
 {
@@ -34,10 +29,13 @@ init_overlay_memory_manager(void)
 		gInfo != NULL ? gInfo->mode_list : NULL,
 		gInfo != NULL && gInfo->shared_info != NULL ? gInfo->shared_info->current_mode.virtual_width : 0,
 		gInfo != NULL && gInfo->shared_info != NULL ? gInfo->shared_info->current_mode.virtual_height : 0);
-	if (gInfo == NULL || gInfo->shared_info == NULL || gInfo->frame_buffer == NULL)
+	if (gInfo == NULL || gInfo->shared_info == NULL || gInfo->frame_buffer == NULL){
+		debug_printf("intel_arc.accelerant OVERLAY: ERROR no shared_info or frame_buffer\n");
 		return B_NO_INIT;
-	if (gInfo->overlay_mem_mgr != NULL)
+	if (gInfo->overlay_mem_mgr != NULL){
+		debug_printf("intel_arc.accelerant OVERLAY: memory manager already instantiated\n");
 		return B_OK;
+	}
 
 	uint32 maxWidth = gInfo->shared_info->current_mode.virtual_width;
 	uint32 maxHeight = gInfo->shared_info->current_mode.virtual_height;
@@ -52,19 +50,25 @@ init_overlay_memory_manager(void)
 		+ (uint64)reserveBytesPerRow * maxHeight;
 	uint32 heapStart = ((uint32)reserveSize + B_PAGE_SIZE - 1)
 		& ~(B_PAGE_SIZE - 1);
-	if (heapStart >= gInfo->shared_info->frame_buffer_size)
+	if (heapStart >= gInfo->shared_info->frame_buffer_size){
+		debug_printf("intel_arc.accelerant OVERLAY: ERROR no memory left for our overlay manager\n");
 		return B_NO_MEMORY;
+	}
 
 	uint32 heapSize = (uint32)min_c(
 		gInfo->shared_info->frame_buffer_size - heapStart,
 		(uint64)0xffffffffU);
-	if (heapSize < 4096)
+	if (heapSize < 4096) {
+		debug_printf("intel_arc.accelerant OVERLAY: ERROR not enough (4096) memory for you overlay manager\n");
 		return B_NO_MEMORY;
+	}
 
 	gInfo->overlay_mem_mgr = mem_init("intel_arc_overlay_vram", heapStart,
 		heapSize, 64, 128);
-	if (gInfo->overlay_mem_mgr == NULL)
+	if (gInfo->overlay_mem_mgr == NULL) {
+		debug_printf("intel_arc.accelerant OVERLAY: ERROR memory manager not initialized\n");
 		return B_NO_MEMORY;
+	}
 
 	memset(sOverlayBuffers, 0, sizeof(sOverlayBuffers));
 	debug_printf("intel_arc.accelerant: overlay VRAM heap start=0x%08" B_PRIx32
@@ -78,8 +82,10 @@ intel_arc_configure_overlay(overlay_token token, const overlay_buffer* buffer,
 {
 	debug_printf("intel_arc.accelerant: configure_overlay(token=%p, buffer=%p, window=%p, view=%p)\n",
 		token, buffer, window, view);
-	if (token == NULL || token != sOverlayState.token)
+	if (token == NULL || token != sOverlayState.token) {
+		debug_printf("intel_arc.accelerant OVERLAY: ERROR no token or incorrect\n");
 		return B_BAD_VALUE;
+	}
 
 	if (buffer == NULL) {
 		const int8 pipe = gInfo->shared_info->active_pipe;
@@ -98,11 +104,14 @@ intel_arc_configure_overlay(overlay_token token, const overlay_buffer* buffer,
 		}
 		sOverlayState.buffer = NULL;
 		sOverlayState.configured = false;
+		debug_printf("intel_arc.accelerant OVERLAY: cannot configure overlay with null buffer\n");
 		return B_OK;
 	}
 
-	if (window == NULL || view == NULL)
+	if (window == NULL || view == NULL) {
+		debug_printf("intel_arc.accelerant OVERLAY: ERROR window or view null\n");
 		return B_BAD_VALUE;
+	}
 
 	debug_printf("intel_arc.accelerant: overlay params space=0x%08" B_PRIx32
 		" bpr=%" B_PRIu32 " dma=%p win=[%d,%d %ux%u off LTRB=%u,%u,%u,%u flags=0x%08" B_PRIx32
@@ -123,13 +132,17 @@ intel_arc_configure_overlay(overlay_token token, const overlay_buffer* buffer,
 
 	display_mode currentMode;
 	status_t status = intel_arc_get_display_mode(&currentMode);
-	if (status != B_OK)
+	if (status != B_OK) {
+		debug_printf("intel_arc.accelerant OVERLAY: ERROR on intel_arc_get_display_mode\n");
 		return status;
+	}
 
 	overlay_constraints constraints;
 	status = intel_arc_get_overlay_constraints(&currentMode, buffer, &constraints);
-	if (status != B_OK)
+	if (status != B_OK) {
+		debug_printf("intel_arc.accelerant OVERLAY: ERROR on intel_arc_get_overlay_constraints\n");
 		return status;
+	}
 
 	if (view->width < constraints.view.width.min
 		|| view->width > constraints.view.width.max
@@ -149,8 +162,10 @@ intel_arc_configure_overlay(overlay_token token, const overlay_buffer* buffer,
 	sOverlayState.configured = true;
 
 	const int8 pipe = gInfo->shared_info->active_pipe;
-	if (pipe < 0)
+	if (pipe < 0) {
+		debug_printf("intel_arc.accelerant OVERLAY: ERROR pipe less than 0\n");
 		return B_UNSUPPORTED;
+	}
 
 	uint32 planeCtl = INTEL_ARC_DISPLAY_CONTROL_ENABLED | INTEL_ARC_PLANE_LINEAR;
 	uint32 colorCtl = 0;
@@ -280,13 +295,14 @@ intel_arc_overlay_supported_features(uint32 colorSpace)
 }
 
 overlay_buffer*
-intel_arc_allocate_overlay_buffer(color_space colorSpace, uint16 width,
-	uint16 height)
+intel_arc_allocate_overlay_buffer(color_space colorSpace, uint16 width, uint16 height)
 {
 	debug_printf("intel_arc.accelerant: allocate_overlay_buffer(space=0x%08" B_PRIx32
 		", width=%u, height=%u)\n", (uint32)colorSpace, width, height);
-	if (width == 0 || height == 0)
+	if (width == 0 || height == 0) {
+		debug_printf("intel_arc.accelerant OVERLAY: ERROR cannot allocate buffer if width or height are 0\n");
 		return NULL;
+	}
 	if (gInfo->overlay_mem_mgr == NULL && init_overlay_memory_manager() != B_OK) {
 		debug_printf("intel_arc.accelerant: allocate_overlay_buffer failed: overlay_mem_mgr unavailable\n");
 		return NULL;
@@ -358,8 +374,10 @@ status_t
 intel_arc_release_overlay_buffer(const overlay_buffer* buffer)
 {
 	debug_printf("intel_arc.accelerant: release_overlay_buffer(buffer=%p)\n", buffer);
-	if (buffer == NULL)
+	if (buffer == NULL) {
+		debug_printf("intel_arc.accelerant OVERLAY: ERROR cannot release a null buffer\n");
 		return B_BAD_VALUE;
+	}
 
 	if (sOverlayState.buffer == buffer) {
 		sOverlayState.buffer = NULL;
@@ -382,8 +400,10 @@ intel_arc_get_overlay_constraints(const display_mode* mode,
 {
 	debug_printf("intel_arc.accelerant: get_overlay_constraints(mode=%p, buffer=%p, constraints=%p)\n",
 		mode, buffer, constraints);
-	if (mode == NULL || buffer == NULL || constraints == NULL)
+	if (mode == NULL || buffer == NULL || constraints == NULL){
+		debug_printf("intel_arc.accelerant OVERLAY: ERROR mode, buffer or constraints are NULL\n");
 		return B_BAD_VALUE;
+	}
 
 	memset(constraints, 0, sizeof(*constraints));
 
@@ -424,8 +444,10 @@ intel_arc_allocate_overlay(void)
 {
 	debug_printf("intel_arc.accelerant: allocate_overlay() channelUsed=%" B_PRId32
 		" currentToken=%" B_PRId32 "\n", sOverlayChannelUsed, sOverlayToken);
-	if (atomic_or(&sOverlayChannelUsed, 1) != 0)
+	if (atomic_or(&sOverlayChannelUsed, 1) != B_OK) {
+		debug_printf("intel_arc.accelerant OVERLAY: ERROR atomic_or failed\n");
 		return NULL;
+	}
 	sOverlayState.token = (overlay_token)(addr_t)++sOverlayToken;
 	sOverlayState.configured = false;
 	sOverlayState.buffer = NULL;
@@ -439,8 +461,10 @@ intel_arc_release_overlay(overlay_token token)
 {
 	debug_printf("intel_arc.accelerant: release_overlay(token=%p, current=%p)\n",
 		token, sOverlayState.token);
-	if (token == NULL || token != sOverlayState.token)
+	if (token == NULL || token != sOverlayState.token){
+		debug_printf("intel_arc.accelerant OVERLAY: ERROR missing or wrong token on release overlay\n");
 		return B_BAD_VALUE;
+	}
 	atomic_and(&sOverlayChannelUsed, 0);
 	sOverlayState.token = NULL;
 	sOverlayState.configured = false;
