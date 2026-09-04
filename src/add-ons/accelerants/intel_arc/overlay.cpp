@@ -32,6 +32,7 @@ init_overlay_memory_manager(void)
 	if (gInfo == NULL || gInfo->shared_info == NULL || gInfo->frame_buffer == NULL){
 		debug_printf("intel_arc.accelerant OVERLAY: ERROR no shared_info or frame_buffer\n");
 		return B_NO_INIT;
+	}
 	if (gInfo->overlay_mem_mgr != NULL){
 		debug_printf("intel_arc.accelerant OVERLAY: memory manager already instantiated\n");
 		return B_OK;

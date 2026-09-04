@@ -827,102 +827,19 @@ compute_snps_dp_mpllb(uint32 linkRateKhz, snps_mpllb_state* state)
             return false;
     }
 }
-/*
-static bool
-compute_snps_dp_mpllb(uint32 linkRateKhz, snps_mpllb_state* state)
-{
-    if (state == NULL)
-        return false;
-
-    memset(state, 0, sizeof(snps_mpllb_state));
-
-    switch (linkRateKhz) {
-        case 162000: // RBR (1.62 Gbps)
-            state->mpllb_cp      = 0x00007676;
-            state->mpllb_div     = 0x00009A00;
-            state->mpllb_div2    = 0x00000000;
-            state->mpllb_sscen   = 0x00000000;
-            state->mpllb_sscstep = 0x00000000;
-            state->mpllb_fracn1  = 0x00000000;
-            state->mpllb_fracn2  = 0x00000000;
-            return true;
-
-        case 270000: // HBR (2.7 Gbps)
-            state->mpllb_cp      = 0x00007676;
-            state->mpllb_div     = 0x00008000;
-            state->mpllb_div2    = 0x00000000;
-            state->mpllb_sscen   = 0x00000000;
-            state->mpllb_sscstep = 0x00000000;
-            state->mpllb_fracn1  = 0x00000000;
-            state->mpllb_fracn2  = 0x00000000;
-            return true;
-
-        case 540000: // HBR2 (5.4 Gbps)
-            state->mpllb_cp      = 0x00007676;
-            state->mpllb_div     = 0x00004000;
-            state->mpllb_div2    = 0x00000000;
-            state->mpllb_sscen   = 0x00000000;
-            state->mpllb_sscstep = 0x00000000;
-            state->mpllb_fracn1  = 0x00000000;
-            state->mpllb_fracn2  = 0x00000000;
-            return true;
-
-        case 810000: // HBR3 (8.1 Gbps)
-            state->mpllb_cp      = 0x00007676;
-            state->mpllb_div     = 0x00002000;
-            state->mpllb_div2    = 0x00000000;
-            state->mpllb_sscen   = 0x00000000;
-            state->mpllb_sscstep = 0x00000000;
-            state->mpllb_fracn1  = 0x00000000;
-            state->mpllb_fracn2  = 0x00000000;
-            return true;
-	case 1000000: // UHBR10 (10.0 Gbps - Link Rate 1000000 kHz)
-            state->mpllb_cp      = 0x00007676;
-            state->mpllb_div     = 0x00005500; 
-            state->mpllb_div2    = 0x00000000;
-            state->mpllb_sscen   = 0x00000000;
-            state->mpllb_sscstep = 0x00000000;
-            state->mpllb_fracn1  = 0x00005555; // Attivazione modulazione frazionaria (0.333...)
-            state->mpllb_fracn2  = 0x00000002;
-            return true;
-
-        case 1350000: // UHBR13.5 (13.5 Gbps - Link Rate 1350000 kHz)
-            state->mpllb_cp      = 0x00007676;
-            state->mpllb_div     = 0x00004000;
-            state->mpllb_div2    = 0x00000000;
-            state->mpllb_sscen   = 0x00000000;
-            state->mpllb_sscstep = 0x00000000;
-            state->mpllb_fracn1  = 0x00000000; // Torna intero sul VCO a step modificato
-            state->mpllb_fracn2  = 0x00000000;
-            return true;
-
-        case 2000000: // UHBR20 (20.0 Gbps - Link Rate 2000000 kHz)
-            state->mpllb_cp      = 0x00007676;
-            state->mpllb_div     = 0x00002A00;
-            state->mpllb_div2    = 0x00000000;
-            state->mpllb_sscen   = 0x00000000;
-            state->mpllb_sscstep = 0x00000000;
-            state->mpllb_fracn1  = 0x0000AAAB; // Richiede precisione frazionaria elevata per i 625 MHz di PLL clock
-            state->mpllb_fracn2  = 0x00000002;
-            return true;
-        default:
-            debug_printf("intel_arc.accelerant: Unsupported DP link rate %u kHz\n", linkRateKhz);
-            return false;
-    }
-}*/
 
 static uint32
 snps_phy_enable_reg_for_ddi_port(uint8 ddiPort)
 {
 	switch (ddiPort) {
 		case 0:
-			return INTEL_ARC_TGL_DPLL0_ENABLE;
+			return INTEL_ARC_DG2_DPLL0_ENABLE;
 		case 1:
-			return INTEL_ARC_TGL_DPLL1_ENABLE;
+			return INTEL_ARC_DG2_DPLL1_ENABLE;
 		case 2:
-			return INTEL_ARC_TGL_DPLL4_ENABLE;
+			return INTEL_ARC_DG2_DPLL4_ENABLE;
 		default:
-			return INTEL_ARC_TGL_DPLL1_ENABLE;
+			return INTEL_ARC_DG2_DPLL1_ENABLE;
 	}
 }
 /* program_port_dpll versione con logs */
@@ -1038,116 +955,6 @@ program_port_dpll(uint8 ddiPort, uint32 linkRateKhz)
 
     return B_BAD_TYPE;
 }
-/* funziona ma senza logs
-static status_t
-program_port_dpll(uint8 ddiPort, uint32 linkRateKhz)
-{
-    debug_printf("intel_arc.accelerant: program_port_dpll(ddiPort=%u, linkRate=%u kHz)\n",
-        ddiPort, linkRateKhz);
-
-    // --- 1. ARCHITETTURA ALCHEMIST (DG2 - SNPS PHY) ---
-    if (gInfo->shared_info->family == INTEL_ARC_FAMILY_ALCHEMIST) {
-        const uint32 phyBase = snps_phy_base_for_ddi_port(ddiPort);
-        const uint32 divReg = INTEL_ARC_MMIO_SNPS_PHY_MPLLB_DIV(phyBase);
-
-        snps_mpllb_state state = {};
-        if (!compute_snps_dp_mpllb(linkRateKhz, &state)) {
-            debug_printf("intel_arc.accelerant ERROR: Invalid DP link rate %u kHz\n", linkRateKhz);
-            return B_BAD_VALUE;
-        }
-
-        // A. Reset / Disabilita FORCE_EN e DIV_CLK_EN nel registro DIV per preparare la scrittura
-        uint32 divVal = read32(gInfo, divReg);
-        debug_printf("intel_arc.accelerant: program_port_dpll: INTEL_ARC_MMIO_SNPS_PHY_MPLLB_DIV (before): %" B_PRIx32 "\n",divVal);
-        divVal &= ~(INTEL_ARC_SNPS_PHY_MPLLB_FORCE_EN | INTEL_ARC_SNPS_PHY_MPLLB_DIV_CLK_EN);
-        write32(gInfo, divReg, divVal);
-        debug_printf("intel_arc.accelerant: program_port_dpll: INTEL_ARC_MMIO_SNPS_PHY_MPLLB_DIV (after): %" B_PRIx32 "\n",divVal);
-
-        // B. Scrittura parametri di configurazione SNPS PHY MPLLB
-        write32(gInfo, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_CP(phyBase), state.mpllb_cp);
-        write32(gInfo, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_DIV(phyBase),
-            state.mpllb_div & ~(INTEL_ARC_SNPS_PHY_MPLLB_FORCE_EN | INTEL_ARC_SNPS_PHY_MPLLB_DIV_CLK_EN));
-        write32(gInfo, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_DIV2(phyBase), state.mpllb_div2);
-        write32(gInfo, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_SSCEN(phyBase), state.mpllb_sscen);
-        write32(gInfo, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_SSCSTEP(phyBase), state.mpllb_sscstep);
-        write32(gInfo, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_FRACN1(phyBase), state.mpllb_fracn1);
-        write32(gInfo, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_FRACN2(phyBase), state.mpllb_fracn2);
-
-        // C. Abilita la MPLLB impostando FORCE_EN (bit 31) e DIV_CLK_EN (bit 30)
-        uint32 enableDivVal = state.mpllb_div | INTEL_ARC_SNPS_PHY_MPLLB_FORCE_EN | INTEL_ARC_SNPS_PHY_MPLLB_DIV_CLK_EN;
-        write32(gInfo, divReg, enableDivVal);
-
-        // D. Attendi che il clock SNPS PHY sia agganciato (bit DIV_CLK_EN)
-        status_t status = wait_for_set(divReg, INTEL_ARC_SNPS_PHY_MPLLB_DIV_CLK_EN, 5000);
-        if (status != B_OK) {
-            debug_printf("intel_arc.accelerant ERROR: SNPS PHY MPLLB failed to lock (DIV_CLK_EN not set)!\n");
-            return status;
-        }
-
-        debug_printf("intel_arc.accelerant: SNPS PHY MPLLB successfully locked for port %u\n", ddiPort);
-        return B_OK;
-    }
-
-    // --- 2. ARCHITETTURA BATTLEMAGE (Xe2 - CX0 PHY) ---
-    if (gInfo->shared_info->family == INTEL_ARC_FAMILY_BATTLEMAGE) {
-        return program_battlemage_cx0_dpll(ddiPort, linkRateKhz);
-    }
-
-    return B_BAD_TYPE;
-}*/
-/* vecchia con riferimenti a TGL
-static status_t
-program_port_dpll(uint8 ddiPort, uint32 linkRateKhz)
-{
-    debug_printf("intel_arc.accelerant: program_port_dpll(ddiPort=%u, linkRate=%u kHz)\n",
-        ddiPort, linkRateKhz);
-
-    // --- 1. ARCHITETTURA ALCHEMIST (DG2 - SNPS PHY) ---
-    if (gInfo->shared_info->family == INTEL_ARC_FAMILY_ALCHEMIST) {
-        const uint32 phyBase = snps_phy_base_for_ddi_port(ddiPort);
-        const uint32 enableReg = snps_phy_enable_reg_for_ddi_port(ddiPort);
-
-        snps_mpllb_state state = {};
-        if (!compute_snps_dp_mpllb(linkRateKhz, &state)) {
-            debug_printf("intel_arc.accelerant ERROR: Invalid DP link rate %u kHz\n", linkRateKhz);
-            return B_BAD_VALUE;
-        }
-
-        uint32 enableValue = read32(gInfo, enableReg);
-        write32(gInfo, enableReg, enableValue & ~INTEL_ARC_TGL_DPLL_ENABLE);
-        write32(gInfo, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_DIV(phyBase),
-            state.mpllb_div & ~INTEL_ARC_SNPS_PHY_MPLLB_FORCE_EN);
-        (void)wait_for_clear(enableReg, INTEL_ARC_TGL_DPLL_LOCK, 5000);
-
-        write32(gInfo, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_CP(phyBase), state.mpllb_cp);
-        write32(gInfo, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_DIV(phyBase), state.mpllb_div);
-        write32(gInfo, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_DIV2(phyBase), state.mpllb_div2);
-        write32(gInfo, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_SSCEN(phyBase), state.mpllb_sscen);
-        write32(gInfo, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_SSCSTEP(phyBase), state.mpllb_sscstep);
-        write32(gInfo, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_FRACN1(phyBase), state.mpllb_fracn1);
-        write32(gInfo, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_FRACN2(phyBase), state.mpllb_fracn2);
-
-        enableValue = read32(gInfo, enableReg) | INTEL_ARC_TGL_DPLL_ENABLE;
-        write32(gInfo, enableReg, enableValue);
-        write32(gInfo, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_DIV(phyBase),
-            state.mpllb_div | INTEL_ARC_SNPS_PHY_MPLLB_FORCE_EN);
-
-        status_t status = wait_for_set(enableReg, INTEL_ARC_TGL_DPLL_LOCK, 5000);
-        if (status != B_OK) {
-            debug_printf("intel_arc.accelerant ERROR: SNPS PHY MPLLB failed to lock!\n");
-            return status;
-        }
-
-        return B_OK;
-    }
-
-    // --- 2. ARCHITETTURA BATTLEMAGE (Xe2 - CX0 PHY) ---
-    if (gInfo->shared_info->family == INTEL_ARC_FAMILY_BATTLEMAGE) {
-        return program_battlemage_cx0_dpll(ddiPort, linkRateKhz);
-    }
-
-    return B_BAD_TYPE;
-}*/
 
 /*
  * Note: We cannot use Haiku's standard dp_encode_link_rate() from <dp.h>
@@ -1636,6 +1443,12 @@ perform_dp_link_training(uint32 linkRate, uint32 lanes)
     debug_printf("intel_arc.accelerant: DP Link Training COMPLETED SUCCESSFULLY!\n");
     return result;
 }
+
+/*
+ * Se non ho capito male, il Firmware/GOP della scheda parte sempre con il massimo numero di lanes
+ * Questo significa che se non lo cambiamo riusciamo a cambiare risoluzione con più facilità
+ * niente retraining e complicazioni.
+ */
 static status_t
 configure_dp_link(display_mode* mode)
 {
@@ -2137,10 +1950,10 @@ intel_arc_program_hdmi_dpll(accelerant_info* info, uint8 ddiPort, uint32 pixel_c
 			ddiPort, phyBase, pixel_clock_khz);
 
 		uint32 enableValue = read32(info, enableReg);
-		write32(info, enableReg, enableValue & ~INTEL_ARC_TGL_DPLL_ENABLE);
+		write32(info, enableReg, enableValue & ~INTEL_ARC_DG2_DPLL_ENABLE);
 		write32(info, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_DIV(phyBase),
 			state.mpllb_div & ~INTEL_ARC_SNPS_PHY_MPLLB_FORCE_EN);
-		(void)wait_for_clear(enableReg, INTEL_ARC_TGL_DPLL_LOCK, 5000);
+		(void)wait_for_clear(enableReg, INTEL_ARC_DG2_DPLL_LOCK, 5000);
 
 		write32(info, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_CP(phyBase), state.mpllb_cp);
 		write32(info, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_DIV(phyBase), state.mpllb_div);
@@ -2150,12 +1963,12 @@ intel_arc_program_hdmi_dpll(accelerant_info* info, uint8 ddiPort, uint32 pixel_c
 		write32(info, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_FRACN1(phyBase), state.mpllb_fracn1);
 		write32(info, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_FRACN2(phyBase), state.mpllb_fracn2);
 
-		enableValue = read32(info, enableReg) | INTEL_ARC_TGL_DPLL_ENABLE;
+		enableValue = read32(info, enableReg) | INTEL_ARC_DG2_DPLL_ENABLE;
 		write32(info, enableReg, enableValue);
 		write32(info, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_DIV(phyBase),
 			state.mpllb_div | INTEL_ARC_SNPS_PHY_MPLLB_FORCE_EN);
 
-		status_t status = wait_for_set(enableReg, INTEL_ARC_TGL_DPLL_LOCK, 5000);
+		status_t status = wait_for_set(enableReg, INTEL_ARC_DG2_DPLL_LOCK, 5000);
 		debug_printf("intel_arc.accelerant: HDMI MPLLB regs: CP=0x%08" B_PRIx32 ", DIV=0x%08" B_PRIx32 ", DIV2=0x%08" B_PRIx32 ", FRACN1=0x%08" B_PRIx32 ", FRACN2=0x%08" B_PRIx32 ", SSCEN=0x%08" B_PRIx32 ", ENABLE=0x%08" B_PRIx32 "\n",
 			read32(info, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_CP(phyBase)),
 			read32(info, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_DIV(phyBase)),

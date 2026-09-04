@@ -51,10 +51,10 @@ uninit_common(void)
 		gInfo->overlay_mem_mgr = NULL;
 	}
 	if (!gInfo->is_clone) gInfo->shared_info->accelerant_in_use = false;
-	if (gInfo->cursor_area >= B_OK) {
+	/*if (gInfo->cursor_area >= B_OK) {
 		delete_area(gInfo->cursor_area);
 		gInfo->cursor_area = -1;
-	}
+	}*/
 	if (gInfo->frame_buffer_area >= B_OK)
 		delete_area(gInfo->frame_buffer_area);
 	if (gInfo->regs_area >= B_OK)
@@ -117,7 +117,9 @@ init_common(int device, bool isClone)
 		}
 		regsDeleter.Detach();
 	}
-	
+	/* this is not correct, being a PLANE, cursor address should stay in VRAM not in RAM as
+	 * while finding a solution that doesn't kill the pipe shutting down the video output
+	 * for now let's disable the Hardware Cursor
 	gInfo->cursor_area = -1;
     if (!gInfo->shared_info->bDisableHdwCursor && gInfo->shared_info->cursor_area >= B_OK) {
         AreaDeleter cursorDeleter(clone_area("intel arc userland cursor",
@@ -139,6 +141,8 @@ init_common(int device, bool isClone)
     } else {
         gInfo->shared_info->cursor_virtual_base = NULL;
     }
+    */
+	if (!gInfo->shared_info->bDisableHdwCursor)	gInfo->shared_info->bDisableHdwCursor = true; //for now disable hardware cursor
 	
 
 	if (gInfo->shared_info != NULL)
@@ -168,11 +172,59 @@ init_common(int device, bool isClone)
 		} else {
 			debug_printf("intel_arc.accelerant ERROR: Failed to clone framebuffer: %s\n", strerror(status));
 		}*/
+		/* you can actually do the same by uncommenting this code, it should work, but overlay cloning... mmmh who knows...
+		if (gInfo->shared_info->frame_buffer_area >= B_OK) {
+            AreaDeleter fbDeleter(clone_area("intel arc framebuffer",
+                (void**)&gInfo->frame_buffer, B_ANY_ADDRESS,
+                B_READ_AREA | B_WRITE_AREA,
+                gInfo->shared_info->frame_buffer_area));
+
+            status = gInfo->frame_buffer_area = fbDeleter.Get();
+            if (status < B_OK) {
+                debug_printf("intel_arc.accelerant ERROR: Failed to clone framebuffer area: %s\n", strerror(status));
+                uninit_common();
+                return status;
+            }
+            fbDeleter.Detach();
+        } else {
+            debug_printf("intel_arc.accelerant ERROR: Invalid shared frame_buffer_area\n");
+            uninit_common();
+            return B_ERROR;
+        }
+        */
+        gInfo->frame_buffer_area = gInfo->shared_info->frame_buffer_area;
+		gInfo->frame_buffer = (void*)gInfo->shared_info->frame_buffer;
+		
 		status_t overlayStatus = init_overlay_memory_manager();
 		if (overlayStatus != B_OK)
 			debug_printf("intel_arc.accelerant: overlay VRAM heap unavailable: %s\n", strerror(overlayStatus));
-		gInfo->frame_buffer_area = gInfo->shared_info->frame_buffer_area;
-		gInfo->frame_buffer = (void*)gInfo->shared_info->frame_buffer;
+		
+		/* if you have previously cloned the framebuffer you can now allocate the cursor space
+		 * still it won't work as this accelerant doesn't cover all the steps needed for cursor
+		 * plane setup (like watermarking and other amenities).
+		if (!gInfo->shared_info->bDisableHdwCursor) {
+            uint32 cursorOffset = 0;
+            uint32 cursorBlockID = 0;
+            const uint32 kCursorSize = 16384; // 16 KB
+
+            if (gInfo->overlay_mem_mgr != NULL) {
+                if (mem_alloc(gInfo->overlay_mem_mgr, kCursorSize, NULL, &cursorBlockID, &cursorOffset) != B_OK) {
+                    cursorOffset = 0;
+                }
+            }
+
+            // Fallback: usa gli ultimi 16KB del framebuffer
+            if (cursorOffset == 0 && gInfo->shared_info->frame_buffer_size > kCursorSize) {
+                cursorOffset = gInfo->shared_info->frame_buffer_size - kCursorSize;
+            }
+
+            // Ora gInfo->frame_buffer è un puntatore valido per l'app_server!
+            gInfo->shared_info->cursor_virtual_base = (void*)((addr_t)gInfo->frame_buffer + cursorOffset);
+            gInfo->shared_info->cursor_physical_base = cursorOffset;
+
+            debug_printf("intel_arc.accelerant: HW Cursor VRAM allocated at offset 0x%" B_PRIx32 " (Virt: %p)\n",
+                    cursorOffset, gInfo->shared_info->cursor_virtual_base);
+        }*/
 	} else {
 		read_edid_from_hardware();
 		
