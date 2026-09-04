@@ -28,6 +28,8 @@
 #include <util/AreaKeeper.h>
 #include <vesa_info.h>
 
+#include <driver_settings.h>
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -54,6 +56,15 @@
 #define MAX_CLONED_FRAMEBUFFER_SIZE (256 * 1024 * 1024)
 #define ROUND_TO_PAGE_SIZE(x) (((x) + (B_PAGE_SIZE) - 1) & ~((B_PAGE_SIZE) - 1))
 
+
+
+static intel_arc_settings current_settings = {    
+    "intel_arc.accelerant",	// accelerant filename
+    false,					// dumprom, function still not integrated
+    0,						// memory, override builtin memory size detection in MB
+    true,					// hardcursor, if true use on-chip hardware cursor
+    32,						// cursorbits, number of bits used to draw bitmap cursor
+};
 
 struct supported_device {
 	uint16		device_id;
@@ -182,6 +193,26 @@ static mutex gLock;
 static char* gDeviceNames[MAX_DEVICES + 1];
 static intel_arc_info* gDeviceInfo[MAX_DEVICES];
 
+static void
+load_settings(void)
+{
+    void* handle = load_driver_settings("intel_arc.settings");
+    if (handle != NULL) {
+        
+        current_settings.hardcursor = get_driver_boolean_parameter(
+            handle, "hardcursor", current_settings.hardcursor, current_settings.hardcursor);
+
+        const char* value_str = get_driver_parameter(handle, "cursorbits", "32", "32"); //default HC bits on intel_arc
+        if (value_str != nullptr) {
+            current_settings.cursorbits = (uint32)atoi(value_str);
+            dprintf("INTEL_ARC: driver settings read %d cursor bits\n",current_settings.cursorbits);
+        }
+        
+        unload_driver_settings(handle);
+    } else {
+    	dprintf("INTEL_ARC: driver settings file not found\n");
+    }
+}
 
 static inline uint32
 get_pci_config(pci_info* info, uint8 offset, uint8 size)
@@ -320,87 +351,12 @@ arc_interrupt_handler(void* data)
 	return handled;
 }
 
-/* orig
-static void
-probe_display_state(intel_arc_info& info)
-{
-	intel_arc_shared_info& shared = *info.shared_info;
-	shared.pipe_count = 4;
-	shared.active_pipe = -1;
-	shared.active_ddi_port = 0;
-	shared.active_ddi_mode = 0;
-	shared.dpms_mode = B_DPMS_ON;
-
-	for (uint32 pipe = 0; pipe < shared.pipe_count; pipe++) {
-		const uint32 stride = pipe * INTEL_ARC_MMIO_PIPE_OFFSET;
-		read32(info, INTEL_ARC_MMIO_PIPE_A_HTOTAL + stride, shared.pipe_h_total[pipe]);
-		read32(info, INTEL_ARC_MMIO_PIPE_A_HBLANK + stride, shared.pipe_h_blank[pipe]);
-		read32(info, INTEL_ARC_MMIO_PIPE_A_HSYNC + stride, shared.pipe_h_sync[pipe]);
-		read32(info, INTEL_ARC_MMIO_PIPE_A_VTOTAL + stride, shared.pipe_v_total[pipe]);
-		read32(info, INTEL_ARC_MMIO_PIPE_A_VBLANK + stride, shared.pipe_v_blank[pipe]);
-		read32(info, INTEL_ARC_MMIO_PIPE_A_VSYNC + stride, shared.pipe_v_sync[pipe]);
-		read32(info, INTEL_ARC_MMIO_PIPE_A_CONTROL + stride, shared.pipe_control[pipe]);
-		read32(info, INTEL_ARC_MMIO_PIPE_A_SIZE + stride, shared.pipe_size[pipe]);
-		read32(info, INTEL_ARC_MMIO_PIPE_A_DDI_FUNC_CTL + stride, shared.pipe_ddi_func_ctl[pipe]);
-		read32(info, INTEL_ARC_MMIO_PLANE_A_CONTROL + stride, shared.plane_control[pipe]);
-		read32(info, INTEL_ARC_MMIO_PLANE_A_STRIDE + stride, shared.plane_stride[pipe]);
-		read32(info, INTEL_ARC_MMIO_PLANE_A_POS + stride, shared.plane_pos[pipe]);
-		read32(info, INTEL_ARC_MMIO_PLANE_A_IMAGE_SIZE + stride, shared.plane_image_size[pipe]);
-		read32(info, INTEL_ARC_MMIO_PLANE_A_SURFACE + stride, shared.plane_surface[pipe]);
-
-		if (shared.active_pipe >= 0)
-			continue;
-
-		if ((shared.pipe_control[pipe] & INTEL_ARC_PIPE_ENABLED) == 0)
-			continue;
-		if (shared.pipe_size[pipe] == 0)
-			continue;
-
-		shared.active_pipe = pipe;
-		shared.active_ddi_port
-			= (shared.pipe_ddi_func_ctl[pipe] & INTEL_ARC_PIPE_DDI_SELECT_MASK)
-				>> INTEL_ARC_PIPE_DDI_SELECT_SHIFT;
-		shared.active_ddi_mode
-			= (shared.pipe_ddi_func_ctl[pipe] & INTEL_ARC_PIPE_DDI_MODE_MASK)
-				>> INTEL_ARC_PIPE_DDI_MODE_SHIFT;
-
-		const uint32 width = (shared.pipe_size[pipe] & 0xffff) + 1;
-		const uint32 height = (shared.pipe_size[pipe] >> 16) + 1;
-		if (width != 0 && height != 0) {
-			shared.current_mode.virtual_width = width;
-			shared.current_mode.virtual_height = height;
-			if (shared.current_mode.space == B_NO_COLOR_SPACE)
-				shared.current_mode.space = B_RGB32;
-			if (shared.bytes_per_row == 0)
-				shared.bytes_per_row = width * 4;
-		}
-	}
-
-	static const uint32 kPortRegisters[4] = {
-		INTEL_ARC_MMIO_PORT_A,
-		INTEL_ARC_MMIO_PORT_B,
-		INTEL_ARC_MMIO_PORT_C,
-		INTEL_ARC_MMIO_PORT_D
-	};
-
-	shared.detected_port_bits = 0;
-	for (uint32 port = 0; port < 4; port++) {
-		if (!read32(info, kPortRegisters[port], shared.port_state[port]))
-			continue;
-
-		if ((shared.port_state[port] & (INTEL_ARC_PORT_ENABLED
-				| INTEL_ARC_PORT_DETECTED)) != 0) {
-			shared.detected_port_bits |= (1 << port);
-		}
-	}
-}
-*/
-/* orig con logs */
 static void
 probe_display_state(intel_arc_info& info)
 {
 	// 1. LOG INIZIALIZZAZIONE
-    dprintf("DEBUG: Entering probe_display_state.\n");
+	bool enableLog = false;
+    if (enableLog) dprintf("DEBUG: Entering probe_display_state.\n");
 
 	intel_arc_shared_info& shared = *info.shared_info;
 	shared.pipe_count = 4;
@@ -410,71 +366,71 @@ probe_display_state(intel_arc_info& info)
 	shared.dpms_mode = B_DPMS_ON;
 
     // Reset e log delle variabili chiave prima del ciclo
-    dprintf("DEBUG: Initializing shared info fields.\n");
+    if (enableLog) dprintf("DEBUG: Initializing shared info fields.\n");
 
 
 	for (uint32 pipe = 0; pipe < shared.pipe_count; pipe++) {
         // LOG INIZIO PIPE LOOP
-		dprintf("DEBUG: Processing Pipe %u\n", pipe);
+		if (enableLog) dprintf("DEBUG: Processing Pipe %u\n", pipe);
 
 		const uint32 stride = pipe * INTEL_ARC_MMIO_PIPE_OFFSET;
         
         // 2. LEGGERE I REGISTRI E LOGGARLI
         read32(info, INTEL_ARC_MMIO_PIPE_A_HTOTAL + stride, shared.pipe_h_total[pipe]);
-		dprintf("DEBUG: Pipe %u HTotal read: 0x%X\n", pipe, shared.pipe_h_total[pipe]);
+		if (enableLog) dprintf("DEBUG: Pipe %u HTotal read: 0x%X\n", pipe, shared.pipe_h_total[pipe]);
 
         read32(info, INTEL_ARC_MMIO_PIPE_A_HBLANK + stride, shared.pipe_h_blank[pipe]);
-		dprintf("DEBUG: Pipe %u HBlank read: 0x%X\n", pipe, shared.pipe_h_blank[pipe]);
+		if (enableLog) dprintf("DEBUG: Pipe %u HBlank read: 0x%X\n", pipe, shared.pipe_h_blank[pipe]);
 
         read32(info, INTEL_ARC_MMIO_PIPE_A_HSYNC + stride, shared.pipe_h_sync[pipe]);
-		dprintf("DEBUG: Pipe %u HSync read: 0x%X\n", pipe, shared.pipe_h_sync[pipe]);
+		if (enableLog) dprintf("DEBUG: Pipe %u HSync read: 0x%X\n", pipe, shared.pipe_h_sync[pipe]);
 
         read32(info, INTEL_ARC_MMIO_PIPE_A_VTOTAL + stride, shared.pipe_v_total[pipe]);
-		dprintf("DEBUG: Pipe %u VTotal read: 0x%X\n", pipe, shared.pipe_v_total[pipe]);
+		if (enableLog) dprintf("DEBUG: Pipe %u VTotal read: 0x%X\n", pipe, shared.pipe_v_total[pipe]);
 
         read32(info, INTEL_ARC_MMIO_PIPE_A_VBLANK + stride, shared.pipe_v_blank[pipe]);
-		dprintf("DEBUG: Pipe %u VBlank read: 0x%X\n", pipe, shared.pipe_v_blank[pipe]);
+		if (enableLog) dprintf("DEBUG: Pipe %u VBlank read: 0x%X\n", pipe, shared.pipe_v_blank[pipe]);
 
         read32(info, INTEL_ARC_MMIO_PIPE_A_VSYNC + stride, shared.pipe_v_sync[pipe]);
-		dprintf("DEBUG: Pipe %u VSync read: 0x%X\n", pipe, shared.pipe_v_sync[pipe]);
+		if (enableLog) dprintf("DEBUG: Pipe %u VSync read: 0x%X\n", pipe, shared.pipe_v_sync[pipe]);
 
         read32(info, INTEL_ARC_MMIO_PIPE_A_CONTROL + stride, shared.pipe_control[pipe]);
-		dprintf("DEBUG: Pipe %u Control read: 0x%X (Enabled: %d)\n", pipe, shared.pipe_control[pipe], (shared.pipe_control[pipe] & INTEL_ARC_PIPE_ENABLED) != 0);
+		if (enableLog) dprintf("DEBUG: Pipe %u Control read: 0x%X (Enabled: %d)\n", pipe, shared.pipe_control[pipe], (shared.pipe_control[pipe] & INTEL_ARC_PIPE_ENABLED) != 0);
 
         read32(info, INTEL_ARC_MMIO_PIPE_A_SIZE + stride, shared.pipe_size[pipe]);
-		dprintf("DEBUG: Pipe %u Size read: 0x%X\n", pipe, shared.pipe_size[pipe]);
+		if (enableLog) dprintf("DEBUG: Pipe %u Size read: 0x%X\n", pipe, shared.pipe_size[pipe]);
 
         read32(info, INTEL_ARC_MMIO_PIPE_A_DDI_FUNC_CTL + stride, shared.pipe_ddi_func_ctl[pipe]);
-		dprintf("DEBUG: Pipe %u DDI FuncCtl read: 0x%X\n", pipe, shared.pipe_ddi_func_ctl[pipe]);
+		if (enableLog) dprintf("DEBUG: Pipe %u DDI FuncCtl read: 0x%X\n", pipe, shared.pipe_ddi_func_ctl[pipe]);
 
         read32(info, INTEL_ARC_MMIO_PLANE_A_CONTROL + stride, shared.plane_control[pipe]);
-		dprintf("DEBUG: Pipe %u Plane Control read: 0x%X\n", pipe, shared.plane_control[pipe]);
+		if (enableLog) dprintf("DEBUG: Pipe %u Plane Control read: 0x%X\n", pipe, shared.plane_control[pipe]);
 
         read32(info, INTEL_ARC_MMIO_PLANE_A_STRIDE + stride, shared.plane_stride[pipe]);
-		dprintf("DEBUG: Pipe %u Plane Stride read: 0x%X\n", pipe, shared.plane_stride[pipe]);
+		if (enableLog) dprintf("DEBUG: Pipe %u Plane Stride read: 0x%X\n", pipe, shared.plane_stride[pipe]);
 
         read32(info, INTEL_ARC_MMIO_PLANE_A_POS + stride, shared.plane_pos[pipe]);
-		dprintf("DEBUG: Pipe %u Plane Pos read: 0x%X\n", pipe, shared.plane_pos[pipe]);
+		if (enableLog) dprintf("DEBUG: Pipe %u Plane Pos read: 0x%X\n", pipe, shared.plane_pos[pipe]);
 
         read32(info, INTEL_ARC_MMIO_PLANE_A_IMAGE_SIZE + stride, shared.plane_image_size[pipe]);
-		dprintf("DEBUG: Pipe %u Image Size read: 0x%X\n", pipe, shared.plane_image_size[pipe]);
+		if (enableLog) dprintf("DEBUG: Pipe %u Image Size read: 0x%X\n", pipe, shared.plane_image_size[pipe]);
 
         read32(info, INTEL_ARC_MMIO_PLANE_A_SURFACE + stride, shared.plane_surface[pipe]);
-		dprintf("DEBUG: Pipe %u Surface read: 0x%X\n", pipe, shared.plane_surface[pipe]);
+		if (enableLog) dprintf("DEBUG: Pipe %u Surface read: 0x%X\n", pipe, shared.plane_surface[pipe]);
 
         // LOGIC CHECKING START
 		if (shared.active_pipe >= 0) {
-            dprintf("DEBUG: Skipping Pipe %u because an active pipe was already found.\n", pipe);
+            if (enableLog) dprintf("DEBUG: Skipping Pipe %u because an active pipe was already found.\n", pipe);
 			continue;
 		}
 
 		if ((shared.pipe_control[pipe] & INTEL_ARC_PIPE_ENABLED) == 0) {
-            dprintf("DEBUG: Skipping Pipe %u because the PIPE_ENABLED bit is clear (Control: 0x%X).\n", pipe, shared.pipe_control[pipe]);
+            if (enableLog) dprintf("DEBUG: Skipping Pipe %u because the PIPE_ENABLED bit is clear (Control: 0x%X).\n", pipe, shared.pipe_control[pipe]);
 			continue;
 		}
 
 		if (shared.pipe_size[pipe] == 0) {
-            dprintf("DEBUG: Skipping Pipe %u because pipe size is zero (Size: 0x%X).\n", pipe, shared.pipe_size[pipe]);
+            if (enableLog) dprintf("DEBUG: Skipping Pipe %u because pipe size is zero (Size: 0x%X).\n", pipe, shared.pipe_size[pipe]);
 			continue;
 		}
 
@@ -487,9 +443,9 @@ probe_display_state(intel_arc_info& info)
 			= (shared.pipe_ddi_func_ctl[pipe] & INTEL_ARC_PIPE_DDI_MODE_MASK)
 				>> INTEL_ARC_PIPE_DDI_MODE_SHIFT;
 
-        dprintf("DEBUG: Pipe %u identified as ACTIVE PIPE.\n", pipe);
-		dprintf("DEBUG: Active DDI Port detected: %u\n", shared.active_ddi_port);
-		dprintf("DEBUG: Active DDI Mode detected: %u\n", shared.active_ddi_mode);
+        if (enableLog) dprintf("DEBUG: Pipe %u identified as ACTIVE PIPE.\n", pipe);
+		if (enableLog) dprintf("DEBUG: Active DDI Port detected: %u\n", shared.active_ddi_port);
+		if (enableLog) dprintf("DEBUG: Active DDI Mode detected: %u\n", shared.active_ddi_mode);
 
         // Calcolo e Log risoluzione
         // 1. Estrazione corretta secondo il layout hardware Intel (Display IP 13/14)
@@ -499,18 +455,18 @@ probe_display_state(intel_arc_info& info)
 		if (width != 0 && height != 0) {
 			shared.current_mode.virtual_width = width;
 			shared.current_mode.virtual_height = height;
-			dprintf("DEBUG: Calculated Resolution for Pipe %u: %u x %u\n", pipe, width, height);
+			if (enableLog) dprintf("DEBUG: Calculated Resolution for Pipe %u: %u x %u\n", pipe, width, height);
 
             if (shared.current_mode.space == B_NO_COLOR_SPACE) {
                 shared.current_mode.space = B_RGB32;
-                dprintf("DEBUG: Color space corrected to RGB32.\n");
+                if (enableLog) dprintf("DEBUG: Color space corrected to RGB32.\n");
             }
 			if (shared.bytes_per_row == 0) {
 				shared.bytes_per_row = width * 4;
-                dprintf("DEBUG: Bytes per row set to %u (Width * 4).\n", shared.bytes_per_row);
+                if (enableLog) dprintf("DEBUG: Bytes per row set to %u (Width * 4).\n", shared.bytes_per_row);
 			}
 		} else {
-            dprintf("WARNING: Pipe %u failed resolution check (W=%u, H=%u).\n", pipe, width, height);
+            if (enableLog) dprintf("WARNING: Pipe %u failed resolution check (W=%u, H=%u).\n", pipe, width, height);
         }
         	// Estrazione lane dallo stato hardware al boot
         	// Verificare da manuali se il lane width è ai bit 3:1 o 21:19
@@ -518,22 +474,22 @@ probe_display_state(intel_arc_info& info)
 		//const uint32 ddiWidth = (shared.pipe_ddi_func_ctl[pipe] >> 19) & 0x7;
 
 		if (ddiWidth == 0) {
-			dprintf("DEBUG: Display Port Lanes set to 1\n");
+			if (enableLog) dprintf("DEBUG: Display Port Lanes set to 1\n");
 			shared.dp_lanes[pipe] = 1;
 		} else if (ddiWidth == 1) {
-			dprintf("DEBUG: Display Port Lanes set to 2\n");
+			if (enableLog) dprintf("DEBUG: Display Port Lanes set to 2\n");
 			shared.dp_lanes[pipe] = 2;
 		} else if (ddiWidth == 3) {
-			dprintf("DEBUG: Display Port Lanes set to 4\n");
+			if (enableLog) dprintf("DEBUG: Display Port Lanes set to 4\n");
 			shared.dp_lanes[pipe] = 4;
 		} else {
-			dprintf("DEBUG: dp_lanes set to fallback (2)\n");
+			if (enableLog) dprintf("DEBUG: dp_lanes set to fallback (2)\n");
 			shared.dp_lanes[pipe] = 2;
 		}
 	} // FINE PIPE LOOP
 
     // PORT LOGIC START
-    dprintf("\nDEBUG: Starting Port Detection Loop.\n");
+    if (enableLog) dprintf("\nDEBUG: Starting Port Detection Loop.\n");
 
 	static const uint32 kPortRegisters[4] = {
 		INTEL_ARC_MMIO_PORT_A,
@@ -545,26 +501,26 @@ probe_display_state(intel_arc_info& info)
 	shared.detected_port_bits = 0;
 	for (uint32 port = 0; port < 4; port++) {
         // LOG INIZIO PORT LOOP
-        dprintf("DEBUG: Checking Port %u...\n", port);
+        if (enableLog) dprintf("DEBUG: Checking Port %u...\n", port);
 
 		if (!read32(info, kPortRegisters[port], shared.port_state[port])) {
-            dprintf("WARNING: Failed to read state for Port %u.\n", port);
+            if (enableLog) dprintf("WARNING: Failed to read state for Port %u.\n", port);
 			continue;
 		}
         
         // LOG STADO REGISTRO PORTA
-        dprintf("DEBUG: State register for Port %u: 0x%X\n", port, shared.port_state[port]);
+        if (enableLog) dprintf("DEBUG: State register for Port %u: 0x%X\n", port, shared.port_state[port]);
 
 
 		if ((shared.port_state[port] & (INTEL_ARC_PORT_ENABLED | INTEL_ARC_PORT_DETECTED)) != 0) {
-            dprintf("SUCCESS: Port %u is detected and enabled.\n", port);
+            if (enableLog) dprintf("SUCCESS: Port %u is detected and enabled.\n", port);
 			shared.detected_port_bits |= (1 << port);
 		} else {
-            dprintf("INFO: Port %u is inactive or undetected.\n", port);
+            if (enableLog) dprintf("INFO: Port %u is inactive or undetected.\n", port);
         }
 	} // FINE PORT LOOP
 
-    dprintf("\nDEBUG: probe_display_state finished execution.\n");
+    if (enableLog) dprintf("\nDEBUG: probe_display_state finished execution.\n");
 }
 /* gestione colore 
 static void
@@ -994,6 +950,11 @@ init_device(intel_arc_info& info)
 		return info.shared_area;
 
 	memset(info.shared_info, 0, sizeof(intel_arc_shared_info));
+	load_settings();
+	//memcpy(&info.shared_info->settings, &current_settings, sizeof(intel_arc_settings));
+	info.shared_info->settings = current_settings;
+    info.shared_info->bDisableHdwCursor = !info.shared_info->settings.hardcursor;
+    
 	info.shared_info->vblank_sem = -1;
 	info.shared_info->vendor_id = info.pci.vendor_id;
 	info.shared_info->device_id = info.pci.device_id;
@@ -1143,10 +1104,7 @@ init_device(intel_arc_info& info)
 		enable_interrupts(info, true);
 	}
 
-	sharedKeeper.Detach();
-	mmioKeeper.Detach();
 	
-
 	struct frame_buffer_boot_info* bi = (struct frame_buffer_boot_info*)get_boot_item(
 FRAME_BUFFER_BOOT_INFO, NULL);
 
@@ -1164,10 +1122,86 @@ FRAME_BUFFER_BOOT_INFO, NULL);
     info.shared_info->fbc.bytes_per_row = info.shared_info->bytes_per_row;
 	info.shared_info->accelerant_in_use=false;
 	
+	info.shared_info->cursor_virtual_base_kernel = NULL;
+	info.shared_info->cursor_virtual_base = NULL;
+    info.shared_info->cursor_physical_base = 0;
+	
+	if (!info.shared_info->bDisableHdwCursor) {
+		/* this is not correct, being a PLANE, cursor address should stay in VRAM not in RAM as
+		 * while finding a solution that doesn't kill the pipe shutting down the video output
+		 * for now let's disable the Hardware Cursor
+        AreaKeeper cursorKeeper;
+        size_t cursorSize = B_PAGE_SIZE * 4; // 16 KB
+
+        info.cursor_area = cursorKeeper.Create("intel arc cursor buffer",
+            &info.shared_info->cursor_virtual_base_kernel,
+            B_ANY_KERNEL_ADDRESS,
+            cursorSize,
+            B_FULL_LOCK | B_CONTIGUOUS,
+            B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA | B_CLONEABLE_AREA);
+
+        if (info.cursor_area >= B_OK) {
+            physical_entry pe;
+            status_t status = get_memory_map(
+                info.shared_info->cursor_virtual_base_kernel,
+                cursorSize, &pe, 1);
+
+            if (status == B_OK) {
+                info.shared_info->cursor_area = info.cursor_area;
+                info.shared_info->cursor_physical_base = (uint32)pe.address;
+                cursorKeeper.Detach();
+
+                dprintf("intel_arc: Cursor buffer allocated - Phys: 0x%" B_PRIx32
+                    ", Virt Kernel: %p\n",
+                    info.shared_info->cursor_physical_base,
+                    info.shared_info->cursor_virtual_base_kernel);
+            } else {
+                ERROR("intel_arc: Failed to get memory map for cursor buffer: %s\n",
+                    strerror(status));
+                info.shared_info->bDisableHdwCursor = true;
+            }
+        } else {
+            ERROR("intel_arc: Failed to allocate contiguous cursor area: %s\n",
+                strerror(info.cursor_area));*/
+            info.shared_info->bDisableHdwCursor = true;
+        //}
+    }
+    // Rilevamento diagnostico VRAM fisica totale (LMEM)
+    // -------------------------------------------------------------------------
+    info.shared_info->vram_size = frameBufferBar.size;
+
+    // Se ReBAR è disattivato, la BAR2 è bloccata a 256 MB.
+    // Interroghiamo i registri MMIO di Intel Arc (DG2) per leggere la VRAM reale saldata sulla scheda.
+    if (info.shared_info->vram_size <= 256 * 1024 * 1024 && info.registers != NULL) {
+        // Su Intel Arc (DG2/Xe-HPG), il registro MMIO 0x138000 / 0x100000 
+        // contiene la configurazione dei controller di memoria LMEM.
+        dprintf("intel_arc: ReBAR disabled detected\n");
+        uint32 lmemCap = info.registers[0x138000 / 4];
+
+        if (lmemCap != 0 && lmemCap != 0xFFFFFFFF) {
+            // Estragga la dimensione della VRAM in base ai blocchi LMEM attivi
+            // Esempio tipico su DG2: shift dei blocchi da 1 GB / 2 GB
+            uint64 detectedBytes = ((uint64)(lmemCap & 0xFFFF)) * 1024 * 1024 * 1024;
+            if (detectedBytes > info.shared_info->vram_size)
+                info.shared_info->vram_size = detectedBytes;
+        }
+    } else {
+    	dprintf("intel_arc: ReBAR active!\n");
+    }
+
+    dprintf("intel_arc: Physical VRAM: %" B_PRIu64 " MB | Mapped Framebuffer: %" B_PRIu64 " MB\n",
+        info.shared_info->vram_size / (1024 * 1024),
+        info.shared_info->frame_buffer_size / (1024 * 1024));
+	
 #ifdef IS_PIRATI_BUILD
 	draw_logo(info);
 	snooze(2000000);
 #endif
+
+	sharedKeeper.Detach();
+	mmioKeeper.Detach();
+	
+
 
 	return B_OK;
 }

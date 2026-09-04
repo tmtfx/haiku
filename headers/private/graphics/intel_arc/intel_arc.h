@@ -104,6 +104,13 @@ enum intel_arc_family {
 	INTEL_ARC_FAMILY_BATTLEMAGE
 };
 
+typedef struct {
+	char	accelerant[B_FILE_NAME_LENGTH];
+	bool	dumprom;
+	uint32 	memory;		/* Forza riconoscimento memoria */
+	bool	hardcursor;
+	uint32	cursorbits;
+} intel_arc_settings;
 
 struct intel_arc_shared_info {
 	area_id			mode_list_area;
@@ -144,14 +151,19 @@ struct intel_arc_shared_info {
 
 	addr_t			frame_buffer;
 	
+	uint64			vram_size;            // VRAM fisica totale (es. 16 GB)
+    
 	bool			bDisableHdwCursor;      // Toggle impostabile da settings/driver
     bool			cursor_visible;
     uint16			cursor_hot_x;
     uint16			cursor_hot_y;
 
-    uint32			cursor_physical_base;   // Indirizzo fisico/GGTT in VRAM (allineato a 4096)
-    void*			cursor_virtual_base;    // Mappatura virtuale per accelerant
-
+    void*			cursor_virtual_base_kernel;  // Puntatore kernel (opzionale)
+    void*			cursor_virtual_base;         // Mappatura virtuale per accelerant (Userland)
+    uint32			cursor_physical_base;        // Indirizzo fisico/GGTT letto da CUR_SURF
+    
+	intel_arc_settings settings;
+	
 	uint32			pipe_control[4];
 	uint32			pipe_size[4];
 	uint32			pipe_ddi_func_ctl[4];
