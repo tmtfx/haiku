@@ -511,9 +511,37 @@ LogoView::~LogoView()
 void
 LogoView::MouseDown(BPoint where)
 {
+	where.PrintToStream();
+    if (fEnableEEgg) {
+        BRect tile(80.0, 37.0, 185.0, 98.0);
+
+        // Se la vista supporta lo scrolling o ha un Origin modificato,
+        // aggiungiamo l'offset di Bounds()
+        BRect adjustedTile = tile.OffsetBySelf(Bounds().LeftTop());
+
+        if (adjustedTile.Contains(where)) {
+            BMessage* currentMessage = Window()->CurrentMessage();
+            int32 clicks = 0;
+            if (currentMessage != NULL && currentMessage->FindInt32("clicks", &clicks) == B_OK) {
+                if (clicks >= 2) {
+                    BMessenger(this).SendMessage(kMsgTriggerFricoVideo);
+                    fEnableEEgg = false;
+                    return;
+                }
+            }
+        }
+    }
+
+    BView::MouseDown(where);
+	/*
 	if (fEnableEEgg) {
+		BPoint localWhere = where;
+        ConvertFromScreen(&localWhere);
+        localWhere.PrintToStream();
+        where.PrintToStream();
+        
 		BRect tile(134.0, 72.0, 240.0, 138.0);
-		if (!tile.Contains(where)) {
+		if (!tile.Contains(localWhere)) {
 			BView::MouseDown(where);
 			return;
 		}
@@ -533,27 +561,7 @@ LogoView::MouseDown(BPoint where)
 	}
 	
 	BView::MouseDown(where);
-	
-	/*
-	BMessage* currentMessage = Window()->CurrentMessage();
-	int32 calls = 0;
-	int32 modifiers = 0;
-
-	if (currentMessage) {
-		currentMessage->FindInt32("clicks", &calls);
-		currentMessage->FindInt32("modifiers", &modifiers);
-	}
-
-	// Verifica se è un doppio click E se il tasto Option/Win è premuto
-	if (calls == 2 && (modifiers & B_OPTION_KEY) != 0) {
-		// Invia un messaggio alla BWindow (AboutWindow) per attivare l'Easter Egg!
-		Window()->PostMessage(kMsgTriggerFricoVideo);
-		return;
-	}*/
-	
-
-	// Comportamento di default
-	
+	*/
 }
 
 BSize
@@ -1489,34 +1497,10 @@ AboutView::MessageReceived(BMessage* message)
 void
 AboutView::_ShowFricoVideo()
 {
-	BPath path;
-	//find_directory(B_SYSTEM_DATA_DIRECTORY, &path);
-	//path.Append("Pirates_love_Skardy.webm");
-	/*
-	find_directory(B_USER_DIRECTORY, &path);
-	path.Append("Musiche/Pirates_love_Skardy.webm");
-	BEntry entry(path.Path(), true);
-	if (entry.InitCheck()!= B_OK || !entry.Exists())
-		return;*/
-	
 	if (fVideoView == NULL )
 		return;
 	fCardLayout->SetVisibleItem(1);
-	// Nascondiamo i crediti (il layout li rimuoverà dallo spazio visivo)
-	//if (fCreditsView != NULL && !fCreditsView->IsHidden()){
-	//	fCreditsView->Hide();
-	//	BScrollBar* scrollBar = fCreditsView->ScrollBar(B_VERTICAL);
-	//	scrollBar->Hide();
-	//}
-
-	// Mostriamo il video (il layout gli assegnerà automaticamente lo spazio lasciato dai crediti)
-	//fVideoView->Show();
-	////float x=-fCreditsView->Bounds().Width();
-	////debug_printf("provo a spostare a sinistra di %f",x);
-	////fVideoView->MoveBy(x,0);
-
-	// Avviamo la riproduzione
-	//fVideoView->PlayVideo(path.Path());
+	
 	fVideoView->PlayVideo(4);
 }
 

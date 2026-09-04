@@ -13,6 +13,10 @@
 
 #include <algorithm>
 
+//test, rimuovere risolto il bug
+#include <stdlib.h> // Per setenv
+// fino qui
+
 FricoVideoView::FricoVideoView(const char* name)
     :
     BView(name, B_WILL_DRAW | B_FULL_UPDATE_ON_RESIZE),
@@ -169,15 +173,22 @@ FricoVideoView::_InitMediaPlayback()
     media_format decodedFormat = {};
     decodedFormat.type = B_MEDIA_RAW_VIDEO;
     decodedFormat.u.raw_video = media_raw_video_format::wildcard;
-    decodedFormat.u.raw_video.display.format = B_YCbCr422;
 
+    //Questo funziona
+    decodedFormat.u.raw_video.display.format = B_RGB32;
+    if (fVideoTrack->DecodedFormat(&decodedFormat) != B_OK) {
+        StopVideo();
+        return;
+    }
+    /* Questo genera artefatti o crasha
+    decodedFormat.u.raw_video.display.format = B_YCbCr422;
     if (fVideoTrack->DecodedFormat(&decodedFormat) != B_OK) {
         decodedFormat.u.raw_video.display.format = B_RGB32;
         if (fVideoTrack->DecodedFormat(&decodedFormat) != B_OK) {
             StopVideo();
             return;
         }
-    }
+    }*/
 
     color_space space = decodedFormat.u.raw_video.display.format;
 
