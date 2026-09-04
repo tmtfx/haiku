@@ -191,6 +191,7 @@
 #define INTEL_ARC_TGL_DPCLKA_DDIB_CLOCK_SELECT	(3U << 2)
 #define INTEL_ARC_TGL_DPCLKA_DDIB_CLOCK_SELECT_SHIFT 2
 #define INTEL_ARC_TGL_DPCLKA_DDIA_CLOCK_SELECT	(3U << 0)
+
 /*
 #define INTEL_ARC_TGL_DPLL0_CFGCR0				0x164284
 #define INTEL_ARC_TGL_DPLL1_CFGCR0				0x16428C
@@ -291,12 +292,14 @@
 #define INTEL_ARC_MMIO_CUR_SURF_A        0x70084
 #define INTEL_ARC_MMIO_CUR_POS_A         0x70088
 
+
 // Bits per CUR_CTL (Mode selection bits 5:0)
 #define MCURSOR_MODE_DISABLE             0x00
 #define MCURSOR_MODE_64_ARGB8888         0x04  // 64x64 32bpp ARGB
 #define MCURSOR_MODE_128_ARGB8888        0x01  // 128x128 32bpp ARGB
 #define MCURSOR_MODE_256_ARGB8888        0x02  // 256x256 32bpp ARGB
-#define MCURSOR_PIPE_SELECT_SHIFT        28
+
+//#define MCURSOR_PIPE_SELECT_SHIFT        28
 
 // Posizione x/y in CUR_POS
 #define CUR_POS_SIGN_X                   (1 << 15)

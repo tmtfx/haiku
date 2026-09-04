@@ -7,7 +7,6 @@
 #include <cstring>
 
 #define CALLED() debug_printf("INTEL_ARC_ACC: CALLED %s\n", __FUNCTION__)
-
 static void
 SetupCursorDBUF(int pipe)
 {
@@ -51,6 +50,49 @@ SetupCursorDBUF(int pipe)
     }
 }
 
+void
+ShowCursor(bool isVisible)
+{
+    CALLED();
+    const int8 pipe = gInfo->shared_info->active_pipe;
+    if (pipe < 0) {
+        debug_printf("intel_arc SHOW_CURSOR error, pipe < 0\n");
+        return;
+    }
+
+    const uint32 pipeOffset = (uint32)pipe * INTEL_ARC_MMIO_PIPE_OFFSET;
+
+    gInfo->shared_info->cursor_visible = isVisible;
+
+    if (!isVisible) {
+        debug_printf("intel_arc SHOW_CURSOR disabling cursor...\n");
+
+        // 1. Azzera i bit di modalità [5:0] in CUR_CTL (0x00 = MCURSOR_MODE_DISABLE)
+        uint32 curCtl = 0;
+        read_register(INTEL_ARC_MMIO_CUR_CTL_A + pipeOffset, curCtl);
+        curCtl &= ~0x3F;
+        write_register(INTEL_ARC_MMIO_CUR_CTL_A + pipeOffset, curCtl);
+
+        // 2. Trigger hardware per applicare il disabilita al vblank
+        write_register(INTEL_ARC_MMIO_CUR_SURF_A + pipeOffset, 0);
+        return;
+    }
+
+    debug_printf("intel_arc SHOW_CURSOR enabling cursor...\n");
+    SetupCursorDBUF(pipe);
+
+    // 1. Prima configura CUR_CTL con la modalità 64x64 ARGB (0x04)
+    uint32 curCtl = 0;
+    read_register(INTEL_ARC_MMIO_CUR_CTL_A + pipeOffset, curCtl);
+    curCtl &= ~0x3F;                    // Pulisce i vecchi bit di modalità
+    curCtl |= MCURSOR_MODE_64_ARGB8888; // Imposta 0x04
+    write_register(INTEL_ARC_MMIO_CUR_CTL_A + pipeOffset, curCtl);
+
+    // 2. Infine imposta CUR_SURF che fa da TRIGGER hardware
+    uint32 cursorOffset = gInfo->shared_info->cursor_physical_base;
+    write_register(INTEL_ARC_MMIO_CUR_SURF_A + pipeOffset, cursorOffset);
+}
+/*
 void
 ShowCursor(bool isVisible)
 {
@@ -106,6 +148,7 @@ ShowCursor(bool isVisible)
     write_register(INTEL_ARC_MMIO_CUR_SURF_A + pipeOffset, cursorOffset);
     //ma tanto penso manchi ancora il watermarking o altro...
 }
+*/
 
 void
 MoveCursor(uint16 x, uint16 y)
