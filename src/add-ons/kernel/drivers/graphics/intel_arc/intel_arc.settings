@@ -10,6 +10,6 @@ dumprom     false                # dump bios rom to ~/trident.rom // not yet imp
 
 # intel_arc.accelerant parameters:
 #memory     8                   # in MB, override builtin memory size detection (es. 4, 6, 8) // not yet implemented
-hardcursor  true                 # if true use on-chip hardware cursor
+hardcursor  false                 # if true use on-chip hardware cursor # not implemented
 cursorbits  32                  # number of bits used to draw bitmap cursor
-
+overlay  false          # if true use hardware accelerated video overlays # not implemented

@@ -62,8 +62,9 @@ static intel_arc_settings current_settings = {
     "intel_arc.accelerant",	// accelerant filename
     false,					// dumprom, function still not integrated
     0,						// memory, override builtin memory size detection in MB
-    true,					// hardcursor, if true use on-chip hardware cursor
+    false,					// hardcursor, if true use on-chip hardware cursor
     32,						// cursorbits, number of bits used to draw bitmap cursor
+    false,					// overlay, if true use hardware accelerated video overlays
 };
 
 struct supported_device {
@@ -201,12 +202,16 @@ load_settings(void)
         
         current_settings.hardcursor = get_driver_boolean_parameter(
             handle, "hardcursor", current_settings.hardcursor, current_settings.hardcursor);
+            
+        current_settings.overlay = get_driver_boolean_parameter(
+            handle, "overlay", current_settings.overlay, current_settings.overlay);
 
         const char* value_str = get_driver_parameter(handle, "cursorbits", "32", "32"); //default HC bits on intel_arc
         if (value_str != nullptr) {
             current_settings.cursorbits = (uint32)atoi(value_str);
             dprintf("INTEL_ARC: driver settings read %d cursor bits\n",current_settings.cursorbits);
         }
+        
         
         unload_driver_settings(handle);
     } else {
@@ -954,6 +959,7 @@ init_device(intel_arc_info& info)
 	//memcpy(&info.shared_info->settings, &current_settings, sizeof(intel_arc_settings));
 	info.shared_info->settings = current_settings;
     info.shared_info->bDisableHdwCursor = !info.shared_info->settings.hardcursor;
+    info.shared_info->bDisableOverlay = !info.shared_info->settings.overlay;
     
 	info.shared_info->vblank_sem = -1;
 	info.shared_info->vendor_id = info.pci.vendor_id;
@@ -1166,6 +1172,10 @@ FRAME_BUFFER_BOOT_INFO, NULL);
             info.shared_info->bDisableHdwCursor = true;
         //}
     }
+    
+    
+    
+    
     // Rilevamento diagnostico VRAM fisica totale (LMEM)
     // -------------------------------------------------------------------------
     info.shared_info->vram_size = frameBufferBar.size;

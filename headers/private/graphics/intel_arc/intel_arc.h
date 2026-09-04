@@ -110,6 +110,7 @@ typedef struct {
 	uint32 	memory;		/* Forza riconoscimento memoria */
 	bool	hardcursor;
 	uint32	cursorbits;
+	bool	overlay;
 } intel_arc_settings;
 
 struct intel_arc_shared_info {
@@ -153,6 +154,7 @@ struct intel_arc_shared_info {
 	
 	uint64			vram_size;            // VRAM fisica totale (es. 16 GB)
     
+    bool			bDisableOverlay;
 	bool			bDisableHdwCursor;      // Toggle impostabile da settings/driver
     bool			cursor_visible;
     uint16			cursor_hot_x;

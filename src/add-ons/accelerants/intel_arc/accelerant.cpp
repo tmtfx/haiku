@@ -194,11 +194,13 @@ init_common(int device, bool isClone)
         */
         gInfo->frame_buffer_area = gInfo->shared_info->frame_buffer_area;
 		gInfo->frame_buffer = (void*)gInfo->shared_info->frame_buffer;
-		
-		status_t overlayStatus = init_overlay_memory_manager();
-		if (overlayStatus != B_OK)
-			debug_printf("intel_arc.accelerant: overlay VRAM heap unavailable: %s\n", strerror(overlayStatus));
-		
+		if (!gInfo->shared_info->bDisableOverlay) {
+			status_t overlayStatus = init_overlay_memory_manager();
+			if (overlayStatus != B_OK)
+				debug_printf("intel_arc.accelerant: overlay VRAM heap unavailable: %s\n", strerror(overlayStatus));
+			else
+				debug_printf("intel_arc.accelerant: overlay VRAM heap initialized\n");
+		}
 		/* if you have previously cloned the framebuffer you can now allocate the cursor space
 		 * still it won't work as this accelerant doesn't cover all the steps needed for cursor
 		 * plane setup (like watermarking and other amenities).
@@ -303,10 +305,12 @@ intel_arc_clone_accelerant(void* data)
 	if (status == B_OK) {
 		gInfo->frame_buffer_area = info.area;
 		gInfo->frame_buffer = info.address;
-		status_t overlayStatus = init_overlay_memory_manager();
-		if (overlayStatus != B_OK)
-			debug_printf("intel_arc.accelerant: overlay VRAM heap unavailable in clone: %s\n",
-				strerror(overlayStatus));
+		if (!gInfo->shared_info->bDisableOverlay) {
+			status_t overlayStatus = init_overlay_memory_manager();
+			if (overlayStatus != B_OK)
+				debug_printf("intel_arc.accelerant: overlay VRAM heap unavailable in clone: %s\n",
+					strerror(overlayStatus));
+		}
 	}
 
 	return B_OK;
@@ -462,26 +466,29 @@ get_accelerant_hook(uint32 feature, void* /*data*/)
 			return (void*)intel_arc_get_frame_buffer_config;
 		case B_GET_PIXEL_CLOCK_LIMITS:
 			return (void*)intel_arc_get_pixel_clock_limits;
-		case B_OVERLAY_COUNT:
-			return (void*)intel_arc_overlay_count;
-		case B_OVERLAY_SUPPORTED_SPACES:
-			return (void*)intel_arc_overlay_supported_spaces;
-		case B_OVERLAY_SUPPORTED_FEATURES:
-			return (void*)intel_arc_overlay_supported_features;
-		case B_ALLOCATE_OVERLAY_BUFFER:
-			return (void*)intel_arc_allocate_overlay_buffer;
-		case B_RELEASE_OVERLAY_BUFFER:
-			return (void*)intel_arc_release_overlay_buffer;
-		case B_GET_OVERLAY_CONSTRAINTS:
-			return (void*)intel_arc_get_overlay_constraints;
-		case B_ALLOCATE_OVERLAY:
-			return (void*)intel_arc_allocate_overlay;
-		case B_RELEASE_OVERLAY:
-			return (void*)intel_arc_release_overlay;
-		case B_CONFIGURE_OVERLAY:
-			return (void*)intel_arc_configure_overlay;
 		case B_SET_INDEXED_COLORS:
 			return (void*)intel_arc_set_indexed_colors;
+		
+		// OVERLAYS
+		case B_OVERLAY_COUNT:
+			return (void*)(gInfo->shared_info->bDisableOverlay ? NULL : intel_arc_overlay_count);
+		case B_OVERLAY_SUPPORTED_SPACES:
+			return (void*)(gInfo->shared_info->bDisableOverlay ? NULL : intel_arc_overlay_supported_spaces);
+		case B_OVERLAY_SUPPORTED_FEATURES:
+			return (void*)(gInfo->shared_info->bDisableOverlay ? NULL : intel_arc_overlay_supported_features);
+		case B_ALLOCATE_OVERLAY_BUFFER:
+			return (void*)(gInfo->shared_info->bDisableOverlay ? NULL : intel_arc_allocate_overlay_buffer);
+		case B_RELEASE_OVERLAY_BUFFER:
+			return (void*)(gInfo->shared_info->bDisableOverlay ? NULL : intel_arc_release_overlay_buffer);
+		case B_GET_OVERLAY_CONSTRAINTS:
+			return (void*)(gInfo->shared_info->bDisableOverlay ? NULL : intel_arc_get_overlay_constraints);
+		case B_ALLOCATE_OVERLAY:
+			return (void*)(gInfo->shared_info->bDisableOverlay ? NULL : intel_arc_allocate_overlay);
+		case B_RELEASE_OVERLAY:
+			return (void*)(gInfo->shared_info->bDisableOverlay ? NULL : intel_arc_release_overlay);
+		case B_CONFIGURE_OVERLAY:
+			return (void*)(gInfo->shared_info->bDisableOverlay ? NULL : intel_arc_configure_overlay);
+		
 		// HW CUR
 		case B_SET_CURSOR_SHAPE:
             return (void*)(gInfo->shared_info->bDisableHdwCursor ? NULL : SetCursorShape);
