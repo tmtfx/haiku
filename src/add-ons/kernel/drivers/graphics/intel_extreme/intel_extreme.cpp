@@ -64,14 +64,14 @@ draw_intel_logo(intel_info &info, struct frame_buffer_boot_info *bi)
 
 	uint32 logoW = intel_logo_width;
 	uint32 logoH = intel_logo_height;
-	
+
 	int32 startX = (int32)((screenWidth - logoW) / 2);
     if (startX < 0) startX = 0;
 
     int32 startY = (int32)((screenHeight - logoH) / 2);
     if (startY < 0) startY = 0;
 	uint8* fb = (uint8*)info.aperture_base;
-	// Se da problemi, non usare l'inizio assoluto dell'aperture, 
+	// Se da problemi, non usare l'inizio assoluto dell'aperture,
 	// usare l'indirizzo logico del FB del bootloader!
 	//uint8* fb = (uint8*)bi->frame_buffer;
 
@@ -750,7 +750,7 @@ intel_extreme_init(intel_info &info)
 	}
 
 	// Everything in the display PRM gets +0x180000
-	if (info.device_type.InGroup(INTEL_GROUP_VLV)) {
+	if (info.device_type.InGroup(INTEL_GROUP_VLV) || info.device_type.InGroup(INTEL_GROUP_CHV)) {
 		// "I nearly got violent with the hw guys when they told me..."
 		blocks[REGISTER_BLOCK(REGS_SOUTH_SHARED)] += VLV_DISPLAY_BASE;
 		blocks[REGISTER_BLOCK(REGS_SOUTH_TRANSCODER_PORT)] += VLV_DISPLAY_BASE;

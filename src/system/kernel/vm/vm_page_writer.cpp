@@ -50,8 +50,9 @@
 #define PAGES_FLUSH_DURATION_GLOBAL_QUOTA		(5 * 1000 * 1000)
 	// target maximum time needed to write out all modified pages, in one & all queues
 
+ConditionVariable ModifiedPageQueue::sUnderQuotaCondition;
 int64 ModifiedPageQueue::sGlobalModifiedCount = 0;
-bigtime_t ModifiedPageQueue::sGlobalEstimatedWriteDuration = 0;
+bigtime_t ModifiedPageQueue::sGlobalEstimatedWriteDuration = -1;
 
 
 #if PAGE_WRITER_TRACING
@@ -95,6 +96,7 @@ class PageWriteWrapper;
 class PageWriterRun {
 public:
 	status_t Init(uint32 maxPages);
+	~PageWriterRun();
 
 	void PrepareNextRun();
 	void AddPage(vm_page* page);
@@ -420,6 +422,13 @@ PageWriterRun::Init(uint32 maxPages)
 }
 
 
+PageWriterRun::~PageWriterRun()
+{
+	delete[] fWrappers;
+	delete[] fTransfers;
+}
+
+
 void
 PageWriterRun::PrepareNextRun()
 {
@@ -722,7 +731,7 @@ ModifiedPageQueue::_PageWriter()
 			fLastAveragePageWriteDuration = (system_time() - runStart) / numPages;
 
 		if (!IsOverQuota())
-			fUnderQuotaCondition.NotifyAll();
+			sUnderQuotaCondition.NotifyAll();
 	}
 
 	return B_OK;
@@ -923,13 +932,16 @@ ModifiedPageQueue::~ModifiedPageQueue()
 status_t
 ModifiedPageQueue::StartWriter(const char* name)
 {
-	char threadName[B_OS_NAME_LENGTH];
-	snprintf(threadName, sizeof(threadName), "page writer: %s", name);
+	if (sGlobalEstimatedWriteDuration == -1) {
+		sUnderQuotaCondition.Init(this, "pguq");
+		sGlobalEstimatedWriteDuration = 0;
+	}
 
-	fPageWriterCondition.Init(threadName);
-	fUnderQuotaCondition.Init(this, "ModifiedPageQueue");
+	fPageWriterCondition.Init("pgwr");
 	fLastAveragePageWriteDuration = 0;
 
+	char threadName[B_OS_NAME_LENGTH];
+	snprintf(threadName, sizeof(threadName), "page writer: %s", name);
 	fWriterThread = spawn_kernel_thread(&_WriterThreadEntry, threadName,
 		B_NORMAL_PRIORITY + 1, this);
 	if (fWriterThread < 0)
@@ -977,7 +989,7 @@ ModifiedPageQueue::WaitIfOverQuota(page_num_t additionalPages,
 
 	while (IsOverQuota(additionalPages)) {
 		ConditionVariableEntry waitEntry;
-		fUnderQuotaCondition.Add(&waitEntry);
+		sUnderQuotaCondition.Add(&waitEntry);
 
 		if (!IsOverQuota(additionalPages))
 			return B_OK;

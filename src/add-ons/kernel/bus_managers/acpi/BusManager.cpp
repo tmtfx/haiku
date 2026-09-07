@@ -17,6 +17,7 @@
 #include <dpc.h>
 #include <KernelExport.h>
 #include <PCI.h>
+#include <drivers/smbios.h>
 
 #include <safemode.h>
 
@@ -222,6 +223,21 @@ acpi_std_ops(int32 op,...)
 			if (checkAndLogFailure(AcpiInitializeTables(NULL, 0, TRUE),
 					"AcpiInitializeTables failed"))
 				goto err_acpi;
+
+#if defined(__i386__) || defined(__x86_64__)
+			smbios_module_info* smbios;
+			if (get_module(SMBIOS_MODULE_NAME, (module_info**)&smbios) == B_OK) {
+				if (smbios->match_vendor_product("Apple Inc.", NULL)
+					|| smbios->match_vendor_product("Apple Computer, Inc.", NULL)) {
+					// Apple's ACPI disables certain hardware (iGPUs, Thunderbolt
+					// controllers) when _OSI returns values other than "Darwin".
+					if (AcpiUpdateInterfaces(ACPI_DISABLE_ALL_VENDOR_STRINGS) != AE_OK
+						|| AcpiInstallInterface((ACPI_STRING)"Darwin") != AE_OK)
+						ERROR("failed to install Darwin OSI");
+				}
+				put_module(SMBIOS_MODULE_NAME);
+			}
+#endif
 
 			if (checkAndLogFailure(AcpiLoadTables(),
 					"AcpiLoadTables failed"))
@@ -474,7 +490,7 @@ get_next_entry(uint32 objectType, const char *base, char *result,
 	ACPI_BUFFER buffer;
 	ACPI_STATUS status;
 
-	TRACE("get_next_entry %ld, %s\n", objectType, base);
+	// TRACE("get_next_entry %" B_PRId32 ", %s\n", objectType, base);
 
 	if (base == NULL || !strcmp(base, "\\")) {
 		parent = ACPI_ROOT_OBJECT;
@@ -519,7 +535,7 @@ get_device(const char* hid, uint32 index, char* result, size_t resultLength)
 	uint32 counter[2] = {index, 0};
 	char *buffer = NULL;
 
-	TRACE("get_device %s, index %ld\n", hid, index);
+	TRACE("get_device %s, index %" B_PRId32 "\n", hid, index);
 	status = AcpiGetDevices((ACPI_STRING)hid, (ACPI_WALK_CALLBACK)&get_device_by_hid_callback,
 		counter, (void**)&buffer);
 	if (status != AE_OK || buffer == NULL)
@@ -575,7 +591,7 @@ get_device_addr(const char *path, uint32 *addr)
 {
 	ACPI_HANDLE handle;
 
-	TRACE("get_device_adr: path %s, hid %s\n", path, hid);
+	TRACE("get_device_adr: path %s\n", path);
 	if (AcpiGetHandle(NULL, (ACPI_STRING)path, &handle) != AE_OK)
 		return B_ENTRY_NOT_FOUND;
 

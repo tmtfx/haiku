@@ -266,7 +266,7 @@ l2cap_receive_data(net_buffer* buffer)
 		{
 			NetBufferHeaderReader<l2cap_connectionless_header> connlessHeader(buffer);
 			const uint16 psm = le16toh(connlessHeader->psm);
-			L2capEndpoint* endpoint = gL2capEndpointManager.ForPSM(psm);
+			L2capEndpoint* endpoint = gL2capEndpointManager.GetForPSM(psm);
 			if (endpoint == NULL)
 				return ECONNRESET;
 
@@ -274,17 +274,19 @@ l2cap_receive_data(net_buffer* buffer)
 			buffer->interface_address = NULL;
 
 			status = endpoint->ReceiveData(buffer);
+			gSocketModule->release_socket(endpoint->socket);
 			break;
 		}
 
 		default:
 		{
-			L2capEndpoint* endpoint = gL2capEndpointManager.ForChannel(dcid);
+			L2capEndpoint* endpoint = gL2capEndpointManager.GetForChannel(dcid);
 			if (endpoint == NULL)
 				return ECONNRESET;
 
 			buffer->interface_address = NULL;
 			status = endpoint->ReceiveData(buffer);
+			gSocketModule->release_socket(endpoint->socket);
 			break;
 		}
 	}
@@ -300,8 +302,10 @@ l2cap_error_received(net_error error, net_error_data* errorData, net_buffer* dat
 
 	if (error == B_NET_ERROR_UNREACH_HOST) {
 		struct HciConnection* connection = connection_for(data);
-		if (connection == NULL)
+		if (connection == NULL) {
+			ERROR("Couldn't find the connection to complete l2cap disconnection\n");
 			return ENOTCONN;
+		}
 
 		// Disconnect all connections with this HciConnection.
 		gL2capEndpointManager.Disconnected(connection);

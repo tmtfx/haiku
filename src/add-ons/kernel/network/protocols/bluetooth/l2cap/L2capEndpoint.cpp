@@ -8,9 +8,11 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <Errors.h>
 #include <NetBufferUtilities.h>
 
 #include "L2capEndpointManager.h"
+#include "SupportDefs.h"
 #include "l2cap_signal.h"
 #include <btDebug.h>
 
@@ -24,16 +26,6 @@ static l2cap_qos sDefaultQOS = {
 	.access_latency = 0xffffffff, /* don't care */
 	.delay_variation = 0xffffffff /* don't care */
 };
-
-
-static inline bigtime_t
-absolute_timeout(bigtime_t timeout)
-{
-	if (timeout == 0 || timeout == B_INFINITE_TIMEOUT)
-		return timeout;
-
-	return timeout + system_time();
-}
 
 
 static inline status_t
@@ -141,11 +133,11 @@ L2capEndpoint::Shutdown()
 	}
 
 	status_t status;
-	bigtime_t timeout = absolute_timeout(socket->receive.timeout);
+	bigtime_t timeout;
 	if (gStackModule->is_restarted_syscall())
 		timeout = gStackModule->restore_syscall_restart_timeout();
 	else
-		gStackModule->store_syscall_restart_timeout(timeout);
+		timeout = gStackModule->set_syscall_restart_timeout(socket->receive.timeout);
 
 	// FIXME: If we are currently waiting for a connection or configuration,
 	// we need to wait for that command to return (and free its ident on timeout.)
@@ -161,11 +153,15 @@ L2capEndpoint::Shutdown()
 	uint8 ident = btCoreData->allocate_command_ident(fConnection, this);
 	if (ident == L2CAP_NULL_IDENT)
 		return ENOBUFS;
+	gSocketModule->acquire_socket(socket);
 
 	status = send_l2cap_disconnection_req(fConnection, ident,
 		fDestinationChannelID, fChannelID);
-	if (status != B_OK)
+	if (status != B_OK) {
+		btCoreData->free_command_ident(fConnection, ident);
+		gSocketModule->release_socket(socket);
 		return status;
+	}
 
 	fState = WAIT_FOR_DISCONNECTION_RSP;
 
@@ -278,7 +274,7 @@ L2capEndpoint::Connect(const struct sockaddr* _address)
 	MutexLocker _(fLock);
 
 	status_t status;
-	bigtime_t timeout = absolute_timeout(socket->send.timeout);
+	bigtime_t timeout;
 	if (gStackModule->is_restarted_syscall()) {
 		timeout = gStackModule->restore_syscall_restart_timeout();
 
@@ -289,7 +285,7 @@ L2capEndpoint::Connect(const struct sockaddr* _address)
 		}
 		return (fState == OPEN) ? B_OK : ECONNREFUSED;
 	} else {
-		gStackModule->store_syscall_restart_timeout(timeout);
+		timeout = gStackModule->set_syscall_restart_timeout(socket->send.timeout);
 	}
 
 	if (fState == LISTEN)
@@ -324,11 +320,15 @@ L2capEndpoint::Connect(const struct sockaddr* _address)
 	uint8 ident = btCoreData->allocate_command_ident(fConnection, this);
 	if (ident == L2CAP_NULL_IDENT)
 		return ENOBUFS;
+	gSocketModule->acquire_socket(socket);
 
 	status = send_l2cap_connection_req(fConnection, ident,
 		address->l2cap_psm, fChannelID);
-	if (status != B_OK)
+	if (status != B_OK) {
+		btCoreData->free_command_ident(fConnection, ident);
+		gSocketModule->release_socket(socket);
 		return status;
+	}
 
 	fState = WAIT_FOR_CONNECTION_RSP;
 
@@ -348,11 +348,11 @@ L2capEndpoint::Accept(net_socket** _acceptedSocket)
 	MutexLocker locker(fLock);
 
 	status_t status;
-	bigtime_t timeout = absolute_timeout(socket->receive.timeout);
+	bigtime_t timeout;
 	if (gStackModule->is_restarted_syscall())
 		timeout = gStackModule->restore_syscall_restart_timeout();
 	else
-		gStackModule->store_syscall_restart_timeout(timeout);
+		timeout = gStackModule->set_syscall_restart_timeout(socket->receive.timeout);
 
 	do {
 		locker.Unlock();
@@ -384,17 +384,20 @@ L2capEndpoint::ReadData(size_t numBytes, uint32 flags, net_buffer** _buffer)
 
 	bigtime_t timeout = 0;
 	if ((flags & MSG_DONTWAIT) == 0) {
-		timeout = absolute_timeout(socket->receive.timeout);
 		if (gStackModule->is_restarted_syscall())
 			timeout = gStackModule->restore_syscall_restart_timeout();
 		else
-			gStackModule->store_syscall_restart_timeout(timeout);
+			timeout = gStackModule->set_syscall_restart_timeout(socket->receive.timeout);
 	}
 
 	if (fState == CLOSED)
 		flags |= MSG_DONTWAIT;
 
-	return gStackModule->fifo_dequeue_buffer(&fReceiveQueue, flags, timeout, _buffer);
+	locker.Unlock();
+	ssize_t bytes = gStackModule->fifo_dequeue_buffer(&fReceiveQueue, flags, timeout, _buffer);
+	if (bytes == B_WOULD_BLOCK && fState == CLOSED)
+		return ENOTCONN;
+	return bytes;
 }
 
 
@@ -427,8 +430,14 @@ L2capEndpoint::SendData(net_buffer* buffer)
 status_t
 L2capEndpoint::ReceiveData(net_buffer* buffer)
 {
+	CALLED();
 	// FIXME: Check address specified in net_buffer!
-	return gStackModule->fifo_enqueue_buffer(&fReceiveQueue, buffer);
+	status_t status = gStackModule->fifo_enqueue_buffer(&fReceiveQueue, buffer);
+
+	if (status == B_OK)
+		gSocketModule->notify(socket, B_SELECT_READ, Receivable());
+
+	return status;
 }
 
 
@@ -639,10 +648,13 @@ L2capEndpoint::_SendChannelConfig()
 		// TODO: Retry later?
 		return;
 	}
+	gSocketModule->acquire_socket(socket);
 
 	status_t status = send_l2cap_configuration_req(fConnection, ident,
 		fDestinationChannelID, 0, flush_timeout, mtu, flow);
 	if (status != B_OK) {
+		btCoreData->free_command_ident(fConnection, ident);
+		gSocketModule->release_socket(socket);
 		socket->error = status;
 		return;
 	}
@@ -662,7 +674,7 @@ L2capEndpoint::_HandleConfigurationReq(uint8 ident, uint16 flags,
 	if (fState != CONFIGURATION && fState != OPEN) {
 		ERROR("l2cap: unexpected configuration req: invalid channel state (cid=%d, state=%d)\n",
 			fChannelID, fState);
-		send_l2cap_configuration_rsp(fConnection, ident, fChannelID, 0,
+		send_l2cap_configuration_rsp(fConnection, ident, fDestinationChannelID, 0,
 			l2cap_configuration_rsp::RESULT_REJECTED, NULL);
 		return;
 	}
@@ -682,7 +694,7 @@ L2capEndpoint::_HandleConfigurationReq(uint8 ident, uint16 flags,
 	if (flow != NULL)
 		fChannelConfig.incoming_flow = *flow;
 
-	send_l2cap_configuration_rsp(fConnection, ident, fChannelID, 0,
+	send_l2cap_configuration_rsp(fConnection, ident, fDestinationChannelID, 0,
 		l2cap_configuration_rsp::RESULT_SUCCESS, NULL);
 
 	if ((flags & L2CAP_CFG_FLAG_CONTINUATION) != 0) {

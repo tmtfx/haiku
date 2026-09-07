@@ -459,7 +459,7 @@ TBarApp::MessageReceived(BMessage* message)
 
 		case kStateChanged:
 			if (fPreferencesWindow != NULL)
-				fPreferencesWindow->PostMessage(kStateChanged);
+				fPreferencesWindow->PostMessage(message);
 			break;
 
 		case kShowDeskbarMenu:
@@ -818,6 +818,10 @@ TBarApp::Unsubscribe(const BMessenger &subscriber)
 BBitmap*
 TBarApp::FetchTeamIcon(team_id team, int32 size)
 {
+	BAutolock autolock(sSubscriberLock);
+	if (!autolock.IsLocked())
+		return NULL;
+
 	int32 teamCount = sBarTeamInfoList.CountItems();
 	for (int32 i = 0; i < teamCount; i++) {
 		BarTeamInfo* barInfo = (BarTeamInfo*)sBarTeamInfoList.ItemAt(i);
@@ -991,6 +995,10 @@ TBarApp::RemoveTeam(team_id team)
 void
 TBarApp::ResizeTeamIcons()
 {
+	BAutolock autolock(sSubscriberLock);
+	if (!autolock.IsLocked())
+		return;
+
 	for (int32 i = sBarTeamInfoList.CountItems() - 1; i >= 0; i--) {
 		BarTeamInfo* barInfo = (BarTeamInfo*)sBarTeamInfoList.ItemAt(i);
 		if ((barInfo->flags & B_BACKGROUND_APP) == 0
@@ -1101,7 +1109,7 @@ TBarApp::_CacheTeamIcon(BarTeamInfo* barInfo, int32 size)
 	// fill with transparent
 	uint8* iconBits = (uint8*)icon->Bits();
 	if (icon->ColorSpace() == B_RGBA32) {
-		int32 i = 0;
+		size_t i = 0;
 		while (i < icon->BitsLength()) {
 			iconBits[i++] = B_TRANSPARENT_32_BIT.red;
 			iconBits[i++] = B_TRANSPARENT_32_BIT.green;
@@ -1110,7 +1118,7 @@ TBarApp::_CacheTeamIcon(BarTeamInfo* barInfo, int32 size)
 		}
 	} else {
 		// Assume B_CMAP8
-		for (int32 i = 0; i < icon->BitsLength(); i++)
+		for (size_t i = 0; i < icon->BitsLength(); i++)
 			iconBits[i] = B_TRANSPARENT_MAGIC_CMAP8;
 	}
 

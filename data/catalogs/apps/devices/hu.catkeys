@@ -1,23 +1,25 @@
-1	hungarian	x-vnd.Haiku-Devices	2994036512
+1	hungarian	x-vnd.Haiku-Devices	4001232826
 ACPI bus	DevicesView		ACPI port
 Encryption controller	Device		Titkosító vezérlő
 Devices	System name		Eszközök
 USB bus	DevicesView		USB busz
 Processor	Device		Processzor
 Generate system information	DevicesView		Rendszerinformáció létrehozása
+Disable driver	DevicesView		Vezérlő letiltása
+Reboot needed	DevicesView		Újraindítás szükséges
 Class info	DevicePCI		Osztály-információk
 USB bus	Device		USB busz
 Computer	DevicesView		Számítógép
-ACPI thermal zone	DeviceACPI		ACPI hő-zóna
 Communications	DeviceSCSI		Kommunikáció
+ACPI thermal zone	DeviceACPI		ACPI hő-zóna
 Mass storage controller	Device		Háttértároló vezérlő
-Connection	DevicesView		Csatlakozás
 Printer	DeviceSCSI		Nyomtató
-Driver used	DevicesView		Használ eszközvezérlő
+Connection	DevicesView		Csatlakozás
+Failed to write to the settings file.	DevicesView		Nem tudom elmenteni a beállításokat.
+Enable driver	DevicesView		Vezérlő engedélyezése
 Manufacturer	Device		Gyártó
 Scanner	DeviceSCSI		Lapolvasó
 Memory controller	Device		Memóriavezérlő
-Device paths	DevicesView		Eszköz útvonala
 Unknown device	DevicesView		Ismeretlen eszköz
 ACPI node '%1'	DeviceACPI		ACPI csomópont '%1'
 Name	PropertyList		Név
@@ -29,23 +31,23 @@ Satellite communications controller	Device		Műholdas kommunikációs vezérlő
 Device class	DeviceSCSI		Eszközosztály
 Device	Device		Eszközök
 Input device controller	Device		Beviteli eszköz vezérlő
+OK	DevicesView		Rendben
 PCI bus	DevicesView		PCI port
 Changer	DeviceSCSI		Cserélő
 Serial bus controller	Device		Soros busz vezérlő
-unknown	DevicesView		ismeretlen
+Restart computer	DevicesView		Számítógép újraindítása
 Refresh devices	DevicesView		Eszközök frissítése
 Category	DevicesView		Kategória
 RBC	DeviceSCSI		RBC
-Device paths	Device		Útvonal
 Unknown device	Device		Ismeretlen eszköz
+Device paths	Device		Útvonal
 Wireless controller	Device		Vezeték nélküli vezérlő
 Generic system peripheral	Device		Általános rendszer periféria
 Value	PropertyList		Érték
 Devices	DevicesView		Eszközök
-none	DevicesView		nincs
 Device name	DeviceACPI		Eszköznév
-unknown	DevicePCI		ismeretlen
 Optical drive	DeviceSCSI		Optikai eszköz
+unknown	DevicePCI		ismeretlen
 Display controller	Device		Kijelző vezérlő
 Bus	DevicesView		Busz
 ACPI <unknown>	DeviceACPI		ACPI <ismeretlen>
@@ -60,17 +62,23 @@ Order by:	DevicesView		Rendezés alapja:
 Intelligent controller	Device		Intelligens vezérlő
 ACPI processor namespace '%2'	DeviceACPI		ACPI feldolgozó névtér '%2'
 Multimedia controller	Device		Multimedia vezérlő
+The driver path is not in a package volume: 	DevicesView		A vezérlő útvonala nem található a csomagban: 
+none	Device		nincs
+Blocked entry:\n	DevicesView		Blokkolt bejegyzés:\n
 Quit	DevicesView		Kilépés
+Disabling critical system drivers is not allowed.	DevicesView		A kritikus rendszer-vezérlők letiltása nem engedélyezett.
+Driver disabled	DevicesView		Vezérlő letiltva
 ISA bus	Device		ISA port
 ISA bus	DevicesView		ISA port
 Basic information	PropertyList		Alapvető információk
 Processor	DeviceSCSI		Processzor
 Card reader	DeviceSCSI		Kártyaolvasó
+Disabling non-packaged drivers is not supported.	DevicesView		Nem csomagolt vezérlők letiltása nem lehetséges.
 Bridge	Device		Híd
 ACPI button '%1'	DeviceACPI		ACPI gomb '%1'
 Attributes	PropertyList		Jellemzők
-Disk drive	DeviceSCSI		Lemez-eszköz
 Worm	DeviceSCSI		Féreg
+Disk drive	DeviceSCSI		Lemez-eszköz
 CD-ROM	DeviceSCSI		CD meghajtó
 Manufacturer	DevicePCI		Gyártó
 Bridge	DeviceSCSI		Híd
@@ -82,6 +90,7 @@ Docking station	Device		Dokkolóállomás
 Array	DeviceSCSI		Tömb
 Unclassified device	Device		Besorolatlan eszköz
 Manufacturer	DeviceACPI		Gyártó
+Error	DevicesView		Hiba
 ACPI controller	Device		ACPI vezérlő
 Network controller	Device		Hálózati vezérlő
 Driver used	Device		Vezérlőprogram

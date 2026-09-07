@@ -1,18 +1,16 @@
 /*
- * Copyright 2021, Haiku, Inc. All rights reserved.
+ * Copyright 2021-2026, Haiku, Inc. All rights reserved.
  * Distributed under the terms of the MIT License.
  */
 
 
 #include "VirtioDevice.h"
 
-#include <malloc.h>
 #include <string.h>
 #include <new>
 
 #include <KernelExport.h>
 #include <kernel.h>
-#include <debug.h>
 
 
 static inline void
@@ -26,13 +24,14 @@ SetLowHi(vuint32 &low, vuint32 &hi, uint64 val)
 // #pragma mark - VirtioQueue
 
 
-VirtioQueue::VirtioQueue(VirtioDevice *dev, int32 id)
+VirtioQueue::VirtioQueue(VirtioDevice* dev, int32 id)
 	:
 	fDev(dev),
 	fId(id),
 	fAllocatedDescs(0),
 	fQueueHandler(NULL),
-	fQueueHandlerCookie(NULL)
+	fQueueHandlerCookie(NULL),
+	fLock(B_SPINLOCK_INITIALIZER)
 {
 }
 
@@ -55,15 +54,22 @@ VirtioQueue::Init(uint16 requestedSize)
 	fDev->fRegs->queueNum = fQueueLen;
 	fLastUsed = 0;
 
+	// For the legacy transport, the rings must be laid out as described in
+	// the virtio 1.3 spec, section 2.7.2
+	// "Legacy Interfaces: A Note on Virtqueue Layout".
+	// This layout also satisfies the version 2 alignment requirements.
 	size_t queueMemSize = 0;
 	size_t descsOffset = queueMemSize;
-	queueMemSize += ROUNDUP(sizeof(VirtioDesc) * fDescCount, B_PAGE_SIZE);
+	queueMemSize += sizeof(VirtioDesc) * fDescCount;
 
 	size_t availOffset = queueMemSize;
-	queueMemSize += ROUNDUP(sizeof(VirtioAvail) + sizeof(uint16) * fQueueLen, B_PAGE_SIZE);
+	queueMemSize += sizeof(VirtioAvail) + sizeof(uint16) * fQueueLen + sizeof(uint16);
 
+	queueMemSize = ROUNDUP(queueMemSize, B_PAGE_SIZE);
 	size_t usedOffset = queueMemSize;
-	queueMemSize += ROUNDUP(sizeof(VirtioUsed) + sizeof(VirtioUsedItem) * fQueueLen, B_PAGE_SIZE);
+	queueMemSize += sizeof(VirtioUsed) + sizeof(VirtioUsedItem) * fQueueLen + sizeof(uint16);
+
+	queueMemSize = ROUNDUP(queueMemSize, B_PAGE_SIZE);
 
 	uint8* queueMem = NULL;
 	fArea.SetTo(create_area("VirtIO Queue", (void**)&queueMem,
@@ -144,6 +150,8 @@ VirtioQueue::Enqueue(const physical_entry* vector,
 	size_t readVectorCount, size_t writtenVectorCount,
 	void* cookie)
 {
+	InterruptsSpinLocker locker(fLock);
+
 	int32 firstDesc = -1, lastDesc = -1;
 	size_t count = readVectorCount + writtenVectorCount;
 
@@ -188,7 +196,12 @@ VirtioQueue::Enqueue(const physical_entry* vector,
 	int32_t idx = fAvail->idx & (fQueueLen - 1);
 	fCookies[firstDesc] = cookie;
 	fAvail->ring[idx] = firstDesc;
+
+	memory_write_barrier();
 	fAvail->idx++;
+	locker.Unlock();
+
+	memory_write_barrier();
 	fDev->fRegs->queueNotify = fId;
 
 	return B_OK;
@@ -198,11 +211,12 @@ VirtioQueue::Enqueue(const physical_entry* vector,
 bool
 VirtioQueue::Dequeue(void** _cookie, uint32* _usedLength)
 {
-	fDev->fRegs->queueSel = fId;
+	InterruptsSpinLocker locker(fLock);
 
 	if (fUsed->idx == fLastUsed)
 		return false;
 
+	memory_read_barrier();
 	int32_t desc = fUsed->ring[fLastUsed & (fQueueLen - 1)].id;
 
 	if (_cookie != NULL)
@@ -255,23 +269,23 @@ VirtioIrqHandler::Handle(void* data)
 	// TRACE("VirtioIrqHandler::Handle(%p)\n", data);
 	VirtioDevice* dev = (VirtioDevice*)data;
 
-	if ((kVirtioIntQueue & dev->fRegs->interruptStatus) != 0) {
+	uint32 status = dev->fRegs->interruptStatus;
+	if (status == 0)
+		return B_UNHANDLED_INTERRUPT;
+
+	dev->fRegs->interruptAck = status;
+
+	if ((kVirtioIntQueue & status) != 0) {
 		for (int32 i = 0; i < dev->fQueueCnt; i++) {
 			VirtioQueue* queue = dev->fQueues[i].Get();
-			if (queue->fUsed->idx != queue->fLastUsed
-				&& queue->fQueueHandler != NULL) {
-				queue->fQueueHandler(dev->fConfigHandlerCookie,
-					queue->fQueueHandlerCookie);
-				}
+			if (queue->fQueueHandler != NULL)
+				queue->fQueueHandler(dev->fConfigHandlerCookie, queue->fQueueHandlerCookie);
 		}
-		dev->fRegs->interruptAck = kVirtioIntQueue;
 	}
 
-	if ((kVirtioIntConfig & dev->fRegs->interruptStatus) != 0) {
+	if ((kVirtioIntConfig & status) != 0) {
 		if (dev->fConfigHandler != NULL)
 			dev->fConfigHandler(dev->fConfigHandlerCookie);
-
-		dev->fRegs->interruptAck = kVirtioIntConfig;
 	}
 
 	return B_HANDLED_INTERRUPT;

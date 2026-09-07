@@ -97,25 +97,12 @@ typedef struct rw_lock {
 
 
 // static initializers
-#if KDEBUG
-#	define MUTEX_INITIALIZER(name) \
-	{ name, NULL, B_SPINLOCK_INITIALIZER, -1, 0 }
-#	define RECURSIVE_LOCK_INITIALIZER(name)	{ MUTEX_INITIALIZER(name), 0 }
-#else
-#	define MUTEX_INITIALIZER(name) \
+#define MUTEX_INITIALIZER(name) \
 	{ name, NULL, B_SPINLOCK_INITIALIZER, 0, 0 }
-#	define RECURSIVE_LOCK_INITIALIZER(name)	{ MUTEX_INITIALIZER(name), -1, 0 }
-#endif
-
+#define RECURSIVE_LOCK_INITIALIZER(name) \
+	{ MUTEX_INITIALIZER(name), -1, 0 }
 #define RW_LOCK_INITIALIZER(name) \
 	{ name, NULL, B_SPINLOCK_INITIALIZER, -1, 0, 0, 0, 0, 0 }
-
-
-#if KDEBUG
-#	define RECURSIVE_LOCK_HOLDER(recursiveLock)	((recursiveLock)->lock.holder)
-#else
-#	define RECURSIVE_LOCK_HOLDER(recursiveLock)	((recursiveLock)->holder)
-#endif
 
 
 #ifdef __cplusplus
@@ -143,6 +130,7 @@ extern status_t recursive_lock_switch_from_read_lock(rw_lock* from,
 	recursive_lock* to);
 	// Like recursive_lock_switch_lock(), just for switching from a read-locked
 	// rw_lock.
+extern void recursive_lock_transfer_lock(recursive_lock* lock, thread_id thread);
 extern int32 recursive_lock_get_recursion(recursive_lock *lock);
 
 extern void rw_lock_init(rw_lock* lock, const char* name);
@@ -164,13 +152,11 @@ extern status_t mutex_switch_lock(mutex* from, mutex* to);
 extern status_t mutex_switch_from_read_lock(rw_lock* from, mutex* to);
 	// Like mutex_switch_lock(), just for switching from a read-locked rw_lock.
 
-#if KDEBUG
 extern status_t mutex_lock(mutex* lock);
 extern void mutex_unlock(mutex* lock);
 extern status_t mutex_trylock(mutex* lock);
 extern status_t mutex_lock_with_timeout(mutex* lock, uint32 timeoutFlags,
 	bigtime_t timeout);
-#endif
 
 
 // implementation private:
@@ -240,56 +226,47 @@ rw_lock_write_unlock(rw_lock* lock)
 
 #if !KDEBUG
 static inline status_t
-mutex_lock(mutex* lock)
+mutex_lock_inline(mutex* lock)
 {
 	if (atomic_add(&lock->count, -1) < 0)
 		return _mutex_lock(lock, NULL);
 	return B_OK;
 }
+#define mutex_lock		mutex_lock_inline
 
 
 static inline status_t
-mutex_trylock(mutex* lock)
+mutex_trylock_inline(mutex* lock)
 {
 	if (atomic_test_and_set(&lock->count, -1, 0) != 0)
 		return B_WOULD_BLOCK;
 	return B_OK;
 }
+#define mutex_trylock	mutex_trylock_inline
 
 
 static inline status_t
-mutex_lock_with_timeout(mutex* lock, uint32 timeoutFlags, bigtime_t timeout)
+mutex_lock_with_timeout_inline(mutex* lock, uint32 timeoutFlags, bigtime_t timeout)
 {
 	if (atomic_add(&lock->count, -1) < 0)
 		return _mutex_lock_with_timeout(lock, timeoutFlags, timeout);
 	return B_OK;
 }
+#define mutex_lock_with_timeout	mutex_lock_with_timeout_inline
 
 
 static inline void
-mutex_unlock(mutex* lock)
+mutex_unlock_inline(mutex* lock)
 {
 	if (atomic_add(&lock->count, 1) < -1)
 		_mutex_unlock(lock);
 }
+#define mutex_unlock	mutex_unlock_inline
 #endif
-
-
-static inline void
-recursive_lock_transfer_lock(recursive_lock* lock, thread_id thread)
-{
-	if (lock->recursion != 1)
-		panic("invalid recursion level for lock transfer!");
-
-#if KDEBUG
-	mutex_transfer_lock(&lock->lock, thread);
-#else
-	lock->holder = thread;
-#endif
-}
 
 
 extern void lock_debug_init();
+
 
 #ifdef __cplusplus
 }

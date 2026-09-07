@@ -13,6 +13,7 @@ extern "C" {
 #	include "acpi.h"
 }
 
+#include <condition_variable.h>
 #include <i2c.h>
 #include <lock.h>
 
@@ -70,6 +71,7 @@ struct pch_i2c_crs {
     uint8	irq_triggering;
 	uint8	irq_polarity;
 	uint8	irq_shareable;
+	uint8	bus_speed;
 
 	uint32	addr_bas;
 	uint32	addr_len;
@@ -113,8 +115,7 @@ typedef struct {
 
 	// transfer
 	int32	busy;
-	bool	readwait;
-	bool	writewait;
+	ConditionVariable wait_read, wait_write, wait_busy;
 	i2c_op	op;
 	void*	buffer;
 	size_t	length;

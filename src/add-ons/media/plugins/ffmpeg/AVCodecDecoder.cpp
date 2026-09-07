@@ -483,9 +483,7 @@ AVCodecDecoder::_NegotiateVideoOutputFormat(media_format* inOutFormat)
 		return B_ERROR;
 	}
 	fCodecInitDone = true;
-// ===============================================================================================
-/* commented, because we want to use sws for color space conversion but still using hardware 
- * overlay if available with other formats
+
 #if USE_SWS_FOR_COLOR_SPACE_CONVERSION
 	fOutputColorSpace = B_RGB32;
 #else
@@ -497,19 +495,6 @@ AVCodecDecoder::_NegotiateVideoOutputFormat(media_format* inOutFormat)
 	else
 		fOutputColorSpace = B_RGB32;
 #endif
-*/
-/* questo per la mia sm750 */
-	color_space requestedSpace = inOutFormat->u.raw_video.display.format;
-	if (requestedSpace == B_YCbCr422 || requestedSpace == B_RGB16) {
-		debug_printf("Negotiation output colorspace format: %d\n", requestedSpace);
-		fOutputColorSpace = requestedSpace;
-	} else {
-		debug_printf("fallback to B_RGB32\n");
-		fOutputColorSpace = B_RGB32;
-	}
-	
-	//fOutputColorSpace = inOutFormat->u.raw_video.display.format;
-// ================================================================================================
 
 #if USE_SWS_FOR_COLOR_SPACE_CONVERSION
 	if (fSwsContext != NULL)
@@ -1686,9 +1671,9 @@ AVCodecDecoder::_DeinterlaceAndColorConvertVideoFrame()
 	fDecodedDataSizeInBytes = fHeader.size_used;
 
 	if (fDecodedData == NULL) {
-		const size_t kOptimalAlignmentForColorConversion = 32;
+		const size_t kOptimalAlignmentForColorConversion = 64;
 		posix_memalign(reinterpret_cast<void**>(&fDecodedData),
-			kOptimalAlignmentForColorConversion, fDecodedDataSizeInBytes);
+			kOptimalAlignmentForColorConversion, fDecodedDataSizeInBytes + 63);
 	}
 	if (fDecodedData == NULL)
 		return B_NO_MEMORY;

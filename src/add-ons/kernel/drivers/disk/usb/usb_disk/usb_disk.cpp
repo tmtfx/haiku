@@ -89,7 +89,7 @@ static void	usb_disk_callback(void *cookie, status_t status, void *data,
 static status_t usb_disk_do_io(void* cookie, IOOperation* operation);
 
 uint8		usb_disk_get_max_lun(disk_device *device);
-void		usb_disk_reset_recovery(disk_device *device);
+void		usb_disk_reset_recovery(disk_device *device, err_act *_action);
 status_t	usb_disk_receive_csw(disk_device *device,
 				usb_massbulk_command_status_wrapper *status);
 
@@ -687,6 +687,8 @@ usb_disk_request_sense(device_lun *lun, err_act *_action)
 	} else if (status == B_DEV_NOT_READY || status == B_DEV_NO_MEDIA) {
 		lun->media_present = false;
 		usb_disk_reset_capacity(lun);
+	} else if (status == B_READ_ONLY_DEVICE) {
+		lun->write_protected = true;
 	}
 
 	if (_action != NULL)
@@ -705,9 +707,9 @@ usb_disk_mode_sense(device_lun *lun)
 	memset(commandBlock, 0, sizeof(commandBlock));
 
 	commandBlock[0] = SCSI_MODE_SENSE_6;
-	commandBlock[1] = SCSI_MODE_PAGE_DEVICE_CONFIGURATION;
-	commandBlock[2] = 0; // Current values
-	commandBlock[3] = dataLength >> 8;
+	commandBlock[1] = SCSI_MODE_SENSE_DISABLE_BLOCK_DESCRIPTORS;
+	commandBlock[2] = SCSI_MODE_PAGE_DEVICE_CONFIGURATION;
+	commandBlock[3] = 0;
 	commandBlock[4] = dataLength;
 
 	scsi_mode_sense_6_parameter parameter;
@@ -943,6 +945,13 @@ usb_disk_update_capacity(device_lun *lun)
 		if (result != B_OK)
 			return result;
 	}
+
+#if 0
+	if (usb_disk_mode_sense(lun) != B_OK)
+		lun->write_protected = false;
+#else
+	lun->write_protected = (lun->device_type == B_CD);
+#endif
 
 	if (lun->io_scheduler != NULL
 			&& lun->io_scheduler->GetDMAResource()->BlockSize() != lun->block_size) {
@@ -1204,19 +1213,11 @@ usb_disk_attach(device_node *node, usb_device newDevice, void **cookie)
 			status_t ready = usb_disk_test_unit_ready(lun, &action);
 			if (ready == B_OK || ready == B_DEV_NO_MEDIA
 				|| ready == B_DEV_MEDIA_CHANGED) {
-				if (lun->device_type == B_CD)
-					lun->write_protected = true;
-				// TODO: check for write protection; disabled since some
-				// devices lock up when getting the mode sense
-				else if (/*usb_disk_mode_sense(lun) != B_OK*/true)
-					lun->write_protected = false;
-
-				TRACE("usb lun %" B_PRIu8 " ready. write protected = %c%s\n", i,
-					lun->write_protected ? 'y' : 'n',
+				TRACE("usb lun %" B_PRIu8 " ready. %s\n", i,
 					ready == B_DEV_NO_MEDIA ? " (no media inserted)" : "");
-
 				break;
 			}
+
 			TRACE("usb lun %" B_PRIu8 " inquiry attempt %" B_PRIu32 " failed\n",
 				i, tries);
 			if (action != err_act_retry && action != err_act_many_retries)
@@ -1342,6 +1343,8 @@ usb_disk_block_write(device_lun *lun, uint64 blockPosition, size_t blockCount,
 {
 	if (!lun->media_present)
 		return B_DEV_NO_MEDIA;
+	if (lun->write_protected)
+		return B_READ_ONLY_DEVICE;
 
 	uint8 commandBlock[16];
 	memset(commandBlock, 0, sizeof(commandBlock));
@@ -1946,7 +1949,13 @@ usb_disk_uninit_driver(void *_cookie)
 	disk_device *device = (disk_device *)_cookie;
 	mutex_lock(&device->lock);
 
-	ASSERT(device->open_count == 0 && device->removed);
+	if (!device->removed) {
+		mutex_unlock(&device->lock);
+		usb_disk_device_removed(_cookie);
+		mutex_lock(&device->lock);
+	}
+
+	ASSERT(device->open_count == 0);
 	usb_disk_free_device_and_luns(device);
 }
 

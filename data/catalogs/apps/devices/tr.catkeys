@@ -1,23 +1,25 @@
-1	turkish	x-vnd.Haiku-Devices	2994036512
+1	turkish	x-vnd.Haiku-Devices	4001232826
 ACPI bus	DevicesView		ACPI veri yolu
 Encryption controller	Device		Şifreleme denetleyicisi
 Devices	System name		Aygıtlar
 USB bus	DevicesView		USB veri yolu
 Processor	Device		İşlemci
 Generate system information	DevicesView		Sistem bilgisi üret
+Disable driver	DevicesView		Sürücüyü devre dışı bırak
+Reboot needed	DevicesView		Yeniden başlatma gerekiyor
 Class info	DevicePCI		Sınıf bilgisi
 USB bus	Device		USB veri yolu
 Computer	DevicesView		Bilgisayar
-ACPI thermal zone	DeviceACPI		ACPI termal bölgesi
 Communications	DeviceSCSI		İletişim
+ACPI thermal zone	DeviceACPI		ACPI termal bölgesi
 Mass storage controller	Device		Yığın depolama denetleyicisi
-Connection	DevicesView		Bağlantı
 Printer	DeviceSCSI		Yazıcı
-Driver used	DevicesView		Kullanılan sürücü
+Connection	DevicesView		Bağlantı
+Failed to write to the settings file.	DevicesView		Ayarlar dosyasına yazılamadı.
+Enable driver	DevicesView		Sürücüyü etkinleştir
 Manufacturer	Device		Üretici
 Scanner	DeviceSCSI		Tarayıcı
 Memory controller	Device		Bellek denetleyicisi
-Device paths	DevicesView		Aygıt yolları
 Unknown device	DevicesView		Bilinmeyen aygıt
 ACPI node '%1'	DeviceACPI		ACPI düğümü “%1”
 Name	PropertyList		Ad
@@ -29,23 +31,23 @@ Satellite communications controller	Device		Uydu iletişimi denetleyicisi
 Device class	DeviceSCSI		Aygıt sınıfı
 Device	Device		Aygıt
 Input device controller	Device		Giriş aygıtı denetleyicisi
+OK	DevicesView		Tamam
 PCI bus	DevicesView		PCI veri yolu
 Changer	DeviceSCSI		Değiştirici
 Serial bus controller	Device		Seri veri yolu denetleyicisi
-unknown	DevicesView		bilinmeyen
+Restart computer	DevicesView		Bilgisayarı yeniden başlat
 Refresh devices	DevicesView		Aygıtları yenile
 Category	DevicesView		Kategori
 RBC	DeviceSCSI		RBC
-Device paths	Device		Aygıt yolları
 Unknown device	Device		Bilinmeyen aygıt
+Device paths	Device		Aygıt yolları
 Wireless controller	Device		Kablosuz denetleyicisi
 Generic system peripheral	Device		Genel sistem çevre birimi
 Value	PropertyList		Değer
 Devices	DevicesView		Aygıtlar
-none	DevicesView		yok
 Device name	DeviceACPI		Aygıt adı
-unknown	DevicePCI		bilinmeyen
 Optical drive	DeviceSCSI		Optik sürücü
+unknown	DevicePCI		bilinmeyen
 Display controller	Device		Görüntü denetleyicisi
 Bus	DevicesView		Veri yolu
 ACPI <unknown>	DeviceACPI		ACPI <bilinmiyor>
@@ -60,17 +62,23 @@ Order by:	DevicesView		Sıralama:
 Intelligent controller	Device		Akıllı denetleyici
 ACPI processor namespace '%2'	DeviceACPI		ACPI işlemci ad alanı “%2”
 Multimedia controller	Device		Çoklu ortam denetleyici
+The driver path is not in a package volume: 	DevicesView		Sürücü yolu bir paket bölümünde değil: 
+none	Device		yok
+Blocked entry:\n	DevicesView		Engellenen girdi:\n
 Quit	DevicesView		Çık
+Disabling critical system drivers is not allowed.	DevicesView		Kritik sistem sürücülerinin devre dışı bırakılmasına izin verilmez.
+Driver disabled	DevicesView		Sürücü devre dışı
 ISA bus	Device		ISA veri yolu
 ISA bus	DevicesView		ISA veri yolu
 Basic information	PropertyList		Temel bilgiler
 Processor	DeviceSCSI		İşlemci
 Card reader	DeviceSCSI		Kart okuyucusu
+Disabling non-packaged drivers is not supported.	DevicesView		Paketlenmemiş sürücüleri devre dışı bırakma desteklenmiyor.
 Bridge	Device		Köprü
 ACPI button '%1'	DeviceACPI		ACPI düğmesi “%1”
 Attributes	PropertyList		Öznitelikler
-Disk drive	DeviceSCSI		Disk sürücüsü
 Worm	DeviceSCSI		Solucan
+Disk drive	DeviceSCSI		Disk sürücüsü
 CD-ROM	DeviceSCSI		CD-ROM
 Manufacturer	DevicePCI		Üretici
 Bridge	DeviceSCSI		Köprü
@@ -82,6 +90,7 @@ Docking station	Device		Takma istasyonu
 Array	DeviceSCSI		Diziliş
 Unclassified device	Device		Sınıflandırılmamış aygıt
 Manufacturer	DeviceACPI		Üretici
+Error	DevicesView		Hata
 ACPI controller	Device		ACPI denetleyicisi
 Network controller	Device		Ağ denetleyicisi
 Driver used	Device		Kullanılan sürücü

@@ -10,7 +10,6 @@
 
 #include <ACPI.h>
 #include <ByteOrder.h>
-#include <condition_variable.h>
 #include <bus/PCI.h>
 
 
@@ -76,12 +75,12 @@ pch_i2c_interrupt_handler(pch_i2c_sim_info* bus)
 	/*if ((status & PCH_IC_INTR_STAT_TX_ABRT) != 0)
 		tx error */
 	if ((status & PCH_IC_INTR_STAT_RX_FULL) != 0)
-		ConditionVariable::NotifyAll(&bus->readwait, B_OK);
+		bus->wait_read.NotifyAll();
 	if ((status & PCH_IC_INTR_STAT_TX_EMPTY) != 0)
-		ConditionVariable::NotifyAll(&bus->writewait, B_OK);
+		bus->wait_write.NotifyAll();
 	if ((status & PCH_IC_INTR_STAT_STOP_DET) != 0) {
 		bus->busy = 0;
-		ConditionVariable::NotifyAll(&bus->busy, B_OK);
+		bus->wait_busy.NotifyAll();
 	}
 
 	return handled;
@@ -191,25 +190,29 @@ exec_command(i2c_bus_cookie cookie, i2c_op op, i2c_addr slaveAddress,
 
 		// here read the data if needed
 		while (IS_READ_OP(op) && (txLimit == 0 || i == dataLength)) {
+			ConditionVariableEntry waiter;
+			bus->wait_read.Add(&waiter);
+
 			write32(bus->registers + PCH_IC_INTR_MASK,
 				PCH_IC_INTR_STAT_RX_FULL);
 
-			// sleep until wake up by intr handler
-			struct ConditionVariable condition;
-			condition.Publish(&bus->readwait, "pch_i2c");
-			ConditionVariableEntry variableEntry;
-			status_t status = variableEntry.Wait(&bus->readwait,
-				B_RELATIVE_TIMEOUT, 500000L);
-			condition.Unpublish();
-			if (status != B_OK)
-				ERROR("exec_command timed out waiting for read\n");
 			uint32 rxBytes = read32(bus->registers + PCH_IC_RXFLR);
 			if (rxBytes == 0) {
-				ERROR("exec_command timed out reading %" B_PRIuSIZE " bytes\n",
-					dataLength - readPos);
-				bus->busy = 0;
-				return B_ERROR;
+				// sleep until wake up by intr handler
+				if (waiter.Wait(B_RELATIVE_TIMEOUT, 500000L) != B_OK)
+					ERROR("exec_command timed out waiting for read. Raw intr stat %08x TX ABORT SOURCE %08x\n",
+						read32(bus->registers + PCH_IC_RAW_INTR_STAT),
+						read32(bus->registers + PCH_IC_TX_ABRT_SOURCE));
+
+				rxBytes = read32(bus->registers + PCH_IC_RXFLR);
+				if (rxBytes == 0) {
+					ERROR("exec_command timed out reading %" B_PRIuSIZE " bytes\n",
+						dataLength - readPos);
+					bus->busy = 0;
+					return B_ERROR;
+				}
 			}
+
 			for (; rxBytes > 0; rxBytes--) {
 				uint32 read = read32(bus->registers + PCH_IC_DATA_CMD);
 				if (readPos < dataLength)
@@ -231,17 +234,18 @@ exec_command(i2c_bus_cookie cookie, i2c_op op, i2c_addr slaveAddress,
 	status_t err = B_OK;
 	if (IS_STOP_OP(op) && IS_WRITE_OP(op)) {
 		TRACE("exec_command: waiting busy condition\n");
-		while (bus->busy == 1) {
+		while (bus->busy) {
 			write32(bus->registers + PCH_IC_INTR_MASK,
 				PCH_IC_INTR_STAT_STOP_DET);
 
+			ConditionVariableEntry waiter;
+			bus->wait_busy.Add(&waiter);
+
+			if (!bus->busy)
+				break;
+
 			// sleep until wake up by intr handler
-			struct ConditionVariable condition;
-			condition.Publish(&bus->busy, "pch_i2c");
-			ConditionVariableEntry variableEntry;
-			err = variableEntry.Wait(&bus->busy, B_RELATIVE_TIMEOUT,
-				500000L);
-			condition.Unpublish();
+			err = waiter.Wait(B_RELATIVE_TIMEOUT, 500000L);
 			if (err != B_OK)
 				ERROR("exec_command timed out waiting for busy\n");
 		}
@@ -259,11 +263,16 @@ pch_i2c_scan_parse_callback(ACPI_RESOURCE *res, void *context)
 {
 	struct pch_i2c_crs* crs = (struct pch_i2c_crs*)context;
 
-	if (res->Type == ACPI_RESOURCE_TYPE_SERIAL_BUS &&
-	    res->Data.CommonSerialBus.Type == ACPI_RESOURCE_SERIAL_TYPE_I2C) {
-		crs->i2c_addr = B_LENDIAN_TO_HOST_INT16(
-			res->Data.I2cSerialBus.SlaveAddress);
-		return AE_CTRL_TERMINATE;
+	TRACE("scan_parse_callback: res type %x\n", res->Type);
+
+	if (res->Type == ACPI_RESOURCE_TYPE_SERIAL_BUS) {
+		TRACE("scan_parse_callback:     serial bus type %x\n", res->Data.CommonSerialBus.Type);
+		if (res->Data.CommonSerialBus.Type == ACPI_RESOURCE_SERIAL_TYPE_I2C) {
+			crs->i2c_addr = B_LENDIAN_TO_HOST_INT16(
+				res->Data.I2cSerialBus.SlaveAddress);
+			crs->bus_speed = res->Data.I2cSerialBus.ConnectionSpeed;
+			return AE_CTRL_TERMINATE;
+		}
 	} else if (res->Type == ACPI_RESOURCE_TYPE_IRQ) {
 		crs->irq = res->Data.Irq.Interrupts[0];
 		crs->irq_triggering = res->Data.Irq.Triggering;
@@ -316,7 +325,7 @@ pch_i2c_scan_bus_callback(acpi_handle object, uint32 nestingLevel,
 		return B_OK;
 
 	// Attach devices for I2C resources
-	struct pch_i2c_crs crs;
+	struct pch_i2c_crs crs = { .i2c_addr = UINT16_MAX };
 	status = gACPI->walk_resources(object, (ACPI_STRING)"_CRS",
 		pch_i2c_scan_parse_callback, &crs);
 	if (status != B_OK) {
@@ -324,7 +333,12 @@ pch_i2c_scan_bus_callback(acpi_handle object, uint32 nestingLevel,
 		return status;
 	}
 
-	TRACE("pch_i2c_scan_bus_callback deviceAddress %x\n", crs.i2c_addr);
+	if (crs.i2c_addr == UINT16_MAX) {
+		ERROR("Could not find i2c address in device resources");
+		return B_BAD_DATA;
+	}
+
+	TRACE("pch_i2c_scan_bus_callback deviceAddress %x speed %x\n", crs.i2c_addr, crs.bus_speed);
 
 	acpi_data buffer;
 	buffer.pointer = NULL;
@@ -403,6 +417,11 @@ init_bus(device_node* node, void** bus_cookie)
 
 	TRACE_ALWAYS("init_bus() addr 0x%" B_PRIxPHYSADDR " size 0x%" B_PRIx64
 		" irq 0x%" B_PRIx32 "\n", bus->base_addr, bus->map_size, bus->irq);
+
+	bus->wait_read.Init(bus, "pch_i2c bus");
+	bus->wait_write.Init(bus, "pch_i2c bus");
+	bus->wait_busy.Init(bus, "pch_i2c bus");
+	mutex_init(&bus->lock, "pch_i2c");
 
 	bus->registersArea = map_physical_memory("PCHI2C memory mapped registers",
 		bus->base_addr, bus->map_size, B_ANY_KERNEL_ADDRESS,
@@ -487,7 +506,6 @@ init_bus(device_node* node, void** bus_cookie)
 		goto err;
 	}
 
-	mutex_init(&bus->lock, "pch_i2c");
 	*bus_cookie = bus;
 	return status;
 
@@ -508,7 +526,6 @@ uninit_bus(void* bus_cookie)
 		(interrupt_handler)pch_i2c_interrupt_handler, bus);
 	if (bus->registersArea >= 0)
 		delete_area(bus->registersArea);
-
 }
 
 

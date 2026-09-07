@@ -131,7 +131,7 @@ AddNewDriversToPackage disk scsi :
 	;
 AddNewDriversToPackage disk virtual :
 	ram_disk
-	#virtio_block
+	virtio_block@arm,arm64,riscv64
 	;
 AddNewDriversToPackage graphics :
 	virtio_gpu
@@ -305,8 +305,8 @@ for keymapAlias in $(HAIKU_KEYMAP_ALIASES) {
 # keyboard layouts
 AddFilesToPackage data KeyboardLayouts
 	: $(HAIKU_KEYBOARD_LAYOUT_FILES) ;
-AddFilesToPackage data KeyboardLayouts Apple\ Aluminum
-	: $(HAIKU_APPLE_ALUMINUM_KEYBOARD_LAYOUT_FILES) ;
+AddFilesToPackage data KeyboardLayouts Apple\ Magic
+	: $(HAIKU_APPLE_MAGIC_KEYBOARD_LAYOUT_FILES) ;
 AddFilesToPackage data KeyboardLayouts ThinkPad
 	: $(HAIKU_THINKPAD_KEYBOARD_LAYOUT_FILES) ;
 
@@ -324,6 +324,7 @@ AddBootModuleSymlinksToPackage
 	dpc
 	efi_gpt
 	generic_ide_pci
+	highpoint_ide_pci
 	hyperv@x86,x86_64
 	hyperv_scsi@x86,x86_64
 	ide_isa@x86
@@ -346,7 +347,7 @@ AddBootModuleSymlinksToPackage
 	scsi_disk
 	scsi_periph
 	silicon_image_3112
-	highpoint_ide_pci
+	smbios@x86,x86_64
 	sdhci
 	usb
 	usb_disk
@@ -355,8 +356,8 @@ AddBootModuleSymlinksToPackage
 	<usb>uhci
 	<usb>xhci
 	virtio
-	#virtio_block
-	virtio_mmio@riscv64,arm,arm64
+	virtio_block@arm,arm64,riscv64
+	virtio_mmio@arm,arm64,riscv64
 	virtio_pci
 	virtio_scsi
 ;
@@ -384,7 +385,7 @@ AddFilesToPackage add-ons mail_daemon inbound_filters :
 AddFilesToPackage add-ons mail_daemon outbound_filters :
 	Fortune
 	;
-
+	
 AddFilesToPackage add-ons ai : $(SYSTEM_ADD_ONS_AI) ;
 
 AddFilesToPackage add-ons kernel drivers bin : $(SYSTEM_ADD_ONS_CRYPTO) ;

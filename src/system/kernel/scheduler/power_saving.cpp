@@ -196,12 +196,19 @@ pack_irqs()
 		return;
 
 	cpu_ent* cpu = get_cpu_struct();
-	if (smallTaskCore == CoreEntry::GetCore(cpu->cpu_num))
+	CoreEntry* thisCore = CoreEntry::GetCore(cpu->cpu_num);
+	if (smallTaskCore == thisCore)
 		return;
 
+	// Avoid packing IRQs if it's not really going to change much.
+	if (thisCore->GetLoad() >= smallTaskCore->GetLoad()
+			|| (smallTaskCore->GetLoad() - thisCore->GetLoad()) < kLoadDifference) {
+		return;
+	}
+
 	SpinLocker locker(cpu->irqs_lock);
-	while (list_get_first_item(&cpu->irqs) != NULL) {
-		irq_assignment* irq = (irq_assignment*)list_get_first_item(&cpu->irqs);
+	while (cpu->irqs.First() != NULL) {
+		irq_assignment* irq = cpu->irqs.First();
 		locker.Unlock();
 
 		int32 newCPU = smallTaskCore->CPUHeap()->PeekRoot()->ID();
@@ -231,12 +238,12 @@ rebalance_irqs(bool idle)
 	SpinLocker locker(cpu->irqs_lock);
 
 	irq_assignment* chosen = NULL;
-	irq_assignment* irq = (irq_assignment*)list_get_first_item(&cpu->irqs);
+	irq_assignment* irq = cpu->irqs.First();
 
 	while (irq != NULL) {
 		if (chosen == NULL || chosen->load < irq->load)
 			chosen = irq;
-		irq = (irq_assignment*)list_get_next_item(&cpu->irqs, irq);
+		irq = cpu->irqs.GetNext(irq);
 	}
 
 	locker.Unlock();

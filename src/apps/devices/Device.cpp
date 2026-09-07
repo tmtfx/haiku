@@ -43,6 +43,7 @@ const int kCategoryStringLength	= sizeof(kCategoryString)/sizeof(char *);
 
 // This list is only used to translate Device properties
 B_TRANSLATE_MARK_VOID("unknown");
+B_TRANSLATE_MARK_VOID("none");
 B_TRANSLATE_MARK_VOID("Device");
 B_TRANSLATE_MARK_VOID("Computer");
 B_TRANSLATE_MARK_VOID("ACPI bus");
@@ -59,7 +60,8 @@ Device::Device(Device* physicalParent, BusType busType, Category category,
 	BStringItem(name.String()),
 	fBusType(busType),
 	fCategory(category),
-	fPhysicalParent(physicalParent)
+	fPhysicalParent(physicalParent),
+	fNodeCookie(0)
 {
 	SetAttribute(B_TRANSLATE("Device name"), B_TRANSLATE_NOCOLLECT(name));
 	SetAttribute(B_TRANSLATE("Manufacturer"), B_TRANSLATE_NOCOLLECT(manufacturer));

@@ -357,7 +357,6 @@ XHCI::XHCI(pci_info *info, 	pci_device_module_info* pci, pci_device* device, Sta
 		fSlotCount(0),
 		fScratchpadCount(0),
 		fContextSizeShift(0),
-		fFinishedHead(NULL),
 		fFinishTransfersSem(-1),
 		fFinishThread(-1),
 		fEventSem(-1),
@@ -565,7 +564,7 @@ XHCI::XHCI(pci_info *info, 	pci_device_module_info* pci, pci_device* device, Sta
 	install_io_interrupt_handler(fIRQ, InterruptHandler, (void *)this, 0);
 
 	memset(fPortSpeeds, 0, sizeof(fPortSpeeds));
-	memset(fDevices, 0, sizeof(fDevices));
+	memset((void*)fDevices, 0, sizeof(fDevices));
 
 	fInitOK = true;
 	TRACE("driver construction successful\n");
@@ -964,6 +963,8 @@ XHCI::SubmitNormalRequest(Transfer *transfer)
 		panic("endpoint is not initialized!");
 		return B_NO_INIT;
 	}
+	if (isochronousData != NULL && transfer->IsPhysical())
+		return B_NOT_SUPPORTED;
 
 	status_t status = transfer->InitKernelAccess();
 	if (status != B_OK)
@@ -979,15 +980,28 @@ XHCI::SubmitNormalRequest(Transfer *transfer)
 		if (isochronousData->packet_count == 0)
 			return B_BAD_VALUE;
 
-		// Isochronous transfers use more specifically sized packets.
-		trbSize = transfer->DataLength() / isochronousData->packet_count;
-		if (trbSize == 0 || trbSize > pipe->MaxPacketSize() || trbSize
-				!= (size_t)isochronousData->packet_descriptors[0].request_length)
+		// Each isochronous packet is a separate TD and may be shorter than the
+		// endpoint's max_burst_payload or max packet size.
+		trbSize = 0;
+		size_t totalLength = 0;
+		for (uint32 i = 0; i < isochronousData->packet_count; i++) {
+			size_t packetLength = isochronousData->packet_descriptors[i].request_length;
+			if (packetLength == 0 || packetLength > pipe->MaxPacketSize())
+				return B_BAD_VALUE;
+
+			totalLength += packetLength;
+			trbSize = max_c(trbSize, packetLength);
+		}
+		if (totalLength != transfer->FragmentLength())
 			return B_BAD_VALUE;
 	}
 
 	// Now that we know trbSize, compute the count.
-	int32 trbCount = (transfer->FragmentLength() + trbSize - 1) / trbSize;
+	int32 trbCount;
+	if (isochronousData != NULL)
+		trbCount = isochronousData->packet_count;
+	else
+		trbCount = (transfer->FragmentLength() + trbSize - 1) / trbSize;
 
 	generic_io_vec* transferVec = transfer->Vector();
 	generic_size_t transferVecOffset = 0;
@@ -1006,7 +1020,7 @@ XHCI::SubmitNormalRequest(Transfer *transfer)
 		}
 	}
 
-	xhci_td *td = CreateDescriptor(trbCount, trbCount, trbSize);
+	xhci_td* td = CreateDescriptor(trbCount, trbCount, trbSize);
 	if (td == NULL)
 		return B_NO_MEMORY;
 
@@ -1017,8 +1031,11 @@ XHCI::SubmitNormalRequest(Transfer *transfer)
 		phys_addr_t address;
 		generic_size_t trbLength;
 		if (!transfer->IsPhysical()) {
-			 address = td->buffer_addrs[i];
-			 trbLength = (remaining < trbSize) ? remaining : trbSize;
+			address = td->buffer_addrs[i];
+			if (isochronousData != NULL)
+				trbLength = isochronousData->packet_descriptors[i].request_length;
+			else
+				trbLength = (remaining < trbSize) ? remaining : trbSize;
 		} else {
 			address = transferVec->base + transferVecOffset;
 			trbLength = transferVec->length - transferVecOffset;
@@ -1038,9 +1055,12 @@ XHCI::SubmitNormalRequest(Transfer *transfer)
 		// remaining maximum-size *packets* in this TD, *not* including the
 		// packets in the current TRB, and capped at 31 if there are more
 		// than 31 packets remaining in the TD. (XHCI 1.2 § 4.11.2.4 p218.)
-		int32 tdSize = (remaining + maxPacketSize - 1) / maxPacketSize;
-		if (tdSize > 31)
-			tdSize = 31;
+		int32 tdSize = 0;
+		if (isochronousData == NULL) {
+			tdSize = (remaining + maxPacketSize - 1) / maxPacketSize;
+			if (tdSize > 31)
+				tdSize = 31;
+		}
 
 		td->trbs[i].address = address;
 		td->trbs[i].status = TRB_2_IRQ(0)
@@ -1079,8 +1099,10 @@ XHCI::SubmitNormalRequest(Transfer *transfer)
 			// All reads from the microframe index register must be
 			// incremented by 1. (XHCI 1.2 § 4.14.2.1.4 p265.)
 			frame = (ReadRunReg32(XHCI_MFINDEX) + 1) >> 3;
-			td->trbs[0].flags |= TRB_3_ISO_SIA_BIT;
+			for (uint32 i = 0; i < isochronousData->packet_count; i++)
+				td->trbs[i].flags |= TRB_3_ISO_SIA_BIT;
 		} else {
+			// TODO: We likely to apply FRIDs to each TD. (XHCI 1.2 § 4.11.2.5 p219.)
 			frame = *isochronousData->starting_frame_number;
 			td->trbs[0].flags |= TRB_3_FRID(frame);
 		}
@@ -1142,11 +1164,6 @@ XHCI::CancelQueuedTransfers(Pipe *pipe, bool force)
 
 	MutexLocker endpointLocker(endpoint->lock);
 
-	if (endpoint->td_head == NULL) {
-		// There aren't any currently pending transfers to cancel.
-		return B_OK;
-	}
-
 	// Calling the callbacks while holding the endpoint lock could potentially
 	// cause deadlocks, so we instead store them in a pointer array. We need
 	// to do this separately from freeing the TDs, for in the case we fail
@@ -1154,7 +1171,7 @@ XHCI::CancelQueuedTransfers(Pipe *pipe, bool force)
 	Transfer* transfers[XHCI_MAX_TRANSFERS];
 	int32 transfersCount = 0;
 
-	for (xhci_td* td = endpoint->td_head; td != NULL; td = td->next) {
+	for (xhci_td* td = endpoint->td_list.Head(); td != NULL; td = endpoint->td_list.GetNext(td)) {
 		if (td->transfer == NULL)
 			continue;
 
@@ -1182,9 +1199,9 @@ XHCI::CancelQueuedTransfers(Pipe *pipe, bool force)
 	}
 	endpointLocker.Lock();
 
-	// Detach the head TD from the endpoint.
-	xhci_td* td_head = endpoint->td_head;
-	endpoint->td_head = NULL;
+	// Remove all TDs from the endpoint.
+	DoublyLinkedList<xhci_td> tdList;
+	tdList.TakeFrom(&endpoint->td_list);
 
 	if (status == B_OK) {
 		// Clear the endpoint's TRBs.
@@ -1209,8 +1226,7 @@ XHCI::CancelQueuedTransfers(Pipe *pipe, bool force)
 		// so that when/if the hardware returns, they can be properly unlinked,
 		// as otherwise the endpoint could get "stuck" by having the "used"
 		// slowly accumulate due to "dead" transfers.
-		endpoint->td_head = td_head;
-		td_head = NULL;
+		endpoint->td_list.TakeFrom(&tdList);
 	}
 
 	endpointLocker.Unlock();
@@ -1225,13 +1241,9 @@ XHCI::CancelQueuedTransfers(Pipe *pipe, bool force)
 		delete transfers[i];
 	}
 
-	// This loop looks a bit strange because we need to store the "next"
-	// pointer before freeing the descriptor.
 	xhci_td* td;
-	while ((td = td_head) != NULL) {
-		td_head = td_head->next;
+	while ((td = tdList.RemoveHead()) != NULL)
 		FreeDescriptor(td);
-	}
 
 	return B_OK;
 }
@@ -1265,9 +1277,9 @@ XHCI::StartDebugTransfer(Transfer *transfer)
 	if (status != B_OK)
 		return status;
 
-	// The endpoint's head TD is the TD of the just-submitted transfer.
+	// The endpoint's last TD is the TD of the just-submitted transfer.
 	// Just like EHCI, abuse the callback cookie to hold the TD pointer.
-	transfer->SetCallback(NULL, endpoint->td_head);
+	transfer->SetCallback(NULL, endpoint->td_list.Last());
 
 	return B_OK;
 }
@@ -1282,19 +1294,12 @@ XHCI::CheckDebugTransfer(Transfer *transfer)
 
 	// Process events once, and then look for it in the finished list.
 	ProcessEvents();
-	xhci_td *previous = NULL;
-	for (xhci_td *td = fFinishedHead; td != NULL; td = td->next) {
-		if (td != transfer_td) {
-			previous = td;
+	for (xhci_td *td = fFinishedList.Head(); td != NULL; td = fFinishedList.GetNext(td)) {
+		if (td != transfer_td)
 			continue;
-		}
 
 		// We've found it!
-		if (previous == NULL) {
-			fFinishedHead = fFinishedHead->next;
-		} else {
-			previous->next = td->next;
-		}
+		fFinishedList.Remove(td);
 
 		bool directionIn = (transfer->TransferPipe()->Direction() != Pipe::Out);
 		status_t status = (td->trb_completion_code == COMP_SUCCESS
@@ -1441,7 +1446,6 @@ XHCI::CreateDescriptor(uint32 trbCount, uint32 bufferCount, size_t bufferSize)
 	result->transfer = NULL;
 	result->trb_completion_code = 0;
 	result->trb_left = 0;
-	result->next = NULL;
 
 	TRACE("CreateDescriptor allocated %p, buffer_size %ld, buffer_count %" B_PRIu32 "\n",
 		result, result->buffer_size, result->buffer_count);
@@ -1712,7 +1716,7 @@ XHCI::AllocateDevice(Hub *parent, int8 hubAddress, uint8 hubPort,
 	endpoint0->device = device;
 	endpoint0->id = 0;
 	endpoint0->status = 0;
-	endpoint0->td_head = NULL;
+	ASSERT(endpoint0->td_list.IsEmpty());
 	endpoint0->used = 0;
 	endpoint0->next = 0;
 	endpoint0->trbs = device->trbs;
@@ -1888,7 +1892,7 @@ XHCI::CleanupDevice(xhci_device *device)
 	if (device->device_ctx_addr != 0)
 		delete_area(device->device_ctx_area);
 
-	memset(device, 0, sizeof(xhci_device));
+	memset((void*)device, 0, sizeof(xhci_device));
 }
 
 
@@ -1946,7 +1950,7 @@ XHCI::_InsertEndpointForPipe(Pipe *pipe)
 
 		endpoint->device = device;
 		endpoint->id = id;
-		endpoint->td_head = NULL;
+		ASSERT(endpoint->td_list.IsEmpty());
 		endpoint->used = 0;
 		endpoint->next = 0;
 
@@ -2018,15 +2022,12 @@ XHCI::_RemoveEndpointForPipe(Pipe *pipe)
 
 		mutex_lock(&endpoint->lock);
 
-		// See comment in CancelQueuedTransfers.
 		xhci_td* td;
-		while ((td = endpoint->td_head) != NULL) {
-			endpoint->td_head = endpoint->td_head->next;
+		while ((td = endpoint->td_list.RemoveHead()) != NULL)
 			FreeDescriptor(td);
-		}
 
 		mutex_destroy(&endpoint->lock);
-		memset(endpoint, 0, sizeof(xhci_endpoint));
+		memset((void*)endpoint, 0, sizeof(xhci_endpoint));
 
 		_WriteContext(&device->input_ctx->input.dropFlags, (1 << epNumber));
 		_WriteContext(&device->input_ctx->input.addFlags, (1 << 0));
@@ -2058,15 +2059,14 @@ XHCI::_LinkDescriptorForPipe(xhci_td *descriptor, xhci_endpoint *endpoint)
 	}
 
 	// We do not support queuing other transfers in tandem with a fragmented one.
-	if (endpoint->td_head != NULL && endpoint->td_head->transfer != NULL
-			&& endpoint->td_head->transfer->IsFragmented()) {
+	if (!endpoint->td_list.IsEmpty() && endpoint->td_list.Tail()->transfer != NULL
+			&& endpoint->td_list.Tail()->transfer->IsFragmented()) {
 		TRACE_ERROR("cannot submit transfer: a fragmented transfer is queued\n");
 		return B_DEV_RESOURCE_CONFLICT;
 	}
 
 	endpoint->used++;
-	descriptor->next = endpoint->td_head;
-	endpoint->td_head = descriptor;
+	endpoint->td_list.Add(descriptor);
 
 	uint32 link = endpoint->next, eventdata = link + 1, next = eventdata + 1;
 	if (eventdata == XHCI_ENDPOINT_RING_SIZE || next == XHCI_ENDPOINT_RING_SIZE) {
@@ -2169,25 +2169,11 @@ status_t
 XHCI::_UnlinkDescriptorForPipe(xhci_td *descriptor, xhci_endpoint *endpoint)
 {
 	TRACE("unlink descriptor for pipe\n");
-	// We presume that the caller has already locked or owns the endpoint.
+	ASSERT_LOCKED_MUTEX(&endpoint->lock);
 
+	endpoint->td_list.Remove(descriptor);
 	endpoint->used--;
-	if (descriptor == endpoint->td_head) {
-		endpoint->td_head = descriptor->next;
-		descriptor->next = NULL;
-		return B_OK;
-	} else {
-		for (xhci_td *td = endpoint->td_head; td->next != NULL; td = td->next) {
-			if (td->next == descriptor) {
-				td->next = descriptor->next;
-				descriptor->next = NULL;
-				return B_OK;
-			}
-		}
-	}
-
-	endpoint->used++;
-	return B_ERROR;
+	return B_OK;
 }
 
 
@@ -2739,7 +2725,7 @@ XHCI::HandleTransferComplete(xhci_trb* trb)
 			source = B_LENDIAN_TO_HOST_INT64(endpoint->trbs[offset].address);
 	}
 
-	for (xhci_td *td = endpoint->td_head; td != NULL; td = td->next) {
+	for (xhci_td *td = endpoint->td_list.Head(); td != NULL; td = endpoint->td_list.GetNext(td)) {
 		int64 offset = (source - td->trb_addr) / sizeof(xhci_trb);
 		if (offset < 0 || offset >= td->trb_count)
 			continue;
@@ -2766,7 +2752,7 @@ XHCI::HandleTransferComplete(xhci_trb* trb)
 
 			// Compute the real transferred length.
 			transferred = 0;
-			for (int32 i = 0; i < offset; i++) {
+			for (int32 i = 0; i <= offset; i++) {
 				usb_iso_packet_descriptor& descriptor = isochronousData->packet_descriptors[i];
 				if (descriptor.status == B_NO_INIT) {
 					// Assume success.
@@ -2807,8 +2793,7 @@ XHCI::HandleTransferComplete(xhci_trb* trb)
 			// add descriptor to finished list
 			if (mutex_trylock(&fFinishedLock) != B_OK)
 				mutex_lock(&fFinishedLock);
-			td->next = fFinishedHead;
-			fFinishedHead = td;
+			fFinishedList.Add(td);
 			mutex_unlock(&fFinishedLock);
 
 			release_sem_etc(fFinishTransfersSem, 1, B_DO_NOT_RESCHEDULE);
@@ -3174,10 +3159,8 @@ XHCI::FinishTransfers()
 
 		mutex_lock(&fFinishedLock);
 		TRACE("finishing transfers\n");
-		while (fFinishedHead != NULL) {
-			xhci_td* td = fFinishedHead;
-			fFinishedHead = td->next;
-			td->next = NULL;
+		while (!fFinishedList.IsEmpty()) {
+			xhci_td* td = fFinishedList.RemoveHead();
 			mutex_unlock(&fFinishedLock);
 
 			TRACE("finishing transfer td %p\n", td);

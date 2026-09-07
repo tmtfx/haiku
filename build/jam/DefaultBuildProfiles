@@ -98,15 +98,16 @@ rule DefineDefaultBuildProfiles
 				openssh
 				pdfwriter
 				pe
+				sounds_community_default
 				timgmsoundfont
 				vision
 				wonderbrush
 				wpa_supplicant
 				# Some packages can't be built with gcc2, so we install the gcc13
 				# secondary architecture package instead in this case
-				!gcc2 @{ nano p7zip python3.10 xz_utils }@
+				!gcc2 @{ nano p7zip python3.14 xz_utils }@
 				gcc2 @{ nano_x86@secondary_x86 p7zip_x86@secondary_x86
-					python3.10_x86@secondary_x86 xz_utils_x86@secondary_x86 }@
+					python3.14_x86@secondary_x86 xz_utils_x86@secondary_x86 }@
 				;
 			AddHaikuImageSourcePackages
 				bepdf
@@ -149,6 +150,7 @@ rule DefineDefaultBuildProfiles
 				openssh
 				openssl3
 				pe
+				sounds_community_default
 				vision
 				wpa_supplicant
 				# xz_utils can't be built with gcc2, so we install it for
@@ -201,9 +203,9 @@ rule DefineDefaultBuildProfiles
 			AddHaikuImageSystemPackages
 				openssh
 				openssl3
-				!gcc2 @{ python3.10 nano }@
+				!gcc2 @{ python3.14 nano }@
 				gcc2 @{
-					python3.10_x86@secondary_x86 
+					python3.14_x86@secondary_x86
 					nano_x86@secondary_x86
 				}@
 				;
@@ -227,7 +229,7 @@ rule DefineDefaultBuildProfiles
 				make
 				ncurses6
 				noto
-				python
+				python3.10
 				sed
 				texinfo
 				!gcc2 @{ gawk grep }@

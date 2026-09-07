@@ -153,26 +153,6 @@ authenticate_user(const char* prompt, passwd* passwd, spwd* spwd, int maxTries,
 
 
 status_t
-authenticate_user(const char* prompt, const char* user, passwd** _passwd,
-	spwd** _spwd, int maxTries, bool useStdio)
-{
-	struct passwd* passwd = getpwnam(user);
-	struct spwd* spwd = getspnam(user);
-
-	status_t error = authenticate_user(prompt, passwd, spwd, maxTries,
-		useStdio);
-	if (error == B_OK) {
-		if (_passwd)
-			*_passwd = passwd;
-		if (_spwd)
-			*_spwd = spwd;
-	}
-
-	return error;
-}
-
-
-status_t
 setup_environment(struct passwd* passwd, bool preserveEnvironment, bool chngdir)
 {
 	const char* term = getenv("TERM");
@@ -199,13 +179,13 @@ setup_environment(struct passwd* passwd, bool preserveEnvironment, bool chngdir)
 			return errno;
 	}
 
-	if (passwd->pw_gid && setgid(passwd->pw_gid) != 0)
+	if (setresgid(passwd->pw_gid, passwd->pw_gid, passwd->pw_gid) != 0)
 		return errno;
 
 	if (initgroups(passwd->pw_name, passwd->pw_gid) != 0)
 		return errno;
 
-	if (passwd->pw_uid && setuid(passwd->pw_uid) != 0)
+	if (setresuid(passwd->pw_uid, passwd->pw_uid, passwd->pw_uid) != 0)
 		return errno;
 
 	if (chngdir) {

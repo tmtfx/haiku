@@ -238,6 +238,9 @@ void
 MixerCore::BufferReceived(BBuffer *buffer, bigtime_t lateness)
 {
 	ASSERT_LOCKED();
+	if (!fRunning)
+		return;
+
 	MixerInput *input;
 	int32 id = buffer->Header()->destination;
 	for (int i = 0; (input = Input(i)) != 0; i++) {
@@ -288,14 +291,20 @@ void
 MixerCore::SetTimingInfo(BTimeSource *ts, bigtime_t downstream_latency)
 {
 	ASSERT_LOCKED();
-	if (fTimeSource)
-		fTimeSource->Release();
 
-	fTimeSource = dynamic_cast<BTimeSource *>(ts->Acquire());
+	if (fTimeSource != ts) {
+		if (fTimeSource != NULL)
+			fTimeSource->Release();
+		if (ts != NULL)
+			fTimeSource = dynamic_cast<BTimeSource *>(ts->Acquire());
+		else
+			fTimeSource = NULL;
+	}
+
 	fDownstreamLatency = downstream_latency;
 
 	TRACE("MixerCore::SetTimingInfo, now = %lld, downstream latency %lld\n",
-		fTimeSource->Now(), fDownstreamLatency);
+		ts != NULL ? fTimeSource->Now() : 0, fDownstreamLatency);
 }
 
 

@@ -1,18 +1,29 @@
 /*
- * Copyright 2008-2009 Haiku Inc. All rights reserved.
+ * Copyright 2008-2026 Haiku Inc. All rights reserved.
  * Distributed under the terms of the MIT license.
  *
  * Authors:
  *		Pieter Panman
+ *		Leo Rouleau
  */
 
 
+#include <Alert.h>
 #include <Application.h>
+#include <Button.h>
 #include <Catalog.h>
+#include <File.h>
+#include <FindDirectory.h>
 #include <LayoutBuilder.h>
+#include <Menu.h>
 #include <MenuBar.h>
+#include <Path.h>
 #include <ScrollView.h>
 #include <String.h>
+#include <StringView.h>
+
+#include <RosterPrivate.h>
+
 
 #include <iostream>
 
@@ -24,17 +35,28 @@
 #include <unistd.h>
 
 #include "DevicesView.h"
+#include "DriverUtils.h"
 
 #undef B_TRANSLATION_CONTEXT
 #define B_TRANSLATION_CONTEXT "DevicesView"
 
-DevicesView::DevicesView()
+
+DevicesView::DevicesView(OrderByType OrderBy)
 	:
-	BView("DevicesView", B_WILL_DRAW | B_FRAME_EVENTS)
+	BView("DevicesView", B_WILL_DRAW | B_FRAME_EVENTS),
+	fOrderBy(OrderBy),
+	fHasShownDisableAlert(false),
+	fRebootNeeded(false)
 {
 	CreateLayout();
 	RescanDevices();
-	RebuildDevicesOutline();
+	RebuildDevicesOutline(fDevicesOutline, fDevices, fCategoryMap, fOrderBy);
+}
+
+
+DevicesView::~DevicesView()
+{
+	DeleteDevices();
 }
 
 
@@ -78,23 +100,46 @@ DevicesView::CreateLayout()
 		new BMessage(kMsgOrderCategory));
 	BMenuItem* byConnection = new BMenuItem(B_TRANSLATE("Connection"),
 		new BMessage(kMsgOrderConnection));
-	byCategory->SetMarked(true);
-	fOrderBy = byCategory->IsMarked() ? ORDER_BY_CATEGORY : ORDER_BY_CONNECTION;
 	orderByPopupMenu->AddItem(byBus);
 	orderByPopupMenu->AddItem(byCategory);
 	orderByPopupMenu->AddItem(byConnection);
+
+	item = orderByPopupMenu->ItemAt((int32)fOrderBy);
+	if (item != NULL)
+		item->SetMarked(true);
 	fOrderByMenu = new BMenuField(B_TRANSLATE("Order by:"), orderByPopupMenu);
 	fAttributesView = new PropertyList("attributesView");
+	fBlockButton
+		= new BButton("blockButton", B_TRANSLATE("Disable driver"), new BMessage(kMsgToggleDriver));
+	fBlockButton->SetEnabled(false);
+	fRebootNotice = new BStringView("rebootNotice", "");
+
+	fActionMenuBar = new BMenuBar("Action Menu");
+	BMenu* rebootMenu = new BMenu(B_TRANSLATE("Reboot needed"));
+	rebootMenu->AddItem(new BMenuItem(B_TRANSLATE("Restart computer"), new BMessage(kMsgReboot)));
+	rebootMenu->SetTargetForItems(this);
+	fActionMenuBar->AddItem(rebootMenu);
+	fActionMenuBar->Hide();
 
 	BLayoutBuilder::Group<>(this, B_VERTICAL, 0)
-		.Add(menuBar)
+		.AddGroup(B_HORIZONTAL, 0.0f)
+			.Add(menuBar, 1.0f)
+			.Add(fActionMenuBar, 0.0f)
+			.End()
 		.AddSplit(B_HORIZONTAL)
 			.SetInsets(B_USE_WINDOW_SPACING)
 			.AddGroup(B_VERTICAL)
 				.Add(fOrderByMenu, 1)
 				.Add(scrollView, 2)
 				.End()
-			.Add(fAttributesView, 2);
+			.AddGroup(B_VERTICAL, B_USE_DEFAULT_SPACING, 2.0f)
+				.Add(fAttributesView, 2)
+				.AddGroup(B_HORIZONTAL)
+					.Add(fBlockButton)
+					.Add(fRebootNotice)
+					.AddGlue()
+					.End()
+				.End();
 }
 
 
@@ -104,7 +149,7 @@ DevicesView::RescanDevices()
 	// Empty the outline and delete the devices in the list, incl. categories
 	fDevicesOutline->MakeEmpty();
 	DeleteDevices();
-	DeleteCategoryMap();
+	DeleteCategoryMap(fCategoryMap);
 
 	// Fill the devices list
 	status_t error;
@@ -120,7 +165,7 @@ DevicesView::RescanDevices()
 
 	uninit_dm_wrapper();
 
-	CreateCategoryMap();
+	CreateCategoryMap(fDevices, fCategoryMap);
 }
 
 
@@ -140,13 +185,13 @@ DevicesView::DeleteDevices()
 
 
 void
-DevicesView::CreateCategoryMap()
+DevicesView::CreateCategoryMap(const Devices& devices, CategoryMap& categoryMap)
 {
 	CategoryMapIterator iter;
-	for (unsigned int i = 0; i < fDevices.size(); i++) {
-		Category category = fDevices[i]->GetCategory();
+	for (unsigned int i = 0; i < devices.size(); i++) {
+		Category category = devices[i]->GetCategory();
 		if (category < 0 || category >= kCategoryStringLength) {
-			std::cerr << "CreateCategoryMap: device " << fDevices[i]->GetName()
+			std::cerr << "CreateCategoryMap: device " << devices[i]->GetName()
 				<< " returned an unknown category index (" << category << "). "
 				<< "Skipping device." << std::endl;
 			continue;
@@ -154,23 +199,22 @@ DevicesView::CreateCategoryMap()
 
 		const char* categoryName = kCategoryString[category];
 
-		iter = fCategoryMap.find(category);
-		if (iter == fCategoryMap.end()) {
+		iter = categoryMap.find(category);
+		if (iter == categoryMap.end()) {
 			// This category has not yet been added, add it.
-			fCategoryMap[category] = new Device(NULL, BUS_NONE, CAT_NONE, categoryName);
+			categoryMap[category] = new Device(NULL, BUS_NONE, CAT_NONE, categoryName);
 		}
 	}
 }
 
 
 void
-DevicesView::DeleteCategoryMap()
+DevicesView::DeleteCategoryMap(CategoryMap& categoryMap)
 {
 	CategoryMapIterator iter;
-	for (iter = fCategoryMap.begin(); iter != fCategoryMap.end(); iter++) {
+	for (iter = categoryMap.begin(); iter != categoryMap.end(); iter++)
 		delete iter->second;
-	}
-	fCategoryMap.clear();
+	categoryMap.clear();
 }
 
 
@@ -189,60 +233,60 @@ DevicesView::SortItemsCompare(const BListItem *item1, const BListItem *item2)
 
 
 void
-DevicesView::RebuildDevicesOutline()
+DevicesView::RebuildDevicesOutline(BOutlineListView* outline, const Devices& devices,
+	const CategoryMap& categoryMap, OrderByType orderBy)
 {
 	// Rearranges existing Devices into the proper hierarchy
-	fDevicesOutline->MakeEmpty();
+	outline->MakeEmpty();
 
-	if (fOrderBy == ORDER_BY_BUS) {
+	if (orderBy == ORDER_BY_BUS) {
 		// add all bus controllers to the outline
-		for (unsigned int i = 0; i < fDevices.size(); i++)
-			if (fDevices[i]->GetCategory() == CAT_BUS)
-				fDevicesOutline->AddItem(fDevices[i]);
+		for (unsigned int i = 0; i < devices.size(); i++)
+			if (devices[i]->GetCategory() == CAT_BUS)
+				outline->AddItem(devices[i]);
 
 		// attach devices to their bus
-		for (unsigned int i = 0; i < fDevices.size(); i++) {
-			if (fDevices[i]->GetCategory() != CAT_BUS) {
-				Device* busParent = fDevices[i]->GetPhysicalParent();
+		for (unsigned int i = 0; i < devices.size(); i++) {
+			if (devices[i]->GetCategory() != CAT_BUS) {
+				Device* busParent = devices[i]->GetPhysicalParent();
 
 				while (busParent != NULL && busParent->GetCategory() != CAT_BUS) {
 					busParent = busParent->GetPhysicalParent();
 				}
 
 				if (busParent != NULL)
-					fDevicesOutline->AddUnder(fDevices[i], busParent);
+					outline->AddUnder(devices[i], busParent);
 				else
-					fDevicesOutline->AddItem(fDevices[i]);
+					outline->AddItem(devices[i]);
 			}
 		}
-		fDevicesOutline->SortItemsUnder(NULL, true, SortItemsCompare);
-	} else if (fOrderBy == ORDER_BY_CATEGORY) {
+		outline->SortItemsUnder(NULL, false, SortItemsCompare);
+	} else if (orderBy == ORDER_BY_CATEGORY) {
 		// Add all categories to the outline
 		CategoryMapIterator iter;
-		for (iter = fCategoryMap.begin(); iter != fCategoryMap.end(); iter++) {
-			fDevicesOutline->AddItem(iter->second);
-		}
+		for (iter = categoryMap.begin(); iter != categoryMap.end(); iter++)
+			outline->AddItem(iter->second);
 
 		// Add all devices under the categories
-		for (unsigned int i = 0; i < fDevices.size(); i++) {
-			Category category = fDevices[i]->GetCategory();
+		for (unsigned int i = 0; i < devices.size(); i++) {
+			Category category = devices[i]->GetCategory();
 
-			iter = fCategoryMap.find(category);
-			if (iter == fCategoryMap.end()) {
+			iter = categoryMap.find(category);
+			if (iter == categoryMap.end()) {
 				std::cerr
 					<< "Tried to add device without category, file a bug\n";
 				continue;
 			} else {
-				fDevicesOutline->AddUnder(fDevices[i], iter->second);
+				outline->AddUnder(devices[i], iter->second);
 			}
 		}
-		fDevicesOutline->SortItemsUnder(NULL, true, SortItemsCompare);
-	} else if (fOrderBy == ORDER_BY_CONNECTION) {
-		for (unsigned int i = 0; i < fDevices.size(); i++) {
-			if (fDevices[i]->GetPhysicalParent() == NULL) {
+		outline->SortItemsUnder(NULL, false, SortItemsCompare);
+	} else if (orderBy == ORDER_BY_CONNECTION) {
+		for (unsigned int i = 0; i < devices.size(); i++) {
+			if (devices[i]->GetPhysicalParent() == NULL) {
 				// process each parent device and its children
-				fDevicesOutline->AddItem(fDevices[i]);
-				AddChildrenToOutlineByConnection(fDevices[i]);
+				outline->AddItem(devices[i]);
+				AddChildrenToOutlineByConnection(outline, devices, devices[i]);
 			}
 		}
 	}
@@ -250,12 +294,13 @@ DevicesView::RebuildDevicesOutline()
 
 
 void
-DevicesView::AddChildrenToOutlineByConnection(Device* parent)
+DevicesView::AddChildrenToOutlineByConnection(BOutlineListView* outline, const Devices& devices,
+	Device* parent)
 {
-	for (unsigned int i = 0; i < fDevices.size(); i++) {
-		if (fDevices[i]->GetPhysicalParent() == parent) {
-			fDevicesOutline->AddUnder(fDevices[i], parent);
-			AddChildrenToOutlineByConnection(fDevices[i]);
+	for (unsigned int i = 0; i < devices.size(); i++) {
+		if (devices[i]->GetPhysicalParent() == parent) {
+			outline->AddUnder(devices[i], parent);
+			AddChildrenToOutlineByConnection(outline, devices, devices[i]);
 		}
 	}
 }
@@ -391,6 +436,8 @@ DevicesView::AddDeviceAndChildren(device_node_cookie *node, Device* parent)
 			CAT_NONE, B_TRANSLATE("Unknown device"));
 	}
 
+	newDevice->SetNodeCookie(*node);
+
 	struct device_attr_info driverAttrInfo;
 	driverAttrInfo.node_cookie = *node;
 	driverAttrInfo.cookie = 0;
@@ -401,7 +448,8 @@ DevicesView::AddDeviceAndChildren(device_node_cookie *node, Device* parent)
 	// Add its attributes to the device, initialize it and add to the list.
 	for (unsigned int i = 0; i < attributes.size(); i++) {
 		if (attributes[i].fName == B_DEVICE_PUBLISHED_PATH) {
-			newDevice->SetAttribute(B_TRANSLATE("Device paths"), attributes[i].fValue);
+			newDevice->SetAttribute(B_TRANSLATE_CONTEXT("Device paths", "Device"),
+				attributes[i].fValue);
 			hasPublishedPath = true;
 			continue;
 		}
@@ -410,11 +458,14 @@ DevicesView::AddDeviceAndChildren(device_node_cookie *node, Device* parent)
 	}
 
 	if (driverAttrInfo.value.string[0] != '\0')
-		newDevice->SetAttribute(B_TRANSLATE("Driver used"), driverAttrInfo.value.string);
+		newDevice->SetAttribute(B_TRANSLATE_CONTEXT("Driver used", "Device"),
+			driverAttrInfo.value.string);
 	else
-		newDevice->SetAttribute(B_TRANSLATE("Driver used"), B_TRANSLATE("unknown"));
+		newDevice->SetAttribute(B_TRANSLATE_CONTEXT("Driver used", "Device"),
+			B_TRANSLATE_CONTEXT("unknown", "Device"));
 	if (!hasPublishedPath)
-		newDevice->SetAttribute(B_TRANSLATE("Device paths"), B_TRANSLATE("none"));
+		newDevice->SetAttribute(B_TRANSLATE_CONTEXT("Device paths", "Device"),
+			B_TRANSLATE_CONTEXT("none", "Device"));
 
 	newDevice->InitFromAttributes();
 	fDevices.push_back(newDevice);
@@ -432,9 +483,155 @@ DevicesView::AddDeviceAndChildren(device_node_cookie *node, Device* parent)
 }
 
 
-DevicesView::~DevicesView()
+void
+DevicesView::_ShowInfoAlert(const BString& message)
 {
-	DeleteDevices();
+	BAlert* alert = new BAlert("infoAlert", message, B_TRANSLATE("OK"), NULL, NULL,
+		B_WIDTH_AS_USUAL, B_INFO_ALERT);
+	alert->Go();
+}
+
+
+void
+DevicesView::_ShowDisableDriverAlert(const BPath& settingsPath, const BString& relativePath)
+{
+	if (fHasShownDisableAlert)
+		return;
+
+	fHasShownDisableAlert = true;
+
+	BString alertText;
+	alertText << B_TRANSLATE("The driver has been disabled. A reboot is required "
+							 "for the change to take effect.\n\n"
+							 "After rebooting, this device may no longer appear "
+							 "in the device list as the system will not be able to identify "
+							 "it without its driver.\n\n"
+							 "To re-enable the driver, find the device in the "
+							 "%devices% application and click \"Enable driver\". If the "
+							 "device is no longer visible, remove the corresponding "
+							 "blocked entry from the packages settings file:\n")
+			  << settingsPath.Path() << "\n\n"
+			  << B_TRANSLATE("Blocked entry:\n")
+			  << relativePath;
+	alertText.ReplaceFirst("%devices%", B_TRANSLATE_SYSTEM_NAME("Devices"));
+
+	BAlert* alert = new BAlert(B_TRANSLATE("Driver disabled"), alertText, B_TRANSLATE("OK"), NULL,
+		NULL, B_WIDTH_AS_USUAL, B_INFO_ALERT);
+	alert->Go();
+}
+
+
+void
+DevicesView::_ToggleDriverState(bool disable)
+{
+	int32 selected = fDevicesOutline->CurrentSelection(0);
+	if (selected < 0)
+		return;
+
+	Device* device = (Device*)fDevicesOutline->ItemAt(selected);
+	BString driver = device->GetDriverUsed();
+
+	if (disable && DriverUtils::IsCriticalDriver(device))
+		return;
+
+	BString packageName;
+	if (!DriverUtils::IsPackagedDriver(driver, &packageName))
+		return;
+
+	BPath settingsPath;
+	BString relativePath;
+	status_t status = DriverUtils::GetDriverPackageSettings(driver, settingsPath, relativePath);
+	if (status != B_OK) {
+		if (disable) {
+			BString errorMsg = B_TRANSLATE("The driver path is not in a package volume: ");
+			errorMsg << driver;
+			_ShowInfoAlert(errorMsg);
+		}
+		return;
+	}
+
+	if (DriverUtils::UpdatePackageBlockedEntry(settingsPath.Path(), packageName.String(),
+			relativePath.String(), disable)
+		!= B_OK) {
+		_ShowInfoAlert(B_TRANSLATE("Failed to write to the settings file."));
+		return;
+	}
+
+	_UpdateBlockButton(device);
+	fRebootNeeded = true;
+	fActionMenuBar->Show();
+
+	if (disable)
+		_ShowDisableDriverAlert(settingsPath, relativePath);
+}
+
+
+void
+DevicesView::_SetOrderBy(OrderByType orderBy)
+{
+	device_node_cookie selectedCookie = 0;
+	int32 selected = fDevicesOutline->CurrentSelection(0);
+	if (selected >= 0) {
+		Device* device = (Device*)fDevicesOutline->ItemAt(selected);
+		if (device != NULL)
+			selectedCookie = device->NodeCookie();
+	}
+
+	fOrderBy = orderBy;
+	RescanDevices();
+	RebuildDevicesOutline(fDevicesOutline, fDevices, fCategoryMap, fOrderBy);
+
+	if (selectedCookie != 0) {
+		for (int32 i = 0; i < fDevicesOutline->CountItems(); i++) {
+			Device* device = (Device*)fDevicesOutline->ItemAt(i);
+			if (device != NULL && device->NodeCookie() == selectedCookie) {
+				fDevicesOutline->Select(i);
+				fDevicesOutline->ScrollToSelection();
+				break;
+			}
+		}
+	}
+}
+
+
+void
+DevicesView::_UpdateBlockButton(Device* device)
+{
+	fBlockButton->SetTarget(this);
+
+	if (device == NULL) {
+		fBlockButton->SetEnabled(false);
+		fBlockButton->SetLabel(B_TRANSLATE("Disable driver"));
+		fRebootNotice->SetText("");
+		return;
+	}
+
+	BString driver = device->GetDriverUsed();
+	bool hasDriver = !driver.IsEmpty() && driver != B_TRANSLATE_CONTEXT("unknown", "Device")
+		&& driver != B_TRANSLATE_CONTEXT("none", "Device");
+
+	if (!hasDriver) {
+		fBlockButton->SetEnabled(false);
+		fBlockButton->SetLabel(B_TRANSLATE("Disable driver"));
+		fRebootNotice->SetText("");
+	} else if (DriverUtils::IsCriticalDriver(device)) {
+		fBlockButton->SetEnabled(false);
+		fBlockButton->SetLabel(B_TRANSLATE("Disable driver"));
+		fRebootNotice->SetHighUIColor(B_PANEL_TEXT_COLOR);
+		fRebootNotice->SetText(B_TRANSLATE("Disabling critical system drivers is not allowed."));
+	} else if (!DriverUtils::IsPackagedDriver(driver)) {
+		fBlockButton->SetEnabled(false);
+		fBlockButton->SetLabel(B_TRANSLATE("Disable driver"));
+		fRebootNotice->SetHighUIColor(B_PANEL_TEXT_COLOR);
+		fRebootNotice->SetText(B_TRANSLATE("Disabling non-packaged drivers is not supported."));
+	} else {
+		fBlockButton->SetEnabled(true);
+		fRebootNotice->SetText("");
+		if (DriverUtils::IsDriverEnabled(driver))
+			fBlockButton->SetLabel(B_TRANSLATE("Disable driver"));
+		else
+			fBlockButton->SetLabel(B_TRANSLATE("Enable driver"));
+	}
 }
 
 
@@ -442,46 +639,55 @@ void
 DevicesView::MessageReceived(BMessage *msg)
 {
 	switch (msg->what) {
+		case kMsgReboot:
+		{
+			BRoster roster;
+			BRoster::Private rosterPrivate(roster);
+			status_t error = rosterPrivate.ShutDown(true, false, false);
+			if (error != B_OK) {
+				BString errorMsg;
+				errorMsg << B_TRANSLATE("Shutdown failed with error: ") << strerror(error);
+				BAlert* errorAlert = new BAlert(B_TRANSLATE("Error"), errorMsg.String(),
+					B_TRANSLATE("OK"), NULL, NULL, B_WIDTH_AS_USUAL, B_STOP_ALERT);
+				errorAlert->Go();
+			}
+			break;
+		}
 		case kMsgSelectionChanged:
 		{
 			int32 selected = fDevicesOutline->CurrentSelection(0);
-			if (selected >= 0) {
-				Device* device = (Device*)fDevicesOutline->ItemAt(selected);
+			Device* device = (selected >= 0) ? (Device*)fDevicesOutline->ItemAt(selected) : NULL;
+			if (device != NULL) {
 				fAttributesView->AddAttributes(device->GetAllAttributes());
 				fAttributesView->Invalidate();
 			}
+			_UpdateBlockButton(device);
 			break;
 		}
 
 		case kMsgOrderBus:
 		{
-			fOrderBy = ORDER_BY_BUS;
-			RescanDevices();
-			RebuildDevicesOutline();
+			_SetOrderBy(ORDER_BY_BUS);
 			break;
 		}
 
 		case kMsgOrderCategory:
 		{
-			fOrderBy = ORDER_BY_CATEGORY;
-			RescanDevices();
-			RebuildDevicesOutline();
+			_SetOrderBy(ORDER_BY_CATEGORY);
 			break;
 		}
 
 		case kMsgOrderConnection:
 		{
-			fOrderBy = ORDER_BY_CONNECTION;
-			RescanDevices();
-			RebuildDevicesOutline();
+			_SetOrderBy(ORDER_BY_CONNECTION);
 			break;
 		}
 
 		case kMsgRefresh:
 		{
-			fAttributesView->RemoveAll();
+			fAttributesView->Clear();
 			RescanDevices();
-			RebuildDevicesOutline();
+			RebuildDevicesOutline(fDevicesOutline, fDevices, fCategoryMap, fOrderBy);
 			break;
 		}
 
@@ -497,6 +703,16 @@ DevicesView::MessageReceived(BMessage *msg)
 			break;
 		}
 
+		case kMsgToggleDriver:
+		{
+			int32 selected = fDevicesOutline->CurrentSelection(0);
+			if (selected >= 0) {
+				Device* device = (Device*)fDevicesOutline->ItemAt(selected);
+				BString driver = device->GetDriverUsed();
+				_ToggleDriverState(DriverUtils::IsDriverEnabled(driver));
+			}
+			break;
+		}
 		default:
 			BView::MessageReceived(msg);
 			break;

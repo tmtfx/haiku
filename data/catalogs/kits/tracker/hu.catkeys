@@ -1,4 +1,4 @@
-1	hungarian	x-vnd.Haiku-libtracker	1792277746
+1	hungarian	x-vnd.Haiku-libtracker	1752805840
 Created	ContainerWindow		Létrehozva
 Icon	AttributesView		Ikon
 Open and make preferred	OpenWithWindow		Megnyitás és előnyben részesítés
@@ -43,7 +43,6 @@ You cannot replace a folder or a symbolic link with a file.	FSUtils		Nem lehet m
 (unknown)	InfoWindow		(ismeretlen)
 {0, plural, other{<# dates>}}	AttributesView		{0, plural, other{<# dátum>}}
 Trailing \\.	libtracker		Záró \\.
-At %func \nfind_directory() failed. \nReason: %error	Email Query Columns		Ennél: %func \nsikertelen volt a find_directory(). \nOka: %error
 Handles any file	OpenWithWindow		Bármilyen fájlt kezel
 save text	FilePanelPriv		szöveg mentése
 Raw data	AttributesView		Nyers adat
@@ -58,6 +57,7 @@ Identify	ContainerWindow		Azonosítás
 Create link	ContainerWindow		Hivatkozás készítése
 starts with	FindPanel		eleje
 Replace	FSUtils		Csere
+At %func \nfind_directory() failed. \nReason: %error	TrackerInitialState		%func \nfind_directory() sikertelen. \nHiba oka: %error
 ?+* follows nothing.	libtracker		?+* nem követ semmit.
 Include Trash	FindPanel		A Szemetesben is
 Rectangle	AttributesView		Téglalap
@@ -139,13 +139,11 @@ URL	Bookmark Query Columns		URL
 Floating point number	AttributesView		Lebegőpontos szám
 Cancel	ContainerWindow		Mégse
 Attributes	ContainerWindow		Jellemzők
-Error deleting items	FSUtils		Hiba történt az elemek törlése közben
 Cut	ContainerWindow		Kivágás
 Disks	Model		Lemezek
 Create a Query template	FindPanel		Keresési sablon készítése
 Size	FindPanel		Méret
 New submenu	ContainerWindow	Folder name of New-template submenu	Új almenü
-OK	Email Query Columns		Rendben
 Location	QueryPoseView		Hely
 Edit query	ContainerWindow		Keresés szerkesztése
 {0, plural, one{(# byte)} other{(# bytes)}}	InfoWindow		{0, plural, one{(# bájt)} other{(# bájt)}}
@@ -174,6 +172,7 @@ Preferences…	ContainerWindow		Beállítások…
 Could not open \"%document\" because application \"%app\" is in the Trash. 	FSUtils		Nem sikerült megnyitni a dokumentumot (\"%document\"), mert a program (\"%app\") a Szemetesben van. 
 Work Phone	Person Query Columns		Munkahelyi telefonszám
 Select folders	FindPanel		Mappák megadása
+OK	TrackerInitialState		Rendben
 Close	ContainerWindow		Bezárás
 Get info	ContainerWindow		Információ
 MIME Type	AttributesView		MIME Típus
@@ -198,8 +197,8 @@ Media parameter web	AttributesView		Média paraméter web
 Sorry, you can't save things at the root of your system.	FilePanelPriv		Sajnos nem lehet a rendszer gyökérmappájába menteni.
 Restore	ContainerWindow		Visszaállítás
 Location	ContainerWindow		Hely
-Skip	FSUtils		Kihagy
 Warning space color	SettingsView		Veszély jelzőszíne
+Skip	FSUtils		Kihagy
 Text list	AttributesView		Szöveg lista
 Used space color	SettingsView		Használt terület színe
 Cancel	FSUtils		Mégse
@@ -290,6 +289,7 @@ Execute	FilePermissionsView		Futtatás
 no	AttributesView		nem
 Show volumes on Desktop	SettingsView		Lemezek megjelenítése az Asztalon
 Recent folders	ContainerWindow		Legutóbbi mappák
+Error deleting items: %error	FSUtils		Nem tudom törölni: %error
 Desktop	Model		Asztal
 Select all	ContainerWindow		Mind kijelölése
 {0, plural, other{#/%total %filter}}	CountView	Number of selected items from a filtered set: \"10/30 view\"	{0, plural, other{#/%total %filter}}
@@ -325,8 +325,8 @@ Could not open \"%document\" with application \"%app\" (%error). 	FSUtils		Nem s
 Create %s clipping	PoseView		%s kivágás készítése
 Error moving \"%name\"	FSUtils		Hiba történt a mozgatás közben: \"%name\"
 To: %dir	StatusWindow		Ide: %dir
-Cancel	Tracker		Mégse
 Paste layout	ContainerWindow		Elrendezés beillesztése
+Cancel	Tracker		Mégse
 yes	AttributesView		igen
 Make active printer	ContainerWindow		Beállítás aktív nyomtatónak
 Copy to	ContainerWindow		Másolás
@@ -428,6 +428,7 @@ Move here	ContainerWindow		Mozgatás ide
 the config folder	FSUtils		a konfigurációs mappa
 Sorry, could not create a new folder.	FSUtils		Nem sikerült az új mappát létrehozni.
 MIME Signature	AttributesView		MIME azonosítója
+%ld × %ld	ContainerWindow	The '×' is the Unicode multiplication sign U+00D7	%ld × %ld
 Rename	FSUtils	button label	Átnevezés
 Clean up all	ContainerWindow		Összes rendezése
 Add current folder	FilePanelPriv		Jelenlegi mappa hozzáadása

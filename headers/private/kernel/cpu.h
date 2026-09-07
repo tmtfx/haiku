@@ -10,6 +10,7 @@
 
 
 #include <setjmp.h>
+#include <util/DoublyLinkedList.h>
 
 #include <interrupts.h>
 #include <smp.h>
@@ -54,7 +55,7 @@ typedef struct CACHE_LINE_ALIGN cpu_ent {
 
 	// used to force a reschedule at quantum expiration time
 	bool			preempted;
-	bool			reschedule_disabled;
+	uint8			reschedule_disabled;
 	timer			quantum_timer;
 
 	// keeping track of CPU activity
@@ -82,7 +83,7 @@ typedef struct CACHE_LINE_ALIGN cpu_ent {
 	int				cache_id[CPU_MAX_CACHE_LEVEL];
 
 	// IRQs assigned to this CPU
-	struct list		irqs;
+	DoublyLinkedList<irq_assignment, DoublyLinkedListCLink<irq_assignment> > irqs;
 	spinlock		irqs_lock;
 
 	// arch-specific stuff

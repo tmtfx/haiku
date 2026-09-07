@@ -9,6 +9,7 @@
 #include "pthread_private.h"
 
 #include <signal.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -17,6 +18,7 @@
 #include <syscall_utils.h>
 
 #include <libroot_private.h>
+#include <runtime_loader/runtime_loader.h>
 #include <syscalls.h>
 #include <thread_defs.h>
 #include <time_private.h>
@@ -182,9 +184,18 @@ pthread_create(pthread_t* _thread, const pthread_attr_t* attr,
 	if (thread == NULL)
 		return EAGAIN;
 
+	char threadName[B_OS_NAME_LENGTH];
+	char* imageName;
+	status_t status = __gRuntimeLoader->get_nearest_symbol_at_address(
+		(void*)startRoutine, NULL, NULL, &imageName, NULL, NULL, NULL, NULL);
+	if (status == B_OK)
+		snprintf(threadName, sizeof(threadName), "%s pthread", imageName);
+	else
+		strlcpy(threadName, "pthread func", sizeof(threadName));
+
 	thread_creation_attributes attributes;
 	status_t error = __pthread_init_creation_attributes(attr, thread,
-		&pthread_thread_entry, NULL, thread, "pthread func", &attributes);
+		&pthread_thread_entry, NULL, thread, threadName, &attributes);
 	if (error != B_OK) {
 		free(thread);
 		return error;

@@ -32,6 +32,7 @@
 #include <boot/kernel_args.h>
 #include <condition_variable.h>
 #include <cpu.h>
+#include <elf.h>
 #include <interrupts.h>
 #include <kimage.h>
 #include <kscheduler.h>
@@ -2014,14 +2015,46 @@ dump_thread_info(int argc, char **argv)
 }
 
 
+struct CallingMatchArgs {
+	Thread* thread;
+	const char* pattern;
+	addr_t start, end;
+	bool case_insensitive, images;
+};
+
+
+static bool
+calling_match(void* _args, addr_t ip)
+{
+	CallingMatchArgs* args = (CallingMatchArgs*)_args;
+
+	if (args->pattern == NULL)
+		return ip >= args->start && ip < args->end;
+
+	if (!IS_KERNEL_ADDRESS(ip))
+		return false;
+
+	const char* image;
+	const char* symbol;
+	if (elf_debug_lookup_symbol_address(ip,
+			NULL, &symbol, &image, NULL) != B_OK)
+		return false;
+
+	const char* search = symbol;
+	if (args->images)
+		search = image;
+
+	if (args->case_insensitive)
+		return strcasestr(search, args->pattern) != NULL;
+	return strstr(search, args->pattern) != NULL;
+}
+
+
 static int
 dump_thread_list(int argc, char **argv)
 {
 	bool realTimeOnly = false;
-	bool calling = false;
-	const char *callSymbol = NULL;
-	addr_t callStart = 0;
-	addr_t callEnd = 0;
+	CallingMatchArgs* calling = NULL;
 	int32 requiredState = 0;
 	team_id team = -1;
 	sem_id sem = -1;
@@ -2041,16 +2074,39 @@ dump_thread_list(int argc, char **argv)
 				kprintf("ignoring invalid semaphore argument.\n");
 		}
 	} else if (!strcmp(argv[0], "calling")) {
-		if (argc < 2) {
-			kprintf("Need to give a symbol name or start and end arguments.\n");
-			return 0;
-		} else if (argc == 3) {
-			callStart = parse_expression(argv[1]);
-			callEnd = parse_expression(argv[2]);
-		} else
-			callSymbol = argv[1];
+		argv++;
+		argc--;
+		if (argc == 0) {
+			kprintf("calling: Not enough arguments.\n");
+			return -1;
+		}
 
-		calling = true;
+		calling = (CallingMatchArgs*)alloca(sizeof(CallingMatchArgs));
+		memset(calling, 0, sizeof(CallingMatchArgs));
+
+		while (argv[0][0] == '-') {
+			if (strcmp(argv[0], "-i") == 0)
+				calling->case_insensitive = true;
+			else if (strcmp(argv[0], "-m") == 0)
+				calling->images = true;
+			else {
+				kprintf("calling: unknown argument %s\n", argv[0]);
+				return -1;
+			}
+			argv++;
+			argc--;
+		}
+
+		if (argc != 1 && argc != 2) {
+			kprintf("calling: Need to give a symbol name or start and end arguments.\n");
+			return -1;
+		}
+
+		if (argc == 2) {
+			calling->start = parse_expression(argv[0]);
+			calling->end = parse_expression(argv[1]);
+		} else
+			calling->pattern = argv[0];
 	} else if (argc > 1) {
 		team = strtoul(argv[1], NULL, 0);
 		if (team == 0)
@@ -2063,8 +2119,7 @@ dump_thread_list(int argc, char **argv)
 			Thread* thread = it.Next();) {
 		// filter out threads not matching the search criteria
 		if ((requiredState && thread->state != requiredState)
-			|| (calling && !arch_debug_contains_call(thread, callSymbol,
-					callStart, callEnd))
+			|| (calling != NULL && !arch_debug_walk_stack(thread, calling_match, calling))
 			|| (sem > 0 && get_thread_wait_sem(thread) != sem)
 			|| (team > 0 && thread->team->id != team)
 			|| (realTimeOnly && thread->priority < B_REAL_TIME_DISPLAY_PRIORITY))
@@ -2840,13 +2895,12 @@ thread_init(kernel_args *args)
 
 	// create an idle thread for each cpu
 	for (uint32 i = 0; i < args->num_cpus; i++) {
-		Thread *thread;
 		area_info info;
 		char name[64];
 
 		sprintf(name, "idle thread %" B_PRIu32, i + 1);
-		thread = new(&sIdleThreads[i]) Thread(name,
-			i == 0 ? team_get_kernel_team_id() : -1, &gCPU[i]);
+		Thread *thread = &sIdleThreads[i];
+		new(&sIdleThreads[i]) Thread(name, thread->id, &gCPU[i]);
 		if (thread == NULL || thread->Init(true) != B_OK) {
 			panic("error creating idle thread struct\n");
 			return B_NO_MEMORY;
@@ -2883,7 +2937,7 @@ thread_init(kernel_args *args)
 	new(&sUndertakerEntries) DoublyLinkedList<UndertakerEntry>();
 	sUndertakerCondition.Init(&sUndertakerEntries, "undertaker entries");
 
-	thread_id undertakerThread = spawn_kernel_thread(&undertaker, "undertaker",
+	thread_id undertakerThread = spawn_kernel_thread(&undertaker, "thread undertaker",
 		B_DISPLAY_PRIORITY, NULL);
 	if (undertakerThread < 0)
 		panic("Failed to create undertaker thread!");
@@ -2924,7 +2978,9 @@ thread_init(kernel_args *args)
 		"  <name>     - The thread's name.\n", 0);
 	add_debugger_command_etc("calling", &dump_thread_list,
 		"Show all threads that have a specific address in their call chain",
-		"{ <symbol-pattern> | <start> <end> }\n", 0);
+		" { [ -i ] [ -m ] <symbol-pattern> | <start> <end> }\n"
+		"  -i         - Case-insensitive search.\n"
+		"  -m         - Search image names instead of symbol names.\n", 0);
 	add_debugger_command_etc("unreal", &make_thread_unreal,
 		"Set realtime priority threads to normal priority",
 		"[ <id> ]\n"
@@ -2966,6 +3022,7 @@ thread_preboot_init_percpu(struct kernel_args *args, int32 cpuNum)
 	// so that get_current_cpu and friends will work, which is crucial for
 	// a lot of low level routines
 	sIdleThreads[cpuNum].cpu = &gCPU[cpuNum];
+	sIdleThreads[cpuNum].id = (cpuNum == 0) ? B_SYSTEM_TEAM : -1;
 	arch_thread_set_current_thread(&sIdleThreads[cpuNum]);
 	return B_OK;
 }
@@ -4026,28 +4083,43 @@ _user_get_cpu()
 
 
 status_t
-_user_get_thread_affinity(thread_id id, void* userMask, size_t size)
+_user_get_thread_affinity(thread_id id, void* userMask, size_t userMaskSize)
 {
-	if (userMask == NULL || id < B_OK)
+	const size_t maskSize = sizeof(CPUSet);
+	if (userMask == NULL || id < 0 || userMaskSize < maskSize)
 		return B_BAD_VALUE;
-
 	if (!IS_USER_ADDRESS(userMask))
 		return B_BAD_ADDRESS;
 
 	CPUSet mask;
 
-	if (id == 0)
-		id = thread_get_current_thread_id();
-	// get the thread
-	Thread* thread = Thread::GetAndLock(id);
-	if (thread == NULL)
-		return B_BAD_THREAD_ID;
-	BReference<Thread> threadReference(thread, true);
-	ThreadLocker threadLocker(thread, true);
-	memcpy(&mask, &thread->cpumask, sizeof(mask));
+	{
+		if (id == 0)
+			id = thread_get_current_thread_id();
+		Thread* thread = Thread::GetAndLock(id);
+		if (thread == NULL)
+			return B_BAD_THREAD_ID;
+		BReference<Thread> threadReference(thread, true);
+		ThreadLocker threadLocker(thread, true);
 
-	if (user_memcpy(userMask, &mask, min_c(sizeof(mask), size)) < B_OK)
+		if (thread->team == team_get_kernel_team())
+			return B_NOT_ALLOWED;
+		if (thread->team != thread_get_current_thread()->team && geteuid() != 0)
+			return B_NOT_ALLOWED;
+
+		mask = thread->cpumask;
+	}
+
+	if (mask.IsEmpty())
+		mask.SetAll();
+	mask = mask.And(gCPUEnabled);
+
+	if (user_memcpy(userMask, &mask, maskSize) < B_OK)
 		return B_BAD_ADDRESS;
+	if (userMaskSize > maskSize) {
+		if (user_memset((uint8*)userMask + maskSize, 0, userMaskSize - maskSize) != B_OK)
+			return B_BAD_ADDRESS;
+	}
 
 	return B_OK;
 }
@@ -4057,34 +4129,40 @@ _user_set_thread_affinity(thread_id id, const void* userMask, size_t size)
 {
 	if (userMask == NULL || id < B_OK || size < sizeof(CPUSet))
 		return B_BAD_VALUE;
-
 	if (!IS_USER_ADDRESS(userMask))
 		return B_BAD_ADDRESS;
 
 	CPUSet mask;
-	if (user_memcpy(&mask, userMask, min_c(sizeof(CPUSet), size)) < B_OK)
+	if (user_memcpy(&mask, userMask, sizeof(CPUSet)) < B_OK)
 		return B_BAD_ADDRESS;
 
-	CPUSet cpus;
-	cpus.SetAll();
-	for (int i = 0; i < smp_get_num_cpus(); i++)
-		cpus.ClearBit(i);
-	if (mask.Matches(cpus))
+	CPUSet andEnabled = mask.And(gCPUEnabled);
+	if (andEnabled.IsEmpty())
 		return B_BAD_VALUE;
+
+	// if setting to all enabled CPUs, just use no mask instead
+	if (andEnabled == gCPUEnabled)
+		mask.ClearAll();
 
 	if (id == 0)
 		id = thread_get_current_thread_id();
 
-	// get the thread
 	Thread* thread = Thread::GetAndLock(id);
 	if (thread == NULL)
 		return B_BAD_THREAD_ID;
 	BReference<Thread> threadReference(thread, true);
 	ThreadLocker threadLocker(thread, true);
-	memcpy(&thread->cpumask, &mask, sizeof(mask));
 
-	// check if running on masked cpu
-	if (!thread->cpumask.GetBit(thread->cpu->cpu_num))
+	if (thread->team == team_get_kernel_team())
+		return B_NOT_ALLOWED;
+	if (thread->team != thread_get_current_thread()->team && geteuid() != 0)
+		return B_NOT_ALLOWED;
+
+	thread->cpumask = mask;
+	threadLocker.Unlock();
+
+	// check if running on masked CPU
+	if (!mask.IsEmpty() && !mask.GetBit(thread->cpu->cpu_num))
 		thread_yield();
 
 	return B_OK;

@@ -124,6 +124,8 @@ const struct supported_device {
 	{0x0f00, 0x0f31, INTEL_MODEL_VLVM, "ValleyView Mobile"},
 	{0x0f00, 0x0f32, INTEL_MODEL_VLVM, "ValleyView Mobile"},
 	{0x0f00, 0x0f33, INTEL_MODEL_VLVM, "ValleyView Mobile"},
+
+	{0x2280, 0x22b1, INTEL_MODEL_CHVM, "Braswell GT1"},
 #endif
 
 	// XXX: 0x1604 only confirmed on 0x1616
@@ -177,6 +179,7 @@ const struct supported_device {
 	{0x5af0, 0x5a85, INTEL_MODEL_KBYM, "Apollo Lake GT1"},
 	{0x5904, 0x5906, INTEL_MODEL_KBY,  "Kabylake ULT GT1"},
 	{0x590f, 0x5902, INTEL_MODEL_KBY,  "Kabylake DT GT1"},
+	{0x590f, 0x5912, INTEL_MODEL_KBY,  "Kabylake DT GT2"},
 	{0x5904, 0x5916, INTEL_MODEL_KBYM, "Kabylake ULT GT2"},
 	{0x590c, 0x5916, INTEL_MODEL_KBYM, "Kabylake ULT GT2"},
 	{0x5904, 0x5921, INTEL_MODEL_KBYM, "Kabylake ULT GT2F"},
@@ -202,6 +205,7 @@ const struct supported_device {
 	{0x3ec4, 0x3e9b, INTEL_MODEL_CFLM, "CoffeeLake Halo GT2"},
 	{0x3e10, 0x3eab, INTEL_MODEL_CFLM, "CoffeeLake Halo GT2"},
 	{0x3ec4, 0x3eab, INTEL_MODEL_CFLM, "CoffeeLake Halo GT2"},
+	{0x3e20, 0x3e9b, INTEL_MODEL_CFLM, "CoffeeLake Halo GT2"},
 	{0x3ed0, 0x3ea5, INTEL_MODEL_CFL,  "CoffeeLake GT3"},
 	{0x3ed0, 0x3ea6, INTEL_MODEL_CFL,  "CoffeeLake GT3"},
 
@@ -236,6 +240,7 @@ const struct supported_device {
 	{0x4e26, 0x4e71, INTEL_MODEL_JSLM, "JasperLake"},
 	{0x4e28, 0x4e71, INTEL_MODEL_JSLM, "JasperLake"},
 
+	{0x9a12, 0x9a40, INTEL_MODEL_TGLM, "TigerLake-UP4 GT2"},
 	{0x9a12, 0x9a49, INTEL_MODEL_TGLM, "TigerLake-LP GT2"},
 	{0x9a12, 0x9a78, INTEL_MODEL_TGLM, "TigerLake-LP GT2"},
 	{0x9a02, 0x9a49, INTEL_MODEL_TGLM, "TigerLake-LP GT2"},
@@ -253,6 +258,9 @@ const struct supported_device {
 	{0x4621, 0x46a6, INTEL_MODEL_ALDM, "Alder Lake-P GT2"},
 	{0x4621, 0x46d1, INTEL_MODEL_ALDM, "Alder Lake-N GT2"},
 	{0x4641, 0x46a6, INTEL_MODEL_ALDM, "Alder Lake-P GT2"},
+#if 0
+	{0x4601, 0x46a8, INTEL_MODEL_ALDM, "Alder Lake-UP3 GT2"},
+#endif
 };
 
 struct intel_info {
