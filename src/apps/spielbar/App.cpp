@@ -104,7 +104,8 @@ enum {
 	kUnmountVolume = 'UMVo',
 	kMountAllNow = 'MoAl',
 	kUnmountAll = 'UMAl',
-	kRaiseBtn = 'RBTN'
+	kRaiseBtn = 'RBTN',
+	kRaiseQuit = 'RQTM'
 };
 
 enum {
@@ -1284,10 +1285,20 @@ public:
 
 	void MessageReceived(BMessage* msg) override {
 		switch (msg->what) {
-		
+			
+			case kRaiseQuit:
+				{
+					BMessage reply;
+					BMessenger msngr("application/x-vnd.Be-TSKB");
+					msngr.SendMessage(kRaiseDeskbarBtn,&reply);
+					PostMessage(B_QUIT_REQUESTED);
+				}
+				break;
+
 			case kMsgDelayedClose:
 				if (!IsActive()) {
-					PostMessage(B_QUIT_REQUESTED);
+					//PostMessage(B_QUIT_REQUESTED);
+					PostMessage(kRaiseQuit);
 				}
 				break;
 				
@@ -2637,12 +2648,12 @@ private:
 							BMessage openMsg(B_REFS_RECEIVED);
 							openMsg.AddRef("refs", &item->Ref());
 							tracker.SendMessage(&openMsg);
-							PostMessage(B_QUIT_REQUESTED);
+							PostMessage(kRaiseQuit); //B_QUIT_REQUESTED);
 						}
 					} else {
 						if (!item->Signature().IsEmpty()) {
 							be_roster->Launch(item->Signature().String());
-							PostMessage(B_QUIT_REQUESTED);
+							PostMessage(kRaiseQuit); //B_QUIT_REQUESTED);
 						} else {
 							BNode node(&item->Ref());
 							if (node.InitCheck() == B_OK) {
@@ -2658,7 +2669,7 @@ private:
 								} else {
 									be_roster->Launch(&item->Ref());
 								}
-								PostMessage(B_QUIT_REQUESTED);
+								PostMessage(kRaiseQuit); //B_QUIT_REQUESTED);
 							}
 						}
 					}
