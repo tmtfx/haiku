@@ -20,6 +20,8 @@
 #define CALLED() debug_printf("INTEL_ARC_ACC: CALLED %s\n", __FUNCTION__)
 extern accelerant_info* gInfo;
 
+bool enableAllDebugLogs = true;
+
 static const arc_mit_buf_trans_entry kDg2SnpsDp14Trans[] = {
 	{25, 0, 0}, {32, 0, 6}, {35, 0, 10}, {43, 0, 17}, {35, 0, 0},
 	{45, 0, 8}, {48, 0, 14}, {47, 0, 0}, {55, 0, 7}, {62, 0, 0}
@@ -328,6 +330,8 @@ is_mode_supported(display_mode* mode)
 static void
 log_pipe_plane_state(const char* origin, int8 pipe)
 {
+	if (!enableAllDebugLogs) return;
+	
 	if (pipe < 0)
 		return;
 
@@ -355,8 +359,8 @@ log_pipe_plane_state(const char* origin, int8 pipe)
 		{"PS_2_WIN_SIZE", scaler_window_size_register(pipe, 2)}
 	};
 
-	debug_printf("intel_arc.accelerant: %s: register snapshot for pipe %" B_PRId8 "\n",
-		origin, pipe);
+	debug_printf("intel_arc.accelerant: %s: register snapshot for pipe %" B_PRId8 "\n", origin, pipe);
+	
 	for (size_t i = 0; i < B_COUNT_OF(registers); i++) {
 		uint32 value = 0;
 		if (read_register(registers[i].offset, value)) {
@@ -394,6 +398,7 @@ bytes_per_pixel_for_space(color_space space)
 static void
 log_boot_dp_registers(int8 pipe, uint8 ddiPort)
 {
+	if (!enableAllDebugLogs) return;
     if (pipe < 0)
         return;
 
@@ -431,23 +436,25 @@ create_mode_list(void)
 {
 	display_mode mode = gInfo->shared_info->current_mode;
 	sanitize_mode_geometry(mode, "create_mode_list");
-	debug_printf("==================================================\n");
-	debug_printf("intel_arc.accelerant: >>> CREATE MODE LIST <<<\n");
-	debug_printf("intel_arc.accelerant: >>> PREVIOUS MODE: <<<\n");
-	debug_printf("  - Virtual Size : %u x %u\n", mode.virtual_width, mode.virtual_height);
-	debug_printf("  - Display Start: (%u, %u)\n", mode.h_display_start, mode.v_display_start);
-	debug_printf("  - Color Space  : 0x%08X\n", mode.space);
-	debug_printf("  - Flags        : 0x%08X\n", mode.flags);
-	debug_printf("  --- Timing Details ---\n");
-	debug_printf("  - Pixel Clock  : %u kHz\n", mode.timing.pixel_clock);
-	debug_printf("  - Horizontal   : Display=%u, SyncStart=%u, SyncEnd=%u, Total=%u\n",
-		mode.timing.h_display, mode.timing.h_sync_start,
-		mode.timing.h_sync_end, mode.timing.h_total);
-	debug_printf("  - Vertical     : Display=%u, SyncStart=%u, SyncEnd=%u, Total=%u\n",
-		mode.timing.v_display, mode.timing.v_sync_start,
-		mode.timing.v_sync_end, mode.timing.v_total);
-	debug_printf("  - Sync Flags   : 0x%08X\n", mode.timing.flags);
-	debug_printf("==================================================\n");
+	if (enableAllDebugLogs) {
+		debug_printf("==================================================\n");
+		debug_printf("intel_arc.accelerant: >>> CREATE MODE LIST <<<\n");
+		debug_printf("intel_arc.accelerant: >>> PREVIOUS MODE: <<<\n");
+		debug_printf("  - Virtual Size : %u x %u\n", mode.virtual_width, mode.virtual_height);
+		debug_printf("  - Display Start: (%u, %u)\n", mode.h_display_start, mode.v_display_start);
+		debug_printf("  - Color Space  : 0x%08X\n", mode.space);
+		debug_printf("  - Flags        : 0x%08X\n", mode.flags);
+		debug_printf("  --- Timing Details ---\n");
+		debug_printf("  - Pixel Clock  : %u kHz\n", mode.timing.pixel_clock);
+		debug_printf("  - Horizontal   : Display=%u, SyncStart=%u, SyncEnd=%u, Total=%u\n",
+			mode.timing.h_display, mode.timing.h_sync_start,
+			mode.timing.h_sync_end, mode.timing.h_total);
+		debug_printf("  - Vertical     : Display=%u, SyncStart=%u, SyncEnd=%u, Total=%u\n",
+			mode.timing.v_display, mode.timing.v_sync_start,
+			mode.timing.v_sync_end, mode.timing.v_total);
+		debug_printf("  - Sync Flags   : 0x%08X\n", mode.timing.flags);
+		debug_printf("==================================================\n");
+	}
 	
 
 	
@@ -461,13 +468,13 @@ create_mode_list(void)
 		if (gInfo->shared_info->has_boot_info
 			&& gInfo->shared_info->boot_width > 0
 			&& gInfo->shared_info->boot_height > 0) {
-			debug_printf("intel_arc.accelerant: Using boot framebuffer mode for mode list:\n");
+			if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: Using boot framebuffer mode for mode list:\n");
 			mode.virtual_width = gInfo->shared_info->boot_width;
 			mode.virtual_height = gInfo->shared_info->boot_height;
 			mode.space = gInfo->shared_info->boot_depth >= 24 ? B_RGB32 : B_RGB16;
-			debug_printf("intel_arc.accelerant: mode.virtual_width %u, mode.virtual_height %u\n", mode.virtual_width,mode.virtual_height);
+			if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: mode.virtual_width %u, mode.virtual_height %u\n", mode.virtual_width,mode.virtual_height);
 		} else {
-			debug_printf("intel_arc.accelerant: Boot mode unavailable, falling back to 1024x768\n");
+			if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: Boot mode unavailable, falling back to 1024x768\n");
 			memset(&mode, 0, sizeof(mode));
 			mode.virtual_width = 1024;
 			mode.virtual_height = 768;
@@ -516,24 +523,26 @@ create_mode_list(void)
 		gInfo->shared_info->bytes_per_row  = (mode.virtual_width * bytesPerPixel + 63) & ~63;
 	}
 	
-	debug_printf("intel_arc.accelerant: Bytes Per Row: %u\n",gInfo->shared_info->bytes_per_row);
+	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: Bytes Per Row: %u\n",gInfo->shared_info->bytes_per_row);
 	gInfo->shared_info->current_mode = mode;
-	debug_printf("intel_arc.accelerant: >>> CREATE MODE LIST <<<\n");
-	debug_printf("intel_arc.accelerant: >>> NEW MODE: <<<\n");
-	debug_printf("  - Virtual Size : %u x %u\n", mode.virtual_width, mode.virtual_height);
-	debug_printf("  - Display Start: (%u, %u)\n", mode.h_display_start, mode.v_display_start);
-	debug_printf("  - Color Space  : 0x%08X\n", mode.space);
-	debug_printf("  - Flags        : 0x%08X\n", mode.flags);
-	debug_printf("  --- Timing Details ---\n");
-	debug_printf("  - Pixel Clock  : %u kHz\n", mode.timing.pixel_clock);
-	debug_printf("  - Horizontal   : Display=%u, SyncStart=%u, SyncEnd=%u, Total=%u\n",
-		mode.timing.h_display, mode.timing.h_sync_start,
-		mode.timing.h_sync_end, mode.timing.h_total);
-	debug_printf("  - Vertical     : Display=%u, SyncStart=%u, SyncEnd=%u, Total=%u\n",
-		mode.timing.v_display, mode.timing.v_sync_start,
-		mode.timing.v_sync_end, mode.timing.v_total);
-	debug_printf("  - Sync Flags   : 0x%08X\n", mode.timing.flags);
-	debug_printf("==================================================\n");
+	if (enableAllDebugLogs) {
+		debug_printf("intel_arc.accelerant: >>> CREATE MODE LIST <<<\n");
+		debug_printf("intel_arc.accelerant: >>> NEW MODE: <<<\n");
+		debug_printf("  - Virtual Size : %u x %u\n", mode.virtual_width, mode.virtual_height);
+		debug_printf("  - Display Start: (%u, %u)\n", mode.h_display_start, mode.v_display_start);
+		debug_printf("  - Color Space  : 0x%08X\n", mode.space);
+		debug_printf("  - Flags        : 0x%08X\n", mode.flags);
+		debug_printf("  --- Timing Details ---\n");
+		debug_printf("  - Pixel Clock  : %u kHz\n", mode.timing.pixel_clock);
+		debug_printf("  - Horizontal   : Display=%u, SyncStart=%u, SyncEnd=%u, Total=%u\n",
+			mode.timing.h_display, mode.timing.h_sync_start,
+			mode.timing.h_sync_end, mode.timing.h_total);
+		debug_printf("  - Vertical     : Display=%u, SyncStart=%u, SyncEnd=%u, Total=%u\n",
+			mode.timing.v_display, mode.timing.v_sync_start,
+			mode.timing.v_sync_end, mode.timing.v_total);
+		debug_printf("  - Sync Flags   : 0x%08X\n", mode.timing.flags);
+		debug_printf("==================================================\n");
+	}
 
     gInfo->shared_info->current_mode = mode;
 
@@ -542,8 +551,7 @@ create_mode_list(void)
     edid1_info* targetEdid = gInfo->has_edid ? &gInfo->edid_info : &gInfo->shared_info->boot_edid;
 
     if (hasValidEdid) {
-        debug_printf("intel_arc.accelerant: EDID available (%s), parsing full mode list\n",
-            gInfo->has_edid ? "Hardware" : "Bootloader");
+    	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: EDID available (%s), parsing full mode list\n", gInfo->has_edid ? "Hardware" : "Bootloader");
 
         // Genera tutte le risoluzioni dichiarate dal monitor tramite l'EDID
         // senza reintrodurre la modalità ereditata dal GOP come seed: se il
@@ -553,7 +561,7 @@ create_mode_list(void)
             targetEdid, NULL, 0, kSupportedSpaces, kNumSupportedSpaces,
             NULL , &gInfo->mode_list, &gInfo->shared_info->mode_count);//is_mode_supported
     } else {
-        debug_printf("intel_arc.accelerant: No EDID found, generating single active mode fallback\n");
+        if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: No EDID found, generating single active mode fallback\n");
 
         gInfo->mode_list_area = create_display_modes("intel arc modes",
             NULL, &mode, 1, kSupportedSpaces, kNumSupportedSpaces,
@@ -567,8 +575,7 @@ create_mode_list(void)
     }
 
     gInfo->shared_info->mode_list_area = gInfo->mode_list_area;
-    debug_printf("intel_arc.accelerant: Created %u display modes successfully\n",
-        gInfo->shared_info->mode_count);
+    if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: Created %u display modes successfully\n", gInfo->shared_info->mode_count);
 
     return B_OK;
 }
@@ -665,8 +672,7 @@ intel_arc_get_preferred_mode(display_mode* mode)
                 && gInfo->mode_list[i].space == targetSpace) {
                 
                 *mode = gInfo->mode_list[i];
-                debug_printf("intel_arc.accelerant: Preferred mode matched boot resolution: %ux%u (index %u)\n",
-                    targetWidth, targetHeight, i);
+                if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: Preferred mode matched boot resolution: %ux%u (index %u)\n", targetWidth, targetHeight, i);
                 return B_OK;
             }
         }
@@ -677,8 +683,7 @@ intel_arc_get_preferred_mode(display_mode* mode)
                 && gInfo->mode_list[i].virtual_height == targetHeight) {
                 
                 *mode = gInfo->mode_list[i];
-                debug_printf("intel_arc.accelerant: Preferred mode matched boot size: %ux%u\n",
-                    targetWidth, targetHeight);
+                if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: Preferred mode matched boot size: %ux%u\n", targetWidth, targetHeight);
                 return B_OK;
             }
         }
@@ -687,8 +692,7 @@ intel_arc_get_preferred_mode(display_mode* mode)
     // 2. Fallback: Se la risoluzione di boot non è presente nell'EDID o non è definita,
     // usiamo la prima modalità valida dell'elenco
     *mode = gInfo->mode_list[0];
-    debug_printf("intel_arc.accelerant: Preferred mode fallback to mode_list[0]: %ux%u\n",
-        mode->virtual_width, mode->virtual_height);
+    if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: Preferred mode fallback to mode_list[0]: %ux%u\n", mode->virtual_width, mode->virtual_height);
 
     return B_OK;
 }
@@ -846,8 +850,7 @@ snps_phy_enable_reg_for_ddi_port(uint8 ddiPort)
 static status_t
 program_port_dpll(uint8 ddiPort, uint32 linkRateKhz)
 {
-    debug_printf("intel_arc.accelerant: program_port_dpll(ddiPort=%u, linkRate=%u kHz)\n",
-        ddiPort, linkRateKhz);
+    if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: program_port_dpll(ddiPort=%u, linkRate=%u kHz)\n", ddiPort, linkRateKhz);
 
     // --- 1. ARCHITETTURA ALCHEMIST (DG2 - SNPS PHY) ---
     if (gInfo->shared_info->family == INTEL_ARC_FAMILY_ALCHEMIST) {
@@ -868,7 +871,7 @@ program_port_dpll(uint8 ddiPort, uint32 linkRateKhz)
         uint32 divVal = valBefore & ~(INTEL_ARC_SNPS_PHY_MPLLB_FORCE_EN | INTEL_ARC_SNPS_PHY_MPLLB_DIV_CLK_EN);
         write32(gInfo, divReg, divVal);
         valAfter = read32(gInfo, divReg);
-        debug_printf("intel_arc.accelerant: program_port_dpll: MPLLB_DIV (Reset) [0x%" B_PRIx32 "] | before: 0x%08" B_PRIx32 " | write: 0x%08" B_PRIx32 " | after: 0x%08" B_PRIx32 "\n",
+        if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: program_port_dpll: MPLLB_DIV (Reset) [0x%" B_PRIx32 "] | before: 0x%08" B_PRIx32 " | write: 0x%08" B_PRIx32 " | after: 0x%08" B_PRIx32 "\n",
             divReg, valBefore, divVal, valAfter);
 
         // B. Scrittura parametri di configurazione SNPS PHY MPLLB
@@ -878,7 +881,7 @@ program_port_dpll(uint8 ddiPort, uint32 linkRateKhz)
         valBefore = read32(gInfo, cpReg);
         write32(gInfo, cpReg, state.mpllb_cp);
         valAfter = read32(gInfo, cpReg);
-        debug_printf("intel_arc.accelerant: program_port_dpll: MPLLB_CP [0x%" B_PRIx32 "] | before: 0x%08" B_PRIx32 " | write: 0x%08" B_PRIx32 " | after: 0x%08" B_PRIx32 "\n",
+        if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: program_port_dpll: MPLLB_CP [0x%" B_PRIx32 "] | before: 0x%08" B_PRIx32 " | write: 0x%08" B_PRIx32 " | after: 0x%08" B_PRIx32 "\n",
             cpReg, valBefore, state.mpllb_cp, valAfter);
 
         // MPLLB_DIV (Configurazione frequenza)
@@ -886,7 +889,7 @@ program_port_dpll(uint8 ddiPort, uint32 linkRateKhz)
         uint32 targetDiv = (valBefore & ~0x000000FF) | (state.mpllb_div & 0x000000FF); //state.mpllb_div & ~(INTEL_ARC_SNPS_PHY_MPLLB_FORCE_EN | INTEL_ARC_SNPS_PHY_MPLLB_DIV_CLK_EN);
         write32(gInfo, divReg, targetDiv);
         valAfter = read32(gInfo, divReg);
-        debug_printf("intel_arc.accelerant: program_port_dpll: MPLLB_DIV (Config) [0x%" B_PRIx32 "] | before: 0x%08" B_PRIx32 " | write: 0x%08" B_PRIx32 " | after: 0x%08" B_PRIx32 "\n",
+        if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: program_port_dpll: MPLLB_DIV (Config) [0x%" B_PRIx32 "] | before: 0x%08" B_PRIx32 " | write: 0x%08" B_PRIx32 " | after: 0x%08" B_PRIx32 "\n",
             divReg, valBefore, targetDiv, valAfter);
 
         // MPLLB_DIV2
@@ -894,7 +897,7 @@ program_port_dpll(uint8 ddiPort, uint32 linkRateKhz)
         valBefore = read32(gInfo, div2Reg);
         write32(gInfo, div2Reg, state.mpllb_div2);
         valAfter = read32(gInfo, div2Reg);
-        debug_printf("intel_arc.accelerant: program_port_dpll: MPLLB_DIV2 [0x%" B_PRIx32 "] | before: 0x%08" B_PRIx32 " | write: 0x%08" B_PRIx32 " | after: 0x%08" B_PRIx32 "\n",
+        if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: program_port_dpll: MPLLB_DIV2 [0x%" B_PRIx32 "] | before: 0x%08" B_PRIx32 " | write: 0x%08" B_PRIx32 " | after: 0x%08" B_PRIx32 "\n",
             div2Reg, valBefore, state.mpllb_div2, valAfter);
 
         // MPLLB_SSCEN
@@ -902,7 +905,7 @@ program_port_dpll(uint8 ddiPort, uint32 linkRateKhz)
         valBefore = read32(gInfo, sscenReg);
         write32(gInfo, sscenReg, state.mpllb_sscen);
         valAfter = read32(gInfo, sscenReg);
-        debug_printf("intel_arc.accelerant: program_port_dpll: MPLLB_SSCEN [0x%" B_PRIx32 "] | before: 0x%08" B_PRIx32 " | write: 0x%08" B_PRIx32 " | after: 0x%08" B_PRIx32 "\n",
+        if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: program_port_dpll: MPLLB_SSCEN [0x%" B_PRIx32 "] | before: 0x%08" B_PRIx32 " | write: 0x%08" B_PRIx32 " | after: 0x%08" B_PRIx32 "\n",
             sscenReg, valBefore, state.mpllb_sscen, valAfter);
 
         // MPLLB_SSCSTEP
@@ -910,7 +913,7 @@ program_port_dpll(uint8 ddiPort, uint32 linkRateKhz)
         valBefore = read32(gInfo, sscstepReg);
         write32(gInfo, sscstepReg, state.mpllb_sscstep);
         valAfter = read32(gInfo, sscstepReg);
-        debug_printf("intel_arc.accelerant: program_port_dpll: MPLLB_SSCSTEP [0x%" B_PRIx32 "] | before: 0x%08" B_PRIx32 " | write: 0x%08" B_PRIx32 " | after: 0x%08" B_PRIx32 "\n",
+        if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: program_port_dpll: MPLLB_SSCSTEP [0x%" B_PRIx32 "] | before: 0x%08" B_PRIx32 " | write: 0x%08" B_PRIx32 " | after: 0x%08" B_PRIx32 "\n",
             sscstepReg, valBefore, state.mpllb_sscstep, valAfter);
 
         // MPLLB_FRACN1
@@ -918,7 +921,7 @@ program_port_dpll(uint8 ddiPort, uint32 linkRateKhz)
         valBefore = read32(gInfo, fracn1Reg);
         write32(gInfo, fracn1Reg, state.mpllb_fracn1);
         valAfter = read32(gInfo, fracn1Reg);
-        debug_printf("intel_arc.accelerant: program_port_dpll: MPLLB_FRACN1 [0x%" B_PRIx32 "] | before: 0x%08" B_PRIx32 " | write: 0x%08" B_PRIx32 " | after: 0x%08" B_PRIx32 "\n",
+        if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: program_port_dpll: MPLLB_FRACN1 [0x%" B_PRIx32 "] | before: 0x%08" B_PRIx32 " | write: 0x%08" B_PRIx32 " | after: 0x%08" B_PRIx32 "\n",
             fracn1Reg, valBefore, state.mpllb_fracn1, valAfter);
 
         // MPLLB_FRACN2
@@ -926,7 +929,7 @@ program_port_dpll(uint8 ddiPort, uint32 linkRateKhz)
         valBefore = read32(gInfo, fracn2Reg);
         write32(gInfo, fracn2Reg, state.mpllb_fracn2);
         valAfter = read32(gInfo, fracn2Reg);
-        debug_printf("intel_arc.accelerant: program_port_dpll: MPLLB_FRACN2 [0x%" B_PRIx32 "] | before: 0x%08" B_PRIx32 " | write: 0x%08" B_PRIx32 " | after: 0x%08" B_PRIx32 "\n",
+        if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: program_port_dpll: MPLLB_FRACN2 [0x%" B_PRIx32 "] | before: 0x%08" B_PRIx32 " | write: 0x%08" B_PRIx32 " | after: 0x%08" B_PRIx32 "\n",
             fracn2Reg, valBefore, state.mpllb_fracn2, valAfter);
 
         // C. Abilita la MPLLB impostando FORCE_EN (bit 31) e DIV_CLK_EN (bit 30)
@@ -934,7 +937,7 @@ program_port_dpll(uint8 ddiPort, uint32 linkRateKhz)
         uint32 enableDivVal = valBefore | INTEL_ARC_SNPS_PHY_MPLLB_FORCE_EN | INTEL_ARC_SNPS_PHY_MPLLB_DIV_CLK_EN; //state.mpllb_div | INTEL_ARC_SNPS_PHY_MPLLB_FORCE_EN | INTEL_ARC_SNPS_PHY_MPLLB_DIV_CLK_EN;
         write32(gInfo, divReg, enableDivVal);
         valAfter = read32(gInfo, divReg);
-        debug_printf("intel_arc.accelerant: program_port_dpll: MPLLB_DIV (Enable) [0x%" B_PRIx32 "] | before: 0x%08" B_PRIx32 " | write: 0x%08" B_PRIx32 " | after: 0x%08" B_PRIx32 "\n",
+        if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: program_port_dpll: MPLLB_DIV (Enable) [0x%" B_PRIx32 "] | before: 0x%08" B_PRIx32 " | write: 0x%08" B_PRIx32 " | after: 0x%08" B_PRIx32 "\n",
             divReg, valBefore, enableDivVal, valAfter);
 
         // D. Attendi che il clock SNPS PHY sia agganciato (bit DIV_CLK_EN)
@@ -944,7 +947,7 @@ program_port_dpll(uint8 ddiPort, uint32 linkRateKhz)
             return status;
         }
 
-        debug_printf("intel_arc.accelerant: SNPS PHY MPLLB successfully locked for port %u\n", ddiPort);
+        if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: SNPS PHY MPLLB successfully locked for port %u\n", ddiPort);
         return B_OK;
     }
 
@@ -994,7 +997,7 @@ static status_t
 apply_snps_phy_levels(uint8 ddiPort, const uint8* laneSettings, uint32 lanes,
 	bool uhbr)
 {
-	debug_printf("intel_arc.accelerant: apply_snps_phy_levels(ddiPort=%u, lanes=%u, uhbr=%d)\n", ddiPort, lanes, uhbr);
+	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: apply_snps_phy_levels(ddiPort=%u, lanes=%u, uhbr=%d)\n", ddiPort, lanes, uhbr);
 	const arc_mit_buf_trans_entry* table = uhbr ? kDg2SnpsUhbrTrans : kDg2SnpsDp14Trans;
 	const size_t tableCount = uhbr ? B_COUNT_OF(kDg2SnpsUhbrTrans) : B_COUNT_OF(kDg2SnpsDp14Trans);
 
@@ -1233,7 +1236,7 @@ apply_ddi_source_levels(uint8 ddiPort, int8 pipe, uint32 lanes,
 	const uint8* laneSettings, uint32 linkRate)
 {
 	(void)pipe;
-	debug_printf("intel_arc.accelerant: apply_ddi_source_levels(ddiPort=%u, family=%u)\n",
+	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: apply_ddi_source_levels(ddiPort=%u, family=%u)\n",
 		ddiPort, gInfo->shared_info->family);
 
 	if (gInfo->shared_info->family == INTEL_ARC_FAMILY_ALCHEMIST)
@@ -1287,17 +1290,177 @@ dp_channel_eq_ok(const uint8* status, uint32 lanes)
 	}
 	return (status[2] & DP_INTERLANE_ALIGN_DONE) != 0;
 }
-
 static status_t
-perform_dp_link_training(uint32 linkRate, uint32 lanes)
+perform_dp_link_training(uint32 linkRate, uint32 lanes, bool enhancedFraming)
 {
-    debug_printf("intel_arc.accelerant: perform_dp_link_training(linkRate=%u, lanes=%u) start\n", linkRate, lanes);
+    if (enableAllDebugLogs)
+        debug_printf("intel_arc.accelerant: perform_dp_link_training(linkRate=%u, lanes=%u) start\n", linkRate, lanes);
+
     uint8 laneSettings[4] = {0, 0, 0, 0};
     uint8 status[DP_LINK_STATUS_SIZE];
     
     uint32 pipe = gInfo->shared_info->active_pipe;
     uint32 tpCtlReg = INTEL_ARC_MMIO_DP_TP_CTL(pipe);
-    debug_printf("intel_arc.accelerant: tpCtlReg is %" B_PRIx32 "\n",tpCtlReg);
+
+    uint8 value = encode_link_rate(linkRate);
+    status_t result = write_dpcd(DP_LINK_RATE, &value, 1);
+    if (result != B_OK) {
+        debug_printf("intel_arc.accelerant ERROR: write_dpcd DP_LINK_RATE failed: %s\n", strerror(result));
+        return result;
+    }
+
+    value = lanes & DP_LANE_COUNT_MASK;
+    if (enhancedFraming)
+        value |= DP_ENHANCED_FRAME_EN;
+
+    result = write_dpcd(DP_LANE_COUNT, &value, 1);
+    if (result != B_OK)
+        return result;
+
+    /* Phase 1: Configurazione Transcoder per PAT1 */
+    if (enableAllDebugLogs)
+        debug_printf("intel_arc.accelerant: DP Link Training: Phase 1 (Clock Recovery)\n");
+
+    uint32 tpCtl = read32(gInfo, tpCtlReg);
+    tpCtl &= ~(7 << 8);                  /* Pulisce i bit del pattern [10:8] */
+    tpCtl |= (0 << 8);                   /* 0 = PAT1 */
+    tpCtl |= INTEL_ARC_DP_TP_CTL_ENABLE; /* Mantiene abilitato */
+    write32(gInfo, tpCtlReg, tpCtl);
+
+    value = DP_TRAINING_PATTERN_1;
+    result = write_dpcd(DP_TRAINING_PATTERN_SET, &value, 1);
+    if (result != B_OK)
+        return result;
+
+    result = write_dpcd(DP_TRAINING_LANE0_SET, laneSettings, lanes);
+    if (result != B_OK)
+        return result;
+
+    result = apply_ddi_source_levels(gInfo->shared_info->active_ddi_port,
+        pipe, lanes, laneSettings, linkRate);
+    if (result != B_OK)
+        return result;
+
+    for (int attempt = 0; attempt < 5; attempt++) {
+        snooze(400);
+        result = read_dpcd(DP_LANE_STATUS_0_1, status, DP_LINK_STATUS_SIZE);
+        if (result != B_OK) {
+            debug_printf("read_dpcd failed DP_LANE_STATUS_0_1: 0x%" B_PRIx32 "\n", result);
+            return result;
+        }
+
+        if (dp_clock_recovery_ok(status, lanes)) {
+            debug_printf("intel_arc.accelerant: Clock Recovery SUCCESS on attempt %d\n", attempt + 1);
+            break;
+        }
+
+        for (uint32 lane = 0; lane < lanes; lane++) {
+            uint8 voltage, emphasis;
+            dp_get_adjust_request(status, lane, &voltage, &emphasis);
+            laneSettings[lane] = (voltage & 0x3) | ((emphasis & 0x3) << 3);
+            if (voltage == 3) laneSettings[lane] |= DP_TRAIN_MAX_SWING_EN;
+            if (emphasis == 3) laneSettings[lane] |= DP_TRAIN_MAX_EMPHASIS_EN;
+        }
+
+        result = write_dpcd(DP_TRAINING_LANE0_SET, laneSettings, lanes);
+        if (result != B_OK)
+            return result;
+
+        result = apply_ddi_source_levels(gInfo->shared_info->active_ddi_port,
+            pipe, lanes, laneSettings, linkRate);
+        if (result != B_OK)
+            return result;
+
+        if (attempt == 4) {
+            debug_printf("intel_arc.accelerant ERROR: Clock Recovery FAILED after 5 attempts!\n");
+            return B_ERROR;
+        }
+    }
+
+    /* Phase 2: Configurazione Transcoder per PAT2 */
+    if (enableAllDebugLogs)
+        debug_printf("intel_arc.accelerant: DP Link Training: Phase 2 (Channel Equalization)\n");
+
+    tpCtl = read32(gInfo, tpCtlReg);
+    tpCtl &= ~(7 << 8);
+    tpCtl |= (1 << 8);                   /* 1 = PAT2 */
+    tpCtl |= INTEL_ARC_DP_TP_CTL_ENABLE;
+    write32(gInfo, tpCtlReg, tpCtl);
+
+    value = DP_TRAINING_PATTERN_2;
+    result = write_dpcd(DP_TRAINING_PATTERN_SET, &value, 1);
+    if (result != B_OK)
+        return result;
+
+    for (int attempt = 0; attempt < 5; attempt++) {
+        snooze(400);
+        result = read_dpcd(DP_LANE_STATUS_0_1, status, DP_LINK_STATUS_SIZE);
+        if (result != B_OK)
+            return result;
+
+        /* Verifica che la Clock Recovery non sia andata persa */
+        if (!dp_clock_recovery_ok(status, lanes)) {
+            debug_printf("intel_arc.accelerant ERROR: Clock Recovery lost during Channel EQ!\n");
+            return B_ERROR;
+        }
+
+        if (dp_channel_eq_ok(status, lanes)) {
+            debug_printf("intel_arc.accelerant: Channel Equalization SUCCESS on attempt %d\n", attempt + 1);
+            break;
+        }
+
+        for (uint32 lane = 0; lane < lanes; lane++) {
+            uint8 voltage, emphasis;
+            dp_get_adjust_request(status, lane, &voltage, &emphasis);
+            laneSettings[lane] = (voltage & 0x3) | ((emphasis & 0x3) << 3);
+            if (voltage == 3) laneSettings[lane] |= DP_TRAIN_MAX_SWING_EN;
+            if (emphasis == 3) laneSettings[lane] |= DP_TRAIN_MAX_EMPHASIS_EN;
+        }
+
+        result = write_dpcd(DP_TRAINING_LANE0_SET, laneSettings, lanes);
+        if (result != B_OK)
+            return result;
+
+        result = apply_ddi_source_levels(gInfo->shared_info->active_ddi_port,
+            pipe, lanes, laneSettings, linkRate);
+        if (result != B_OK)
+            return result;
+
+        if (attempt == 4) {
+            debug_printf("intel_arc.accelerant ERROR: Channel Equalization FAILED after 5 attempts!\n");
+            return B_ERROR;
+        }
+    }
+
+    /* Training Completato: passaggio alla modalità di trasmissione NORMAL (0x500) */
+    if (enableAllDebugLogs)
+        debug_printf("intel_arc.accelerant: Training Completato: passaggio a NORMAL (0x500)\n");
+
+    tpCtl = read32(gInfo, tpCtlReg);
+    tpCtl &= ~(7 << 8);                  /* Pulisce i bit del pattern [10:8] */
+    tpCtl |= (5 << 8);                   /* 5 = NORMAL MODE (DP_TP_CTL_MODE_NORMAL) */
+    tpCtl |= INTEL_ARC_DP_TP_CTL_ENABLE;
+    write32(gInfo, tpCtlReg, tpCtl);
+
+    value = DP_TRAINING_PATTERN_DISABLE;
+    result = write_dpcd(DP_TRAINING_PATTERN_SET, &value, 1);
+
+    if (enableAllDebugLogs)
+        debug_printf("intel_arc.accelerant: DP Link Training COMPLETED SUCCESSFULLY!\n");
+
+    return result;
+}
+/* funziona con monitor 1280x1024 e adattatore
+static status_t
+perform_dp_link_training(uint32 linkRate, uint32 lanes)
+{
+    if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: perform_dp_link_training(linkRate=%u, lanes=%u) start\n", linkRate, lanes);
+    uint8 laneSettings[4] = {0, 0, 0, 0};
+    uint8 status[DP_LINK_STATUS_SIZE];
+    
+    uint32 pipe = gInfo->shared_info->active_pipe;
+    uint32 tpCtlReg = INTEL_ARC_MMIO_DP_TP_CTL(pipe);
+    if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: tpCtlReg is %" B_PRIx32 "\n",tpCtlReg);
 
     uint8 value = encode_link_rate(linkRate);
     status_t result = write_dpcd(DP_LINK_RATE, &value, 1);
@@ -1311,17 +1474,17 @@ perform_dp_link_training(uint32 linkRate, uint32 lanes)
     if (result != B_OK)
         return result;
 
-    /* Phase 1: Configurazione Transcoder per PAT1 */
-    debug_printf("intel_arc.accelerant: DP Link Training: Phase 1 (Clock Recovery)\n");
+    // Phase 1: Configurazione Transcoder per PAT1
+    if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: DP Link Training: Phase 1 (Clock Recovery)\n");
     uint32 tpCtl = read32(gInfo, tpCtlReg);
-    debug_printf("intel_arc.accelerant: tpCtlReg value before Phase 1 is %" B_PRIx32 "\n", tpCtl);
+    if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: tpCtlReg value before Phase 1 is %" B_PRIx32 "\n", tpCtl);
     
-    tpCtl &= ~(7 << 8);                  /* Pulisce i bit del pattern [10:8] */
-    tpCtl |= (0 << 8);                   /* 0 = PAT1 */
-    tpCtl |= INTEL_ARC_DP_TP_CTL_ENABLE; /* Mantiene abilitato */
+    tpCtl &= ~(7 << 8);                  // Pulisce i bit del pattern [10:8]
+    tpCtl |= (0 << 8);                   // 0 = PAT1
+    tpCtl |= INTEL_ARC_DP_TP_CTL_ENABLE; // Mantiene abilitato
     write32(gInfo, tpCtlReg, tpCtl);
     
-    debug_printf("intel_arc.accelerant: tpCtlReg value during Phase 1 is %" B_PRIx32 "\n", read32(gInfo, tpCtlReg));
+    if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: tpCtlReg value during Phase 1 is %" B_PRIx32 "\n", read32(gInfo, tpCtlReg));
 
     value = DP_TRAINING_PATTERN_1;
     result = write_dpcd(DP_TRAINING_PATTERN_SET, &value, 1);
@@ -1336,7 +1499,7 @@ perform_dp_link_training(uint32 linkRate, uint32 lanes)
     if (result != B_OK)
         return result;
 
-    debug_printf("intel_arc.accelerant: DP Link Training: Phase 1 (Clock Recovery)\n");
+    if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: DP Link Training: Phase 1 (Clock Recovery)\n");
     for (int attempt = 0; attempt < 5; attempt++) {
         snooze(400);
         result = read_dpcd(DP_LANE_STATUS_0_1, status, DP_LINK_STATUS_SIZE);
@@ -1375,15 +1538,15 @@ perform_dp_link_training(uint32 linkRate, uint32 lanes)
         }
     }
 
-    /* Phase 2: Configurazione Transcoder per PAT2 */
-    debug_printf("intel_arc.accelerant: DP Link Training: Phase 2 (Channel Equalization)\n");
+    // Phase 2: Configurazione Transcoder per PAT2
+    if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: DP Link Training: Phase 2 (Channel Equalization)\n");
     tpCtl = read32(gInfo, tpCtlReg);
-    tpCtl &= ~(7 << 8);                  /* Pulisce i bit del pattern [10:8] */
-    tpCtl |= (1 << 8);                   /* 1 = PAT2 */
+    tpCtl &= ~(7 << 8);                  // Pulisce i bit del pattern [10:8]
+    tpCtl |= (1 << 8);                   // 1 = PAT2
     tpCtl |= INTEL_ARC_DP_TP_CTL_ENABLE;
     write32(gInfo, tpCtlReg, tpCtl);
     
-    debug_printf("intel_arc.accelerant: tpCtlReg value during Phase 2 is %" B_PRIx32 "\n", read32(gInfo, tpCtlReg));
+    if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: tpCtlReg value during Phase 2 is %" B_PRIx32 "\n", read32(gInfo, tpCtlReg));
 
     value = DP_TRAINING_PATTERN_2;
     result = write_dpcd(DP_TRAINING_PATTERN_SET, &value, 1);
@@ -1428,31 +1591,31 @@ perform_dp_link_training(uint32 linkRate, uint32 lanes)
         }
     }
 
-    /* Training Completato: passaggio alla modalità di trasmissione normale (Normal/Idle) */
-    debug_printf("intel_arc.accelerant: Training Completato: passaggio a NORMAL\n");
+    // Training Completato: passaggio alla modalità di trasmissione normale (Normal/Idle)
+    if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: Training Completato: passaggio a NORMAL\n");
     tpCtl = read32(gInfo, tpCtlReg);
-    tpCtl &= ~(7 << 8);                  /* Pulisce i bit del pattern [10:8] */
-    tpCtl |= (3 << 8);                   /* 3 = NORMAL (0x300) */
+    tpCtl &= ~(7 << 8);                  // Pulisce i bit del pattern [10:8]
+    tpCtl |= (3 << 8);                   // 3 = NORMAL (0x300)
     tpCtl |= INTEL_ARC_DP_TP_CTL_ENABLE;
     write32(gInfo, tpCtlReg, tpCtl);
 
-    debug_printf("intel_arc.accelerant: tpCtlReg value final is %" B_PRIx32 "\n", read32(gInfo, tpCtlReg));
+    if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: tpCtlReg value final is %" B_PRIx32 "\n", read32(gInfo, tpCtlReg));
     
     value = DP_TRAINING_PATTERN_DISABLE;
     result = write_dpcd(DP_TRAINING_PATTERN_SET, &value, 1);
-    debug_printf("intel_arc.accelerant: DP Link Training COMPLETED SUCCESSFULLY!\n");
+    if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: DP Link Training COMPLETED SUCCESSFULLY!\n");
     return result;
-}
+}*/
 
 /*
  * Se non ho capito male, il Firmware/GOP della scheda parte sempre con il massimo numero di lanes
  * Questo significa che se non lo cambiamo riusciamo a cambiare risoluzione con più facilità
  * niente retraining e complicazioni.
- */
+ *
 static status_t
 configure_dp_link(display_mode* mode)
 {
-    debug_printf("intel_arc.accelerant: configure_dp_link() entering for mode %ux%u@%uHz\n",
+    if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: configure_dp_link() entering for mode %ux%u@%uHz\n",
         mode->virtual_width, mode->virtual_height, mode->timing.pixel_clock);
 
     const int8 pipe = gInfo->shared_info->active_pipe;
@@ -1463,7 +1626,7 @@ configure_dp_link(display_mode* mode)
 
     const uint32 pipeOffset = (uint32)pipe * INTEL_ARC_MMIO_PIPE_OFFSET;
     const uint32 pipeFunc = gInfo->shared_info->pipe_ddi_func_ctl[pipe];
-    debug_printf("intel_arc.accelerant: initial pipe_ddi_func_ctl[%d] in configure_dp_link: %" B_PRIx32 "\n", pipe, pipeFunc);
+    if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: initial pipe_ddi_func_ctl[%d] in configure_dp_link: %" B_PRIx32 "\n", pipe, pipeFunc);
     
     uint32 bitsPerPixel = pipe_ddi_decode_bpp(pipeFunc);
     gInfo->shared_info->dp_bpp[pipe] = bitsPerPixel;
@@ -1479,14 +1642,14 @@ configure_dp_link(display_mode* mode)
     uint32 maxLinkRate = 270000;
     if (gInfo->shared_info->has_dpcd && gInfo->shared_info->dpcd_max_link_rate != 0) {
         maxLinkRate = decode_link_rate(gInfo->shared_info->dpcd_max_link_rate);
-        debug_printf("intel_arc.accelerant: maxLinkRate retrieved from dpcd: %u kHz\n", maxLinkRate);
+        if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: maxLinkRate retrieved from dpcd: %u kHz\n", maxLinkRate);
     } else {
         debug_printf("intel_arc.accelerant: cannot get maxLinkRate from dpcd, using default 270000 kHz\n");
     }
 
     // 2. Calcolo Banda Richiesta (BPS)
     const uint32 bps = mode->timing.pixel_clock * bitsPerPixel * 21 / 20;
-    debug_printf("intel_arc.accelerant: DP Config: maxLanes=%u, maxLinkRate=%u kHz, bpp=%u\n", maxLanes, maxLinkRate, bitsPerPixel);
+    if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: DP Config: maxLanes=%u, maxLinkRate=%u kHz, bpp=%u\n", maxLanes, maxLinkRate, bitsPerPixel);
 
     // 3. Selezione Stabile delle Lane
     // Tenta prima di mantenere le lane stabili già negoziate al boot (es. 2 lanes)
@@ -1508,31 +1671,81 @@ configure_dp_link(display_mode* mode)
     uint32 linkBandwidth = maxLinkRate;
     gInfo->shared_info->dp_lanes[pipe] = lanes;
 
-    debug_printf("intel_arc.accelerant: Selected DP Link Bandwidth: %u kHz, Lanes: %u (bps required: %u)\n", 
+    if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: Selected DP Link Bandwidth: %u kHz, Lanes: %u (bps required: %u)\n", 
         linkBandwidth, lanes, bps);
 
     // 4. Calcolo REGISTRI DP M/N (Specifiche Hardware Intel Display)
     // N per Data e Link sono COSTANTI hardware per Intel Gen9 / Arc
     const uint32 dataN = 0x00800000; // 8388608
     const uint32 linkN = 0x00080000; // 524288
+// 30 / 8 non da un intero... funziona con 1280x1024
+//    const uint64 bytesPerPixel = bitsPerPixel / 8;
+//    const uint64 linkBw = (uint64)linkBandwidth * lanes;
+//    const uint64 streamBw = (uint64)mode->timing.pixel_clock * bytesPerPixel;
+//
+//    uint32 dataM = (uint32)((streamBw * dataN) / linkBw);
+//    uint32 linkM = (uint32)(((uint64)mode->timing.pixel_clock * linkN) / linkBandwidth);
+//
+//    // Transfer Unit Size standard = 64 (0x7E000000)
+//    const uint32 tuValue = 0x7E000000;
+//    const uint32 dataMReg = tuValue | (dataM & 0x00FFFFFF);
+//
+// -------------------------------------
+// calcolo corretto
+//    const uint64 linkBw = (uint64)linkBandwidth * lanes * 8;
+//    const uint64 streamBw = (uint64)mode->timing.pixel_clock * bitsPerPixel;
+//    // Calcolo preciso senza troncamenti intermedi
+//    uint32 dataM = (uint32)((streamBw * dataN) / linkBw);
+//    uint32 linkM = (uint32)(((uint64)mode->timing.pixel_clock * linkN) / linkBandwidth);
+//
+//    // Transfer Unit Size standard = 64 (0x7E000000)
+//    const uint32 tuValue = 0x7E000000;
+//    const uint32 dataMReg = tuValue | (dataM & 0x00FFFFFF);
+// -------------------------------------
+const uint32 ddiFunc = gInfo->shared_info->pipe_ddi_func_ctl[pipe];
+const uint32 bpcVal = (ddiFunc >> 20) & 0x7;
+uint32 bpp = 24;
 
-    const uint64 bytesPerPixel = bitsPerPixel / 8;
-    const uint64 linkBw = (uint64)linkBandwidth * lanes;
-    const uint64 streamBw = (uint64)mode->timing.pixel_clock * bytesPerPixel;
+switch (bpcVal) {
+    case 0: bpp = 24; break; // 8 bpc
+    case 1: bpp = 30; break; // 10 bpc
+    case 2: bpp = 36; break; // 12 bpc
+    case 3: bpp = 48; break; // 16 bpc
+    case 4: bpp = 18; break; // 6 bpc
+    default: bpp = 24; break;
+}
 
-    uint32 dataM = (uint32)((streamBw * dataN) / linkBw);
-    uint32 linkM = (uint32)(((uint64)mode->timing.pixel_clock * linkN) / linkBandwidth);
+// CALCOLO LEGACY (Errato per bpp != 24 a causa di bytesPerPixel = bpp / 8)
+const uint64 bytesPerPixelLegacy = bpp / 8; // Con 30 bpp tronca a 3 invece di 3.75
+const uint64 linkBwLegacy = (uint64)linkBandwidth * lanes;
+const uint64 streamBwLegacy = (uint64)mode->timing.pixel_clock * bytesPerPixelLegacy;
+const uint32 dataMLegacy = (uint32)((streamBwLegacy * dataN) / linkBwLegacy);
 
-    // Transfer Unit Size standard = 64 (0x7E000000)
-    const uint32 tuValue = 0x7E000000;
-    const uint32 dataMReg = tuValue | (dataM & 0x00FFFFFF);
+// CALCOLO CORRETTO (Senza troncamenti intermedi)
+const uint64 linkBw = (uint64)linkBandwidth * lanes * 8;
+const uint64 pixelBw = (uint64)mode->timing.pixel_clock * bpp;
+const uint32 dataM = (uint32)((pixelBw * dataN) / linkBw);
 
-    debug_printf("intel_arc.accelerant: Writing DP Data M/N: DATA_M=0x%" B_PRIx32 " (M=0x%" B_PRIx32 "), DATA_N=0x%" B_PRIx32 "\n", 
+const uint32 linkM = (uint32)(((uint64)mode->timing.pixel_clock * linkN) / linkBandwidth);
+
+// Formattazione registri con TU = 64 (0x7E000000)
+const uint32 tuValue = 0x7E000000;
+const uint32 dataMRegLegacy = tuValue | (dataMLegacy & 0x00FFFFFF);
+const uint32 dataMReg = tuValue | (dataM & 0x00FFFFFF);
+
+// Log di confronto
+if (enableAllDebugLogs) {
+    debug_printf("intel_arc.accelerant: [DP M/N Compare] bpc_val=%u -> bpp=%u\n", bpcVal, bpp);
+    debug_printf("intel_arc.accelerant:   LEGACY  DATA_M_REG = 0x%" B_PRIx32 " (raw M = 0x%" B_PRIx32 ")\n", dataMRegLegacy, dataMLegacy);
+    debug_printf("intel_arc.accelerant:   CORRECT DATA_M_REG = 0x%" B_PRIx32 " (raw M = 0x%" B_PRIx32 ")\n", dataMReg, dataM);
+}
+
+    if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: Writing DP Data M/N: DATA_M=0x%" B_PRIx32 " (M=0x%" B_PRIx32 "), DATA_N=0x%" B_PRIx32 "\n", 
         dataMReg, dataM, dataN);
     write_register(INTEL_ARC_MMIO_DDI_PIPE_A_DATA_M + pipeOffset, dataMReg);
     write_register(INTEL_ARC_MMIO_DDI_PIPE_A_DATA_N + pipeOffset, dataN);
 
-    debug_printf("intel_arc.accelerant: Writing DP Link M/N: LINK_M=0x%" B_PRIx32 ", LINK_N=0x%" B_PRIx32 "\n", 
+    if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: Writing DP Link M/N: LINK_M=0x%" B_PRIx32 ", LINK_N=0x%" B_PRIx32 "\n", 
         linkM & 0x00FFFFFF, linkN);
     write_register(INTEL_ARC_MMIO_DDI_PIPE_A_LINK_M + pipeOffset, linkM & 0x00FFFFFF);
     write_register(INTEL_ARC_MMIO_DDI_PIPE_A_LINK_N + pipeOffset, linkN);
@@ -1545,7 +1758,7 @@ configure_dp_link(display_mode* mode)
     }
 
     // 6. Configurazione Port DPLL
-    debug_printf("intel_arc.accelerant: Programming Port DPLL for DDI Port %u (Rate: %u kHz)\n",
+    if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: Programming Port DPLL for DDI Port %u (Rate: %u kHz)\n",
         gInfo->shared_info->active_ddi_port, linkBandwidth);
     status = program_port_dpll(gInfo->shared_info->active_ddi_port, linkBandwidth);
     if (status != B_OK) {
@@ -1574,7 +1787,7 @@ configure_dp_link(display_mode* mode)
 
     gInfo->shared_info->pipe_ddi_func_ctl[pipe] = ddiCtl;
 
-    debug_printf("intel_arc.accelerant: valore di PIPE_DDI_FUNC_CTL[%d] dopo impostazione HSYNC E VSYNC: %" B_PRIx32 "\n", pipe,ddiCtl);
+    if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: valore di PIPE_DDI_FUNC_CTL[%d] dopo impostazione HSYNC E VSYNC: %" B_PRIx32 "\n", pipe,ddiCtl);
 
     write_register(INTEL_ARC_MMIO_PIPE_A_DDI_FUNC_CTL + pipeOffset, ddiCtl);
 
@@ -1587,7 +1800,7 @@ configure_dp_link(display_mode* mode)
 
     // 9. Esegui il DP Link Training per stabilire la sincronizzazione
     if (gInfo->shared_info->has_dpcd) {
-        debug_printf("intel_arc.accelerant: Performing DP Link Training (Lanes=%u, Rate=%u kHz)\n", lanes, linkBandwidth);
+        if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: Performing DP Link Training (Lanes=%u, Rate=%u kHz)\n", lanes, linkBandwidth);
         status = perform_dp_link_training(linkBandwidth, lanes);
         if (status != B_OK) {
             debug_printf("intel_arc.accelerant ERROR: perform_dp_link_training failed: %s\n", strerror(status));
@@ -1598,157 +1811,204 @@ configure_dp_link(display_mode* mode)
     }
 
     return B_OK;
+}*/
+status_t
+fast_modeset_dp(const display_mode& targetMode, uint8 bpp)
+{
+    const int8 pipe = gInfo->shared_info->active_pipe;
+    const uint32 pipeOffset = (uint32)pipe * INTEL_ARC_MMIO_PIPE_OFFSET;
+
+    // 1. Recupera i parametri di link ereditati dal boot
+    uint32 linkRateKhz = 540000; // 5.4 GHz (HBR2) di default
+    uint8 lanes = 4;
+    
+    if (gInfo->shared_info->dp_boot_config.linkBandwidth > 0) {
+        linkRateKhz = gInfo->shared_info->dp_boot_config.linkBandwidth;
+        lanes = gInfo->shared_info->dp_boot_config.lanes;
+    }
+
+    uint32 pixelClockKhz = targetMode.timing.pixel_clock;
+
+    // 2. Calcola il nuovo DATA_M preservando il mascheramento TU Size (0x7E000000)
+    uint64 dataM = ((uint64)pixelClockKhz * bpp * 1048576ULL) / ((uint64)linkRateKhz * lanes);
+    uint32 dataM_reg = 0x7E000000U | ((uint32)dataM & 0x00FFFFFFU);
+
+    // FIX: Salva il valore nella struttura condivisa!
+    gInfo->shared_info->pipe_data_m[pipe] = dataM_reg;
+
+    if (enableAllDebugLogs) {
+        debug_printf("intel_arc: Fast Modeset -> %dx%d@%dkHz | DATA_M = 0x%" B_PRIx32 "\n",
+            targetMode.timing.h_display, targetMode.timing.v_display, pixelClockKhz, dataM_reg);
+    }
+
+    // 3. Disabilita temporaneamente il solo Plane (NON il Transcoder/DDI!)
+    uint32 planeCtl = gInfo->shared_info->plane_control[pipe] & ~(1U << 31);
+    write_register(INTEL_ARC_MMIO_PLANE_A_CONTROL + pipeOffset, planeCtl);
+
+    // 4. Scrivi il nuovo DATA_M
+    write_register(INTEL_ARC_MMIO_DDI_PIPE_A_DATA_M + pipeOffset, dataM_reg);
+
+    // 5. Applica i nuovi Timing della Pipe e dello Scaler (già calcolati in shared_info)
+    write_register(INTEL_ARC_MMIO_PIPE_A_HTOTAL + pipeOffset, gInfo->shared_info->pipe_h_total[pipe]);
+    write_register(INTEL_ARC_MMIO_PIPE_A_HBLANK + pipeOffset, gInfo->shared_info->pipe_h_blank[pipe]);
+    write_register(INTEL_ARC_MMIO_PIPE_A_HSYNC + pipeOffset, gInfo->shared_info->pipe_h_sync[pipe]);
+    write_register(INTEL_ARC_MMIO_PIPE_A_VTOTAL + pipeOffset, gInfo->shared_info->pipe_v_total[pipe]);
+    write_register(INTEL_ARC_MMIO_PIPE_A_VBLANK + pipeOffset, gInfo->shared_info->pipe_v_blank[pipe]);
+    write_register(INTEL_ARC_MMIO_PIPE_A_VSYNC + pipeOffset, gInfo->shared_info->pipe_v_sync[pipe]);
+    write_register(INTEL_ARC_MMIO_PIPE_A_SIZE + pipeOffset, gInfo->shared_info->pipe_size[pipe]);
+
+    write_register(INTEL_ARC_MMIO_PLANE_A_POS + pipeOffset, 0);
+    write_register(INTEL_ARC_MMIO_PLANE_A_IMAGE_SIZE + pipeOffset, gInfo->shared_info->plane_image_size[pipe]);
+    write_register(INTEL_ARC_MMIO_PLANE_A_STRIDE + pipeOffset, gInfo->shared_info->plane_stride[pipe]);
+
+    // 6. Riabilita il Plane e forza l'aggiornamento atomico (Double Buffer Latch)
+    uint32 enabledPlaneCtl = gInfo->shared_info->plane_control[pipe] | (1U << 31);
+    write_register(INTEL_ARC_MMIO_PLANE_A_CONTROL + pipeOffset, enabledPlaneCtl);
+
+    uint32 fbAddress = gInfo->shared_info->frame_buffer_base + gInfo->shared_info->frame_buffer_offset;
+    write_register(INTEL_ARC_MMIO_PLANE_A_SURFACE + pipeOffset, fbAddress);
+
+    return B_OK;
 }
-/* ultima semifunzionante
 static status_t
 configure_dp_link(display_mode* mode)
 {
-    debug_printf("intel_arc.accelerant: configure_dp_link() entering for mode %ux%u@%uHz\n",
-        mode->virtual_width, mode->virtual_height, mode->timing.pixel_clock);
+    if (enableAllDebugLogs) {
+        debug_printf("intel_arc.accelerant: configure_dp_link() entering for mode %ux%u@%uHz\n",
+            mode->virtual_width, mode->virtual_height, mode->timing.pixel_clock);
+    }
 
     const int8 pipe = gInfo->shared_info->active_pipe;
-    if (gInfo->shared_info->active_pipe < 0) {
-        debug_printf("intel_arc.accelerant: active pipe < 0\n");
+    if (pipe < 0) {
+        debug_printf("intel_arc.accelerant ERROR: active pipe < 0\n");
         return B_UNSUPPORTED;
     }
 
     const uint32 pipeOffset = (uint32)pipe * INTEL_ARC_MMIO_PIPE_OFFSET;
-    debug_printf("intel_arc.accelerant: pipeOffset %" B_PRIx32 "\n", pipeOffset);
+
+    // 1. Decodifica BPP univoca per tutta la funzione
     const uint32 pipeFunc = gInfo->shared_info->pipe_ddi_func_ctl[pipe];
-    debug_printf("intel_arc.accelerant: initial pipe_ddi_func_ctl[%d] in configure_dp_link: %" B_PRIx32 "\n", pipe, pipeFunc);
+    const uint32 bpp = pipe_ddi_decode_bpp(pipeFunc);
 
-    // using static inline helper func
-    uint32 bitsPerPixel = pipe_ddi_decode_bpp(pipeFunc);
-    gInfo->shared_info->dp_bpp[pipe] = bitsPerPixel;
-
-    // Corretto: maxLanes viene inizializzato al massimo hardware (4) e limitato solo dal DPCD, 
-    // ignorando la configurazione del registro di boot.
-    uint32 maxLanes = 4;
-    if (gInfo->shared_info->has_dpcd && gInfo->shared_info->dpcd_max_lane_count != 0)
-        maxLanes = min_c(maxLanes, (uint32)gInfo->shared_info->dpcd_max_lane_count);
-
-    if (maxLanes == 0 || maxLanes > 4)
-        maxLanes = 4;
-
-    uint32 maxLinkRate = 270000;
-    if (gInfo->shared_info->has_dpcd && gInfo->shared_info->dpcd_max_link_rate != 0){
-        maxLinkRate = decode_link_rate(gInfo->shared_info->dpcd_max_link_rate);
-        debug_printf("intel_arc.accelerant: maxLinkRate retrieved from dpcd\n");
-    } else {
-        debug_printf("intel_arc.accelerant: cannot get maxLinkRate from dpcd\n");
-    }
-
-    debug_printf("intel_arc.accelerant: DP Config: maxLanes=%u, maxLinkRate=%u kHz, bpp=%u\n", maxLanes, maxLinkRate, bitsPerPixel);
-
-    const uint32 candidateRates[] = {810000, 540000, 270000, 162000};
-    uint32 linkBandwidth = 0;
-    uint32 lanes = 0;
-    const uint32 bps = mode->timing.pixel_clock * bitsPerPixel * 21 / 20;
-
-    for (size_t i = 0; i < sizeof(candidateRates) / sizeof(candidateRates[0]); i++) {
-        if (candidateRates[i] > maxLinkRate)
-            continue;
-        for (uint32 candidateLanes = 1; candidateLanes <= 4; candidateLanes <<= 1) {
-            if (candidateLanes > maxLanes)
-                continue;
-            if (bps <= candidateRates[i] * candidateLanes * 8) {
-                linkBandwidth = candidateRates[i];
-                lanes = candidateLanes;
-                break;
-            }
+    // -------------------------------------------------------------------------
+    // FAST PATH: Link GOP già addestrato dal Bootloader
+    // -------------------------------------------------------------------------
+    if (gInfo->shared_info->dp_link_trained_by_gop) {
+        if (enableAllDebugLogs) {
+            debug_printf("intel_arc.accelerant: Link GOP attivo rilevato -> Bypasso re-training e reset DPLL\n");
         }
-        if (lanes != 0)
-            break;
+
+        uint32 linkBandwidth = gInfo->shared_info->dp_boot_config.linkBandwidth;
+        uint32 lanes = gInfo->shared_info->dp_boot_config.lanes;
+
+        if (linkBandwidth == 0) linkBandwidth = 540000;
+        if (lanes == 0) lanes = 4;
+
+        // Calcolo registri M/N per la nuova risoluzione
+        const uint32 dataN = 0x00800000;
+        const uint32 linkN = 0x00080000;
+
+        const uint64 linkBw = (uint64)linkBandwidth * lanes * 8;
+        const uint64 pixelBw = (uint64)mode->timing.pixel_clock * bpp;
+        const uint32 dataM = (uint32)((pixelBw * dataN) / linkBw);
+        const uint32 linkM = (uint32)(((uint64)mode->timing.pixel_clock * linkN) / linkBandwidth);
+
+        const uint32 tuValue = 0x7E000000; // Transfer Unit Size = 64
+        const uint32 dataMReg = tuValue | (dataM & 0x00FFFFFF);
+
+        // Aggiorna la memoria condivisa
+        gInfo->shared_info->pipe_data_m[pipe] = dataMReg;
+        gInfo->shared_info->dp_config[pipe].lanes = lanes;
+        gInfo->shared_info->dp_config[pipe].bpp = bpp;
+        gInfo->shared_info->dp_config[pipe].linkBandwidth = linkBandwidth;
+
+        // Scrittura dei registri hardware
+        write_register(INTEL_ARC_MMIO_DDI_PIPE_A_DATA_M + pipeOffset, dataMReg);
+        write_register(INTEL_ARC_MMIO_DDI_PIPE_A_DATA_N + pipeOffset, dataN);
+        write_register(INTEL_ARC_MMIO_DDI_PIPE_A_LINK_M + pipeOffset, linkM & 0x00FFFFFF);
+        write_register(INTEL_ARC_MMIO_DDI_PIPE_A_LINK_N + pipeOffset, linkN);
+
+        return B_OK;
     }
-    if (lanes == 0) {
-        debug_printf("intel_arc.accelerant ERROR: Could not compute valid DP lanes and link bandwidth for bps=%u\n", bps);
-        return B_BAD_VALUE;
-    }
-    // new
-    gInfo->shared_info->dp_lanes[pipe] = lanes;
-    //uint32 ddiWidthBits = 0;
-    //if (lanes == 2) ddiWidthBits = (1 << 1);
-    //else if (lanes == 4) ddiWidthBits = (3 << 1);
 
-    //gInfo->shared_info->pipe_ddi_func_ctl[pipe] &= ~(0x7 << 1);
-    //gInfo->shared_info->pipe_ddi_func_ctl[pipe] |= ddiWidthBits;
-    // -------
-
-    debug_printf("intel_arc.accelerant: Selected DP link Bandwidth: %u kHz, Lanes: %u\n", linkBandwidth, lanes);
-
-    uint64 linkSpeed = (uint64)lanes * linkBandwidth * 8;
-    uint64 retN = 1;
-    while (retN < linkSpeed)
-        retN <<= 1;
-    if (retN > 0x800000)
-        retN = 0x800000;
-    uint64 retM = (uint64)mode->timing.pixel_clock * retN * bitsPerPixel / linkSpeed;
-    while (retN > 0xffffff || retM > 0xffffff) {
-        retN >>= 1;
-        retM >>= 1;
-    }
-
-    	uint32 mdata = 0, ndata = 0;
-    	read_register(INTEL_ARC_MMIO_DDI_PIPE_A_DATA_M + pipeOffset, mdata);
-	read_register(INTEL_ARC_MMIO_DDI_PIPE_A_DATA_N + pipeOffset, ndata);
-
-	debug_printf("intel_arc.accelerant: PIPE DATA_M (before) is 0x%" B_PRIx32 "\n", mdata);
-	debug_printf("intel_arc.accelerant: PIPE DATA_N (before) is 0x%" B_PRIx32 "\n", ndata);
+    // -------------------------------------------------------------------------
+    // FULL LINK TRAINING PATH
+    // -------------------------------------------------------------------------
     
-    const uint32 tuSize = 64;
-    const uint32 tuValue = ((tuSize - 1) & 0x3F) << 25; // Risultato: 0x7E000000
-    const uint32 dataMReg = tuValue | ((uint32)retM & 0x00FFFFFF);
-    const uint32 dataNReg = (uint32)retN & 0x00FFFFFF;
+    // Determinazione Lane Massime
+    uint32 maxLanes = 4;
+    if (gInfo->shared_info->has_dpcd && gInfo->shared_info->dpcd_max_lane_count != 0) {
+        maxLanes = min_c(maxLanes, (uint32)gInfo->shared_info->dpcd_max_lane_count);
+    }
+    if (maxLanes == 0 || maxLanes > 4) maxLanes = 4;
 
-    debug_printf("intel_arc.accelerant: Writing Data M/N: Reg DATA_M=0x%" B_PRIx32 " (calculated M=0x%" B_PRIx64 "), Reg DATA_N=0x%" B_PRIx32 "\n", dataMReg, retM, dataNReg);
+    // Determinazione Link Rate Massimo
+    uint32 maxLinkRate = 270000;
+    if (gInfo->shared_info->has_dpcd && gInfo->shared_info->dpcd_max_link_rate != 0) {
+        maxLinkRate = decode_link_rate(gInfo->shared_info->dpcd_max_link_rate);
+    }
+
+    // Calcolo Banda Richiesta (BPS)
+    const uint32 bps = mode->timing.pixel_clock * bpp * 21 / 20;
+
+    // Selezione Lane Ottimale
+    uint32 lanes = gInfo->shared_info->dp_config[pipe].lanes;
+    if (lanes == 0 || lanes > maxLanes) lanes = maxLanes;
+
+    while (lanes < maxLanes && bps > maxLinkRate * lanes * 8) {
+        lanes <<= 1;
+    }
+
+    if (lanes == 1 && maxLanes >= 2 && bps > (maxLinkRate * 1 * 6)) {
+        lanes = 2;
+    }
+
+    uint32 linkBandwidth = maxLinkRate;
+
+    // Aggiornamento struttura condivisa
+    gInfo->shared_info->dp_config[pipe].lanes = lanes;
+    gInfo->shared_info->dp_config[pipe].bpp = bpp;
+    gInfo->shared_info->dp_config[pipe].linkBandwidth = linkBandwidth;
+
+    if (enableAllDebugLogs) {
+        debug_printf("intel_arc.accelerant: Selected DP Link Bandwidth: %u kHz, Lanes: %u (bps required: %u)\n",
+            linkBandwidth, lanes, bps);
+    }
+
+    // Calcolo Registri DP M/N
+    const uint32 dataN = 0x00800000;
+    const uint32 linkN = 0x00080000;
+
+    const uint64 linkBw = (uint64)linkBandwidth * lanes * 8;
+    const uint64 pixelBw = (uint64)mode->timing.pixel_clock * bpp;
+    const uint32 dataM = (uint32)((pixelBw * dataN) / linkBw);
+    const uint32 linkM = (uint32)(((uint64)mode->timing.pixel_clock * linkN) / linkBandwidth);
+
+    const uint32 tuValue = 0x7E000000;
+    const uint32 dataMReg = tuValue | (dataM & 0x00FFFFFF);
+
+    gInfo->shared_info->pipe_data_m[pipe] = dataMReg;
 
     write_register(INTEL_ARC_MMIO_DDI_PIPE_A_DATA_M + pipeOffset, dataMReg);
-    write_register(INTEL_ARC_MMIO_DDI_PIPE_A_DATA_N + pipeOffset, dataNReg);
+    write_register(INTEL_ARC_MMIO_DDI_PIPE_A_DATA_N + pipeOffset, dataN);
+    write_register(INTEL_ARC_MMIO_DDI_PIPE_A_LINK_M + pipeOffset, linkM & 0x00FFFFFF);
+    write_register(INTEL_ARC_MMIO_DDI_PIPE_A_LINK_N + pipeOffset, linkN);
 
-    linkSpeed = linkBandwidth;
-    retN = 1;
-    while (retN < linkSpeed)
-        retN <<= 1;
-    if (retN > 0x800000)
-        retN = 0x800000;
-    retM = (uint64)mode->timing.pixel_clock * retN / linkSpeed;
-    while (retN > 0xffffff || retM > 0xffffff) {
-        retN >>= 1;
-        retM >>= 1;
-    }
-	uint32 mlink =0 ,nlink = 0;
-	read_register(INTEL_ARC_MMIO_DDI_PIPE_A_LINK_M + pipeOffset, mlink);
-	read_register(INTEL_ARC_MMIO_DDI_PIPE_A_LINK_N + pipeOffset, nlink);
-
-	debug_printf("intel_arc.accelerant: PIPE LINK_M (before) is 0x%" B_PRIx32 "\n", mlink);
-	debug_printf("intel_arc.accelerant: PIPE LINK_N (before) is 0x%" B_PRIx32 "\n", nlink);
-
-    debug_printf("intel_arc.accelerant: Writing Link M/N: M=0x%" B_PRIx64 ", N=0x%" B_PRIx64 "\n", retM, retN);
-    write_register(INTEL_ARC_MMIO_DDI_PIPE_A_LINK_M + pipeOffset, (uint32)retM);
-    write_register(INTEL_ARC_MMIO_DDI_PIPE_A_LINK_N + pipeOffset, (uint32)retN);
-    
-    // DISABILITA PRIMA IL DDI BUFFER per isolare la PHY dal clock in fase di riprogrammazione
+    // Disabilita DDI Buffer prima di programmare la DPLL
     status_t status = program_ddi_buffer(gInfo->shared_info->active_ddi_port, pipe, lanes, false);
-    if (status != B_OK) {
-        debug_printf("intel_arc.accelerant ERROR: Failed to disable DDI buffer before DPLL program\n");
-        return status;
-    }
+    if (status != B_OK) return status;
 
-    debug_printf("intel_arc.accelerant: Programming Port DPLL for DDI Port %u (Rate: %u kHz)\n",
-        gInfo->shared_info->active_ddi_port, linkBandwidth);
+    // Programmazione DPLL
     status = program_port_dpll(gInfo->shared_info->active_ddi_port, linkBandwidth);
-    if (status != B_OK) {
-        debug_printf("intel_arc.accelerant ERROR: program_port_dpll failed: %s\n", strerror(status));
-        return status;
-    }
-    
+    if (status != B_OK) return status;
+
     snooze(100);
 
+    // Aggiornamento PIPE_DDI_FUNC_CTL
     uint32 ddiCtl = gInfo->shared_info->pipe_ddi_func_ctl[pipe];
-    debug_printf("intel_arc.accelerant: valore di ddiFuncCtl dentro configure_dp_link: %" B_PRIx32 "\n",ddiCtl);
-    
     ddiCtl &= ~INTEL_ARC_PIPE_DDI_DP_WIDTH_MASK;
     ddiCtl |= pipe_ddi_encode_dp_width(lanes);
+
     if (mode->timing.flags & B_POSITIVE_HSYNC)
         ddiCtl |= INTEL_ARC_DDI_HSYNC_POLARITY_POSITIVE;
     else
@@ -1760,31 +2020,23 @@ configure_dp_link(display_mode* mode)
         ddiCtl &= ~INTEL_ARC_DDI_VSYNC_POLARITY_POSITIVE;
 
     gInfo->shared_info->pipe_ddi_func_ctl[pipe] = ddiCtl;
-    
-    debug_printf("intel_arc.accelerant: valore di ddiFuncCtl dopo impostazione HSYNC E VSYNC: %" B_PRIx32 "\n",ddiCtl);
-    // aggiunto di recente...
     write_register(INTEL_ARC_MMIO_PIPE_A_DDI_FUNC_CTL + pipeOffset, ddiCtl);
-    debug_printf("intel_arc.accelerant: pipe_ddi_func_ctl[%d] set as %" B_PRIx32 "\n", pipe, gInfo->shared_info->pipe_ddi_func_ctl[pipe]);
-    
-    status = program_ddi_buffer(gInfo->shared_info->active_ddi_port, pipe, lanes, true);
-    if (status != B_OK) {
-        debug_printf("intel_arc.accelerant ERROR: program_ddi_buffer failed: %s\n", strerror(status));
-        return status;
-    }
 
+    // Riabilita DDI Buffer
+    status = program_ddi_buffer(gInfo->shared_info->active_ddi_port, pipe, lanes, true);
+    if (status != B_OK) return status;
+
+    // Esegui Link Training
     if (gInfo->shared_info->has_dpcd) {
-        debug_printf("intel_arc.accelerant: Performing DP Link Training (Lanes=%u, Rate=%u kHz)\n", lanes, linkBandwidth);
-        status = perform_dp_link_training(linkBandwidth, lanes);
-        if (status != B_OK) {
-            debug_printf("intel_arc.accelerant ERROR: perform_dp_link_training failed: %s\n", strerror(status));
-            return status;
-        }
-    } else {
-        debug_printf("intel_arc.accelerant: Skipping DP Link Training (DPCD unavailable, assuming GOP state)\n");
+        // Estrazione corretta del flag Enhanced Framing dal buffer raw DPCD[2] (0x00002)
+        bool enhancedFraming = (gInfo->shared_info->dpcd[2] & DP_ENHANCED_FRAME_CAP) != 0;
+
+        status = perform_dp_link_training(linkBandwidth, lanes, enhancedFraming);
+        if (status != B_OK) return status;
     }
 
     return B_OK;
-}*/
+}
 
 static uint32
 clamp_u32(uint32 value, uint32 low, uint32 high)
@@ -1805,7 +2057,7 @@ compute_snps_hdmi_mpllb(uint32 pixelClockKHz, snps_mpllb_state& state)
 			? pixelClockKHz - tableClock : tableClock - pixelClockKHz;
 		if (delta <= 1000) {
 			state = kDg2HdmiPllTable[i].state;
-			debug_printf("intel_arc.accelerant: compute_snps_hdmi_mpllb(): snapped %" B_PRIu32 " kHz to upstream DG2 HDMI table %" B_PRIu32 " kHz\n",
+			if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: compute_snps_hdmi_mpllb(): snapped %" B_PRIu32 " kHz to upstream DG2 HDMI table %" B_PRIu32 " kHz\n",
 				pixelClockKHz, tableClock);
 			return;
 		}
@@ -1946,7 +2198,7 @@ intel_arc_program_hdmi_dpll(accelerant_info* info, uint8 ddiPort, uint32 pixel_c
 		snps_mpllb_state state = {};
 		compute_snps_hdmi_mpllb(pixel_clock_khz, state);
 
-		debug_printf("intel_arc.accelerant: intel_arc_program_hdmi_dpll(): SNPS MPLLB path ddiPort=%u phyBase=0x%05" B_PRIx32 " pixel_clock=%" B_PRIu32 " kHz\n",
+		if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: intel_arc_program_hdmi_dpll(): SNPS MPLLB path ddiPort=%u phyBase=0x%05" B_PRIx32 " pixel_clock=%" B_PRIu32 " kHz\n",
 			ddiPort, phyBase, pixel_clock_khz);
 
 		uint32 enableValue = read32(info, enableReg);
@@ -1969,7 +2221,7 @@ intel_arc_program_hdmi_dpll(accelerant_info* info, uint8 ddiPort, uint32 pixel_c
 			state.mpllb_div | INTEL_ARC_SNPS_PHY_MPLLB_FORCE_EN);
 
 		status_t status = wait_for_set(enableReg, INTEL_ARC_DG2_DPLL_LOCK, 5000);
-		debug_printf("intel_arc.accelerant: HDMI MPLLB regs: CP=0x%08" B_PRIx32 ", DIV=0x%08" B_PRIx32 ", DIV2=0x%08" B_PRIx32 ", FRACN1=0x%08" B_PRIx32 ", FRACN2=0x%08" B_PRIx32 ", SSCEN=0x%08" B_PRIx32 ", ENABLE=0x%08" B_PRIx32 "\n",
+		if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: HDMI MPLLB regs: CP=0x%08" B_PRIx32 ", DIV=0x%08" B_PRIx32 ", DIV2=0x%08" B_PRIx32 ", FRACN1=0x%08" B_PRIx32 ", FRACN2=0x%08" B_PRIx32 ", SSCEN=0x%08" B_PRIx32 ", ENABLE=0x%08" B_PRIx32 "\n",
 			read32(info, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_CP(phyBase)),
 			read32(info, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_DIV(phyBase)),
 			read32(info, INTEL_ARC_MMIO_SNPS_PHY_MPLLB_DIV2(phyBase)),
@@ -2003,318 +2255,11 @@ apply_hdmi_phy_levels(uint8 ddiPort, int8 pipe)
 	for (uint32 lane = 0; lane < 4; lane++)
 		write_register(INTEL_ARC_MMIO_SNPS_PHY_TX_EQ(phyBase, lane), value);
 
-	debug_printf("intel_arc.accelerant: HDMI PHY levels applied: phyBase=0x%05" B_PRIx32 ", txeq=0x%08" B_PRIx32 "\n",
+	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: HDMI PHY levels applied: phyBase=0x%05" B_PRIx32 ", txeq=0x%08" B_PRIx32 "\n",
 		phyBase, value);
 	return B_OK;
 }
-
-status_t
-intel_arc_set_display_mode(display_mode* mode)
-{
-	if (mode == NULL)
-		return B_BAD_VALUE;
-
-	debug_printf("intel_arc.accelerant: >>> SET_DISPLAY_MODE requested: %ux%u, pixel_clock=%u kHz <<<\n",
-		mode->virtual_width, mode->virtual_height, mode->timing.pixel_clock);
-
-	debug_printf("intel_arc.accelerant: Timing: HTotal=%u, HDisplay=%u, HSyncStart=%u, HSyncEnd=%u\n",
-		mode->timing.h_total, mode->timing.h_display, mode->timing.h_sync_start, mode->timing.h_sync_end);
-	debug_printf("intel_arc.accelerant: Timing: VTotal=%u, VDisplay=%u, VSyncStart=%u, VSyncEnd=%u\n",
-		mode->timing.v_total, mode->timing.v_display, mode->timing.v_sync_start, mode->timing.v_sync_end);
-
-	(void)handle_hotplug_event();
-
-	display_mode target = *mode;
-	status_t status = intel_arc_propose_display_mode(&target, &target, &target);
-	if (status != B_OK) {
-		debug_printf("propose display mode failed\n");
-		return status;
-	}
-	sanitize_mode_geometry(target, "intel_arc_set_display_mode");
-
-	if (gInfo->shared_info->active_pipe < 0) {
-		debug_printf("intel_arc.accelerant ERROR: No active pipe found in shared info!\n");
-		return B_UNSUPPORTED;
-	}
-
-	status = apply_dpms_off();
-	if (status != B_OK)
-		debug_printf("intel_arc.accelerant ERROR: apply_dpms_off() returned %s\n", strerror(status));
-
-	const int8 pipe = gInfo->shared_info->active_pipe;
-	const uint32 pipeOffset = (uint32)pipe * INTEL_ARC_MMIO_PIPE_OFFSET;
-	const uint32 bytesPerPixel = bytes_per_pixel_for_space((color_space)target.space);
-	if (bytesPerPixel == 0)
-		return B_BAD_VALUE;
-	//debug_printf("Arc Driver: app_server pitch = %" B_PRIu32 ", calculated pitch = %" B_PRIu32 "\n",
-    	//gInfo->shared_info->bytes_per_row, (target.virtual_width * bytesPerPixel + 63) & ~63);
-
-	gInfo->shared_info->current_mode = target;
-	//gInfo->shared_info->bytes_per_row = target.virtual_width * bytesPerPixel;
-	
-	// Regilations Pipe Timings
-	gInfo->shared_info->pipe_h_total[pipe]
-		= ((uint32)(target.timing.h_total - 1) << 16) | ((uint32)target.timing.h_display - 1);
-	debug_printf("intel_arc.accelerant: H_TOTAL impostato a 0x%X\n", gInfo->shared_info->pipe_h_total[pipe]);
-	gInfo->shared_info->pipe_h_blank[pipe]
-		= ((uint32)(target.timing.h_total - 1) << 16) | ((uint32)target.timing.h_display - 1);
-	debug_printf("intel_arc.accelerant: H_BLANK impostato a 0x%X\n", gInfo->shared_info->pipe_h_blank[pipe]);
-	gInfo->shared_info->pipe_h_sync[pipe]
-		= ((uint32)(target.timing.h_sync_end - 1) << 16) | ((uint32)target.timing.h_sync_start - 1);
-	debug_printf("intel_arc.accelerant: H_SYNC impostato a 0x%X\n", gInfo->shared_info->pipe_h_sync[pipe]);
-	gInfo->shared_info->pipe_v_total[pipe]
-		= ((uint32)(target.timing.v_total - 1) << 16) | ((uint32)target.timing.v_display - 1);
-	debug_printf("intel_arc.accelerant: V_TOTAL impostato a 0x%X\n", gInfo->shared_info->pipe_v_total[pipe]);
-	gInfo->shared_info->pipe_v_blank[pipe]
-		= ((uint32)(target.timing.v_total - 1) << 16) | ((uint32)target.timing.v_display - 1);
-	debug_printf("intel_arc.accelerant: V_BLANK impostato a 0x%X\n", gInfo->shared_info->pipe_v_blank[pipe]);
-	gInfo->shared_info->pipe_v_sync[pipe]
-		= ((uint32)(target.timing.v_sync_end - 1) << 16) | ((uint32)target.timing.v_sync_start - 1);
-	debug_printf("intel_arc.accelerant: V_SYNC impostato a 0x%X\n", gInfo->shared_info->pipe_v_sync[pipe]);
-
-	const uint32 bytesPerRow = (target.virtual_width * bytesPerPixel + 63) & ~63;
-	gInfo->shared_info->bytes_per_row = bytesPerRow;
-	gInfo->shared_info->plane_stride[pipe] = bytesPerRow / 64;
-	gInfo->shared_info->fbc.bytes_per_row = bytesPerRow;
-	
-	gInfo->shared_info->plane_pos[pipe] = 0;
-
-	debug_printf("intel_arc.accelerant: PLANE_CONTROL prima di modificare i parametri: 0x%X\n",gInfo->shared_info->plane_control[pipe]);
-    gInfo->shared_info->plane_control[pipe] &= ~INTEL_ARC_PLANE_TILED_MASK;
-	gInfo->shared_info->plane_control[pipe] |= INTEL_ARC_PLANE_LINEAR;
-		debug_printf("intel_arc.accelerant: PLANE_CONTROL dopo modifica parametri TILED_MASK e LINEAR: 0x%X\n",gInfo->shared_info->plane_control[pipe]);
-    //-------------------
-	gInfo->shared_info->plane_control[pipe]
-		= (gInfo->shared_info->plane_control[pipe]
-			& ~INTEL_ARC_DISPLAY_CONTROL_COLOR_MASK_SKY)
-		| plane_color_format_for_space((color_space)target.space);
-	// A. Disabilita lo Scaler
-	write_register(scaler_control_register(pipe, 1), 0);
-	write_register(scaler_control_register(pipe, 2), 0);
-
-	const uint32 hDisplay = target.timing.h_display;
-	const uint32 vDisplay = target.timing.v_display;
-	
-
-	const uint32 nativeSize = ((vDisplay - 1) << 16) | (hDisplay - 1);
-	const uint32 nativeSizeforPipe = ((hDisplay - 1) << 16) | (vDisplay - 1);
-
-	// La Pipe e il Piano devono avere LA STESSA dimensione fisica
-	gInfo->shared_info->pipe_size[pipe] = nativeSizeforPipe;
-	debug_printf("intel_arc.accelerant: PIPE_SIZE impostato a 0x%X\n", gInfo->shared_info->pipe_size[pipe]);
-	gInfo->shared_info->plane_image_size[pipe] = nativeSize;
-	debug_printf("intel_arc.accelerant: PLANE_IMAGE_SIZE impostato a 0x%X\n", gInfo->shared_info->plane_image_size[pipe]);
-	log_pipe_plane_state("intel_arc_set_display_mode before MMIO writes", pipe);
-	
-	// B. Scrivi i Timing della Pipe (1280x1024 VESA)
-	write_register(INTEL_ARC_MMIO_PIPE_A_HTOTAL + pipeOffset, gInfo->shared_info->pipe_h_total[pipe]);
-	write_register(INTEL_ARC_MMIO_PIPE_A_HBLANK + pipeOffset, gInfo->shared_info->pipe_h_blank[pipe]);
-	write_register(INTEL_ARC_MMIO_PIPE_A_HSYNC + pipeOffset, gInfo->shared_info->pipe_h_sync[pipe]);
-	write_register(INTEL_ARC_MMIO_PIPE_A_VTOTAL + pipeOffset, gInfo->shared_info->pipe_v_total[pipe]);
-	write_register(INTEL_ARC_MMIO_PIPE_A_VBLANK + pipeOffset, gInfo->shared_info->pipe_v_blank[pipe]);
-	write_register(INTEL_ARC_MMIO_PIPE_A_VSYNC + pipeOffset, gInfo->shared_info->pipe_v_sync[pipe]);
-	write_register(INTEL_ARC_MMIO_PIPE_A_SIZE + pipeOffset, gInfo->shared_info->pipe_size[pipe]);
-	// C. Scrivi la superficie del Piano (1280x1024)
-	write_register(INTEL_ARC_MMIO_PLANE_A_POS + pipeOffset, 0);
-	write_register(INTEL_ARC_MMIO_PLANE_A_IMAGE_SIZE + pipeOffset, gInfo->shared_info->plane_image_size[pipe]);
-	write_register(INTEL_ARC_MMIO_PLANE_A_STRIDE + pipeOffset, gInfo->shared_info->plane_stride[pipe]);
-	write_register(INTEL_ARC_MMIO_PLANE_A_OFFSET + pipeOffset, 0);
-
-	const uint32 disabledPlaneCtl = gInfo->shared_info->plane_control[pipe] & ~(1U << 31);
-    	write_register(INTEL_ARC_MMIO_PLANE_A_CONTROL + pipeOffset, disabledPlaneCtl);
-
-    
-    const uint32 gammaModeReg = INTEL_ARC_GAMMA_MODE_BASE + (pipe * 0x1000);
-    uint32 gammaValue = 0;
-
-    // Legge il valore attuale del registro per preservare gli altri flag hardware
-    if (read_register(gammaModeReg, gammaValue)) {
-        if (target.space == B_COLOR_8_BIT) {
-        	debug_printf("intel_arc.accelerant: CLEARING GAMMAMODE for 8-bits color space\n");
-            // Bit [1:0] = 00b -> Forza la Pipe in Legacy Palette 8-bit Mode
-            gammaValue &= ~3U;
-        } else {
-            // Per 16/24/32 bit rispristina/imposta il bypass o Direct Gamma
-            // (Bit [1:0] = 01b o valore di default per colori diretti)
-            debug_printf("intel_arc.accelerant: DIRECT GAMMA for NON-8bits color space\n");
-            gammaValue = (gammaValue & ~3U) | 1U;
-        }
-        write_register(gammaModeReg, gammaValue);
-    } else {
-        // Fallback in caso di fallimento della lettura
-        if (target.space == B_COLOR_8_BIT)
-            write_register(gammaModeReg, 0);
-    }
-    
-    uint32 ddiFuncCtl = gInfo->shared_info->pipe_ddi_func_ctl[pipe];
-    debug_printf("intel_arc.accelerant: valore di ddiFuncCtl prima di configurare il monitor: %" B_PRIx32 "\n",ddiFuncCtl);
-/* dovrebbe impostare i bit di hsync e vsync per ora posticipiamo  lo facciamo in configure_dp_link
-    if ((target.timing.flags & B_POSITIVE_HSYNC) != 0)
-        ddiFuncCtl |= INTEL_ARC_DDI_HSYNC_POLARITY_POSITIVE;
-    else
-        ddiFuncCtl &= ~INTEL_ARC_DDI_HSYNC_POLARITY_POSITIVE;
-
-    if ((target.timing.flags & B_POSITIVE_VSYNC) != 0)
-        ddiFuncCtl |= INTEL_ARC_DDI_VSYNC_POLARITY_POSITIVE;
-    else
-        ddiFuncCtl &= ~INTEL_ARC_DDI_VSYNC_POLARITY_POSITIVE;
-    debug_printf("intel_arc.accelerant: valore di ddiFuncCtl DOPO la modifica HSYNC e VSYNC: %" B_PRIx32 "\n",ddiFuncCtl);
-*/
-    // Disabilita il bit ENABLE (Bit 31) su PIPE_DDI_FUNC_CTL prima del Link Training
-    ddiFuncCtl &= ~INTEL_ARC_PIPE_DDI_FUNC_CTL_ENABLE; // Bit 31 = 0
-
-    // Salva lo stato aggiornato nella struttura condivisa e scrivi il registro MMIO
-    debug_printf("intel_arc.accelerant: valore di ddiFuncCtl prima di dp_link o program_hdmi_dpll: %" B_PRIx32 "\n",ddiFuncCtl);
-    gInfo->shared_info->pipe_ddi_func_ctl[pipe] = ddiFuncCtl;
-    write_register(INTEL_ARC_MMIO_PIPE_A_DDI_FUNC_CTL + pipeOffset, ddiFuncCtl);
-	log_pipe_plane_state("intel_arc_set_display_mode after MMIO writes", pipe);
-    //-------------------
-
-	debug_printf("intel_arc.accelerant: Configuring link for Active Pipe %d (FuncCtl: 0x%08X)\n",
-		pipe, gInfo->shared_info->pipe_ddi_func_ctl[pipe]);
-	
-	uint32 modeSel = (gInfo->shared_info->pipe_ddi_func_ctl[pipe] & INTEL_ARC_PIPE_DDI_MODESEL_MASK) >> 24;
-	debug_printf("intel_arc.accelerant: Detected DDI ModeSel: %u\n", modeSel);
-
-	if (modeSel == INTEL_ARC_PIPE_DDI_MODE_DP_SST || modeSel == INTEL_ARC_PIPE_DDI_MODE_DP_MST) {
-		debug_printf("intel_arc.accelerant: Mode is DP, calling configure_dp_link()\n");
-		status = configure_dp_link(&target);
-		if (status != B_OK) {
-			debug_printf("intel_arc.accelerant ERROR: configure_dp_link failed: %s\n", strerror(status));
-			return status;
-		}
-	} else {
-		debug_printf("intel_arc.accelerant: Mode is NOT DisplayPort (likely HDMI/DVI), skipping DP link training\n");
-		status = intel_arc_program_hdmi_dpll(gInfo,
-			gInfo->shared_info->active_ddi_port, target.timing.pixel_clock);
-    	if (status != B_OK) {
-        	debug_printf("intel_arc.accelerant ERROR: intel_arc_program_hdmi_dpll failed: %s\n", strerror(status));
-        	return status;
-    	}
-
-		status = apply_hdmi_phy_levels(gInfo->shared_info->active_ddi_port, pipe);
-		if (status != B_OK) {
-			debug_printf("intel_arc.accelerant ERROR: apply_hdmi_phy_levels failed: %s\n", strerror(status));
-			return status;
-		}
-	}
-	// ORA CHE IL LINK TRAPPING È COMPLETATO E IN NORMAL:
- //   rileggi ddiFuncCtl
-    ddiFuncCtl = gInfo->shared_info->pipe_ddi_func_ctl[pipe];
-    debug_printf("intel_arc.accelerant: valore di ddiFuncCtl dopo dp_link o program_hdmi_dpll: %" B_PRIx32 "\n",ddiFuncCtl);
-    // 1. Abilita il Transcoder / Pipe DDI
-    ddiFuncCtl |= INTEL_ARC_PIPE_DDI_FUNC_ENABLE;//INTEL_ARC_PIPE_DDI_FUNC_CTL_ENABLE;
-    gInfo->shared_info->pipe_ddi_func_ctl[pipe] = ddiFuncCtl;
-    write_register(INTEL_ARC_MMIO_PIPE_A_DDI_FUNC_CTL + pipeOffset, ddiFuncCtl);
-
-    // 2. Abilita il Plane e carica l'indirizzo della superficie
-    const uint32 enabledPlaneCtl = gInfo->shared_info->plane_control[pipe] | (1U << 31);
-    write_register(INTEL_ARC_MMIO_PLANE_A_CONTROL + pipeOffset, enabledPlaneCtl);
-
-    uint32 fbAddress = gInfo->shared_info->frame_buffer_base + gInfo->shared_info->frame_buffer_offset;
-    write_register(INTEL_ARC_MMIO_PLANE_A_SURFACE + pipeOffset, fbAddress);
-    
-    log_pipe_plane_state("intel_arc_set_display_mode before dpms_on", pipe);
-
-	status = apply_dpms_on();
-	if (status == B_OK) {
-		*mode = target;
-		gInfo->shared_info->fbc.frame_buffer = (void*)gInfo->shared_info->frame_buffer;
-    	gInfo->shared_info->fbc.frame_buffer_dma = (void *)(gInfo->shared_info->frame_buffer_base 
-    + gInfo->shared_info->frame_buffer_offset);
-		debug_printf("intel_arc.accelerant: SET_DISPLAY_MODE completed successfully!\n");
-	} else {
-		debug_printf("intel_arc.accelerant ERROR: apply_dpms_on() failed: %s\n", strerror(status));
-	}
-	return status;
-}
-
-status_t
-intel_arc_get_display_mode(display_mode* mode)
-{
-	(void)handle_hotplug_event();
-	*mode = gInfo->shared_info->current_mode;
-	return B_OK;
-}
-
-status_t
-intel_arc_get_edid_info(void* info, size_t size, uint32* version)
-{
-	(void)handle_hotplug_event();
-	if (!gInfo->has_edid)
-		return B_ERROR;
-	if (size < sizeof(edid1_info))
-		return B_BUFFER_OVERFLOW;
-
-	memcpy(info, &gInfo->edid_info, sizeof(edid1_info));
-	*version = EDID_VERSION_1;
-	return B_OK;
-}
-
-status_t
-intel_arc_get_frame_buffer_config(frame_buffer_config* config)
-{
-	(void)handle_hotplug_event();
-	if (!config) return B_BAD_VALUE;
-	if (gInfo->frame_buffer == NULL)
-		return B_UNSUPPORTED;
-	*config = gInfo->shared_info->fbc;
-	return B_OK;
-}
-
-status_t
-intel_arc_get_pixel_clock_limits(display_mode* mode, uint32* low, uint32* high)
-{
-	(void)handle_hotplug_event();
-	uint32 totalPixel = (uint32)mode->timing.h_total * (uint32)mode->timing.v_total;
-	uint32 clockLimit = 2000000;
-
-	*low = totalPixel * 48L / 1000L;
-	if (*low > clockLimit)
-		return B_ERROR;
-
-	*high = clockLimit;
-	return B_OK;
-}
-
-status_t
-intel_arc_set_indexed_colors(uint32 count, uint8 first,
-    uint8* color_data, uint32 flags)
-{
-    if (color_data == NULL)
-        return B_BAD_VALUE;
-
-    if (first + count > 256)
-        return B_BAD_VALUE;
-
-    // Recupera la pipe attualmente attiva per lo schermo
-    uint32 pipe = gInfo->shared_info->active_pipe;
-
-    // Indirizzo base dei registri LGC_PALETTE per la pipe attiva
-    // Offset: 0x4A000 + (pipe * 0x400)
-    uint32 paletteBase = INTEL_ARC_LGC_PALETTE_BASE + (pipe * 0x400);
-
-    for (uint32 i = 0; i < count; i++) {
-        uint8 index = first + i;
-        
-        if (index > 255)
-            break;
-
-        // L'array color_data contiene triplette consecutive R, G, B
-        uint8 r = color_data[i * 3 + 0];
-        uint8 g = color_data[i * 3 + 1];
-        uint8 b = color_data[i * 3 + 2];
-
-        // Formato registro Intel LGC_PALETTE: [23:16] Red, [15:8] Green, [7:0] Blue
-        uint32 colorValue = ((uint32)r << 16) | ((uint32)g << 8) | (uint32)b;
-
-        // Scrittura del registro della tavolozza (4 byte per voce)
-        write_register(paletteBase + (index * 4), colorValue);
-    }
-
-    return B_OK;
-}
-
+/* original
 static ssize_t
 aux_transfer(uint8 ddiPort, uint8* transmitBuffer, uint8 transmitSize,
 	uint8* receiveBuffer, uint8 receiveSize)
@@ -2579,7 +2524,854 @@ nextRead:
 	}
 
 	return B_OK;
+}*/
+/*con logs */
+static ssize_t
+aux_transfer(uint8 ddiPort, uint8* transmitBuffer, uint8 transmitSize,
+    uint8* receiveBuffer, uint8 receiveSize)
+{
+    const uint32 channelControl = aux_control_register(ddiPort);
+    uint32 status = 0;
+
+    for (int tries = 0; tries < 3; tries++) {
+        if (!read_register(channelControl, status)) {
+            debug_printf("intel_arc.accelerant: aux_transfer MMIO read failed on control reg 0x%" B_PRIx32 "\n",
+                channelControl);
+            return B_ERROR;
+        }
+        if ((status & INTEL_ARC_DP_AUX_CTL_BUSY) == 0)
+            break;
+        snooze(1000);
+        if (tries == 2) {
+            debug_printf("intel_arc.accelerant: aux_transfer ERROR: AUX channel port %u stuck BUSY (status=0x%08" B_PRIx32 ")\n",
+                ddiPort, status);
+            return B_BUSY;
+        }
+    }
+
+    if (transmitSize > 20 || receiveSize > 20) {
+        debug_printf("intel_arc.accelerant: aux_transfer ERROR: buffer size out of bounds (tx=%u, rx=%u)\n",
+            transmitSize, receiveSize);
+        return E2BIG;
+    }
+
+    const uint32 sendControl = INTEL_ARC_DP_AUX_CTL_BUSY
+        | INTEL_ARC_DP_AUX_CTL_DONE
+        | INTEL_ARC_DP_AUX_CTL_INTERRUPT
+        | INTEL_ARC_DP_AUX_CTL_TIMEOUT_ERROR
+        | INTEL_ARC_DP_AUX_CTL_TIMEOUT_1600US
+        | INTEL_ARC_DP_AUX_CTL_RECEIVE_ERROR
+        | ((uint32)transmitSize << INTEL_ARC_DP_AUX_CTL_MSG_SIZE_SHIFT)
+        | INTEL_ARC_DP_AUX_CTL_FW_SYNC_PULSE_SKL(32)
+        | INTEL_ARC_DP_AUX_CTL_SYNC_PULSE_SKL(32);
+
+    for (uint8 retry = 0; retry < 5; retry++) {
+        for (uint8 i = 0; i < transmitSize;) {
+            uint32 data = ((uint32)transmitBuffer[i++]) << 24;
+            if (i < transmitSize) data |= ((uint32)transmitBuffer[i++]) << 16;
+            if (i < transmitSize) data |= ((uint32)transmitBuffer[i++]) << 8;
+            if (i < transmitSize) data |= transmitBuffer[i++];
+            write_register(aux_data_register(ddiPort, (i - 1) / 4), data);
+        }
+
+        write_register(channelControl, sendControl);
+
+        for (int waited = 0; waited < 1000; waited++) {
+            if (!read_register(channelControl, status))
+                return B_ERROR;
+            if ((status & INTEL_ARC_DP_AUX_CTL_BUSY) == 0)
+                break;
+            snooze(10);
+        }
+
+        write_register(channelControl, status | INTEL_ARC_DP_AUX_CTL_DONE
+            | INTEL_ARC_DP_AUX_CTL_TIMEOUT_ERROR
+            | INTEL_ARC_DP_AUX_CTL_RECEIVE_ERROR);
+
+        if ((status & INTEL_ARC_DP_AUX_CTL_TIMEOUT_ERROR) != 0) {
+            debug_printf("intel_arc.accelerant: aux_transfer (retry %u/5): TIMEOUT_ERROR (ctl=0x%08" B_PRIx32 ")\n",
+                retry + 1, status);
+            continue;
+        }
+        if ((status & INTEL_ARC_DP_AUX_CTL_RECEIVE_ERROR) != 0) {
+            debug_printf("intel_arc.accelerant: aux_transfer (retry %u/5): RECEIVE_ERROR (ctl=0x%08" B_PRIx32 ")\n",
+                retry + 1, status);
+            snooze(400);
+            continue;
+        }
+        if ((status & INTEL_ARC_DP_AUX_CTL_DONE) != 0)
+            break;
+    }
+
+    if ((status & INTEL_ARC_DP_AUX_CTL_DONE) == 0) {
+        debug_printf("intel_arc.accelerant: aux_transfer FAIL: Transaction not DONE (status=0x%08" B_PRIx32 ")\n", status);
+        return B_BUSY;
+    }
+    if ((status & INTEL_ARC_DP_AUX_CTL_RECEIVE_ERROR) != 0) {
+        debug_printf("intel_arc.accelerant: aux_transfer FAIL: Final RECEIVE_ERROR\n");
+        return B_IO_ERROR;
+    }
+    if ((status & INTEL_ARC_DP_AUX_CTL_TIMEOUT_ERROR) != 0) {
+        debug_printf("intel_arc.accelerant: aux_transfer FAIL: Final TIMEOUT_ERROR\n");
+        return B_TIMED_OUT;
+    }
+
+    uint8 bytes = (status & INTEL_ARC_DP_AUX_CTL_MSG_SIZE_MASK) >> INTEL_ARC_DP_AUX_CTL_MSG_SIZE_SHIFT;
+    if (bytes == 0 || bytes > 20) {
+        debug_printf("intel_arc.accelerant: aux_transfer ERROR: Invalid reply size = %u bytes\n", bytes);
+        return B_BUSY;
+    }
+    if (bytes > receiveSize)
+        bytes = receiveSize;
+
+    for (uint8 i = 0; i < bytes;) {
+        uint32 data = 0;
+        if (!read_register(aux_data_register(ddiPort, i / 4), data))
+            return B_ERROR;
+        receiveBuffer[i++] = data >> 24;
+        if (i < bytes) receiveBuffer[i++] = data >> 16;
+        if (i < bytes) receiveBuffer[i++] = data >> 8;
+        if (i < bytes) receiveBuffer[i++] = data;
+    }
+
+    return bytes;
 }
+
+static ssize_t
+aux_transfer(uint8 ddiPort, dp_aux_msg* message)
+{
+    if (message == NULL) {
+        debug_printf("intel_arc.accelerant: aux_transfer msg NULL\n");
+        return B_BAD_VALUE;
+    }
+    if (message->size > 16) {
+        debug_printf("intel_arc.accelerant: aux_transfer msg size too large (%" B_PRIuSIZE ")\n", message->size);
+        return B_BAD_VALUE;
+    }
+
+    uint8 receiveBuffer[20];
+    uint8 transmitBuffer[20];
+    uint8 transmitSize = message->size > 0 ? 4 : 3;
+    uint8 receiveSize = 0;
+
+    switch (message->request & ~DP_AUX_I2C_MOT) {
+        case DP_AUX_NATIVE_WRITE:
+        case DP_AUX_I2C_WRITE:
+        case DP_AUX_I2C_WRITE_STATUS_UPDATE:
+            transmitSize += message->size;
+            break;
+    }
+
+    if (message->size > 0 && message->buffer == NULL) {
+        debug_printf("intel_arc.accelerant: aux_transfer msg buffer NULL with size > 0\n");
+        return B_BAD_VALUE;
+    }
+
+    transmitBuffer[0] = (message->request << 4) | ((message->address >> 16) & 0x0f);
+    transmitBuffer[1] = (message->address >> 8) & 0xff;
+    transmitBuffer[2] = message->address & 0xff;
+    transmitBuffer[3] = message->size != 0 ? (message->size - 1) : 0;
+
+    debug_printf("intel_arc.accelerant: aux_msg START ddiPort=%u req=0x%02x addr=0x%04" B_PRIx32 " size=%" B_PRIuSIZE "\n",
+        ddiPort, message->request, message->address, message->size);
+
+    for (uint8 retry = 0; retry < 7; retry++) {
+        ssize_t result = B_ERROR;
+
+        switch (message->request & ~DP_AUX_I2C_MOT) {
+            case DP_AUX_NATIVE_WRITE:
+            case DP_AUX_I2C_WRITE:
+            case DP_AUX_I2C_WRITE_STATUS_UPDATE:
+                receiveSize = 1;
+                if (message->buffer != NULL)
+                    memcpy(transmitBuffer + 4, message->buffer, message->size);
+                result = aux_transfer(ddiPort, transmitBuffer, transmitSize, receiveBuffer, receiveSize);
+                if (result > 0) {
+                    message->reply = receiveBuffer[0] >> 4;
+                    result = (ssize_t)message->size;
+                }
+                break;
+
+            case DP_AUX_NATIVE_READ:
+            case DP_AUX_I2C_READ:
+                receiveSize = message->size + 1;
+                result = aux_transfer(ddiPort, transmitBuffer, transmitSize, receiveBuffer, receiveSize);
+                if (result > 0) {
+                    message->reply = receiveBuffer[0] >> 4;
+                    result--;
+                    if (message->buffer != NULL && result > 0)
+                        memcpy(message->buffer, receiveBuffer + 1, result);
+                }
+                break;
+
+            default:
+                debug_printf("intel_arc.accelerant: aux_msg unknown request mode 0x%02x\n", message->request);
+                return B_BAD_VALUE;
+        }
+
+        if (result == B_BUSY) {
+            debug_printf("intel_arc.accelerant: aux_msg retry %u: low-level returned B_BUSY\n", retry + 1);
+            continue;
+        }
+        if (result < B_OK) {
+            debug_printf("intel_arc.accelerant: aux_msg retry %u failed with status: %s\n",
+                retry + 1, strerror(result));
+            return result;
+        }
+
+        debug_printf("intel_arc.accelerant: aux_msg raw reply byte = 0x%02x (reply_code=0x%02x)\n",
+            receiveBuffer[0], message->reply);
+
+        switch (message->reply & DP_AUX_NATIVE_REPLY_MASK) {
+            case DP_AUX_NATIVE_REPLY_ACK:
+                return result;
+            case DP_AUX_NATIVE_REPLY_NACK:
+                debug_printf("intel_arc.accelerant: aux_msg ERROR: DP Native/I2C NACK\n");
+                return B_IO_ERROR;
+            case DP_AUX_NATIVE_REPLY_DEFER:
+                debug_printf("intel_arc.accelerant: aux_msg DEFER received, sleeping 400us\n");
+                snooze(400);
+                break;
+            default:
+                debug_printf("intel_arc.accelerant: aux_msg ERROR: Invalid reply mask (0x%02x)\n", message->reply);
+                return B_IO_ERROR;
+        }
+    }
+
+    debug_printf("intel_arc.accelerant: aux_msg ERROR: Exceeded 7 retries\n");
+    return B_IO_ERROR;
+}
+/* senza buffer underrun a NULL size 0 */
+
+static status_t
+aux_send_receive(const i2c_bus* bus, uint32 slaveAddress,
+    const uint8* writeBuffer, size_t writeLength, uint8* readBuffer,
+    size_t readLength)
+{
+    if (bus == NULL)
+        return B_BAD_VALUE;
+
+    const uint8 ddiPort = (uint8)(addr_t)bus->cookie;
+    const size_t transferLength = 16;
+    dp_aux_msg message;
+    memset(&message, 0, sizeof(message));
+    
+    debug_printf("intel_arc.accelerant: aux_send_receive ddiPort=%u slave=0x%02" B_PRIx32 " writeLen=%" B_PRIuSIZE " readLen=%" B_PRIuSIZE "\n",
+        ddiPort, slaveAddress, writeLength, readLength);
+
+    if (writeBuffer != NULL && writeLength > 0) {
+        message.address = slaveAddress;
+
+        for (size_t i = 0; i < writeLength;) {
+            message.buffer = (void*)(writeBuffer + i);
+            message.size = min_c(transferLength, writeLength - i);
+            message.request = DP_AUX_I2C_WRITE;
+            
+            if (writeLength - i > transferLength)
+                message.request |= DP_AUX_I2C_MOT; // Middle of Transaction
+
+            bool acked = false;
+            for (int attempt = 0; attempt < 7; attempt++) {
+                ssize_t result = aux_transfer(ddiPort, &message);
+                if (result < B_OK) {
+                	debug_printf("intel_arc.accelerant: aux_send_receive WRITE transfer error at offset %" B_PRIuSIZE ": %s\n",
+                        i, strerror(result));
+                    return result;
+                }
+
+                uint8 i2cReply = message.reply & DP_AUX_I2C_REPLY_MASK;
+                switch (i2cReply) {
+                    case DP_AUX_I2C_REPLY_ACK:
+                        acked = true;
+                        goto nextWrite;
+                    case DP_AUX_I2C_REPLY_NACK:
+                    	debug_printf("intel_arc.accelerant: aux_send_receive WRITE I2C NACK at offset %" B_PRIuSIZE "\n", i);
+                        return B_IO_ERROR;
+                    case DP_AUX_I2C_REPLY_DEFER:
+                        debug_printf("intel_arc.accelerant: aux_send_receive WRITE I2C DEFER at offset %" B_PRIuSIZE ", attempt %d\n", i, attempt);
+                        snooze(400);
+                        break;
+                    default:
+                        debug_printf("intel_arc.accelerant: aux_send_receive WRITE unknown I2C reply 0x%02x\n", i2cReply);
+                        return B_ERROR;
+                }
+            }
+            if (!acked) {
+            	debug_printf("intel_arc.accelerant: aux_send_receive WRITE TIMEOUT (DEFER exhausted) at offset %" B_PRIuSIZE "\n", i);
+                return B_TIMED_OUT;
+            }
+
+nextWrite:
+            i += message.size;
+        }
+    }
+
+    if (readBuffer != NULL && readLength > 0) {
+        message.address = slaveAddress;
+
+        for (size_t i = 0; i < readLength;) {
+            message.buffer = readBuffer + i;
+            message.size = min_c(transferLength, readLength - i);
+            message.request = DP_AUX_I2C_READ;
+
+            if (readLength - i > transferLength)
+                message.request |= DP_AUX_I2C_MOT;
+
+            bool acked = false;
+            for (int attempt = 0; attempt < 7; attempt++) {
+                ssize_t result = aux_transfer(ddiPort, &message);
+                if (result < B_OK) {
+                	debug_printf("intel_arc.accelerant: aux_send_receive READ transfer error at offset %" B_PRIuSIZE ": %s\n",
+                        i, strerror(result));
+                    return result;
+                }
+
+                uint8 i2cReply = message.reply & DP_AUX_I2C_REPLY_MASK;
+                switch (i2cReply) {
+                    case DP_AUX_I2C_REPLY_ACK:
+                        acked = true;
+                        goto nextRead;
+                    case DP_AUX_I2C_REPLY_NACK:
+                    	debug_printf("intel_arc.accelerant: aux_send_receive READ I2C NACK at offset %" B_PRIuSIZE "\n", i);
+                        return B_IO_ERROR;
+                    case DP_AUX_I2C_REPLY_DEFER:
+                        debug_printf("intel_arc.accelerant: aux_send_receive READ I2C DEFER at offset %" B_PRIuSIZE ", attempt %d\n", i, attempt);
+                        snooze(400);
+                        break;
+                    default:
+                    	debug_printf("intel_arc.accelerant: aux_send_receive READ unknown I2C reply 0x%02x\n", i2cReply);
+                        return B_ERROR;
+                }
+            }
+            if (!acked) {
+            	debug_printf("intel_arc.accelerant: aux_send_receive READ TIMEOUT (DEFER exhausted) at offset %" B_PRIuSIZE "\n", i);
+                return B_TIMED_OUT;
+            }
+
+nextRead:
+            i += message.size;
+        }
+    }
+
+    debug_printf("intel_arc.accelerant: aux_send_receive SUCCESS\n");
+    return B_OK;
+}
+/*
+static status_t
+configure_gpu_transcoder_hdmi(uint8 pipe, uint32 pixelClockKHz)
+{
+    uint32 val = 0;
+    if (pixelClockKHz > 340000) {
+        val |= TRANS_HDMI_SCRAMBLING_ENABLE | TRANS_HDMI_HIGH_TMDS_CHAR_RATE;
+    }
+
+    write_register(TRANS_HDMI_CONFIG(pipe), val);
+
+    uint32 readback = 0;
+    read_register(TRANS_HDMI_CONFIG(pipe), readback);
+    debug_printf("intel_arc.accelerant: TRANS_HDMI_CONFIG(pipe=%u) val=0x%08" B_PRIx32 " (read=0x%08" B_PRIx32 ")\n",
+        pipe, val, readback);
+
+    return B_OK;
+}
+static uint8
+ddi_port_to_gmbus_pin(uint8 ddiPort)
+{
+    // Mappatura pin GMBUS per Intel Arc (DG2 / Xe_LPD)
+    // 1: DDI A, 2: DDI B, 3: DDI C, 4: DDI D (o Combo PHYs)
+    switch (ddiPort) {
+        case 0: return 1; // GMBUS_PIN_DPA
+        case 1: return 2; // GMBUS_PIN_DPB / HDMI-B
+        case 2: return 3; // GMBUS_PIN_DPC / HDMI-C
+        case 3: return 4; // GMBUS_PIN_DPD / HDMI-D
+        default: return 2;
+    }
+}
+
+static status_t
+gmbus_wait_hardware_ready(uint32* statusOut)
+{
+    uint32 status = 0;
+    for (int timeout = 0; timeout < 1000; timeout++) {
+        if (!read_register(INTEL_GMBUS2, status))
+            return B_ERROR;
+        if ((status & GMBUS_SATOER) != 0) {
+            debug_printf("intel_arc.accelerant: GMBUS NAK/Timeout error (status=0x%08" B_PRIx32 ")\n", status);
+            write_register(INTEL_GMBUS1, GMBUS_SW_CLR_INT);
+            return B_IO_ERROR;
+        }
+        if ((status & GMBUS_HW_RDY) != 0) {
+            if (statusOut != NULL)
+                *statusOut = status;
+            return B_OK;
+        }
+        snooze(10);
+    }
+    debug_printf("intel_arc.accelerant: GMBUS hardware ready timed out\n");
+    return B_TIMED_OUT;
+}
+
+static status_t
+gmbus_send_receive(const i2c_bus* bus, uint32 slaveAddress,
+    const uint8* writeBuffer, size_t writeLength, uint8* readBuffer,
+    size_t readLength)
+{
+    if (bus == NULL)
+        return B_BAD_VALUE;
+
+    const uint8 ddiPort = (uint8)(addr_t)bus->cookie;
+    const uint8 gmbusPin = ddi_port_to_gmbus_pin(ddiPort);
+
+    // 1. Seleziona il Pin Pair GMBUS
+    write_register(INTEL_GMBUS0, gmbusPin);
+
+    // 2. Fase di Scrittura (es. offset registro SCDC o indirizzo EDID)
+    if (writeBuffer != NULL && writeLength > 0) {
+        uint32 command = GMBUS_SW_RDY
+            | (readLength == 0 ? GMBUS_CYCLE_STOP : GMBUS_CYCLE_WAIT)
+            | ((uint32)writeLength << 16)
+            | (slaveAddress << 1); // Direzione Scrittura (bit 0 = 0)
+
+        // Carica i primi 4 byte nel FIFO di scrittura
+        uint32 val = 0;
+        for (size_t i = 0; i < writeLength && i < 4; i++)
+            val |= ((uint32)writeBuffer[i]) << (i * 8);
+
+        write_register(INTEL_GMBUS3, val);
+        write_register(INTEL_GMBUS1, command);
+
+        for (size_t i = 0; i < writeLength; i += 4) {
+            status_t status = gmbus_wait_hardware_ready(NULL);
+            if (status != B_OK)
+                return status;
+
+            if (i + 4 < writeLength) {
+                val = 0;
+                for (size_t j = 0; j < 4 && (i + 4 + j) < writeLength; j++)
+                    val |= ((uint32)writeBuffer[i + 4 + j]) << (j * 8);
+                write_register(INTEL_GMBUS3, val);
+            }
+        }
+    }
+
+    // 3. Fase di Lettura (se richiesta)
+    if (readBuffer != NULL && readLength > 0) {
+        uint32 command = GMBUS_SW_RDY
+            | GMBUS_CYCLE_STOP
+            | ((uint32)readLength << 16)
+            | (slaveAddress << 1) | 1; // Direzione Lettura (bit 0 = 1)
+
+        write_register(INTEL_GMBUS1, command);
+
+        for (size_t i = 0; i < readLength; i += 4) {
+            status_t status = gmbus_wait_hardware_ready(NULL);
+            if (status != B_OK)
+                return status;
+
+            uint32 val = 0;
+            if (!read_register(INTEL_GMBUS3, val))
+                return B_ERROR;
+
+            for (size_t j = 0; j < 4 && (i + j) < readLength; j++)
+                readBuffer[i + j] = (val >> (j * 8)) & 0xff;
+        }
+    }
+
+    // Pulisci il controller al termine
+    write_register(INTEL_GMBUS1, GMBUS_CYCLE_STOP | GMBUS_SW_CLR_INT);
+    return B_OK;
+}
+static status_t
+configure_hdmi_scdc(uint8 ddiPort, uint32 pixelClockKHz)
+{
+    uint8 scdcConfig = 0;
+
+    if (pixelClockKHz > 340000) {
+        // Modalità HDMI 2.0: Clock Ratio 1:40 e Scrambling attivo
+        scdcConfig = SCDC_TMDS_BIT_CLOCK_RATIO_BY_40 | SCDC_SCRAMBLING_ENABLE;
+    } else {
+        // Modalità HDMI 1.4: Clock Ratio 1:10 e Scrambling disattivato
+        scdcConfig = 0;
+    }
+
+    debug_printf("intel_arc.accelerant: SCDC config for port %u (clock %" B_PRIu32 " kHz): 0x%02X via GMBUS\n",
+        ddiPort, pixelClockKHz, scdcConfig);
+
+    // Buffer di scrittura I2C SCDC: [registro 0x20 TMDS_CONFIG, valore]
+    uint8 writeBuffer[2] = { SCDC_TMDS_CONFIG, scdcConfig };
+
+    i2c_bus bus;
+    memset(&bus, 0, sizeof(bus));
+    ddc2_init_timing(&bus);
+    bus.cookie = (void*)(addr_t)ddiPort;
+    bus.send_receive = &gmbus_send_receive;
+    bus.set_signals = NULL;
+    bus.get_signals = NULL;
+
+    // Transazione I2C nativa via GMBUS su indirizzo SCDC 0x54
+    status_t status = gmbus_send_receive(&bus, SCDC_I2C_SLAVE_ADDR,
+        writeBuffer, sizeof(writeBuffer), NULL, 0);
+    if (status != B_OK) {
+        debug_printf("intel_arc.accelerant ERROR: Failed to write SCDC config via GMBUS I2C: %s\n",
+            strerror(status));
+    }
+    return status;
+}*/
+status_t
+intel_arc_set_display_mode(display_mode* mode)
+{
+	if (mode == NULL)
+		return B_BAD_VALUE;
+
+	debug_printf("intel_arc.accelerant: >>> SET_DISPLAY_MODE requested: %ux%u, pixel_clock=%u kHz <<<\n",
+		mode->virtual_width, mode->virtual_height, mode->timing.pixel_clock);
+
+	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: Timing: HTotal=%u, HDisplay=%u, HSyncStart=%u, HSyncEnd=%u\n",
+		mode->timing.h_total, mode->timing.h_display, mode->timing.h_sync_start, mode->timing.h_sync_end);
+	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: Timing: VTotal=%u, VDisplay=%u, VSyncStart=%u, VSyncEnd=%u\n",
+		mode->timing.v_total, mode->timing.v_display, mode->timing.v_sync_start, mode->timing.v_sync_end);
+
+	(void)handle_hotplug_event();
+
+	display_mode target = *mode;
+	/*status_t status = intel_arc_propose_display_mode(&target, &target, &target);
+	if (status != B_OK) {
+		debug_printf("propose display mode failed\n");
+		return status;
+	}*/
+	sanitize_mode_geometry(target, "intel_arc_set_display_mode");
+
+	if (gInfo->shared_info->active_pipe < 0) {
+		debug_printf("intel_arc.accelerant ERROR: No active pipe found in shared info!\n");
+		return B_UNSUPPORTED;
+	}
+
+	status_t status = apply_dpms_off();
+	if (status != B_OK)
+		debug_printf("intel_arc.accelerant ERROR: apply_dpms_off() returned %s\n", strerror(status));
+
+	const int8 pipe = gInfo->shared_info->active_pipe;
+	const uint32 pipeOffset = (uint32)pipe * INTEL_ARC_MMIO_PIPE_OFFSET;
+	const uint32 bytesPerPixel = bytes_per_pixel_for_space((color_space)target.space);
+	if (bytesPerPixel == 0)
+		return B_BAD_VALUE;
+	//debug_printf("Arc Driver: app_server pitch = %" B_PRIu32 ", calculated pitch = %" B_PRIu32 "\n",
+    	//gInfo->shared_info->bytes_per_row, (target.virtual_width * bytesPerPixel + 63) & ~63);
+
+	gInfo->shared_info->current_mode = target;
+	//gInfo->shared_info->bytes_per_row = target.virtual_width * bytesPerPixel;
+	
+	// Regilations Pipe Timings
+	gInfo->shared_info->pipe_h_total[pipe]
+		= ((uint32)(target.timing.h_total - 1) << 16) | ((uint32)target.timing.h_display - 1);
+	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: H_TOTAL impostato a 0x%X\n", gInfo->shared_info->pipe_h_total[pipe]);
+	gInfo->shared_info->pipe_h_blank[pipe]
+		= ((uint32)(target.timing.h_total - 1) << 16) | ((uint32)target.timing.h_display - 1);
+	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: H_BLANK impostato a 0x%X\n", gInfo->shared_info->pipe_h_blank[pipe]);
+	gInfo->shared_info->pipe_h_sync[pipe]
+		= ((uint32)(target.timing.h_sync_end - 1) << 16) | ((uint32)target.timing.h_sync_start - 1);
+	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: H_SYNC impostato a 0x%X\n", gInfo->shared_info->pipe_h_sync[pipe]);
+	gInfo->shared_info->pipe_v_total[pipe]
+		= ((uint32)(target.timing.v_total - 1) << 16) | ((uint32)target.timing.v_display - 1);
+	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: V_TOTAL impostato a 0x%X\n", gInfo->shared_info->pipe_v_total[pipe]);
+	gInfo->shared_info->pipe_v_blank[pipe]
+		= ((uint32)(target.timing.v_total - 1) << 16) | ((uint32)target.timing.v_display - 1);
+	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: V_BLANK impostato a 0x%X\n", gInfo->shared_info->pipe_v_blank[pipe]);
+	gInfo->shared_info->pipe_v_sync[pipe]
+		= ((uint32)(target.timing.v_sync_end - 1) << 16) | ((uint32)target.timing.v_sync_start - 1);
+	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: V_SYNC impostato a 0x%X\n", gInfo->shared_info->pipe_v_sync[pipe]);
+
+	const uint32 bytesPerRow = (target.virtual_width * bytesPerPixel + 63) & ~63;
+	gInfo->shared_info->bytes_per_row = bytesPerRow;
+	gInfo->shared_info->plane_stride[pipe] = bytesPerRow / 64;
+	gInfo->shared_info->fbc.bytes_per_row = bytesPerRow;
+	
+	gInfo->shared_info->plane_pos[pipe] = 0;
+
+	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: PLANE_CONTROL prima di modificare i parametri: 0x%X\n",gInfo->shared_info->plane_control[pipe]);
+    gInfo->shared_info->plane_control[pipe] &= ~INTEL_ARC_PLANE_TILED_MASK;
+	gInfo->shared_info->plane_control[pipe] |= INTEL_ARC_PLANE_LINEAR;
+	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: PLANE_CONTROL dopo modifica parametri TILED_MASK e LINEAR: 0x%X\n",gInfo->shared_info->plane_control[pipe]);
+    //-------------------
+	gInfo->shared_info->plane_control[pipe]
+		= (gInfo->shared_info->plane_control[pipe]
+			& ~INTEL_ARC_DISPLAY_CONTROL_COLOR_MASK_SKY)
+		| plane_color_format_for_space((color_space)target.space);
+	// A. Disabilita lo Scaler
+	write_register(scaler_control_register(pipe, 1), 0);
+	write_register(scaler_control_register(pipe, 2), 0);
+
+	const uint32 hDisplay = target.timing.h_display;
+	const uint32 vDisplay = target.timing.v_display;
+	
+
+	const uint32 nativeSize = ((vDisplay - 1) << 16) | (hDisplay - 1);
+	const uint32 nativeSizeforPipe = ((hDisplay - 1) << 16) | (vDisplay - 1);
+
+	// La Pipe e il Piano devono avere LA STESSA dimensione fisica
+	gInfo->shared_info->pipe_size[pipe] = nativeSizeforPipe;
+	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: PIPE_SIZE impostato a 0x%X\n", gInfo->shared_info->pipe_size[pipe]);
+	gInfo->shared_info->plane_image_size[pipe] = nativeSize;
+	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: PLANE_IMAGE_SIZE impostato a 0x%X\n", gInfo->shared_info->plane_image_size[pipe]);
+	log_pipe_plane_state("intel_arc_set_display_mode before MMIO writes", pipe);
+	
+	// B. Scrivi i Timing della Pipe (1280x1024 VESA)
+	write_register(INTEL_ARC_MMIO_PIPE_A_HTOTAL + pipeOffset, gInfo->shared_info->pipe_h_total[pipe]);
+	write_register(INTEL_ARC_MMIO_PIPE_A_HBLANK + pipeOffset, gInfo->shared_info->pipe_h_blank[pipe]);
+	write_register(INTEL_ARC_MMIO_PIPE_A_HSYNC + pipeOffset, gInfo->shared_info->pipe_h_sync[pipe]);
+	write_register(INTEL_ARC_MMIO_PIPE_A_VTOTAL + pipeOffset, gInfo->shared_info->pipe_v_total[pipe]);
+	write_register(INTEL_ARC_MMIO_PIPE_A_VBLANK + pipeOffset, gInfo->shared_info->pipe_v_blank[pipe]);
+	write_register(INTEL_ARC_MMIO_PIPE_A_VSYNC + pipeOffset, gInfo->shared_info->pipe_v_sync[pipe]);
+	write_register(INTEL_ARC_MMIO_PIPE_A_SIZE + pipeOffset, gInfo->shared_info->pipe_size[pipe]);
+	// C. Scrivi la superficie del Piano (1280x1024)
+	write_register(INTEL_ARC_MMIO_PLANE_A_POS + pipeOffset, 0);
+	write_register(INTEL_ARC_MMIO_PLANE_A_IMAGE_SIZE + pipeOffset, gInfo->shared_info->plane_image_size[pipe]);
+	write_register(INTEL_ARC_MMIO_PLANE_A_STRIDE + pipeOffset, gInfo->shared_info->plane_stride[pipe]);
+	write_register(INTEL_ARC_MMIO_PLANE_A_OFFSET + pipeOffset, 0);
+
+	const uint32 disabledPlaneCtl = gInfo->shared_info->plane_control[pipe] & ~(1U << 31);
+    	write_register(INTEL_ARC_MMIO_PLANE_A_CONTROL + pipeOffset, disabledPlaneCtl);
+
+    
+    const uint32 gammaModeReg = INTEL_ARC_GAMMA_MODE_BASE + (pipe * 0x1000);
+    uint32 gammaValue = 0;
+
+    // Legge il valore attuale del registro per preservare gli altri flag hardware
+    if (read_register(gammaModeReg, gammaValue)) {
+        if (target.space == B_COLOR_8_BIT) {
+        	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: CLEARING GAMMAMODE for 8-bits color space\n");
+            // Bit [1:0] = 00b -> Forza la Pipe in Legacy Palette 8-bit Mode
+            gammaValue &= ~3U;
+        } else {
+            // Per 16/24/32 bit rispristina/imposta il bypass o Direct Gamma
+            // (Bit [1:0] = 01b o valore di default per colori diretti)
+            if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: DIRECT GAMMA for NON-8bits color space\n");
+            gammaValue = (gammaValue & ~3U) | 1U;
+        }
+        write_register(gammaModeReg, gammaValue);
+    } else {
+        // Fallback in caso di fallimento della lettura
+        if (target.space == B_COLOR_8_BIT)
+            write_register(gammaModeReg, 0);
+    }
+    
+    uint32 ddiFuncCtl = gInfo->shared_info->pipe_ddi_func_ctl[pipe];
+    if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: valore di ddiFuncCtl prima di configurare il monitor: %" B_PRIx32 "\n",ddiFuncCtl);
+/* dovrebbe impostare i bit di hsync e vsync per ora posticipiamo  lo facciamo in configure_dp_link
+    if ((target.timing.flags & B_POSITIVE_HSYNC) != 0)
+        ddiFuncCtl |= INTEL_ARC_DDI_HSYNC_POLARITY_POSITIVE;
+    else
+        ddiFuncCtl &= ~INTEL_ARC_DDI_HSYNC_POLARITY_POSITIVE;
+
+    if ((target.timing.flags & B_POSITIVE_VSYNC) != 0)
+        ddiFuncCtl |= INTEL_ARC_DDI_VSYNC_POLARITY_POSITIVE;
+    else
+        ddiFuncCtl &= ~INTEL_ARC_DDI_VSYNC_POLARITY_POSITIVE;
+    debug_printf("intel_arc.accelerant: valore di ddiFuncCtl DOPO la modifica HSYNC e VSYNC: %" B_PRIx32 "\n",ddiFuncCtl);
+*/
+
+
+
+
+    // Disabilita il bit ENABLE (Bit 31) su PIPE_DDI_FUNC_CTL prima del Link Training
+    //ddiFuncCtl &= ~INTEL_ARC_PIPE_DDI_FUNC_CTL_ENABLE; // Bit 31 = 0 se disattivo il transcoder perdo il link display_link e perdo il fast modeset
+
+    // Salva lo stato aggiornato nella struttura condivisa e scrivi il registro MMIO
+    if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: valore di ddiFuncCtl prima di dp_link o program_hdmi_dpll: %" B_PRIx32 "\n",ddiFuncCtl);
+    gInfo->shared_info->pipe_ddi_func_ctl[pipe] = ddiFuncCtl;
+    //write_register(INTEL_ARC_MMIO_PIPE_A_DDI_FUNC_CTL + pipeOffset, ddiFuncCtl);
+	log_pipe_plane_state("intel_arc_set_display_mode after MMIO writes", pipe);
+    //-------------------
+
+	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: Configuring link for Active Pipe %d (FuncCtl: 0x%08X)\n",
+		pipe, gInfo->shared_info->pipe_ddi_func_ctl[pipe]);
+	
+	uint32 modeSel = (gInfo->shared_info->pipe_ddi_func_ctl[pipe] & INTEL_ARC_PIPE_DDI_MODESEL_MASK) >> 24;
+	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: Detected DDI ModeSel: %u\n", modeSel);
+
+	if (modeSel == INTEL_ARC_PIPE_DDI_MODE_DP_SST || modeSel == INTEL_ARC_PIPE_DDI_MODE_DP_MST) {
+		if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: Mode is DP, calling configure_dp_link()\n");
+		//configure_dp_link(&target);
+		if (gInfo->shared_info->dp_link_trained_by_gop) {
+            // FAST MODESET: Il DDI e il Link PHY NON vengono toccati né disabilitati!
+            if (enableAllDebugLogs)
+                debug_printf("intel_arc.accelerant: Executing DP Fast Modeset\n");
+
+            status = fast_modeset_dp(target, gInfo->shared_info->dp_boot_config.bpp);
+        } else {
+			// Fallback: eseguiamo la sequenza completa di Link Training
+			// Attualmente non funziona, evidentemente sbaglio qualcosa...
+			ddiFuncCtl &= ~INTEL_ARC_PIPE_DDI_FUNC_CTL_ENABLE;
+            gInfo->shared_info->pipe_ddi_func_ctl[pipe] = ddiFuncCtl;
+            write_register(INTEL_ARC_MMIO_PIPE_A_DDI_FUNC_CTL + pipeOffset, ddiFuncCtl);
+
+            if (enableAllDebugLogs)
+                debug_printf("intel_arc.accelerant: Executing Full DP Link Training\n");
+
+            status = configure_dp_link(&target);
+
+            // Riabilitiamo il DDI al termine del Full Training
+            ddiFuncCtl |= INTEL_ARC_PIPE_DDI_FUNC_ENABLE;
+            gInfo->shared_info->pipe_ddi_func_ctl[pipe] = ddiFuncCtl;
+            write_register(INTEL_ARC_MMIO_PIPE_A_DDI_FUNC_CTL + pipeOffset, ddiFuncCtl);
+		}
+		if (status != B_OK) {
+			debug_printf("intel_arc.accelerant ERROR: configure_dp_link failed: %s\n", strerror(status));
+			return status;
+		}
+	} else {
+		if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: Mode is HDMI/DVI\n");
+		status = intel_arc_program_hdmi_dpll(gInfo, gInfo->shared_info->active_ddi_port, target.timing.pixel_clock);
+    	if (status != B_OK) {
+        	debug_printf("intel_arc.accelerant ERROR: intel_arc_program_hdmi_dpll failed: %s\n", strerror(status));
+        	return status;
+    	}
+
+		status = apply_hdmi_phy_levels(gInfo->shared_info->active_ddi_port, pipe);
+		if (status != B_OK) {
+			debug_printf("intel_arc.accelerant ERROR: apply_hdmi_phy_levels failed: %s\n", strerror(status));
+			return status;
+		}
+		/*
+		// Configura SCDC sul monitor via I2C (Scrambling + Clock Ratio 1:40)
+        status = configure_hdmi_scdc(gInfo->shared_info->active_ddi_port, target.timing.pixel_clock);
+        if (status != B_OK) {
+            debug_printf("intel_arc.accelerant WARNING: SCDC programming failed, monitor may stay dark\n");
+        }*/
+	}
+	// ORA CHE IL LINK TRAPPING È COMPLETATO E IN NORMAL:
+ //   rileggi ddiFuncCtl
+    ddiFuncCtl = gInfo->shared_info->pipe_ddi_func_ctl[pipe];
+    if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: valore di ddiFuncCtl dopo dp_link o program_hdmi_dpll: %" B_PRIx32 "\n",ddiFuncCtl);
+    // Configura i bit HDMI 2.0 sul trasmettitore DDI della GPU Arc
+    /*
+    if (modeSel != INTEL_ARC_PIPE_DDI_MODE_DP_SST && modeSel != INTEL_ARC_PIPE_DDI_MODE_DP_MST) {
+        if (target.timing.pixel_clock > 340000) {
+            ddiFuncCtl |= INTEL_ARC_DDI_HIGH_TMDS_CHAR_RATE;
+            ddiFuncCtl |= INTEL_ARC_DDI_HDMI_SCRAMBLING;
+        } else {
+            ddiFuncCtl &= ~INTEL_ARC_DDI_HIGH_TMDS_CHAR_RATE;
+            ddiFuncCtl &= ~INTEL_ARC_DDI_HDMI_SCRAMBLING;
+        }
+    }
+    */
+    // 1. Abilita il Transcoder / Pipe DDI
+    ddiFuncCtl |= INTEL_ARC_PIPE_DDI_FUNC_ENABLE;//INTEL_ARC_PIPE_DDI_FUNC_CTL_ENABLE;
+    gInfo->shared_info->pipe_ddi_func_ctl[pipe] = ddiFuncCtl;
+    write_register(INTEL_ARC_MMIO_PIPE_A_DDI_FUNC_CTL + pipeOffset, ddiFuncCtl);
+    
+    /*if (modeSel != INTEL_ARC_PIPE_DDI_MODE_DP_SST && modeSel != INTEL_ARC_PIPE_DDI_MODE_DP_MST) {
+        configure_gpu_transcoder_hdmi(pipe, target.timing.pixel_clock);
+    }*/
+
+    // 2. Abilita il Plane e carica l'indirizzo della superficie
+    const uint32 enabledPlaneCtl = gInfo->shared_info->plane_control[pipe] | (1U << 31);
+    write_register(INTEL_ARC_MMIO_PLANE_A_CONTROL + pipeOffset, enabledPlaneCtl);
+
+    uint32 fbAddress = gInfo->shared_info->frame_buffer_base + gInfo->shared_info->frame_buffer_offset;
+    write_register(INTEL_ARC_MMIO_PLANE_A_SURFACE + pipeOffset, fbAddress);
+    
+    log_pipe_plane_state("intel_arc_set_display_mode before dpms_on", pipe);
+
+	status = apply_dpms_on();
+	if (status == B_OK) {
+		*mode = target;
+		gInfo->shared_info->fbc.frame_buffer = (void*)gInfo->shared_info->frame_buffer;
+    	gInfo->shared_info->fbc.frame_buffer_dma = (void *)(gInfo->shared_info->frame_buffer_base 
+    + gInfo->shared_info->frame_buffer_offset);
+		if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: SET_DISPLAY_MODE completed successfully!\n");
+	} else {
+		debug_printf("intel_arc.accelerant ERROR: apply_dpms_on() failed: %s\n", strerror(status));
+	}
+	return status;
+}
+
+status_t
+intel_arc_get_display_mode(display_mode* mode)
+{
+	(void)handle_hotplug_event();
+	*mode = gInfo->shared_info->current_mode;
+	return B_OK;
+}
+
+status_t
+intel_arc_get_edid_info(void* info, size_t size, uint32* version)
+{
+	(void)handle_hotplug_event();
+	if (!gInfo->has_edid)
+		return B_ERROR;
+	if (size < sizeof(edid1_info))
+		return B_BUFFER_OVERFLOW;
+
+	memcpy(info, &gInfo->edid_info, sizeof(edid1_info));
+	*version = EDID_VERSION_1;
+	return B_OK;
+}
+
+status_t
+intel_arc_get_frame_buffer_config(frame_buffer_config* config)
+{
+	(void)handle_hotplug_event();
+	if (!config) return B_BAD_VALUE;
+	if (gInfo->frame_buffer == NULL)
+		return B_UNSUPPORTED;
+	*config = gInfo->shared_info->fbc;
+	return B_OK;
+}
+
+status_t
+intel_arc_get_pixel_clock_limits(display_mode* mode, uint32* low, uint32* high)
+{
+	(void)handle_hotplug_event();
+	uint32 totalPixel = (uint32)mode->timing.h_total * (uint32)mode->timing.v_total;
+	uint32 clockLimit = 2000000;
+
+	*low = totalPixel * 48L / 1000L;
+	if (*low > clockLimit)
+		return B_ERROR;
+
+	*high = clockLimit;
+	return B_OK;
+}
+
+status_t
+intel_arc_set_indexed_colors(uint32 count, uint8 first,
+    uint8* color_data, uint32 flags)
+{
+    if (color_data == NULL)
+        return B_BAD_VALUE;
+
+    if (first + count > 256)
+        return B_BAD_VALUE;
+
+    // Recupera la pipe attualmente attiva per lo schermo
+    uint32 pipe = gInfo->shared_info->active_pipe;
+
+    // Indirizzo base dei registri LGC_PALETTE per la pipe attiva
+    // Offset: 0x4A000 + (pipe * 0x400)
+    uint32 paletteBase = INTEL_ARC_LGC_PALETTE_BASE + (pipe * 0x400);
+
+    for (uint32 i = 0; i < count; i++) {
+        uint8 index = first + i;
+        
+        if (index > 255)
+            break;
+
+        // L'array color_data contiene triplette consecutive R, G, B
+        uint8 r = color_data[i * 3 + 0];
+        uint8 g = color_data[i * 3 + 1];
+        uint8 b = color_data[i * 3 + 2];
+
+        // Formato registro Intel LGC_PALETTE: [23:16] Red, [15:8] Green, [7:0] Blue
+        uint32 colorValue = ((uint32)r << 16) | ((uint32)g << 8) | (uint32)b;
+
+        // Scrittura del registro della tavolozza (4 byte per voce)
+        write_register(paletteBase + (index * 4), colorValue);
+    }
+
+    return B_OK;
+}
+
 
 static status_t
 read_edid_from_port(uint8 ddiPort, edid1_info& edid)
@@ -2587,7 +3379,7 @@ read_edid_from_port(uint8 ddiPort, edid1_info& edid)
 	if (ddiPort > 6)
 		return B_BAD_VALUE;
 		
-	debug_printf("intel_arc.accelerant: read_edid_from_port(ddiPort=%u)\n", ddiPort);
+	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: read_edid_from_port(ddiPort=%u)\n", ddiPort);
 
 	i2c_bus bus;
 	ddc2_init_timing(&bus);
@@ -2601,7 +3393,7 @@ read_edid_from_port(uint8 ddiPort, edid1_info& edid)
 static status_t
 read_dpcd_caps_from_port(uint8 ddiPort)
 {
-	debug_printf("intel_arc.accelerant: read_dpcd_caps_from_port(ddiPort=%u)\n", ddiPort);
+	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: read_dpcd_caps_from_port(ddiPort=%u)\n", ddiPort);
 	uint8 buffer[8];
 	dp_aux_msg message;
 	memset(&message, 0, sizeof(message));
@@ -2625,7 +3417,7 @@ read_dpcd_caps_from_port(uint8 ddiPort)
 	gInfo->shared_info->dpcd_max_lane_count = buffer[2] & DP_MAX_LANE_COUNT_MASK;
 	gInfo->shared_info->dpcd_sink_count = buffer[7] & DP_SINK_COUNT_MASK;
 
-	debug_printf("intel_arc.accelerant: DPCD Caps: Rev=0x%02x, MaxLinkRate=0x%02x, MaxLanes=%u\n",
+	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: DPCD Caps: Rev=0x%02x, MaxLinkRate=0x%02x, MaxLanes=%u\n",
 		gInfo->shared_info->dpcd_revision,
 		gInfo->shared_info->dpcd_max_link_rate,
 		gInfo->shared_info->dpcd_max_lane_count);
@@ -2635,7 +3427,7 @@ read_dpcd_caps_from_port(uint8 ddiPort)
 status_t
 read_edid_from_hardware(void)
 {
-    debug_printf("intel_arc.accelerant: read_edid_from_hardware() entering\n");
+    if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: read_edid_from_hardware() entering\n");
     if (gInfo->registers == NULL) {
         if (gInfo->shared_info->has_boot_edid) {
             debug_printf("intel_arc.accelerant: Using boot EDID as there are no registers\n");
@@ -2656,7 +3448,7 @@ read_edid_from_hardware(void)
         && gInfo->shared_info->active_ddi_port >= 0
         && gInfo->shared_info->active_ddi_port < 4) {
         candidates[candidateCount++] = (uint8)gInfo->shared_info->active_ddi_port;
-        debug_printf("intel_arc.accelerant: Active DDI Port %u added to candidates\n", 
+        if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: Active DDI Port %u added to candidates\n", 
             gInfo->shared_info->active_ddi_port);
     }
 
@@ -2685,14 +3477,14 @@ read_edid_from_hardware(void)
     // 4. Scansione edid/dpcd sui candidati
     for (size_t i = 0; i < candidateCount; i++) {
         uint8 port = candidates[i];
-        debug_printf("intel_arc.accelerant: Attempting probe on DDI Port %u\n", port);
+        if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: Attempting probe on DDI Port %u\n", port);
 
         if (!gInfo->shared_info->has_dpcd) {
             read_dpcd_caps_from_port(port);
         }
 
         if (read_edid_from_port(port, gInfo->edid_info) == B_OK) {
-            debug_printf("intel_arc.accelerant: Successfully read EDID from DDI Port %u\n", port);
+            if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: Successfully read EDID from DDI Port %u\n", port);
             gInfo->has_edid = true;
             return B_OK;
         }
@@ -2718,85 +3510,7 @@ read_edid_from_hardware(void)
     gInfo->has_edid = false;
     return B_ENTRY_NOT_FOUND;
 }
-/* lettura dpcd indipendente da edid ma il ciclo non viene eseguito perché non c'è porta attiva!
-status_t
-read_edid_from_hardware(void)
-{
-    debug_printf("intel_arc.accelerant: read_edid_from_hardware() entering\n");
-    if (gInfo->registers == NULL) {
-        if (gInfo->shared_info->has_boot_edid) {
-            debug_printf("intel_arc.accelerant: Using boot EDID as there are no registers\n");
-            memcpy(&gInfo->edid_info, &gInfo->shared_info->boot_edid, sizeof(edid1_info));
-            gInfo->has_edid = true;
-            return B_OK;
-        }
 
-        gInfo->has_edid = false;
-        return B_ENTRY_NOT_FOUND;
-    }
-
-    size_t candidateCount = 0;
-    uint8 candidates[6];
-    
-    if (gInfo->shared_info->active_pipe >= 0
-        && gInfo->shared_info->active_ddi_port > 0
-        && gInfo->shared_info->active_ddi_port <= 4) {
-        candidates[candidateCount++] = gInfo->shared_info->active_ddi_port;
-    }
-
-    for (uint8 port = 1; port <= 4; port++) {
-        if ((gInfo->shared_info->detected_port_bits & (1 << port)) == 0)
-            continue;
-
-        bool alreadyQueued = false;
-        for (size_t i = 0; i < candidateCount; i++) {
-            if (candidates[i] == port) {
-                alreadyQueued = true;
-                break;
-            }
-        }
-        if (!alreadyQueued)
-            candidates[candidateCount++] = port;
-    }
-
-    // 1. Tenta la lettura su ogni porta candidata
-    for (size_t i = 0; i < candidateCount; i++) {
-        uint8 port = candidates[i];
-        debug_printf("intel_arc.accelerant: Attempting probe on candidate DDI Port %u\n", port);
-        
-        // Tenta SEMPRE la lettura DPCD via Native AUX (indipendentemente dall'EDID)
-        if (!gInfo->shared_info->has_dpcd) {
-            read_dpcd_caps_from_port(port);
-        }
-
-        if (read_edid_from_port(port, gInfo->edid_info) == B_OK) {
-            debug_printf("intel_arc.accelerant: Successfully read EDID from DDI Port %u\n", port);
-            gInfo->has_edid = true;
-            return B_OK;
-        }
-    }
-
-    // 2. Fallback su Boot EDID (se la lettura hardware EDID e fallita)
-    if (gInfo->shared_info->has_boot_edid) {
-        debug_printf("intel_arc.accelerant: Hardware EDID read failed, falling back to boot EDID\n");
-        memcpy(&gInfo->edid_info, &gInfo->shared_info->boot_edid, sizeof(edid1_info));
-        gInfo->has_edid = true;
-
-        // Se non siamo riusciti a leggere i DPCD nel ciclo sopra, ritentiamo
-        // esplicitamente sulla porta attiva ereditata dal GOP
-        if (!gInfo->shared_info->has_dpcd && gInfo->shared_info->active_ddi_port > 0) {
-            debug_printf("intel_arc.accelerant: Retrying DPCD read on active DDI Port %u for boot fallback\n",
-                gInfo->shared_info->active_ddi_port);
-            read_dpcd_caps_from_port(gInfo->shared_info->active_ddi_port);
-        }
-
-        return B_OK;
-    }
-
-    debug_printf("intel_arc.accelerant ERROR: Could not read EDID from any port\n");
-    gInfo->has_edid = false;
-    return B_ENTRY_NOT_FOUND;
-}*/
 /* questa versione non legge indipendentemente dpcd da edid
 status_t
 read_edid_from_hardware(void)
@@ -2870,7 +3584,7 @@ handle_hotplug_event(void)
 	if (gInfo->last_hotplug_event_count == gInfo->shared_info->hotplug_event_count)
 		return B_OK;
 
-	debug_printf("intel_arc.accelerant: Hotplug event detected (count=%u)\n", gInfo->shared_info->hotplug_event_count);
+	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: Hotplug event detected (count=%u)\n", gInfo->shared_info->hotplug_event_count);
 	gInfo->last_hotplug_event_count = gInfo->shared_info->hotplug_event_count;
 
 	if (gInfo->shared_info->active_pipe < 0)
@@ -2975,139 +3689,11 @@ program_ddi_buffer(uint8 ddiPort, int8 pipe, uint32 lanes, bool enable)
 
 	return B_OK;
 }*/
-/* ultima versione
+
 status_t
 program_ddi_buffer(uint8 ddiPort, int8 pipe, uint32 lanes, bool enable)
 {
-    debug_printf("intel_arc.accelerant: program_ddi_buffer(ddiPort=%u, pipe=%d, lanes=%u, enable=%d)\n",
-        ddiPort, pipe, lanes, enable);
-
-    if (ddiPort > 4)
-        return B_BAD_VALUE;
-
-    const uint32 reg = INTEL_ARC_MMIO_DDI_BUF_CTL_A + ddiPort * 0x100;
-    uint32 value = 0;
-    read_register(reg, value);
-
-    const bool isCurrentlyEnabled = (value & INTEL_ARC_DDI_BUF_CTL_ENABLE) != 0;
-
-    if (enable) {
-        // Aggiorna la configurazione delle lane (Bits 3:1 - DDI Port Width)
-        value &= ~INTEL_ARC_PIPE_DDI_DP_WIDTH_MASK;
-        value |= pipe_ddi_encode_dp_width(lanes);
-
-        // Se non è ancora abilitato, lo abilita e attende che esca dallo stato IDLE
-        if (!isCurrentlyEnabled) {
-            value |= INTEL_ARC_DDI_BUF_CTL_ENABLE;
-            write_register(reg, value);
-
-            // Attesa che DDI_BUF_IS_IDLE (bit 7) si azzeri (porta attiva)
-            status_t status = wait_for_clear(reg, INTEL_ARC_DDI_BUF_IS_IDLE, 50000);
-            if (status != B_OK) {
-                debug_printf("intel_arc.accelerant ERROR: DDI_BUF_CTL[%u] timed out waiting for IDLE clear (0x%08" B_PRIx32 ")!\n",
-                    ddiPort, value);
-                return status;
-            }
-        } else {
-            // Se già abilitato, applica l'eventuale aggiornamento delle lane
-            write_register(reg, value);
-        }
-    } else {
-        // Se è abilitato, lo disabilita e attende il ritorno in IDLE
-        if (isCurrentlyEnabled) {
-            value &= ~INTEL_ARC_DDI_BUF_CTL_ENABLE;
-            write_register(reg, value);
-
-            // Attende che la porta ritorni in IDLE (bit 7 diventa 1)
-            status_t status = wait_for_set(reg, INTEL_ARC_DDI_BUF_IS_IDLE, 50000);
-            if (status != B_OK) {
-                debug_printf("intel_arc.accelerant ERROR: DDI_BUF_CTL[%u] timed out waiting for IDLE set!\n", ddiPort);
-                return status;
-            }
-        }
-    }
-
-    // Rilegge il registro reale dall'hardware per verificare l'effettivo stato MMIO
-    read_register(reg, value);
-    debug_printf("intel_arc.accelerant: DDI_BUF_CTL[%u] = 0x%08" B_PRIx32 " OK\n", ddiPort, value);
-
-    if (ddiPort > 0 && ddiPort <= 4)
-        gInfo->shared_info->port_state[ddiPort - 1] = value;
-
-    return B_OK;
-}*/
-/* versione con lanes ai bit 21:19  peccato che non sono quelli i bit corretti!
-status_t
-program_ddi_buffer(uint8 ddiPort, int8 pipe, uint32 lanes, bool enable)
-{
-    debug_printf("intel_arc.accelerant: program_ddi_buffer(ddiPort=%u, pipe=%d, lanes=%u, enable=%d)\n",
-        ddiPort, pipe, lanes, enable);
-
-    if (ddiPort > 4)
-        return B_BAD_VALUE;
-
-    const uint32 reg = INTEL_ARC_MMIO_DDI_BUF_CTL_A + ddiPort * 0x100;
-    uint32 value = 0;
-    read_register(reg, value);
-
-    const bool isCurrentlyEnabled = (value & INTEL_ARC_DDI_BUF_CTL_ENABLE) != 0;
-
-    if (enable) {
-        // Aggiorna la configurazione delle lane (Bits 21:19 - DDI Port Width)
-        // 1 lane = 0x0, 2 lanes = 0x1, 4 lanes = 0x3
-        uint32 portWidthCode = 0;
-        if (lanes == 2)
-            portWidthCode = 1;
-        else if (lanes == 4)
-            portWidthCode = 3;
-
-        value &= ~(0x7 << 19);               // Maschera di pulizia sui bit 21:19
-        value |= (portWidthCode << 19);      // Imposta le lane corrette
-
-        // Se non è ancora abilitato, lo abilita e attende che esca dallo stato IDLE
-        if (!isCurrentlyEnabled) {
-            value |= INTEL_ARC_DDI_BUF_CTL_ENABLE;
-            write_register(reg, value);
-
-            // Attesa che DDI_BUF_IS_IDLE (bit 7) si azzeri (porta attiva)
-            status_t status = wait_for_clear(reg, INTEL_ARC_DDI_BUF_IS_IDLE, 50000);
-            if (status != B_OK) {
-                debug_printf("intel_arc.accelerant ERROR: DDI_BUF_CTL[%u] timed out waiting for IDLE clear (0x%08" B_PRIx32 ")!\n",
-                    ddiPort, value);
-                return status;
-            }
-        } else {
-            // Se già abilitato, applica l'eventuale aggiornamento delle lane
-            write_register(reg, value);
-        }
-    } else {
-        // Se è abilitato, lo disabilita e attende il ritorno in IDLE
-        if (isCurrentlyEnabled) {
-            value &= ~INTEL_ARC_DDI_BUF_CTL_ENABLE;
-            write_register(reg, value);
-
-            // Attende che la porta ritorni in IDLE (bit 7 diventa 1)
-            status_t status = wait_for_set(reg, INTEL_ARC_DDI_BUF_IS_IDLE, 50000);
-            if (status != B_OK) {
-                debug_printf("intel_arc.accelerant ERROR: DDI_BUF_CTL[%u] timed out waiting for IDLE set!\n", ddiPort);
-                return status;
-            }
-        }
-    }
-
-    // Rilegge il registro reale dall'hardware per verificare l'effettivo stato MMIO
-    read_register(reg, value);
-    debug_printf("intel_arc.accelerant: DDI_BUF_CTL[%u] = 0x%08" B_PRIx32 " OK\n", ddiPort, value);
-
-    if (ddiPort > 0 && ddiPort <= 4)
-        gInfo->shared_info->port_state[ddiPort - 1] = value;
-
-    return B_OK;
-}*/
-status_t
-program_ddi_buffer(uint8 ddiPort, int8 pipe, uint32 lanes, bool enable)
-{
-    debug_printf("intel_arc.accelerant: program_ddi_buffer(ddiPort=%u, pipe=%d, lanes=%" B_PRIu32 ", enable=%d)\n",
+    if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: program_ddi_buffer(ddiPort=%u, pipe=%d, lanes=%" B_PRIu32 ", enable=%d)\n",
         ddiPort, pipe, lanes, enable);
 
     if (ddiPort > 6)
@@ -3116,7 +3702,7 @@ program_ddi_buffer(uint8 ddiPort, int8 pipe, uint32 lanes, bool enable)
     const uint32 reg = INTEL_ARC_MMIO_DDI_BUF_CTL_A + ddiPort * 0x100;
     uint32 value = 0;
     read_register(reg, value);
-    debug_printf("PROGRAM_DDI_BUFFER: value before 0x%" B_PRIx32 "\n", value);
+    if (enableAllDebugLogs) debug_printf("PROGRAM_DDI_BUFFER: value before 0x%" B_PRIx32 "\n", value);
 
     const bool isCurrentlyEnabled = (value & INTEL_ARC_DDI_BUF_CTL_ENABLE) != 0;
 
@@ -3166,123 +3752,10 @@ program_ddi_buffer(uint8 ddiPort, int8 pipe, uint32 lanes, bool enable)
 
     // Rilegge il registro reale dall'hardware per verificare l'effettivo stato MMIO
     read_register(reg, value);
-    debug_printf("intel_arc.accelerant: DDI_BUF_CTL[%u] = 0x%08" B_PRIx32 " OK\n", ddiPort, value);
+    if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: DDI_BUF_CTL[%u] = 0x%08" B_PRIx32 " OK\n", ddiPort, value);
 
     if (ddiPort > 0 && ddiPort <= 4)
         gInfo->shared_info->port_state[ddiPort - 1] = value;
 
     return B_OK;
 }
-/* funziona ma riscrivo
-status_t
-program_ddi_buffer(uint8 ddiPort, int8 pipe, uint32 lanes, bool enable)
-{
-    debug_printf("intel_arc.accelerant: program_ddi_buffer(ddiPort=%u, pipe=%d, lanes=%u, enable=%d)\n",
-        ddiPort, pipe, lanes, enable);
-
-    if (ddiPort > 6)
-        return B_BAD_VALUE;
-
-    const uint32 reg = INTEL_ARC_MMIO_DDI_BUF_CTL_A + ddiPort * 0x100;
-    uint32 value = 0;
-    read_register(reg, value);
-    debug_printf("PROGRAM_DDI_BUFFER: value before %" B_PRIx32 "\n",value);
-
-    const bool isCurrentlyEnabled = (value & INTEL_ARC_DDI_BUF_CTL_ENABLE) != 0;
-
-    if (enable) {
-        // Aggiorna la configurazione delle lane (Bits 19:16 - DDI Port Width)
-        // 1 lane = 0x0, 2 lanes = 0x1, 4 lanes = 0x3
-        uint32 portWidth = 0;
-        if (lanes == 2)
-            portWidth = (1 << 16);
-        else if (lanes == 4)
-            portWidth = (3 << 16);
-
-        value &= ~(0xF << 16);
-        value |= portWidth;
-
-        // Se non è ancora abilitato, lo abilita e attende che esca dallo stato IDLE
-        if (!isCurrentlyEnabled) {
-            value |= INTEL_ARC_DDI_BUF_CTL_ENABLE;
-            write_register(reg, value);
-
-            // Attesa che DDI_BUF_IS_IDLE (bit 7) si azzeri (porta attiva)
-            status_t status = wait_for_clear(reg, INTEL_ARC_DDI_BUF_IS_IDLE, 50000);
-            if (status != B_OK) {
-                debug_printf("intel_arc.accelerant ERROR: DDI_BUF_CTL[%u] timed out waiting for IDLE clear (0x%08" B_PRIx32 ")!\n",
-                    ddiPort, value);
-                return status;
-            }
-        } else {
-            // Se già abilitato, applica l'eventuale aggiornamento delle lane
-            write_register(reg, value);
-        }
-    } else {
-        // Se è abilitato, lo disabilita e attende il ritorno in IDLE
-        if (isCurrentlyEnabled) {
-            value &= ~INTEL_ARC_DDI_BUF_CTL_ENABLE;
-            write_register(reg, value);
-
-            // Attende che la porta ritorni in IDLE (bit 7 diventa 1)
-            status_t status = wait_for_set(reg, INTEL_ARC_DDI_BUF_IS_IDLE, 50000);
-            if (status != B_OK) {
-                debug_printf("intel_arc.accelerant ERROR: DDI_BUF_CTL[%u] timed out waiting for IDLE set!\n", ddiPort);
-                return status;
-            }
-        }
-    }
-
-    // Rilegge il registro reale dall'hardware per verificare l'effettivo stato MMIO
-    read_register(reg, value);
-    debug_printf("intel_arc.accelerant: DDI_BUF_CTL[%u] = 0x%08" B_PRIx32 " OK\n", ddiPort, value);
-
-    if (ddiPort > 0 && ddiPort <= 4)
-        gInfo->shared_info->port_state[ddiPort - 1] = value;
-
-    return B_OK;
-}*/
-/*
-status_t
-program_ddi_buffer(uint8 ddiPort, int8 pipe, uint32 lanes, bool enable)
-{
-    debug_printf("intel_arc.accelerant: program_ddi_buffer(ddiPort=%u, pipe=%d, lanes=%u, enable=%d)\n",
-        ddiPort, pipe, lanes, enable);
-    if (ddiPort > 6)
-        return B_BAD_VALUE;
-
-    const uint32 reg = INTEL_ARC_MMIO_DDI_BUF_CTL_A + ddiPort * 0x100;
-    uint32 value = 0;
-    read_register(reg, value);
-
-    if (enable) {
-        // Abilita il buffer della DDI
-        value |= INTEL_ARC_DDI_BUF_CTL_ENABLE;
-        write_register(reg, value);
-
-        // Con il clock SNPS PHY agganciato, DDI_BUF_IS_IDLE (bit 7) deve azzerarsi
-        status_t status = wait_for_clear(reg, INTEL_ARC_DDI_BUF_IS_IDLE, 50000);
-        if (status != B_OK) {
-            debug_printf("intel_arc.accelerant ERROR: DDI_BUF_CTL[%u] timed out waiting for IDLE clear (0x%08" B_PRIx32 ")!\n",
-                ddiPort, value);
-            return status;
-        }
-    } else {
-        // Disabilita il buffer della DDI
-        value &= ~INTEL_ARC_DDI_BUF_CTL_ENABLE;
-        write_register(reg, value);
-
-        // Attende che la porta ritorni in IDLE (bit 7 diventa 1)
-        status_t status = wait_for_set(reg, INTEL_ARC_DDI_BUF_IS_IDLE, 50000);
-        if (status != B_OK) {
-            debug_printf("intel_arc.accelerant ERROR: DDI_BUF_CTL[%u] timed out waiting for IDLE set!\n", ddiPort);
-            return status;
-        }
-    }
-
-    debug_printf("intel_arc.accelerant: DDI_BUF_CTL[%u] = 0x%08" B_PRIx32 " OK\n", ddiPort, value);
-    if (ddiPort > 0 && ddiPort <= 4)
-        gInfo->shared_info->port_state[ddiPort - 1] = value;
-
-    return B_OK;
-}*/

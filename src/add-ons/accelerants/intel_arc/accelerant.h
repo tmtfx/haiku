@@ -14,10 +14,8 @@
 /* Pipe & Transcoder Block Base (Transcoder A) */
 #define INTEL_ARC_MMIO_PIPE_BLOCK_BASE          0x60000
 #define INTEL_ARC_MMIO_PIPE_OFFSET              0x1000
-/* DisplayPort AUX Channel Registers (Display 13+) */
-#define INTEL_ARC_MMIO_AUX_CH_CTL_A             (INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x4010) // 0x64010
-#define INTEL_ARC_MMIO_AUX_CH_DATA1_A           (INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x4014) // 0x64014
-#define INTEL_ARC_MMIO_AUX_CHANNEL_STRIDE       0x100
+
+
 /* Transcoder Timing Registers (Pipe A) */
 #define INTEL_ARC_MMIO_PIPE_A_HTOTAL            (INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0000) // 0x60000
 #define INTEL_ARC_MMIO_PIPE_A_HBLANK           (INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x0004) // 0x60004
@@ -134,6 +132,7 @@
 #define INTEL_ARC_DP_AUX_CTL_SYNC_PULSE_SKL(c)	((c) - 1)
 #define INTEL_ARC_DDI_MN_TU_SIZE_MASK			(0x3fU << 25)
 
+
 //#define INTEL_ARC_PIPE_ENABLED					(1U << 31) //in intel_arc.h
 #ifdef INTEL_ARC_PIPE_ENABLED
 #undef INTEL_ARC_PIPE_ENABLED
@@ -152,9 +151,9 @@
 #define INTEL_ARC_DDI_BUF_PORT_WIDTH_SHIFT      16
 #define INTEL_ARC_DDI_BUF_PORT_WIDTH_MASK       (0xFU << INTEL_ARC_DDI_BUF_PORT_WIDTH_SHIFT)
 
-#define INTEL_ARC_PIPE_DDI_MODESEL_MASK			(7U << 24)
-#define INTEL_ARC_PIPE_DDI_MODE_DP_SST			2U
-#define INTEL_ARC_PIPE_DDI_MODE_DP_MST			3U
+//#define INTEL_ARC_PIPE_DDI_MODESEL_MASK			(7U << 24)
+//#define INTEL_ARC_PIPE_DDI_MODE_DP_SST			2U
+//#define INTEL_ARC_PIPE_DDI_MODE_DP_MST			3U
 //#define INTEL_ARC_PIPE_DDI_BPC_MASK				(7U << 20) //in intel_arc.h
 //#define INTEL_ARC_PIPE_DDI_DP_WIDTH_MASK		(7U << 1)
 //#define INTEL_ARC_PIPE_DDI_DP_WIDTH_SHIFT		1 
@@ -182,6 +181,17 @@
 #define INTEL_ARC_DP_LINK_RATE_810				0x1e
 #define INTEL_ARC_DP_LINK_RATE_1350				0x2a
 #define INTEL_ARC_DP_LINK_RATE_2000				0x32
+// ********* HDMI 2.0 ************
+// Registri DDI / Pipe Function Control (DG2 / Alchemist)
+#define INTEL_ARC_DDI_HIGH_TMDS_CHAR_RATE  (1U << 27) // TMDS Clock Ratio 1:40 (sopra i 340 MHz)
+#define INTEL_ARC_DDI_HDMI_SCRAMBLING       (1U << 26) // Abilita Scrambler HDMI 2.0
+
+// SCDC (Status and Control Data Channel - I2C Slave Address 0x54)
+#define SCDC_I2C_SLAVE_ADDR                 0x54
+#define SCDC_TMDS_CONFIG                    0x20
+#define SCDC_TMDS_BIT_CLOCK_RATIO_BY_40     (1U << 1)
+#define SCDC_SCRAMBLING_ENABLE              (1U << 0)
+// ********************************
 
 #define INTEL_ARC_TGL_DPCLKA_CFGCR0				0x164280
 #define INTEL_ARC_TGL_DPCLKA_DDIC_CLOCK_OFF		(1U << 24)
@@ -314,6 +324,34 @@
 #define INTEL_ARC_BMG_CX0_C10_TX0                0x010
 #define INTEL_ARC_BMG_CX0_C10_TX1                0x014
 #define INTEL_ARC_BMG_CX0_C10_CMN0               0x020
+
+
+
+
+#define INTEL_GMBUS0                        0x51000
+#define INTEL_GMBUS1                        0x51004
+#define INTEL_GMBUS2                        0x51008
+#define INTEL_GMBUS3                        0x5100c
+#define INTEL_GMBUS4                        0x51010
+#define INTEL_GMBUS5                        0x51014
+
+#define GMBUS_SW_CLR_INT                    (1u << 31)
+#define GMBUS_SW_RDY                        (1u << 30)
+#define GMBUS_ENT_WAIT_READ                 (1u << 29)
+#define GMBUS_CYCLE_NONE                    (0u << 25)
+#define GMBUS_CYCLE_OPEN                    (1u << 25)
+#define GMBUS_CYCLE_WAIT                    (2u << 25)
+#define GMBUS_CYCLE_STOP                    (4u << 25)
+
+#define GMBUS_HW_RDY                        (1u << 11)
+#define GMBUS_ACTIVE                        (1u << 9)
+#define GMBUS_SATOER                        (1u << 10) // Timeout / NAK
+
+#define TRANS_HDMI_CONFIG_A                     0x600C0
+#define TRANS_HDMI_CONFIG(transcoder)           (0x600C0 + (transcoder) * 0x1000)
+
+#define TRANS_HDMI_SCRAMBLING_ENABLE            (1u << 0)
+#define TRANS_HDMI_HIGH_TMDS_CHAR_RATE          (1u << 1) // Attiva il ratio 1:40 per clock > 340MHz
 
 struct arc_mit_buf_trans_entry {
 	uint8	main;

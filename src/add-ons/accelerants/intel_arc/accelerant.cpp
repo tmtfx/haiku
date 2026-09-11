@@ -68,7 +68,128 @@ uninit_common(void)
 	free(gInfo);
 	gInfo = NULL;
 }
+/*
+status_t dp_aux_read(uint32 address, uint8* buffer, size_t size)
+{
+    if (buffer == NULL || size == 0 || size > 16)
+        return B_BAD_VALUE;
 
+    // Costruzione comando AUX: Header 20 bit [Command (4b) | Address (16b) | Length-1 (8b)]
+    uint32 aux_cmd = (DP_AUX_NATIVE_READ << 20) | ((address & 0xFFFFF) << 4) | ((size - 1) & 0xF);
+
+    // 1. Scrivi il comando nel registro DATA1
+    write_register(INTEL_ARC_MMIO_AUX_CH_DATA1_A, aux_cmd);
+
+    // 2. Avvia la transazione AUX (BIT 31 = SEND_BUSY, BIT 26 = Interrupt enable/disable, Sync pulse len)
+    uint32 ctl_val = (1U << 31) | (size << 20) | (5 << 16); // 5 us message length timeout
+    write_register(INTEL_ARC_MMIO_AUX_CH_CTL_A, ctl_val);
+
+    // 3. Polling per il completamento (Bit 31 torna a 0)
+    int timeout = 1000;
+    uint32 val = 0;
+    read_register(INTEL_ARC_MMIO_AUX_CH_CTL_A, val);
+    while ((val & (1U << 31)) && --timeout > 0) {
+        snooze(10);
+    }
+
+    if (timeout <= 0)
+        return B_TIMED_OUT;
+
+    // 4. Leggi la risposta dal registro DATA
+    uint32 rx_data = 0;
+    read_register(INTEL_ARC_MMIO_AUX_CH_DATA1_A, rx_data);
+    buffer[0] = (rx_data >> 16) & 0xFF; // Estrai byte letto
+
+    return B_OK;
+}
+
+status_t get_transcoder_dp_config(uint32 trans_ddi_ctl_reg, dp_link_config& config)
+{
+    // Inizializzazione con le tue impostazioni di default
+    config.lanes = 4;            // Default sicuro
+    config.bpp = 24;             // Default 8 bpc (24 bpp)
+    config.linkBandwidth = 540000; // Default 5.40 Gbps (HBR2) in kHz
+
+    // 1. Leggi il registro TRANS_DDI_FUNC_CTL del transcoder attivo
+    uint32 ddi_ctl = 0;
+    status_t ret = read_register(trans_ddi_ctl_reg, ddi_ctl);
+
+    if ((ret != B_OK)&&!(ddi_ctl & INTEL_ARC_PIPE_DDI_FUNC_ENABLE)) {
+        return B_ERROR; // Transcoder disabilitato
+    }
+
+    // -------------------------------------------------------------
+    // A. RECUPERO DEL NUMERO DI LANE (Bit [3:1])
+    // -------------------------------------------------------------
+    uint32 port_width = ddi_ctl & INTEL_ARC_PIPE_DDI_DP_WIDTH_MASK;
+    switch (port_width) {
+        case INTEL_ARC_PIPE_DDI_DP_WIDTH_1:
+            config.lanes = 1;
+            break;
+        case INTEL_ARC_PIPE_DDI_DP_WIDTH_2:
+            config.lanes = 2;
+            break;
+        case INTEL_ARC_PIPE_DDI_DP_WIDTH_3:
+            config.lanes = 3;
+            break;
+        case INTEL_ARC_PIPE_DDI_DP_WIDTH_4:
+        default:
+            config.lanes = 4;
+            break;
+    }
+
+    // -------------------------------------------------------------
+    // B. RECUPERO BPC E BPP (Bit [22:20])
+    // -------------------------------------------------------------
+    uint32 bpc_bits = ddi_ctl & INTEL_ARC_PIPE_DDI_BPC_MASK;
+    switch (bpc_bits) {
+        case INTEL_ARC_PIPE_DDI_BPC_6:
+            config.bpp = 18; // 6 bits per color * 3 RGB
+            break;
+        case INTEL_ARC_PIPE_DDI_BPC_8:
+            config.bpp = 24; // 8 bits per color * 3 RGB
+            break;
+        case INTEL_ARC_PIPE_DDI_BPC_10:
+            config.bpp = 30; // 10 bits per color * 3 RGB
+            break;
+        case INTEL_ARC_PIPE_DDI_BPC_12:
+            config.bpp = 36; // 12 bits per color * 3 RGB
+            break;
+        //case TRANS_DDI_BPC_16:
+        //    config.bpp = 48; // 16 bits per color * 3 RGB
+        //    break;
+        default:
+            config.bpp = 24;
+            break;
+    }
+
+    // -------------------------------------------------------------
+    // C. RECUPERO LINK BANDWIDTH / LINK RATE (da DPCD via AUX)
+    // -------------------------------------------------------------
+    uint8 dpcd_bw = 0;
+    if (dp_aux_read(DPCD_LINK_BW_SET, &dpcd_bw, 1) == B_OK && dpcd_bw != 0) {
+        switch (dpcd_bw) {
+            case 0x06:
+                config.linkBandwidth = 162000; // RBR  (1.62 Gbps)
+                break;
+            case 0x0A:
+                config.linkBandwidth = 270000; // HBR  (2.70 Gbps)
+                break;
+            case 0x14:
+                config.linkBandwidth = 540000; // HBR2 (5.40 Gbps)
+                break;
+            case 0x1E:
+                config.linkBandwidth = 810000; // HBR3 (8.10 Gbps)
+                break;
+            default:
+                // Calcolo generico DPCD: BW = valore_dpcd * 27000 kHz
+                config.linkBandwidth = (uint32)dpcd_bw * 27000;
+                break;
+        }
+    }
+
+    return B_OK;
+}*/
 
 static status_t
 init_common(int device, bool isClone)
@@ -190,8 +311,8 @@ init_common(int device, bool isClone)
             debug_printf("intel_arc.accelerant ERROR: Invalid shared frame_buffer_area\n");
             uninit_common();
             return B_ERROR;
-        }
-        */
+        }*/
+        
         gInfo->frame_buffer_area = gInfo->shared_info->frame_buffer_area;
 		gInfo->frame_buffer = (void*)gInfo->shared_info->frame_buffer;
 		if (!gInfo->shared_info->bDisableOverlay) {
@@ -236,7 +357,28 @@ init_common(int device, bool isClone)
 			return status;
 		}
 	}
+	/*
+	const int8 pipe = gInfo->shared_info->active_pipe;
+	const uint32 pipeOffset = (uint32)pipe * INTEL_ARC_MMIO_PIPE_OFFSET;
 	
+	uint32 gopDdiCtl = 0;
+	status_t ret = read_register(INTEL_ARC_MMIO_PIPE_A_DDI_FUNC_CTL + pipeOffset, gopDdiCtl);
+	if ((ret == B_OK) && (gopDdiCtl & (1 << 31)) != 0) { // Se è già abilitato dal GOP
+		uint32 modeSel = (gInfo->shared_info->pipe_ddi_func_ctl[pipe] & INTEL_ARC_PIPE_DDI_MODESEL_MASK) >> 24;
+		if (modeSel == INTEL_ARC_PIPE_DDI_MODE_DP_SST || modeSel == INTEL_ARC_PIPE_DDI_MODE_DP_MST) {
+			gInfo->shared_info->dp_link_trained_by_gop = true;
+			get_transcoder_dp_config(INTEL_ARC_MMIO_PIPE_A_DDI_FUNC_CTL + pipeOffset, gInfo->shared_info->dp_boot_config);
+			debug_printf("intel_arc.accelerant: lanes detected at boot: %d\n",gInfo->shared_info->dp_boot_config.lanes);
+			debug_printf("intel_arc.accelerant: bpp detected at boot: %d\n",gInfo->shared_info->dp_boot_config.bpp);
+			debug_printf("intel_arc.accelerant: link bandwidth detected at boot: %d\n",gInfo->shared_info->dp_boot_config.linkBandwidth);
+		} else {
+			gInfo->shared_info->dp_link_trained_by_gop = false;
+		}
+	} else {
+		debug_printf("intel_arc.accelerant: couldn't establish if gop already set dplink\n");
+		gInfo->shared_info->dp_link_trained_by_gop = false;
+	}
+	*/
 	return B_OK;
 }
 

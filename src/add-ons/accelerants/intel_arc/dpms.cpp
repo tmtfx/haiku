@@ -95,7 +95,7 @@ apply_dpms_on(void)
     //uint32 modeSel = (gInfo->shared_info->pipe_ddi_func_ctl[pipe] & INTEL_ARC_PIPE_DDI_MODE_MASK);
     if (modeSel == INTEL_ARC_PIPE_DDI_MODE_DP_SST || modeSel == INTEL_ARC_PIPE_DDI_MODE_DP_MST) {
 	//invece di ricalcolarlo usiamo il valore salvato nella shared_info
-	lanes = gInfo->shared_info->dp_lanes[pipe];
+	lanes = gInfo->shared_info->dp_config[pipe].lanes;
 	if (lanes == 0) {
 		
 		/*

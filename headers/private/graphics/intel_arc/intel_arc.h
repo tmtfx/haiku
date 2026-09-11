@@ -77,6 +77,10 @@
 #define INTEL_ARC_PIPE_DDI_MODE_HDMI             (0U << INTEL_ARC_PIPE_DDI_MODE_SHIFT)
 //#define INTEL_ARC_PIPE_DDI_MODE_DP_SST           (1U << INTEL_ARC_PIPE_DDI_MODE_SHIFT)
 //#define INTEL_ARC_PIPE_DDI_MODE_DP_MST           (2U << INTEL_ARC_PIPE_DDI_MODE_SHIFT)
+#define INTEL_ARC_PIPE_DDI_MODESEL_MASK			(7U << 24)
+#define INTEL_ARC_PIPE_DDI_MODE_DP_SST			2U
+#define INTEL_ARC_PIPE_DDI_MODE_DP_MST			3U
+
 #define INTEL_ARC_PIPE_DDI_MODE_FDI              (3U << INTEL_ARC_PIPE_DDI_MODE_SHIFT)
 
 #define INTEL_ARC_PIPE_DDI_BPC_SHIFT             20
@@ -90,12 +94,18 @@
 #define INTEL_ARC_PIPE_DDI_DP_WIDTH_MASK         (0x7U << INTEL_ARC_PIPE_DDI_DP_WIDTH_SHIFT)
 #define INTEL_ARC_PIPE_DDI_DP_WIDTH_1            (0U << INTEL_ARC_PIPE_DDI_DP_WIDTH_SHIFT)
 #define INTEL_ARC_PIPE_DDI_DP_WIDTH_2            (1U << INTEL_ARC_PIPE_DDI_DP_WIDTH_SHIFT)
+#define INTEL_ARC_PIPE_DDI_DP_WIDTH_3            (2U << INTEL_ARC_PIPE_DDI_DP_WIDTH_SHIFT)
 #define INTEL_ARC_PIPE_DDI_DP_WIDTH_4            (3U << INTEL_ARC_PIPE_DDI_DP_WIDTH_SHIFT)
 
 #define INTEL_ARC_DDI_VSYNC_POLARITY_POSITIVE    (1U << 17)
 #define INTEL_ARC_DDI_HSYNC_POLARITY_POSITIVE    (1U << 16)
 
-
+/* DisplayPort AUX Channel Registers (Display 13+) */
+#define INTEL_ARC_MMIO_AUX_CH_CTL_A             (INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x4010) // 0x64010
+#define INTEL_ARC_MMIO_AUX_CH_DATA1_A           (INTEL_ARC_MMIO_PIPE_BLOCK_BASE + 0x4014) // 0x64014
+#define INTEL_ARC_MMIO_AUX_CHANNEL_STRIDE       0x100
+#define DP_AUX_NATIVE_READ 0x9
+#define DPCD_LINK_BW_SET             0x00100
 
 
 enum intel_arc_family {
@@ -113,7 +123,16 @@ typedef struct {
 	bool	overlay;
 } intel_arc_settings;
 
+struct dp_link_config {
+    uint32 lanes;
+    uint32 bpp;
+    uint32 linkBandwidth; // in kHz
+};
+
 struct intel_arc_shared_info {
+	// -------------------------------------------------------------------------
+    // Informazioni e Aree di Memoria Generali
+    // -------------------------------------------------------------------------
 	area_id			mode_list_area;
 	uint32			mode_count;
 	display_mode	current_mode;
@@ -128,18 +147,42 @@ struct intel_arc_shared_info {
 	uint16			family;
 	uint32			device_id;
 	uint8			revision;
+	uint16			subsystem_vendor_id;
+	uint16			subsystem_id;
+	
+	// -------------------------------------------------------------------------
+    // Configurazione Display, Pipe Attiva e DP / Boot
+    // -------------------------------------------------------------------------
 	uint8			pipe_count;
 	int8			active_pipe;
 	uint8			active_ddi_port;
 	uint8			active_ddi_mode;
 	uint8			reserved1[3];
-	uint16			subsystem_vendor_id;
-	uint16			subsystem_id;
+	
+	bool			has_boot_info;
+    uint32			boot_width;
+    uint32			boot_height;
+    uint32			boot_depth;
+
 	uint8			has_boot_edid;
 	uint8			detected_port_bits;
 	uint8			has_dpcd;
 	uint8			dpcd_revision;
-
+	
+	bool			dp_link_trained_by_gop;
+	dp_link_config	dp_boot_config;
+	dp_link_config	dp_config[INTEL_ARC_MAX_PIPES];
+	
+	uint8			dpcd[8];
+	uint8			dpcd_max_lane_count;
+	uint8			dpcd_sink_count;
+	uint8			dpcd_max_link_rate;
+	edid1_info		boot_edid;
+	frame_buffer_config fbc;
+	
+	// -------------------------------------------------------------------------
+    // Mappature MMIO e Framebuffer
+    // -------------------------------------------------------------------------
 	uint8			mmio_bar;
 	uint8			frame_buffer_bar;
 	uint8			reserved0[2];
@@ -151,9 +194,11 @@ struct intel_arc_shared_info {
 	uint64			frame_buffer_size;
 
 	addr_t			frame_buffer;
-	
 	uint64			vram_size;            // VRAM fisica totale (es. 16 GB)
-    
+	
+	// -------------------------------------------------------------------------
+    // Hardware Cursor
+    // -------------------------------------------------------------------------
     bool			bDisableOverlay;
 	bool			bDisableHdwCursor;      // Toggle impostabile da settings/driver
     bool			cursor_visible;
@@ -164,42 +209,45 @@ struct intel_arc_shared_info {
     void*			cursor_virtual_base;         // Mappatura virtuale per accelerant (Userland)
     uint32			cursor_physical_base;        // Indirizzo fisico/GGTT letto da CUR_SURF
     
-	intel_arc_settings settings;
-	
-	uint32			pipe_control[4];
-	uint32			pipe_size[4];
-	uint32			pipe_ddi_func_ctl[4];
-	uint32			pipe_h_total[4];
-	uint32			pipe_h_blank[4];
-	uint32			pipe_h_sync[4];
-	uint32			pipe_v_total[4];
-	uint32			pipe_v_blank[4];
-	uint32			pipe_v_sync[4];
-	uint32			plane_control[4];
-	uint32			plane_stride[4];
-	uint32			plane_pos[4];
-	uint32			plane_image_size[4];
-	uint32			plane_surface[4];
-	uint32			port_state[4];
+	// -------------------------------------------------------------------------
+    // Stato Registri Hardware Pipe & Plane (Speculare ai Registri MMIO)
+    // -------------------------------------------------------------------------
+	uint32			pipe_control[INTEL_ARC_MAX_PIPES];
+	uint32			pipe_size[INTEL_ARC_MAX_PIPES];
+	uint32			pipe_ddi_func_ctl[INTEL_ARC_MAX_PIPES];
+	uint32			pipe_data_m[INTEL_ARC_MAX_PIPES];
+	uint32			pipe_h_total[INTEL_ARC_MAX_PIPES];
+	uint32			pipe_h_blank[INTEL_ARC_MAX_PIPES];
+	uint32			pipe_h_sync[INTEL_ARC_MAX_PIPES];
+	uint32			pipe_v_total[INTEL_ARC_MAX_PIPES];
+	uint32			pipe_v_blank[INTEL_ARC_MAX_PIPES];
+	uint32			pipe_v_sync[INTEL_ARC_MAX_PIPES];
+	uint32			plane_control[INTEL_ARC_MAX_PIPES];
+	uint32			plane_stride[INTEL_ARC_MAX_PIPES];
+	uint32			plane_pos[INTEL_ARC_MAX_PIPES];
+	uint32			plane_image_size[INTEL_ARC_MAX_PIPES];
+	uint32			plane_surface[INTEL_ARC_MAX_PIPES];
+	// -------------------------------------------------------------------------
+    // Port State & Hotplug Interrupts
+    // -------------------------------------------------------------------------
+	uint32			port_state[INTEL_ARC_MAX_PIPES];
 	uint32			hotplug_ctl;
 	uint32			hpd_iir;
 	uint32			hotplug_event_count;
-	uint8			dpcd[8];
-	uint8			dpcd_max_lane_count;
-	uint8			dpcd_sink_count;
-	uint8			dpcd_max_link_rate;
-	uint8			dp_lanes[INTEL_ARC_MAX_PIPES];
-	uint32			dp_bpp[INTEL_ARC_MAX_PIPES];
+	
+	
+	//uint8			dp_lanes[INTEL_ARC_MAX_PIPES];
+	//uint32			dp_bpp[INTEL_ARC_MAX_PIPES];
 
-	edid1_info		boot_edid;
-	frame_buffer_config fbc;
+	
 
-	char			device_identifier[32];
-	bool has_boot_info;
-	uint32 boot_width;
-	uint32 boot_height;
-	uint32 boot_depth;
-	bool accelerant_in_use;
+	// -------------------------------------------------------------------------
+    // Driver Control & Settings
+    // -------------------------------------------------------------------------
+	intel_arc_settings	settings;
+	char				device_identifier[32];
+	bool				accelerant_in_use;
+
 };
 
 
