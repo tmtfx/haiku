@@ -496,7 +496,7 @@ int32 sm750_vblank_service_thread(void *arg)
             }
             // 3. ORA segnaliamo al resto del mondo (App, Media Player) che il V-Sync è avvenuto
             // Solo se qualcuno lo ha creato!
-            if (si->vblank_sync_sem > 0)   
+            if (si->vblank_sync_sem >= 0) // copilot dice >=0 prima era >0
                 // Svegliamo l'eventuale chiamata bloccante in attesa del flip
                 release_sem(si->vblank_sync_sem);
         } else {
