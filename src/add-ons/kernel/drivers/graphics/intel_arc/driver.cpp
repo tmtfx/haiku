@@ -95,6 +95,7 @@ struct intel_arc_info {
 	area_id					frame_buffer_area;
 	uint8*					frame_buffer;
 	uint32					irq;
+	bool					use_msi;
 	bool					irq_installed;
 };
 
@@ -120,6 +121,7 @@ static bool write32(const intel_arc_info& info, uint32 offset, uint32 value);
 static void probe_display_state(intel_arc_info& info);
 static int32 arc_interrupt_handler(void* data);
 static int32 release_vblank_sem(intel_arc_info& info);
+static uint32 set_master_interrupts(intel_arc_info& info, bool enable);
 static void enable_interrupts(intel_arc_info& info, bool enable);
 extern "C" void uninit_driver(void);
 
@@ -302,6 +304,25 @@ release_vblank_sem(intel_arc_info& info)
 }
 
 
+static uint32
+set_master_interrupts(intel_arc_info& info, bool enable)
+{
+	if (enable) {
+		write32(info, INTEL_ARC_MMIO_PCH_MASTER_INT_CTL,
+			INTEL_ARC_MASTER_INT_GLOBAL);
+		return 0;
+	}
+
+	write32(info, INTEL_ARC_MMIO_PCH_MASTER_INT_CTL, 0);
+
+	uint32 interrupt = 0;
+	if (!read32(info, INTEL_ARC_MMIO_PCH_MASTER_INT_CTL, interrupt))
+		return 0;
+
+	return interrupt;
+}
+
+
 static void
 enable_interrupts(intel_arc_info& info, bool enable)
 {
@@ -313,13 +334,7 @@ enable_interrupts(intel_arc_info& info, bool enable)
 	write32(info, INTEL_ARC_MMIO_PIPE_INT_IDENTITY(pipe), ~0U);
 	write32(info, INTEL_ARC_MMIO_PIPE_INT_ENABLE(pipe), value);
 	write32(info, INTEL_ARC_MMIO_PIPE_INT_MASK(pipe), ~value);
-
-	if (enable) {
-		write32(info, INTEL_ARC_MMIO_PCH_MASTER_INT_CTL,
-			INTEL_ARC_MASTER_INT_GLOBAL);
-	} else {
-		write32(info, INTEL_ARC_MMIO_PCH_MASTER_INT_CTL, 0);
-	}
+	set_master_interrupts(info, enable);
 }
 
 
@@ -330,11 +345,11 @@ arc_interrupt_handler(void* data)
 	if (info.shared_info == NULL || info.shared_info->active_pipe < 0)
 		return B_UNHANDLED_INTERRUPT;
 
-	uint32 interrupt = 0;
-	if (!read32(info, INTEL_ARC_MMIO_PCH_MASTER_INT_CTL, interrupt))
+	uint32 interrupt = set_master_interrupts(info, false);
+	if ((interrupt & INTEL_ARC_MASTER_INT_GLOBAL) == 0) {
+		set_master_interrupts(info, true);
 		return B_UNHANDLED_INTERRUPT;
-	if ((interrupt & INTEL_ARC_MASTER_INT_GLOBAL) == 0)
-		return B_UNHANDLED_INTERRUPT;
+	}
 
 	int32 handled = B_HANDLED_INTERRUPT;
 	const uint32 pipe = (uint32)info.shared_info->active_pipe + 1;
@@ -348,6 +363,7 @@ arc_interrupt_handler(void* data)
 		}
 	}
 
+	set_master_interrupts(info, true);
 	return handled;
 }
 
@@ -1092,16 +1108,31 @@ init_device(intel_arc_info& info)
 	}
 
 	info.irq = 0;
+	info.use_msi = false;
 	info.irq_installed = false;
 	if (info.pci.u.h0.interrupt_pin != 0x00) {
 		info.irq = info.pci.u.h0.interrupt_line;
 		if (info.irq == 0xff)
 			info.irq = 0;
 	}
+	if (gPCI->get_msi_count(info.pci.bus, info.pci.device,
+			info.pci.function) >= 1) {
+		uint32 msiVector = 0;
+		if (gPCI->configure_msi(info.pci.bus, info.pci.device,
+				info.pci.function, 1, &msiVector) == B_OK
+			&& gPCI->enable_msi(info.pci.bus, info.pci.device,
+				info.pci.function) == B_OK) {
+			TRACE("using message signaled interrupts\n");
+			info.irq = msiVector;
+			info.use_msi = true;
+			dprintf("intel_arc: MSI in use\n");
+		}
+	}
 	if (info.irq != 0 && info.shared_info->vblank_sem >= B_OK
 		&& install_io_interrupt_handler(info.irq, arc_interrupt_handler, &info, 0) == B_OK) {
 		info.irq_installed = true;
 		enable_interrupts(info, true);
+		dprintf("intel_arc: interrupts enabled\n");
 	}
 
 	
@@ -1117,14 +1148,14 @@ FRAME_BUFFER_BOOT_INFO, NULL);
 		info.shared_info->has_boot_info = false;
 	}
 	info.shared_info->fbc.frame_buffer = (void*)info.shared_info->frame_buffer;
-    info.shared_info->fbc.frame_buffer_dma = (void *)(info.shared_info->frame_buffer_base 
-    + info.shared_info->frame_buffer_offset);
-    info.shared_info->fbc.bytes_per_row = info.shared_info->bytes_per_row;
+	info.shared_info->fbc.frame_buffer_dma = (void *)(info.shared_info->frame_buffer_base 
+							+ info.shared_info->frame_buffer_offset);
+	info.shared_info->fbc.bytes_per_row = info.shared_info->bytes_per_row;
 	info.shared_info->accelerant_in_use=false;
 	
 	info.shared_info->cursor_virtual_base_kernel = NULL;
 	info.shared_info->cursor_virtual_base = NULL;
-    info.shared_info->cursor_physical_base = 0;
+	info.shared_info->cursor_physical_base = 0;
 	
 	if (!info.shared_info->bDisableHdwCursor) {
 		/* this is not correct, being a PLANE, cursor address should stay in VRAM not in RAM as
@@ -1214,6 +1245,12 @@ uninit_device(intel_arc_info& info)
 		enable_interrupts(info, false);
 		remove_io_interrupt_handler(info.irq, arc_interrupt_handler, &info);
 		info.irq_installed = false;
+	}
+
+	if (info.use_msi) {
+		gPCI->disable_msi(info.pci.bus, info.pci.device, info.pci.function);
+		gPCI->unconfigure_msi(info.pci.bus, info.pci.device, info.pci.function);
+		info.use_msi = false;
 	}
 
 	if (info.shared_info != NULL && info.shared_info->vblank_sem >= B_OK) {
