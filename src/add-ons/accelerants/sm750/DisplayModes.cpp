@@ -122,7 +122,7 @@ sm750_set_pitch(uint32 pitch, bool is_panel)
     // I bit 19:16 e 3:0 sono Hardwired a 0, quindi lo shift deve essere preciso.
     
     uint32 reg_val = (aligned_val << 20) | (aligned_val << 4);
-    uint32 reg_offset = is_panel ? SM750_DISP_PANEL_FB_WIDTH : SM750_DISP_CRT_FB_WIDTH ;
+    uint32 reg_offset = is_panel ? SM750_DISP_PANEL_FB_OFFSET_WWIDTH : SM750_DISP_CRT_FB_OFFSET_WWIDTH ;
     SM750_WREG32(reg_offset, reg_val);
     
     //debug_printf("SM750_ACC: Pitch Bytes %u -> Valore Allineato 0x%X\n", pitch, aligned_val);
@@ -299,6 +299,45 @@ sm750_set_display_mode(display_mode *mode)
     sm750_set_fb_addr(0, isPanel);
     // Pitch e Window Width (Registro 0x080208) - USA L'HELPER!
     sm750_set_pitch(pitch, isPanel);
+    // Il ramo non selezionato resta configurato dal boot. Su SM750, quando
+    // il CRT usa il secondary data path instradato verso il primary branch,
+    // una geometria stale qui taglia il desktop pur con il timing corretto.
+    //sm750_set_fb_addr(0, !isPanel);
+    //sm750_set_pitch(pitch, !isPanel);
+    if (isPanel) {
+        debug_printf("original fb_width %" B_PRIx32 "\n",SM750_REG32(SM750_DISP_PANEL_FB_WIDTH));
+        debug_printf("original fb_height %" B_PRIx32 "\n",SM750_REG32(SM750_DISP_PANEL_FB_HEIGHT));
+    	// PANEL has 2 more regs to set up:
+    	// Reg 0x080014 / 0x080214:
+        // Bits 27:16 = FB Global Width (in pixel)
+        // Bits 11:0  = WX (Start X = 0)
+        //uint32 fb_width_reg = (mode->virtual_width & 0x0FFF) << 16;
+
+        // Reg 0x080018 / 0x080218:
+        // Bits 27:16 = FB Global Height (in linee)
+        // Bits 11:0  = WY (Start Y = 0)
+        //uint32 fb_height_reg = (mode->virtual_height & 0x0FFF) << 16;
+
+        //SM750_WREG32(SM750_DISP_PANEL_FB_W, fb_width_reg);
+        //SM750_WREG32(SM750_DISP_PANEL_FB_H, fb_height_reg);
+        //snooze(10);
+        //debug_printf("ora imposto fb_width a %" B_PRIx32 "\n",SM750_REG32(SM750_DISP_PANEL_FB_WIDTH));
+        //debug_printf("ora imposto fb_height a %" B_PRIx32 "\n",SM750_REG32(SM750_DISP_PANEL_FB_HEIGHT));
+        
+        // forse manca Primary Display Plane TL Location e Primary Display Plane BR Location
+        uint32 width = mode->virtual_width;
+        uint32 height = mode->virtual_height;
+        debug_printf("original primary display plane TL Location %" B_PRIx32 "\n",SM750_REG32(SM750_DISP_PANEL_PLANE_TL_LOC));
+        debug_printf("original primary display plane BR Location %" B_PRIx32 "\n",SM750_REG32(SM750_DISP_PANEL_PLANE_BR_LOC));
+        uint32 plane_tl = 0;
+        SM750_WREG32(SM750_DISP_PANEL_PLANE_TL_LOC, plane_tl);
+        uint32 plane_br = (((height - 1) & 0x07FF) << 16) | ((width - 1) & 0x07FF);
+        SM750_WREG32(SM750_DISP_PANEL_PLANE_BR_LOC, plane_br);
+        snooze(10);
+        debug_printf("nuovo valore di primary display plane TL Location: %" B_PRIx32 "\n",SM750_REG32(SM750_DISP_PANEL_PLANE_TL_LOC));
+        debug_printf("nuovo valore primary display plane BR Location: %" B_PRIx32 "\n",SM750_REG32(SM750_DISP_PANEL_PLANE_BR_LOC));
+        //snooze(10);
+    }
     
     uint32 ctrl = 0;
     // Formato (Bit 1:0) -> 10 per 32bpp, 01 per 16bpp
