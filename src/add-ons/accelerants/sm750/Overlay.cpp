@@ -14,6 +14,58 @@
 extern accelerant_info *gInfo;
 
 #define CALLED() debug_printf("SM750_ACC OVERLAY: %s\n", __FUNCTION__)
+void
+sm750_configure_color_key(const overlay_window *ow)
+{
+    vuint32 *regs = gInfo->regs;
+    shared_info *si = gInfo->si;
+
+    uint16 keyColor = 0;
+    uint16 keyMask = 0;
+
+    switch (si->dm.space) {
+        case B_RGB15:
+        case B_RGBA15:
+            // RGB 5:5:5 (15-bit)
+            keyMask = 0x7FFF;
+            keyColor = ((ow->red.value   & ow->red.mask)   << 10)
+                     | ((ow->green.value & ow->green.mask) << 5)
+                     | ((ow->blue.value  & ow->blue.mask)  << 0);
+            break;
+
+        case B_RGB16:
+            // RGB 5:6:5 (16-bit)
+            keyMask = 0xFFFF;
+            keyColor = ((ow->red.value   & ow->red.mask)   << 11)
+                     | ((ow->green.value & ow->green.mask) << 5)
+                     | ((ow->blue.value  & ow->blue.mask)  << 0);
+            break;
+
+        case B_RGB32:
+        case B_RGBA32:
+        default:
+            // Desktop a 32-bit (RGB 8:8:8):
+            // ow->red.value, green.value e blue.value sono a 8 bit (0-255).
+            // Dobbiamo scalarli nel formato 16-bit RGB 5:6:5 accettato dall'hardware.
+            keyMask = 0xFFFF;
+            
+            uint16 red5   = ((ow->red.value   & ow->red.mask)   >> 3) & 0x1F;
+            uint16 green6 = ((ow->green.value & ow->green.mask) >> 2) & 0x3F;
+            uint16 blue5  = ((ow->blue.value  & ow->blue.mask)  >> 3) & 0x1F;
+
+            keyColor = (red5 << 11) | (green6 << 5) | blue5;
+            break;
+    }
+
+    // Registro Primary Display Color Key (0x080008)
+    // Bit 31:16 -> Mask
+    // Bit 15:0  -> Value
+    uint32 regValue = ((uint32)keyMask << 16) | (keyColor & 0xFFFF);
+
+    if (si->card_info.is_panel) {
+        SM750_WREG32(SM750_DISP_PANEL_COLOR_KEY, regValue);
+    }
+}
 
 static void
 sm750_set_video_scale(const overlay_window *window, const overlay_buffer *buffer)
@@ -165,7 +217,6 @@ sm750_allocate_overlay_buffer(color_space cs, uint16 width, uint16 height)
     ob->width = width;
     ob->height = height;
     ob->bytes_per_row = alignedPitch;
-    //ob->buffer = (void *)((addr_t)gInfo->framebuffer + alignedOffset);
 	ob->buffer = (void *)((addr_t)si->framebuffer + alignedOffset);
     ob->buffer_dma = (void *)(addr_t)alignedOffset;
     
@@ -183,14 +234,20 @@ sm750_configure_overlay(const overlay_window *window, const overlay_buffer *buff
 {
 //	CALLED();
 	
-	vuint32 *regs = gInfo->regs;
+    vuint32 *regs = gInfo->regs;
+    
+
 	
-	if (buffer == NULL || window == NULL) {
-		//debug_printf("SM750_ACC: Rilevato buffer/window NULL, spengo il piano video.\n");
+    if (buffer == NULL || window == NULL) {
+        //debug_printf("SM750_ACC: Rilevato buffer/window NULL, spengo il piano video.\n");
         uint32 control = SM750_REG32(SM750_DISP_PANEL_VIDEO_DISP_CTRL);
         control &= ~(1 << 2); // Disabilita Video Plane (Bit 2)
         SM750_WREG32(SM750_DISP_PANEL_VIDEO_DISP_CTRL, control);
         return;
+    }
+    
+    if (gInfo->si->card_info.is_panel) {
+        sm750_configure_color_key(window);
     }
     
     if (buffer->buffer_dma == NULL)
@@ -415,10 +472,13 @@ sm750_configure_overlay_api(overlay_token token, const overlay_buffer *buffer,
 uint32
 sm750_overlay_supported_features(uint32 space)
 {
-	//CALLED();
-    // The SM750 is special: the video layer supports YUYV but doesn't have color keying.
+    //CALLED();
+    // The SM750 is special: the video layer supports YUYV but doesn't have color keying for crt plane.
     // The alpha video layer has color keying but not YUYV format.
-    // B_OVERLAY_COLOR_KEY | // Transparency via color (essential)
-    return B_OVERLAY_HORIZONTAL_FILTERING | // Scaling fluido orizzontale
-           B_OVERLAY_VERTICAL_FILTERING;   // Scaling fluido verticale
+    uint32 features = B_OVERLAY_HORIZONTAL_FILTERING | // Scaling fluido orizzontale
+                      B_OVERLAY_VERTICAL_FILTERING;   // Scaling fluido verticale
+    if (gInfo->si->card_info.is_panel) {
+    	return features | B_OVERLAY_COLOR_KEY; // Transparency via color
+    }
+    return features;
 }
