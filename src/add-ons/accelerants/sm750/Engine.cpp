@@ -256,7 +256,7 @@ void sm750_init_2d_engine(display_mode *mode) {
 	//CALLED();
     vuint32 *regs = gInfo->regs;
     // USIAMO LA LARGHEZZA VIRTUALE (fondamentale per l'allineamento VRAM)
-    uint32 width = mode->virtual_width; 
+    uint32 width = mode->virtual_width;
     uint32 height = mode->virtual_height;
     uint32 bpp_code;
 
@@ -266,6 +266,15 @@ void sm750_init_2d_engine(display_mode *mode) {
         case B_RGB16: bpp_code = 1; break; // 16-bpp
         default:      bpp_code = 0; break; // 8-bpp
     }
+    debug_printf("SM750 Init_2D_Engine - virtual resolution rquested: %dx%d\n",width,height);
+    
+    //uint32 inheritedmask = SM750_REG32(SM750_2D_MASK);
+    //debug_printf("SM750 Init_2D_Engine - inherited 2d mask: %" B_PRIx32 "\n", inheritedmask);
+    //debug_printf("SM750 Init_2D_Engine - setting 2d mask to 0xFFFFFFFF\n");
+    //SM750_WREG32(SM750_2D_MASK, 0xFFFFFFFF);
+    //SM750_WREG32(SM750_2D_COLOR_COMPARE_MASK, 0x00000000);
+    //SM750_WREG32(SM750_2D_COLOR_COMPARE, 0x00000000);
+    
 
     // 1. Aspetta che l'engine sia libero
     sm750_wait_engine_idle();
@@ -288,6 +297,7 @@ void sm750_init_2d_engine(display_mode *mode) {
     // Bit 19:16 = 0000 (XY Mode)
     // Bit 30 = 1 (XY mode per il pattern)
     uint32 format = (1U << 30) | (bpp_code << 20) | (0U << 16);
+    debug_printf("SM750 Engine, 2D Stretch set to: %" B_PRIx32 "\n",format);
     SM750_WREG32(SM750_2D_STRETCH, format);
 
     // 4. Imposta le Basi (Source e Destination Base)
@@ -313,6 +323,7 @@ void sm750_init_2d_engine(display_mode *mode) {
     // Bit 12    = Select (0: Write INSIDE enabled)
     // Bit 11:0  = Left (0)
     uint32 clipTL = (1 << 13);
+    debug_printf("SM750 Engine: clip_TL is %" B_PRIx32 "\n",clipTL);
     SM750_WREG32(SM750_2D_CLIP_TL, clipTL);
 
     // 2D Clip BR (0x100030)
@@ -320,6 +331,7 @@ void sm750_init_2d_engine(display_mode *mode) {
     // Bit 15:13 = Reserved (devono rimanere a 0)
     // Bit 12:0  = Right (width - 1)  -> Maschera 0x1FFF (13 bit) max 8191
     uint32 clipBR = (((height - 1) & 0xFFFF) << 16) | ((width - 1) & 0x1FFF);
+    debug_printf("SM750 Engine: clip_BR is %" B_PRIx32 "\n",clipBR);
     SM750_WREG32(SM750_2D_CLIP_BR, clipBR);
     //debug_printf("SM750_ACC: 2D engine succesfully initializated\n");
 }
