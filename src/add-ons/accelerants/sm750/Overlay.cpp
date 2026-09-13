@@ -14,6 +14,22 @@
 extern accelerant_info *gInfo;
 
 #define CALLED() debug_printf("SM750_ACC OVERLAY: %s\n", __FUNCTION__)
+
+static void
+sm750_set_color_key_enabled(bool enable)
+{
+	vuint32* regs = gInfo->regs;
+	uint32 panelControl = SM750_REG32(SM750_PANEL_CONTROL);
+
+	if (enable)
+		panelControl |= (1 << 9);
+	else
+		panelControl &= ~(1 << 9);
+
+	SM750_WREG32(SM750_PANEL_CONTROL, panelControl);
+}
+
+
 void
 sm750_configure_color_key(const overlay_window *ow)
 {
@@ -62,9 +78,8 @@ sm750_configure_color_key(const overlay_window *ow)
     // Bit 15:0  -> Value
     uint32 regValue = ((uint32)keyMask << 16) | (keyColor & 0xFFFF);
 
-    if (si->card_info.is_panel) {
-        SM750_WREG32(SM750_DISP_PANEL_COLOR_KEY, regValue);
-    }
+    SM750_WREG32(SM750_DISP_PANEL_COLOR_KEY, regValue);
+    sm750_set_color_key_enabled(true);
 }
 
 static void
@@ -243,11 +258,19 @@ sm750_configure_overlay(const overlay_window *window, const overlay_buffer *buff
         uint32 control = SM750_REG32(SM750_DISP_PANEL_VIDEO_DISP_CTRL);
         control &= ~(1 << 2); // Disabilita Video Plane (Bit 2)
         SM750_WREG32(SM750_DISP_PANEL_VIDEO_DISP_CTRL, control);
+        sm750_set_color_key_enabled(false);
         return;
     }
     
+    /*if ((window->flags & B_OVERLAY_COLOR_KEY) != 0) {
+        sm750_configure_color_key(window);
+    } else {
+        sm750_set_color_key_enabled(false);
+    }*/
     if (gInfo->si->card_info.is_panel) {
         sm750_configure_color_key(window);
+    } else {
+        sm750_set_color_key_enabled(false);
     }
     
     if (buffer->buffer_dma == NULL)
@@ -436,6 +459,7 @@ sm750_release_overlay(overlay_token token)
     uint32 control = SM750_REG32(SM750_DISP_PANEL_VIDEO_DISP_CTRL);
     control &= ~(1 << 2); // Disable Video Plane
     SM750_WREG32(SM750_DISP_PANEL_VIDEO_DISP_CTRL, control);
+    sm750_set_color_key_enabled(false);
     
     gInfo->si->overlay.overlay_token = 0;
     atomic_set(&gInfo->si->overlay_in_use, 0);
@@ -461,6 +485,7 @@ sm750_configure_overlay_api(overlay_token token, const overlay_buffer *buffer,
         uint32 control = SM750_REG32(SM750_DISP_PANEL_VIDEO_DISP_CTRL);
         control &= ~(1 << 2); 
         SM750_WREG32(SM750_DISP_PANEL_VIDEO_DISP_CTRL, control);
+        sm750_set_color_key_enabled(false);
         return B_OK;
     }
 
@@ -475,10 +500,10 @@ sm750_overlay_supported_features(uint32 space)
     //CALLED();
     // The SM750 is special: the video layer supports YUYV but doesn't have color keying for crt plane.
     // The alpha video layer has color keying but not YUYV format.
-    uint32 features = B_OVERLAY_HORIZONTAL_FILTERING | // Scaling fluido orizzontale
-                      B_OVERLAY_VERTICAL_FILTERING;   // Scaling fluido verticale
+     uint32 features = B_OVERLAY_HORIZONTAL_FILTERING | // Scaling fluido orizzontale
+                       B_OVERLAY_VERTICAL_FILTERING;   // Scaling fluido verticale
     if (gInfo->si->card_info.is_panel) {
-    	return features | B_OVERLAY_COLOR_KEY; // Transparency via color
+       return features | B_OVERLAY_COLOR_KEY; // Transparency via color
     }
     return features;
 }
