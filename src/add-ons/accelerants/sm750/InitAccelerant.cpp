@@ -316,7 +316,6 @@ static status_t init_common(int fd,bool isClone) {
         }
     }
     
-    //gInfo->cursor_virtual_address = (void *)((addr_t)gInfo->framebuffer + si->cursor.vram_offset);
 	gInfo->cursor_virtual_address = (void *)((addr_t)si->framebuffer + si->cursor.vram_offset);
     
     // Token for 2D engine
@@ -412,7 +411,6 @@ void sm750_uninit_accelerant(void) {
     if (gInfo->shared_info_area >= 0) delete_area(gInfo->shared_info_area);
     
     gInfo->regs = NULL;
-    //gInfo->framebuffer = NULL;
     gInfo->vblank_thread = -1;
     gInfo->si = NULL;
 }
