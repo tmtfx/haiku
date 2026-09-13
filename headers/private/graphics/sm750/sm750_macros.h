@@ -80,8 +80,16 @@
 
 
 /* --- PANEL (Primary) --- */
-#define SM750_DISP_PANEL_FB_ADDR	0x0008000C // Primary Display FB Address
-#define SM750_DISP_PANEL_FB_WIDTH	0x00080010 // Primary Display FB Offset/Window Width
+#define SM750_DISP_PANEL_PANNING_CTRL		0x00080004 // Primary Display Panning Control //not used
+#define SM750_DISP_PANEL_COLOR_KEY		0x00080008 // Primary Display Color Key
+#define SM750_DISP_PANEL_FB_ADDR		0x0008000C // Primary Display FB Address
+#define SM750_DISP_PANEL_FB_OFFSET_WWIDTH	0x00080010 // Primary Display FB Offset/Window Width
+#define SM750_DISP_PANEL_FB_WIDTH		0x00080014 // Primary Display FB Width //not used
+#define SM750_DISP_PANEL_FB_HEIGHT		0x00080014 // Primary Display FB Height //not used
+#define SM750_DISP_PANEL_PLANE_TL_LOC		0x0008001C // Primary Display Plane TL Location
+#define SM750_DISP_PANEL_PLANE_BR_LOC		0x00080020 // Primary Display Plane BR Location
+
+
 
 /* --- PANEL Display Timings (Primary) --- */
 #define SM750_PANEL_H_TOTAL_ACTIVE	0x00080024 // Pag 143: Primary Horizontal Total
@@ -134,8 +142,8 @@
 // 0x00080118 - 0x00080134 ALPHA COLOR LOOKUP
 
 /* --- CRT (Secondary) --- */
-#define SM750_DISP_CRT_FB_ADDR		0x00080204 // Secondary Display FB Address
-#define SM750_DISP_CRT_FB_WIDTH		0x00080208 // Secondary Display FB Offset/Window Width
+#define SM750_DISP_CRT_FB_ADDR			0x00080204 // Secondary Display FB Address
+#define SM750_DISP_CRT_FB_OFFSET_WWIDTH		0x00080208 // Secondary Display FB Offset/Window Width
 
 /* --- CRT Display Timings (Secondary) --- */
 #define SM750_CRT_H_TOTAL_ACTIVE	0x0008020C // Pag 143: Secondary Horizontal Total
