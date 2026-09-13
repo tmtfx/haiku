@@ -25,10 +25,10 @@ private:
 
 class KeyItem : public BStringItem {
 public:
-    KeyItem(const BKey& key);
-    const BKey& Key() const { return fKey; }
+    KeyItem(const BPasswordKey& key);
+    const BPasswordKey& Key() const { return fKey; }
 private:
-    BKey fKey;
+    BPasswordKey fKey;
 };
 
 class KeyStoreWindow : public BWindow {

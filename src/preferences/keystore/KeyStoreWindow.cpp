@@ -23,16 +23,31 @@ static const uint32 MSG_RESET_MASTER_PASS  = 'RSMP';
 static const uint32 MSG_LOCK_KEYRING       = 'LCKR';
 static const uint32 MSG_REMOVE_KEY         = 'RMKY';
 
-KeyItem::KeyItem(const BKey& key)
+KeyItem::KeyItem(const BPasswordKey& key)
     : BStringItem("")
 {
     fKey = key;
     BString label;
-    if (strlen(key.SecondaryIdentifier()) > 0) {
-        label.SetToFormat("%s  [%s]", key.Identifier(), key.SecondaryIdentifier());
+    const char* id = key.Identifier();
+    const char* secId = key.SecondaryIdentifier();
+    const char* owner = key.Owner();
+
+    if (id != NULL && strlen(id) > 0) {
+        label << id;
     } else {
-        label.SetTo(key.Identifier());
+        label << "<No Identifier>";
     }
+
+    if (secId != NULL && strlen(secId) > 0) {
+        label << " [" << secId << "]";
+    }
+
+    if (owner != NULL && strlen(owner) > 0) {
+        label << " (Owner: " << owner << ")";
+    }
+
+    // Aggiungiamo il tipo numerico per verifica
+    //label.SetToFormat("%s - Type: %d", label, (int)key.Type());
     SetText(label.String());
 }
 
@@ -144,12 +159,12 @@ void KeyStoreWindow::_RefreshKeyrings()
 
     // Scansiona le altre keyring nel Keystore
     while (store.GetNextKeyring(cookie, keyringName) == B_OK) {
-        if (keyringName != "Master") {
+        if (keyringName != "Master"|| keyringName != B_TRANSLATE("Master")) {
             fKeyringsList->AddItem(new KeyringItem(keyringName.String()));
         }
     }
 }
-
+/*
 void KeyStoreWindow::_RefreshKeys()
 {
     fKeysList->MakeEmpty();
@@ -247,6 +262,126 @@ void KeyStoreWindow::_UpdateKeyDetails()
     }
 
     fDetailsView->SetText(details.String());
+}*/
+void KeyStoreWindow::_RefreshKeys()
+{
+    fKeysList->MakeEmpty();
+    fDetailsView->SetText("");
+    fRemoveKeyButton->SetEnabled(false);
+
+    int32 selection = fKeyringsList->CurrentSelection();
+    if (selection < 0) {
+        fLockKeyringButton->SetEnabled(false);
+        return;
+    }
+
+    KeyringItem* item = (KeyringItem*)fKeyringsList->ItemAt(selection);
+    if (!item) return;
+
+    // Assicurati che item->Name() restituisca il NOME REALE del keyring e non la traduzione
+    BString keyringName = item->Name(); 
+    //fLockKeyringButton->SetEnabled(true);
+
+    BKeyStore store;
+    uint32 cookie = 0;
+    //BKey key;
+    BPasswordKey key;
+
+    // "Master" in Haiku API deve sempre passare NULL
+    const char* keyringArg = (keyringName == B_TRANSLATE("Master")) ?  "Master" : keyringName.String();
+
+    status_t err = B_OK;
+    int32 count = 0;
+    
+    fLockKeyringButton->SetEnabled(store.IsKeyringUnlocked(keyringArg));
+
+    while (err == B_OK) {
+    	err = store.GetNextKey(keyringArg, cookie, key);
+        fKeysList->AddItem(new KeyItem(key));
+        count++;
+    }
+
+    if (count == 0) {
+        if (err == B_NOT_ALLOWED || err == B_PERMISSION_DENIED) {
+            fKeysList->AddItem(new BStringItem(B_TRANSLATE("[Keyring is locked]")));
+        } else {
+            fKeysList->AddItem(new BStringItem(B_TRANSLATE("[No keys stored in this keyring]")));
+        }
+    }
+}
+
+void KeyStoreWindow::_UpdateKeyDetails()
+{
+    fDetailsView->SetText("");
+    fRemoveKeyButton->SetEnabled(false);
+
+    int32 ringSel = fKeyringsList->CurrentSelection();
+    int32 keySel = fKeysList->CurrentSelection();
+    if (ringSel < 0 || keySel < 0) return;
+
+    KeyringItem* ringItem = (KeyringItem*)fKeyringsList->ItemAt(ringSel);
+    KeyItem* keyItem = dynamic_cast<KeyItem*>(fKeysList->ItemAt(keySel));
+    if (!ringItem || !keyItem) return;
+
+    fRemoveKeyButton->SetEnabled(true);
+
+    const BKey& key = keyItem->Key();
+    BString keyringName = ringItem->Name();
+    const char* keyringArg = (keyringName == B_TRANSLATE("Master")) ?  "Master" : keyringName.String();// NULL : keyringName.String();
+
+    BString details;
+    details << B_TRANSLATE("Identifier: ") << key.Identifier() << "\n";
+    if (strlen(key.SecondaryIdentifier()) > 0) {
+        details << B_TRANSLATE("Secondary Identifier: ") << key.SecondaryIdentifier() << "\n";
+    }
+
+    BString typeStr = B_TRANSLATE("Generic");
+    if (key.Type() == B_KEY_TYPE_PASSWORD) typeStr = B_TRANSLATE("Password");
+    else if (key.Type() == B_KEY_TYPE_CERTIFICATE) typeStr = B_TRANSLATE("Certificate");
+    details << B_TRANSLATE("Type: ") << typeStr << "\n";
+
+    BKeyStore store;
+
+if (key.Type() == B_KEY_TYPE_PASSWORD) {
+    BPasswordKey pwdKey;
+    status_t err = store.GetKey(keyringArg, key.Type(), key.Identifier(),
+        key.SecondaryIdentifier(), false, pwdKey);
+
+    if (err == B_OK) {
+        details << B_TRANSLATE("Status: Unlocked / Decrypted") << "\n";
+        details << B_TRANSLATE("Value (Password): ") << pwdKey.Password() << "\n";
+    } else {
+        details << B_TRANSLATE("Status: Locked / Encrypted") << "\n";
+        details << B_TRANSLATE("Error loading key content: ") << strerror(err) << "\n";
+    }
+} else {
+    BKey fullKey;
+    status_t err = store.GetKey(keyringArg, key.Type(), key.Identifier(),
+        key.SecondaryIdentifier(), false, fullKey);
+
+    if (err == B_OK) {
+        details << B_TRANSLATE("Status: Unlocked / Decrypted") << "\n";
+        details << B_TRANSLATE("Value (Data length): ") << (int32)fullKey.DataLength()
+                << B_TRANSLATE(" bytes") << "\n";
+    } else {
+        details << B_TRANSLATE("Status: Locked / Encrypted") << "\n";
+        details << B_TRANSLATE("Error loading key content: ") << strerror(err) << "\n";
+    }
+}
+
+    details << "\n=== " << B_TRANSLATE("AUTHORIZED APPLICATIONS") << " ===\n";
+    uint32 appCookie = 0;
+    BString appSig;
+    bool hasApps = false;
+    while (store.GetNextApplication(keyringArg, appCookie, appSig) == B_OK) {
+        details << "  - " << appSig << "\n";
+        hasApps = true;
+    }
+    if (!hasApps) {
+        details << "  " << B_TRANSLATE("[No applications authorized yet]") << "\n";
+    }
+
+    fDetailsView->SetText(details.String());
 }
 
 void KeyStoreWindow::_LockSelectedKeyring()
@@ -258,7 +393,7 @@ void KeyStoreWindow::_LockSelectedKeyring()
     if (!item) return;
 
     BString keyringName = item->Name();
-    const char* keyringArg = (keyringName == B_TRANSLATE("Master")) ? NULL : keyringName.String();
+    const char* keyringArg = (keyringName == B_TRANSLATE("Master")) ?  "Master" : keyringName.String();//NULL : keyringName.String();
 
     BKeyStore store;
     status_t err;
@@ -293,7 +428,7 @@ void KeyStoreWindow::_RemoveSelectedKey()
 
     const BKey& key = keyItem->Key();
     BString keyringName = ringItem->Name();
-    const char* keyringArg = (keyringName == B_TRANSLATE("Master")) ? NULL : keyringName.String();
+    const char* keyringArg = (keyringName == B_TRANSLATE("Master")) ?  "Master" : keyringName.String();// NULL : keyringName.String();
 
     BAlert* alert = new BAlert(B_TRANSLATE("Confirm Delete"),
         B_TRANSLATE("Are you sure you want to permanently delete this key?"),
