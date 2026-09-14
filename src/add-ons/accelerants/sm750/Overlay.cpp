@@ -18,8 +18,10 @@ extern accelerant_info *gInfo;
 static void
 sm750_set_color_key_enabled(bool enable)
 {
+	debug_printf("SM750 Overlay: %s color key...\n", enable ? "enabling" : "disabling");
 	vuint32* regs = gInfo->regs;
 	uint32 panelControl = SM750_REG32(SM750_PANEL_CONTROL);
+	debug_printf("SM750 Overlay: Panel Control was %" B_PRIx32 "\n", panelControl);
 
 	if (enable)
 		panelControl |= (1 << 9);
@@ -27,9 +29,55 @@ sm750_set_color_key_enabled(bool enable)
 		panelControl &= ~(1 << 9);
 
 	SM750_WREG32(SM750_PANEL_CONTROL, panelControl);
+	snooze(10);
+	panelControl = SM750_REG32(SM750_PANEL_CONTROL);
+	debug_printf("SM750 Overlay: now Panel Control is %" B_PRIx32 "\n", panelControl);
 }
 
+void
+sm750_configure_color_key(const overlay_window *ow)
+{
+    vuint32 *regs = gInfo->regs;
+    shared_info *si = gInfo->si;
+    
+    debug_printf("SM750 Raw Overlay -> Red: val=%u, mask=0x%x\n", 
+                ow->red.value, ow->red.mask);
+    debug_printf("SM750 Raw Overlay -> Green: val=%u, mask=0x%x\n", 
+                ow->green.value, ow->green.mask);
+    debug_printf("SM750 Raw Overlay -> Blue: val=%u, mask=0x%x\n", 
+                ow->blue.value, ow->blue.mask);
 
+    uint16 keyColor = 0;
+    uint16 keyMask = 0xFFFF; // Maschera rigida (tutti i 16 bit devono combaciare)
+
+    // Indipendentemente dal fatto che il desktop sia 16 o 32 bit, 
+    // l'SM750 accetta un Value a 16 bit (formato RGB 5:6:5) nel registro 0x080008.
+    // Convertiamo quindi i valori ricevuti da ow nel formato 16-bit:
+    
+    uint16 r = (ow->red.value   & ow->red.mask);
+    uint16 g = (ow->green.value & ow->green.mask);
+    uint16 b = (ow->blue.value  & ow->blue.mask);
+    debug_printf("SM750 Overlay: r=%d, g=%d, b=%d\n",r,g,b);
+
+    if (si->dm.space == B_RGB15 || si->dm.space == B_RGBA15) {
+        keyMask = 0x7FFF;
+        keyColor = ((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3);
+    } else {
+        // Per B_RGB16 e anche per B_RGB32 (che l'SM750 mappa a 16-bit per il color key):
+        keyMask = 0xFFFF;
+        keyColor = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
+    }
+
+    // Costruiamo il registro a 32 bit:
+    // Bit [31:16] = Mask
+    // Bit [15:0]  = Value
+    uint32 regValue = ((uint32)keyMask << 16) | (keyColor & 0xFFFF);
+	debug_printf("SM750 Overlay: valore del registro: %" B_PRIx32 "\n",regValue);
+
+    SM750_WREG32(SM750_DISP_PANEL_COLOR_KEY, regValue);
+    sm750_set_color_key_enabled(true);
+}
+/*
 void
 sm750_configure_color_key(const overlay_window *ow)
 {
@@ -80,7 +128,7 @@ sm750_configure_color_key(const overlay_window *ow)
 
     SM750_WREG32(SM750_DISP_PANEL_COLOR_KEY, regValue);
     sm750_set_color_key_enabled(true);
-}
+}*/
 
 static void
 sm750_set_video_scale(const overlay_window *window, const overlay_buffer *buffer)
