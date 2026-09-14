@@ -64,6 +64,9 @@ bool LoadAISettings(AISettings& out);
 // Save settings to ~/config/settings/AIService_settings
 bool SaveAISettings(const AISettings& settings);
 
+//TODO
+//void SetGlobalSettingContextSize(uint32 size)
+
 bool GetPluginAPIKey(const char* pluginName, BString& outKey);
 
 // Convert settings to a minimal JSON string suitable for plugin init

@@ -261,44 +261,6 @@ bool RemoveAPIKey(const char* plugin)
     return _StoreAPIKeyToKeyStore(plugin, "");
 }
 
-/*
-bool LoadAISettings(AISettings& out)
-{
-    BPath path;
-    if (find_directory(B_USER_SETTINGS_DIRECTORY, &path) != B_OK) return false;
-    path.Append("AIService_settings");
-
-    BFile file(path.Path(), B_READ_ONLY);
-    if (file.InitCheck() != B_OK) return false;
-
-    BMessage m;
-    if (m.Unflatten(&file) != B_OK) return false;
-
-    const char* s = nullptr;
-    if (m.FindString("engine", &s) == B_OK) out.engine = s;
-    if (m.FindString("plugin", &s) == B_OK) out.plugin = s;
-    if (m.FindString("model", &s) == B_OK) out.model = s;
-
-    // API key is stored in KeyStore, not in the settings file
-    BString api;
-    if (_GetAPIKeyFromKeyStore(out.plugin.String(), api)) {
-        out.api_key = api;
-    } else {
-        out.api_key.SetTo("");
-    }
-    
-    if (m.FindString("base_url", &s) == B_OK) out.base_url = s;
-    if (m.FindBool("base_url_override", &out.base_url_override) != B_OK) {
-        out.base_url_override = false;
-    }
-    if (m.FindBool("use_remote_context", &out.use_remote_context) != B_OK) {
-        out.use_remote_context = false; 
-    }
-    if (m.FindInt32("mcp_permissions", (int32*)&out.mcp_permissions) != B_OK) {
-        out.mcp_permissions = 0;
-    }
-    return true;
-}*/
 bool LoadAISettings(AISettings& out)
 {
     BPath path;
@@ -362,6 +324,9 @@ bool LoadAISettings(AISettings& out)
 
     return true;
 }
+
+//TODO fare funzione kit per impostare la dimensione del contesto da salvare nelle impostazioni globali
+//void SetGlobalSettingContextSize(uint32 size)
 
 bool SaveAISettings(const AISettings& settings)
 {

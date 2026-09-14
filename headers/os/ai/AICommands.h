@@ -101,9 +101,11 @@ public:
     void        SetBaseUrl(const char* baseUrl);
     status_t	SetMCPPermissions(uint32 permissions);
     uint32		GetMCPPermissions();
+    //status_t	SetContextSize(uint32 size)
     
     static uint32		GetPluginCapabilities(const char* pluginName);
     static status_t		GetAllSessions(BList& outSessionsList);
+    //static status_t		SetContextSize(int32 session, uint32 size);
 
 private:
     status_t    _EnsureServerRunning();

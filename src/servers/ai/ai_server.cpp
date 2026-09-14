@@ -398,8 +398,11 @@ public:
 				AISettings globalSettings;
 				bool availableGlobalSettings = false;
 				if (LoadAISettings(globalSettings)) availableGlobalSettings = true;
+				//TODO: qui detro inserire lettura GRANDEZZA CONTESTO, se non presente stabilire un valore predefinito
+				// la grandezza del contesto viene salvata nella sessione e letta dai plugin per sapere quanto contesto mandare al llm
 				if (availableGlobalSettings) session.useRemoteContext = globalSettings.use_remote_context;
 				else session.useRemoteContext = false;
+				
 
 				if (reqPlugin && reqModel) {
 					session.plugin_name = reqPlugin;
@@ -446,7 +449,7 @@ public:
 						savedRemoteIdStr = remoteIdCheck;
 						hasRemoteId = true;
 					}
-				}
+				}				
 
 				int32 mcpPermissions = 0;
 				//if (msg->FindInt32("mcp_permissions", &mcpPermissions) != B_OK) {

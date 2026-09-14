@@ -185,6 +185,11 @@ AIEngine::GetRemoteContextId(BString& outRemoteId) const
     return B_NAME_NOT_FOUND;
 }
 
+// TODO: questa funzione imposterà la dimensione del contesto di una specifica sessione
+// /* static */ status_t AIEngine::SetContextSize(int32 session, uint32 size)
+// TODO: questa funzione fa la stessa cosa di quella sopra ma è legata alla sessione fSessionID
+// status_t AIEngine::SetContextSize(uint32 size)
+
 status_t
 AIEngine::_EnsureServerRunning()
 {
