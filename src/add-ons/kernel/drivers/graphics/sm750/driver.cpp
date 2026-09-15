@@ -116,7 +116,6 @@ map_videomem(void **out_virt, phys_addr_t phys, uint32 size, const char *name)
 static void
 load_settings(void)
 {
-	dprintf("SM750: entering load_settings...\n");
     void* handle = load_driver_settings("sm750.settings");
     if (handle != NULL) {
         current_settings.force_CRT = get_driver_boolean_parameter(
@@ -127,19 +126,17 @@ load_settings(void)
             
         current_settings.hardcursor = get_driver_boolean_parameter(
             handle, "hardcursor", current_settings.hardcursor, current_settings.hardcursor);
-        dprintf("SM750: hardcursor is %s\n", current_settings.hardcursor ? "True" : "False");
+        
         current_settings.usealphacursor = get_driver_boolean_parameter(
             handle, "usealphacursor", current_settings.usealphacursor, current_settings.usealphacursor);
-		dprintf("SM750: usealphacursor is %s\n", current_settings.usealphacursor ? "True" : "False");
-        const char* value_str = get_driver_parameter(handle, "cursorbits", "2", "2"); //default HC bits on SM750
+		
+		const char* value_str = get_driver_parameter(handle, "cursorbits", "2", "2"); //default HC bits on SM750
 
         if (value_str != nullptr) {
             current_settings.cursorbits = (uint32)atoi(value_str);
         }
         
         unload_driver_settings(handle);
-    } else {
-    	dprintf("SM750: Handle is NULL!\n");
     }
 }
 
