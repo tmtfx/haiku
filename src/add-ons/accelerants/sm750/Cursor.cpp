@@ -326,7 +326,12 @@ sm750_get_cursor_bits(void)
 	if (gInfo == NULL || gInfo->si == NULL)
 		return 0;
 	
-	if (gInfo->si->settings.usealphacursor) return 32;
-
-	return gInfo->si->settings.cursorbits;
+	uint32 cb = 32;
+	if (gInfo->si->settings.usealphacursor) {
+		debug_printf("SM750 Cursor color bits: 32\n");
+		return cb;
+	}
+	cb = gInfo->si->settings.cursorbits;
+	debug_printf("SM750 Cursor color bits: %d\n",cb);
+	return cb;
 }
