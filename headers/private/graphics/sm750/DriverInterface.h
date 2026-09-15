@@ -120,6 +120,7 @@ typedef struct {
 	bool	usebios;
 	bool	hardcursor;
 	uint32	cursorbits;
+	bool	usealphacursor;
 	bool	force_CRT;
     bool	force_Panel;
 	bool	dualhead;
@@ -181,7 +182,9 @@ typedef struct {
 		bool	is_visible;
 		phys_addr_t	vram_offset; 
 		//void	*v_address;
-		uint32          block_id;
+		uint32	block_id;
+		phys_addr_t	alpha_vram_offset;
+		uint32	alpha_block_id;
 	} cursor;
 
 	/* DAC Palette (CLUT) */
@@ -265,6 +268,7 @@ typedef struct {
     bool            overlay_active;
     thread_id       vblank_thread;
     void	*cursor_virtual_address;
+    void	*alphacursor_virtual_address;
 } accelerant_info;
 
 /* Stato globale del driver */
