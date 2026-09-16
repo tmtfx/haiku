@@ -187,6 +187,8 @@ typedef struct {
 		uint32	alpha_block_id;
 		uint16	cursor_bitmap_width;
 		uint16	cursor_bitmap_height;
+		uint16	bytesPerRaw;
+		const uint8*	bitmapData;
 	} cursor;
 
 	/* DAC Palette (CLUT) */

@@ -56,7 +56,8 @@ static status_t init_vram_manager(shared_info* si)
     status_t status = mem_alloc((mem_info*)local_mem_mgr, 16384, (void*)0x43555253, // "CURS"
                                 &cursorBlockID, &cursorOffset);
     if (si->settings.usealphacursor) {
-    	ret = mem_alloc((mem_info*)local_mem_mgr, 16384, (void*)0x414C5048, // "ALPH"
+    	//ret = mem_alloc((mem_info*)local_mem_mgr, 16384, (void*)0x414C5048, // "ALPH"
+    	ret = mem_alloc((mem_info*)local_mem_mgr, 163840, (void*)0x414C5048, // "ALPH" this is the size (256x320) of the rectangle app_server wants for drag'n'drop
                                 &alphacursorBlockID, &alphacursorOffset);
     }
     
@@ -335,6 +336,8 @@ static status_t init_common(int fd,bool isClone) {
     
 	gInfo->cursor_virtual_address = (void *)((addr_t)si->framebuffer + si->cursor.vram_offset);
 	gInfo->alphacursor_virtual_address = (void *)((addr_t)si->framebuffer + si->cursor.alpha_vram_offset);
+	uint16* dest = (uint16*)gInfo->alphacursor_virtual_address;
+	memset(dest, 0, 320 * 256 * 2);
     
     // Token for 2D engine
     gInfo->sm750_engine_token.engine_id = 1; 

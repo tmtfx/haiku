@@ -12,6 +12,119 @@
 
 extern accelerant_info *gInfo;
 
+bool actualoutbounds = false;
+bool previousoutbounds = false;
+
+static status_t
+sm750_update_alpha_cursor(uint16 x, uint16 y, uint16 width, uint16 height, uint16 bytesPerRow, const uint8* bitmapData)
+{
+	    // Dai vari test si nota che impostando right = left + 64 e 
+        // bottom = top + 64 per coprire tutta l'area del cursore alpha
+        // accade che l'ultima riga a destra e l'ultima in basso presentano
+        // artefatti. Tagliando via le ultime righe l'artefatto scompare.
+        // Ma l'artefatto si ripresenta quando muovo velocemente il mouse.
+        // Da prove empiriche per un tradeoff accettabile l'area di 48x48
+        // funziona abbastanza bene anche per lo spostamento veloce con 
+        // move_cursor, a quella dimensione non si presentano troppo spesso
+        // gli artefatti e l'area è sufficientemente grande per il trascinamento di icone
+        // con il drag'n'drop.
+    if (gInfo->alphacursor_virtual_address == NULL) {
+        debug_printf("SM750_ACC: Cursor: indirizzo di memoria cursore alpha non inizializzato\n");
+        return B_NO_INIT;
+    }
+
+    shared_info *si = gInfo->si;
+    vuint32 *regs = gInfo->regs;
+    
+    uint16* dest = (uint16*)gInfo->alphacursor_virtual_address;
+    const uint8* src = (const uint8* )bitmapData;
+
+    // Posizione logica considerando l'hotspot (può diventare negativa)
+    int16 left = (int16)x - (int16)si->cursor.hot_x;
+    int16 top = (int16)y - (int16)si->cursor.hot_y;
+
+    si->cursor.cursor_bitmap_width = width;
+    si->cursor.cursor_bitmap_height = height;
+
+    // --- CLIPPING SOFTWARE PER BORDI NEGATIVI ---
+    int16 hw_left = left;
+    int16 hw_top = top;
+    
+    int src_start_x = 0;
+    int src_start_y = 0;
+    
+    int draw_width = width;
+    int draw_height = height;
+
+    // Se usciamo a sinistra
+    if (hw_left < 0) {
+        src_start_x = -hw_left;        // Quanti pixel saltare all'inizio della riga sorgente
+        draw_width += hw_left;         // Riduciamo la larghezza da disegnare
+        hw_left = 0;                   // La finestra hardware parte da 0 a schermo
+    }
+
+    // Se usciamo in alto
+    if (hw_top < 0) {
+        src_start_y = -hw_top;         // Quante righe saltare all'inizio
+        draw_height += hw_top;         // Riduciamo l'altezza da disegnare
+        hw_top = 0;                    // La finestra hardware parte da 0 a schermo
+    }
+
+    // Calcoliamo right e bottom basati sulla porzione effettivamente visibile
+    int16 hw_right = hw_left + draw_width;
+    int16 bottom = hw_top + draw_height;
+
+    // Inviamo i valori positivi/clippati ai registri hardware dell'SM750
+    uint32 tl_val = ((hw_top & 0x7FF) << 16) | (hw_left & 0x07FF);
+    uint32 br_val = ((bottom & 0x7FF) << 16) | (hw_right & 0x07FF);
+
+    SM750_WREG32(SM750_DISP_PANEL_ALPHA_PL_TL_POS, tl_val);
+    SM750_WREG32(SM750_DISP_PANEL_ALPHA_PL_BR_POS, br_val);
+
+    // Indirizzo VRAM allineato
+    uint32 alpha_addr = si->cursor.alpha_vram_offset & 0x03FFFFF0;
+    SM750_WREG32(SM750_DISP_PANEL_ALPHA_FB_ADDR, alpha_addr);
+
+    // Allineamento a 128-bit per il pitch dei blocchi basato sulla larghezza attiva
+    uint32 raw_blocks = ((width * 2) + 15) / 16;
+    uint32 aligned_blocks = (raw_blocks + 7) & ~7;
+    if (aligned_blocks < 8) aligned_blocks = 8;
+    uint32 reg_val = (aligned_blocks << 20) | (aligned_blocks << 4);
+
+    SM750_WREG32(SM750_DISP_PANEL_ALPHA_FB_OFFSET_WWIDTH, reg_val);
+
+    uint32 pitch_pixels = aligned_blocks * 8;
+
+    // Pulisci l'area VRAM (64x64 pixel a 16-bit)
+    memset(dest, 0, 64 * 64 * 2);
+
+    // Copia dei pixel tenendo conto del ritaglio (cropping)
+    if (draw_width > 0 && draw_height > 0) {
+        for (int y_idx = 0; y_idx < draw_height && (src_start_y + y_idx) < height; y_idx++) {
+            for (int x_idx = 0; x_idx < draw_width && (src_start_x + x_idx) < width; x_idx++) {
+                
+                int src_x = src_start_x + x_idx;
+                int src_y = src_start_y + y_idx;
+
+                const uint8* pixel = src + (src_y * bytesPerRow) + (src_x * 4);
+                uint8 b = pixel[0] >> 4;
+                uint8 g = pixel[1] >> 4;
+                uint8 r = pixel[2] >> 4;
+                uint8 a = pixel[3] >> 4;
+
+                uint16 val = (a << 12) | (r << 8) | (g << 4) | b;
+                
+                // Scriviamo partendo da 0 nel buffer VRAM locale della finestra
+                dest[y_idx * pitch_pixels + x_idx] = val;
+            }
+        }
+    }
+
+    uint32 alpha_ctrl = (1 << 2) | (3 << 0); // Enable = 1, Format = 11 (16-bit aRGB 4:4:4:4)
+    SM750_WREG32(SM750_DISP_PANEL_ALPHA_CTRL, alpha_ctrl);
+
+    return B_OK;
+}
 void
 sm750_move_cursor(uint16 x, uint16 y)
 {
@@ -50,27 +163,36 @@ sm750_move_cursor(uint16 x, uint16 y)
     si->cursor.y = y;
     
     if (si->settings.usealphacursor) {
-        // Calcoliamo la posizione top-left considerando l'hotspot
-        int16 left = (int16)x - (int16)si->cursor.hot_x;
-        int16 top = (int16)y - (int16)si->cursor.hot_y;
-        
-        // Riduco o recupero la larghezza
-        // della bitmap per ridurre l'area di disegno, vedi nota
-        // in sm750_set_cursor_bitmap;
-        int16 width = (si->cursor.cursor_bitmap_width == 64) ? 63 : si->cursor.cursor_bitmap_width;
-        int16 height = (si->cursor.cursor_bitmap_height == 64) ? 63 : si->cursor.cursor_bitmap_height;
-        int16 right = left + width;
-        int16 bottom = top + height;
+    	// Valutiamo se la posizione attuale è fuori dai bordi (negativa)
+        actualoutbounds = (x_pos < 0 || y_pos < 0);
+        // Se ci troviamo fuori dai bordi O veniamo da una condizione di fuori bordo 
+        // (serve a ripulire/ripristinare quando rientriamo o ci muoviamo sul confine)
+        if (actualoutbounds || previousoutbounds) {
+            // Richiamiamo l'helper che gestisce il posizionamento e il cropping software
+            // Nota: passiamo la larghezza/altezza originale salvata in cursor_bitmap_width/height 
+            // e recuperiamo il bytesPerRow salvato (o ricalcolato se lo memorizziamo).
+            // Assicurati di avere il bytesPerRow a disposizione in si->cursor o passalo salvandolo prima.
+            sm750_update_alpha_cursor(x, y, si->cursor.cursor_bitmap_width, 
+                                      si->cursor.cursor_bitmap_height, 
+                                      si->cursor.bytesPerRaw, si->cursor.bitmapData);
+        } else {
+            // Caso standard in pieno schermo: aggiorniamo solo i registri della finestra 
+            // senza ricalcolare la VRAM pixel per pixel (massima velocità)
+            int16 left = x_pos;
+            int16 top = y_pos;
+            
+            int16 width = (si->cursor.cursor_bitmap_width == 64) ? 63 : si->cursor.cursor_bitmap_width;
+            int16 height = (si->cursor.cursor_bitmap_height == 64) ? 63 : si->cursor.cursor_bitmap_height;
+            int16 right = left + width;
+            int16 bottom = top + height;
 
-        // Gestione base dei bordi (evitiamo valori negativi se escono dallo schermo, 
-        // o lasciamo che il registro gestisca il clipping se supportato)
-        // Per sicurezza clampiamo o passiamo direttamente i valori nei bit corretti:
-        
-        uint32 tl_val = ((top & 0x7FF) << 16) | (left & 0x07FF);
-        uint32 br_val = ((bottom & 0x7FF) << 16) | (right & 0x07FF);
+            uint32 tl_val = ((top & 0x7FF) << 16) | (left & 0x07FF);
+            uint32 br_val = ((bottom & 0x7FF) << 16) | (right & 0x07FF);
 
-        SM750_WREG32(SM750_DISP_PANEL_ALPHA_PL_TL_POS, tl_val);
-        SM750_WREG32(SM750_DISP_PANEL_ALPHA_PL_BR_POS, br_val);
+            SM750_WREG32(SM750_DISP_PANEL_ALPHA_PL_TL_POS, tl_val);
+            SM750_WREG32(SM750_DISP_PANEL_ALPHA_PL_BR_POS, br_val);
+        }// Aggiorniamo lo stato precedente per il prossimo movimento
+        previousoutbounds = actualoutbounds;
     }
 }
 
@@ -183,86 +305,21 @@ sm750_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
     vuint32 *regs = gInfo->regs;
     si->cursor.hot_x = hotX;
     si->cursor.hot_y = hotY;
+    si->cursor.cursor_bitmap_width = width;
+    si->cursor.cursor_bitmap_height = height;
+    si->cursor.bytesPerRaw = bytesPerRow;
+    si->cursor.bitmapData = bitmapData;
     
     if (si->settings.usealphacursor){
-    	if (gInfo->alphacursor_virtual_address == NULL) {
-            debug_printf("SM750_ACC: Cursor: indirizzo di memoria cursore alpha non inizializzato");
-            return B_NO_INIT;
-        }
-        uint16* dest = (uint16*)gInfo->alphacursor_virtual_address;
-        const uint8* src = (const uint8*)bitmapData;
-        
-        
-        // Calcoliamo la posizione top-left considerando l'hotspot
+    	// Calcoliamo la posizione top-left considerando l'hotspot
         int16 left = (int16)si->cursor.x - (int16)si->cursor.hot_x;
         int16 top = (int16)si->cursor.y - (int16)si->cursor.hot_y;
         
-        // Dai vari test si nota che impostando right = left + 64 e 
-        // bottom = top + 64 per coprire tutta l'area del cursore alpha
-        // accade che l'ultima riga a destra e l'ultima in basso presentano
-        // artefatti. Tagliando via le ultime righe l'artefatto scompare.
-        // Ma l'artefatto si ripresenta quando muovo velocemente il mouse.
-        // Da prove empiriche per un tradeoff accettabile l'area di 48x48
-        // funziona abbastanza bene anche per lo spostamento veloce con 
-        // move_cursor, a quella dimensione non si presentano troppo spesso
-        // gli artefatti e l'area è sufficientemente grande per il trascinamento di icone
-        // con il drag'n'drop.
-        
-        int16 right = left + width;
-        si->cursor.cursor_bitmap_width = width;
-        int16 bottom = top + width;
-        si->cursor.cursor_bitmap_height = height;
-
-        uint32 tl_val = ((top & 0x7FF) << 16) | (left & 0x07FF);
-        uint32 br_val = ((bottom & 0x7FF) << 16) | (right & 0x07FF);
-
-        SM750_WREG32(SM750_DISP_PANEL_ALPHA_PL_TL_POS, tl_val);
-        SM750_WREG32(SM750_DISP_PANEL_ALPHA_PL_BR_POS, br_val);
-        
-        // L'offset in VRAM deve essere allineato (i 4 bit inferiori a zero)
-        uint32 alpha_addr = si->cursor.alpha_vram_offset & 0x03FFFFF0;
-        // Se usiamo la memoria locale, il bit 27 è 0. 
-        // Possiamo eventualmente impostare il bit 31 se serve un trigger di flip, 
-        // ma per l'inizializzazione statica o l'aggiornamento diretto basta l'indirizzo pulito.
-        SM750_WREG32(SM750_DISP_PANEL_ALPHA_FB_ADDR, alpha_addr);
-        
-        //uint32 fb_offset = 8;     // 128 byte / 16 = 8 blocchi
-        //uint32 window_width = 8;  // Stessa larghezza per la finestra del cursore (64 pixel)
-        //uint32 reg_val = (window_width << 20) | (fb_offset << 4);
-                
-        // ALLINEAMENTO a 128-bit!!!
-        uint32 raw_blocks = ((width * 2) + 15) /16; // pitch a 16-bit di colore allineato a 128-bit
-        uint32 aligned_blocks = (raw_blocks +7) &~7;
-        if (aligned_blocks < 8) aligned_blocks = 8;
-        uint32 reg_val = (aligned_blocks << 20) | (aligned_blocks << 4);
-        
-        
-        SM750_WREG32(SM750_DISP_PANEL_ALPHA_FB_OFFSET_WWIDTH, reg_val);
-        
-        uint32 pitch_pixels = aligned_blocks*8;
-        // Pulisci l'area (64x64 pixel a 16-bit = 8192 byte)
-        memset(dest, 0, 64 * 64 * 2);
-        // for debug black background
-        //for (int i = 0; i < 64 * 64; i++) {
-        //	dest[i]=0xFFFF; // aRGB16 4a,4r,4g,4b
-        //}
-        for (uint32 y = 0; y < height && y < 64; y++) {
-            for (uint32 x = 0; x < width && x < 64; x++) {
-                const uint8* pixel = src + (y * bytesPerRow) + (x * 4);
-                uint8 b = pixel[0] >> 4; // Da 8-bit a 4-bit (0-15)
-                uint8 g = pixel[1] >> 4;
-                uint8 r = pixel[2] >> 4;
-                uint8 a = pixel[3] >> 4;
-
-                // Formato aRGB 4:4:4:4: [A:15-12][R:11-8][G:7-4][B:3-0]
-                uint16 val = (a << 12) | (r << 8) | (g << 4) | b;
-                //dest[y * 64 + x] = val;
-                dest[y * pitch_pixels + x] = val;
-            }
-        }
-        uint32 alpha_ctrl = (1 << 2) | (3 << 0); // Enable = 1, Format = 11 (16-bit aRGB 4:4:4:4)
-        SM750_WREG32(SM750_DISP_PANEL_ALPHA_CTRL, alpha_ctrl);
-    
+        // --- GESTIONE STATO BOUNDS ---
+        actualoutbounds = (left < 0 || top < 0);
+        previousoutbounds = actualoutbounds; // Allineiamo lo stato iniziale
+        // Sfruttiamo l'helper centralizzato che gestisce anche i bordi negativi e il cropping
+        return sm750_update_alpha_cursor(si->cursor.x, si->cursor.y, width, height, bytesPerRow, bitmapData);
     } else {
         //if (si->cursor.v_address == NULL) {
         if (gInfo->cursor_virtual_address == NULL) {
