@@ -185,6 +185,8 @@ typedef struct {
 		uint32	block_id;
 		phys_addr_t	alpha_vram_offset;
 		uint32	alpha_block_id;
+		uint16	cursor_bitmap_width;
+		uint16	cursor_bitmap_height;
 	} cursor;
 
 	/* DAC Palette (CLUT) */

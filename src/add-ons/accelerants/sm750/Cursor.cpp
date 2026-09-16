@@ -54,9 +54,13 @@ sm750_move_cursor(uint16 x, uint16 y)
         int16 left = (int16)x - (int16)si->cursor.hot_x;
         int16 top = (int16)y - (int16)si->cursor.hot_y;
         
-        // Supponendo che il cursore sia 64x64 pixel
-        int16 right = left + 64;
-        int16 bottom = top + 64;
+        // Riduco o recupero la larghezza
+        // della bitmap per ridurre l'area di disegno, vedi nota
+        // in sm750_set_cursor_bitmap;
+        int16 width = (si->cursor.cursor_bitmap_width == 64) ? 63 : si->cursor.cursor_bitmap_width;
+        int16 height = (si->cursor.cursor_bitmap_height == 64) ? 63 : si->cursor.cursor_bitmap_height;
+        int16 right = left + width;
+        int16 bottom = top + height;
 
         // Gestione base dei bordi (evitiamo valori negativi se escono dallo schermo, 
         // o lasciamo che il registro gestisca il clipping se supportato)
@@ -177,7 +181,6 @@ sm750_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 	//       while changing the bitmap
     shared_info *si = gInfo->si;
     vuint32 *regs = gInfo->regs;
-    //uint8* dest = (uint8*)si->cursor.v_address;
     si->cursor.hot_x = hotX;
     si->cursor.hot_y = hotY;
     
@@ -194,14 +197,22 @@ sm750_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
         int16 left = (int16)si->cursor.x - (int16)si->cursor.hot_x;
         int16 top = (int16)si->cursor.y - (int16)si->cursor.hot_y;
         
-        // Supponendo che il cursore sia 64x64 pixel
-        int16 right = left + 64;
-        int16 bottom = top + 64;
-
-        // Gestione base dei bordi (evitiamo valori negativi se escono dallo schermo, 
-        // o lasciamo che il registro gestisca il clipping se supportato)
-        // Per sicurezza clampiamo o passiamo direttamente i valori nei bit corretti:
+        // Dai vari test si nota che impostando right = left + 64 e 
+        // bottom = top + 64 per coprire tutta l'area del cursore alpha
+        // accade che l'ultima riga a destra e l'ultima in basso presentano
+        // artefatti. Tagliando via le ultime righe l'artefatto scompare.
+        // Ma l'artefatto si ripresenta quando muovo velocemente il mouse.
+        // Da prove empiriche per un tradeoff accettabile l'area di 48x48
+        // funziona abbastanza bene anche per lo spostamento veloce con 
+        // move_cursor, a quella dimensione non si presentano troppo spesso
+        // gli artefatti e l'area è sufficientemente grande per il trascinamento di icone
+        // con il drag'n'drop.
         
+        int16 right = left + width;
+        si->cursor.cursor_bitmap_width = width;
+        int16 bottom = top + width;
+        si->cursor.cursor_bitmap_height = height;
+
         uint32 tl_val = ((top & 0x7FF) << 16) | (left & 0x07FF);
         uint32 br_val = ((bottom & 0x7FF) << 16) | (right & 0x07FF);
 
@@ -215,13 +226,26 @@ sm750_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
         // ma per l'inizializzazione statica o l'aggiornamento diretto basta l'indirizzo pulito.
         SM750_WREG32(SM750_DISP_PANEL_ALPHA_FB_ADDR, alpha_addr);
         
-        uint32 fb_offset = 8;     // 128 byte / 16 = 8 blocchi
-        uint32 window_width = 8;  // Stessa larghezza per la finestra del cursore (64 pixel)
-        uint32 reg_val = (window_width << 20) | (fb_offset << 4);
+        //uint32 fb_offset = 8;     // 128 byte / 16 = 8 blocchi
+        //uint32 window_width = 8;  // Stessa larghezza per la finestra del cursore (64 pixel)
+        //uint32 reg_val = (window_width << 20) | (fb_offset << 4);
+                
+        // ALLINEAMENTO a 128-bit!!!
+        uint32 raw_blocks = ((width * 2) + 15) /16; // pitch a 16-bit di colore allineato a 128-bit
+        uint32 aligned_blocks = (raw_blocks +7) &~7;
+        if (aligned_blocks < 8) aligned_blocks = 8;
+        uint32 reg_val = (aligned_blocks << 20) | (aligned_blocks << 4);
+        
+        
         SM750_WREG32(SM750_DISP_PANEL_ALPHA_FB_OFFSET_WWIDTH, reg_val);
         
+        uint32 pitch_pixels = aligned_blocks*8;
         // Pulisci l'area (64x64 pixel a 16-bit = 8192 byte)
         memset(dest, 0, 64 * 64 * 2);
+        // for debug black background
+        //for (int i = 0; i < 64 * 64; i++) {
+        //	dest[i]=0xFFFF; // aRGB16 4a,4r,4g,4b
+        //}
         for (uint32 y = 0; y < height && y < 64; y++) {
             for (uint32 x = 0; x < width && x < 64; x++) {
                 const uint8* pixel = src + (y * bytesPerRow) + (x * 4);
@@ -232,7 +256,8 @@ sm750_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 
                 // Formato aRGB 4:4:4:4: [A:15-12][R:11-8][G:7-4][B:3-0]
                 uint16 val = (a << 12) | (r << 8) | (g << 4) | b;
-                dest[y * 64 + x] = val;
+                //dest[y * 64 + x] = val;
+                dest[y * pitch_pixels + x] = val;
             }
         }
         uint32 alpha_ctrl = (1 << 2) | (3 << 0); // Enable = 1, Format = 11 (16-bit aRGB 4:4:4:4)
