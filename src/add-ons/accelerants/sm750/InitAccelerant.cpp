@@ -50,16 +50,33 @@ static status_t init_vram_manager(shared_info* si)
     // SM750 hardware cursor in "3-color + transparency" mode uses 16KB.
     uint32 cursorBlockID;
     uint32 cursorOffset;
-    status_t status = mem_alloc((mem_info*)local_mem_mgr, 16384, (void*)0x43555253, 
+    uint32 alphacursorBlockID;
+    uint32 alphacursorOffset;
+    status_t ret = B_OK;
+    status_t status = mem_alloc((mem_info*)local_mem_mgr, 16384, (void*)0x43555253, // "CURS"
                                 &cursorBlockID, &cursorOffset);
+    if (si->settings.usealphacursor) {
+    	ret = mem_alloc((mem_info*)local_mem_mgr, 16384, (void*)0x414C5048, // "ALPH"
+                                &alphacursorBlockID, &alphacursorOffset);
+    }
     
     if (status == B_OK) {
         si->cursor.vram_offset = cursorOffset;
         si->cursor.block_id = cursorBlockID;
+        if (si->settings.usealphacursor) {
+        	if (ret == B_OK) {
+        		si->cursor.alpha_vram_offset = alphacursorOffset;
+        		si->cursor.alpha_block_id = alphacursorBlockID;
+        	}
+        }
         si->mem_mgr = local_mem_mgr;
+        
         //debug_printf("SM750_ACC: Cursor dinamically allocated at offset 0x%x\n", cursorOffset);
     } else {
         debug_printf("SM750_ACC ERROR: Unable to allocate memory for the cursor!\n");
+    }
+    if (ret != B_OK) {
+    	debug_printf("SM750_ACC ERROR: Unable to allocate memory for the alpha cursor layer!\n");
     }
 
     return B_OK;
@@ -316,8 +333,8 @@ static status_t init_common(int fd,bool isClone) {
         }
     }
     
-    //gInfo->cursor_virtual_address = (void *)((addr_t)gInfo->framebuffer + si->cursor.vram_offset);
 	gInfo->cursor_virtual_address = (void *)((addr_t)si->framebuffer + si->cursor.vram_offset);
+	gInfo->alphacursor_virtual_address = (void *)((addr_t)si->framebuffer + si->cursor.alpha_vram_offset);
     
     // Token for 2D engine
     gInfo->sm750_engine_token.engine_id = 1; 
@@ -412,7 +429,6 @@ void sm750_uninit_accelerant(void) {
     if (gInfo->shared_info_area >= 0) delete_area(gInfo->shared_info_area);
     
     gInfo->regs = NULL;
-    //gInfo->framebuffer = NULL;
     gInfo->vblank_thread = -1;
     gInfo->si = NULL;
 }
