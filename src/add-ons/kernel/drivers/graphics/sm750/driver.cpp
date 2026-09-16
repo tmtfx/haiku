@@ -41,6 +41,7 @@ static sm750_settings current_settings = {
     false,					// usebios, rely on bios to coldstart (not recommended)
     true,					// hardcursor, if true use on-chip hardware cursor
     2,						// cursorbits, number of bits used to draw bitmap cursor
+    false,					// usealphacursor, use the card's alpha layer for BitmapCursor image (overrides cursorbits)
     false,					// force_crt, utually exclusive with force_panel: force crt layer usage
     false,					// force_panel, force panel layer usage
     true,					// dualhead, support for both crt and panel, not implemented
@@ -115,7 +116,7 @@ map_videomem(void **out_virt, phys_addr_t phys, uint32 size, const char *name)
 static void
 load_settings(void)
 {
-    void* handle = load_driver_settings("sm750");
+    void* handle = load_driver_settings("sm750.settings");
     if (handle != NULL) {
         current_settings.force_CRT = get_driver_boolean_parameter(
             handle, "force_crt", current_settings.force_CRT, current_settings.force_CRT);
@@ -125,8 +126,11 @@ load_settings(void)
             
         current_settings.hardcursor = get_driver_boolean_parameter(
             handle, "hardcursor", current_settings.hardcursor, current_settings.hardcursor);
-
-        const char* value_str = get_driver_parameter(handle, "cursorbits", "2", "2"); //default HC bits on SM750
+        
+        current_settings.usealphacursor = get_driver_boolean_parameter(
+            handle, "usealphacursor", current_settings.usealphacursor, current_settings.usealphacursor);
+		
+		const char* value_str = get_driver_parameter(handle, "cursorbits", "2", "2"); //default HC bits on SM750
 
         if (value_str != nullptr) {
             current_settings.cursorbits = (uint32)atoi(value_str);
