@@ -85,7 +85,7 @@
 #define SM750_DISP_PANEL_FB_ADDR		0x0008000C // Primary Display FB Address
 #define SM750_DISP_PANEL_FB_OFFSET_WWIDTH	0x00080010 // Primary Display FB Offset/Window Width
 #define SM750_DISP_PANEL_FB_WIDTH		0x00080014 // Primary Display FB Width //not used
-#define SM750_DISP_PANEL_FB_HEIGHT		0x00080014 // Primary Display FB Height //not used
+#define SM750_DISP_PANEL_FB_HEIGHT		0x00080018 // Primary Display FB Height //not used
 #define SM750_DISP_PANEL_PLANE_TL_LOC		0x0008001C // Primary Display Plane TL Location
 #define SM750_DISP_PANEL_PLANE_BR_LOC		0x00080020 // Primary Display Plane BR Location
 
