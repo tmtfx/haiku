@@ -142,14 +142,15 @@ sm750_set_fb_addr(uint32 offset, bool is_panel)
         
     // 1. Controllo allineamento (128-bit / 16 byte)
     if (offset & 0xF) {
-        debug_printf("SM750_ACC: ERROR - FB Address 0x%08x non allineato a 16 byte!\n", offset);
+        debug_printf("SM750_ACC: ERROR - FB Address 0x%08x is not 128-bit aligned!\n", offset);
         offset &= ~0xF; // Forza l'allineamento arrotondando per difetto
     }
+    
+    uint32 ramSize = gInfo->si->card_info.mem_size;
 
     // 2. Controllo Limiti (Safe Guard per 16MB)
-    if (offset >= (16 * 1024 * 1024)) {
-    	debug_printf("SM750_ACC: TODO: use real size");
-        debug_printf("SM750_ACC: ERROR - FB Address 0x%08x fuori dai 16MB!\n", offset);
+    if (offset >= ramSize) {
+        debug_printf("SM750_ACC: ERROR - FB Address 0x%08x beyond graphics memory size of %d!\n", offset, ramSize);
         return B_BAD_VALUE;
     }
 
@@ -305,37 +306,37 @@ sm750_set_display_mode(display_mode *mode)
     //sm750_set_fb_addr(0, !isPanel);
     //sm750_set_pitch(pitch, !isPanel);
     if (isPanel) {
-        debug_printf("original fb_width %" B_PRIx32 "\n",SM750_REG32(SM750_DISP_PANEL_FB_WIDTH));
-        debug_printf("original fb_height %" B_PRIx32 "\n",SM750_REG32(SM750_DISP_PANEL_FB_HEIGHT));
+        //debug_printf("original fb_width %" B_PRIx32 "\n",SM750_REG32(SM750_DISP_PANEL_FB_WIDTH));
+        //debug_printf("original fb_height %" B_PRIx32 "\n",SM750_REG32(SM750_DISP_PANEL_FB_HEIGHT));
     	// PANEL has 2 more regs to set up:
     	// Reg 0x080014 / 0x080214:
         // Bits 27:16 = FB Global Width (in pixel)
         // Bits 11:0  = WX (Start X = 0)
-        //uint32 fb_width_reg = (mode->virtual_width & 0x0FFF) << 16;
+        uint32 fb_width_reg = (mode->virtual_width & 0x0FFF) << 16;
 
         // Reg 0x080018 / 0x080218:
         // Bits 27:16 = FB Global Height (in linee)
         // Bits 11:0  = WY (Start Y = 0)
-        //uint32 fb_height_reg = (mode->virtual_height & 0x0FFF) << 16;
+        uint32 fb_height_reg = (mode->virtual_height & 0x0FFF) << 16;
 
-        //SM750_WREG32(SM750_DISP_PANEL_FB_W, fb_width_reg);
-        //SM750_WREG32(SM750_DISP_PANEL_FB_H, fb_height_reg);
-        //snooze(10);
+        SM750_WREG32(SM750_DISP_PANEL_FB_WIDTH, fb_width_reg);
+        SM750_WREG32(SM750_DISP_PANEL_FB_HEIGHT, fb_height_reg);
+        snooze(10);
         //debug_printf("ora imposto fb_width a %" B_PRIx32 "\n",SM750_REG32(SM750_DISP_PANEL_FB_WIDTH));
         //debug_printf("ora imposto fb_height a %" B_PRIx32 "\n",SM750_REG32(SM750_DISP_PANEL_FB_HEIGHT));
         
         // forse manca Primary Display Plane TL Location e Primary Display Plane BR Location
         uint32 width = mode->virtual_width;
         uint32 height = mode->virtual_height;
-        debug_printf("original primary display plane TL Location %" B_PRIx32 "\n",SM750_REG32(SM750_DISP_PANEL_PLANE_TL_LOC));
-        debug_printf("original primary display plane BR Location %" B_PRIx32 "\n",SM750_REG32(SM750_DISP_PANEL_PLANE_BR_LOC));
+        //debug_printf("original primary display plane TL Location %" B_PRIx32 "\n",SM750_REG32(SM750_DISP_PANEL_PLANE_TL_LOC));
+        //debug_printf("original primary display plane BR Location %" B_PRIx32 "\n",SM750_REG32(SM750_DISP_PANEL_PLANE_BR_LOC));
         uint32 plane_tl = 0;
         SM750_WREG32(SM750_DISP_PANEL_PLANE_TL_LOC, plane_tl);
         uint32 plane_br = (((height - 1) & 0x07FF) << 16) | ((width - 1) & 0x07FF);
         SM750_WREG32(SM750_DISP_PANEL_PLANE_BR_LOC, plane_br);
         snooze(10);
-        debug_printf("nuovo valore di primary display plane TL Location: %" B_PRIx32 "\n",SM750_REG32(SM750_DISP_PANEL_PLANE_TL_LOC));
-        debug_printf("nuovo valore primary display plane BR Location: %" B_PRIx32 "\n",SM750_REG32(SM750_DISP_PANEL_PLANE_BR_LOC));
+        //debug_printf("nuovo valore di primary display plane TL Location: %" B_PRIx32 "\n",SM750_REG32(SM750_DISP_PANEL_PLANE_TL_LOC));
+        //debug_printf("nuovo valore primary display plane BR Location: %" B_PRIx32 "\n",SM750_REG32(SM750_DISP_PANEL_PLANE_BR_LOC));
         //snooze(10);
     }
     
@@ -493,7 +494,7 @@ sm750_propose_display_mode(display_mode *target, const display_mode *low, const 
     // Usiamo 12MB come limite invalicabile per il frame buffer primario
 
     if (memNeeded > gInfo->si->card_info.max_desktop_mem) {
-        debug_printf("SM750: Modalità rifiutata - serve %u byte, limite desktop %u\n", 
+        debug_printf("SM750: Mode rejected - you need %u bytes, desktop limit is %u\n", 
                   memNeeded, gInfo->si->card_info.max_desktop_mem);
         return B_BAD_VALUE;
     }
