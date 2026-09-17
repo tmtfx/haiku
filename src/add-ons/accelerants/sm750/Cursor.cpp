@@ -29,7 +29,7 @@ sm750_update_alpha_cursor(uint16 x, uint16 y, uint16 width, uint16 height, uint1
         // gli artefatti e l'area è sufficientemente grande per il trascinamento di icone
         // con il drag'n'drop.
     if (gInfo->alphacursor_virtual_address == NULL) {
-        debug_printf("SM750_ACC: Cursor: indirizzo di memoria cursore alpha non inizializzato\n");
+        debug_printf("SM750_ACC: Cursor: alpha-cursor memory address not initialized\n");
         return B_NO_INIT;
     }
 
@@ -323,7 +323,7 @@ sm750_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
     } else {
         //if (si->cursor.v_address == NULL) {
         if (gInfo->cursor_virtual_address == NULL) {
-            debug_printf("SM750_ACC: Cursor: indirizzo di memoria non inizializzato");
+            debug_printf("SM750_ACC: Cursor: cursor memory address not initialized\n");
             return B_NO_INIT;
         }
         
