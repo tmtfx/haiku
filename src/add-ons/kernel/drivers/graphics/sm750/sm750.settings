@@ -17,8 +17,8 @@ usealphacursor false		# for BitmapCursor use card's alpha layer
 #logmask    0x00000000           # nothing logged (default) (not implemented)
 #logmask    0xffffffff           # log everything to file (not implemented)
 
-#force_crt true                 # mutually exclusive with force_panel: force crt layer usage (not implemented)
-#force_panel true            # force panel layer usage (not implemented)
+#force_crt true                 # mutually exclusive with force_panel: force crt layer usage
+#force_panel true            # force panel layer usage
 
 # SM750 specific tweaks:
 dualhead    true                 # enable support for both CRT and Panel (not implemented)
