@@ -13,15 +13,17 @@
 
 extern accelerant_info *gInfo;
 
+bool enableLogs = false;
+
 #define CALLED() debug_printf("SM750_ACC OVERLAY: %s\n", __FUNCTION__)
 
 static void
 sm750_set_color_key_enabled(bool enable)
 {
-	debug_printf("SM750 Overlay: %s color key...\n", enable ? "enabling" : "disabling");
+	if (enableLogs) debug_printf("SM750 Overlay: %s color key...\n", enable ? "enabling" : "disabling");
 	vuint32* regs = gInfo->regs;
 	uint32 panelControl = SM750_REG32(SM750_PANEL_CONTROL);
-	debug_printf("SM750 Overlay: Panel Control was %" B_PRIx32 "\n", panelControl);
+	if (enableLogs) debug_printf("SM750 Overlay: Panel Control was %" B_PRIx32 "\n", panelControl);
 
 	if (enable)
 		panelControl |= (1 << 9);
@@ -31,7 +33,7 @@ sm750_set_color_key_enabled(bool enable)
 	SM750_WREG32(SM750_PANEL_CONTROL, panelControl);
 	snooze(10);
 	panelControl = SM750_REG32(SM750_PANEL_CONTROL);
-	debug_printf("SM750 Overlay: now Panel Control is %" B_PRIx32 "\n", panelControl);
+	if (enableLogs) debug_printf("SM750 Overlay: now Panel Control is %" B_PRIx32 "\n", panelControl);
 }
 
 void
@@ -40,11 +42,11 @@ sm750_configure_color_key(const overlay_window *ow)
     vuint32 *regs = gInfo->regs;
     shared_info *si = gInfo->si;
     
-    debug_printf("SM750 Raw Overlay -> Red: val=%u, mask=0x%x\n", 
+    if (enableLogs) debug_printf("SM750 Raw Overlay -> Red: val=%u, mask=0x%x\n", 
                 ow->red.value, ow->red.mask);
-    debug_printf("SM750 Raw Overlay -> Green: val=%u, mask=0x%x\n", 
+    if (enableLogs) debug_printf("SM750 Raw Overlay -> Green: val=%u, mask=0x%x\n", 
                 ow->green.value, ow->green.mask);
-    debug_printf("SM750 Raw Overlay -> Blue: val=%u, mask=0x%x\n", 
+    if (enableLogs) debug_printf("SM750 Raw Overlay -> Blue: val=%u, mask=0x%x\n", 
                 ow->blue.value, ow->blue.mask);
 
     uint16 keyColor = 0;
@@ -57,7 +59,7 @@ sm750_configure_color_key(const overlay_window *ow)
     uint16 r = (ow->red.value   & ow->red.mask);
     uint16 g = (ow->green.value & ow->green.mask);
     uint16 b = (ow->blue.value  & ow->blue.mask);
-    debug_printf("SM750 Overlay: r=%d, g=%d, b=%d\n",r,g,b);
+    if (enableLogs) debug_printf("SM750 Overlay: r=%d, g=%d, b=%d\n",r,g,b);
 
     if (si->dm.space == B_RGB15 || si->dm.space == B_RGBA15) {
         keyMask = 0x7FFF;
@@ -72,7 +74,7 @@ sm750_configure_color_key(const overlay_window *ow)
     // Bit [31:16] = Mask
     // Bit [15:0]  = Value
     uint32 regValue = ((uint32)keyMask << 16) | (keyColor & 0xFFFF);
-	debug_printf("SM750 Overlay: valore del registro: %" B_PRIx32 "\n",regValue);
+	if (enableLogs) debug_printf("SM750 Overlay: valore del registro: %" B_PRIx32 "\n",regValue);
 
     SM750_WREG32(SM750_DISP_PANEL_COLOR_KEY, regValue);
     sm750_set_color_key_enabled(true);
@@ -263,12 +265,12 @@ sm750_allocate_overlay_buffer(color_space cs, uint16 width, uint16 height)
     uint32 available_vram = mem_get_free_memory((mem_info*)si->mem_mgr);
 
     if (size > available_vram) {
-        debug_printf("SM750_ACC: Overlay too big! Free RAM heap: %u, Needed: %u\n", available_vram, size);
+        if (enableLogs) debug_printf("SM750_ACC: Overlay too big! Free RAM heap: %u, Needed: %u\n", available_vram, size);
         return NULL;
     }
     
     if (mem_alloc((mem_info*)si->mem_mgr, allocSize, (void*)'VIDO', &blockID, &offset) != B_OK){
-        debug_printf("SM750_ACC: Kernel VRAM Heap Out of Memory!\n");
+        if (enableLogs) debug_printf("SM750_ACC: Kernel VRAM Heap Out of Memory!\n");
         return NULL;
     }
     
@@ -418,7 +420,7 @@ sm750_configure_overlay(const overlay_window *window, const overlay_buffer *buff
         case B_YCbCr422: format = 3; break; // YUYV
         case B_RGB16:    format = 1; break; // 16bpp 5:6:5
         default:
-            debug_printf("SM750_ACC: Format %d not supported by hardware! Force YUV.\n", buffer->space);
+            if (enableLogs) debug_printf("SM750_ACC: Format %d not supported by hardware! Force YUV.\n", buffer->space);
             format = 3; 
             break;
     }
