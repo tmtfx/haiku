@@ -484,6 +484,10 @@ AVCodecDecoder::_NegotiateVideoOutputFormat(media_format* inOutFormat)
 	}
 	fCodecInitDone = true;
 
+/* commented, because we want to use sws for color space conversion but still
+ * using hardware overlay if available with other formats
+ *
+ * this is the original code:
 #if USE_SWS_FOR_COLOR_SPACE_CONVERSION
 	fOutputColorSpace = B_RGB32;
 #else
@@ -495,6 +499,22 @@ AVCodecDecoder::_NegotiateVideoOutputFormat(media_format* inOutFormat)
 	else
 		fOutputColorSpace = B_RGB32;
 #endif
+*/
+/* questo funziona almeno per la mia sm750 */
+
+	color_space requestedSpace = inOutFormat->u.raw_video.display.format;
+	if (requestedSpace == B_YCbCr422 || requestedSpace == B_RGB16) {
+		debug_printf("Negotiation output colorspace format: %d\n", requestedSpace);
+		fOutputColorSpace = requestedSpace;
+	} else {
+		debug_printf("fallback to B_RGB32\n");
+		fOutputColorSpace = B_RGB32;
+	}
+
+	//fOutputColorSpace = inOutFormat->u.raw_video.display.format;
+	//debug_printf("Negotiation output colorspace format: %d\n", fOutputColorSpace);
+	
+// ================================================================================================
 
 #if USE_SWS_FOR_COLOR_SPACE_CONVERSION
 	if (fSwsContext != NULL)
