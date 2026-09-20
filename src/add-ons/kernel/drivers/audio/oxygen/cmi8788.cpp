@@ -45,24 +45,20 @@ cmi8788_map_registers(cmi8788_device *device)
 int32
 cmi8788_interrupt(void *data)
 {
-	cmi8788_device *device = (cmi8788_device *)data;
-	
-	// Leggi lo stato degli interrupt dal registro MMIO del CMI8788
-	uint8 status = *(volatile uint8 *)(device->mmio_base + OXYGEN_INTERRUPT_STATUS);
-	
-	if (status == 0)
-		return B_UNHANDLED_INTERRUPT; // L'interrupt non appartiene a questa scheda
+    cmi8788_device *device = (cmi8788_device *)data;
+    
+    // Leggi lo stato degli interrupt dal registro MMIO del CMI8788
+    uint16_t status = oxygen_read16(device, OXYGEN_INTERRUPT_STATUS);
+    if (status == 0 || status == 0xffff)
+        return B_UNHANDLED_INTERRUPT;
+    
+    if (status & OXYGEN_CHANNEL_MULTICH) {
+        // Pulisci l o status o gestisci il buffer circolare audio
+        oxygen_write16(device, OXYGEN_INTERRUPT_STATUS, OXYGEN_CHANNEL_MULTICH);
+        // TODO: Notifica il client audio di Haiku
+    }
 
-	// Pulisci i flag di interrupt scrivendoli indietro
-	*(volatile uint8 *)(device->mmio_base + OXYGEN_INTERRUPT_STATUS) = status;
-
-	if (status & OXYGEN_INT_PLAYBACK) {
-		// Notifica al framework multi_audio di Haiku che un frammento DMA è stato riprodotto
-		// e che possiamo riempire il successivo blocco del ring buffer.
-		// (In Haiku si usa una notifica tramite condition variable o blocco semaforo)
-	}
-
-	return B_HANDLED_INTERRUPT;
+    return B_HANDLED_INTERRUPT;
 }
 
 
@@ -139,7 +135,6 @@ cmi8788_free(void *cookie)
 	return B_OK;
 }
 
-
 // Funzione di descrizione delle capacità della D2X per il framework multi_audio di Haiku
 status_t
 cmi8788_get_capabilities(cmi8788_device *device, multi_description *data)
@@ -173,38 +168,7 @@ cmi8788_get_capabilities(cmi8788_device *device, multi_description *data)
 
     return B_OK;
 }
-/* OK
-static status_t
-cmi8788_get_capabilities(cmi8788_device *device, multi_description *data)
-{
-    if (data == NULL)
-        return B_BAD_VALUE;
 
-    memset(data, 0, sizeof(multi_description));
-
-    data->info_size = sizeof(multi_description);
-    data->interface_version = 1;
-    data->interface_minimum = 1;
-
-    strlcpy(data->friendly_name, "ASUS Xonar DX / CMI8788", sizeof(data->friendly_name));
-    strlcpy(data->vendor_info, "C-Media / ASUS", sizeof(data->vendor_info));
-
-    data->output_channel_count = 8;
-    data->input_channel_count = 2;
-    data->output_bus_channel_count = 0;
-    data->input_bus_channel_count = 0;
-    data->aux_bus_channel_count = 0;
-
-    // Usa i prefissi corretti B_SR_
-    data->output_rates = B_SR_44100 | B_SR_48000 | B_SR_96000 | B_SR_192000;
-    data->input_rates  = B_SR_44100 | B_SR_48000 | B_SR_96000 | B_SR_192000;
-
-    // Usa B_FMT_32BIT suggerito dal compilatore
-    data->output_formats = B_FMT_32BIT; 
-    data->input_formats  = B_FMT_32BIT;
-
-    return B_OK;
-}*/
 static int32
 cmi8788_control(void *cookie, uint32 op, void *arg, size_t length)
 {
@@ -216,34 +180,34 @@ cmi8788_control(void *cookie, uint32 op, void *arg, size_t length)
         case B_MULTI_GET_DESCRIPTION:
             return cmi8788_get_capabilities(device, (multi_description *)arg);
 
-case B_MULTI_GET_BUFFERS:
-{
-    multi_buffer_list *data = (multi_buffer_list *)arg;
+        case B_MULTI_GET_BUFFERS:
+        {
+            multi_buffer_list *data = (multi_buffer_list *)arg;
     
-    int32 num_buffers = data->request_playback_buffers > 0 ? data->request_playback_buffers : 2;
-    int32 channels = data->request_playback_channels > 0 ? data->request_playback_channels : 8; // 8 canali per la D2X
-    uint32 buffer_size_frames = data->request_playback_buffer_size > 0 ? data->request_playback_buffer_size : 1024;
+            int32 num_buffers = data->request_playback_buffers > 0 ? data->request_playback_buffers : 2;
+            int32 channels = data->request_playback_channels > 0 ? data->request_playback_channels : 8; // 8 canali per la D2X
+            uint32 buffer_size_frames = data->request_playback_buffer_size > 0 ? data->request_playback_buffer_size : 1024;
     
-    data->return_playback_buffers = num_buffers;
-    data->return_playback_channels = channels;
-    data->return_playback_buffer_size = buffer_size_frames;
+            data->return_playback_buffers = num_buffers;
+            data->return_playback_channels = channels;
+            data->return_playback_buffer_size = buffer_size_frames;
     
-    size_t chunk_size = buffer_size_frames * channels * sizeof(int32);
+            size_t chunk_size = buffer_size_frames * channels * sizeof(int32);
     
-    for (int b = 0; b < num_buffers; b++) {
-        for (int c = 0; c < channels; c++) {
-            data->playback_buffers[b][c].base = (char *)device->dma_pub_base 
-                + (b * chunk_size) + (c * buffer_size_frames * sizeof(int32));
-            data->playback_buffers[b][c].stride = chunk_size;
+            for (int b = 0; b < num_buffers; b++) {
+                for (int c = 0; c < channels; c++) {
+                    data->playback_buffers[b][c].base = (char *)device->dma_pub_base 
+                        + (b * chunk_size) + (c * buffer_size_frames * sizeof(int32));
+                    data->playback_buffers[b][c].stride = chunk_size;
+                }
+            }
+    
+            data->return_record_buffers = 0;
+            data->return_record_channels = 0;
+            data->return_record_buffer_size = 0;
+    
+            return B_OK;
         }
-    }
-    
-    data->return_record_buffers = 0;
-    data->return_record_channels = 0;
-    data->return_record_buffer_size = 0;
-    
-    return B_OK;
-}
         case B_MULTI_BUFFER_EXCHANGE:
         {
             multi_buffer_info *data = (multi_buffer_info *)arg;
