@@ -1,0 +1,7 @@
+SubDir HAIKU_TOP src add-ons kernel drivers audio oxygen ;
+
+KernelAddon cmi8788 :
+	cmi8788.cpp
+	oxygen.cpp
+	oxygen_i2c.cpp
+;
