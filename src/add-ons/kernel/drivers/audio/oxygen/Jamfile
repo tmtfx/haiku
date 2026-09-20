@@ -1,4 +1,6 @@
 SubDir HAIKU_TOP src add-ons kernel drivers audio oxygen ;
+UsePrivateKernelHeaders ;
+UsePrivateHeaders audio device ;
 
 KernelAddon cmi8788 :
 	cmi8788.cpp

@@ -6,31 +6,75 @@
 #include <KernelExport.h>
 #include <Drivers.h>
 
+//#include <stdlib.h>
+//#include <errno.h>
 
-// Prototipo della funzione I2C definita sopra
-status_t oxygen_i2c_write(addr_t mmio_base, uint8 device_addr, uint8 reg, uint16 data);
+//#include <SupportDefs.h>
+#include <util/kernel_cpp.h>
+//#include <unistd.h>
+//#include <stdio.h>
+//#include <string.h>
+//#include <errno.h>
 
-// Registri di controllo globali OxygenHD
-#define OXYGEN_FUNCTION_CONTROL		CNc 0x6a // Esempio offset registro funzionale
-#define OXYGEN_GPI_DATA			0xe0
+#include "cmi8788.h"
 
-status_t
-oxygen_chip_init(addr_t mmio_base)
+#define ROUNDUP(value, alignment) (((value) + (alignment) - 1) & ~((alignment) - 1))
+
+// Funzione di scrittura SPI per i DAC PCM1796 della Xonar D2X
+static void
+xonar_d2_pcm1796_write(oxygen_t *chip, uint8_t codec_mask, uint8_t reg, uint8_t value)
 {
-	dprintf("oxygen: Inizializzazione registri CMI8788 in corso...\n");
+    int timeout = 100;
+    
+    while ((oxygen_read8(chip, OXYGEN_SPI_STATUS) & 0x01) && --timeout > 0) {
+        // spin-wait breve nel kernel
+    }
 
-	// 1. Reset e configurazione iniziale dei canali DMA e interrupt
-	// (Qui andranno configurate le maschere di interrupt globali)
+    uint16_t spi_data = ((reg & 0x1f) << 8) | value;
+    oxygen_write16(chip, OXYGEN_SPI_DATA, spi_data);
+    
+    uint8_t control_val = 0x01 | (codec_mask & 0x0f) << 4;
+    oxygen_write8(chip, OXYGEN_SPI_CONTROL, control_val);
+}
 
-	// 2. Inizializzazione del DAC CS4398 via I2C (Indirizzo tipico 0x98 o simili per Xonar DX)
-	// Esempio di invio configurazione volume/mute iniziale al DAC
-	status_t status = oxygen_i2c_write(mmio_base, 0x98, 0x01, 0x0000);
-	if (status < B_OK) {
-		dprintf("oxygen: Attenzione - Impossibile comunicare con il DAC via I2C\n");
-	}
+// Inizializzazione hardware specifica per la Xonar D2X
+void
+xonar_d2_init(oxygen_t *chip)
+{
+    uint16_t control;
+    uint16_t data;
 
-	dprintf("oxygen: Chip CMI8788 inizializzato con successo.\n");
-	return B_OK;
+    control = oxygen_read16(chip, OXYGEN_GPIO_CONTROL);
+    control |= (XONAR_D2_GPIO_MUTE | XONAR_D2_GPIO_LED_MASK);
+    oxygen_write16(chip, OXYGEN_GPIO_CONTROL, control);
+
+    data = oxygen_read16(chip, OXYGEN_GPIO_DATA);
+    data &= ~XONAR_D2_GPIO_MUTE;
+    oxygen_write16(chip, OXYGEN_GPIO_DATA, data);
+
+    for (int i = 0; i < 4; i++) {
+        uint8_t dac_mask = (1 << i);
+        xonar_d2_pcm1796_write(chip, dac_mask, PCM1796_REG_CONTROL_1, 0x00); 
+        xonar_d2_pcm1796_write(chip, dac_mask, PCM1796_REG_CONTROL_2, 0x50); 
+        xonar_d2_pcm1796_write(chip, dac_mask, PCM1796_REG_ATTN_L, 0xff);
+        xonar_d2_pcm1796_write(chip, dac_mask, PCM1796_REG_ATTN_R, 0xff);
+    }
+
+    data |= XONAR_D2_GPIO_MUTE;
+    oxygen_write16(chip, OXYGEN_GPIO_DATA, data);
+}
+
+// Allinea la firma a quella dichiarata in cmi8788.h (oppure aggiorna l'header se preferisci passare il puntatore al chip)
+status_t
+oxygen_chip_init(oxygen_t *chip)
+{
+    dprintf("oxygen: Inizializzazione registri CMI8788 per ASUS Xonar D2X...\n");
+
+    // Esegue l'inizializzazione specifica dei DAC PCM1796 e dei GPIO della D2X
+    xonar_d2_init(chip);
+
+    dprintf("oxygen: Chip CMI8788 e Xonar D2X inizializzati con successo.\n");
+    return B_OK;
 }
 
 void
@@ -43,7 +87,7 @@ status_t
 oxygen_init_dma_buffer(cmi8788_device *device, size_t size)
 {
 	// Allineiamo la dimensione alla pagina
-	size = ROUNDUP(size, B_PAGE_SIZE);
+	size = ROUNDUP(size, B_PAGE_SIZE); //same as: size = (size + B_PAGE_SIZE - 1) & ~(B_PAGE_SIZE - 1);
 	device->dma_buffer_size = size;
 
 	// Creiamo un'area di memoria contigua fisica per il DMA

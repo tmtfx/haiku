@@ -6,43 +6,14 @@
 #include <KernelExport.h>
 #include <Drivers.h>
 #include <PCI.h>
-#include <multi_audio.h>
+#include <hmulti_audio.h>
 
-#define CMEDIA_VENDOR_ID    0x13f6
-#define CMI8788_DEVICE_ID   0x8788
-
-// Registri di interrupt del CMI8788
-#define OXYGEN_INTERRUPT_STATUS		0x02
-#define OXYGEN_INTERRUPT_MASK		0x03
-#define   OXYGEN_INT_PLAYBACK		(1 << 0)
-#define   OXYGEN_INT_CAPTURE		(1 << 1)
+#include "cmi8788.h"
 
 static pci_module_info *gPci;
 
-// Struttura per tracciare la periferica
-
-typedef struct {
-	pci_info pci_info;
-	area_id    mmio_area;
-	addr_t    mmio_base;
-	bool      initialized;
-	
-	// Campi per il buffer DMA
-	area_id    dma_area;
-	void*      dma_pub_base;
-	phys_addr_t dma_phy_base;
-	size_t     dma_buffer_size;
-} cmi8788_device;
 
 static cmi8788_device sDataDevice;
-
-// Prototipi delle funzioni esterne definite in oxygen.cpp
-status_t oxygen_chip_init(addr_t mmio_base);
-void oxygen_chip_shutdown(addr_t mmio_base);
-status_t oxygen_init_dma_buffer(cmi8788_device *device, size_t size);
-void oxygen_free_dma_buffer(cmi8788_device *device);
-status_t cmi8788_setup_interrupts(cmi8788_device *device);
-void cmi8788_remove_interrupts(cmi8788_device *device);
 
 status_t
 cmi8788_map_registers(cmi8788_device *device)
@@ -53,7 +24,7 @@ cmi8788_map_registers(cmi8788_device *device)
 
 	device->mmio_area = map_physical_memory(
 		"cmi8788_mmio",
-		(void *)mmio_paddr,
+		(phys_addr_t)mmio_paddr,
 		mmio_size,
 		B_ANY_KERNEL_ADDRESS,
 		B_READ_AREA | B_WRITE_AREA,
@@ -71,7 +42,7 @@ cmi8788_map_registers(cmi8788_device *device)
 	return B_OK;
 }
 // Funzione ISR (Interrupt Service Routine) richiamata dal kernel all'hardware interrupt
-static int32
+int32
 cmi8788_interrupt(void *data)
 {
 	cmi8788_device *device = (cmi8788_device *)data;
@@ -118,7 +89,7 @@ cmi8788_open(const char *name, uint32 flags, void **cookie)
 		}
 
 		if (!found)
-			return B_ENODEV;
+			return B_DEVICE_NOT_FOUND;
 
 		status_t status = cmi8788_map_registers(device);
 		if (status < B_OK)
@@ -140,7 +111,7 @@ cmi8788_open(const char *name, uint32 flags, void **cookie)
 		}
 		
 		// Inizializza il chip e i DAC esterni via I2C
-		status = oxygen_chip_init(device->mmio_base);
+		status = oxygen_chip_init(device);
 		if (status < B_OK) {
 			cmi8788_remove_interrupts(device);
 			oxygen_free_dma_buffer(device);
@@ -168,58 +139,126 @@ cmi8788_free(void *cookie)
 	return B_OK;
 }
 
-static status_t
-cmi8788_get_capabilities(cmi8788_device *device, multi_device_info *data)
-{
-	strcpy(data->name, "ASUS Xonar DX / CMI8788");
-	strcpy(data->info, "C-Media CMI8788 OxygenHD Audio Driver per Haiku");
-	data->output_channel_count = 2;
-	data->input_channel_count = 2;
-	data->play_sample_rates = B_AUDIO_SAMPLE_RATE_44100 | B_AUDIO_SAMPLE_RATE_48000 | B_AUDIO_SAMPLE_RATE_96000 | B_AUDIO_SAMPLE_RATE_192000;
-	data->record_sample_rates = B_AUDIO_SAMPLE_RATE_44100 | B_AUDIO_SAMPLE_RATE_48000;
-	data->play_supported_formats = B_AUDIO_FORMAT_INT32;
-	data->record_supported_formats = B_AUDIO_FORMAT_INT32;
-	data->buffer_size = 4096;
-	data->buffer_count = 4;
-	return B_OK;
-}
 
+// Funzione di descrizione delle capacità della D2X per il framework multi_audio di Haiku
+status_t
+cmi8788_get_capabilities(cmi8788_device *device, multi_description *data)
+{
+    if (data == NULL)
+        return B_BAD_VALUE;
+
+    memset(data, 0, sizeof(multi_description));
+
+    data->info_size = sizeof(multi_description);
+    data->interface_version = 1;
+    data->interface_minimum = 1;
+
+    strlcpy(data->friendly_name, "ASUS Xonar D2X / CMI8788", sizeof(data->friendly_name));
+    strlcpy(data->vendor_info, "ASUS / Burr-Brown PCM1796", sizeof(data->vendor_info));
+
+    // La Xonar D2X gestisce 8 canali in output (7.1) e 8 canali in input tramite i Burr-Brown
+    data->output_channel_count = 8;
+    data->input_channel_count = 8;
+    data->output_bus_channel_count = 0;
+    data->input_bus_channel_count = 0;
+    data->aux_bus_channel_count = 0;
+
+    // Frequenze supportate dai PCM1796 e dal CMI8788 (fino a 192kHz)
+    data->output_rates = B_SR_44100 | B_SR_48000 | B_SR_96000 | B_SR_192000;
+    data->input_rates  = B_SR_44100 | B_SR_48000 | B_SR_96000 | B_SR_192000;
+
+    // Formato nativo supportato dai DAC PCM1796 (32-bit container / 24-bit audio)
+    data->output_formats = B_FMT_32BIT;
+    data->input_formats  = B_FMT_32BIT;
+
+    return B_OK;
+}
+/* OK
+static status_t
+cmi8788_get_capabilities(cmi8788_device *device, multi_description *data)
+{
+    if (data == NULL)
+        return B_BAD_VALUE;
+
+    memset(data, 0, sizeof(multi_description));
+
+    data->info_size = sizeof(multi_description);
+    data->interface_version = 1;
+    data->interface_minimum = 1;
+
+    strlcpy(data->friendly_name, "ASUS Xonar DX / CMI8788", sizeof(data->friendly_name));
+    strlcpy(data->vendor_info, "C-Media / ASUS", sizeof(data->vendor_info));
+
+    data->output_channel_count = 8;
+    data->input_channel_count = 2;
+    data->output_bus_channel_count = 0;
+    data->input_bus_channel_count = 0;
+    data->aux_bus_channel_count = 0;
+
+    // Usa i prefissi corretti B_SR_
+    data->output_rates = B_SR_44100 | B_SR_48000 | B_SR_96000 | B_SR_192000;
+    data->input_rates  = B_SR_44100 | B_SR_48000 | B_SR_96000 | B_SR_192000;
+
+    // Usa B_FMT_32BIT suggerito dal compilatore
+    data->output_formats = B_FMT_32BIT; 
+    data->input_formats  = B_FMT_32BIT;
+
+    return B_OK;
+}*/
 static int32
 cmi8788_control(void *cookie, uint32 op, void *arg, size_t length)
 {
-	cmi8788_device *device = (cmi8788_device *)cookie;
-	if (device == NULL)
-		return B_BAD_VALUE;
+    cmi8788_device *device = (cmi8788_device *)cookie;
+    if (device == NULL)
+        return B_BAD_VALUE;
 
-	switch (op) {
-		case B_AUDIO_GET_CAPABILITIES:
-			return cmi8788_get_capabilities(device, (multi_device_info *)arg);
+    switch (op) {
+        case B_MULTI_GET_DESCRIPTION:
+            return cmi8788_get_capabilities(device, (multi_description *)arg);
 
-		case B_AUDIO_GET_BUFFERS:
-		{
-			multi_buffer_list *data = (multi_buffer_list *)arg;
-			// Configuriamo i puntatori al buffer DMA circolare diviso in frammenti
-			data->playback_buffers = 1;
-			data->record_buffers = 1;
-			
-			// Assegniamo i buffer fisici/virtuali al framework multi_audio di Haiku
-			// (Qui collegheremo i descrittori dei frammenti allocati con oxygen_init_dma_buffer)
-			return B_OK;
-		}
+case B_MULTI_GET_BUFFERS:
+{
+    multi_buffer_list *data = (multi_buffer_list *)arg;
+    
+    int32 num_buffers = data->request_playback_buffers > 0 ? data->request_playback_buffers : 2;
+    int32 channels = data->request_playback_channels > 0 ? data->request_playback_channels : 8; // 8 canali per la D2X
+    uint32 buffer_size_frames = data->request_playback_buffer_size > 0 ? data->request_playback_buffer_size : 1024;
+    
+    data->return_playback_buffers = num_buffers;
+    data->return_playback_channels = channels;
+    data->return_playback_buffer_size = buffer_size_frames;
+    
+    size_t chunk_size = buffer_size_frames * channels * sizeof(int32);
+    
+    for (int b = 0; b < num_buffers; b++) {
+        for (int c = 0; c < channels; c++) {
+            data->playback_buffers[b][c].base = (char *)device->dma_pub_base 
+                + (b * chunk_size) + (c * buffer_size_frames * sizeof(int32));
+            data->playback_buffers[b][c].stride = chunk_size;
+        }
+    }
+    
+    data->return_record_buffers = 0;
+    data->return_record_channels = 0;
+    data->return_record_buffer_size = 0;
+    
+    return B_OK;
+}
+        case B_MULTI_BUFFER_EXCHANGE:
+        {
+            multi_buffer_info *data = (multi_buffer_info *)arg;
+            (void)data; // Evita il warning di variabile non usata
+            // Gestione dello scambio dei buffer audio
+            return B_OK;
+        }
 
-		case B_AUDIO_START_PLAYBACK:
-			dprintf("cmi8788: Avvio riproduzione DMA\n");
-			// Qui scriveremo sui registri del CMI8788 per far partire il channel play DMA
-			return B_OK;
+        case B_MULTI_BUFFER_FORCE_STOP:
+            // Stop forzato dello streaming
+            return B_OK;
 
-		case B_AUDIO_STOP_PLAYBACK:
-			dprintf("cmi8788: Arresto riproduzione DMA\n");
-			// Qui fermeremo i registri DMA
-			return B_OK;
-
-		default:
-			return B_BAD_VALUE;
-	}
+        default:
+            return B_BAD_VALUE;
+    }
 }
 
 static int32
@@ -263,7 +302,7 @@ init_hardware(void)
 	if (get_module(B_PCI_MODULE_NAME, (module_info **)&gPci) < B_OK)
 		return B_ERROR;
 
-	status_t result = B_ENODEV;
+	status_t result = B_DEVICE_NOT_FOUND;
 	while ((*gPci->get_nth_pci_info)(index, &info) == B_OK) {
 		if (info.vendor_id == CMEDIA_VENDOR_ID && info.device_id == CMI8788_DEVICE_ID) {
 			dprintf("cmi8788: Trovata scheda audio CMI8788 compatibile!\n");
