@@ -6,15 +6,7 @@
 #include <KernelExport.h>
 #include <Drivers.h>
 
-//#include <stdlib.h>
-//#include <errno.h>
-
-//#include <SupportDefs.h>
 #include <util/kernel_cpp.h>
-//#include <unistd.h>
-//#include <stdio.h>
-//#include <string.h>
-//#include <errno.h>
 
 #include "cmi8788.h"
 
@@ -23,56 +15,34 @@
 // Funzione di scrittura SPI per i DAC PCM1796 della Xonar D2X
 void xonar_d2_pcm1796_write(oxygen_t *chip, uint8_t codec, uint8_t reg, uint8_t value)
 {
+    /* Mappa la coppia di canali multicanale alla linea Chip Select SPI corretta */
+    static const uint8_t codec_map[4] = {
+        0, 1, 2, 4
+    };
+
     uint32_t timeout = 1000;
     while ((oxygen_read8(chip, OXYGEN_SPI_CONTROL) & OXYGEN_SPI_BUSY) && --timeout > 0) {
-        // Attento che il bus SPI sia libero
+        snooze(10);
     }
 
-    // Il PCM1796 accetta pacchetti da 16 bit (Indirizzo + Dato) o simili a seconda del codec, 
-    // qui impostiamo i registri dati SPI ufficiali:
-    oxygen_write8(chip, OXYGEN_SPI_DATA1, reg);
-    oxygen_write8(chip, OXYGEN_SPI_DATA2, value);
+    // Scrive i dati (formato 16 bit: Indirizzo nel Data2, Dato nel Data1)
+    oxygen_write8(chip, OXYGEN_SPI_DATA1, value);
+    oxygen_write8(chip, OXYGEN_SPI_DATA2, reg);
     
-    // Configura il controllo SPI: seleziona il codec (chip select) e attiva il trigger
+    // Configura il controllo SPI: attiva il trigger, seleziona il codec, latch clock alto
     uint8_t control = OXYGEN_SPI_TRIGGER | 
-                      ((codec << OXYGEN_SPI_CODEC_SHIFT) & OXYGEN_SPI_CODEC_MASK) |
-                      OXYGEN_SPI_DATA_LENGTH_2; // Lunghezza dati a 2 bytes
+                      ((codec_map[codec] << OXYGEN_SPI_CODEC_SHIFT) & OXYGEN_SPI_CODEC_MASK) |
+                      OXYGEN_SPI_CEN_LATCH_CLOCK_HI |
+                      OXYGEN_SPI_CLOCK_160 |
+                      OXYGEN_SPI_DATA_LENGTH_2; // Lunghezza dati a 2 byte
                       
     oxygen_write8(chip, OXYGEN_SPI_CONTROL, control);
-}
-/* variante
-void
-xonar_d2_pcm1796_write(oxygen_t *chip, uint8_t dac_mask, uint8_t reg, uint8_t value)
-{
-    // 1. Attendi che il bus SPI sia libero
-    int timeout = 1000;
-    while ((*(volatile uint8_t *)(chip->mmio_base + OXYGEN_SPI_STATUS) & OXYGEN_SPI_BUSY) && timeout > 0) {
-        snooze(10);
-        timeout--;
-    }
 
-    // 2. Scrivi il valore del registro nel data register SPI
-    *(volatile uint8_t *)(chip->mmio_base + OXYGEN_SPI_DATA) = value;
-
-    // 3. Configura il controllo SPI: 
-    // - Indirizzo del registro sul PCM1796 (bit bassi)
-    // - Maschera di selezione del chip / DAC (tramite i bit di codec/chipless select)
-    // - Trigger di scrittura
-    uint8_t control = OXYGEN_SPI_TRIGGER_WRITE | (reg & 0x1f);
-    
-    // Seleziona quale dei 4 DAC pilotare in base alla maschera (es. bit 0..3)
-    // Nel CMI8788 i chip select dei DAC multicanale usano specifici bit di codec
-    control |= (dac_mask << OXYGEN_SPI_CODEC_SHIFT);
-
-    *(volatile uint8_t *)(chip->mmio_base + OXYGEN_SPI_CONTROL) = control;
-
-    // Attendi il completamento della transazione SPI
     timeout = 1000;
-    while ((*(volatile uint8_t *)(chip->mmio_base + OXYGEN_SPI_STATUS) & OXYGEN_SPI_BUSY) && timeout > 0) {
+    while ((oxygen_read8(chip, OXYGEN_SPI_CONTROL) & OXYGEN_SPI_BUSY) && --timeout > 0) {
         snooze(10);
-        timeout--;
     }
-}*/
+}
 
 // Inizializzazione hardware specifica per la Xonar D2X
 void
@@ -80,58 +50,123 @@ xonar_d2_init(oxygen_t *chip)
 {
     dprintf("oxygen: Configurazione registri globali e GPIO per ASUS Xonar D2X...\n");
 
-    // 1. Configurazione dei GPIO: imposta MUTE e LED come output
-    uint16_t control = oxygen_read16(chip, OXYGEN_GPIO_CONTROL);
-    control |= (XONAR_D2_GPIO_MUTE | XONAR_D2_GPIO_LED_MASK);
-    oxygen_write16(chip, OXYGEN_GPIO_CONTROL, control);
-
-    // 2. Attiva il MUTE hardware durante il setup iniziale per evitare "pop" sonori
-    uint16_t data = oxygen_read16(chip, OXYGEN_GPIO_DATA);
-    data &= ~XONAR_D2_GPIO_MUTE; // Mute attivo (basso)
-    oxygen_write16(chip, OXYGEN_GPIO_DATA, data);
-
-    // 3. Inizializzazione dei 4 chip Burr-Brown PCM1796 via SPI
-    // Ciascun PCM1796 gestisce una coppia di canali (7.1 in totale = 4 chip)
-    for (int i = 0; i < 4; i++) {
-        uint8_t dac_mask = (1 << i);
-        
-        // Control 1: Impostazioni di default (filtri, deselezione soft mute di reset)
-        xonar_d2_pcm1796_write(chip, dac_mask, PCM1796_REG_CONTROL_1, 0x00);
-        
-        // Control 2: Formato I2S, 24-bit/32-bit, disattivazione soft mute manuale
-        xonar_d2_pcm1796_write(chip, dac_mask, PCM1796_REG_CONTROL_2, 0x50);
-        
-        // Imposta l'attenuazione iniziale a 0 (volume massimo iniziale, o gestito dal mixer)
-        xonar_d2_pcm1796_write(chip, dac_mask, PCM1796_REG_ATTN_L, 0xff);
-        xonar_d2_pcm1796_write(chip, dac_mask, PCM1796_REG_ATTN_R, 0xff);
+    // Controlla l'alimentazione esterna floppy a 4 pin (fondamentale per la D2X!)
+    uint16_t gpio_status = oxygen_read16(chip, OXYGEN_GPIO_DATA);
+    if (!(gpio_status & XONAR_D2X_EXT_POWER)) {
+        dprintf("oxygen: ATTENZIONE! Nessuna alimentazione esterna floppy a 4 pin rilevata!\n");
+    } else {
+        dprintf("oxygen: Alimentazione esterna rilevata correttamente.\n");
     }
 
-    // 4. Rilascia il MUTE (porta il pin GPIO alto) ora che i DAC sono configurati
+    // Configura GPIO come output: MUTE (GPIO 8) e ALT loopback (GPIO 7)
+    uint16_t control = oxygen_read16(chip, OXYGEN_GPIO_CONTROL);
+    control |= (XONAR_D2_GPIO_MUTE | XONAR_D2_GPIO_ALT);
+    // Assicura che GPIO 5 (ext power detection) rimanga impostato come input
+    control &= ~XONAR_D2X_EXT_POWER;
+    oxygen_write16(chip, OXYGEN_GPIO_CONTROL, control);
+
+    // Attiva il MUTE hardware durante il setup iniziale per evitare "pop" sonori
+    uint16_t data = oxygen_read16(chip, OXYGEN_GPIO_DATA);
+    data &= ~XONAR_D2_GPIO_MUTE; // Mute attivo (basso)
+    data &= ~XONAR_D2_GPIO_ALT;  // Loopback analogico spento
+    oxygen_write16(chip, OXYGEN_GPIO_DATA, data);
+
+    // Inizializzazione dei 4 chip Burr-Brown PCM1796 via SPI
+    for (int i = 0; i < 4; i++) {
+        // Control 1: Formato I2S standard a 24/32-bit, soft mute disattivato, caricamento volume automatico (ATLD)
+        xonar_d2_pcm1796_write(chip, i, PCM1796_REG_CONTROL_1, PCM1796_DMF_DISABLED | PCM1796_FMT_24_I2S | PCM1796_ATLD);
+        
+        // Control 2: Filtro Sharp Roll-off e velocità di transizione attenuazione rapida (ATS_1)
+        xonar_d2_pcm1796_write(chip, i, PCM1796_REG_CONTROL_2, PCM1796_FLT_SHARP | PCM1796_ATS_1);
+        
+        // Imposta l'attenuazione iniziale a 0 (volume massimo iniziale, o gestito dal mixer)
+        xonar_d2_pcm1796_write(chip, i, PCM1796_REG_ATTN_L, 0xff);
+        xonar_d2_pcm1796_write(chip, i, PCM1796_REG_ATTN_R, 0xff);
+    }
+
+    // Rilascia il MUTE (porta il pin GPIO alto) ora che i DAC sono pronti
     data |= XONAR_D2_GPIO_MUTE;
     oxygen_write16(chip, OXYGEN_GPIO_DATA, data);
 
     dprintf("oxygen: Xonar D2X inizializzata con successo.\n");
 }
 
-// Allinea la firma a quella dichiarata in cmi8788.h (oppure aggiorna l'header se preferisci passare il puntatore al chip)
 status_t
 oxygen_chip_init(oxygen_t *chip)
 {
-	xonar_d2_init(chip);
-	return B_OK;
+    dprintf("oxygen: Inizializzazione globale del chip C-Media CMI8788...\n");
+    
+    // Inizializza i valori di mixer di default nello stato interno
+    for (int i = 0; i < 8; i++) {
+        chip->dac_volume[i] = 255; // Nessuna attenuazione, volume massimo
+    }
+    chip->dac_mute = false;
+    chip->dac_filter = 0; // Sharp Roll-off
+    chip->playing = false;
+    chip->current_playback_buffer = 0;
+
+    // Crea il semaforo per il ping-pong del buffer
+    chip->playback_sem = create_sem(0, "cmi8788_playback_sem");
+    if (chip->playback_sem < 0) {
+        dprintf("oxygen: Errore creazione semaforo playback\n");
+        return chip->playback_sem;
+    }
+
+    // Forza reset dei codec esterni e attiva il controller SPI
+    oxygen_write8_masked(chip, OXYGEN_FUNCTION,
+                         OXYGEN_FUNCTION_RESET_CODEC | OXYGEN_FUNCTION_SPI | OXYGEN_FUNCTION_ENABLE_SPI_4_5,
+                         OXYGEN_FUNCTION_RESET_CODEC | OXYGEN_FUNCTION_2WIRE_SPI_MASK | OXYGEN_FUNCTION_ENABLE_SPI_4_5);
+
+    // Arresta i canali DMA prima della configurazione
+    oxygen_write8(chip, OXYGEN_DMA_STATUS, 0);
+    oxygen_write8(chip, OXYGEN_DMA_PAUSE, 0);
+    
+    // Configura i canali di riproduzione: 8 canali per il buffer DMA multicanale
+    oxygen_write8(chip, OXYGEN_PLAY_CHANNELS,
+                  OXYGEN_PLAY_CHANNELS_8 | OXYGEN_DMA_A_BURST_8 | OXYGEN_DMA_MULTICH_BURST_8);
+
+    // Formato dati playback: 32-bit (container) per i DAC della Xonar D2X
+    oxygen_write8(chip, OXYGEN_PLAY_FORMAT,
+                  (OXYGEN_FORMAT_32 << OXYGEN_MULTICH_FORMAT_SHIFT));
+
+    // Configura formato I2S della multicanale: 48kHz, Master, 32-bit, formato I2S, MCLK 512
+    oxygen_write16(chip, OXYGEN_I2S_MULTICH_FORMAT,
+                   OXYGEN_RATE_48000 | OXYGEN_I2S_FORMAT_I2S | OXYGEN_I2S_MCLK(MCLK_512) |
+                   OXYGEN_I2S_BITS_32 | OXYGEN_I2S_MASTER | OXYGEN_I2S_BCLK_64);
+
+    // Routing di riproduzione multicanale: mappa i flussi I2S direttamente ai DAC esterni
+    oxygen_write16(chip, OXYGEN_PLAY_ROUTING,
+                   OXYGEN_PLAY_MULTICH_I2S_DAC | OXYGEN_PLAY_SPDIF_SPDIF |
+                   (0 << OXYGEN_PLAY_DAC0_SOURCE_SHIFT) |
+                   (1 << OXYGEN_PLAY_DAC1_SOURCE_SHIFT) |
+                   (2 << OXYGEN_PLAY_DAC2_SOURCE_SHIFT) |
+                   (3 << OXYGEN_PLAY_DAC3_SOURCE_SHIFT));
+
+    // Esegui l'inizializzazione della scheda Xonar D2X
+    xonar_d2_init(chip);
+
+    return B_OK;
 }
 
 void
 oxygen_chip_shutdown(addr_t mmio_base)
 {
-	dprintf("oxygen: Arresto del chip CMI8788...\n");
-	// Disattiva i flussi DMA e metti in muto le uscite
+    dprintf("oxygen: Arresto del chip CMI8788...\n");
+    
+    // Mettere a muto l'uscita tramite GPIO per evitare pop allo spegnimento
+    uint16_t data = *(volatile uint16_t *)(mmio_base + OXYGEN_GPIO_DATA);
+    data &= ~XONAR_D2_GPIO_MUTE;
+    *(volatile uint16_t *)(mmio_base + OXYGEN_GPIO_DATA) = data;
+
+    // Disattiva flussi DMA
+    *(volatile uint8_t *)(mmio_base + OXYGEN_DMA_STATUS) = 0;
 }
+
 status_t
 oxygen_init_dma_buffer(cmi8788_device *device, size_t size)
 {
 	// Allineiamo la dimensione alla pagina
-	size = ROUNDUP(size, B_PAGE_SIZE); //same as: size = (size + B_PAGE_SIZE - 1) & ~(B_PAGE_SIZE - 1);
+	size = ROUNDUP(size, B_PAGE_SIZE);
 	device->dma_buffer_size = size;
 
 	// Creiamo un'area di memoria contigua fisica per il DMA
@@ -162,13 +197,15 @@ oxygen_free_dma_buffer(cmi8788_device *device)
 		device->dma_area = -1;
 		device->dma_pub_base = NULL;
 	}
+    if (device->playback_sem >= 0) {
+        delete_sem(device->playback_sem);
+        device->playback_sem = -1;
+    }
 }
-
 
 status_t
 cmi8788_setup_interrupts(cmi8788_device *device)
 {
-	// Ottieni la linea IRQ assegnata dal BIOS/PCI bus manager
 	uint8 irq = device->pci_info.u.h0.interrupt_line;
 	
 	dprintf("cmi8788: Installazione interrupt su IRQ %u\n", irq);
@@ -179,9 +216,9 @@ cmi8788_setup_interrupts(cmi8788_device *device)
 		return status;
 	}
 
-	// Abilita gli interrupt per il playback nel registro di maschera del chip
+	// Abilita gli interrupt per la multicanale nel registro di maschera del chip
 	uint8 mask = *(volatile uint8 *)(device->mmio_base + OXYGEN_INTERRUPT_MASK);
-	mask |= OXYGEN_INT_PLAYBACK;
+	mask |= OXYGEN_CHANNEL_MULTICH;
 	*(volatile uint8 *)(device->mmio_base + OXYGEN_INTERRUPT_MASK) = mask;
 
 	return B_OK;
@@ -214,37 +251,7 @@ void cmi8788_gpio_set(cmi8788_device *device, uint16 data, uint16 mask)
 
 void cmi8788_set_mute(cmi8788_device *device, bool mute)
 {
-    // Sulla Xonar D2, impostare il bit XONAR_D2_GPIO_MUTE attiva/disattiva il relè
     uint16 data = mute ? 0x0000 : XONAR_D2_GPIO_MUTE;
     cmi8788_gpio_set(device, data, XONAR_D2_GPIO_MUTE);
-}
-void cmi8788_spi_write(cmi8788_device *device, uint8 codec_mask, uint8 reg, uint8 value)
-{
-    // 1. Attendi che il bus SPI sia libero
-    int timeout = 1000;
-    while ((*(volatile uint8 *)(device->mmio_base + OXYGEN_SPI_STATUS) & OXYGEN_SPI_BUSY) && timeout > 0) {
-        snooze(10);
-        timeout--;
-    }
-
-    // 2. Scrivi i dati nel registro dati SPI (formato tipico: indirizzo/valore o comando codec)
-    *(volatile uint8 *)(device->mmio_base + OXYGEN_SPI_DATA) = value;
-    
-    // 3. Configura il controllo SPI (includendo la maschera del DAC target e il registro)
-    // Nota: il CMI8788 permette di selezionare quale DAC indirizzare tramite i bit di selezione nel registro SPI control
-    uint8 control = codec_mask | (reg & 0x1f); 
-    *(volatile uint8 *)(device->mmio_base + OXYGEN_SPI_CONTROL) = control | OXYGEN_SPI_TRIGGER_WRITE;
-}
-
-void xonar_d2_init_dacs(cmi8788_device *device)
-{
-    // Inizializza i registri dei PCM1796 (es. Control 1 e 2, azzeramento attenuazione)
-    // Ipotizzando una maschera che seleziona tutti i DAC o iterando sui chip
-    for (int codec = 0; codec < 4; codec++) {
-        uint8 mask = (1 << codec); // Selezione chip select via SPI sul CMI8788
-        cmi8788_spi_write(device, mask, PCM1796_REG_CONTROL_1, 0x00); // Impostazioni default
-        cmi8788_spi_write(device, mask, PCM1796_REG_CONTROL_2, 0x10); // Soft mute disattivato, 24-bit/I2S
-        cmi8788_spi_write(device, mask, PCM1796_REG_ATTN_L, 0xff);    // Volume massimo (attenuazione 0)
-        cmi8788_spi_write(device, mask, PCM1796_REG_ATTN_R, 0xff);
-    }
+    device->dac_mute = mute;
 }

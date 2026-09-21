@@ -469,6 +469,26 @@
 #define OXYGEN_OFFSIN_44K        0xec
 #define OXYGEN_OFFSBASE_44K        0xed
 
+// GPIO and Specific Board Constants for ASUS Xonar D2X
+#define XONAR_D2_GPIO_MUTE          0x0100  // Controls the output mute relay (GPIO 8)
+#define XONAR_D2_GPIO_LED_MASK      0x0000  // No separate GPIO LED mask
+#define XONAR_D2_GPIO_ALT           0x0080  // GPIO 7
+#define XONAR_D2X_EXT_POWER         0x0020  // GPIO 5
+
+// PCM1796 DAC Registers and Constants
+#define PCM1796_REG_ATTN_L          16
+#define PCM1796_REG_ATTN_R          17
+#define PCM1796_REG_CONTROL_1       18
+#define PCM1796_REG_CONTROL_2       19
+
+#define PCM1796_DMF_DISABLED        0x00
+#define PCM1796_FMT_24_I2S          0x50
+#define PCM1796_ATLD                0x80
+
+#define PCM1796_FLT_SHARP           0x00
+#define PCM1796_FLT_SLOW            0x02
+#define PCM1796_ATS_1               0x00
+
 // Definizione della struct principale del device
 typedef struct cmi8788_device {
     struct pci_info     pci_info;
@@ -481,6 +501,20 @@ typedef struct cmi8788_device {
     void*               dma_pub_base;
     phys_addr_t         dma_phy_base;
     size_t              dma_buffer_size;
+
+    // Multi-audio state
+    sem_id              playback_sem;
+    bool                playing;
+    uint32_t            sample_rate;
+    uint32_t            format;
+    uint32_t            channels;
+    uint32_t            buffer_size_frames;
+    uint32_t            current_playback_buffer;
+
+    // Mixer state
+    uint8_t             dac_volume[8]; // 0-255 volume attenuation
+    bool                dac_mute;
+    uint8_t             dac_filter;    // 0 = Sharp Roll-off, 1 = Slow Roll-off
 } cmi8788_device;
 
 typedef cmi8788_device oxygen_t;
@@ -522,6 +556,12 @@ oxygen_write32(oxygen_t *chip, uint32_t reg, uint32_t value)
     *(volatile uint32_t *)(chip->mmio_base + reg) = value;
 }
 
+static inline void
+oxygen_write8_masked(oxygen_t *chip, uint32_t reg, uint8_t value, uint8_t mask)
+{
+    oxygen_write8(chip, reg, (oxygen_read8(chip, reg) & ~mask) | (value & mask));
+}
+
 // Prototipi delle funzioni del driver
 status_t oxygen_chip_init(oxygen_t *chip);
 void oxygen_chip_shutdown(addr_t mmio_base);
@@ -533,6 +573,7 @@ int32 cmi8788_interrupt(void *data);
 void cmi8788_gpio_set(cmi8788_device *device, uint16 data, uint16 mask);
 void cmi8788_set_mute(cmi8788_device *device, bool mute);
 void cmi8788_spi_write(cmi8788_device *device, uint8 codec_mask, uint8 reg, uint8 value);
+void xonar_d2_pcm1796_write(oxygen_t *chip, uint8_t codec, uint8_t reg, uint8_t value);
 void xonar_d2_init_dacs(cmi8788_device *device);
 
 #endif /* CMI8788_H */
