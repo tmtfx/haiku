@@ -15,12 +15,17 @@
 #define B_MULTI_MIX_GAIN      0x2
 #define B_MULTI_MIX_ENABLE    0x8
 
-static pci_module_info *gPci;
-static cmi8788_device sDataDevice;
+#define CALLED() dprintf("CMI8788: CALLED %s\n", __FUNCTION__)
 
-status_t
+int32 api_version = B_CUR_DRIVER_API_VERSION;
+
+pci_module_info *gPci;
+cmi8788_device sDataDevice;
+
+static status_t
 cmi8788_map_registers(cmi8788_device *device)
 {
+	CALLED();
 	addr_t mmio_paddr = device->pci_info.u.h0.base_registers[0];
 	size_t mmio_size = device->pci_info.u.h0.base_register_sizes[0];
 
@@ -48,6 +53,7 @@ cmi8788_map_registers(cmi8788_device *device)
 int32
 cmi8788_interrupt(void *data)
 {
+	CALLED();
     cmi8788_device *device = (cmi8788_device *)data;
     
     // Leggi lo stato degli interrupt dal registro MMIO del CMI8788
@@ -145,6 +151,7 @@ cmi8788_free(void *cookie)
 status_t
 cmi8788_get_capabilities(cmi8788_device *device, multi_description *data)
 {
+	CALLED();
     if (data == NULL)
         return B_BAD_VALUE;
 
@@ -178,6 +185,7 @@ cmi8788_get_capabilities(cmi8788_device *device, multi_description *data)
 static int32
 cmi8788_control(void *cookie, uint32 op, void *arg, size_t length)
 {
+	CALLED();
     cmi8788_device *device = (cmi8788_device *)cookie;
     if (device == NULL)
         return B_BAD_VALUE;
@@ -418,7 +426,7 @@ cmi8788_write(void *cookie, off_t position, const void *buffer, size_t *_numByte
 	return B_NOT_ALLOWED;
 }
 
-static device_hooks sDeviceHooks = {
+device_hooks sDeviceHooks = {
 	cmi8788_open,
 	cmi8788_close,
 	cmi8788_free,
@@ -432,13 +440,15 @@ static device_hooks sDeviceHooks = {
 };
 
 const char *gDeviceNames[] = {
-	"audio/raw/cmi8788/1",
+	//"audio/raw/cmi8788/1",
+	"audio/hmulti/cmi8788/1",
 	NULL
 };
 
-status_t
+extern "C" status_t
 init_hardware(void)
 {
+	CALLED();
 	pci_info info;
 	int index = 0;
 	
@@ -459,7 +469,7 @@ init_hardware(void)
 	return result;
 }
 
-status_t
+extern "C" status_t
 init_driver(void)
 {
 	if (get_module(B_PCI_MODULE_NAME, (module_info **)&gPci) < B_OK)
@@ -469,7 +479,7 @@ init_driver(void)
 	return B_OK;
 }
 
-void
+extern "C" void
 uninit_driver(void)
 {
 	cmi8788_device *device = &sDataDevice;
@@ -485,13 +495,13 @@ uninit_driver(void)
 		put_module(B_PCI_MODULE_NAME);
 }
 
-const char **
+extern "C" const char **
 publish_devices(void)
 {
 	return gDeviceNames;
 }
 
-device_hooks *
+extern "C" device_hooks *
 find_device(const char *name)
 {
 	return &sDeviceHooks;
