@@ -153,44 +153,36 @@ cmi8788_get_capabilities(cmi8788_device *device, multi_description *data)
     if (data == NULL)
         return B_BAD_VALUE;
 
-    memset(data, 0, sizeof(multi_description));
+    // Preserva i puntatori e i conteggi allocati dallo user-space
+    multi_channel_info *user_channels = data->channels;
+    int32 request_count = data->request_channel_count;
 
+    // Inizializza i campi singolarmente per non sovrascrivere i puntatori utente
     data->info_size = sizeof(multi_description);
     data->interface_version = 1;
     data->interface_minimum = 1;
 
-    strlcpy(data->friendly_name, "ASUS Xonar D2X / CMI8788", sizeof(data->friendly_name));
-    strlcpy(data->vendor_info, "ASUS / Burr-Brown PCM1796", sizeof(data->vendor_info));
+    strlcpy(data->friendly_name, "ASUS Xonar D2X", sizeof(data->friendly_name));
+    strlcpy(data->vendor_info, "ASUS / C-Media", sizeof(data->vendor_info));
 
-	// max_cvsr_rate: Frequenza massima per il Continuous Variable Sample Rate.
-    // Se l'hardware non supporta il resampling continuo a frequenze arbitrarie, va lasciato a 0.
     data->max_cvsr_rate = 0;
+    data->min_cvsr_rate = 0;
 	
-    // Xonar D2X:
-    // - 8 canali output analogici (7.1 Surround)
-    // - 2 canali output digitali (S/PDIF Coaxial Out)
-    // - 2 canali input analogici (Line-In / Mic)
-    // - 2 canali input digitali (S/PDIF Coaxial In)
     data->output_channel_count = 10; // 8 analogici + 2 digitali S/PDIF
     data->input_channel_count = 4;   // 2 analogici (Line/Mic) + 2 digitali S/PDIF In
-    data->output_bus_channel_count = 0;
-    data->input_bus_channel_count = 0;
+    data->output_bus_channel_count = 10;
+    data->input_bus_channel_count = 4;
     data->aux_bus_channel_count = 0;
-    // aggiunto da qui
-    // Importante: indica quanti elementi stai passando nell'array channels
-    data->request_channel_count = 14; // 10+4
-    data->channels = device->channel_infos; // Puntatore all'array dentro il device
-    
+
+    data->lock_sources = B_MULTI_LOCK_INTERNAL;
+    data->timecode_sources = 0;
+    data->interface_flags = B_MULTI_INTERFACE_PLAYBACK | B_MULTI_INTERFACE_RECORD;
+    data->start_latency = 30000;
+    data->control_panel[0] = '\0';
+
     int idx = 0;
     
     // 1. Output Analogici (7.1 Surround - 8 canali su mini-jack)
-    /*const char *out_names[8] = {
-        "Front Left", "Front Right", 
-        "Center", "Subwoofer", 
-        "Rear Left", "Rear Right", 
-        "Side Left", "Side Right"
-    };*/
-    
     uint32 out_designations[8] = {
         B_CHANNEL_LEFT, B_CHANNEL_RIGHT,
         B_CHANNEL_CENTER, B_CHANNEL_SUB,
@@ -205,7 +197,7 @@ cmi8788_get_capabilities(cmi8788_device *device, multi_description *data)
         device->channel_infos[idx].connectors = B_CHANNEL_MINI_JACK_STEREO;
     }
     
-    // 2. Output Digitali Coassiali (S/PDIF Out - 2 canali sui connettori RCA)[cite: 1]
+    // 2. Output Digitali Coassiali (S/PDIF Out - 2 canali sui connettori RCA)
     device->channel_infos[idx].channel_id = idx;
     device->channel_infos[idx].kind = B_MULTI_OUTPUT_CHANNEL;
     device->channel_infos[idx].designations = B_CHANNEL_LEFT;
@@ -218,7 +210,7 @@ cmi8788_get_capabilities(cmi8788_device *device, multi_description *data)
     device->channel_infos[idx].connectors = B_CHANNEL_COAX_SPDIF;
     idx++;
 
-    // 3. Input Analogici (Line-In / Mic - 2 canali su mini-jack)[cite: 1]
+    // 3. Input Analogici (Line-In / Mic - 2 canali su mini-jack)
     device->channel_infos[idx].channel_id = idx;
     device->channel_infos[idx].kind = B_MULTI_INPUT_CHANNEL;
     device->channel_infos[idx].designations = B_CHANNEL_LEFT;
@@ -231,7 +223,7 @@ cmi8788_get_capabilities(cmi8788_device *device, multi_description *data)
     device->channel_infos[idx].connectors = B_CHANNEL_MINI_JACK_STEREO;
     idx++;
 
-    // 4. Input Digitali Coassiali (S/PDIF In - 2 canali sui connettori RCA)[cite: 1]
+    // 4. Input Digitali Coassiali (S/PDIF In - 2 canali sui connettori RCA)
     device->channel_infos[idx].channel_id = idx;
     device->channel_infos[idx].kind = B_MULTI_INPUT_CHANNEL;
     device->channel_infos[idx].designations = B_CHANNEL_LEFT;
@@ -243,7 +235,15 @@ cmi8788_get_capabilities(cmi8788_device *device, multi_description *data)
     device->channel_infos[idx].designations = B_CHANNEL_RIGHT;
     device->channel_infos[idx].connectors = B_CHANNEL_COAX_SPDIF;
     idx++;
-    // a qui
+
+    // Copia i dati all'utente salvaguardando lo spazio allocato
+    int32 copy_count = request_count < 14 ? request_count : 14;
+    if (user_channels != NULL && copy_count > 0) {
+        memcpy(user_channels, device->channel_infos, copy_count * sizeof(multi_channel_info));
+    }
+    
+    data->channels = user_channels;
+    data->request_channel_count = request_count;
 
     // Frequenze supportate dai PCM1796 e dal CMI8788 (Xonar D2X lavora nativamente a 48kHz, 96kHz, 192kHz)
     data->output_rates = B_SR_44100 | B_SR_48000 | B_SR_96000 | B_SR_192000;
