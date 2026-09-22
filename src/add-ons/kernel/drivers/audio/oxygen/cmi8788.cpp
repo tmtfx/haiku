@@ -142,6 +142,13 @@ cmi8788_open(const char *name, uint32 flags, void **cookie)
 		return B_DEVICE_NOT_FOUND;
 	
 	if (!device->initialized) {
+		// Allinea i comandi PCI: abilita Bus Master e le mappature di memoria/IO (fondamentale per DMA!)
+		uint16 pcicmd = (*gPci->read_pci_config)(device->pci_info.bus, 
+			device->pci_info.device, device->pci_info.function, PCI_command, 2);
+		pcicmd |= PCI_command_master | PCI_command_memory | PCI_command_io;
+		(*gPci->write_pci_config)(device->pci_info.bus, 
+			device->pci_info.device, device->pci_info.function, PCI_command, 2, pcicmd);
+
 		status_t status = cmi8788_map_registers(device);
 		if (status < B_OK)
 			return status;
@@ -485,7 +492,7 @@ cmi8788_control(void *cookie, uint32 op, void *arg, size_t length)
                 controls[count].gain.min_gain = -60.0f;
                 controls[count].gain.max_gain = 0.0f;
                 controls[count].gain.granularity = 0.5f;
-                strlcpy(controls[count].name, "Volume Sinistro", sizeof(controls[count].name));
+                strlcpy(controls[count].name, "Master Sinistro", sizeof(controls[count].name));
                 count++;
             } else {
                 count++;
@@ -501,15 +508,143 @@ cmi8788_control(void *cookie, uint32 op, void *arg, size_t length)
                 controls[count].gain.min_gain = -60.0f;
                 controls[count].gain.max_gain = 0.0f;
                 controls[count].gain.granularity = 0.5f;
-                strlcpy(controls[count].name, "Volume Destro", sizeof(controls[count].name));
+                strlcpy(controls[count].name, "Master Destro", sizeof(controls[count].name));
                 count++;
             } else {
                 count++;
             }
 
-            // 4. Master Mute Toggle (Usa la stringa di sistema S_MUTE)
+            // 4. Frontale L
             if (controls != NULL && info->control_count > count) {
                 controls[count].id = 103;
+                controls[count].flags = B_MULTI_MIX_GAIN;
+                controls[count].master = 0;
+                controls[count].parent = 100;
+                controls[count].string = S_null;
+                controls[count].gain.min_gain = -60.0f;
+                controls[count].gain.max_gain = 0.0f;
+                controls[count].gain.granularity = 0.5f;
+                strlcpy(controls[count].name, "Frontale Sinistro", sizeof(controls[count].name));
+                count++;
+            } else {
+                count++;
+            }
+
+            // 5. Frontale R (Slave a 103)
+            if (controls != NULL && info->control_count > count) {
+                controls[count].id = 104;
+                controls[count].flags = B_MULTI_MIX_GAIN;
+                controls[count].master = 103;
+                controls[count].parent = 100;
+                controls[count].string = S_null;
+                controls[count].gain.min_gain = -60.0f;
+                controls[count].gain.max_gain = 0.0f;
+                controls[count].gain.granularity = 0.5f;
+                strlcpy(controls[count].name, "Frontale Destro", sizeof(controls[count].name));
+                count++;
+            } else {
+                count++;
+            }
+
+            // 6. Posteriore L
+            if (controls != NULL && info->control_count > count) {
+                controls[count].id = 105;
+                controls[count].flags = B_MULTI_MIX_GAIN;
+                controls[count].master = 0;
+                controls[count].parent = 100;
+                controls[count].string = S_null;
+                controls[count].gain.min_gain = -60.0f;
+                controls[count].gain.max_gain = 0.0f;
+                controls[count].gain.granularity = 0.5f;
+                strlcpy(controls[count].name, "Posteriore Sinistro", sizeof(controls[count].name));
+                count++;
+            } else {
+                count++;
+            }
+
+            // 7. Posteriore R (Slave a 105)
+            if (controls != NULL && info->control_count > count) {
+                controls[count].id = 106;
+                controls[count].flags = B_MULTI_MIX_GAIN;
+                controls[count].master = 105;
+                controls[count].parent = 100;
+                controls[count].string = S_null;
+                controls[count].gain.min_gain = -60.0f;
+                controls[count].gain.max_gain = 0.0f;
+                controls[count].gain.granularity = 0.5f;
+                strlcpy(controls[count].name, "Posteriore Destro", sizeof(controls[count].name));
+                count++;
+            } else {
+                count++;
+            }
+
+            // 8. Centrale (Codec 2, Canale L)
+            if (controls != NULL && info->control_count > count) {
+                controls[count].id = 107;
+                controls[count].flags = B_MULTI_MIX_GAIN;
+                controls[count].master = 0;
+                controls[count].parent = 100;
+                controls[count].string = S_null;
+                controls[count].gain.min_gain = -60.0f;
+                controls[count].gain.max_gain = 0.0f;
+                controls[count].gain.granularity = 0.5f;
+                strlcpy(controls[count].name, "Centrale", sizeof(controls[count].name));
+                count++;
+            } else {
+                count++;
+            }
+
+            // 9. Subwoofer (Codec 2, Canale R, Slave a 107)
+            if (controls != NULL && info->control_count > count) {
+                controls[count].id = 108;
+                controls[count].flags = B_MULTI_MIX_GAIN;
+                controls[count].master = 107;
+                controls[count].parent = 100;
+                controls[count].string = S_null;
+                controls[count].gain.min_gain = -60.0f;
+                controls[count].gain.max_gain = 0.0f;
+                controls[count].gain.granularity = 0.5f;
+                strlcpy(controls[count].name, "Subwoofer", sizeof(controls[count].name));
+                count++;
+            } else {
+                count++;
+            }
+
+            // 10. Laterale L (Codec 3, Canale L)
+            if (controls != NULL && info->control_count > count) {
+                controls[count].id = 109;
+                controls[count].flags = B_MULTI_MIX_GAIN;
+                controls[count].master = 0;
+                controls[count].parent = 100;
+                controls[count].string = S_null;
+                controls[count].gain.min_gain = -60.0f;
+                controls[count].gain.max_gain = 0.0f;
+                controls[count].gain.granularity = 0.5f;
+                strlcpy(controls[count].name, "Laterale Sinistro", sizeof(controls[count].name));
+                count++;
+            } else {
+                count++;
+            }
+
+            // 11. Laterale R (Codec 3, Canale R, Slave a 109)
+            if (controls != NULL && info->control_count > count) {
+                controls[count].id = 110;
+                controls[count].flags = B_MULTI_MIX_GAIN;
+                controls[count].master = 109;
+                controls[count].parent = 100;
+                controls[count].string = S_null;
+                controls[count].gain.min_gain = -60.0f;
+                controls[count].gain.max_gain = 0.0f;
+                controls[count].gain.granularity = 0.5f;
+                strlcpy(controls[count].name, "Laterale Destro", sizeof(controls[count].name));
+                count++;
+            } else {
+                count++;
+            }
+
+            // 12. Master Mute Toggle (Usa la stringa di sistema S_MUTE)
+            if (controls != NULL && info->control_count > count) {
+                controls[count].id = 111;
                 controls[count].flags = B_MULTI_MIX_ENABLE;
                 controls[count].master = 0;
                 controls[count].parent = 100;
@@ -520,9 +655,9 @@ cmi8788_control(void *cookie, uint32 op, void *arg, size_t length)
                 count++;
             }
 
-            // 5. DAC Filter Choice (Sharp vs Slow)
+            // 13. DAC Filter Choice (Sharp vs Slow)
             if (controls != NULL && info->control_count > count) {
-                controls[count].id = 104;
+                controls[count].id = 112;
                 controls[count].flags = B_MULTI_MIX_ENABLE; 
                 controls[count].master = 0;
                 controls[count].parent = 100;
@@ -546,16 +681,21 @@ cmi8788_control(void *cookie, uint32 op, void *arg, size_t length)
             for (int32 i = 0; i < info->item_count; i++) {
                 int32 id = info->values[i].id;
                 if (id == 101) {
-                    // Restituisce volume Left (mappato su dac_volume[0])
+                    // Volume Master Sinistro (restituisce il valore del DAC 0 L)
                     float gain_db = -60.0f + ((float)device->dac_volume[0] * (60.0f / 255.0f));
                     info->values[i].gain = gain_db;
                 } else if (id == 102) {
-                    // Restituisce volume Right (mappato su dac_volume[1])
+                    // Volume Master Destro (restituisce il valore del DAC 0 R)
                     float gain_db = -60.0f + ((float)device->dac_volume[1] * (60.0f / 255.0f));
                     info->values[i].gain = gain_db;
-                } else if (id == 103) {
+                } else if (id >= 103 && id <= 110) {
+                    // Volume canali specifici (Front L/R, Rear L/R, Center/Sub, Side L/R)
+                    int ch = id - 103;
+                    float gain_db = -60.0f + ((float)device->dac_volume[ch] * (60.0f / 255.0f));
+                    info->values[i].gain = gain_db;
+                } else if (id == 111) {
                     info->values[i].enable = device->dac_mute;
-                } else if (id == 104) {
+                } else if (id == 112) {
                     info->values[i].enable = (device->dac_filter == 0);
                 }
             }
@@ -576,7 +716,7 @@ cmi8788_control(void *cookie, uint32 op, void *arg, size_t length)
                     if (gain_db > 0.0f) gain_db = 0.0f;
                     uint8_t raw_vol = (uint8_t)((gain_db + 60.0f) * (255.0f / 60.0f));
                     
-                    // Assegna il volume ai canali Left dei 4 DAC PCM1796 via SPI
+                    // Master Left: Assegna il volume ai canali Left dei 4 DAC esterni PCM1796 via SPI
                     for (int codec = 0; codec < 4; codec++) {
                         device->dac_volume[codec * 2] = raw_vol;
                         xonar_d2_pcm1796_write(device, codec, PCM1796_REG_ATTN_L, raw_vol);
@@ -587,15 +727,31 @@ cmi8788_control(void *cookie, uint32 op, void *arg, size_t length)
                     if (gain_db > 0.0f) gain_db = 0.0f;
                     uint8_t raw_vol = (uint8_t)((gain_db + 60.0f) * (255.0f / 60.0f));
                     
-                    // Assegna il volume ai canali Right dei 4 DAC PCM1796 via SPI
+                    // Master Right: Assegna il volume ai canali Right dei 4 DAC esterni PCM1796 via SPI
                     for (int codec = 0; codec < 4; codec++) {
                         device->dac_volume[codec * 2 + 1] = raw_vol;
                         xonar_d2_pcm1796_write(device, codec, PCM1796_REG_ATTN_R, raw_vol);
                     }
-                } else if (id == 103) {
+                } else if (id >= 103 && id <= 110) {
+                    float gain_db = info->values[i].gain;
+                    if (gain_db < -60.0f) gain_db = -60.0f;
+                    if (gain_db > 0.0f) gain_db = 0.0f;
+                    uint8_t raw_vol = (uint8_t)((gain_db + 60.0f) * (255.0f / 60.0f));
+
+                    int ch = id - 103;
+                    device->dac_volume[ch] = raw_vol;
+
+                    // Scrive via SPI sul rispettivo canale del DAC Burr-Brown
+                    int codec = ch / 2;
+                    if (ch % 2 == 0) {
+                        xonar_d2_pcm1796_write(device, codec, PCM1796_REG_ATTN_L, raw_vol);
+                    } else {
+                        xonar_d2_pcm1796_write(device, codec, PCM1796_REG_ATTN_R, raw_vol);
+                    }
+                } else if (id == 111) {
                     bool mute = info->values[i].enable;
                     cmi8788_set_mute(device, mute);
-                } else if (id == 104) {
+                } else if (id == 112) {
                     bool sharp = info->values[i].enable;
                     device->dac_filter = sharp ? 0 : 1;
                     uint8_t filter_reg = sharp ? PCM1796_FLT_SHARP : PCM1796_FLT_SLOW;

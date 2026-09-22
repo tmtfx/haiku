@@ -122,6 +122,21 @@ xonar_d2_init(oxygen_t *chip)
 {
     dprintf("oxygen: Configurazione registri globali e GPIO per ASUS Xonar D2X...\n");
 
+    // Configura GPIO come output: MUTE (GPIO 8) e ALT loopback (GPIO 7)
+    uint16_t control = oxygen_read16(chip, OXYGEN_GPIO_CONTROL);
+    control |= (XONAR_D2_GPIO_MUTE | XONAR_D2_GPIO_ALT);
+    // Assicura che GPIO 5 (ext power detection) rimanga impostato come input
+    control &= ~XONAR_D2X_EXT_POWER;
+    oxygen_write16(chip, OXYGEN_GPIO_CONTROL, control);
+
+    // Abilita la rilevazione dell'input sul GPIO 5 impostandone la maschera di interrupt (16-bit)
+    // Questo attiva fisicamente il buffer di input hardware sul controller C-Media!
+    uint16_t gpio_int = oxygen_read16(chip, OXYGEN_GPIO_INTERRUPT_MASK);
+    gpio_int |= XONAR_D2X_EXT_POWER;
+    oxygen_write16(chip, OXYGEN_GPIO_INTERRUPT_MASK, gpio_int);
+
+    snooze(100); // Piccola pausa per la stabilizzazione elettrica
+
     // Controlla l'alimentazione esterna floppy a 4 pin (fondamentale per la D2X!)
     uint16_t gpio_status = oxygen_read16(chip, OXYGEN_GPIO_DATA);
     if (!(gpio_status & XONAR_D2X_EXT_POWER)) {
@@ -129,13 +144,6 @@ xonar_d2_init(oxygen_t *chip)
     } else {
         dprintf("oxygen: Alimentazione esterna rilevata correttamente.\n");
     }
-
-    // Configura GPIO come output: MUTE (GPIO 8) e ALT loopback (GPIO 7)
-    uint16_t control = oxygen_read16(chip, OXYGEN_GPIO_CONTROL);
-    control |= (XONAR_D2_GPIO_MUTE | XONAR_D2_GPIO_ALT);
-    // Assicura che GPIO 5 (ext power detection) rimanga impostato come input
-    control &= ~XONAR_D2X_EXT_POWER;
-    oxygen_write16(chip, OXYGEN_GPIO_CONTROL, control);
 
     // Attiva il MUTE hardware durante il setup iniziale per evitare "pop" sonori
     uint16_t data = oxygen_read16(chip, OXYGEN_GPIO_DATA);
