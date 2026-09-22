@@ -533,41 +533,80 @@ typedef struct cmi8788_device {
 
 typedef cmi8788_device oxygen_t;
 
-// Funzioni inline di accesso ai registri MMIO del CMI8788
+// Abilitazione dei Log Verbosi (imposta a 0 per disabilitare)
+#define ENABLE_VERBOSE_LOGS 1
+
+// Funzioni inline di accesso ai registri MMIO del CMI8788 con log pre-scrittura, scrittura e post-scrittura
 static inline uint8_t
 oxygen_read8(oxygen_t *chip, uint32_t reg)
 {
-    return *(volatile uint8_t *)(chip->mmio_base + reg);
+    uint8_t value = *(volatile uint8_t *)(chip->mmio_base + reg);
+#if ENABLE_VERBOSE_LOGS
+    dprintf("cmi8788: [READ8] Reg 0x%02x -> Valore 0x%02x\n", reg, value);
+#endif
+    return value;
 }
 
 static inline void
 oxygen_write8(oxygen_t *chip, uint32_t reg, uint8_t value)
 {
+#if ENABLE_VERBOSE_LOGS
+    uint8_t pre = *(volatile uint8_t *)(chip->mmio_base + reg);
     *(volatile uint8_t *)(chip->mmio_base + reg) = value;
+    uint8_t post = *(volatile uint8_t *)(chip->mmio_base + reg);
+    dprintf("cmi8788: [WRITE8] Reg 0x%02x: Pre-Lettura=0x%02x -> Scrittura=0x%02x -> Post-Lettura=0x%02x\n", 
+            reg, pre, value, post);
+#else
+    *(volatile uint8_t *)(chip->mmio_base + reg) = value;
+#endif
 }
 
 static inline uint16_t
 oxygen_read16(oxygen_t *chip, uint32_t reg)
 {
-    return *(volatile uint16_t *)(chip->mmio_base + reg);
+    uint16_t value = *(volatile uint16_t *)(chip->mmio_base + reg);
+#if ENABLE_VERBOSE_LOGS
+    dprintf("cmi8788: [READ16] Reg 0x%02x -> Valore 0x%04x\n", reg, value);
+#endif
+    return value;
 }
 
 static inline void
 oxygen_write16(oxygen_t *chip, uint32_t reg, uint16_t value)
 {
+#if ENABLE_VERBOSE_LOGS
+    uint16_t pre = *(volatile uint16_t *)(chip->mmio_base + reg);
     *(volatile uint16_t *)(chip->mmio_base + reg) = value;
+    uint16_t post = *(volatile uint16_t *)(chip->mmio_base + reg);
+    dprintf("cmi8788: [WRITE16] Reg 0x%02x: Pre-Lettura=0x%04x -> Scrittura=0x%04x -> Post-Lettura=0x%04x\n", 
+            reg, pre, value, post);
+#else
+    *(volatile uint16_t *)(chip->mmio_base + reg) = value;
+#endif
 }
 
 static inline uint32_t
 oxygen_read32(oxygen_t *chip, uint32_t reg)
 {
-    return *(volatile uint32_t *)(chip->mmio_base + reg);
+    uint32_t value = *(volatile uint32_t *)(chip->mmio_base + reg);
+#if ENABLE_VERBOSE_LOGS
+    dprintf("cmi8788: [READ32] Reg 0x%02x -> Valore 0x%08" B_PRIx32 "\n", reg, value);
+#endif
+    return value;
 }
 
 static inline void
 oxygen_write32(oxygen_t *chip, uint32_t reg, uint32_t value)
 {
+#if ENABLE_VERBOSE_LOGS
+    uint32_t pre = *(volatile uint32_t *)(chip->mmio_base + reg);
     *(volatile uint32_t *)(chip->mmio_base + reg) = value;
+    uint32_t post = *(volatile uint32_t *)(chip->mmio_base + reg);
+    dprintf("cmi8788: [WRITE32] Reg 0x%02x: Pre-Lettura=0x%08" B_PRIx32 " -> Scrittura=0x%08" B_PRIx32 " -> Post-Lettura=0x%08" B_PRIx32 "\n", 
+            reg, pre, value, post);
+#else
+    *(volatile uint32_t *)(chip->mmio_base + reg) = value;
+#endif
 }
 
 static inline void

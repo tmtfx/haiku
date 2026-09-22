@@ -20,6 +20,10 @@ void xonar_d2_pcm1796_write(oxygen_t *chip, uint8_t codec, uint8_t reg, uint8_t 
         0, 1, 2, 4
     };
 
+#if ENABLE_VERBOSE_LOGS
+    dprintf("cmi8788: [SPI WRITE] Codec %u, Reg %u -> Valore 0x%02x\n", codec, reg, value);
+#endif
+
     uint32_t timeout = 1000;
     while ((oxygen_read8(chip, OXYGEN_SPI_CONTROL) & OXYGEN_SPI_BUSY) && --timeout > 0) {
         snooze(10);
