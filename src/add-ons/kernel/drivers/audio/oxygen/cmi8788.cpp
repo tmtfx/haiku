@@ -26,6 +26,50 @@ static cmi8788_device sCards[MAX_CARDS];
 static uint32 gNumCards = 0;
 static const char *sDeviceNames[MAX_CARDS + 1];
 
+static uint32_t
+sample_rate_to_hz(uint32_t rate)
+{
+	switch (rate) {
+		case B_SR_8000:   return 8000;
+		case B_SR_11025:  return 11025;
+		case B_SR_12000:  return 12000;
+		case B_SR_16000:  return 16000;
+		case B_SR_22050:  return 22050;
+		case B_SR_24000:  return 24000;
+		case B_SR_32000:  return 32000;
+		case B_SR_44100:  return 44100;
+		case B_SR_48000:  return 48000;
+		case B_SR_64000:  return 64000;
+		case B_SR_88200:  return 88200;
+		case B_SR_96000:  return 96000;
+		case B_SR_176400: return 176400;
+		case B_SR_192000: return 192000;
+		default:          return 48000;
+	}
+}
+
+static uint32_t
+hz_to_sample_rate(uint32_t hz)
+{
+	switch (hz) {
+		case 8000:   return B_SR_8000;
+		case 11025:  return B_SR_11025;
+		case 12000:  return B_SR_12000;
+		case 16000:  return B_SR_16000;
+		case 22050:  return B_SR_22050;
+		case 24000:  return B_SR_24000;
+		case 32000:  return B_SR_32000;
+		case 44100:  return B_SR_44100;
+		case 48000:  return B_SR_48000;
+		case 64000:  return B_SR_64000;
+		case 88200:  return B_SR_88200;
+		case 96000:  return B_SR_96000;
+		case 176400: return B_SR_176400;
+		case 192000: return B_SR_192000;
+		default:          return B_SR_48000;
+	}
+}
+
 static status_t
 cmi8788_map_registers(cmi8788_device *device)
 {
@@ -301,7 +345,7 @@ cmi8788_control(void *cookie, uint32 op, void *arg, size_t length)
             data->timecode_kind = 0;
             
             data->output.format = device->format;
-            data->output.rate = device->sample_rate;
+            data->output.rate = hz_to_sample_rate(device->sample_rate);
             
             data->input.format = 0;
             data->input.rate = 0;
@@ -316,10 +360,13 @@ cmi8788_control(void *cookie, uint32 op, void *arg, size_t length)
                 return B_BAD_VALUE;
 
             device->format = data->output.format;
-            device->sample_rate = data->output.rate;
+            
+            // Converte il bitmask B_SR_ in frequenza grezza Hz per il chip e DAC
+            uint32_t raw_hz = sample_rate_to_hz(data->output.rate);
+            device->sample_rate = raw_hz;
 
             // Riconfigura la frequenza di campionamento, i cristalli PLL e l'oversampling dei DAC esterni
-            xonar_d2_set_sample_rate(device, device->sample_rate);
+            xonar_d2_set_sample_rate(device, raw_hz);
             return B_OK;
         }
 
@@ -415,51 +462,67 @@ cmi8788_control(void *cookie, uint32 op, void *arg, size_t length)
             int32 count = 0;
             multi_mix_control *controls = info->controls;
             
-            // 1. Gruppo Master
+            // 1. Gruppo Master (Usa la stringa di sistema S_OUTPUT)
             if (controls != NULL && info->control_count > count) {
                 controls[count].id = 100;
                 controls[count].flags = B_MULTI_MIX_GROUP;
                 controls[count].master = 0;
                 controls[count].parent = 0;
-                controls[count].string = S_null;
+                controls[count].string = S_OUTPUT;
                 strlcpy(controls[count].name, "Uscite Master", sizeof(controls[count].name));
                 count++;
             } else {
                 count++;
             }
 
-            // 2. Master Volume Slider
+            // 2. Master Volume Left (Usa la stringa di sistema S_VOLUME)
             if (controls != NULL && info->control_count > count) {
                 controls[count].id = 101;
                 controls[count].flags = B_MULTI_MIX_GAIN;
-                controls[count].master = 0;
+                controls[count].master = 0; // Master
                 controls[count].parent = 100;
-                controls[count].string = S_null;
+                controls[count].string = S_VOLUME;
                 controls[count].gain.min_gain = -60.0f;
                 controls[count].gain.max_gain = 0.0f;
                 controls[count].gain.granularity = 0.5f;
-                strlcpy(controls[count].name, "Volume Riproduzione", sizeof(controls[count].name));
+                strlcpy(controls[count].name, "Volume Sinistro", sizeof(controls[count].name));
                 count++;
             } else {
                 count++;
             }
 
-            // 3. Master Mute Toggle
+            // 3. Master Volume Right (Slave agganciato all'ID 101)
             if (controls != NULL && info->control_count > count) {
                 controls[count].id = 102;
+                controls[count].flags = B_MULTI_MIX_GAIN;
+                controls[count].master = 101; // Aggancia a Left per formare slider Stereo
+                controls[count].parent = 100;
+                controls[count].string = S_VOLUME;
+                controls[count].gain.min_gain = -60.0f;
+                controls[count].gain.max_gain = 0.0f;
+                controls[count].gain.granularity = 0.5f;
+                strlcpy(controls[count].name, "Volume Destro", sizeof(controls[count].name));
+                count++;
+            } else {
+                count++;
+            }
+
+            // 4. Master Mute Toggle (Usa la stringa di sistema S_MUTE)
+            if (controls != NULL && info->control_count > count) {
+                controls[count].id = 103;
                 controls[count].flags = B_MULTI_MIX_ENABLE;
                 controls[count].master = 0;
                 controls[count].parent = 100;
-                controls[count].string = S_null;
+                controls[count].string = S_MUTE;
                 strlcpy(controls[count].name, "Mute", sizeof(controls[count].name));
                 count++;
             } else {
                 count++;
             }
 
-            // 4. DAC Filter Choice (Sharp vs Slow)
+            // 5. DAC Filter Choice (Sharp vs Slow)
             if (controls != NULL && info->control_count > count) {
-                controls[count].id = 103;
+                controls[count].id = 104;
                 controls[count].flags = B_MULTI_MIX_ENABLE; 
                 controls[count].master = 0;
                 controls[count].parent = 100;
@@ -483,12 +546,16 @@ cmi8788_control(void *cookie, uint32 op, void *arg, size_t length)
             for (int32 i = 0; i < info->item_count; i++) {
                 int32 id = info->values[i].id;
                 if (id == 101) {
-                    // Restituisce volume left/right (mappato su dac_volume[0] e [1])
+                    // Restituisce volume Left (mappato su dac_volume[0])
                     float gain_db = -60.0f + ((float)device->dac_volume[0] * (60.0f / 255.0f));
                     info->values[i].gain = gain_db;
                 } else if (id == 102) {
-                    info->values[i].enable = device->dac_mute;
+                    // Restituisce volume Right (mappato su dac_volume[1])
+                    float gain_db = -60.0f + ((float)device->dac_volume[1] * (60.0f / 255.0f));
+                    info->values[i].gain = gain_db;
                 } else if (id == 103) {
+                    info->values[i].enable = device->dac_mute;
+                } else if (id == 104) {
                     info->values[i].enable = (device->dac_filter == 0);
                 }
             }
@@ -509,20 +576,26 @@ cmi8788_control(void *cookie, uint32 op, void *arg, size_t length)
                     if (gain_db > 0.0f) gain_db = 0.0f;
                     uint8_t raw_vol = (uint8_t)((gain_db + 60.0f) * (255.0f / 60.0f));
                     
-                    // Assegna a tutti gli 8 canali per la riproduzione uniforme
-                    for (int ch = 0; ch < 8; ch++) {
-                        device->dac_volume[ch] = raw_vol;
-                    }
-                    
-                    // Applica l'attenuazione (0..255) ai 4 DAC PCM1796 via SPI
+                    // Assegna il volume ai canali Left dei 4 DAC PCM1796 via SPI
                     for (int codec = 0; codec < 4; codec++) {
+                        device->dac_volume[codec * 2] = raw_vol;
                         xonar_d2_pcm1796_write(device, codec, PCM1796_REG_ATTN_L, raw_vol);
-                        xonar_d2_pcm1796_write(device, codec, PCM1796_REG_ATTN_R, raw_vol);
                     }
                 } else if (id == 102) {
+                    float gain_db = info->values[i].gain;
+                    if (gain_db < -60.0f) gain_db = -60.0f;
+                    if (gain_db > 0.0f) gain_db = 0.0f;
+                    uint8_t raw_vol = (uint8_t)((gain_db + 60.0f) * (255.0f / 60.0f));
+                    
+                    // Assegna il volume ai canali Right dei 4 DAC PCM1796 via SPI
+                    for (int codec = 0; codec < 4; codec++) {
+                        device->dac_volume[codec * 2 + 1] = raw_vol;
+                        xonar_d2_pcm1796_write(device, codec, PCM1796_REG_ATTN_R, raw_vol);
+                    }
+                } else if (id == 103) {
                     bool mute = info->values[i].enable;
                     cmi8788_set_mute(device, mute);
-                } else if (id == 103) {
+                } else if (id == 104) {
                     bool sharp = info->values[i].enable;
                     device->dac_filter = sharp ? 0 : 1;
                     uint8_t filter_reg = sharp ? PCM1796_FLT_SHARP : PCM1796_FLT_SLOW;
