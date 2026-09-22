@@ -510,6 +510,9 @@ typedef struct cmi8788_device {
     
     char                devfs_path[64];
 
+    area_id             dma_user_area;
+    void*               dma_user_base;
+
     // Multi-audio state
     sem_id              playback_sem;
     bool                playing;

@@ -142,10 +142,15 @@ cmi8788_open(const char *name, uint32 flags, void **cookie)
 		return B_DEVICE_NOT_FOUND;
 	
 	if (!device->initialized) {
+		device->dma_user_area = -1;
+		device->dma_user_base = NULL;
+
 		// Allinea i comandi PCI: abilita Bus Master e le mappature di memoria/IO (fondamentale per DMA!)
+		// Inoltre disabilita il bit PCI_command_int_disable (0x0400) per abilitare fisicamente gli interrupt INTx legacy!
 		uint16 pcicmd = (*gPci->read_pci_config)(device->pci_info.bus, 
 			device->pci_info.device, device->pci_info.function, PCI_command, 2);
 		pcicmd |= PCI_command_master | PCI_command_memory | PCI_command_io;
+		pcicmd &= ~0x0400; // Pulisce bit 10 per sbloccare gli interrupt INTx hardware
 		(*gPci->write_pci_config)(device->pci_info.bus, 
 			device->pci_info.device, device->pci_info.function, PCI_command, 2, pcicmd);
 
@@ -380,6 +385,8 @@ cmi8788_control(void *cookie, uint32 op, void *arg, size_t length)
         case B_MULTI_GET_BUFFERS:
         {
             multi_buffer_list *data = (multi_buffer_list *)arg;
+            if (data == NULL)
+                return B_BAD_VALUE;
     
             int32 num_buffers = data->request_playback_buffers > 0 ? data->request_playback_buffers : 2;
             int32 channels = data->request_playback_channels > 0 ? data->request_playback_channels : 8; // 8 canali per la D2X
@@ -392,12 +399,29 @@ cmi8788_control(void *cookie, uint32 op, void *arg, size_t length)
             device->channels = channels;
             device->buffer_size_frames = buffer_size_frames;
     
+            // Se non è già stata clonata, cloniamo l'area DMA nel team utente corrente
+            if (device->dma_user_area < 0) {
+                device->dma_user_base = NULL;
+                device->dma_user_area = clone_area(
+                    "cmi8788_dma_user",
+                    &device->dma_user_base,
+                    B_ANY_ADDRESS,
+                    B_READ_AREA | B_WRITE_AREA,
+                    device->dma_area
+                );
+                if (device->dma_user_area < B_OK) {
+                    dprintf("cmi8788: Errore nel clonare l'area DMA per user-space (%s)\n", strerror(device->dma_user_area));
+                    return device->dma_user_area;
+                }
+                dprintf("cmi8788: Area DMA clonata per user-space con successo. Indirizzo utente: %p\n", device->dma_user_base);
+            }
+
             size_t single_buffer_bytes = buffer_size_frames * channels * sizeof(int32);
     
-            // Mappatura Interleaved dei buffer per DMA del CMI8788
+            // Mappatura Interleaved dei buffer clonato per user-space
             for (int b = 0; b < num_buffers; b++) {
                 for (int c = 0; c < channels; c++) {
-                    data->playback_buffers[b][c].base = (char *)device->dma_pub_base 
+                    data->playback_buffers[b][c].base = (char *)device->dma_user_base 
                         + (b * single_buffer_bytes) + (c * sizeof(int32));
                     data->playback_buffers[b][c].stride = channels * sizeof(int32);
                 }
@@ -456,6 +480,9 @@ cmi8788_control(void *cookie, uint32 op, void *arg, size_t length)
                 uint8_t dma_status = oxygen_read8(device, OXYGEN_DMA_STATUS);
                 dma_status &= ~OXYGEN_CHANNEL_MULTICH;
                 oxygen_write8(device, OXYGEN_DMA_STATUS, dma_status);
+
+                // Sblocca immediatamente eventuali thread in attesa sul semaforo
+                release_sem(device->playback_sem);
             }
             return B_OK;
         }
@@ -477,6 +504,58 @@ cmi8788_control(void *cookie, uint32 op, void *arg, size_t length)
                 controls[count].parent = 0;
                 controls[count].string = S_OUTPUT;
                 strlcpy(controls[count].name, "Uscite Master", sizeof(controls[count].name));
+                count++;
+            } else {
+                count++;
+            }
+
+            // 1.1 Sotto-Gruppo Canali Frontali (Sotto-gruppo di 100)
+            if (controls != NULL && info->control_count > count) {
+                controls[count].id = 200;
+                controls[count].flags = B_MULTI_MIX_GROUP;
+                controls[count].master = 0;
+                controls[count].parent = 100;
+                controls[count].string = S_null;
+                strlcpy(controls[count].name, "Canali Frontali", sizeof(controls[count].name));
+                count++;
+            } else {
+                count++;
+            }
+
+            // 1.2 Sotto-Gruppo Canali Posteriori (Sotto-gruppo di 100)
+            if (controls != NULL && info->control_count > count) {
+                controls[count].id = 300;
+                controls[count].flags = B_MULTI_MIX_GROUP;
+                controls[count].master = 0;
+                controls[count].parent = 100;
+                controls[count].string = S_null;
+                strlcpy(controls[count].name, "Canali Posteriori", sizeof(controls[count].name));
+                count++;
+            } else {
+                count++;
+            }
+
+            // 1.3 Sotto-Gruppo Canale Centrale e Subwoofer (Sotto-gruppo di 100)
+            if (controls != NULL && info->control_count > count) {
+                controls[count].id = 400;
+                controls[count].flags = B_MULTI_MIX_GROUP;
+                controls[count].master = 0;
+                controls[count].parent = 100;
+                controls[count].string = S_null;
+                strlcpy(controls[count].name, "Canale Centrale e Sub", sizeof(controls[count].name));
+                count++;
+            } else {
+                count++;
+            }
+
+            // 1.4 Sotto-Gruppo Canali Laterali (Sotto-gruppo di 100)
+            if (controls != NULL && info->control_count > count) {
+                controls[count].id = 500;
+                controls[count].flags = B_MULTI_MIX_GROUP;
+                controls[count].master = 0;
+                controls[count].parent = 100;
+                controls[count].string = S_null;
+                strlcpy(controls[count].name, "Canali Laterali", sizeof(controls[count].name));
                 count++;
             } else {
                 count++;
@@ -514,76 +593,76 @@ cmi8788_control(void *cookie, uint32 op, void *arg, size_t length)
                 count++;
             }
 
-            // 4. Frontale L
+            // 4. Frontale L (Codec 0 L, Sotto-gruppo 200)
             if (controls != NULL && info->control_count > count) {
                 controls[count].id = 103;
                 controls[count].flags = B_MULTI_MIX_GAIN;
                 controls[count].master = 0;
-                controls[count].parent = 100;
+                controls[count].parent = 200;
                 controls[count].string = S_null;
                 controls[count].gain.min_gain = -60.0f;
                 controls[count].gain.max_gain = 0.0f;
                 controls[count].gain.granularity = 0.5f;
-                strlcpy(controls[count].name, "Frontale Sinistro", sizeof(controls[count].name));
+                strlcpy(controls[count].name, "Volume Sinistro", sizeof(controls[count].name));
                 count++;
             } else {
                 count++;
             }
 
-            // 5. Frontale R (Slave a 103)
+            // 5. Frontale R (Codec 0 R, Slave a 103, Sotto-gruppo 200)
             if (controls != NULL && info->control_count > count) {
                 controls[count].id = 104;
                 controls[count].flags = B_MULTI_MIX_GAIN;
                 controls[count].master = 103;
-                controls[count].parent = 100;
+                controls[count].parent = 200;
                 controls[count].string = S_null;
                 controls[count].gain.min_gain = -60.0f;
                 controls[count].gain.max_gain = 0.0f;
                 controls[count].gain.granularity = 0.5f;
-                strlcpy(controls[count].name, "Frontale Destro", sizeof(controls[count].name));
+                strlcpy(controls[count].name, "Volume Destro", sizeof(controls[count].name));
                 count++;
             } else {
                 count++;
             }
 
-            // 6. Posteriore L
+            // 6. Posteriore L (Codec 1 L, Sotto-gruppo 300)
             if (controls != NULL && info->control_count > count) {
                 controls[count].id = 105;
                 controls[count].flags = B_MULTI_MIX_GAIN;
                 controls[count].master = 0;
-                controls[count].parent = 100;
+                controls[count].parent = 300;
                 controls[count].string = S_null;
                 controls[count].gain.min_gain = -60.0f;
                 controls[count].gain.max_gain = 0.0f;
                 controls[count].gain.granularity = 0.5f;
-                strlcpy(controls[count].name, "Posteriore Sinistro", sizeof(controls[count].name));
+                strlcpy(controls[count].name, "Volume Sinistro", sizeof(controls[count].name));
                 count++;
             } else {
                 count++;
             }
 
-            // 7. Posteriore R (Slave a 105)
+            // 7. Posteriore R (Codec 1 R, Slave a 105, Sotto-gruppo 300)
             if (controls != NULL && info->control_count > count) {
                 controls[count].id = 106;
                 controls[count].flags = B_MULTI_MIX_GAIN;
                 controls[count].master = 105;
-                controls[count].parent = 100;
+                controls[count].parent = 300;
                 controls[count].string = S_null;
                 controls[count].gain.min_gain = -60.0f;
                 controls[count].gain.max_gain = 0.0f;
                 controls[count].gain.granularity = 0.5f;
-                strlcpy(controls[count].name, "Posteriore Destro", sizeof(controls[count].name));
+                strlcpy(controls[count].name, "Volume Destro", sizeof(controls[count].name));
                 count++;
             } else {
                 count++;
             }
 
-            // 8. Centrale (Codec 2, Canale L)
+            // 8. Centrale (Codec 2 L, Sotto-gruppo 400)
             if (controls != NULL && info->control_count > count) {
                 controls[count].id = 107;
                 controls[count].flags = B_MULTI_MIX_GAIN;
                 controls[count].master = 0;
-                controls[count].parent = 100;
+                controls[count].parent = 400;
                 controls[count].string = S_null;
                 controls[count].gain.min_gain = -60.0f;
                 controls[count].gain.max_gain = 0.0f;
@@ -594,12 +673,12 @@ cmi8788_control(void *cookie, uint32 op, void *arg, size_t length)
                 count++;
             }
 
-            // 9. Subwoofer (Codec 2, Canale R, Slave a 107)
+            // 9. Subwoofer (Codec 2 R, Slave a 107, Sotto-gruppo 400)
             if (controls != NULL && info->control_count > count) {
                 controls[count].id = 108;
                 controls[count].flags = B_MULTI_MIX_GAIN;
                 controls[count].master = 107;
-                controls[count].parent = 100;
+                controls[count].parent = 400;
                 controls[count].string = S_null;
                 controls[count].gain.min_gain = -60.0f;
                 controls[count].gain.max_gain = 0.0f;
@@ -610,33 +689,33 @@ cmi8788_control(void *cookie, uint32 op, void *arg, size_t length)
                 count++;
             }
 
-            // 10. Laterale L (Codec 3, Canale L)
+            // 10. Laterale L (Codec 3 L, Sotto-gruppo 500)
             if (controls != NULL && info->control_count > count) {
                 controls[count].id = 109;
                 controls[count].flags = B_MULTI_MIX_GAIN;
                 controls[count].master = 0;
-                controls[count].parent = 100;
+                controls[count].parent = 500;
                 controls[count].string = S_null;
                 controls[count].gain.min_gain = -60.0f;
                 controls[count].gain.max_gain = 0.0f;
                 controls[count].gain.granularity = 0.5f;
-                strlcpy(controls[count].name, "Laterale Sinistro", sizeof(controls[count].name));
+                strlcpy(controls[count].name, "Volume Sinistro", sizeof(controls[count].name));
                 count++;
             } else {
                 count++;
             }
 
-            // 11. Laterale R (Codec 3, Canale R, Slave a 109)
+            // 11. Laterale R (Codec 3 R, Slave a 109, Sotto-gruppo 500)
             if (controls != NULL && info->control_count > count) {
                 controls[count].id = 110;
                 controls[count].flags = B_MULTI_MIX_GAIN;
                 controls[count].master = 109;
-                controls[count].parent = 100;
+                controls[count].parent = 500;
                 controls[count].string = S_null;
                 controls[count].gain.min_gain = -60.0f;
                 controls[count].gain.max_gain = 0.0f;
                 controls[count].gain.granularity = 0.5f;
-                strlcpy(controls[count].name, "Laterale Destro", sizeof(controls[count].name));
+                strlcpy(controls[count].name, "Volume Destro", sizeof(controls[count].name));
                 count++;
             } else {
                 count++;
