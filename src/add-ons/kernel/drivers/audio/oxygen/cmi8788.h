@@ -12,6 +12,7 @@
 #include <PCI.h>
 #include <cstring>
 #include <Errors.h>
+#include <hmulti_audio.h>
 
 #define CMEDIA_VENDOR_ID        0x13f6
 #define CMI8788_DEVICE_ID       0x8788
@@ -507,9 +508,12 @@ typedef struct cmi8788_device {
     bool                playing;
     uint32_t            sample_rate;
     uint32_t            format;
-    uint32_t            channels;
+    uint32_t            channels; // Il numero di canali attivi (es. 8)
     uint32_t            buffer_size_frames;
     uint32_t            current_playback_buffer;
+    
+    // ARRAY DESCRITTIVO PER IL MEDIA KIT DI HAIKU
+    multi_channel_info    channel_infos[14];
 
     // Mixer state
     uint8_t             dac_volume[8]; // 0-255 volume attenuation

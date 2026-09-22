@@ -164,20 +164,96 @@ cmi8788_get_capabilities(cmi8788_device *device, multi_description *data)
     strlcpy(data->friendly_name, "ASUS Xonar D2X / CMI8788", sizeof(data->friendly_name));
     strlcpy(data->vendor_info, "ASUS / Burr-Brown PCM1796", sizeof(data->vendor_info));
 
-    // La Xonar D2X gestisce 8 canali in output (7.1)
-    data->output_channel_count = 8;
-    data->input_channel_count = 0;
+	// max_cvsr_rate: Frequenza massima per il Continuous Variable Sample Rate.
+    // Se l'hardware non supporta il resampling continuo a frequenze arbitrarie, va lasciato a 0.
+    data->max_cvsr_rate = 0;
+	
+    // Xonar D2X:
+    // - 8 canali output analogici (7.1 Surround)
+    // - 2 canali output digitali (S/PDIF Coaxial Out)
+    // - 2 canali input analogici (Line-In / Mic)
+    // - 2 canali input digitali (S/PDIF Coaxial In)
+    data->output_channel_count = 10; // 8 analogici + 2 digitali S/PDIF
+    data->input_channel_count = 4;   // 2 analogici (Line/Mic) + 2 digitali S/PDIF In
     data->output_bus_channel_count = 0;
     data->input_bus_channel_count = 0;
     data->aux_bus_channel_count = 0;
+    // aggiunto da qui
+    // Importante: indica quanti elementi stai passando nell'array channels
+    data->request_channel_count = 14; // 10+4
+    data->channels = device->channel_infos; // Puntatore all'array dentro il device
+    
+    int idx = 0;
+    
+    // 1. Output Analogici (7.1 Surround - 8 canali su mini-jack)
+    /*const char *out_names[8] = {
+        "Front Left", "Front Right", 
+        "Center", "Subwoofer", 
+        "Rear Left", "Rear Right", 
+        "Side Left", "Side Right"
+    };*/
+    
+    uint32 out_designations[8] = {
+        B_CHANNEL_LEFT, B_CHANNEL_RIGHT,
+        B_CHANNEL_CENTER, B_CHANNEL_SUB,
+        B_CHANNEL_REARLEFT, B_CHANNEL_REARRIGHT,
+        B_CHANNEL_SIDE_LEFT, B_CHANNEL_SIDE_RIGHT
+    };
+
+    for (int i = 0; i < 8; i++, idx++) {
+        device->channel_infos[idx].channel_id = idx;
+        device->channel_infos[idx].kind = B_MULTI_OUTPUT_CHANNEL;
+        device->channel_infos[idx].designations = out_designations[i];
+        device->channel_infos[idx].connectors = B_CHANNEL_MINI_JACK_STEREO;
+    }
+    
+    // 2. Output Digitali Coassiali (S/PDIF Out - 2 canali sui connettori RCA)[cite: 1]
+    device->channel_infos[idx].channel_id = idx;
+    device->channel_infos[idx].kind = B_MULTI_OUTPUT_CHANNEL;
+    device->channel_infos[idx].designations = B_CHANNEL_LEFT;
+    device->channel_infos[idx].connectors = B_CHANNEL_COAX_SPDIF;
+    idx++;
+
+    device->channel_infos[idx].channel_id = idx;
+    device->channel_infos[idx].kind = B_MULTI_OUTPUT_CHANNEL;
+    device->channel_infos[idx].designations = B_CHANNEL_RIGHT;
+    device->channel_infos[idx].connectors = B_CHANNEL_COAX_SPDIF;
+    idx++;
+
+    // 3. Input Analogici (Line-In / Mic - 2 canali su mini-jack)[cite: 1]
+    device->channel_infos[idx].channel_id = idx;
+    device->channel_infos[idx].kind = B_MULTI_INPUT_CHANNEL;
+    device->channel_infos[idx].designations = B_CHANNEL_LEFT;
+    device->channel_infos[idx].connectors = B_CHANNEL_MINI_JACK_STEREO;
+    idx++;
+
+    device->channel_infos[idx].channel_id = idx;
+    device->channel_infos[idx].kind = B_MULTI_INPUT_CHANNEL;
+    device->channel_infos[idx].designations = B_CHANNEL_RIGHT;
+    device->channel_infos[idx].connectors = B_CHANNEL_MINI_JACK_STEREO;
+    idx++;
+
+    // 4. Input Digitali Coassiali (S/PDIF In - 2 canali sui connettori RCA)[cite: 1]
+    device->channel_infos[idx].channel_id = idx;
+    device->channel_infos[idx].kind = B_MULTI_INPUT_CHANNEL;
+    device->channel_infos[idx].designations = B_CHANNEL_LEFT;
+    device->channel_infos[idx].connectors = B_CHANNEL_COAX_SPDIF;
+    idx++;
+
+    device->channel_infos[idx].channel_id = idx;
+    device->channel_infos[idx].kind = B_MULTI_INPUT_CHANNEL;
+    device->channel_infos[idx].designations = B_CHANNEL_RIGHT;
+    device->channel_infos[idx].connectors = B_CHANNEL_COAX_SPDIF;
+    idx++;
+    // a qui
 
     // Frequenze supportate dai PCM1796 e dal CMI8788 (Xonar D2X lavora nativamente a 48kHz, 96kHz, 192kHz)
     data->output_rates = B_SR_44100 | B_SR_48000 | B_SR_96000 | B_SR_192000;
-    data->input_rates  = 0;
-
+    data->input_rates  = B_SR_44100 | B_SR_48000 | B_SR_96000 | B_SR_192000;
+    
     // Formato nativo supportato dai DAC PCM1796: 32-bit container / 24-bit audio
     data->output_formats = B_FMT_32BIT;
-    data->input_formats  = 0;
+    data->input_formats  = B_FMT_32BIT;
 
     return B_OK;
 }
@@ -406,6 +482,45 @@ cmi8788_control(void *cookie, uint32 op, void *arg, size_t length)
             }
             return B_OK;
         }
+        case B_MULTI_GET_GLOBAL_FORMAT:
+        {
+            multi_format_info *format_info = (multi_format_info *)arg;
+            if (format_info == NULL)
+                return B_BAD_VALUE;
+            
+            memset(format_info, 0, sizeof(multi_format_info));
+            format_info->info_size = sizeof(multi_format_info);
+            
+            // Output format
+            format_info->output.rate = device->sample_rate > 0 ? device->sample_rate : 48000;
+            format_info->output.cvsr = 0.0f;
+            format_info->output.format = B_FMT_32BIT;
+
+            // Input format
+            format_info->input.rate = device->sample_rate > 0 ? device->sample_rate : 48000;
+            format_info->input.cvsr = 0.0f;
+            format_info->input.format = B_FMT_32BIT;
+
+            format_info->timecode_kind = B_MULTI_NO_TIMECODE;
+            
+            return B_OK;
+        }
+
+        case B_MULTI_SET_GLOBAL_FORMAT:
+        {
+            multi_format_info *format_info = (multi_format_info *)arg;
+            if (format_info == NULL)
+                return B_BAD_VALUE;
+            
+            // Usiamo la frequenza di output (o di input, di solito coincidono nel global format)
+            device->sample_rate = format_info->output.rate;
+            
+            // TODO:
+            // Qui andrai a riconfigurare i registri del clock/PLL del CMI8788 
+            // in base a device->sample_rate
+            
+            return B_OK;
+        }
 
         default:
             return B_BAD_VALUE;
@@ -440,7 +555,6 @@ device_hooks sDeviceHooks = {
 };
 
 const char *gDeviceNames[] = {
-	//"audio/raw/cmi8788/1",
 	"audio/hmulti/cmi8788/1",
 	NULL
 };
