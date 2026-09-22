@@ -104,6 +104,10 @@ oxygen_chip_init(oxygen_t *chip)
     chip->dac_filter = 0; // Sharp Roll-off
     chip->playing = false;
     chip->current_playback_buffer = 0;
+    
+    // Inizializza formato e frequenza di campionamento di default
+    chip->format = B_FMT_32BIT;
+    chip->sample_rate = B_SR_48000;
 
     // Crea il semaforo per il ping-pong del buffer
     chip->playback_sem = create_sem(0, "cmi8788_playback_sem");

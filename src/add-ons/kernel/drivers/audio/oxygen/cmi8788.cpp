@@ -270,6 +270,61 @@ cmi8788_control(void *cookie, uint32 op, void *arg, size_t length)
         case B_MULTI_GET_DESCRIPTION:
             return cmi8788_get_capabilities(device, (multi_description *)arg);
 
+        case B_MULTI_GET_ENABLED_CHANNELS:
+        {
+            multi_channel_enable *data = (multi_channel_enable *)arg;
+            if (data == NULL)
+                return B_BAD_VALUE;
+                
+            data->lock_source = B_MULTI_LOCK_INTERNAL;
+            
+            // Abilita tutti i 14 canali (10 output e 4 input) per far capire alla preflet di usarli
+            for (int32 i = 0; i < 14; i++) {
+                B_SET_CHANNEL(data->enable_bits, i, true);
+            }
+            
+            return B_OK;
+        }
+
+        case B_MULTI_SET_ENABLED_CHANNELS:
+        {
+            // Non c'è bisogno di fare nulla, accettiamo la configurazione
+            return B_OK;
+        }
+
+        case B_MULTI_GET_GLOBAL_FORMAT:
+        {
+            multi_format_info *data = (multi_format_info *)arg;
+            if (data == NULL)
+                return B_BAD_VALUE;
+                
+            data->output_latency = 0;
+            data->input_latency = 0;
+            data->timecode_kind = 0;
+            
+            data->output.format = device->format;
+            data->output.rate = device->sample_rate;
+            
+            data->input.format = 0;
+            data->input.rate = 0;
+            
+            return B_OK;
+        }
+
+        case B_MULTI_SET_GLOBAL_FORMAT:
+        {
+            multi_format_info *data = (multi_format_info *)arg;
+            if (data == NULL)
+                return B_BAD_VALUE;
+                
+            device->format = data->output.format;
+            device->sample_rate = data->output.rate;
+            
+            // Opzionalmente qui si potrebbe riconfigurare il formato del chip CMI8788 (es. rate)
+            // in base a device->sample_rate. Per ora accettiamo il valore per compatibilità media-server.
+            return B_OK;
+        }
+
         case B_MULTI_GET_BUFFERS:
         {
             multi_buffer_list *data = (multi_buffer_list *)arg;
@@ -482,45 +537,6 @@ cmi8788_control(void *cookie, uint32 op, void *arg, size_t length)
             }
             return B_OK;
         }
-        case B_MULTI_GET_GLOBAL_FORMAT:
-        {
-            multi_format_info *format_info = (multi_format_info *)arg;
-            if (format_info == NULL)
-                return B_BAD_VALUE;
-            
-            memset(format_info, 0, sizeof(multi_format_info));
-            format_info->info_size = sizeof(multi_format_info);
-            
-            // Output format
-            format_info->output.rate = device->sample_rate > 0 ? device->sample_rate : 48000;
-            format_info->output.cvsr = 0.0f;
-            format_info->output.format = B_FMT_32BIT;
-
-            // Input format
-            format_info->input.rate = device->sample_rate > 0 ? device->sample_rate : 48000;
-            format_info->input.cvsr = 0.0f;
-            format_info->input.format = B_FMT_32BIT;
-
-            format_info->timecode_kind = B_MULTI_NO_TIMECODE;
-            
-            return B_OK;
-        }
-
-        case B_MULTI_SET_GLOBAL_FORMAT:
-        {
-            multi_format_info *format_info = (multi_format_info *)arg;
-            if (format_info == NULL)
-                return B_BAD_VALUE;
-            
-            // Usiamo la frequenza di output (o di input, di solito coincidono nel global format)
-            device->sample_rate = format_info->output.rate;
-            
-            // TODO:
-            // Qui andrai a riconfigurare i registri del clock/PLL del CMI8788 
-            // in base a device->sample_rate
-            
-            return B_OK;
-        }
 
         default:
             return B_BAD_VALUE;
@@ -555,7 +571,7 @@ device_hooks sDeviceHooks = {
 };
 
 const char *gDeviceNames[] = {
-	"audio/hmulti/cmi8788/1",
+	"audio/hmulti/cmi8788",
 	NULL
 };
 
