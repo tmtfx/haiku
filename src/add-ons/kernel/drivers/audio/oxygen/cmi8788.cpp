@@ -20,7 +20,11 @@
 int32 api_version = B_CUR_DRIVER_API_VERSION;
 
 pci_module_info *gPci;
-cmi8788_device sDataDevice;
+
+#define MAX_CARDS 4
+static cmi8788_device sCards[MAX_CARDS];
+static uint32 gNumCards = 0;
+static const char *sDeviceNames[MAX_CARDS + 1];
 
 static status_t
 cmi8788_map_registers(cmi8788_device *device)
@@ -79,27 +83,21 @@ cmi8788_interrupt(void *data)
 static int32
 cmi8788_open(const char *name, uint32 flags, void **cookie)
 {
-	dprintf("cmi8788: open() called\n");
+	CALLED();
+	dprintf("cmi8788: open() called on %s\n", name);
 	
-	cmi8788_device *device = &sDataDevice;
+	cmi8788_device *device = NULL;
+	for (uint32 i = 0; i < gNumCards; i++) {
+		if (strcmp(name, sCards[i].devfs_path) == 0) {
+			device = &sCards[i];
+			break;
+		}
+	}
+
+	if (device == NULL)
+		return B_DEVICE_NOT_FOUND;
 	
 	if (!device->initialized) {
-		pci_info info;
-		int index = 0;
-		bool found = false;
-
-		while ((*gPci->get_nth_pci_info)(index, &info) == B_OK) {
-			if (info.vendor_id == CMEDIA_VENDOR_ID && info.device_id == CMI8788_DEVICE_ID) {
-				device->pci_info = info;
-				found = true;
-				break;
-			}
-			index++;
-		}
-
-		if (!found)
-			return B_DEVICE_NOT_FOUND;
-
 		status_t status = cmi8788_map_registers(device);
 		if (status < B_OK)
 			return status;
@@ -570,11 +568,6 @@ device_hooks sDeviceHooks = {
 	NULL     // write_vnet
 };
 
-const char *gDeviceNames[] = {
-	"audio/hmulti/cmi8788",
-	NULL
-};
-
 extern "C" status_t
 init_hardware(void)
 {
@@ -602,23 +595,47 @@ init_hardware(void)
 extern "C" status_t
 init_driver(void)
 {
+	CALLED();
 	if (get_module(B_PCI_MODULE_NAME, (module_info **)&gPci) < B_OK)
 		return B_ERROR;
-		
-	dprintf("cmi8788: Driver caricato con successo.\n");
+
+	gNumCards = 0;
+	pci_info info;
+	int index = 0;
+	while ((*gPci->get_nth_pci_info)(index, &info) == B_OK && gNumCards < MAX_CARDS) {
+		if (info.vendor_id == CMEDIA_VENDOR_ID && info.device_id == CMI8788_DEVICE_ID) {
+			cmi8788_device *device = &sCards[gNumCards];
+			memset(device, 0, sizeof(cmi8788_device));
+			device->pci_info = info;
+			
+			// Genera il percorso devfs (es. "audio/hmulti/cmi8788/0")
+			sprintf(device->devfs_path, DEVFS_PATH_FORMAT, gNumCards);
+			sDeviceNames[gNumCards] = device->devfs_path;
+			
+			dprintf("cmi8788: Registrata scheda #%" B_PRIu32 " a %s\n", gNumCards, device->devfs_path);
+			gNumCards++;
+		}
+		index++;
+	}
+	sDeviceNames[gNumCards] = NULL;
+
+	dprintf("cmi8788: Caricati %" B_PRIu32 " device cmi8788 compatibili.\n", gNumCards);
 	return B_OK;
 }
 
 extern "C" void
 uninit_driver(void)
 {
-	cmi8788_device *device = &sDataDevice;
-	if (device->initialized) {
-		oxygen_chip_shutdown(device->mmio_base);
-		cmi8788_remove_interrupts(device);
-		oxygen_free_dma_buffer(device);
-		delete_area(device->mmio_area);
-		device->initialized = false;
+	CALLED();
+	for (uint32 i = 0; i < gNumCards; i++) {
+		cmi8788_device *device = &sCards[i];
+		if (device->initialized) {
+			oxygen_chip_shutdown(device->mmio_base);
+			cmi8788_remove_interrupts(device);
+			oxygen_free_dma_buffer(device);
+			delete_area(device->mmio_area);
+			device->initialized = false;
+		}
 	}
 
 	if (gPci != NULL)
@@ -628,7 +645,8 @@ uninit_driver(void)
 extern "C" const char **
 publish_devices(void)
 {
-	return gDeviceNames;
+	CALLED();
+	return sDeviceNames;
 }
 
 extern "C" device_hooks *

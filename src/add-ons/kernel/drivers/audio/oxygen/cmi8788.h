@@ -476,6 +476,8 @@
 #define XONAR_D2_GPIO_ALT           0x0080  // GPIO 7
 #define XONAR_D2X_EXT_POWER         0x0020  // GPIO 5
 
+#define DEVFS_PATH_FORMAT           "audio/hmulti/cmi8788/%" B_PRIu32
+
 // PCM1796 DAC Registers and Constants
 #define PCM1796_REG_ATTN_L          16
 #define PCM1796_REG_ATTN_R          17
@@ -502,6 +504,8 @@ typedef struct cmi8788_device {
     void*               dma_pub_base;
     phys_addr_t         dma_phy_base;
     size_t              dma_buffer_size;
+    
+    char                devfs_path[64];
 
     // Multi-audio state
     sem_id              playback_sem;
