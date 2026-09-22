@@ -44,6 +44,78 @@ void xonar_d2_pcm1796_write(oxygen_t *chip, uint8_t codec, uint8_t reg, uint8_t 
     }
 }
 
+// Funzione per impostare la frequenza di campionamento e il clock hardware (Asus Xonar D2X)
+void xonar_d2_set_sample_rate(oxygen_t *chip, uint32_t rate)
+{
+    dprintf("oxygen: Impostazione frequenza di campionamento a %u Hz...\n", rate);
+
+    // 1. Selezione del cristallo di clock corretto (22.5792 MHz per famiglia 44.1k, 24.576 MHz per famiglia 48k)
+    uint8_t misc = oxygen_read8(chip, OXYGEN_MISC);
+    if (rate == 44100 || rate == 88200 || rate == 176400) {
+        misc |= OXYGEN_MISC_CRYSTAL_27; // Seleziona il cristallo da 22.5792 MHz (etichettato 27 in reference)
+    } else {
+        misc &= ~OXYGEN_MISC_CRYSTAL_MASK; // Seleziona il cristallo da 24.576 MHz
+    }
+    oxygen_write8(chip, OXYGEN_MISC, misc);
+
+    snooze(1000); // Attendi stabilità del Master Clock (1ms)
+
+    // 2. Calcola i bit della frequenza CMI8788, divisore MCLK e oversampling del DAC
+    uint16_t oxygen_rate_val = OXYGEN_RATE_48000;
+    uint16_t mclk_val = OXYGEN_I2S_MCLK(MCLK_512);
+    uint8_t pcm1796_os = PCM1796_OS_128;
+
+    switch (rate) {
+        case 32000:
+            oxygen_rate_val = OXYGEN_RATE_32000;
+            break;
+        case 44100:
+            oxygen_rate_val = OXYGEN_RATE_44100;
+            break;
+        case 48000:
+            oxygen_rate_val = OXYGEN_RATE_48000;
+            break;
+        case 64000:
+            oxygen_rate_val = OXYGEN_RATE_64000;
+            mclk_val = OXYGEN_I2S_MCLK(MCLK_128); // double speed rates use MCLK 128
+            pcm1796_os = PCM1796_OS_64;
+            break;
+        case 88200:
+            oxygen_rate_val = OXYGEN_RATE_88200;
+            mclk_val = OXYGEN_I2S_MCLK(MCLK_128);
+            pcm1796_os = PCM1796_OS_64;
+            break;
+        case 96000:
+            oxygen_rate_val = OXYGEN_RATE_96000;
+            mclk_val = OXYGEN_I2S_MCLK(MCLK_128);
+            pcm1796_os = PCM1796_OS_64;
+            break;
+        case 176400:
+            oxygen_rate_val = OXYGEN_RATE_176400;
+            mclk_val = OXYGEN_I2S_MCLK(MCLK_128); // quad speed rates
+            pcm1796_os = PCM1796_OS_64;
+            break;
+        case 192000:
+            oxygen_rate_val = OXYGEN_RATE_192000;
+            mclk_val = OXYGEN_I2S_MCLK(MCLK_128);
+            pcm1796_os = PCM1796_OS_64;
+            break;
+    }
+
+    // Aggiorna OXYGEN_I2S_MULTICH_FORMAT (lasciando inalterati formato, bit e master)
+    uint16_t i2s_format = oxygen_read16(chip, OXYGEN_I2S_MULTICH_FORMAT);
+    i2s_format &= ~(OXYGEN_I2S_RATE_MASK | OXYGEN_I2S_MCLK_MASK);
+    i2s_format |= (oxygen_rate_val | mclk_val);
+    oxygen_write16(chip, OXYGEN_I2S_MULTICH_FORMAT, i2s_format);
+
+    // 3. Configura via SPI l'oversampling rate corretto sui 4 DAC esterni PCM1796
+    for (int i = 0; i < 4; i++) {
+        xonar_d2_pcm1796_write(chip, i, PCM1796_REG_CONTROL_3, pcm1796_os);
+    }
+
+    chip->sample_rate = rate;
+}
+
 // Inizializzazione hardware specifica per la Xonar D2X
 void
 xonar_d2_init(oxygen_t *chip)
@@ -157,7 +229,7 @@ oxygen_chip_shutdown(addr_t mmio_base)
 {
     dprintf("oxygen: Arresto del chip CMI8788...\n");
     
-    // Mettere a muto l'uscita tramite GPIO per evitare pop allo spegnimento
+    // Mettere a muto l'uscita tramite GPIO per evitare pop allo spegnimento (16-bit)
     uint16_t data = *(volatile uint16_t *)(mmio_base + OXYGEN_GPIO_DATA);
     data &= ~XONAR_D2_GPIO_MUTE;
     *(volatile uint16_t *)(mmio_base + OXYGEN_GPIO_DATA) = data;
@@ -220,10 +292,10 @@ cmi8788_setup_interrupts(cmi8788_device *device)
 		return status;
 	}
 
-	// Abilita gli interrupt per la multicanale nel registro di maschera del chip
-	uint8 mask = *(volatile uint8 *)(device->mmio_base + OXYGEN_INTERRUPT_MASK);
+	// Abilita gli interrupt per la multicanale nel registro di maschera del chip (16-bit)
+	uint16 mask = oxygen_read16(device, OXYGEN_INTERRUPT_MASK);
 	mask |= OXYGEN_CHANNEL_MULTICH;
-	*(volatile uint8 *)(device->mmio_base + OXYGEN_INTERRUPT_MASK) = mask;
+	oxygen_write16(device, OXYGEN_INTERRUPT_MASK, mask);
 
 	return B_OK;
 }
@@ -233,8 +305,8 @@ cmi8788_remove_interrupts(cmi8788_device *device)
 {
 	uint8 irq = device->pci_info.u.h0.interrupt_line;
 	
-	// Disattiva le maschere
-	*(volatile uint8 *)(device->mmio_base + OXYGEN_INTERRUPT_MASK) = 0;
+	// Disattiva le maschere (16-bit)
+	oxygen_write16(device, OXYGEN_INTERRUPT_MASK, 0);
 	
 	// Rimuovi l'handler dal kernel
 	remove_io_interrupt_handler(irq, cmi8788_interrupt, (void *)device);
@@ -243,14 +315,14 @@ cmi8788_remove_interrupts(cmi8788_device *device)
 // Funzione di scrittura sicura sui registri GPIO del CMI8788
 void cmi8788_gpio_set(cmi8788_device *device, uint16 data, uint16 mask)
 {
-    // Leggi lo stato attuale dei GPIO
-    uint16 ctrl = *(volatile uint16 *)(device->mmio_base + OXYGEN_GPIO_CONTROL);
+    // Leggi lo stato attuale dei GPIO (16-bit)
+    uint16 ctrl = oxygen_read16(device, OXYGEN_GPIO_CONTROL);
     // Assicurati che i pin siano configurati come output (bit a 1 nella control mask)
-    *(volatile uint16 *)(device->mmio_base + OXYGEN_GPIO_CONTROL) = ctrl | mask;
+    oxygen_write16(device, OXYGEN_GPIO_CONTROL, ctrl | mask);
 
-    uint16 val = *(volatile uint16 *)(device->mmio_base + OXYGEN_GPIO_DATA);
+    uint16 val = oxygen_read16(device, OXYGEN_GPIO_DATA);
     val = (val & ~mask) | (data & mask);
-    *(volatile uint16 *)(device->mmio_base + OXYGEN_GPIO_DATA) = val;
+    oxygen_write16(device, OXYGEN_GPIO_DATA, val);
 }
 
 void cmi8788_set_mute(cmi8788_device *device, bool mute)

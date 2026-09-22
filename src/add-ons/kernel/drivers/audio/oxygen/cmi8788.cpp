@@ -314,12 +314,12 @@ cmi8788_control(void *cookie, uint32 op, void *arg, size_t length)
             multi_format_info *data = (multi_format_info *)arg;
             if (data == NULL)
                 return B_BAD_VALUE;
-                
+
             device->format = data->output.format;
             device->sample_rate = data->output.rate;
-            
-            // Opzionalmente qui si potrebbe riconfigurare il formato del chip CMI8788 (es. rate)
-            // in base a device->sample_rate. Per ora accettiamo il valore per compatibilità media-server.
+
+            // Riconfigura la frequenza di campionamento, i cristalli PLL e l'oversampling dei DAC esterni
+            xonar_d2_set_sample_rate(device, device->sample_rate);
             return B_OK;
         }
 

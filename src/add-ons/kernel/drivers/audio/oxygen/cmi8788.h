@@ -483,6 +483,7 @@
 #define PCM1796_REG_ATTN_R          17
 #define PCM1796_REG_CONTROL_1       18
 #define PCM1796_REG_CONTROL_2       19
+#define PCM1796_REG_CONTROL_3       20
 
 #define PCM1796_DMF_DISABLED        0x00
 #define PCM1796_FMT_24_I2S          0x50
@@ -491,6 +492,8 @@
 #define PCM1796_FLT_SHARP           0x00
 #define PCM1796_FLT_SLOW            0x02
 #define PCM1796_ATS_1               0x00
+#define PCM1796_OS_128              0x02
+#define PCM1796_OS_64               0x00
 
 // Definizione della struct principale del device
 typedef struct cmi8788_device {
@@ -582,6 +585,7 @@ void cmi8788_gpio_set(cmi8788_device *device, uint16 data, uint16 mask);
 void cmi8788_set_mute(cmi8788_device *device, bool mute);
 void cmi8788_spi_write(cmi8788_device *device, uint8 codec_mask, uint8 reg, uint8 value);
 void xonar_d2_pcm1796_write(oxygen_t *chip, uint8_t codec, uint8_t reg, uint8_t value);
+void xonar_d2_set_sample_rate(oxygen_t *chip, uint32_t rate);
 void xonar_d2_init_dacs(cmi8788_device *device);
 
 #endif /* CMI8788_H */
