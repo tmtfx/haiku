@@ -542,7 +542,10 @@ oxygen_read8(oxygen_t *chip, uint32_t reg)
 {
     uint8_t value = *(volatile uint8_t *)(chip->mmio_base + reg);
 #if ENABLE_VERBOSE_LOGS
-    dprintf("cmi8788: [READ8] Reg 0x%02x -> Valore 0x%02x\n", reg, value);
+    // Evita il flooding di log per i registri di polling di stato (0x98 per SPI, 0x80 per I2C)
+    if (reg != 0x98 && reg != 0x80) {
+        dprintf("cmi8788: [READ8] Reg 0x%02" B_PRIx32 " -> Valore 0x%02x\n", reg, value);
+    }
 #endif
     return value;
 }
@@ -551,11 +554,15 @@ static inline void
 oxygen_write8(oxygen_t *chip, uint32_t reg, uint8_t value)
 {
 #if ENABLE_VERBOSE_LOGS
-    uint8_t pre = *(volatile uint8_t *)(chip->mmio_base + reg);
-    *(volatile uint8_t *)(chip->mmio_base + reg) = value;
-    uint8_t post = *(volatile uint8_t *)(chip->mmio_base + reg);
-    dprintf("cmi8788: [WRITE8] Reg 0x%02x: Pre-Lettura=0x%02x -> Scrittura=0x%02x -> Post-Lettura=0x%02x\n", 
-            reg, pre, value, post);
+    if (reg != 0x98 && reg != 0x80) {
+        uint8_t pre = *(volatile uint8_t *)(chip->mmio_base + reg);
+        *(volatile uint8_t *)(chip->mmio_base + reg) = value;
+        uint8_t post = *(volatile uint8_t *)(chip->mmio_base + reg);
+        dprintf("cmi8788: [WRITE8] Reg 0x%02" B_PRIx32 ": Pre-Lettura=0x%02x -> Scrittura=0x%02x -> Post-Lettura=0x%02x\n", 
+                reg, pre, value, post);
+    } else {
+        *(volatile uint8_t *)(chip->mmio_base + reg) = value;
+    }
 #else
     *(volatile uint8_t *)(chip->mmio_base + reg) = value;
 #endif
