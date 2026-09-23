@@ -11,6 +11,7 @@
 #include "cmi8788.h"
 
 #define ROUNDUP(value, alignment) (((value) + (alignment) - 1) & ~((alignment) - 1))
+#define XONAR_D2_ANTI_POP_DELAY_US 300000
 
 // Funzione di scrittura SPI per i DAC PCM1796 della Xonar D2X
 void xonar_d2_pcm1796_write(oxygen_t *chip, uint8_t codec, uint8_t reg, uint8_t value)
@@ -157,9 +158,9 @@ xonar_d2_init(oxygen_t *chip)
         dprintf("oxygen: Alimentazione esterna rilevata correttamente.\n");
     }
 
-    // Attiva il MUTE hardware durante il setup iniziale per evitare "pop" sonori
+    // Tieni disabilitata l'uscita durante il setup iniziale (sequenza anti-pop).
     uint16_t data = oxygen_read16(chip, OXYGEN_GPIO_DATA);
-    data &= ~XONAR_D2_GPIO_MUTE; // Mute attivo (basso)
+    data &= ~XONAR_D2_GPIO_MUTE; // Uscita disabilitata / mute attivo (basso)
     data &= ~XONAR_D2_GPIO_ALT;  // Loopback analogico spento
     oxygen_write16(chip, OXYGEN_GPIO_DATA, data);
 
@@ -176,7 +177,11 @@ xonar_d2_init(oxygen_t *chip)
         xonar_d2_pcm1796_write(chip, i, PCM1796_REG_ATTN_R, 0xff);
     }
 
-    // Rilascia il MUTE (porta il pin GPIO alto) ora che i DAC sono pronti
+    // Sequenza relay/output enable in stile driver Xonar:
+    // attesa anti-pop prima di riabilitare fisicamente l'uscita analogica.
+    snooze(XONAR_D2_ANTI_POP_DELAY_US);
+
+    // Rilascia il MUTE / abilita uscita (porta il pin GPIO alto) ora che i DAC sono pronti.
     data |= XONAR_D2_GPIO_MUTE;
     oxygen_write16(chip, OXYGEN_GPIO_DATA, data);
 
