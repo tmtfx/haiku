@@ -145,6 +145,10 @@ cmi8788_open(const char *name, uint32 flags, void **cookie)
 		device->dma_user_area = -1;
 		device->dma_user_base = NULL;
 
+		// Assicura che MSI sia disabilitato per forzare l'uso degli interrupt INTx legacy su IRQ 48!
+		(*gPci->disable_msi)(device->pci_info.bus, device->pci_info.device, device->pci_info.function);
+		(*gPci->unconfigure_msi)(device->pci_info.bus, device->pci_info.device, device->pci_info.function);
+
 		// Allinea i comandi PCI: abilita Bus Master e le mappature di memoria/IO (fondamentale per DMA!)
 		// Inoltre disabilita il bit PCI_command_int_disable (0x0400) per abilitare fisicamente gli interrupt INTx legacy!
 		uint16 pcicmd = (*gPci->read_pci_config)(device->pci_info.bus, 
