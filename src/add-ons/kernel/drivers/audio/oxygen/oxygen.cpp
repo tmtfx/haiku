@@ -137,9 +137,9 @@ xonar_d2_init(oxygen_t *chip)
 
     // Abilita la rilevazione dell'input sul GPIO 5 impostandone la maschera di interrupt (16-bit)
     // Questo attiva fisicamente il buffer di input hardware sul controller C-Media!
-    uint16_t gpio_int = oxygen_read16(chip, OXYGEN_GPIO_INTERRUPT_MASK);
-    gpio_int |= XONAR_D2X_EXT_POWER;
-    oxygen_write16(chip, OXYGEN_GPIO_INTERRUPT_MASK, gpio_int);
+    uint8_t gpio_int = oxygen_read8(chip, OXYGEN_GPIO_INTERRUPT_MASK);
+    gpio_int |= (uint8_t)XONAR_D2X_EXT_POWER;
+    oxygen_write8(chip, OXYGEN_GPIO_INTERRUPT_MASK, gpio_int);
 
     snooze(100); // Piccola pausa per la stabilizzazione elettrica
 
@@ -177,8 +177,12 @@ xonar_d2_init(oxygen_t *chip)
         xonar_d2_pcm1796_write(chip, i, PCM1796_REG_ATTN_R, 0xff);
     }
 
-    // Sequenza relay/output enable in stile driver Xonar:
-    // attesa anti-pop prima di riabilitare fisicamente l'uscita analogica.
+    // Sequenza relay/output-enable in stile Xonar reference:
+    // 1) pin come output, 2) delay anti-pop, 3) uscita alta (relay enable).
+    control = oxygen_read16(chip, OXYGEN_GPIO_CONTROL);
+    control |= XONAR_D2_GPIO_MUTE;
+    oxygen_write16(chip, OXYGEN_GPIO_CONTROL, control);
+
     snooze(XONAR_D2_ANTI_POP_DELAY_US);
 
     // Rilascia il MUTE / abilita uscita (porta il pin GPIO alto) ora che i DAC sono pronti.

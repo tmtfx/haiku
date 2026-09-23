@@ -487,21 +487,30 @@ cmi8788_control(void *cookie, uint32 op, void *arg, size_t length)
             device->channels = channels;
             device->buffer_size_frames = buffer_size_frames;
     
-            // Se non è già stata clonata, cloniamo l'area DMA nel team utente corrente
-            if (device->dma_user_area < 0) {
+            // Ricrea i cloni ad ogni GET_BUFFERS per evitare handle stale tra riaperture del media_server.
+            if (device->dma_user_area >= B_OK) {
+                delete_area(device->dma_user_area);
+                device->dma_user_area = -1;
                 device->dma_user_base = NULL;
-                device->dma_user_area = clone_area(
-                    "cmi8788_dma_user",
-                    &device->dma_user_base,
-                    B_ANY_ADDRESS,
-                    B_READ_AREA | B_WRITE_AREA,
-                    device->dma_area
-                );
-                if (device->dma_user_area < B_OK) {
-                    dprintf("cmi8788: Errore nel clonare l'area DMA per user-space (%s)\n", strerror(device->dma_user_area));
-                    return device->dma_user_area;
-                }
-                dprintf("cmi8788: Area DMA clonata per user-space con successo. Indirizzo utente: %p\n", device->dma_user_base);
+            }
+            device->dma_user_base = NULL;
+            device->dma_user_area = clone_area(
+                "cmi8788_dma_user",
+                &device->dma_user_base,
+                B_ANY_ADDRESS,
+                B_READ_AREA | B_WRITE_AREA,
+                device->dma_area
+            );
+            if (device->dma_user_area < B_OK) {
+                dprintf("cmi8788: Errore nel clonare l'area DMA per user-space (%s)\n", strerror(device->dma_user_area));
+                return device->dma_user_area;
+            }
+            dprintf("cmi8788: Area DMA clonata per user-space con successo. Indirizzo utente: %p\n", device->dma_user_base);
+
+            if (device->record_user_area >= B_OK) {
+                delete_area(device->record_user_area);
+                device->record_user_area = -1;
+                device->record_user_base = NULL;
             }
 
             size_t single_buffer_bytes = buffer_size_frames * channels * sizeof(int32);
@@ -520,19 +529,17 @@ cmi8788_control(void *cookie, uint32 op, void *arg, size_t length)
                 }
             }
 
-            if (device->record_user_area < 0) {
-                device->record_user_base = NULL;
-                device->record_user_area = clone_area(
-                    "cmi8788_record_user",
-                    &device->record_user_base,
-                    B_ANY_ADDRESS,
-                    B_READ_AREA | B_WRITE_AREA,
-                    device->record_area
-                );
-                if (device->record_user_area < B_OK) {
-                    dprintf("cmi8788: Errore clone area record (%s)\n", strerror(device->record_user_area));
-                    return device->record_user_area;
-                }
+            device->record_user_base = NULL;
+            device->record_user_area = clone_area(
+                "cmi8788_record_user",
+                &device->record_user_base,
+                B_ANY_ADDRESS,
+                B_READ_AREA | B_WRITE_AREA,
+                device->record_area
+            );
+            if (device->record_user_area < B_OK) {
+                dprintf("cmi8788: Errore clone area record (%s)\n", strerror(device->record_user_area));
+                return device->record_user_area;
             }
 
             if (data->record_buffers != NULL) {
