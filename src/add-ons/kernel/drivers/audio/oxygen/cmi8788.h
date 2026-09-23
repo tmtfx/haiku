@@ -512,6 +512,13 @@ typedef struct cmi8788_device {
 
     area_id             dma_user_area;
     void*               dma_user_base;
+    area_id             record_area;
+    void*               record_pub_base;
+    phys_addr_t         record_phy_base;
+    area_id             record_user_area;
+    void*               record_user_base;
+    size_t              record_buffer_size;
+    size_t              record_stream_size;
 
     // Multi-audio state
     sem_id              playback_sem;
@@ -521,10 +528,13 @@ typedef struct cmi8788_device {
     uint32_t            channels; // Il numero di canali attivi (es. 8)
     uint32_t            buffer_size_frames;
     uint32_t            current_playback_buffer;
+    uint32_t            current_record_buffer;
     uint64_t            played_frames_count;
+    uint64_t            recorded_frames_count;
+    bool                recording;
     
     // ARRAY DESCRITTIVO PER IL MEDIA KIT DI HAIKU
-    multi_channel_info    channel_infos[8];
+    multi_channel_info    channel_infos[14];
 
     // Mixer state
     uint8_t             dac_volume[8]; // 0-255 volume attenuation

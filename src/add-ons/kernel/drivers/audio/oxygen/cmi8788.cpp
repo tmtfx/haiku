@@ -113,17 +113,29 @@ cmi8788_interrupt(void *data)
     if (status == 0 || status == 0xffff)
         return B_UNHANDLED_INTERRUPT;
     
+    bool wakeExchange = false;
+
     if (status & OXYGEN_CHANNEL_MULTICH) {
-        // Pulisci l'interrupt scrivendo 1 sul canale multicanale
         oxygen_write16(device, OXYGEN_INTERRUPT_STATUS, OXYGEN_CHANNEL_MULTICH);
-        
         if (device->playing) {
-            // Avanza il buffer cycle (ping-pong)
             device->current_playback_buffer = (device->current_playback_buffer + 1) % 2;
             device->played_frames_count += device->buffer_size_frames;
-            // Sblocca il thread in attesa (B_MULTI_BUFFER_EXCHANGE)
-            release_sem_etc(device->playback_sem, 1, B_DO_NOT_RESCHEDULE);
+            wakeExchange = true;
         }
+    }
+
+    uint16_t recordStatus = status & (OXYGEN_CHANNEL_A | OXYGEN_CHANNEL_C);
+    if (recordStatus != 0) {
+        oxygen_write16(device, OXYGEN_INTERRUPT_STATUS, recordStatus);
+        if (device->recording) {
+            device->current_record_buffer = (device->current_record_buffer + 1) % 2;
+            device->recorded_frames_count += device->buffer_size_frames;
+            wakeExchange = true;
+        }
+    }
+
+    if (wakeExchange && device->playback_sem >= B_OK) {
+        release_sem_etc(device->playback_sem, 1, B_DO_NOT_RESCHEDULE);
     }
 
     return B_HANDLED_INTERRUPT;
@@ -149,6 +161,17 @@ cmi8788_open(const char *name, uint32 flags, void **cookie)
 	if (!device->initialized) {
 		device->dma_user_area = -1;
 		device->dma_user_base = NULL;
+		device->playback_sem = -1;
+		device->record_area = -1;
+		device->record_pub_base = NULL;
+		device->record_phy_base = 0;
+		device->record_user_area = -1;
+		device->record_user_base = NULL;
+		device->record_buffer_size = 0;
+		device->record_stream_size = 0;
+		device->current_record_buffer = 0;
+		device->recorded_frames_count = 0;
+		device->recording = false;
 
 		// Assicura che MSI sia disabilitato per forzare l'uso degli interrupt INTx legacy su IRQ 48!
 		(*gPci->disable_msi)(device->pci_info.bus, device->pci_info.device, device->pci_info.function);
@@ -173,6 +196,29 @@ cmi8788_open(const char *name, uint32 flags, void **cookie)
 			delete_area(device->mmio_area);
 			return status;
 		}
+
+		// Buffer DMA reale per capture: stream A (ADC stereo) + stream C (S/PDIF-in stereo), ciascuno doppio buffer.
+		size_t recordBufferFrames = 2048;
+		size_t recordStreamSize = 2 * recordBufferFrames * 2 * sizeof(int32);
+		size_t recordSize = 2 * recordStreamSize;
+		device->record_area = create_area("cmi8788_record_dma", &device->record_pub_base,
+			B_ANY_KERNEL_ADDRESS, recordSize, B_CONTIGUOUS, B_READ_AREA | B_WRITE_AREA);
+		if (device->record_area < B_OK) {
+			oxygen_free_dma_buffer(device);
+			delete_area(device->mmio_area);
+			return device->record_area;
+		}
+		physical_entry recordEntry;
+		status = get_memory_map(device->record_pub_base, recordSize, &recordEntry, 1);
+		if (status < B_OK) {
+			oxygen_free_dma_buffer(device);
+			delete_area(device->mmio_area);
+			return status;
+		}
+		device->record_phy_base = recordEntry.address;
+		device->record_buffer_size = recordSize;
+		device->record_stream_size = recordStreamSize;
+		memset(device->record_pub_base, 0, recordSize);
 
 		// Configura gli interrupt IRQ
 		status = cmi8788_setup_interrupts(device);
@@ -210,11 +256,23 @@ cmi8788_close(void *cookie)
 			oxygen_write8(device, OXYGEN_DMA_STATUS, dma_status);
 			device->playing = false;
 		}
+		if (device->recording) {
+			uint8_t dma_status = oxygen_read8(device, OXYGEN_DMA_STATUS);
+			dma_status &= ~(OXYGEN_CHANNEL_A | OXYGEN_CHANNEL_C);
+			oxygen_write8(device, OXYGEN_DMA_STATUS, dma_status);
+			device->recording = false;
+		}
 
 		if (device->dma_user_area >= B_OK) {
 			delete_area(device->dma_user_area);
 			device->dma_user_area = -1;
 			device->dma_user_base = NULL;
+		}
+
+		if (device->record_user_area >= B_OK) {
+			delete_area(device->record_user_area);
+			device->record_user_area = -1;
+			device->record_user_base = NULL;
 		}
 	}
 	return B_OK;
@@ -248,15 +306,15 @@ cmi8788_get_capabilities(cmi8788_device *device, multi_description *data)
     data->max_cvsr_rate = 0;
     data->min_cvsr_rate = 0;
 	
-    data->output_channel_count = 8;
-    data->input_channel_count = 0;
-    data->output_bus_channel_count = 8;
-    data->input_bus_channel_count = 0;
+    data->output_channel_count = 10; // 8 analogici + 2 S/PDIF
+    data->input_channel_count = 4;   // 2 analogici + 2 S/PDIF
+    data->output_bus_channel_count = 10;
+    data->input_bus_channel_count = 4;
     data->aux_bus_channel_count = 0;
 
     data->lock_sources = B_MULTI_LOCK_INTERNAL;
     data->timecode_sources = 0;
-    data->interface_flags = B_MULTI_INTERFACE_PLAYBACK;
+    data->interface_flags = B_MULTI_INTERFACE_PLAYBACK | B_MULTI_INTERFACE_RECORD;
     data->start_latency = 30000;
     data->control_panel[0] = '\0';
 
@@ -277,8 +335,47 @@ cmi8788_get_capabilities(cmi8788_device *device, multi_description *data)
         device->channel_infos[idx].connectors = B_CHANNEL_MINI_JACK_STEREO;
     }
     
+    // 2. Output Digitali Coassiali (S/PDIF Out - 2 canali sui connettori RCA)
+    device->channel_infos[idx].channel_id = idx;
+    device->channel_infos[idx].kind = B_MULTI_OUTPUT_CHANNEL;
+    device->channel_infos[idx].designations = B_CHANNEL_LEFT;
+    device->channel_infos[idx].connectors = B_CHANNEL_COAX_SPDIF;
+    idx++;
+
+    device->channel_infos[idx].channel_id = idx;
+    device->channel_infos[idx].kind = B_MULTI_OUTPUT_CHANNEL;
+    device->channel_infos[idx].designations = B_CHANNEL_RIGHT;
+    device->channel_infos[idx].connectors = B_CHANNEL_COAX_SPDIF;
+    idx++;
+
+    // 3. Input Analogici (Line-In / Mic - 2 canali)
+    device->channel_infos[idx].channel_id = idx;
+    device->channel_infos[idx].kind = B_MULTI_INPUT_CHANNEL;
+    device->channel_infos[idx].designations = B_CHANNEL_LEFT;
+    device->channel_infos[idx].connectors = B_CHANNEL_MINI_JACK_STEREO;
+    idx++;
+
+    device->channel_infos[idx].channel_id = idx;
+    device->channel_infos[idx].kind = B_MULTI_INPUT_CHANNEL;
+    device->channel_infos[idx].designations = B_CHANNEL_RIGHT;
+    device->channel_infos[idx].connectors = B_CHANNEL_MINI_JACK_STEREO;
+    idx++;
+
+    // 4. Input Digitali Coassiali (S/PDIF In - 2 canali)
+    device->channel_infos[idx].channel_id = idx;
+    device->channel_infos[idx].kind = B_MULTI_INPUT_CHANNEL;
+    device->channel_infos[idx].designations = B_CHANNEL_LEFT;
+    device->channel_infos[idx].connectors = B_CHANNEL_COAX_SPDIF;
+    idx++;
+
+    device->channel_infos[idx].channel_id = idx;
+    device->channel_infos[idx].kind = B_MULTI_INPUT_CHANNEL;
+    device->channel_infos[idx].designations = B_CHANNEL_RIGHT;
+    device->channel_infos[idx].connectors = B_CHANNEL_COAX_SPDIF;
+    idx++;
+
     // Copia i dati all'utente salvaguardando lo spazio allocato
-    int32 copy_count = request_count < 8 ? request_count : 8;
+    int32 copy_count = request_count < 14 ? request_count : 14;
     if (user_channels != NULL && copy_count > 0) {
         memcpy(user_channels, device->channel_infos, copy_count * sizeof(multi_channel_info));
     }
@@ -288,11 +385,11 @@ cmi8788_get_capabilities(cmi8788_device *device, multi_description *data)
 
     // Frequenze supportate dai PCM1796 e dal CMI8788 (Xonar D2X lavora nativamente a 48kHz, 96kHz, 192kHz)
     data->output_rates = B_SR_44100 | B_SR_48000 | B_SR_96000 | B_SR_192000;
-    data->input_rates  = 0;
+    data->input_rates  = B_SR_44100 | B_SR_48000 | B_SR_96000 | B_SR_192000;
     
     // Formato nativo supportato dai DAC PCM1796: 32-bit container / 24-bit audio
     data->output_formats = B_FMT_32BIT;
-    data->input_formats  = 0;
+    data->input_formats  = B_FMT_32BIT;
 
     return B_OK;
 }
@@ -317,7 +414,7 @@ cmi8788_control(void *cookie, uint32 op, void *arg, size_t length)
                 
             data->lock_source = B_MULTI_LOCK_INTERNAL;
             
-            for (int32 i = 0; i < 8; i++) {
+            for (int32 i = 0; i < 14; i++) {
                 B_SET_CHANNEL(data->enable_bits, i, true);
             }
             
@@ -374,12 +471,18 @@ cmi8788_control(void *cookie, uint32 op, void *arg, size_t length)
     
             int32 num_buffers = 2;
             int32 channels = 8;
+            int32 recordBuffers = 2;
+            int32 recordChannels = 4;
             uint32 buffer_size_frames = data->request_playback_buffer_size > 0 ? data->request_playback_buffer_size : 1024;
+            if (buffer_size_frames > 2048)
+                buffer_size_frames = 2048;
     
             data->return_playback_buffers = num_buffers;
             data->return_playback_channels = channels;
             data->return_playback_buffer_size = buffer_size_frames;
             data->flags = B_MULTI_BUFFER_PLAYBACK;
+            if (data->request_record_channels > 0 || data->request_record_buffers > 0)
+                data->flags |= B_MULTI_BUFFER_RECORD;
             
             device->channels = channels;
             device->buffer_size_frames = buffer_size_frames;
@@ -402,6 +505,7 @@ cmi8788_control(void *cookie, uint32 op, void *arg, size_t length)
             }
 
             size_t single_buffer_bytes = buffer_size_frames * channels * sizeof(int32);
+            size_t record_stereo_buffer_bytes = buffer_size_frames * 2 * sizeof(int32);
     
             // Mappatura Interleaved dei buffer clonato per user-space
             if (data->playback_buffers != NULL) {
@@ -415,10 +519,47 @@ cmi8788_control(void *cookie, uint32 op, void *arg, size_t length)
                     }
                 }
             }
-    
-            data->return_record_buffers = 0;
-            data->return_record_channels = 0;
-            data->return_record_buffer_size = 0;
+
+            if (device->record_user_area < 0) {
+                device->record_user_base = NULL;
+                device->record_user_area = clone_area(
+                    "cmi8788_record_user",
+                    &device->record_user_base,
+                    B_ANY_ADDRESS,
+                    B_READ_AREA | B_WRITE_AREA,
+                    device->record_area
+                );
+                if (device->record_user_area < B_OK) {
+                    dprintf("cmi8788: Errore clone area record (%s)\n", strerror(device->record_user_area));
+                    return device->record_user_area;
+                }
+            }
+
+            if (data->record_buffers != NULL) {
+                for (int b = 0; b < recordBuffers; b++) {
+                    if (data->record_buffers[b] == NULL)
+                        continue;
+                    // Canali 0/1: DMA A (ADC stereo)
+                    data->record_buffers[b][0].base = (char *)device->record_user_base
+                        + (b * record_stereo_buffer_bytes);
+                    data->record_buffers[b][0].stride = 2 * sizeof(int32);
+                    data->record_buffers[b][1].base = (char *)device->record_user_base
+                        + (b * record_stereo_buffer_bytes) + sizeof(int32);
+                    data->record_buffers[b][1].stride = 2 * sizeof(int32);
+
+                    // Canali 2/3: DMA C (S/PDIF-in stereo)
+                    data->record_buffers[b][2].base = (char *)device->record_user_base
+                        + device->record_stream_size + (b * record_stereo_buffer_bytes);
+                    data->record_buffers[b][2].stride = 2 * sizeof(int32);
+                    data->record_buffers[b][3].base = (char *)device->record_user_base
+                        + device->record_stream_size + (b * record_stereo_buffer_bytes) + sizeof(int32);
+                    data->record_buffers[b][3].stride = 2 * sizeof(int32);
+                }
+            }
+
+            data->return_record_buffers = recordBuffers;
+            data->return_record_channels = recordChannels;
+            data->return_record_buffer_size = buffer_size_frames;
     
             return B_OK;
         }
@@ -446,9 +587,45 @@ cmi8788_control(void *cookie, uint32 op, void *arg, size_t length)
                 dma_status |= OXYGEN_CHANNEL_MULTICH;
                 oxygen_write8(device, OXYGEN_DMA_STATUS, dma_status);
             }
+
+            if (!device->recording) {
+                size_t record_stereo_buffer_bytes = device->buffer_size_frames * 2 * sizeof(int32);
+                size_t record_stream_dwords = device->record_stream_size / 4;
+                size_t record_period_dwords = record_stereo_buffer_bytes / 4;
+
+                // DMA A: ADC stereo
+                oxygen_write32(device, OXYGEN_DMA_A_ADDRESS, device->record_phy_base);
+                oxygen_write16(device, OXYGEN_DMA_A_COUNT, (uint16)(record_stream_dwords - 1));
+                oxygen_write16(device, OXYGEN_DMA_A_TCOUNT, (uint16)(record_period_dwords - 1));
+
+                // DMA C: SPDIF-in stereo
+                oxygen_write32(device, OXYGEN_DMA_C_ADDRESS,
+                    device->record_phy_base + device->record_stream_size);
+                oxygen_write16(device, OXYGEN_DMA_C_COUNT, (uint16)(record_stream_dwords - 1));
+                oxygen_write16(device, OXYGEN_DMA_C_TCOUNT, (uint16)(record_period_dwords - 1));
+
+                device->recording = true;
+                device->current_record_buffer = 0;
+                device->recorded_frames_count = 0;
+
+                uint8_t dma_status = oxygen_read8(device, OXYGEN_DMA_STATUS);
+                dma_status |= OXYGEN_CHANNEL_A | OXYGEN_CHANNEL_C;
+                oxygen_write8(device, OXYGEN_DMA_STATUS, dma_status);
+            }
             
             // Attendi interrupt dal thread hardware
-            status_t status = acquire_sem(device->playback_sem);
+            status_t status = acquire_sem_etc(device->playback_sem, 1,
+                B_RELATIVE_TIMEOUT | B_CAN_INTERRUPT, 50000);
+            if (status == B_TIMED_OUT) {
+                data->playback_buffer_cycle = device->current_playback_buffer;
+                data->played_real_time = system_time();
+                data->played_frames_count = device->played_frames_count;
+                data->record_buffer_cycle = device->current_record_buffer;
+                data->recorded_real_time = system_time();
+                data->recorded_frames_count = device->recorded_frames_count;
+                data->flags = B_MULTI_BUFFER_PLAYBACK | B_MULTI_BUFFER_RECORD;
+                return B_OK;
+            }
             if (status < B_OK)
                 return status;
                 
@@ -456,23 +633,25 @@ cmi8788_control(void *cookie, uint32 op, void *arg, size_t length)
             data->played_real_time = system_time();
             data->played_frames_count = device->played_frames_count;
             
-            data->record_buffer_cycle = 0;
+            data->record_buffer_cycle = device->current_record_buffer;
             data->recorded_real_time = system_time();
-            data->recorded_frames_count = 0;
-            data->flags = B_MULTI_BUFFER_PLAYBACK;
+            data->recorded_frames_count = device->recorded_frames_count;
+            data->flags = B_MULTI_BUFFER_PLAYBACK | B_MULTI_BUFFER_RECORD;
             
             return B_OK;
         }
 
         case B_MULTI_BUFFER_FORCE_STOP:
         {
-            if (device->playing) {
-                device->playing = false;
-                
-                // Disabilita il canale DMA multicanale
+            if (device->playing || device->recording) {
                 uint8_t dma_status = oxygen_read8(device, OXYGEN_DMA_STATUS);
-                dma_status &= ~OXYGEN_CHANNEL_MULTICH;
+                dma_status &= ~(OXYGEN_CHANNEL_MULTICH | OXYGEN_CHANNEL_A | OXYGEN_CHANNEL_C);
                 oxygen_write8(device, OXYGEN_DMA_STATUS, dma_status);
+
+                device->playing = false;
+                device->recording = false;
+                device->current_playback_buffer = 0;
+                device->current_record_buffer = 0;
 
                 // Sblocca immediatamente eventuali thread in attesa sul semaforo
                 release_sem(device->playback_sem);

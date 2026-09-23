@@ -111,6 +111,7 @@ void xonar_d2_set_sample_rate(oxygen_t *chip, uint32_t rate)
     i2s_format &= ~(OXYGEN_I2S_RATE_MASK | OXYGEN_I2S_MCLK_MASK);
     i2s_format |= (oxygen_rate_val | mclk_val);
     oxygen_write16(chip, OXYGEN_I2S_MULTICH_FORMAT, i2s_format);
+    oxygen_write16(chip, OXYGEN_I2S_A_FORMAT, i2s_format);
 
     // 3. Configura via SPI l'oversampling rate corretto sui 4 DAC esterni PCM1796
     for (int i = 0; i < 4; i++) {
@@ -194,7 +195,11 @@ oxygen_chip_init(oxygen_t *chip)
     chip->dac_mute = false;
     chip->dac_filter = 0; // Sharp Roll-off
     chip->playing = false;
+    chip->recording = false;
     chip->current_playback_buffer = 0;
+    chip->current_record_buffer = 0;
+    chip->played_frames_count = 0;
+    chip->recorded_frames_count = 0;
     
     // Inizializza formato e frequenza di campionamento di default
     chip->format = B_FMT_32BIT;
@@ -223,6 +228,16 @@ oxygen_chip_init(oxygen_t *chip)
     // Formato dati playback: 32-bit (container) per i DAC della Xonar D2X
     oxygen_write8(chip, OXYGEN_PLAY_FORMAT,
                   (OXYGEN_FORMAT_32 << OXYGEN_MULTICH_FORMAT_SHIFT));
+
+    // Formato dati capture: 32-bit per tutti i DMA di recording (A/B/C)
+    oxygen_write8(chip, OXYGEN_REC_FORMAT,
+                  (OXYGEN_FORMAT_32 << OXYGEN_REC_FORMAT_A_SHIFT) |
+                  (OXYGEN_FORMAT_32 << OXYGEN_REC_FORMAT_B_SHIFT) |
+                  (OXYGEN_FORMAT_32 << OXYGEN_REC_FORMAT_C_SHIFT));
+    oxygen_write8(chip, OXYGEN_REC_CHANNELS, OXYGEN_REC_CHANNELS_2_2_2);
+    oxygen_write8(chip, OXYGEN_REC_ROUTING,
+                  OXYGEN_REC_A_ROUTE_I2S_ADC_1 |
+                  OXYGEN_REC_C_ROUTE_SPDIF);
 
     // Configura formato I2S della multicanale: 48kHz, Master, 32-bit, formato I2S, MCLK 512
     oxygen_write16(chip, OXYGEN_I2S_MULTICH_FORMAT,
@@ -292,6 +307,14 @@ oxygen_free_dma_buffer(cmi8788_device *device)
 		device->dma_area = -1;
 		device->dma_pub_base = NULL;
 	}
+    if (device->record_area >= B_OK) {
+        delete_area(device->record_area);
+        device->record_area = -1;
+        device->record_pub_base = NULL;
+        device->record_phy_base = 0;
+        device->record_buffer_size = 0;
+        device->record_stream_size = 0;
+    }
     if (device->playback_sem >= 0) {
         delete_sem(device->playback_sem);
         device->playback_sem = -1;
@@ -311,9 +334,9 @@ cmi8788_setup_interrupts(cmi8788_device *device)
 		return status;
 	}
 
-	// Abilita gli interrupt per la multicanale nel registro di maschera del chip (16-bit)
+	// Abilita interrupt playback multicanale + capture ADC/SPDIF (A e C)
 	uint16 mask = oxygen_read16(device, OXYGEN_INTERRUPT_MASK);
-	mask |= OXYGEN_CHANNEL_MULTICH;
+	mask |= OXYGEN_CHANNEL_MULTICH | OXYGEN_CHANNEL_A | OXYGEN_CHANNEL_C;
 	oxygen_write16(device, OXYGEN_INTERRUPT_MASK, mask);
 
 	return B_OK;
