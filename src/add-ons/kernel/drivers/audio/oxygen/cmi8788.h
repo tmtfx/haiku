@@ -521,9 +521,10 @@ typedef struct cmi8788_device {
     uint32_t            channels; // Il numero di canali attivi (es. 8)
     uint32_t            buffer_size_frames;
     uint32_t            current_playback_buffer;
+    uint64_t            played_frames_count;
     
     // ARRAY DESCRITTIVO PER IL MEDIA KIT DI HAIKU
-    multi_channel_info    channel_infos[14];
+    multi_channel_info    channel_infos[8];
 
     // Mixer state
     uint8_t             dac_volume[8]; // 0-255 volume attenuation
@@ -534,7 +535,7 @@ typedef struct cmi8788_device {
 typedef cmi8788_device oxygen_t;
 
 // Abilitazione dei Log Verbosi (imposta a 0 per disabilitare)
-#define ENABLE_VERBOSE_LOGS 1
+#define ENABLE_VERBOSE_LOGS 0
 
 // Funzioni inline di accesso ai registri MMIO del CMI8788 con log pre-scrittura, scrittura e post-scrittura
 static inline uint8_t

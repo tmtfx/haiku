@@ -15,7 +15,11 @@
 #define B_MULTI_MIX_GAIN      0x2
 #define B_MULTI_MIX_ENABLE    0x8
 
+#if ENABLE_VERBOSE_LOGS
 #define CALLED() dprintf("CMI8788: CALLED %s\n", __FUNCTION__)
+#else
+#define CALLED() do {} while (0)
+#endif
 
 int32 api_version = B_CUR_DRIVER_API_VERSION;
 
@@ -116,6 +120,7 @@ cmi8788_interrupt(void *data)
         if (device->playing) {
             // Avanza il buffer cycle (ping-pong)
             device->current_playback_buffer = (device->current_playback_buffer + 1) % 2;
+            device->played_frames_count += device->buffer_size_frames;
             // Sblocca il thread in attesa (B_MULTI_BUFFER_EXCHANGE)
             release_sem_etc(device->playback_sem, 1, B_DO_NOT_RESCHEDULE);
         }
@@ -197,6 +202,21 @@ static int32
 cmi8788_close(void *cookie)
 {
 	dprintf("cmi8788: close() called\n");
+	cmi8788_device *device = (cmi8788_device *)cookie;
+	if (device != NULL) {
+		if (device->playing) {
+			uint8_t dma_status = oxygen_read8(device, OXYGEN_DMA_STATUS);
+			dma_status &= ~OXYGEN_CHANNEL_MULTICH;
+			oxygen_write8(device, OXYGEN_DMA_STATUS, dma_status);
+			device->playing = false;
+		}
+
+		if (device->dma_user_area >= B_OK) {
+			delete_area(device->dma_user_area);
+			device->dma_user_area = -1;
+			device->dma_user_base = NULL;
+		}
+	}
 	return B_OK;
 }
 
@@ -228,15 +248,15 @@ cmi8788_get_capabilities(cmi8788_device *device, multi_description *data)
     data->max_cvsr_rate = 0;
     data->min_cvsr_rate = 0;
 	
-    data->output_channel_count = 10; // 8 analogici + 2 digitali S/PDIF
-    data->input_channel_count = 4;   // 2 analogici (Line/Mic) + 2 digitali S/PDIF In
-    data->output_bus_channel_count = 10;
-    data->input_bus_channel_count = 4;
+    data->output_channel_count = 8;
+    data->input_channel_count = 0;
+    data->output_bus_channel_count = 8;
+    data->input_bus_channel_count = 0;
     data->aux_bus_channel_count = 0;
 
     data->lock_sources = B_MULTI_LOCK_INTERNAL;
     data->timecode_sources = 0;
-    data->interface_flags = B_MULTI_INTERFACE_PLAYBACK | B_MULTI_INTERFACE_RECORD;
+    data->interface_flags = B_MULTI_INTERFACE_PLAYBACK;
     data->start_latency = 30000;
     data->control_panel[0] = '\0';
 
@@ -257,47 +277,8 @@ cmi8788_get_capabilities(cmi8788_device *device, multi_description *data)
         device->channel_infos[idx].connectors = B_CHANNEL_MINI_JACK_STEREO;
     }
     
-    // 2. Output Digitali Coassiali (S/PDIF Out - 2 canali sui connettori RCA)
-    device->channel_infos[idx].channel_id = idx;
-    device->channel_infos[idx].kind = B_MULTI_OUTPUT_CHANNEL;
-    device->channel_infos[idx].designations = B_CHANNEL_LEFT;
-    device->channel_infos[idx].connectors = B_CHANNEL_COAX_SPDIF;
-    idx++;
-
-    device->channel_infos[idx].channel_id = idx;
-    device->channel_infos[idx].kind = B_MULTI_OUTPUT_CHANNEL;
-    device->channel_infos[idx].designations = B_CHANNEL_RIGHT;
-    device->channel_infos[idx].connectors = B_CHANNEL_COAX_SPDIF;
-    idx++;
-
-    // 3. Input Analogici (Line-In / Mic - 2 canali su mini-jack)
-    device->channel_infos[idx].channel_id = idx;
-    device->channel_infos[idx].kind = B_MULTI_INPUT_CHANNEL;
-    device->channel_infos[idx].designations = B_CHANNEL_LEFT;
-    device->channel_infos[idx].connectors = B_CHANNEL_MINI_JACK_STEREO;
-    idx++;
-
-    device->channel_infos[idx].channel_id = idx;
-    device->channel_infos[idx].kind = B_MULTI_INPUT_CHANNEL;
-    device->channel_infos[idx].designations = B_CHANNEL_RIGHT;
-    device->channel_infos[idx].connectors = B_CHANNEL_MINI_JACK_STEREO;
-    idx++;
-
-    // 4. Input Digitali Coassiali (S/PDIF In - 2 canali sui connettori RCA)
-    device->channel_infos[idx].channel_id = idx;
-    device->channel_infos[idx].kind = B_MULTI_INPUT_CHANNEL;
-    device->channel_infos[idx].designations = B_CHANNEL_LEFT;
-    device->channel_infos[idx].connectors = B_CHANNEL_COAX_SPDIF;
-    idx++;
-
-    device->channel_infos[idx].channel_id = idx;
-    device->channel_infos[idx].kind = B_MULTI_INPUT_CHANNEL;
-    device->channel_infos[idx].designations = B_CHANNEL_RIGHT;
-    device->channel_infos[idx].connectors = B_CHANNEL_COAX_SPDIF;
-    idx++;
-
     // Copia i dati all'utente salvaguardando lo spazio allocato
-    int32 copy_count = request_count < 14 ? request_count : 14;
+    int32 copy_count = request_count < 8 ? request_count : 8;
     if (user_channels != NULL && copy_count > 0) {
         memcpy(user_channels, device->channel_infos, copy_count * sizeof(multi_channel_info));
     }
@@ -307,11 +288,11 @@ cmi8788_get_capabilities(cmi8788_device *device, multi_description *data)
 
     // Frequenze supportate dai PCM1796 e dal CMI8788 (Xonar D2X lavora nativamente a 48kHz, 96kHz, 192kHz)
     data->output_rates = B_SR_44100 | B_SR_48000 | B_SR_96000 | B_SR_192000;
-    data->input_rates  = B_SR_44100 | B_SR_48000 | B_SR_96000 | B_SR_192000;
+    data->input_rates  = 0;
     
     // Formato nativo supportato dai DAC PCM1796: 32-bit container / 24-bit audio
     data->output_formats = B_FMT_32BIT;
-    data->input_formats  = B_FMT_32BIT;
+    data->input_formats  = 0;
 
     return B_OK;
 }
@@ -336,8 +317,7 @@ cmi8788_control(void *cookie, uint32 op, void *arg, size_t length)
                 
             data->lock_source = B_MULTI_LOCK_INTERNAL;
             
-            // Abilita tutti i 14 canali (10 output e 4 input) per far capire alla preflet di usarli
-            for (int32 i = 0; i < 14; i++) {
+            for (int32 i = 0; i < 8; i++) {
                 B_SET_CHANNEL(data->enable_bits, i, true);
             }
             
@@ -363,8 +343,8 @@ cmi8788_control(void *cookie, uint32 op, void *arg, size_t length)
             data->output.format = device->format;
             data->output.rate = hz_to_sample_rate(device->sample_rate);
             
-            data->input.format = 0;
-            data->input.rate = 0;
+            data->input.format = data->output.format;
+            data->input.rate = data->output.rate;
             
             return B_OK;
         }
@@ -392,13 +372,14 @@ cmi8788_control(void *cookie, uint32 op, void *arg, size_t length)
             if (data == NULL)
                 return B_BAD_VALUE;
     
-            int32 num_buffers = data->request_playback_buffers > 0 ? data->request_playback_buffers : 2;
-            int32 channels = data->request_playback_channels > 0 ? data->request_playback_channels : 8; // 8 canali per la D2X
+            int32 num_buffers = 2;
+            int32 channels = 8;
             uint32 buffer_size_frames = data->request_playback_buffer_size > 0 ? data->request_playback_buffer_size : 1024;
     
             data->return_playback_buffers = num_buffers;
             data->return_playback_channels = channels;
             data->return_playback_buffer_size = buffer_size_frames;
+            data->flags = B_MULTI_BUFFER_PLAYBACK;
             
             device->channels = channels;
             device->buffer_size_frames = buffer_size_frames;
@@ -423,11 +404,15 @@ cmi8788_control(void *cookie, uint32 op, void *arg, size_t length)
             size_t single_buffer_bytes = buffer_size_frames * channels * sizeof(int32);
     
             // Mappatura Interleaved dei buffer clonato per user-space
-            for (int b = 0; b < num_buffers; b++) {
-                for (int c = 0; c < channels; c++) {
-                    data->playback_buffers[b][c].base = (char *)device->dma_user_base 
-                        + (b * single_buffer_bytes) + (c * sizeof(int32));
-                    data->playback_buffers[b][c].stride = channels * sizeof(int32);
+            if (data->playback_buffers != NULL) {
+                for (int b = 0; b < num_buffers; b++) {
+                    if (data->playback_buffers[b] == NULL)
+                        continue;
+                    for (int c = 0; c < channels; c++) {
+                        data->playback_buffers[b][c].base = (char *)device->dma_user_base
+                            + (b * single_buffer_bytes) + (c * sizeof(int32));
+                        data->playback_buffers[b][c].stride = channels * sizeof(int32);
+                    }
                 }
             }
     
@@ -440,6 +425,8 @@ cmi8788_control(void *cookie, uint32 op, void *arg, size_t length)
         case B_MULTI_BUFFER_EXCHANGE:
         {
             multi_buffer_info *data = (multi_buffer_info *)arg;
+            if (data == NULL)
+                return B_BAD_VALUE;
             
             if (!device->playing) {
                 // Avvia i registri DMA del CMI8788
@@ -452,6 +439,7 @@ cmi8788_control(void *cookie, uint32 op, void *arg, size_t length)
                 
                 device->playing = true;
                 device->current_playback_buffer = 0;
+                device->played_frames_count = 0;
                 
                 // Abilita il DMA multicanale
                 uint8_t dma_status = oxygen_read8(device, OXYGEN_DMA_STATUS);
@@ -466,11 +454,12 @@ cmi8788_control(void *cookie, uint32 op, void *arg, size_t length)
                 
             data->playback_buffer_cycle = device->current_playback_buffer;
             data->played_real_time = system_time();
-            data->played_frames_count += device->buffer_size_frames;
+            data->played_frames_count = device->played_frames_count;
             
             data->record_buffer_cycle = 0;
             data->recorded_real_time = system_time();
             data->recorded_frames_count = 0;
+            data->flags = B_MULTI_BUFFER_PLAYBACK;
             
             return B_OK;
         }
@@ -752,6 +741,24 @@ cmi8788_control(void *cookie, uint32 op, void *arg, size_t length)
             }
 
             info->control_count = count;
+            return B_OK;
+        }
+
+        case B_MULTI_LIST_MIX_CHANNELS:
+        {
+            multi_mix_channel_info *info = (multi_mix_channel_info *)arg;
+            if (info == NULL)
+                return B_BAD_VALUE;
+            info->actual_count = 0;
+            return B_OK;
+        }
+
+        case B_MULTI_LIST_MIX_CONNECTIONS:
+        {
+            multi_mix_connection_info *info = (multi_mix_connection_info *)arg;
+            if (info == NULL)
+                return B_BAD_VALUE;
+            info->actual_count = 0;
             return B_OK;
         }
 

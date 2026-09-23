@@ -141,9 +141,16 @@ xonar_d2_init(oxygen_t *chip)
 
     snooze(100); // Piccola pausa per la stabilizzazione elettrica
 
-    // Controlla l'alimentazione esterna floppy a 4 pin (fondamentale per la D2X!)
-    uint16_t gpio_status = oxygen_read16(chip, OXYGEN_GPIO_DATA);
-    if (!(gpio_status & XONAR_D2X_EXT_POWER)) {
+    // Controlla l'alimentazione esterna con un breve debounce per evitare falsi negativi all'avvio.
+    uint16_t gpio_status = 0;
+    int powered_samples = 0;
+    for (int i = 0; i < 5; i++) {
+        gpio_status = oxygen_read16(chip, OXYGEN_GPIO_DATA);
+        if (gpio_status & XONAR_D2X_EXT_POWER)
+            powered_samples++;
+        snooze(1000);
+    }
+    if (powered_samples == 0) {
         dprintf("oxygen: ATTENZIONE! Nessuna alimentazione esterna floppy a 4 pin rilevata!\n");
     } else {
         dprintf("oxygen: Alimentazione esterna rilevata correttamente.\n");
@@ -191,7 +198,7 @@ oxygen_chip_init(oxygen_t *chip)
     
     // Inizializza formato e frequenza di campionamento di default
     chip->format = B_FMT_32BIT;
-    chip->sample_rate = B_SR_48000;
+    chip->sample_rate = 48000;
 
     // Crea il semaforo per il ping-pong del buffer
     chip->playback_sem = create_sem(0, "cmi8788_playback_sem");
