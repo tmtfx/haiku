@@ -53,7 +53,7 @@ MainWindow::MainWindow(const char* context)
 		fEngine = new AIEngine();
 	}
 
-	fHistoryView = new BTextView("history");
+	fHistoryView = new BMarkdownView("history");
 	fHistoryView->MakeEditable(false);
 	
 	if (context != nullptr && context[0] != '\0') {
@@ -140,6 +140,7 @@ void MainWindow::MessageReceived(BMessage* msg)
 					_AppendText("\n[Errore di generazione]\n");
 				} else {
 					_AppendText("\n\n");
+					fHistoryView->SetMarkdown(fHistoryView->RawText());
 				}
 				
 				fHistoryView->ScrollToSelection();
@@ -213,7 +214,8 @@ void MainWindow::_AppendText(const char* text)
 	if (text == nullptr || text[0] == '\0')
 		return;
 	
-	int32 len = fHistoryView->TextLength();
+	int32 len = fHistoryView->RawTextLength();//TextLength();
 	fHistoryView->Select(len, len);
-	fHistoryView->Insert(text);
+	fHistoryView->InsertRaw(text);
+	//fHistoryView->SetMarkdown(fHistoryView->Text());
 }

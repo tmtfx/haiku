@@ -7,7 +7,7 @@
 
 #include <Window.h>
 #include <AICommands.h>
-#include <TextView.h>
+#include <MarkdownView.h>
 
 //class BTextView;
 class BTextControl;
@@ -40,7 +40,7 @@ private:
     void _OnSend();
     void _AppendText(const char* text);
 
-    BTextView*    fHistoryView;
+    BMarkdownView*    fHistoryView;
     BScrollView*  fHistoryScroll;
     InputTextView*    fInputView;
     BScrollView*  fInputScroll;
