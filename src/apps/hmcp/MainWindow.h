@@ -38,7 +38,7 @@ public:
 
 private:
     void _OnSend();
-    void _AppendText(const char* text);
+    void _AppendText(const char* text,bool complete);
 
     BMarkdownView*    fHistoryView;
     BScrollView*  fHistoryScroll;

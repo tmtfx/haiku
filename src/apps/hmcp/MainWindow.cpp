@@ -62,11 +62,11 @@ MainWindow::MainWindow(const char* context)
 			SetTitle(title.String());
 			BString msg;
 			msg.SetToFormat("[Contesto: %s]\n\n", title.String());
-			_AppendText(msg.String());
+			_AppendText(msg.String(),true);
 		} else {
 			BString msg;
 			msg.SetToFormat("[Ripristinato contesto: %s]\n\n", context);
-			_AppendText(msg.String());
+			_AppendText(msg.String(),true);
 		}
 	}
 	fHistoryView->MakeEditable(false);
@@ -126,7 +126,7 @@ void MainWindow::MessageReceived(BMessage* msg)
 				// Pezzettino di stream asincrono arrivato
 				BString partialToken = msg->FindString("partial");
 				if (partialToken.Length() > 0) {
-					_AppendText(partialToken.String());
+					_AppendText(partialToken.String(),complete);
 					// Scorri in automatico verso il basso per seguire lo stream
 					fHistoryView->ScrollToSelection();
 				}
@@ -137,9 +137,11 @@ void MainWindow::MessageReceived(BMessage* msg)
 				msg->FindInt32("status", &status);
 				
 				if (status != B_OK) {
-					_AppendText("\n[Errore di generazione]\n");
+					_AppendText("\n[Errore di generazione]\n",complete);
 				} else {
-					_AppendText("\n\n");
+					//_AppendText("\n\n",complete);
+					_AppendText(response.String(),complete);
+					_AppendText("\n\n",complete);
 					fHistoryView->SetMarkdown(fHistoryView->RawText());
 				}
 				
@@ -152,7 +154,7 @@ void MainWindow::MessageReceived(BMessage* msg)
 			break;
 		}
 		case MSG_AI_ERROR: {
-			_AppendText("\n[Errore del Server o del Plugin]\n");
+			_AppendText("\n[Errore del Server o del Plugin]\n",true);
 			fHistoryView->ScrollToSelection();
 			fInputView->SetEnabled(true);
 			fSendButton->SetEnabled(true);
@@ -190,16 +192,16 @@ void MainWindow::_OnSend()
 	fInputView->SetEnabled(false);
 	fSendButton->SetEnabled(false);
 
-	_AppendText("Tu: ");
-	_AppendText(text.String());
-	_AppendText("\n\nLLM: ");
+	_AppendText("Tu: ",true);
+	_AppendText(text.String(),true);
+	_AppendText("\n\nLLM: ",true);
 	fHistoryView->ScrollToSelection();
 
 	fInputView->SetText("");
 
 	status_t err = fEngine->GenerateAsync(text.String(), BMessenger(this));
 	if (err != B_OK) {
-		_AppendText("[Errore di connessione al server]\n\n");
+		_AppendText("[Errore di connessione al server]\n\n",true);
 		fHistoryView->ScrollToSelection();
 		fInputView->SetEnabled(true);
 		fSendButton->SetEnabled(true);
@@ -209,13 +211,20 @@ void MainWindow::_OnSend()
 	fAbortButton->SetEnabled(true);
 }
 
-void MainWindow::_AppendText(const char* text)
+void MainWindow::_AppendText(const char* text,bool complete)
 {
 	if (text == nullptr || text[0] == '\0')
 		return;
-	
-	int32 len = fHistoryView->RawTextLength();//TextLength();
-	fHistoryView->Select(len, len);
-	fHistoryView->InsertRaw(text);
-	//fHistoryView->SetMarkdown(fHistoryView->Text());
+	if (!complete) {
+		int32 len = fHistoryView->TextLength();
+		//int32 len_raw = fHistoryView->RawTextLength();
+		fHistoryView->Select(len, len);
+		fHistoryView->Insert(text);
+		//fHistoryView->InsertRaw(len_raw,text,strlen(text));
+	} else {
+		int32 len = fHistoryView->RawTextLength();//TextLength();
+		//fHistoryView->Select(len, len);
+		fHistoryView->InsertRaw(len,text,strlen(text));
+		//fHistoryView->SetMarkdown(fHistoryView->Text());
+	}
 }
