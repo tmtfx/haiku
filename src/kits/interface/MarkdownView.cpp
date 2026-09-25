@@ -72,11 +72,11 @@ void BMarkdownView::InsertRaw(int32 offset, const char* text, int32 length)
 
 void BMarkdownView::InsertRaw(const char* text, int32 length)
 {
-	Insert(0, text, length);
+	InsertRaw(0, text, length);
 }
 void BMarkdownView::InsertRaw(const char* text)
 {
-	Insert(0, text, strlen(text));
+	InsertRaw(0, text, strlen(text));
 }
 
 int32 BMarkdownView::RawTextLength() const
