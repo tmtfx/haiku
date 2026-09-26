@@ -6,7 +6,7 @@
 BMarkdownView::BMarkdownView(const char* name, uint32 flags)
 	:
 	BTextView(name, flags),
-	fCodeBlocks(20) // 20 elementi iniziali, true = la lista elimina i puntatori con delete
+	fCodeBlocks(20)
 {
 	fRawMarkdown.SetTo("");
 	MakeEditable(false);
@@ -29,65 +29,28 @@ BMarkdownView::BMarkdownView(const char* name, const BFont* font,
 BMarkdownView::~BMarkdownView()
 {
 }
-/*
+/* niente riquadro perché viene sovrascritto
 void
 BMarkdownView::Draw(BRect updateRect)
 {
-	// 1. Prepariamo lo stato della vista per il disegno dello sfondo custom
 	PushState();
 
 	rgb_color docBg = ui_color(B_DOCUMENT_BACKGROUND_COLOR);
+	rgb_color docText = ui_color(B_DOCUMENT_TEXT_COLOR);
 
-	// Calcoliamo la luminanza per capire se il tema corrente è chiaro o scuro
 	// Luma formula: 0.299 R + 0.587 G + 0.114 B
 	float luminance = (0.299f * docBg.red + 0.587f * docBg.green + 0.114f * docBg.blue);
-	float tint = (luminance < 128.0f) ? B_LIGHTEN_1_TINT : B_DARKEN_1_TINT;
 
-	rgb_color blockBgColor = tint_color(docBg, tint);
-	SetHighColor(blockBgColor);
-
-	// 2. Disegniamo il riquadro arrotondato per ogni blocco di codice
-	int32 count = fCodeBlocks.CountItems();
-	for (int32 i = 0; i < count; i++) {
-		CodeBlockRegion* block = fCodeBlocks.ItemAt(i);
-		if (block == NULL || block->startPos >= block->endPos)
-			continue;
-
-		// Recuperiamo le coordinate geometriche della regione di testo
-		BPoint startPt = PointAt(block->startPos);
-		BPoint endPt = PointAt(block->endPos);
-
-		// Costruiamo il rettangolo occupato dal blocco di codice
-		BRect blockRect;
-		blockRect.left = 0;
-		blockRect.right = Bounds().Width();
-		blockRect.top = startPt.y;
-		blockRect.bottom = endPt.y + LineHeight(block->endPos);
-
-		// Aggiungiamo un piccolo margine (padding) estetico
-		blockRect.InsetBy(2.0f, 1.0f);
-
-		if (blockRect.Intersects(updateRect)) {
-			FillRoundRect(blockRect, 6.0f, 6.0f);
-		}
+	// Invertiamo lo sfondo del riquadro rispetto allo sfondo della finestra
+	rgb_color blockBgColor;
+	if (luminance >= 128.0f) {
+		// Tema Chiaro -> Riquadro Scuro
+		blockBgColor = (rgb_color){ 35, 38, 41, 255 };
+	} else {
+		// Tema Scuro -> Riquadro Chiaro
+		blockBgColor = (rgb_color){ 235, 238, 242, 255 };
 	}
 
-	PopState();
-
-	// 3. Disegniamo il testo e la selezione nativa della BTextView
-	BTextView::Draw(updateRect);
-}*/
-void
-BMarkdownView::Draw(BRect updateRect)
-{
-	PushState();
-
-	rgb_color docBg = ui_color(B_DOCUMENT_BACKGROUND_COLOR);
-
-	float luminance = (0.299f * docBg.red + 0.587f * docBg.green + 0.114f * docBg.blue);
-	float tint = (luminance < 128.0f) ? B_LIGHTEN_1_TINT : B_DARKEN_1_TINT;
-
-	rgb_color blockBgColor = tint_color(docBg, tint);
 	SetHighColor(blockBgColor);
 
 	int32 count = fCodeBlocks.CountItems();
@@ -98,17 +61,13 @@ BMarkdownView::Draw(BRect updateRect)
 
 		BPoint startPt = PointAt(block->startPos);
 		BPoint endPt = PointAt(block->endPos);
-
+		
 		BRect blockRect;
-		// Estendiamo il rettangolo per coprire tutto il margine sinistro/destro visibile
 		blockRect.left = 0.0f;
 		blockRect.right = Bounds().Width();
-		
-		// Allineiamo il top e il bottom alle righe di testo effettive
 		blockRect.top = startPt.y - 1.0f;
 		blockRect.bottom = endPt.y + LineHeight(block->endPos) + 1.0f;
 
-		// Riduciamo leggermente i bordi laterali per fare respirare la UI
 		blockRect.InsetBy(2.0f, 0.0f);
 
 		if (blockRect.Intersects(updateRect)) {
@@ -118,7 +77,148 @@ BMarkdownView::Draw(BRect updateRect)
 
 	PopState();
 
+	// Disegna il testo nativo della BTextView e le selezioni sopra lo sfondo
+	//BTextView::Draw(updateRect);
+	PushState();
+	SetDrawingMode(B_OP_OVER);
+	
+	// Ora BTextView disegna solo i glyph dei caratteri senza cancellare lo sfondo sotto
 	BTextView::Draw(updateRect);
+	
+	PopState();
+}*/
+/* ancora non ci siamo
+void
+BMarkdownView::Draw(BRect updateRect)
+{
+	// 1. Prima facciamo disegnare il testo e lo sfondo base a BTextView
+	BTextView::Draw(updateRect);
+
+	// 2. Disegniamo i riquadri sopra con la modalità di blend appropriata
+	PushState();
+
+	rgb_color docBg = ui_color(B_DOCUMENT_BACKGROUND_COLOR);
+	float luminance = (0.299f * docBg.red + 0.587f * docBg.green + 0.114f * docBg.blue);
+
+	if (luminance >= 128.0f) {
+		// Tema Chiaro: B_OP_MIN fonde il riquadro scuro mantenendo il testo scuro
+		SetDrawingMode(B_OP_MAX);
+		SetHighColor((rgb_color){ 40, 44, 52, 255 });
+	} else {
+		// Tema Scuro: B_OP_MAX fonde il riquadro chiaro mantenendo il testo chiaro
+		SetDrawingMode(B_OP_MIN);
+		SetHighColor((rgb_color){ 220, 224, 230, 255 });
+	}
+
+	int32 count = fCodeBlocks.CountItems();
+	for (int32 i = 0; i < count; i++) {
+		CodeBlockRegion* block = fCodeBlocks.ItemAt(i);
+		if (block == NULL || block->startPos >= block->endPos)
+			continue;
+
+		BPoint startPt = PointAt(block->startPos);
+
+		// Correggiamo l'offset di fine per rimanere dentro l'ultima riga del blocco
+		int32 endPosAdjusted = std::max(block->startPos, block->endPos - 1);
+		BPoint endPt = PointAt(endPosAdjusted);
+
+		BRect blockRect;
+		blockRect.left = 0.0f;
+		blockRect.right = Bounds().Width();
+		blockRect.top = startPt.y - 1.0f;
+		blockRect.bottom = endPt.y + LineHeight(endPosAdjusted) + 1.0f;
+
+		blockRect.InsetBy(2.0f, 0.0f);
+
+		if (blockRect.Intersects(updateRect)) {
+			FillRoundRect(blockRect, 4.0f, 4.0f);
+		}
+	}
+
+	PopState();
+}*/
+void
+BMarkdownView::Draw(BRect updateRect)
+{
+	// 1. BTextView disegna tutto il testo (compreso il testo chiaro del codice)
+	// ma lo fa sullo sfondo bianco standard del documento.
+	BTextView::Draw(updateRect);
+
+	int32 count = fCodeBlocks.CountItems();
+	if (count == 0)
+		return;
+
+	PushState();
+
+	rgb_color docBg = ui_color(B_DOCUMENT_BACKGROUND_COLOR);
+	float luminance = (0.299f * docBg.red + 0.587f * docBg.green + 0.114f * docBg.blue);
+
+	// Sfondo del riquadro invertito
+	rgb_color blockBgColor;
+	rgb_color codeTextColor;
+	
+	if (luminance >= 128.0f) {
+		// Tema Chiaro -> Riquadro Scuro, Testo Chiaro
+		blockBgColor  = (rgb_color){ 35, 38, 41, 255 };
+		codeTextColor = (rgb_color){ 235, 238, 242, 255 };
+	} else {
+		// Tema Scuro -> Riquadro Chiaro/Giallino, Testo Scuro
+		blockBgColor  = (rgb_color){ 245, 242, 220, 255 };
+		codeTextColor = (rgb_color){ 25, 25, 25, 255 };
+	}	
+	
+	for (int32 i = 0; i < count; i++) {
+		CodeBlockRegion* block = fCodeBlocks.ItemAt(i);
+		if (block == NULL || block->startPos >= block->endPos)
+			continue;
+
+		BPoint startPt = PointAt(block->startPos);
+		int32 endPosAdjusted = std::max(block->startPos, block->endPos - 1);
+		BPoint endPt = PointAt(endPosAdjusted);
+
+		BRect blockRect;
+		blockRect.left = 0.0f;
+		blockRect.right = Bounds().Width();
+		blockRect.top = startPt.y - 1.0f;
+		blockRect.bottom = endPt.y + LineHeight(endPosAdjusted) + 1.0f;
+
+		blockRect.InsetBy(2.0f, 0.0f);
+
+		if (blockRect.Intersects(updateRect)) {
+			// A. Disegniamo lo sfondo pieno del riquadro (coprendo l'area del codice)
+			SetDrawingMode(B_OP_COPY);
+			SetHighColor(blockBgColor);
+			FillRoundRect(blockRect, 4.0f, 4.0f);
+
+			// B. Ridisegniamo il testo del codice sopra al riquadro con il colore dedicato
+			SetDrawingMode(B_OP_OVER);
+			SetHighColor(codeTextColor);
+			SetFont(be_fixed_font);
+
+			int32 currentOffset = block->startPos;
+			while (currentOffset < block->endPos) {
+				BPoint linePt = PointAt(currentOffset);
+				
+				int32 lineEnd = currentOffset;
+				while (lineEnd < block->endPos && ByteAt(lineEnd) != '\n') {
+					lineEnd++;
+				}
+
+				int32 length = lineEnd - currentOffset;
+				if (length > 0) {
+					BString lineStr;
+					GetText(currentOffset, length, lineStr.LockBuffer(length + 1));
+					lineStr.UnlockBuffer();
+
+					DrawString(lineStr.String(), BPoint(linePt.x, linePt.y + LineHeight(currentOffset) - 3.0f));
+				}
+
+				currentOffset = lineEnd + 1;
+			}
+		}
+	}
+
+	PopState();
 }
 
 status_t
@@ -131,7 +231,7 @@ status_t
 BMarkdownView::SetMarkdown(const char* markdownText)
 {
 	SetText("");
-	fCodeBlocks.MakeEmpty(true); // Svuota la lista ed elimina gli oggetti allocati
+	fCodeBlocks.MakeEmpty(true);
 	fRawMarkdown.SetTo(markdownText);
 
 	if (markdownText == NULL || strlen(markdownText) == 0)
@@ -145,7 +245,7 @@ BMarkdownView::SetMarkdown(const char* markdownText)
 	state.currentFont = state.baseFont;
 	
 	state.textColor = ui_color(B_DOCUMENT_TEXT_COLOR);
-	state.codeColor = (rgb_color){ 200, 40, 40, 255 };
+	state.codeColor = (rgb_color){ 200, 40, 40, 255 }; // Usato solo per il codice inline `testo`
 
 	MD_PARSER parser = {
 		0,
@@ -160,7 +260,7 @@ BMarkdownView::SetMarkdown(const char* markdownText)
 	};
 
 	int result = md_parse(markdownText, (MD_SIZE)strlen(markdownText), &parser, &state);
-	Invalidate(); // Richiede il ridisegno per applicare i riquadri di sfondo
+	Invalidate();
 	return (result == 0) ? B_OK : B_ERROR;
 }
 
@@ -218,9 +318,17 @@ BMarkdownView::_ApplyCurrentStyle(int32 startPos, RenderState& state)
 		state.currentFont.SetSize(state.baseFont.Size());
 	}
 
-	rgb_color colorToApply = (state.isCode || state.isBlockCode) 
-		? state.codeColor 
-		: state.textColor;
+	// Selezione del colore del font
+	rgb_color colorToApply;
+	if (state.isBlockCode) {
+		// Nei blocchi usiamo il colore ad alto contrasto per il riquadro invertito
+		colorToApply = state.codeColor;
+	} else if (state.isCode) {
+		// Nel codice inline (`testo`) usiamo una tinta di evidenziazione
+		colorToApply = (rgb_color){ 200, 40, 40, 255 };
+	} else {
+		colorToApply = state.textColor;
+	}
 
 	SetFontAndColor(startPos, endPos, &state.currentFont, B_FONT_ALL, &colorToApply);
 }
