@@ -1,0 +1,4 @@
+# Settings for the native NVIDIA GT7xx bring-up driver.
+#
+# Supported cards:
+# - 10de:1287  GeForce GT 730 (GK208)

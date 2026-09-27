@@ -1,0 +1,17 @@
+SubDir HAIKU_TOP src add-ons kernel drivers graphics nvidia_gt7xx ;
+
+SubDirCcFlags -DIS_PIRATI_BUILD ;
+SubDirC++Flags -DIS_PIRATI_BUILD ;
+
+UsePrivateHeaders [ FDirName graphics common ] ;
+UsePrivateHeaders [ FDirName graphics nvidia_gt7xx ] ;
+UsePrivateHeaders shared ;
+UseHeaders [ FDirName $(HAIKU_TOP) headers compatibility gnu ]
+	[ FDirName $(HAIKU_TOP) headers posix ] : true ;
+UsePrivateKernelHeaders ;
+
+KernelAddon nvidia_gt7xx :
+	device.cpp
+	driver.cpp
+	vesa.cpp
+	;

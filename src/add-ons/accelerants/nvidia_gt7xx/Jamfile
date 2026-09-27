@@ -1,0 +1,16 @@
+SubDir HAIKU_TOP src add-ons accelerants nvidia_gt7xx ;
+
+UsePrivateHeaders graphics ;
+UsePrivateHeaders [ FDirName graphics nvidia_gt7xx ] ;
+UsePrivateHeaders [ FDirName graphics common ] ;
+UsePrivateHeaders shared ;
+
+#AddResources nvidia_gt7xx.accelerant : nvidia_gt7xx.accelerant.rdef ;
+
+Addon nvidia_gt7xx.accelerant :
+	accelerant.cpp
+	dpms.cpp
+	hooks.cpp
+	mode.cpp
+	: libaccelerantscommon.a
+;
