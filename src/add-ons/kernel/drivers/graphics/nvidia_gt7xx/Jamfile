@@ -13,5 +13,5 @@ UsePrivateKernelHeaders ;
 KernelAddon nvidia_gt7xx :
 	device.cpp
 	driver.cpp
-	vesa.cpp
+	nvgt7xx.cpp
 	;

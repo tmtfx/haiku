@@ -315,7 +315,7 @@ partendo da quelle specifiche.
 
 - `src/add-ons/kernel/drivers/graphics/nvidia_gt7xx/driver.cpp`
 - `src/add-ons/kernel/drivers/graphics/nvidia_gt7xx/device.cpp`
-- `src/add-ons/kernel/drivers/graphics/nvidia_gt7xx/vesa.cpp`
+- `src/add-ons/kernel/drivers/graphics/nvidia_gt7xx/nvgt7xx.cpp`
 - `src/add-ons/kernel/drivers/graphics/nvidia_gt7xx/vesa_private.h`
 - `src/add-ons/kernel/drivers/graphics/nvidia_gt7xx/Jamfile`
 - `src/add-ons/kernel/drivers/graphics/nvidia_gt7xx/nvidia_gt7xx.settings`

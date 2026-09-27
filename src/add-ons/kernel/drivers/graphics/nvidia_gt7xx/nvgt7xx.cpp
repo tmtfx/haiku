@@ -282,8 +282,8 @@ init_evo_channel(vesa_info& info, uint32 channelID, const char* name, uint32 cla
 		= info.channel_instance_area[channelID];
 	sharedInfo.channels[channelID].push_words = NVIDIA_GT7XX_EVO_PUSH_WORDS;
 	sharedInfo.channels[channelID].notifier_dwords = NVIDIA_GT7XX_EVO_NOTIFIER_DWORDS;
-	sharedInfo.channels[channelID].args.version = 0;
-	sharedInfo.channels[channelID].args.id = channelID;
+	sharedInfo.channels[channelID].version = 0;
+	sharedInfo.channels[channelID].channel_id = channelID;
 	sharedInfo.channels[channelID].put = 0;
 	sharedInfo.channels[channelID].get = 0;
 	sharedInfo.channels[channelID].last_submit_words = 0;
@@ -324,8 +324,7 @@ init_evo_channel(vesa_info& info, uint32 channelID, const char* name, uint32 cla
 	sharedInfo.channels[channelID].memory.instance_size
 		= NVIDIA_GT7XX_EVO_RAMFC_WORDS * sizeof(uint32);
 	sharedInfo.channels[channelID].memory.flags = 0x1;
-	sharedInfo.channels[channelID].args.pushbuf
-		= sharedInfo.channels[channelID].memory.pushbuf_physical;
+
 	sharedInfo.channels[channelID].user_aperture_offset
 		= NVIDIA_GT7XX_EVO_DMA_USER_BASE
 		+ channelID * NVIDIA_GT7XX_EVO_DMA_USER_STRIDE;
@@ -335,7 +334,7 @@ init_evo_channel(vesa_info& info, uint32 channelID, const char* name, uint32 cla
 
 	uint32* ramfc = info.channel_instance_data[channelID];
 	ramfc[0] = classID;
-	ramfc[1] = sharedInfo.channels[channelID].args.id;
+	ramfc[1] = sharedInfo.channels[channelID].channel_id;
 	ramfc[2] = (uint32)sharedInfo.channels[channelID].memory.pushbuf_physical;
 	ramfc[3] = (uint32)(sharedInfo.channels[channelID].memory.pushbuf_physical >> 32);
 	ramfc[4] = (uint32)sharedInfo.channels[channelID].memory.notifier_physical;
@@ -360,7 +359,7 @@ init_evo_channel(vesa_info& info, uint32 channelID, const char* name, uint32 cla
 		" pramin_offset=0x%08" B_PRIx32 " pushbuf_arg=0x%016" B_PRIx64 "\n",
 		channelID, sharedInfo.channels[channelID].user_aperture_offset,
 		sharedInfo.channels[channelID].pramin_offset,
-		sharedInfo.channels[channelID].args.pushbuf);
+		sharedInfo.channels[channelID].memory.pushbuf_physical);
 
 	pushKeeper.Detach();
 	notifierKeeper.Detach();

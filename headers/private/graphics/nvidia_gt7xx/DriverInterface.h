@@ -87,13 +87,6 @@ struct nvidia_gt7xx_evo_method {
 	uint32			value;
 };
 
-struct nvidia_gt7xx_disp_chan_v0 {
-	uint8			version;
-	uint8			id;
-	uint8			pad02[6];
-	uint64			pushbuf;
-};
-
 struct nvidia_gt7xx_evo_memory_binding {
 	uint64			pushbuf_physical;
 	uint64			notifier_physical;
@@ -111,7 +104,8 @@ struct nvidia_gt7xx_evo_channel_state {
 	area_id			instance_area;
 	uint32			push_words;
 	uint32			notifier_dwords;
-	nvidia_gt7xx_disp_chan_v0 args;
+	uint32			channel_id;
+	uint32			version;
 	nvidia_gt7xx_evo_memory_binding memory;
 	uint32			user_aperture_offset;
 	uint32			pramin_offset;
