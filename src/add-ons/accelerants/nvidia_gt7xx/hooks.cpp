@@ -26,14 +26,14 @@ static int32 sOverlayChannelUsed;
 
 
 static uint32
-vesa_overlay_count(const display_mode* mode)
+nvidia_gt7xx_overlay_count(const display_mode* mode)
 {
 	return 1;
 }
 
 
 static const uint32*
-vesa_overlay_supported_spaces(const display_mode* mode)
+nvidia_gt7xx_overlay_supported_spaces(const display_mode* mode)
 {
 	static const uint32 kSupportedSpaces[] = {B_RGB15, B_RGB16, B_RGB32,
 		B_YCbCr422, 0};
@@ -43,7 +43,7 @@ vesa_overlay_supported_spaces(const display_mode* mode)
 
 
 static uint32
-vesa_overlay_supported_features(uint32 colorSpace)
+nvidia_gt7xx_overlay_supported_features(uint32 colorSpace)
 {
 	return B_OVERLAY_COLOR_KEY
 		| B_OVERLAY_HORIZONTAL_FILTERING
@@ -53,7 +53,7 @@ vesa_overlay_supported_features(uint32 colorSpace)
 
 
 static const overlay_buffer*
-vesa_allocate_overlay_buffer(color_space colorSpace, uint16 width,
+nvidia_gt7xx_allocate_overlay_buffer(color_space colorSpace, uint16 width,
 	uint16 height)
 {
 	debug_printf("allocate_overlay_buffer(width %u, height %u, colorSpace %u)\n",
@@ -76,7 +76,7 @@ vesa_allocate_overlay_buffer(color_space colorSpace, uint16 width,
 
 
 static status_t
-vesa_release_overlay_buffer(const overlay_buffer* buffer)
+nvidia_gt7xx_release_overlay_buffer(const overlay_buffer* buffer)
 {
 	debug_printf("release_overlay_buffer(buffer %p)\n", buffer);
 
@@ -86,7 +86,7 @@ vesa_release_overlay_buffer(const overlay_buffer* buffer)
 
 
 static status_t
-vesa_get_overlay_constraints(const display_mode* mode,
+nvidia_gt7xx_get_overlay_constraints(const display_mode* mode,
 	const overlay_buffer* buffer, overlay_constraints* constraints)
 {
 	debug_printf("get_overlay_constraints(buffer %p)\n", buffer);
@@ -125,7 +125,7 @@ vesa_get_overlay_constraints(const display_mode* mode,
 
 
 static overlay_token
-vesa_allocate_overlay()
+nvidia_gt7xx_allocate_overlay()
 {
 	debug_printf("allocate_overlay()\n");
 
@@ -138,7 +138,7 @@ vesa_allocate_overlay()
 
 
 static status_t
-vesa_release_overlay(overlay_token overlayToken)
+nvidia_gt7xx_release_overlay(overlay_token overlayToken)
 {
 	debug_printf("allocate_overlay(token %ld)\n", (uint32)overlayToken);
 
@@ -152,7 +152,7 @@ vesa_release_overlay(overlay_token overlayToken)
 
 
 static status_t
-vesa_configure_overlay(overlay_token overlayToken, const overlay_buffer* buffer,
+nvidia_gt7xx_configure_overlay(overlay_token overlayToken, const overlay_buffer* buffer,
 	const overlay_window* window, const overlay_view* view)
 {
 	debug_printf("configure_overlay: buffer %p, window %p, view %p\n",
@@ -164,7 +164,7 @@ vesa_configure_overlay(overlay_token overlayToken, const overlay_buffer* buffer,
 
 #if FAKE_HARDWARE_CURSOR_SUPPORT
 status_t
-vesa_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
+nvidia_gt7xx_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 	const uint8* andMask, const uint8* xorMask)
 {
 	return B_OK;
@@ -172,7 +172,7 @@ vesa_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 
 
 status_t
-vesa_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
+nvidia_gt7xx_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 	color_space colorSpace, uint16 bytesPerRow, const uint8* bitmapData)
 {
 	return B_OK;
@@ -180,13 +180,13 @@ vesa_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 
 
 void
-vesa_move_cursor(uint16 x, uint16 y)
+nvidia_gt7xx_move_cursor(uint16 x, uint16 y)
 {
 }
 
 
 void
-vesa_show_cursor(bool isVisible)
+nvidia_gt7xx_show_cursor(bool isVisible)
 {
 }
 #endif	// # FAKE_HARDWARE_CURSOR_SUPPORT
@@ -198,84 +198,84 @@ get_accelerant_hook(uint32 feature, void* data)
 	switch (feature) {
 		/* general */
 		case B_INIT_ACCELERANT:
-			return (void*)vesa_init_accelerant;
+			return (void*)nvidia_gt7xx_init_accelerant;
 		case B_UNINIT_ACCELERANT:
-			return (void*)vesa_uninit_accelerant;
+			return (void*)nvidia_gt7xx_uninit_accelerant;
 		case B_CLONE_ACCELERANT:
-			return (void*)vesa_clone_accelerant;
+			return (void*)nvidia_gt7xx_clone_accelerant;
 		case B_ACCELERANT_CLONE_INFO_SIZE:
-			return (void*)vesa_accelerant_clone_info_size;
+			return (void*)nvidia_gt7xx_accelerant_clone_info_size;
 		case B_GET_ACCELERANT_CLONE_INFO:
-			return (void*)vesa_get_accelerant_clone_info;
+			return (void*)nvidia_gt7xx_get_accelerant_clone_info;
 		case B_GET_ACCELERANT_DEVICE_INFO:
-			return (void*)vesa_get_accelerant_device_info;
+			return (void*)nvidia_gt7xx_get_accelerant_device_info;
 		case B_ACCELERANT_RETRACE_SEMAPHORE:
-			return (void*)vesa_accelerant_retrace_semaphore;
+			return (void*)nvidia_gt7xx_accelerant_retrace_semaphore;
 
 		/* mode configuration */
 		case B_ACCELERANT_MODE_COUNT:
-			return (void*)vesa_accelerant_mode_count;
+			return (void*)nvidia_gt7xx_accelerant_mode_count;
 		case B_GET_MODE_LIST:
-			return (void*)vesa_get_mode_list;
+			return (void*)nvidia_gt7xx_get_mode_list;
 		case B_PROPOSE_DISPLAY_MODE:
-			return (void*)vesa_propose_display_mode;
+			return (void*)nvidia_gt7xx_propose_display_mode;
 		case B_SET_DISPLAY_MODE:
-			return (void*)vesa_set_display_mode;
+			return (void*)nvidia_gt7xx_set_display_mode;
 		case B_GET_DISPLAY_MODE:
-			return (void*)vesa_get_display_mode;
+			return (void*)nvidia_gt7xx_get_display_mode;
 		case B_GET_EDID_INFO:
-			return (void*)vesa_get_edid_info;
+			return (void*)nvidia_gt7xx_get_edid_info;
 		case B_GET_FRAME_BUFFER_CONFIG:
-			return (void*)vesa_get_frame_buffer_config;
+			return (void*)nvidia_gt7xx_get_frame_buffer_config;
 		case B_GET_PIXEL_CLOCK_LIMITS:
-			return (void*)vesa_get_pixel_clock_limits;
+			return (void*)nvidia_gt7xx_get_pixel_clock_limits;
 		case B_MOVE_DISPLAY:
-			return (void*)vesa_move_display;
+			return (void*)nvidia_gt7xx_move_display;
 		case B_SET_INDEXED_COLORS:
-			return (void*)vesa_set_indexed_colors;
+			return (void*)nvidia_gt7xx_set_indexed_colors;
 		case B_GET_TIMING_CONSTRAINTS:
-			return (void*)vesa_get_timing_constraints;
+			return (void*)nvidia_gt7xx_get_timing_constraints;
 
 		/* DPMS */
 		case B_DPMS_CAPABILITIES:
-			return (void*)vesa_dpms_capabilities;
+			return (void*)nvidia_gt7xx_dpms_capabilities;
 		case B_DPMS_MODE:
-			return (void*)vesa_dpms_mode;
+			return (void*)nvidia_gt7xx_dpms_mode;
 		case B_SET_DPMS_MODE:
-			return (void*)vesa_set_dpms_mode;
+			return (void*)nvidia_gt7xx_set_dpms_mode;
 
 		/* cursor managment */
 #if FAKE_HARDWARE_CURSOR_SUPPORT
 		case B_SET_CURSOR_SHAPE:
-			return (void*)vesa_set_cursor_shape;
+			return (void*)nvidia_gt7xx_set_cursor_shape;
 		case B_MOVE_CURSOR:
-			return (void*)vesa_move_cursor;
+			return (void*)nvidia_gt7xx_move_cursor;
 		case B_SHOW_CURSOR:
-			return (void*)vesa_show_cursor;
+			return (void*)nvidia_gt7xx_show_cursor;
 		case B_SET_CURSOR_BITMAP:
-			return (void*)vesa_set_cursor_bitmap;
+			return (void*)nvidia_gt7xx_set_cursor_bitmap;
 #endif
 
 #if FAKE_OVERLAY_SUPPORT
 		// overlay
 		case B_OVERLAY_COUNT:
-			return (void*)vesa_overlay_count;
+			return (void*)nvidia_gt7xx_overlay_count;
 		case B_OVERLAY_SUPPORTED_SPACES:
-			return (void*)vesa_overlay_supported_spaces;
+			return (void*)nvidia_gt7xx_overlay_supported_spaces;
 		case B_OVERLAY_SUPPORTED_FEATURES:
-			return (void*)vesa_overlay_supported_features;
+			return (void*)nvidia_gt7xx_overlay_supported_features;
 		case B_ALLOCATE_OVERLAY_BUFFER:
-			return (void*)vesa_allocate_overlay_buffer;
+			return (void*)nvidia_gt7xx_allocate_overlay_buffer;
 		case B_RELEASE_OVERLAY_BUFFER:
-			return (void*)vesa_release_overlay_buffer;
+			return (void*)nvidia_gt7xx_release_overlay_buffer;
 		case B_GET_OVERLAY_CONSTRAINTS:
-			return (void*)vesa_get_overlay_constraints;
+			return (void*)nvidia_gt7xx_get_overlay_constraints;
 		case B_ALLOCATE_OVERLAY:
-			return (void*)vesa_allocate_overlay;
+			return (void*)nvidia_gt7xx_allocate_overlay;
 		case B_RELEASE_OVERLAY:
-			return (void*)vesa_release_overlay;
+			return (void*)nvidia_gt7xx_release_overlay;
 		case B_CONFIGURE_OVERLAY:
-			return (void*)vesa_configure_overlay;
+			return (void*)nvidia_gt7xx_configure_overlay;
 #endif	// FAKE_OVERLAY_SUPPORT
 	}
 

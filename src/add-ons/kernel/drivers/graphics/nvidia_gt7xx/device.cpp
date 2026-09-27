@@ -48,6 +48,8 @@ device_open(const char* name, uint32 flags, void** _cookie)
 		return B_BAD_VALUE;
 
 	vesa_info* info = gDeviceInfo[id];
+	dprintf("nvidia_gt7xx: device_open name=%s id=%d open_count=%" B_PRIu32 "\n",
+		name, id, info->open_count);
 
 	mutex_lock(&gLock);
 
@@ -57,14 +59,19 @@ device_open(const char* name, uint32 flags, void** _cookie)
 		// this device has been opened for the first time, so
 		// we allocate needed resources and initialize the structure
 		if (status == B_OK)
-			status = vesa_init(*info);
+			status = nvidia_gt7xx_init(*info);
 		if (status == B_OK)
 			info->id = id;
+		else
+			dprintf("nvidia_gt7xx: device_open vesa_init failed status=%" B_PRId32 "\n",
+				status);
 	}
 
 	if (status == B_OK) {
 		info->open_count++;
 		*_cookie = info;
+		dprintf("nvidia_gt7xx: device_open success id=%d new_open_count=%" B_PRIu32 "\n",
+			id, info->open_count);
 	}
 
 	mutex_unlock(&gLock);
@@ -88,7 +95,7 @@ device_free(void* cookie)
 
 	if (info->open_count-- == 1) {
 		// release info structure
-		vesa_uninit(*info);
+		nvidia_gt7xx_uninit(*info);
 	}
 
 	mutex_unlock(&gLock);
@@ -143,7 +150,7 @@ device_ioctl(void* cookie, uint32 msg, void* buffer, size_t bufferLength)
 			if (user_memcpy(&mode, buffer, sizeof(display_mode)) != B_OK)
 				return B_BAD_ADDRESS;
 
-			return vesa_set_display_mode(*info, mode);
+			return nvidia_gt7xx_set_display_mode(*info, mode);
 		}
 
 		case VESA_GET_DPMS_MODE:
@@ -152,7 +159,7 @@ device_ioctl(void* cookie, uint32 msg, void* buffer, size_t bufferLength)
 				return B_BAD_VALUE;
 
 			uint32 mode;
-			status_t status = vesa_get_dpms_mode(*info, mode);
+			status_t status = nvidia_gt7xx_get_dpms_mode(*info, mode);
 			if (status != B_OK)
 				return status;
 
@@ -168,7 +175,19 @@ device_ioctl(void* cookie, uint32 msg, void* buffer, size_t bufferLength)
 			if (user_memcpy(&mode, buffer, sizeof(uint32)) != B_OK)
 				return B_BAD_ADDRESS;
 
-			return vesa_set_dpms_mode(*info, mode);
+			return nvidia_gt7xx_set_dpms_mode(*info, mode);
+		}
+
+		case NVIDIA_GT7XX_SUBMIT_EVO:
+		{
+			if (bufferLength != sizeof(nvidia_gt7xx_evo_push))
+				return B_BAD_VALUE;
+
+			nvidia_gt7xx_evo_push push;
+			if (user_memcpy(&push, buffer, sizeof(push)) != B_OK)
+				return B_BAD_ADDRESS;
+
+			return nvidia_gt7xx_submit_evo(*info, push);
 		}
 
 		default:

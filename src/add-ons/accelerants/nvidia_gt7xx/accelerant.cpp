@@ -107,9 +107,9 @@ uninit_common(void)
 
 /*!	Init primary accelerant */
 status_t
-vesa_init_accelerant(int device)
+nvidia_gt7xx_init_accelerant(int device)
 {
-	TRACE(("vesa_init_accelerant()\n"));
+	TRACE(("nvidia_gt7xx_init_accelerant()\n"));
 
 	status_t status = init_common(device, false);
 	if (status != B_OK)
@@ -122,14 +122,14 @@ vesa_init_accelerant(int device)
 	}
 
 	// Initialize current mode completely from the mode list
-	vesa_propose_display_mode(&gInfo->shared_info->current_mode, NULL, NULL);
+	nvidia_gt7xx_propose_display_mode(&gInfo->shared_info->current_mode, NULL, NULL);
 
 	return B_OK;
 }
 
 
 ssize_t
-vesa_accelerant_clone_info_size(void)
+nvidia_gt7xx_accelerant_clone_info_size(void)
 {
 	// clone info is device name, so return its maximum size
 	return B_PATH_NAME_LENGTH;
@@ -137,16 +137,16 @@ vesa_accelerant_clone_info_size(void)
 
 
 void
-vesa_get_accelerant_clone_info(void *info)
+nvidia_gt7xx_get_accelerant_clone_info(void *info)
 {
 	ioctl(gInfo->device, VESA_GET_DEVICE_NAME, info, B_PATH_NAME_LENGTH);
 }
 
 
 status_t
-vesa_clone_accelerant(void *info)
+nvidia_gt7xx_clone_accelerant(void *info)
 {
-	TRACE(("vesa_clone_accelerant()\n"));
+	TRACE(("nvidia_gt7xx_clone_accelerant()\n"));
 
 	// create full device name
 	char path[MAXPATHLEN];
@@ -163,7 +163,7 @@ vesa_clone_accelerant(void *info)
 
 	// get read-only clone of supported display modes
 	status = gInfo->mode_list_area = clone_area(
-		"vesa cloned modes", (void **)&gInfo->mode_list,
+		"nvidia_gt7xx cloned modes", (void **)&gInfo->mode_list,
 		B_ANY_ADDRESS, B_READ_AREA, gInfo->shared_info->mode_list_area);
 	if (status < B_OK)
 		goto err2;
@@ -182,9 +182,9 @@ err1:
 	its clones.
 */
 void
-vesa_uninit_accelerant(void)
+nvidia_gt7xx_uninit_accelerant(void)
 {
-	TRACE(("vesa_uninit_accelerant()\n"));
+	TRACE(("nvidia_gt7xx_uninit_accelerant()\n"));
 
 	// delete accelerant instance data
 	delete_area(gInfo->mode_list_area);
@@ -195,7 +195,7 @@ vesa_uninit_accelerant(void)
 
 
 status_t
-vesa_get_accelerant_device_info(accelerant_device_info *info)
+nvidia_gt7xx_get_accelerant_device_info(accelerant_device_info *info)
 {
 	info->version = B_ACCELERANT_VERSION;
 
@@ -217,7 +217,7 @@ vesa_get_accelerant_device_info(accelerant_device_info *info)
 
 
 sem_id
-vesa_accelerant_retrace_semaphore()
+nvidia_gt7xx_accelerant_retrace_semaphore()
 {
 	return -1;
 }

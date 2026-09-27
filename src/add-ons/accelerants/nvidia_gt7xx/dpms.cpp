@@ -11,14 +11,14 @@
 
 
 uint32
-vesa_dpms_capabilities(void)
+nvidia_gt7xx_dpms_capabilities(void)
 {
 	return gInfo->shared_info->dpms_capabilities;
 }
 
 
 uint32
-vesa_dpms_mode(void)
+nvidia_gt7xx_dpms_mode(void)
 {
 	uint32 mode;
 	if (ioctl(gInfo->device, VESA_GET_DPMS_MODE, &mode, sizeof(mode)) != 0)
@@ -29,7 +29,7 @@ vesa_dpms_mode(void)
 
 
 status_t
-vesa_set_dpms_mode(uint32 mode)
+nvidia_gt7xx_set_dpms_mode(uint32 mode)
 {
 	if (ioctl(gInfo->device, VESA_SET_DPMS_MODE, &mode, sizeof(mode)) != 0)
 		return errno;
