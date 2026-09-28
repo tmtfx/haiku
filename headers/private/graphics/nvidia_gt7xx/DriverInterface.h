@@ -35,9 +35,18 @@ enum nvidia_gt7xx_evo_channel_id {
 
 #define NVIDIA_GT7XX_EVO_CLASS_CORE 0x0000927d
 #define NVIDIA_GT7XX_EVO_CLASS_BASE 0x0000927c
+
+// PDISPLAY Hardware Execution (MMIO) Registers for Kepler / GF119+
+#define NVIDIA_GT7XX_PDISPLAY_CTRL_STATE(channel) \
+	((uint32)(0x00610700 + (channel) * 0x8))
+#define NVIDIA_GT7XX_PDISPLAY_CTRL_VAL(channel) \
+	((uint32)(0x00610704 + (channel) * 0x8))
+#define NVIDIA_GT7XX_PDISPLAY_CTRL_PENDING 0x80000000U
+#define NVIDIA_GT7XX_PDISPLAY_CTRL_ENABLE  0x00000001U
+
 #define NVIDIA_GT7XX_EVO_PRAMIN_BASE 0x00700000U
-#define NVIDIA_GT7XX_EVO_DMA_USER_BASE 0x00c00000U
-#define NVIDIA_GT7XX_EVO_DMA_USER_STRIDE 0x00001000U
+#define NVIDIA_GT7XX_EVO_DMA_USER_BASE 0x00610700U
+#define NVIDIA_GT7XX_EVO_DMA_USER_STRIDE 0x00000008U
 #define NVIDIA_GT7XX_EVO_RAMFC_WORDS 64
 
 #define NVIDIA_GT7XX_EVO_DMA_OPCODE_METHOD 0x00000000U
@@ -46,41 +55,50 @@ enum nvidia_gt7xx_evo_channel_id {
 #define NVIDIA_GT7XX_EVO_DMA_METHOD_COUNT_SHIFT 18
 #define NVIDIA_GT7XX_EVO_DMA_METHOD_OFFSET_SHIFT 2
 
+/*
+ * EVO Methods for DISP022X (GK208 / GF119-)
+ */
 #define NVIDIA_GT7XX_EVO_UPDATE 0x00000080
+
+// DAC: base 0x180, stride 0x20
 #define NVIDIA_GT7XX_EVO_DAC_SET_CONTROL(output) \
-	((uint32)(0x00000400 + (output) * 0x00000080))
-#define NVIDIA_GT7XX_EVO_DAC_SET_POLARITY(output) \
-	((uint32)(0x00000404 + (output) * 0x00000080))
+	((uint32)(0x00000180 + (output) * 0x00000020))
+
+// SOR: base 0x200, stride 0x20
 #define NVIDIA_GT7XX_EVO_SOR_SET_CONTROL(output) \
-	((uint32)(0x00000600 + (output) * 0x00000040))
-#define NVIDIA_GT7XX_EVO_HEAD_SET_PIXEL_CLOCK(head) \
-	((uint32)(0x00000804 + (head) * 0x00000400))
+	((uint32)(0x00000200 + (output) * 0x00000020))
+
+// HEAD: base 0x400, stride 0x300
+#define NVIDIA_GT7XX_EVO_HEAD_SET_OUTPUT_RESOURCE(head) \
+	((uint32)(0x00000404 + (head) * 0x00000300))
 #define NVIDIA_GT7XX_EVO_HEAD_SET_CONTROL(head) \
-	((uint32)(0x00000808 + (head) * 0x00000400))
+	((uint32)(0x00000408 + (head) * 0x00000300))
 #define NVIDIA_GT7XX_EVO_HEAD_SET_OVERSCAN_COLOR(head) \
-	((uint32)(0x00000810 + (head) * 0x00000400))
+	((uint32)(0x00000410 + (head) * 0x00000300))
 #define NVIDIA_GT7XX_EVO_HEAD_SET_RASTER_SIZE(head) \
-	((uint32)(0x00000814 + (head) * 0x00000400))
+	((uint32)(0x00000414 + (head) * 0x00000300))
 #define NVIDIA_GT7XX_EVO_HEAD_SET_RASTER_SYNC_END(head) \
-	((uint32)(0x00000818 + (head) * 0x00000400))
+	((uint32)(0x00000418 + (head) * 0x00000300))
 #define NVIDIA_GT7XX_EVO_HEAD_SET_RASTER_BLANK_END(head) \
-	((uint32)(0x0000081c + (head) * 0x00000400))
+	((uint32)(0x0000041c + (head) * 0x00000300))
 #define NVIDIA_GT7XX_EVO_HEAD_SET_RASTER_BLANK_START(head) \
-	((uint32)(0x00000820 + (head) * 0x00000400))
+	((uint32)(0x00000420 + (head) * 0x00000300))
 #define NVIDIA_GT7XX_EVO_HEAD_SET_RASTER_VERT_BLANK2(head) \
-	((uint32)(0x00000824 + (head) * 0x00000400))
-#define NVIDIA_GT7XX_EVO_HEAD_SET_RASTER_VERT_BLANK_DMI(head) \
-	((uint32)(0x00000828 + (head) * 0x00000400))
+	((uint32)(0x00000424 + (head) * 0x00000300))
 #define NVIDIA_GT7XX_EVO_HEAD_SET_DEFAULT_BASE_COLOR(head) \
-	((uint32)(0x0000082c + (head) * 0x00000400))
+	((uint32)(0x0000042c + (head) * 0x00000300))
+#define NVIDIA_GT7XX_EVO_HEAD_SET_PIXEL_CLOCK(head) \
+	((uint32)(0x00000450 + (head) * 0x00000300))
+#define NVIDIA_GT7XX_EVO_HEAD_SET_PIXEL_CLOCK_CONFIGURATION(head) \
+	((uint32)(0x00000454 + (head) * 0x00000300))
 #define NVIDIA_GT7XX_EVO_HEAD_SET_OFFSET(head, index) \
-	((uint32)(0x00000860 + (head) * 0x00000400 + (index) * 0x00000004))
+	((uint32)(0x00000460 + (head) * 0x00000300 + (index) * 0x00000004))
 #define NVIDIA_GT7XX_EVO_HEAD_SET_SIZE(head) \
-	((uint32)(0x00000868 + (head) * 0x00000400))
+	((uint32)(0x00000468 + (head) * 0x00000300))
 #define NVIDIA_GT7XX_EVO_HEAD_SET_STORAGE(head) \
-	((uint32)(0x0000086c + (head) * 0x00000400))
+	((uint32)(0x0000046c + (head) * 0x00000300))
 #define NVIDIA_GT7XX_EVO_HEAD_SET_PARAMS(head) \
-	((uint32)(0x00000870 + (head) * 0x00000400))
+	((uint32)(0x00000470 + (head) * 0x00000300))
 
 struct nvidia_gt7xx_evo_method {
 	uint32			method;
@@ -129,8 +147,9 @@ struct nvidia_gt7xx_evo_state {
 	uint32			last_method_count;
 	uint32			last_update;
 	uint32			output_control;
-	uint32			output_polarity;
+	uint32			output_resource;
 	uint32			pixel_clock;
+	uint32			pixel_clock_config;
 	uint32			head_control;
 	uint32			overscan_color;
 	uint32			raster_size;
@@ -138,7 +157,6 @@ struct nvidia_gt7xx_evo_state {
 	uint32			raster_blank_end;
 	uint32			raster_blank_start;
 	uint32			raster_vert_blank2;
-	uint32			raster_vert_blank_dmi;
 	uint32			default_base_color;
 	uint32			base_offset;
 	uint32			base_size;

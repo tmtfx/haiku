@@ -461,105 +461,114 @@ mmio_write32(vesa_info& info, uint32 offset, uint32 value)
 }
 
 
-static status_t
-program_pramin_window(vesa_info& info, uint32 vramAddress)
+static const char*
+evo_method_name(uint32 method)
 {
-	if (!mmio_range_valid(info, NVIDIA_GT7XX_PBUS_BAR0_WINDOW, sizeof(uint32)))
-		return B_ERROR;
+	if (method == NVIDIA_GT7XX_EVO_UPDATE)
+		return "UPDATE";
+	if ((method & ~0x60) == NVIDIA_GT7XX_EVO_DAC_SET_CONTROL(0))
+		return "DAC_SET_CONTROL";
+	if ((method & ~0xe0) == NVIDIA_GT7XX_EVO_SOR_SET_CONTROL(0))
+		return "SOR_SET_CONTROL";
 
-	uint32 windowBase = (vramAddress >> 16) & 0x00ffffff;
-	uint32 value = NVIDIA_GT7XX_PBUS_BAR0_WINDOW_TARGET_VRAM | windowBase;
-	dprintf("nvidia_gt7xx: program_pramin_window vram=0x%08" B_PRIx32
-		" window_base=0x%08" B_PRIx32 "\n", vramAddress, value);
-	mmio_write32(info, NVIDIA_GT7XX_PBUS_BAR0_WINDOW, value);
-	return B_OK;
+	uint32 headMethod = method & 0xff;
+	switch (headMethod) {
+		case 0x04: return "HEAD_SET_OUTPUT_RESOURCE";
+		case 0x08: return "HEAD_SET_CONTROL";
+		case 0x10: return "HEAD_SET_OVERSCAN_COLOR";
+		case 0x14: return "HEAD_SET_RASTER_SIZE";
+		case 0x18: return "HEAD_SET_RASTER_SYNC_END";
+		case 0x1c: return "HEAD_SET_RASTER_BLANK_END";
+		case 0x20: return "HEAD_SET_RASTER_BLANK_START";
+		case 0x24: return "HEAD_SET_RASTER_VERT_BLANK2";
+		case 0x2c: return "HEAD_SET_DEFAULT_BASE_COLOR";
+		case 0x50: return "HEAD_SET_PIXEL_CLOCK";
+		case 0x54: return "HEAD_SET_PIXEL_CLOCK_CONFIGURATION";
+		case 0x60: return "HEAD_SET_OFFSET";
+		case 0x68: return "HEAD_SET_SIZE";
+		case 0x6c: return "HEAD_SET_STORAGE";
+		case 0x70: return "HEAD_SET_PARAMS";
+		default:   return "UNKNOWN_EVO_METHOD";
+	}
 }
 
 
 static status_t
-sync_channel_instance_to_pramin(vesa_info& info, uint32 channelID)
+submit_evo_method_hw(vesa_info& info, uint32 channel, uint32 method, uint32 value)
 {
-	if (channelID >= NVIDIA_GT7XX_EVO_CHANNEL_COUNT)
-		return B_BAD_VALUE;
+	uint32 ctrlOffset = NVIDIA_GT7XX_PDISPLAY_CTRL_STATE(channel);
+	uint32 valOffset = NVIDIA_GT7XX_PDISPLAY_CTRL_VAL(channel);
 
-	nvidia_gt7xx_evo_channel_state& channel = info.shared_info->channels[channelID];
-	if (info.channel_instance_data[channelID] == NULL)
-		return B_ERROR;
-	if (!mmio_range_valid(info, channel.pramin_offset,
-			NVIDIA_GT7XX_EVO_RAMFC_WORDS * sizeof(uint32))) {
+	if (!mmio_range_valid(info, ctrlOffset, 8)) {
+		dprintf("nvidia_gt7xx: [HW ERROR] invalid mmio range for ctrlOffset=0x%08"
+			B_PRIx32 "\n", ctrlOffset);
 		return B_ERROR;
 	}
 
-	status_t status = program_pramin_window(info, 0);
-	if (status != B_OK)
-		return status;
+	uint32 initialCtrl = mmio_read32(info, ctrlOffset);
+	dprintf("nvidia_gt7xx: [HW] ch=%" B_PRIu32 " submit method=0x%08" B_PRIx32
+		" (%s) val=0x%08" B_PRIx32 " [ctrl_before=0x%08" B_PRIx32 "]\n",
+		channel, method, evo_method_name(method), value, initialCtrl);
 
-	volatile uint32* pramin = (volatile uint32*)(info.registers + channel.pramin_offset);
-	for (uint32 i = 0; i < NVIDIA_GT7XX_EVO_RAMFC_WORDS; i++)
-		pramin[i] = info.channel_instance_data[channelID][i];
+	mmio_write32(info, ctrlOffset, initialCtrl | NVIDIA_GT7XX_PDISPLAY_CTRL_ENABLE);
+	mmio_write32(info, valOffset, value);
+	mmio_write32(info, ctrlOffset, NVIDIA_GT7XX_PDISPLAY_CTRL_PENDING
+		| NVIDIA_GT7XX_PDISPLAY_CTRL_ENABLE | method);
 
-	dprintf("nvidia_gt7xx: sync_channel_instance_to_pramin channel=%" B_PRIu32
-		" pramin_off=0x%08" B_PRIx32 " class=0x%08" B_PRIx32
-		" push_lo=0x%08" B_PRIx32 " notif_lo=0x%08" B_PRIx32
-		" put=%" B_PRIu32 " get=%" B_PRIu32 "\n",
-		channelID, channel.pramin_offset, channel.class_id,
-		info.channel_instance_data[channelID][2],
-		info.channel_instance_data[channelID][4],
-		channel.put, channel.get);
-
-	channel.materialized = 1;
-	return B_OK;
-}
-
-
-static status_t
-kick_dma_user_channel(vesa_info& info, uint32 channelID)
-{
-	if (channelID >= NVIDIA_GT7XX_EVO_CHANNEL_COUNT)
-		return B_BAD_VALUE;
-
-	nvidia_gt7xx_evo_channel_state& channel = info.shared_info->channels[channelID];
-	uint32 putOffset = channel.user_aperture_offset;
-	uint32 getOffset = channel.user_aperture_offset + 0x4;
-	if (!mmio_range_valid(info, putOffset, sizeof(uint32))
-		|| !mmio_range_valid(info, getOffset, sizeof(uint32))) {
-		dprintf("nvidia_gt7xx: kick_dma_user_channel channel=%" B_PRIu32
-			" invalid aperture put=0x%08" B_PRIx32 " get=0x%08" B_PRIx32 "\n",
-			channelID, putOffset, getOffset);
-		return B_ERROR;
+	bigtime_t startTime = system_time();
+	uint32 spins = 0;
+	while ((mmio_read32(info, ctrlOffset) & NVIDIA_GT7XX_PDISPLAY_CTRL_PENDING) != 0) {
+		spins++;
+		bigtime_t elapsed = system_time() - startTime;
+		if (elapsed > 100000) { // 100ms timeout
+			uint32 timeoutCtrl = mmio_read32(info, ctrlOffset);
+			dprintf("nvidia_gt7xx: [HW TIMEOUT] ch=%" B_PRIu32 " method=0x%08"
+				B_PRIx32 " (%s) val=0x%08" B_PRIx32 " ctrl_now=0x%08" B_PRIx32
+				" elapsed=%" B_PRIdBIGTIME " us (spins=%" B_PRIu32 ")\n",
+				channel, method, evo_method_name(method), value,
+				timeoutCtrl, elapsed, spins);
+			return B_TIMED_OUT;
+		}
+		spin(10);
 	}
 
-	dprintf("nvidia_gt7xx: kick_dma_user_channel channel=%" B_PRIu32
-		" put_off=0x%08" B_PRIx32 " get_off=0x%08" B_PRIx32
-		" put_words=%" B_PRIu32 "\n",
-		channelID, putOffset, getOffset, channel.put);
-	mmio_write32(info, putOffset, channel.put << 2);
-	channel.get = mmio_read32(info, getOffset) >> 2;
-	dprintf("nvidia_gt7xx: kick_dma_user_channel channel=%" B_PRIu32
-		" hw_get_words=%" B_PRIu32 "\n",
-		channelID, channel.get);
-	channel.materialized = 2;
+	bigtime_t elapsed = system_time() - startTime;
+	uint32 finalCtrl = mmio_read32(info, ctrlOffset);
+	dprintf("nvidia_gt7xx: [HW OK] ch=%" B_PRIu32 " method=0x%08" B_PRIx32
+		" (%s) acked in %" B_PRIdBIGTIME " us (spins=%" B_PRIu32
+		" ctrl_after=0x%08" B_PRIx32 ")\n",
+		channel, method, evo_method_name(method), elapsed, spins, finalCtrl);
+
+	mmio_write32(info, ctrlOffset, initialCtrl);
 	return B_OK;
 }
 
 
 static status_t
-materialize_hardware_channel(vesa_info& info, uint32 channelID)
+materialize_hardware_channel(vesa_info& info, const nvidia_gt7xx_evo_push& push)
 {
-	dprintf("nvidia_gt7xx: materialize_hardware_channel channel=%" B_PRIu32 "\n",
-		channelID);
-	status_t status = sync_channel_instance_to_pramin(info, channelID);
-	if (status != B_OK)
-		dprintf("nvidia_gt7xx: materialize_hardware_channel channel=%" B_PRIu32
-			" pramin sync failed: %" B_PRId32 "\n", channelID, status);
-	if (status != B_OK)
-		return status;
+	dprintf("nvidia_gt7xx: materialize_hardware_channel START ch=%" B_PRIu32
+		" count=%" B_PRIu32 "\n", push.channel, push.count);
 
-	status = kick_dma_user_channel(info, channelID);
-	if (status != B_OK)
-		dprintf("nvidia_gt7xx: materialize_hardware_channel channel=%" B_PRIu32
-			" dma kick failed: %" B_PRId32 "\n", channelID, status);
-	return status;
+	for (uint32 i = 0; i < push.count; i++) {
+		status_t status = submit_evo_method_hw(info, push.channel,
+			push.methods[i].method, push.methods[i].value);
+		if (status != B_OK) {
+			dprintf("nvidia_gt7xx: [HW FAILED] at m[%02" B_PRIu32 "/%02" B_PRIu32 "] "
+				"method=0x%08" B_PRIx32 " (%s) val=0x%08" B_PRIx32
+				" status=%" B_PRId32 "\n",
+				i, push.count, push.methods[i].method,
+				evo_method_name(push.methods[i].method),
+				push.methods[i].value, status);
+			return status;
+		}
+	}
+
+	info.shared_info->channels[push.channel].materialized = 1;
+	dprintf("nvidia_gt7xx: materialize_hardware_channel ch=%" B_PRIu32
+		" ALL %" B_PRIu32 " METHODS SUCCESSFULLY EXECUTED IN HARDWARE!\n",
+		push.channel, push.count);
+	return B_OK;
 }
 
 
@@ -603,7 +612,7 @@ color_space_from_evo_format(uint32 baseParams)
 static uint32
 bytes_per_row_from_evo_storage(uint32 baseStorage, uint32 width, color_space space)
 {
-	uint32 pitch = ((baseStorage >> 8) & 0x3ff) << 8;
+	uint32 pitch = ((baseStorage >> 8) & 0x1fff) << 4;
 	if (pitch != 0)
 		return pitch;
 
@@ -632,15 +641,13 @@ static uint32
 timing_flags_from_evo_state(const vesa_shared_info& sharedInfo)
 {
 	uint32 flags = 0;
-	uint32 polarity = sharedInfo.evo.output_polarity;
-	if (sharedInfo.active_output == NVIDIA_GT7XX_OUTPUT_DIGITAL)
-		polarity = sharedInfo.evo.output_control;
-
-	if ((polarity & (1 << 12)) != 0 || (polarity & (1 << 0)) != 0)
+	// In HEAD_SET_OUTPUT_RESOURCE: bit 3 = HSYNC (0 = positive, 1 = negative)
+	if ((sharedInfo.evo.output_resource & (1 << 3)) == 0)
 		flags |= B_POSITIVE_HSYNC;
-	if ((polarity & (1 << 13)) != 0 || (polarity & (1 << 1)) != 0)
+	// bit 4 = VSYNC (0 = positive, 1 = negative)
+	if ((sharedInfo.evo.output_resource & (1 << 4)) == 0)
 		flags |= B_POSITIVE_VSYNC;
-	if ((sharedInfo.evo.head_control & 0x6) != 0)
+	if ((sharedInfo.evo.head_control & 1) != 0)
 		flags |= B_TIMING_INTERLACED;
 	return flags;
 }
@@ -650,7 +657,8 @@ static void
 update_mode_from_evo_state(vesa_shared_info& sharedInfo)
 {
 	display_mode& mode = sharedInfo.current_mode;
-	mode.timing.pixel_clock = sharedInfo.evo.pixel_clock & 0x003fffff;
+	if (sharedInfo.evo.pixel_clock != 0)
+		mode.timing.pixel_clock = sharedInfo.evo.pixel_clock / 1000;
 	mode.timing.h_display = sharedInfo.evo.raster_size & 0x7fff;
 	mode.timing.v_display = (sharedInfo.evo.raster_size >> 16) & 0x7fff;
 	mode.timing.h_sync_end = sharedInfo.evo.raster_sync_end & 0x7fff;
@@ -680,11 +688,11 @@ decode_head_index(uint32 method, uint32 baseMethod, uint8& headIndex)
 		return false;
 
 	uint32 delta = method - baseMethod;
-	if ((delta % 0x400) != 0)
+	if ((delta % 0x300) != 0)
 		return false;
 
-	headIndex = delta / 0x400;
-	return headIndex < 2;
+	headIndex = delta / 0x300;
+	return headIndex < 4;
 }
 
 
@@ -699,7 +707,7 @@ decode_output_index(uint32 method, uint32 baseMethod, uint32 stride, uint8& outp
 		return false;
 
 	outputIndex = delta / stride;
-	return outputIndex < 4;
+	return outputIndex < 8;
 }
 
 
@@ -713,29 +721,31 @@ apply_evo_method(vesa_shared_info& sharedInfo, const nvidia_gt7xx_evo_method& me
 	}
 
 	if (decode_output_index(method.method, NVIDIA_GT7XX_EVO_DAC_SET_CONTROL(0),
-			0x80, index)) {
+			0x20, index)) {
 		sharedInfo.active_output = NVIDIA_GT7XX_OUTPUT_ANALOG;
 		sharedInfo.evo.output_control = method.value;
 		return B_OK;
 	}
 
-	if (decode_output_index(method.method, NVIDIA_GT7XX_EVO_DAC_SET_POLARITY(0),
-			0x80, index)) {
-		sharedInfo.active_output = NVIDIA_GT7XX_OUTPUT_ANALOG;
-		sharedInfo.evo.output_polarity = method.value;
-		return B_OK;
-	}
-
 	if (decode_output_index(method.method, NVIDIA_GT7XX_EVO_SOR_SET_CONTROL(0),
-			0x40, index)) {
+			0x20, index)) {
 		sharedInfo.active_output = NVIDIA_GT7XX_OUTPUT_DIGITAL;
 		sharedInfo.evo.output_control = method.value;
 		return B_OK;
 	}
 
+	if (decode_head_index(method.method, NVIDIA_GT7XX_EVO_HEAD_SET_OUTPUT_RESOURCE(0), index)) {
+		sharedInfo.active_head = index;
+		sharedInfo.evo.output_resource = method.value;
+		return B_OK;
+	}
 	if (decode_head_index(method.method, NVIDIA_GT7XX_EVO_HEAD_SET_PIXEL_CLOCK(0), index)) {
 		sharedInfo.active_head = index;
 		sharedInfo.evo.pixel_clock = method.value;
+		return B_OK;
+	}
+	if (decode_head_index(method.method, NVIDIA_GT7XX_EVO_HEAD_SET_PIXEL_CLOCK_CONFIGURATION(0), index)) {
+		sharedInfo.evo.pixel_clock_config = method.value;
 		return B_OK;
 	}
 	if (decode_head_index(method.method, NVIDIA_GT7XX_EVO_HEAD_SET_CONTROL(0), index)) {
@@ -765,10 +775,6 @@ apply_evo_method(vesa_shared_info& sharedInfo, const nvidia_gt7xx_evo_method& me
 	}
 	if (decode_head_index(method.method, NVIDIA_GT7XX_EVO_HEAD_SET_RASTER_VERT_BLANK2(0), index)) {
 		sharedInfo.evo.raster_vert_blank2 = method.value;
-		return B_OK;
-	}
-	if (decode_head_index(method.method, NVIDIA_GT7XX_EVO_HEAD_SET_RASTER_VERT_BLANK_DMI(0), index)) {
-		sharedInfo.evo.raster_vert_blank_dmi = method.value;
 		return B_OK;
 	}
 	if (decode_head_index(method.method, NVIDIA_GT7XX_EVO_HEAD_SET_DEFAULT_BASE_COLOR(0), index)) {
@@ -929,6 +935,45 @@ nvidia_gt7xx_init(vesa_info& info)
 		sharedInfo.boot_width, sharedInfo.boot_height, sharedInfo.boot_depth,
 		sharedInfo.active_output);
 
+	if (mmio_range_valid(info, 0x000000, 4)) {
+		uint32 pmcId = mmio_read32(info, 0x000000);
+		dprintf("nvidia_gt7xx: [DIAG] PMC.ID=0x%08" B_PRIx32 " (chipset=0x%03" B_PRIx32
+			" card_type=0x%02" B_PRIx32 ")\n",
+			pmcId, (pmcId >> 20) & 0x1ff, (pmcId >> 20) & 0x1f0);
+	}
+
+	if (mmio_range_valid(info, 0x610000, 12)) {
+		uint32 caps0 = mmio_read32(info, 0x610000);
+		uint32 caps1 = mmio_read32(info, 0x610004);
+		uint32 caps2 = mmio_read32(info, 0x610008);
+		dprintf("nvidia_gt7xx: [DIAG] PDISPLAY CAPS0=0x%08" B_PRIx32 " (ver=0x%04"
+			B_PRIx32 " class=0x%04" B_PRIx32 ") CAPS1=0x%08" B_PRIx32
+			" CAPS2=0x%08" B_PRIx32 "\n",
+			caps0, caps0 & 0xffff, caps0 >> 16, caps1, caps2);
+	}
+
+	for (uint32 ch = 0; ch < NVIDIA_GT7XX_EVO_CHANNEL_COUNT; ch++) {
+		uint32 ctrlOff = NVIDIA_GT7XX_PDISPLAY_CTRL_STATE(ch);
+		uint32 valOff = NVIDIA_GT7XX_PDISPLAY_CTRL_VAL(ch);
+		if (mmio_range_valid(info, ctrlOff, 8)) {
+			dprintf("nvidia_gt7xx: [DIAG] PDISPLAY CTRL[%01" B_PRIu32 "]=0x%08"
+				B_PRIx32 " VAL[%01" B_PRIu32 "]=0x%08" B_PRIx32 "\n",
+				ch, mmio_read32(info, ctrlOff), ch, mmio_read32(info, valOff));
+		}
+	}
+
+	if (mmio_range_valid(info, 0x610180, 4)) {
+		dprintf("nvidia_gt7xx: [DIAG] PDISPLAY DAC0_CTRL=0x%08" B_PRIx32 "\n",
+			mmio_read32(info, 0x610180));
+	}
+	for (uint32 s = 0; s < 4; s++) {
+		uint32 sorOff = 0x610200 + s * 0x20;
+		if (mmio_range_valid(info, sorOff, 4)) {
+			dprintf("nvidia_gt7xx: [DIAG] PDISPLAY SOR%01" B_PRIu32 "_CTRL=0x%08"
+				B_PRIx32 "\n", s, mmio_read32(info, sorOff));
+		}
+	}
+
 	sharedKeeper.Detach();
 	mmioKeeper.Detach();
 	return B_OK;
@@ -989,33 +1034,58 @@ nvidia_gt7xx_set_display_mode(vesa_info& info, const display_mode& mode)
 status_t
 nvidia_gt7xx_submit_evo(vesa_info& info, const nvidia_gt7xx_evo_push& push)
 {
-	if (info.shared_info == NULL)
+	if (info.shared_info == NULL) {
+		dprintf("nvidia_gt7xx: submit_evo failed: shared_info is NULL\n");
 		return B_ERROR;
-	if (push.magic != NVIDIA_GT7XX_EVO_MAGIC)
+	}
+	if (push.magic != NVIDIA_GT7XX_EVO_MAGIC) {
+		dprintf("nvidia_gt7xx: submit_evo failed: bad magic=0x%08" B_PRIx32 "\n",
+			push.magic);
 		return B_BAD_VALUE;
-	if (push.channel >= NVIDIA_GT7XX_EVO_CHANNEL_COUNT)
+	}
+	if (push.channel >= NVIDIA_GT7XX_EVO_CHANNEL_COUNT) {
+		dprintf("nvidia_gt7xx: submit_evo failed: bad channel=%" B_PRIu32 "\n",
+			push.channel);
 		return B_BAD_VALUE;
-	if (push.count == 0 || push.count > NVIDIA_GT7XX_EVO_MAX_METHODS)
+	}
+	if (push.count == 0 || push.count > NVIDIA_GT7XX_EVO_MAX_METHODS) {
+		dprintf("nvidia_gt7xx: submit_evo failed: bad count=%" B_PRIu32 "\n",
+			push.count);
 		return B_BAD_VALUE;
+	}
+
+	dprintf("nvidia_gt7xx: submit_evo START channel=%" B_PRIu32 " count=%" B_PRIu32 "\n",
+		push.channel, push.count);
 
 	status_t status = write_dma_push(info, push);
-	if (status != B_OK)
+	if (status != B_OK) {
+		dprintf("nvidia_gt7xx: submit_evo write_dma_push failed: %" B_PRId32 "\n", status);
 		return status;
+	}
 
 	for (uint32 i = 0; i < push.count; i++) {
 		status = apply_evo_method(*info.shared_info, push.methods[i]);
-		if (status != B_OK)
+		if (status != B_OK) {
+			dprintf("nvidia_gt7xx: submit_evo apply_evo_method failed at m[%02" B_PRIu32
+				"] method=0x%08" B_PRIx32 " status=%" B_PRId32 "\n",
+				i, push.methods[i].method, status);
 			return status;
+		}
 	}
 
 	info.shared_info->evo.submit_count
 		= info.shared_info->channels[push.channel].submit_count;
 	info.shared_info->evo.last_method_count = push.count;
 	update_mode_from_evo_state(*info.shared_info);
-	status = materialize_hardware_channel(info, push.channel);
-	if (status != B_OK)
+
+	status = materialize_hardware_channel(info, push);
+	if (status != B_OK) {
+		dprintf("nvidia_gt7xx: submit_evo materialize_hardware_channel FAILED: %"
+			B_PRId32 "\n", status);
 		return status;
-	dprintf("nvidia_gt7xx: submit_evo channel=%" B_PRIu32 " done mode=%ux%u space=0x%08"
+	}
+
+	dprintf("nvidia_gt7xx: submit_evo channel=%" B_PRIu32 " SUCCESS mode=%ux%u space=0x%08"
 		B_PRIx32 " bpr=%" B_PRIu32 "\n",
 		push.channel,
 		info.shared_info->current_mode.virtual_width,

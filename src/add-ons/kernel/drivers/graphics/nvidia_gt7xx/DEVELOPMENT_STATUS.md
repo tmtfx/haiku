@@ -342,16 +342,15 @@ partendo da quelle specifiche.
 - boot mode e boot EDID
 - mapping MMIO / framebuffer
 - accelerante collegato al kernel add-on
-- protocollo EVO software-side
+- protocollo EVO software-side e allineamento metodi a GK208 (GF119-)
 - canali software `core/base`
-- pushbuf / notifier / instance con indirizzi fisici risolti
-- image RAMFC-like iniziale
+- sottomissione hardware nativa dei metodi EVO tramite registri MMIO PDISPLAY `0x610700 + c * 8` (`STATE`) e `0x610704 + c * 8` (`VAL`)
+- polling del bit 31 PENDING hardware e latch atomico con metodo `UPDATE` (0x80)
 
-### Non ancora funzionante in hardware
+### Da validare / estendere
 
-- creazione vera dei channel objects display
-- bind reale RAMFC/PRAMIN/CTXDMA
-- user aperture hardware
-- consumo hardware dei packet
-- modeset reale oltre il boot mode
+- verifica su hardware reale dei log syslog relativi al kick PDISPLAY
+- estensione delle modalità supportate (EDID modeset completo)
+- programmazione DPMS hardware reale
+- gestione accelerazione 2D / overlay / cursor hardware
 

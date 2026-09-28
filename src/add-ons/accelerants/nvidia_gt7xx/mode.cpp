@@ -23,7 +23,16 @@ pack_xy(uint32 x, uint32 y)
 static uint32
 pack_pixel_clock(const display_mode& mode)
 {
-	return (mode.timing.pixel_clock & 0x003fffff) | (2 << 22);
+	// mode.timing.pixel_clock is in kHz, GF119- expects Hz in [30:0]
+	return (uint32)mode.timing.pixel_clock * 1000U;
+}
+
+
+static uint32
+pack_pixel_clock_config(void)
+{
+	// Mode 2 = CUSTOM (bits 20-21)
+	return (2U << 20);
 }
 
 
@@ -32,7 +41,7 @@ pack_head_control(const display_mode& mode)
 {
 	uint32 value = 0;
 	if ((mode.timing.flags & B_TIMING_INTERLACED) != 0)
-		value |= (1 << 1);
+		value |= 1; // bit 0 in GF119-
 	return value;
 }
 
@@ -73,40 +82,39 @@ format_for_space(color_space space)
 
 
 static uint32
-pack_output_control(const display_mode& mode, uint8 outputType, uint8 head)
+pack_head_output_resource(const display_mode& mode)
 {
-	uint32 owner = head + 1;
-	uint32 value = owner;
-
-	if ((mode.timing.flags & B_POSITIVE_HSYNC) != 0)
-		value |= (1 << 12);
-	if ((mode.timing.flags & B_POSITIVE_VSYNC) != 0)
-		value |= (1 << 13);
-
-	if (outputType == NVIDIA_GT7XX_OUTPUT_DIGITAL)
-		value |= (1 << 8);
-
+	uint32 value = (0x5 << 6); // 24bpp 4:4:4
+	if ((mode.timing.flags & B_POSITIVE_HSYNC) == 0)
+		value |= (1 << 3);
+	if ((mode.timing.flags & B_POSITIVE_VSYNC) == 0)
+		value |= (1 << 4);
 	return value;
 }
 
 
 static uint32
-pack_dac_polarity(const display_mode& mode)
+pack_sor_control(uint8 head)
 {
-	uint32 value = 0;
-	if ((mode.timing.flags & B_POSITIVE_HSYNC) == 0)
-		value |= 1;
-	if ((mode.timing.flags & B_POSITIVE_VSYNC) == 0)
-		value |= 2;
-	return value;
+	uint32 ownerMask = (1 << head) & 0xf;
+	uint32 protocol = (0x1 << 8); // SINGLE_TMDS_A
+	return ownerMask | protocol;
+}
+
+
+static uint32
+pack_dac_control(uint8 head)
+{
+	uint32 ownerMask = (1 << head) & 0xf;
+	return ownerMask;
 }
 
 
 static uint32
 pack_base_storage(uint32 bytesPerRow)
 {
-	uint32 pitch = (bytesPerRow + 0xff) & ~0xff;
-	return ((pitch >> 8) & 0x3ff) << 8 | (1 << 20);
+	uint32 pitch = (bytesPerRow + 0x3f) & ~0x3f;
+	return ((pitch >> 4) << 8) | (1 << 24); // bit 24 = LINEAR on GF119-
 }
 
 
@@ -117,19 +125,35 @@ pack_base_params(color_space space)
 }
 
 
-static uint32
-vertical_blank_duration(const display_mode& mode)
+static const char*
+method_name(uint32 method)
 {
-	if (mode.timing.pixel_clock == 0 || mode.timing.h_total == 0
-		|| mode.timing.v_total <= mode.timing.v_display) {
-		return 0;
-	}
+	if (method == NVIDIA_GT7XX_EVO_UPDATE)
+		return "UPDATE";
+	if ((method & ~0x60) == NVIDIA_GT7XX_EVO_DAC_SET_CONTROL(0))
+		return "DAC_SET_CONTROL";
+	if ((method & ~0xe0) == NVIDIA_GT7XX_EVO_SOR_SET_CONTROL(0))
+		return "SOR_SET_CONTROL";
 
-	uint64 lineNanoseconds = ((uint64)mode.timing.h_total * 1000000ULL
-		+ mode.timing.pixel_clock / 2) / mode.timing.pixel_clock;
-	uint64 blankMicros = ((uint64)(mode.timing.v_total - mode.timing.v_display)
-		* lineNanoseconds + 999ULL) / 1000ULL;
-	return blankMicros > 0xfff ? 0xfff : (uint32)blankMicros;
+	uint32 headMethod = method & 0xff;
+	switch (headMethod) {
+		case 0x04: return "HEAD_OUTPUT_RESOURCE";
+		case 0x08: return "HEAD_CONTROL";
+		case 0x10: return "HEAD_OVERSCAN_COLOR";
+		case 0x14: return "HEAD_RASTER_SIZE";
+		case 0x18: return "HEAD_RASTER_SYNC_END";
+		case 0x1c: return "HEAD_RASTER_BLANK_END";
+		case 0x20: return "HEAD_RASTER_BLANK_START";
+		case 0x24: return "HEAD_RASTER_VERT_BLANK2";
+		case 0x2c: return "HEAD_DEFAULT_BASE_COLOR";
+		case 0x50: return "HEAD_PIXEL_CLOCK";
+		case 0x54: return "HEAD_PIXEL_CLOCK_CONFIG";
+		case 0x60: return "HEAD_OFFSET";
+		case 0x68: return "HEAD_SIZE";
+		case 0x6c: return "HEAD_STORAGE";
+		case 0x70: return "HEAD_PARAMS";
+		default:   return "UNKNOWN";
+	}
 }
 
 
@@ -149,22 +173,26 @@ submit_evo_mode_sequence(const display_mode& mode)
 	if (gInfo->shared_info->active_output == NVIDIA_GT7XX_OUTPUT_DIGITAL) {
 		push.methods[push.count++] = {
 			NVIDIA_GT7XX_EVO_SOR_SET_CONTROL(output),
-			pack_output_control(mode, gInfo->shared_info->active_output, head)
+			pack_sor_control(head)
 		};
 	} else {
 		push.methods[push.count++] = {
 			NVIDIA_GT7XX_EVO_DAC_SET_CONTROL(output),
-			pack_output_control(mode, gInfo->shared_info->active_output, head)
-		};
-		push.methods[push.count++] = {
-			NVIDIA_GT7XX_EVO_DAC_SET_POLARITY(output),
-			pack_dac_polarity(mode)
+			pack_dac_control(head)
 		};
 	}
 
 	push.methods[push.count++] = {
+		NVIDIA_GT7XX_EVO_HEAD_SET_OUTPUT_RESOURCE(head),
+		pack_head_output_resource(mode)
+	};
+	push.methods[push.count++] = {
 		NVIDIA_GT7XX_EVO_HEAD_SET_PIXEL_CLOCK(head),
 		pack_pixel_clock(mode)
+	};
+	push.methods[push.count++] = {
+		NVIDIA_GT7XX_EVO_HEAD_SET_PIXEL_CLOCK_CONFIGURATION(head),
+		pack_pixel_clock_config()
 	};
 	push.methods[push.count++] = {
 		NVIDIA_GT7XX_EVO_HEAD_SET_CONTROL(head),
@@ -195,10 +223,6 @@ submit_evo_mode_sequence(const display_mode& mode)
 		pack_xy(mode.timing.v_total, mode.timing.v_total)
 	};
 	push.methods[push.count++] = {
-		NVIDIA_GT7XX_EVO_HEAD_SET_RASTER_VERT_BLANK_DMI(head),
-		vertical_blank_duration(mode)
-	};
-	push.methods[push.count++] = {
 		NVIDIA_GT7XX_EVO_HEAD_SET_DEFAULT_BASE_COLOR(head),
 		0
 	};
@@ -223,20 +247,29 @@ submit_evo_mode_sequence(const display_mode& mode)
 		0
 	};
 
-	debug_printf("nvidia_gt7xx.accelerant: submit_evo_mode_sequence mode=%ux%u"
-		" space=0x%08" B_PRIx32 " head=%u output=%u bpr=%" B_PRIu32
-		" methods=%" B_PRIu32 "\n",
-		mode.virtual_width, mode.virtual_height, mode.space, head,
-		gInfo->shared_info->active_output, bytesPerRow, push.count);
+	debug_printf("nvidia_gt7xx.accelerant: submit_evo_mode_sequence building sequence for %ux%u"
+		" (clock=%" B_PRIu32 " kHz, %" B_PRIu32 " Hz, head=%u, output=%s, bpr=%" B_PRIu32 "):\n",
+		mode.virtual_width, mode.virtual_height, mode.timing.pixel_clock,
+		pack_pixel_clock(mode), head,
+		gInfo->shared_info->active_output == NVIDIA_GT7XX_OUTPUT_DIGITAL ? "DIGITAL" : "ANALOG",
+		bytesPerRow);
+
 	for (uint32 i = 0; i < push.count; i++) {
-		debug_printf("nvidia_gt7xx.accelerant:   m[%02" B_PRIu32 "] method=0x%08"
-			B_PRIx32 " value=0x%08" B_PRIx32 "\n",
-			i, push.methods[i].method, push.methods[i].value);
+		debug_printf("nvidia_gt7xx.accelerant:   [%02" B_PRIu32 "] 0x%08" B_PRIx32
+			" (%-26s) = 0x%08" B_PRIx32 "\n",
+			i, push.methods[i].method, method_name(push.methods[i].method),
+			push.methods[i].value);
 	}
 
+	debug_printf("nvidia_gt7xx.accelerant: calling ioctl(NVIDIA_GT7XX_SUBMIT_EVO)...\n");
 	status_t status = ioctl(gInfo->device, NVIDIA_GT7XX_SUBMIT_EVO, &push, sizeof(push));
-	debug_printf("nvidia_gt7xx.accelerant: submit_evo_mode_sequence ioctl status=%"
-		B_PRId32 "\n", status);
+	if (status == B_OK) {
+		debug_printf("nvidia_gt7xx.accelerant: ioctl(NVIDIA_GT7XX_SUBMIT_EVO) SUCCESS!\n");
+	} else {
+		debug_printf("nvidia_gt7xx.accelerant: ioctl(NVIDIA_GT7XX_SUBMIT_EVO) FAILED: %"
+			B_PRId32 "\n", status);
+	}
+
 	return status;
 }
 
@@ -272,15 +305,25 @@ create_mode_list(void)
 {
 	display_mode initialMode = gInfo->shared_info->current_mode;
 	color_space space = (color_space)initialMode.space;
+	debug_printf("nvidia_gt7xx.accelerant: create_mode_list initial mode: %ux%u space=0x%08"
+		B_PRIx32 " (has_edid=%d)\n",
+		initialMode.virtual_width, initialMode.virtual_height, initialMode.space,
+		gInfo->shared_info->has_edid);
+
 	gInfo->mode_list_area = create_display_modes("nvidia_gt7xx modes",
 		gInfo->shared_info->has_edid ? &gInfo->shared_info->edid_info : NULL,
 		&initialMode, 1, &space, 1, is_mode_supported,
 		&gInfo->mode_list, &gInfo->shared_info->mode_count);
 
-	if (gInfo->mode_list_area < 0)
+	if (gInfo->mode_list_area < 0) {
+		debug_printf("nvidia_gt7xx.accelerant: create_display_modes failed: %" B_PRId32 "\n",
+			gInfo->mode_list_area);
 		return gInfo->mode_list_area;
+	}
 
 	gInfo->shared_info->mode_list_area = gInfo->mode_list_area;
+	debug_printf("nvidia_gt7xx.accelerant: create_mode_list SUCCESS, mode_count=%" B_PRIu32 "\n",
+		gInfo->shared_info->mode_count);
 	return B_OK;
 }
 
@@ -305,6 +348,9 @@ status_t
 nvidia_gt7xx_propose_display_mode(display_mode* target, const display_mode* low,
 	const display_mode* high)
 {
+	debug_printf("nvidia_gt7xx.accelerant: propose_display_mode requested: %ux%u space=0x%08"
+		B_PRIx32 "\n", target->virtual_width, target->virtual_height, target->space);
+
 	for (uint32 i = 0; i < gInfo->shared_info->mode_count; i++) {
 		if (target->virtual_width != gInfo->mode_list[i].virtual_width
 			|| target->virtual_height != gInfo->mode_list[i].virtual_height
@@ -313,9 +359,13 @@ nvidia_gt7xx_propose_display_mode(display_mode* target, const display_mode* low,
 		}
 
 		*target = gInfo->mode_list[i];
+		debug_printf("nvidia_gt7xx.accelerant: propose_display_mode MATCHED mode [%" B_PRIu32
+			"]: %ux%u clock=%" B_PRIu32 " kHz\n",
+			i, target->virtual_width, target->virtual_height, target->timing.pixel_clock);
 		return B_OK;
 	}
 
+	debug_printf("nvidia_gt7xx.accelerant: propose_display_mode NO MATCH found\n");
 	return B_BAD_VALUE;
 }
 
@@ -324,25 +374,27 @@ status_t
 nvidia_gt7xx_set_display_mode(display_mode* modeToSet)
 {
 	display_mode mode = *modeToSet;
-	debug_printf("nvidia_gt7xx.accelerant: set_display_mode request=%ux%u"
-		" space=0x%08" B_PRIx32 " pixel_clock=%" B_PRIu32 "\n",
+	debug_printf("nvidia_gt7xx.accelerant: set_display_mode request: %ux%u"
+		" space=0x%08" B_PRIx32 " pixel_clock=%" B_PRIu32 " kHz\n",
 		mode.virtual_width, mode.virtual_height, mode.space,
 		mode.timing.pixel_clock);
+
 	status_t status = nvidia_gt7xx_propose_display_mode(&mode, &mode, &mode);
-	if (status != B_OK)
-		debug_printf("nvidia_gt7xx.accelerant: propose_display_mode failed status=%"
+	if (status != B_OK) {
+		debug_printf("nvidia_gt7xx.accelerant: set_display_mode propose_display_mode FAILED: %"
 			B_PRId32 "\n", status);
-	if (status != B_OK)
 		return status;
+	}
 
 	status = submit_evo_mode_sequence(mode);
 	if (status == B_OK) {
 		gInfo->shared_info->current_mode = mode;
-		debug_printf("nvidia_gt7xx.accelerant: set_display_mode applied=%ux%u"
-			" space=0x%08" B_PRIx32 "\n",
-			mode.virtual_width, mode.virtual_height, mode.space);
+		debug_printf("nvidia_gt7xx.accelerant: set_display_mode APPLIED: %ux%u"
+			" space=0x%08" B_PRIx32 " clock=%" B_PRIu32 " kHz\n",
+			mode.virtual_width, mode.virtual_height, mode.space,
+			mode.timing.pixel_clock);
 	} else {
-		debug_printf("nvidia_gt7xx.accelerant: set_display_mode submit failed status=%"
+		debug_printf("nvidia_gt7xx.accelerant: set_display_mode submit FAILED: %"
 			B_PRId32 "\n", status);
 	}
 

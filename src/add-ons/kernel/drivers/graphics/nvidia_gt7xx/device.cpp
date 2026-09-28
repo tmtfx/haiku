@@ -143,13 +143,18 @@ device_ioctl(void* cookie, uint32 msg, void* buffer, size_t bufferLength)
 
 		case VESA_SET_DISPLAY_MODE:
 		{
-			if (bufferLength != sizeof(display_mode))
+			if (bufferLength != sizeof(display_mode)) {
+				dprintf("nvidia_gt7xx: ioctl VESA_SET_DISPLAY_MODE bad bufferLength=%"
+					B_PRIuSIZE "\n", bufferLength);
 				return B_BAD_VALUE;
+			}
 
 			display_mode mode;
 			if (user_memcpy(&mode, buffer, sizeof(display_mode)) != B_OK)
 				return B_BAD_ADDRESS;
 
+			dprintf("nvidia_gt7xx: ioctl VESA_SET_DISPLAY_MODE %ux%u space=0x%08"
+				B_PRIx32 "\n", mode.virtual_width, mode.virtual_height, mode.space);
 			return nvidia_gt7xx_set_display_mode(*info, mode);
 		}
 
@@ -175,19 +180,31 @@ device_ioctl(void* cookie, uint32 msg, void* buffer, size_t bufferLength)
 			if (user_memcpy(&mode, buffer, sizeof(uint32)) != B_OK)
 				return B_BAD_ADDRESS;
 
+			dprintf("nvidia_gt7xx: ioctl VESA_SET_DPMS_MODE mode=%" B_PRIu32 "\n", mode);
 			return nvidia_gt7xx_set_dpms_mode(*info, mode);
 		}
 
 		case NVIDIA_GT7XX_SUBMIT_EVO:
 		{
-			if (bufferLength != sizeof(nvidia_gt7xx_evo_push))
+			if (bufferLength != sizeof(nvidia_gt7xx_evo_push)) {
+				dprintf("nvidia_gt7xx: ioctl SUBMIT_EVO bad bufferLength=%" B_PRIuSIZE
+					" expected=%" B_PRIuSIZE "\n",
+					bufferLength, sizeof(nvidia_gt7xx_evo_push));
 				return B_BAD_VALUE;
+			}
 
 			nvidia_gt7xx_evo_push push;
-			if (user_memcpy(&push, buffer, sizeof(push)) != B_OK)
+			if (user_memcpy(&push, buffer, sizeof(push)) != B_OK) {
+				dprintf("nvidia_gt7xx: ioctl SUBMIT_EVO user_memcpy failed\n");
 				return B_BAD_ADDRESS;
+			}
 
-			return nvidia_gt7xx_submit_evo(*info, push);
+			status_t status = nvidia_gt7xx_submit_evo(*info, push);
+			if (status != B_OK) {
+				dprintf("nvidia_gt7xx: ioctl SUBMIT_EVO returned status=%" B_PRId32 "\n",
+					status);
+			}
+			return status;
 		}
 
 		default:
