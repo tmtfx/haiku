@@ -77,20 +77,20 @@ static const uint32 kDefaultAppFlags = kFlagGetKey | kFlagEnumerateKeys
 // Helper interno per stampare i buffer in esadecimale nei log
 /*
 static std::string _BufToHex(const uint8_t* buf, size_t len) {
-    std::ostringstream ss;
-    for (size_t i = 0; i < len; ++i)
-        ss << std::hex << std::setw(2) << std::setfill('0') << (int)buf[i];
-    return ss.str();
+	std::ostringstream ss;
+	for (size_t i = 0; i < len; ++i)
+		ss << std::hex << std::setw(2) << std::setfill('0') << (int)buf[i];
+	return ss.str();
 }*/
 
 static void LogDebug(const char* format, ...) {
-    FILE* f = fopen("/boot/home/keystore_debug.log", "a");
-    if (f == NULL) return;
-    va_list args;
-    va_start(args, format);
-    vfprintf(f, format, args);
-    va_end(args);
-    fclose(f);
+	FILE* f = fopen("/boot/home/keystore_debug.log", "a");
+	if (f == NULL) return;
+	va_list args;
+	va_start(args, format);
+	vfprintf(f, format, args);
+	va_end(args);
+	fclose(f);
 }
 // ********************************
 
@@ -938,16 +938,73 @@ KeyStoreServer::_GetSalt(uint8* saltOut)
 	memcpy(saltOut, shadowSalt, 16);
 	return B_OK;
 }
+status_t
+KeyStoreServer::_GetHash(uint8* hashOut)
+{
+	BPath settingsDir;
+	if (find_directory(B_USER_SETTINGS_DIRECTORY, &settingsDir) != B_OK)
+		return B_ERROR;
+
+	BPath shadowPath(settingsDir.Path(), "shadow");
+	BFile shadowFile(shadowPath.Path(), B_READ_ONLY);
+	if (shadowFile.InitCheck() != B_OK)
+		return shadowFile.InitCheck();
+
+	BMessage shadowMsg;
+	if (shadowMsg.Unflatten(&shadowFile) != B_OK)
+		return B_ERROR;
+
+	const void* shadowHash = NULL;
+	ssize_t hashLen = 0;
+	if (shadowMsg.FindData("hash", B_RAW_TYPE, &shadowHash, &hashLen) != B_OK || hashLen != 64) {
+		return B_BAD_VALUE;
+	}
+
+	memcpy(hashOut, shadowHash, 64);
+	return B_OK;
+}
+status_t
+KeyStoreServer::_GetShadow(uint8* saltOut, uint8* hashOut)
+{
+	BPath settingsDir;
+	if (find_directory(B_USER_SETTINGS_DIRECTORY, &settingsDir) != B_OK)
+		return B_ERROR;
+
+	BPath shadowPath(settingsDir.Path(), "shadow");
+	BFile shadowFile(shadowPath.Path(), B_READ_ONLY);
+	if (shadowFile.InitCheck() != B_OK)
+		return shadowFile.InitCheck();
+
+	BMessage shadowMsg;
+	if (shadowMsg.Unflatten(&shadowFile) != B_OK)
+		return B_ERROR;
+
+	const void* shadowSalt = NULL;
+	ssize_t saltLen = 0;
+	const void* shadowHash = NULL;
+	ssize_t hashLen = 0;
+	if (shadowMsg.FindData("hash", B_RAW_TYPE, &shadowHash, &hashLen) != B_OK || hashLen != 64) {
+		return B_BAD_VALUE;
+	}
+	if (shadowMsg.FindData("salt", B_RAW_TYPE, &shadowSalt, &saltLen) != B_OK || saltLen != 16) {
+		return B_BAD_VALUE;
+	}
+
+	memcpy(saltOut, shadowSalt, 16);
+	memcpy(hashOut, shadowHash, 64);
+	return B_OK;
+}
+
 
 static const uint8 kEmptyStringBlake2b64[64] = {
-    0x0e, 0x57, 0x51, 0xc0, 0x26, 0xe5, 0x43, 0xb2,
-    0xe8, 0xab, 0x2d, 0x12, 0xb1, 0x34, 0xd4, 0xfe,
-    0x80, 0x6e, 0xc6, 0xb4, 0x16, 0x04, 0xfe, 0x6b,
-    0x4e, 0xd9, 0x5b, 0xcf, 0x5f, 0x2e, 0x82, 0x51,
-    0xb6, 0x37, 0xc3, 0x89, 0x82, 0xbf, 0xbf, 0x3f,
-    0x07, 0x5d, 0x0f, 0x63, 0xb1, 0xb5, 0x96, 0xf4,
-    0xd9, 0x30, 0xed, 0x9b, 0x95, 0x60, 0x11, 0xc2,
-    0x30, 0xbd, 0xad, 0x69, 0x02, 0x9d, 0x65, 0x96
+	0x0e, 0x57, 0x51, 0xc0, 0x26, 0xe5, 0x43, 0xb2,
+	0xe8, 0xab, 0x2d, 0x12, 0xb1, 0x34, 0xd4, 0xfe,
+	0x80, 0x6e, 0xc6, 0xb4, 0x16, 0x04, 0xfe, 0x6b,
+	0x4e, 0xd9, 0x5b, 0xcf, 0x5f, 0x2e, 0x82, 0x51,
+	0xb6, 0x37, 0xc3, 0x89, 0x82, 0xbf, 0xbf, 0x3f,
+	0x07, 0x5d, 0x0f, 0x63, 0xb1, 0xb5, 0x96, 0xf4,
+	0xd9, 0x30, 0xed, 0x9b, 0x95, 0x60, 0x11, 0xc2,
+	0x30, 0xbd, 0xad, 0x69, 0x02, 0x9d, 0x65, 0x96
 };
 
 status_t
@@ -959,6 +1016,44 @@ KeyStoreServer::_GetOrAskSessionPassword()
 
 	// Verifichiamo se l'utente ha configurato una password vuota all'installazione (oscuramento).
 	// Se la password è vuota, l'hash memorizzato in shadow coincide con blake2b(salt).
+	uint8 shadowSalt[16];
+	uint8 shadowHash[64];
+	
+	if (_GetShadow(shadowSalt,shadowHash)!=B_OK) {
+		LogDebug("[DEBUG] impossibile estrarre salt e hash dal file shadow.\n");
+	}
+	char saltHex[33];
+	for (int i = 0; i < 16; i++) sprintf(saltHex + i*2, "%02x", shadowSalt[i]);
+	char hashHex[129];
+	for (int i = 0; i < 64; i++) sprintf(hashHex + i*2, "%02x", shadowHash[i]);
+	LogDebug("[DEBUG] shadow salt: %s\n", saltHex);
+	LogDebug("[DEBUG] shadow hash: %s\n", hashHex);
+	BCrypto crypto;
+	if (crypto.InitCheck() == B_OK) {
+		uint8 computedHash[64];
+		if (crypto.Digest(B_CRYPTO_BLAKE2B, shadowSalt, 16, computedHash) == B_OK) {
+			//char compHex[129];
+			//for (int i = 0; i < 64; i++) sprintf(compHex + i*2, "%02x", computedHash[i]);
+			//LogDebug("[DEBUG] computed hash: %s\n", compHex);
+							
+			if (memcmp(computedHash, shadowHash, 64) == 0) {
+				LogDebug("[DEBUG] Match! Password vuota rilevata. Imposto fSessionPassword = \"\"\n");
+				fSessionPassword = "";
+				fHasSessionPassword = true;
+				fSessionPasswordValidated = true;
+				return B_OK;
+			} else {
+				LogDebug("[DEBUG] Hash NON corrisponde.\n");
+			}
+		} else {
+			LogDebug("[DEBUG] Digest BLAKE2B fallito\n");
+		}
+	} else {
+		LogDebug("[DEBUG] BCrypto InitCheck fallito\n");
+	}
+	
+	
+	/*
 	const void* shadowSalt = NULL;
 	ssize_t saltLen = 0;
 	const void* shadowHash = NULL;
@@ -1019,7 +1114,7 @@ KeyStoreServer::_GetOrAskSessionPassword()
 		}
 	} else {
 		LogDebug("[DEBUG] find_directory settings fallito\n");
-	}
+	}*/
 
 	MasterPasswordRequestWindow* window
 		= new(std::nothrow) MasterPasswordRequestWindow();
@@ -1031,12 +1126,12 @@ KeyStoreServer::_GetOrAskSessionPassword()
 	BString password;
 	status_t result = window->RequestPassword(password);
 	if (result != B_OK) {
-		LogDebug("[DEBUG] RequestPassword fallito con codice: %d\n", result);
+		LogDebug("[DEBUG] RequestPassword annullata o fallita con codice: %d\n", result);
 		return result;
 	}
 
 	if (password.IsEmpty()) {
-		LogDebug("[DEBUG] Password inserita vuota da finestra, ritorno errore\n");
+		LogDebug("[DEBUG] Password vuota inserita, ma l'hash salvato non è quello di una password vuota\n");
 		return B_BAD_VALUE;
 	}
 	
@@ -1044,52 +1139,57 @@ KeyStoreServer::_GetOrAskSessionPassword()
 	// validazione password
 	const char* passw = password.String();
 	size_t passLen = strlen(passw);
-	size_t inputLen = passLen + saltLen;
+	size_t inputLen = passLen + 16; //saltLen; saltLen è sempre 16
 	uint8* input = new(std::nothrow) uint8[inputLen];
 	if (input == NULL) {
-        LogDebug("[DEBUG] Impossibile allocare memoria per il buffer di hashing\n");
-        return B_NO_MEMORY;
-    }
+		LogDebug("[DEBUG] Impossibile allocare memoria per il buffer di hashing\n");
+		return B_NO_MEMORY;
+	}
+	
 	memcpy(input, passw, passLen);
-	memcpy(input + passLen, shadowSalt, saltLen);
+	memcpy(input + passLen, shadowSalt, 16); //saltLen); saltLen è sempre 16
+	
 	BCrypto crypto;
-    status_t err = crypto.InitCheck();
-    if (err != B_OK) {
-        delete[] input;
-        LogDebug("[DEBUG] BCrypto InitCheck fallito durante la validazione\n");
-        return err;
-    }
+	status_t err = crypto.InitCheck();
+	if (err != B_OK) {
+		secure_memzero_server(input, inputLen);
+		delete[] input;
+		LogDebug("[DEBUG] BCrypto InitCheck fallito durante la validazione\n");
+		return err;
+	}
 
-    uint8 hash[64];
+	uint8 hash[64];
 	err = crypto.Digest(B_CRYPTO_BLAKE2B, input, inputLen, hash);
-    delete[] input; // Libera la memoria dinamica allocata
+	secure_memzero_server(input, inputLen);
+	delete[] input; // Libera la memoria dinamica allocata
 
-    if (err != B_OK) {
-        LogDebug("[DEBUG] Crypto Digest fallito durante la validazione\n");
-        return err;
-    }
+	if (err != B_OK) {
+		LogDebug("[DEBUG] Crypto Digest fallito durante la validazione\n");
+		return err;
+	}
 
-    // Logging esadecimale (facoltativo, con dimensione array corretta a 129)
-    char hashHex[129];
-    for (int i = 0; i < 64; i++) {
-        sprintf(hashHex + i * 2, "%02x", hash[i]);
-    }
-    LogDebug("[DEBUG] Hash calcolato da input: %s\n", hashHex);
-    
-    // Confronto binario tra hash calcolato e shadowHash memorizzato
-    if (memcmp(hash, shadowHash, 64) == 0) {
-        LogDebug("[DEBUG] Password corretta! Validazione riuscita.\n");
-        fSessionPassword = password;
-        fHasSessionPassword = true;
-        fSessionPasswordValidated = true;
-        return B_OK;
-    } else {
-        LogDebug("[DEBUG] Password errata. Hash non corrispondente.\n");
-        fSessionPassword = password;
-        fHasSessionPassword = true;
-        fSessionPasswordValidated = false;
-        return B_PERMISSION_DENIED;
-    }
+	// Logging esadecimale (facoltativo, con dimensione array corretta a 129)
+	//char hashHex[129];
+	//for (int i = 0; i < 64; i++) {
+	//	sprintf(hashHex + i * 2, "%02x", hash[i]);
+	//}
+	//LogDebug("[DEBUG] Hash calcolato da input: %s\n", hashHex);
+	
+	// Confronto binario tra hash calcolato e shadowHash memorizzato
+	if (memcmp(hash, shadowHash, 64) == 0) {
+		LogDebug("[DEBUG] Password corretta! Validazione riuscita.\n");
+		fSessionPassword = password;
+		fHasSessionPassword = true;
+		fSessionPasswordValidated = true;
+		return B_OK;
+	} else {
+		LogDebug("[DEBUG] Password errata. Hash non corrispondente.\n");
+		fSessionPassword = password;
+		fHasSessionPassword = true;
+		fSessionPasswordValidated = false;
+		secure_memzero_server(hash, sizeof(hash));
+		return B_PERMISSION_DENIED;
+	}
 	
 	
 	//fSessionPassword = password;
@@ -1104,359 +1204,359 @@ KeyStoreServer::_GetOrAskSessionPassword()
 status_t
 KeyStoreServer::_EncryptKeyData(BMessage& keyMessage)
 {
-    //fprintf(stderr, "[DEBUG SERVER] === INIZIO _EncryptKeyData (OpenSSL RSA) ===\n");
+	//fprintf(stderr, "[DEBUG SERVER] === INIZIO _EncryptKeyData (OpenSSL RSA) ===\n");
 
-    // 1. Recuperiamo i dati in chiaro dal messaggio
-    const void* plainData = NULL;
-    ssize_t plainLen = 0;
-    if (keyMessage.FindData("data", B_RAW_TYPE, &plainData, &plainLen) != B_OK) {
-        fprintf(stderr, "[DEBUG SERVER] ERRORE: Nessun dato 'data' da cifrare trovato.\n");
-        return B_BAD_VALUE;
-    }
+	// 1. Recuperiamo i dati in chiaro dal messaggio
+	const void* plainData = NULL;
+	ssize_t plainLen = 0;
+	if (keyMessage.FindData("data", B_RAW_TYPE, &plainData, &plainLen) != B_OK) {
+		fprintf(stderr, "[DEBUG SERVER] ERRORE: Nessun dato 'data' da cifrare trovato.\n");
+		return B_BAD_VALUE;
+	}
 
-    // 2. Troviamo il percorso del file 'master' (dove risiede la chiave pubblica)
-    BPath settingsDir;
-    if (find_directory(B_USER_SETTINGS_DIRECTORY, &settingsDir) != B_OK) {
-        return B_ERROR;
-    }
-    BPath keyPath(settingsDir.Path(), "system/keystore/master");
+	// 2. Troviamo il percorso del file 'master' (dove risiede la chiave pubblica)
+	BPath settingsDir;
+	if (find_directory(B_USER_SETTINGS_DIRECTORY, &settingsDir) != B_OK) {
+		return B_ERROR;
+	}
+	BPath keyPath(settingsDir.Path(), "system/keystore/master");
 
-    BFile keyFile(keyPath.Path(), B_READ_ONLY);
-    if (keyFile.InitCheck() != B_OK) {
-        fprintf(stderr, "[DEBUG SERVER] ERRORE: Impossibile aprire il file master in lettura: %s\n", keyPath.Path());
-        return keyFile.InitCheck();
-    }
+	BFile keyFile(keyPath.Path(), B_READ_ONLY);
+	if (keyFile.InitCheck() != B_OK) {
+		fprintf(stderr, "[DEBUG SERVER] ERRORE: Impossibile aprire il file master in lettura: %s\n", keyPath.Path());
+		return keyFile.InitCheck();
+	}
 
-    // 3. Leggiamo la chiave pubblica DER dal file
-    off_t fileSize = 0;
-    keyFile.GetSize(&fileSize);
-    if (fileSize <= 0) return B_BAD_DATA;
+	// 3. Leggiamo la chiave pubblica DER dal file
+	off_t fileSize = 0;
+	keyFile.GetSize(&fileSize);
+	if (fileSize <= 0) return B_BAD_DATA;
 
-    unsigned char* pubKeyDer = new(std::nothrow) unsigned char[fileSize];
-    if (pubKeyDer == NULL) return B_NO_MEMORY;
+	unsigned char* pubKeyDer = new(std::nothrow) unsigned char[fileSize];
+	if (pubKeyDer == NULL) return B_NO_MEMORY;
 
-    if (keyFile.Read(pubKeyDer, fileSize) != fileSize) {
-        fprintf(stderr, "[DEBUG SERVER] ERRORE: Lettura parziale della chiave pubblica.\n");
-        delete[] pubKeyDer;
-        return B_IO_ERROR;
-    }
+	if (keyFile.Read(pubKeyDer, fileSize) != fileSize) {
+		fprintf(stderr, "[DEBUG SERVER] ERRORE: Lettura parziale della chiave pubblica.\n");
+		delete[] pubKeyDer;
+		return B_IO_ERROR;
+	}
 
-    // 4. Convertiamo il buffer DER in un oggetto EVP_PKEY di OpenSSL
-    const unsigned char* p = pubKeyDer;
-    EVP_PKEY* pubKey = d2i_PUBKEY(NULL, &p, fileSize);
-    delete[] pubKeyDer;
+	// 4. Convertiamo il buffer DER in un oggetto EVP_PKEY di OpenSSL
+	const unsigned char* p = pubKeyDer;
+	EVP_PKEY* pubKey = d2i_PUBKEY(NULL, &p, fileSize);
+	delete[] pubKeyDer;
 
-    if (pubKey == NULL) {
-        fprintf(stderr, "[DEBUG SERVER] ERRORE: d2i_PUBKEY fallito. Il file master è corrotto?\n");
-        ERR_print_errors_fp(stderr);
-        return B_BAD_DATA;
-    }
+	if (pubKey == NULL) {
+		fprintf(stderr, "[DEBUG SERVER] ERRORE: d2i_PUBKEY fallito. Il file master è corrotto?\n");
+		ERR_print_errors_fp(stderr);
+		return B_BAD_DATA;
+	}
 
-    // 5. Inizializziamo il contesto di cifratura OpenSSL
-    EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new(pubKey, NULL);
-    EVP_PKEY_free(pubKey); // Controllato internamente dal contesto ora
+	// 5. Inizializziamo il contesto di cifratura OpenSSL
+	EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new(pubKey, NULL);
+	EVP_PKEY_free(pubKey); // Controllato internamente dal contesto ora
 
-    if (ctx == NULL || EVP_PKEY_encrypt_init(ctx) <= 0) {
-        fprintf(stderr, "[DEBUG SERVER] ERRORE: Inizializzazione contesto di cifratura fallita.\n");
-        EVP_PKEY_CTX_free(ctx);
-        return B_ERROR;
-    }
+	if (ctx == NULL || EVP_PKEY_encrypt_init(ctx) <= 0) {
+		fprintf(stderr, "[DEBUG SERVER] ERRORE: Inizializzazione contesto di cifratura fallita.\n");
+		EVP_PKEY_CTX_free(ctx);
+		return B_ERROR;
+	}
 
-    // Impostiamo il padding RSA-OAEP con SHA-256 (lo standard crittografico moderno)
-    if (EVP_PKEY_CTX_set_rsa_padding(ctx, RSA_PKCS1_OAEP_PADDING) <= 0
-            || EVP_PKEY_CTX_set_rsa_oaep_md(ctx, EVP_sha256()) <= 0) {
-        fprintf(stderr, "[DEBUG SERVER] ERRORE: Configurazione padding OAEP fallita.\n");
-        EVP_PKEY_CTX_free(ctx);
-        return B_ERROR;
-    }
+	// Impostiamo il padding RSA-OAEP con SHA-256 (lo standard crittografico moderno)
+	if (EVP_PKEY_CTX_set_rsa_padding(ctx, RSA_PKCS1_OAEP_PADDING) <= 0
+			|| EVP_PKEY_CTX_set_rsa_oaep_md(ctx, EVP_sha256()) <= 0) {
+		fprintf(stderr, "[DEBUG SERVER] ERRORE: Configurazione padding OAEP fallita.\n");
+		EVP_PKEY_CTX_free(ctx);
+		return B_ERROR;
+	}
 
-    // 6. Calcoliamo la dimensione dell'output ed eseguiamo la cifratura
-    size_t outLen = 0;
-    if (EVP_PKEY_encrypt(ctx, NULL, &outLen, (const unsigned char*)plainData, plainLen) <= 0) {
-        fprintf(stderr, "[DEBUG SERVER] ERRORE: Calcolo dimensione ciphertext fallito.\n");
-        EVP_PKEY_CTX_free(ctx);
-        return B_ERROR;
-    }
+	// 6. Calcoliamo la dimensione dell'output ed eseguiamo la cifratura
+	size_t outLen = 0;
+	if (EVP_PKEY_encrypt(ctx, NULL, &outLen, (const unsigned char*)plainData, plainLen) <= 0) {
+		fprintf(stderr, "[DEBUG SERVER] ERRORE: Calcolo dimensione ciphertext fallito.\n");
+		EVP_PKEY_CTX_free(ctx);
+		return B_ERROR;
+	}
 
-    unsigned char* outBuf = new(std::nothrow) unsigned char[outLen];
-    if (outBuf == NULL) {
-        EVP_PKEY_CTX_free(ctx);
-        return B_NO_MEMORY;
-    }
+	unsigned char* outBuf = new(std::nothrow) unsigned char[outLen];
+	if (outBuf == NULL) {
+		EVP_PKEY_CTX_free(ctx);
+		return B_NO_MEMORY;
+	}
 
-    if (EVP_PKEY_encrypt(ctx, outBuf, &outLen, (const unsigned char*)plainData, plainLen) <= 0) {
-        fprintf(stderr, "[DEBUG SERVER] ERRORE: Cifratura asimmetrica RSA fallita.\n");
-        ERR_print_errors_fp(stderr);
-        delete[] outBuf;
-        EVP_PKEY_CTX_free(ctx);
-        return B_ERROR;
-    }
+	if (EVP_PKEY_encrypt(ctx, outBuf, &outLen, (const unsigned char*)plainData, plainLen) <= 0) {
+		fprintf(stderr, "[DEBUG SERVER] ERRORE: Cifratura asimmetrica RSA fallita.\n");
+		ERR_print_errors_fp(stderr);
+		delete[] outBuf;
+		EVP_PKEY_CTX_free(ctx);
+		return B_ERROR;
+	}
 
-    EVP_PKEY_CTX_free(ctx);
+	EVP_PKEY_CTX_free(ctx);
 
-    // 7. Aggiorniamo il BMessage con il blob asimmetrico
-    keyMessage.RemoveName("data");
-    keyMessage.AddData("data", B_RAW_TYPE, outBuf, outLen);
-    
-    // Rimuoviamo rimasugli di nonce/IV legati al vecchio codice AES simmetrico
-    keyMessage.RemoveName("enc_nonce"); 
-    keyMessage.SetBool("encrypted", true);
+	// 7. Aggiorniamo il BMessage con il blob asimmetrico
+	keyMessage.RemoveName("data");
+	keyMessage.AddData("data", B_RAW_TYPE, outBuf, outLen);
+	
+	// Rimuoviamo rimasugli di nonce/IV legati al vecchio codice AES simmetrico
+	keyMessage.RemoveName("enc_nonce"); 
+	keyMessage.SetBool("encrypted", true);
 
-    delete[] outBuf;
-    //fprintf(stderr, "[DEBUG SERVER] Cifratura RSA completata con successo! Ciphertext len: %zu\n", outLen);
-    //fprintf(stderr, "[DEBUG SERVER] === FINE _EncryptKeyData ===\n");
-    return B_OK;
+	delete[] outBuf;
+	//fprintf(stderr, "[DEBUG SERVER] Cifratura RSA completata con successo! Ciphertext len: %zu\n", outLen);
+	//fprintf(stderr, "[DEBUG SERVER] === FINE _EncryptKeyData ===\n");
+	return B_OK;
 }
 status_t
 KeyStoreServer::_DecryptKeyData(BMessage& keyMessage)
 {
-    //fprintf(stderr, "[DEBUG CRYPTO-READ] === INIZIO _DecryptKeyData (RSA Asimmetrico) ===\n");
+	//fprintf(stderr, "[DEBUG CRYPTO-READ] === INIZIO _DecryptKeyData (RSA Asimmetrico) ===\n");
 
-    // 1. Verifichiamo se il record è marcato come cifrato
-    bool encrypted = false;
-    if (keyMessage.FindBool("encrypted", &encrypted) != B_OK || !encrypted) {
-        fprintf(stderr, "[DEBUG CRYPTO-READ] Chiave non marchiata come cifrata, esco.\n");
-        return B_OK; 
-    }
+	// 1. Verifichiamo se il record è marcato come cifrato
+	bool encrypted = false;
+	if (keyMessage.FindBool("encrypted", &encrypted) != B_OK || !encrypted) {
+		fprintf(stderr, "[DEBUG CRYPTO-READ] Chiave non marchiata come cifrata, esco.\n");
+		return B_OK; 
+	}
 
-    // 2. Recuperiamo il ciphertext (il blob cifrato asimmetricamente)
-    const void* encData = NULL;
-    ssize_t encLen = 0;
-    if (keyMessage.FindData("data", B_RAW_TYPE, &encData, &encLen) != B_OK) {
-        fprintf(stderr, "[DEBUG CRYPTO-READ] ERRORE: Impossibile recuperare campo 'data' dal database!\n");
-        return B_BAD_DATA;
-    }
+	// 2. Recuperiamo il ciphertext (il blob cifrato asimmetricamente)
+	const void* encData = NULL;
+	ssize_t encLen = 0;
+	if (keyMessage.FindData("data", B_RAW_TYPE, &encData, &encLen) != B_OK) {
+		fprintf(stderr, "[DEBUG CRYPTO-READ] ERRORE: Impossibile recuperare campo 'data' dal database!\n");
+		return B_BAD_DATA;
+	}
 
-    //fprintf(stderr, "[DEBUG CRYPTO-READ] Ciphertext RSA recuperato (Len: %" B_PRIdSSIZE "): %s\n", 
-    //    encLen, _BufToHex((const uint8_t*)encData, encLen).c_str());
+	//fprintf(stderr, "[DEBUG CRYPTO-READ] Ciphertext RSA recuperato (Len: %" B_PRIdSSIZE "): %s\n", 
+	//	encLen, _BufToHex((const uint8_t*)encData, encLen).c_str());
 
-    // ==========================================================
-    // ESTRAZIONE VOLATILE DELLA CHIAVE PRIVATA RSA (ON-DEMAND)
-    // ==========================================================
-    EVP_PKEY* privateKey = _DecryptMasterPrivateKey();
-    if (privateKey == NULL) {
-        fprintf(stderr, "[DEBUG CRYPTO-READ] ERRORE CRITICO: Impossibile sbloccare la chiave privata RSA dal master file!\n");
-        return B_NOT_ALLOWED; 
-    }
-    //fprintf(stderr, "[DEBUG CRYPTO-READ] Chiave privata RSA sbloccata correttamente ed estratta in RAM.\n");
+	// ==========================================================
+	// ESTRAZIONE VOLATILE DELLA CHIAVE PRIVATA RSA (ON-DEMAND)
+	// ==========================================================
+	EVP_PKEY* privateKey = _DecryptMasterPrivateKey();
+	if (privateKey == NULL) {
+		fprintf(stderr, "[DEBUG CRYPTO-READ] ERRORE CRITICO: Impossibile sbloccare la chiave privata RSA dal master file!\n");
+		return B_NOT_ALLOWED; 
+	}
+	//fprintf(stderr, "[DEBUG CRYPTO-READ] Chiave privata RSA sbloccata correttamente ed estratta in RAM.\n");
 
-    // 3. Inizializziamo il contesto di decifratura OpenSSL EVP
-    EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new(privateKey, NULL);
-    if (ctx == NULL || EVP_PKEY_decrypt_init(ctx) <= 0) {
-        fprintf(stderr, "[DEBUG CRYPTO-READ] ERRORE: Inizializzazione contesto OpenSSL fallita.\n");
-        ERR_print_errors_fp(stderr);
-        EVP_PKEY_free(privateKey); // <--- Liberiamo subito la risorsa in memoria
-        return B_ERROR;
-    }
+	// 3. Inizializziamo il contesto di decifratura OpenSSL EVP
+	EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new(privateKey, NULL);
+	if (ctx == NULL || EVP_PKEY_decrypt_init(ctx) <= 0) {
+		fprintf(stderr, "[DEBUG CRYPTO-READ] ERRORE: Inizializzazione contesto OpenSSL fallita.\n");
+		ERR_print_errors_fp(stderr);
+		EVP_PKEY_free(privateKey); // <--- Liberiamo subito la risorsa in memoria
+		return B_ERROR;
+	}
 
-    // Configuriame lo stesso identico schema di padding usato in scrittura: RSA-OAEP con SHA-256
-    if (EVP_PKEY_CTX_set_rsa_padding(ctx, RSA_PKCS1_OAEP_PADDING) <= 0
-            || EVP_PKEY_CTX_set_rsa_oaep_md(ctx, EVP_sha256()) <= 0) {
-        fprintf(stderr, "[DEBUG CRYPTO-READ] ERRORE: Configurazione padding OAEP fallita.\n");
-        EVP_PKEY_CTX_free(ctx);
-        EVP_PKEY_free(privateKey);
-        return B_ERROR;
-    }
+	// Configuriame lo stesso identico schema di padding usato in scrittura: RSA-OAEP con SHA-256
+	if (EVP_PKEY_CTX_set_rsa_padding(ctx, RSA_PKCS1_OAEP_PADDING) <= 0
+			|| EVP_PKEY_CTX_set_rsa_oaep_md(ctx, EVP_sha256()) <= 0) {
+		fprintf(stderr, "[DEBUG CRYPTO-READ] ERRORE: Configurazione padding OAEP fallita.\n");
+		EVP_PKEY_CTX_free(ctx);
+		EVP_PKEY_free(privateKey);
+		return B_ERROR;
+	}
 
-    // 4. Determiniamo la dimensione massima necessaria per il buffer in chiaro
-    size_t outLen = 0;
-    if (EVP_PKEY_decrypt(ctx, NULL, &outLen, (const unsigned char*)encData, encLen) <= 0) {
-        fprintf(stderr, "[DEBUG CRYPTO-READ] ERRORE: Impossibile determinare la dimensione massima del plaintext.\n");
-        ERR_print_errors_fp(stderr);
-        EVP_PKEY_CTX_free(ctx);
-        EVP_PKEY_free(privateKey);
-        return B_BAD_DATA;
-    }
+	// 4. Determiniamo la dimensione massima necessaria per il buffer in chiaro
+	size_t outLen = 0;
+	if (EVP_PKEY_decrypt(ctx, NULL, &outLen, (const unsigned char*)encData, encLen) <= 0) {
+		fprintf(stderr, "[DEBUG CRYPTO-READ] ERRORE: Impossibile determinare la dimensione massima del plaintext.\n");
+		ERR_print_errors_fp(stderr);
+		EVP_PKEY_CTX_free(ctx);
+		EVP_PKEY_free(privateKey);
+		return B_BAD_DATA;
+	}
 
-    unsigned char* plainData = new(std::nothrow) unsigned char[outLen];
-    if (plainData == NULL) {
-        EVP_PKEY_CTX_free(ctx);
-        EVP_PKEY_free(privateKey);
-        return B_NO_MEMORY;
-    }
+	unsigned char* plainData = new(std::nothrow) unsigned char[outLen];
+	if (plainData == NULL) {
+		EVP_PKEY_CTX_free(ctx);
+		EVP_PKEY_free(privateKey);
+		return B_NO_MEMORY;
+	}
 
-    // 5. Eseguiamo la reale decifratura RSA asimmetrica
-    status_t result = B_OK;
-    if (EVP_PKEY_decrypt(ctx, plainData, &outLen, (const unsigned char*)encData, encLen) <= 0) {
-        fprintf(stderr, "[DEBUG CRYPTO-READ] ERRORE DI DECIFRATURA RSA: Chiave errata o dati alterati!\n");
-        ERR_print_errors_fp(stderr);
-        secure_memzero_server(plainData, outLen);
-        delete[] plainData;
-        result = B_BAD_DATA;
-    } else {
-        // La decifratura è riuscita!
-        fprintf(stderr, "[DEBUG CRYPTO-READ] DECIFRATURA RSA RIUSCITA! Dati recuperati (Len: %zu)\n", outLen);
-        
-        // 6. Aggiorniamo il BMessage con il testo in chiaro e ripuliamo i metadati
-        keyMessage.RemoveName("data");
-        keyMessage.AddData("data", B_RAW_TYPE, plainData, outLen);
-        keyMessage.RemoveName("enc_nonce"); // Rimuove eventuali vecchi rimasugli simmetrici
-        keyMessage.SetBool("encrypted", false);
+	// 5. Eseguiamo la reale decifratura RSA asimmetrica
+	status_t result = B_OK;
+	if (EVP_PKEY_decrypt(ctx, plainData, &outLen, (const unsigned char*)encData, encLen) <= 0) {
+		fprintf(stderr, "[DEBUG CRYPTO-READ] ERRORE DI DECIFRATURA RSA: Chiave errata o dati alterati!\n");
+		ERR_print_errors_fp(stderr);
+		secure_memzero_server(plainData, outLen);
+		delete[] plainData;
+		result = B_BAD_DATA;
+	} else {
+		// La decifratura è riuscita!
+		fprintf(stderr, "[DEBUG CRYPTO-READ] DECIFRATURA RSA RIUSCITA! Dati recuperati (Len: %zu)\n", outLen);
+		
+		// 6. Aggiorniamo il BMessage con il testo in chiaro e ripuliamo i metadati
+		keyMessage.RemoveName("data");
+		keyMessage.AddData("data", B_RAW_TYPE, plainData, outLen);
+		keyMessage.RemoveName("enc_nonce"); // Rimuove eventuali vecchi rimasugli simmetrici
+		keyMessage.SetBool("encrypted", false);
 
-        secure_memzero_server(plainData, outLen);
-        delete[] plainData;
-    }
+		secure_memzero_server(plainData, outLen);
+		delete[] plainData;
+	}
 
-    // ==========================================================
-    // DISTRUZIONE IMMEDIATA DELLE CHIAVI DALLA MEMORIA VOLATILE
-    // ==========================================================
-    EVP_PKEY_CTX_free(ctx);
-    EVP_PKEY_free(privateKey); // <--- La chiave privata RSA non esiste più nella RAM del server
-    
-    //fprintf(stderr, "[DEBUG CRYPTO-READ] === FINE _DecryptKeyData (Memoria ripulita) ===\n");
-    return result;
+	// ==========================================================
+	// DISTRUZIONE IMMEDIATA DELLE CHIAVI DALLA MEMORIA VOLATILE
+	// ==========================================================
+	EVP_PKEY_CTX_free(ctx);
+	EVP_PKEY_free(privateKey); // <--- La chiave privata RSA non esiste più nella RAM del server
+	
+	//fprintf(stderr, "[DEBUG CRYPTO-READ] === FINE _DecryptKeyData (Memoria ripulita) ===\n");
+	return result;
 }
 
 EVP_PKEY*
 KeyStoreServer::_DecryptMasterPrivateKey()
 {
 	//LogDebug("[DEBUG] Inizio _DecryptMasterPrivateKey\n");
-    status_t sessionCheck = _GetOrAskSessionPassword();
-    
-    if (sessionCheck != B_OK || !fHasSessionPassword) {
-        LogDebug("[DEBUG] Sessione non sbloccata. sessionCheck: %d, fHasSessionPassword: %d\n", sessionCheck, fHasSessionPassword);
-        return NULL;
-    }
+	status_t sessionCheck = _GetOrAskSessionPassword();
+	
+	if (sessionCheck != B_OK || !fHasSessionPassword) {
+		LogDebug("[DEBUG] Sessione non sbloccata. sessionCheck: %d, fHasSessionPassword: %d\n", sessionCheck, fHasSessionPassword);
+		return NULL;
+	}
 
-    // ==========================================
-    // LIVELLO 1: Recupero Salt dallo Shadow per KDF
-    // ==========================================
-    uint8 shadowSalt[16];
-    status_t saltResult = _GetSalt(shadowSalt);
-    if (saltResult != B_OK) {
-        LogDebug("[DEBUG] _GetSalt fallito con errore: %d\n", saltResult);
-        return NULL;
-    }
-    
-    char saltHex[33];
-    for (int i = 0; i < 16; i++) sprintf(saltHex + i*2, "%02x", shadowSalt[i]);
-    LogDebug("[DEBUG] Salt letto per KDF: %s\n", saltHex);
+	// ==========================================
+	// LIVELLO 1: Recupero Salt dallo Shadow per KDF
+	// ==========================================
+	uint8 shadowSalt[16];
+	status_t saltResult = _GetSalt(shadowSalt);
+	if (saltResult != B_OK) {
+		LogDebug("[DEBUG] _GetSalt fallito con errore: %d\n", saltResult);
+		return NULL;
+	}
+	
+	char saltHex[33];
+	for (int i = 0; i < 16; i++) sprintf(saltHex + i*2, "%02x", shadowSalt[i]);
+	LogDebug("[DEBUG] Salt letto per KDF: %s\n", saltHex);
 
-    BPath settingsDir;
-    if (find_directory(B_USER_SETTINGS_DIRECTORY, &settingsDir) != B_OK) {
-        LogDebug("[DEBUG] find_directory settings fallito\n");
-        return NULL;
-    }
+	BPath settingsDir;
+	if (find_directory(B_USER_SETTINGS_DIRECTORY, &settingsDir) != B_OK) {
+		LogDebug("[DEBUG] find_directory settings fallito\n");
+		return NULL;
+	}
 
-    // Rigeneriamo la chiave AES-256 (1000 round SHA256 manuali con OpenSSL)
-    size_t passLen = fSessionPassword.Length();
-    size_t inputLen = passLen + 16;
-    //LogDebug("[DEBUG] passLen: %zu, inputLen: %zu\n", passLen, inputLen);
-    uint8_t* kdfInput = new(std::nothrow) uint8_t[inputLen];
-    if (kdfInput == NULL) return NULL;
+	// Rigeneriamo la chiave AES-256 (1000 round SHA256 manuali con OpenSSL)
+	size_t passLen = fSessionPassword.Length();
+	size_t inputLen = passLen + 16;
+	//LogDebug("[DEBUG] passLen: %zu, inputLen: %zu\n", passLen, inputLen);
+	uint8_t* kdfInput = new(std::nothrow) uint8_t[inputLen];
+	if (kdfInput == NULL) return NULL;
 
-    memcpy(kdfInput, fSessionPassword.String(), passLen);
-    memcpy(kdfInput + passLen, shadowSalt, 16);
+	memcpy(kdfInput, fSessionPassword.String(), passLen);
+	memcpy(kdfInput + passLen, shadowSalt, 16);
 
-    uint8_t aesKey[32];
-    unsigned int mdLen = 0;
-    
-    // Primo round
-    EVP_Digest(kdfInput, inputLen, aesKey, &mdLen, EVP_sha256(), NULL);
-    secure_memzero_server(kdfInput, inputLen);
-    delete[] kdfInput;
+	uint8_t aesKey[32];
+	unsigned int mdLen = 0;
+	
+	// Primo round
+	EVP_Digest(kdfInput, inputLen, aesKey, &mdLen, EVP_sha256(), NULL);
+	secure_memzero_server(kdfInput, inputLen);
+	delete[] kdfInput;
 
-    // Restanti 999 round
-    for (int i = 1; i < 1000; i++) {
-        EVP_Digest(aesKey, 32, aesKey, &mdLen, EVP_sha256(), NULL);
-    }
+	// Restanti 999 round
+	for (int i = 1; i < 1000; i++) {
+		EVP_Digest(aesKey, 32, aesKey, &mdLen, EVP_sha256(), NULL);
+	}
 
-    char aesKeyHex[65];
-    for (int i = 0; i < 32; i++) sprintf(aesKeyHex + i*2, "%02x", aesKey[i]);
-    //LogDebug("[DEBUG] aesKey derivata: %s\n", aesKeyHex);
+	char aesKeyHex[65];
+	for (int i = 0; i < 32; i++) sprintf(aesKeyHex + i*2, "%02x", aesKey[i]);
+	//LogDebug("[DEBUG] aesKey derivata: %s\n", aesKeyHex);
 
-    // ==========================================
-    // LIVELLO 2: Estrazione e Decifratura OpenSSL Nativa
-    // ==========================================
-    BPath keyPath(settingsDir.Path(), "system/keystore/master");
-    BFile keyFile(keyPath.Path(), B_READ_ONLY);
-    if (keyFile.InitCheck() != B_OK) {
-        LogDebug("[DEBUG] Apertura master file fallita: %s\n", strerror(keyFile.InitCheck()));
-        return NULL;
-    }
+	// ==========================================
+	// LIVELLO 2: Estrazione e Decifratura OpenSSL Nativa
+	// ==========================================
+	BPath keyPath(settingsDir.Path(), "system/keystore/master");
+	BFile keyFile(keyPath.Path(), B_READ_ONLY);
+	if (keyFile.InitCheck() != B_OK) {
+		LogDebug("[DEBUG] Apertura master file fallita: %s\n", strerror(keyFile.InitCheck()));
+		return NULL;
+	}
 
-    attr_info attrInfo;
-    if (keyFile.GetAttrInfo("crypto:private_key", &attrInfo) != B_OK) {
-        LogDebug("[DEBUG] GetAttrInfo fallito\n");
-        return NULL;
-    }
-    //LogDebug("[DEBUG] Dimensione attributo crypto:private_key: %lld\n", attrInfo.size);
+	attr_info attrInfo;
+	if (keyFile.GetAttrInfo("crypto:private_key", &attrInfo) != B_OK) {
+		LogDebug("[DEBUG] GetAttrInfo fallito\n");
+		return NULL;
+	}
+	//LogDebug("[DEBUG] Dimensione attributo crypto:private_key: %lld\n", attrInfo.size);
 
-    uint8_t* attrData = new(std::nothrow) uint8_t[attrInfo.size];
-    if (attrData == NULL) return NULL;
+	uint8_t* attrData = new(std::nothrow) uint8_t[attrInfo.size];
+	if (attrData == NULL) return NULL;
 
-    if (keyFile.ReadAttr("crypto:private_key", B_RAW_TYPE, 0, attrData, attrInfo.size) != attrInfo.size) {
-        LogDebug("[DEBUG] ReadAttr fallito\n");
-        delete[] attrData;
-        return NULL;
-    }
+	if (keyFile.ReadAttr("crypto:private_key", B_RAW_TYPE, 0, attrData, attrInfo.size) != attrInfo.size) {
+		LogDebug("[DEBUG] ReadAttr fallito\n");
+		delete[] attrData;
+		return NULL;
+	}
 
-    uint8_t iv[16];
-    memcpy(iv, attrData, 16);
-    size_t encPrivLen = attrInfo.size - 16;
-    uint8_t* encPriv = attrData + 16;
-    
-    char ivHex[33];
-    for (int i = 0; i < 16; i++) sprintf(ivHex + i*2, "%02x", iv[i]);
-    //LogDebug("[DEBUG] IV letto: %s\n", ivHex);
-    //LogDebug("[DEBUG] encPrivLen: %zu\n", encPrivLen);
+	uint8_t iv[16];
+	memcpy(iv, attrData, 16);
+	size_t encPrivLen = attrInfo.size - 16;
+	uint8_t* encPriv = attrData + 16;
+	
+	char ivHex[33];
+	for (int i = 0; i < 16; i++) sprintf(ivHex + i*2, "%02x", iv[i]);
+	//LogDebug("[DEBUG] IV letto: %s\n", ivHex);
+	//LogDebug("[DEBUG] encPrivLen: %zu\n", encPrivLen);
 
-    uint8_t* privDer = new(std::nothrow) uint8_t[encPrivLen];
-    if (privDer == NULL) {
-        delete[] attrData;
-        return NULL;
-    }
+	uint8_t* privDer = new(std::nothrow) uint8_t[encPrivLen];
+	if (privDer == NULL) {
+		delete[] attrData;
+		return NULL;
+	}
 
-    // --- DECIFRATURA DIRETTA CON EVP DI OPENSSL ---
-    EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
-    int len = 0;
-    int privLen = 0;
+	// --- DECIFRATURA DIRETTA CON EVP DI OPENSSL ---
+	EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+	int len = 0;
+	int privLen = 0;
 
-    EVP_DecryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, aesKey, iv);
-    // Abilitiamo il padding PKCS7 nativo di OpenSSL
-    EVP_CIPHER_CTX_set_padding(ctx, 1); 
+	EVP_DecryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, aesKey, iv);
+	// Abilitiamo il padding PKCS7 nativo di OpenSSL
+	EVP_CIPHER_CTX_set_padding(ctx, 1); 
 
-    if (EVP_DecryptUpdate(ctx, privDer, &len, encPriv, encPrivLen) != 1) {
-        LogDebug("[DEBUG] Errore in DecryptUpdate\n");
-    }
-    privLen = len;
+	if (EVP_DecryptUpdate(ctx, privDer, &len, encPriv, encPrivLen) != 1) {
+		LogDebug("[DEBUG] Errore in DecryptUpdate\n");
+	}
+	privLen = len;
 
-    if (EVP_DecryptFinal_ex(ctx, privDer + len, &len) != 1) {
-        LogDebug("[DEBUG] Errore in DecryptFinal (Padding non valido! Chiave errata?)\n");
-        privLen = -1;
-    } else {
-        privLen += len;
-    }
+	if (EVP_DecryptFinal_ex(ctx, privDer + len, &len) != 1) {
+		LogDebug("[DEBUG] Errore in DecryptFinal (Padding non valido! Chiave errata?)\n");
+		privLen = -1;
+	} else {
+		privLen += len;
+	}
 
-    EVP_CIPHER_CTX_free(ctx);
-    secure_memzero_server(aesKey, sizeof(aesKey));
-    delete[] attrData;
+	EVP_CIPHER_CTX_free(ctx);
+	secure_memzero_server(aesKey, sizeof(aesKey));
+	delete[] attrData;
 
-    if (privLen < 0) {
-        LogDebug("[DEBUG] Decrypt fallito, ritorno NULL\n");
-        secure_memzero_server(privDer, encPrivLen);
-        delete[] privDer;
-        return NULL;
-    }
+	if (privLen < 0) {
+		LogDebug("[DEBUG] Decrypt fallito, ritorno NULL\n");
+		secure_memzero_server(privDer, encPrivLen);
+		delete[] privDer;
+		return NULL;
+	}
 
-    //LogDebug("[DEBUG] Decifrato con successo! Output len: %d\n", privLen);
-    char derHex[13];
-    for (int i = 0; i < 4 && i < privLen; i++) sprintf(derHex + i*2, "%02x", privDer[i]);
-    //LogDebug("[DEBUG] Primi byte decifrati: %s\n", derHex);
+	//LogDebug("[DEBUG] Decifrato con successo! Output len: %d\n", privLen);
+	char derHex[13];
+	for (int i = 0; i < 4 && i < privLen; i++) sprintf(derHex + i*2, "%02x", privDer[i]);
+	//LogDebug("[DEBUG] Primi byte decifrati: %s\n", derHex);
 
-    // Proviamo a ricostruire la chiave
-    const unsigned char* p = privDer;
-    EVP_PKEY* privKey = d2i_PrivateKey(EVP_PKEY_RSA, NULL, &p, privLen);
-    if (privKey == NULL) {
-        LogDebug("[DEBUG] d2i_PrivateKey fallito\n");
-    } //else {
-    //    LogDebug("[DEBUG] EVP_PKEY ricostruito con successo!\n");
-    //}
+	// Proviamo a ricostruire la chiave
+	const unsigned char* p = privDer;
+	EVP_PKEY* privKey = d2i_PrivateKey(EVP_PKEY_RSA, NULL, &p, privLen);
+	if (privKey == NULL) {
+		LogDebug("[DEBUG] d2i_PrivateKey fallito\n");
+	} //else {
+	//	LogDebug("[DEBUG] EVP_PKEY ricostruito con successo!\n");
+	//}
 
-    secure_memzero_server(privDer, privLen);
-    delete[] privDer;
+	secure_memzero_server(privDer, privLen);
+	delete[] privDer;
 
-    return privKey;
+	return privKey;
 }
 
 int
