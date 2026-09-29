@@ -490,14 +490,18 @@ AVCodecDecoder::_NegotiateVideoOutputFormat(media_format* inOutFormat)
  * this is the original code:
 #if USE_SWS_FOR_COLOR_SPACE_CONVERSION
 	fOutputColorSpace = B_RGB32;
+	debug_printf("USE_SWS Uses only B_RGB32 color space\n");
 #else
 	// Make MediaPlayer happy (if not in rgb32 screen depth and no overlay,
 	// it will only ask for YCbCr, which DrawBitmap doesn't handle, so the
 	// default colordepth is RGB32).
 	if (inOutFormat->u.raw_video.display.format == B_YCbCr422)
 		fOutputColorSpace = B_YCbCr422;
+		debug_printf("Using B_YCbCr422 color space\n");
 	else
 		fOutputColorSpace = B_RGB32;
+		debug_printf("Using B_RGB32 color space\n");
+		
 #endif
 */
 /* questo funziona almeno per la mia sm750 */
