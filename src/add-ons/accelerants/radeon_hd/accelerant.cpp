@@ -43,6 +43,7 @@
 
 #define ERROR(x...) _sPrintf("radeon_hd: " x)
 
+#define CALLED() debug_printf("RADEON_HD_ACC: CALLED %s\n", __FUNCTION__)
 
 struct accelerant_info* gInfo;
 display_info* gDisplay[MAX_DISPLAY];
@@ -55,6 +56,7 @@ gpio_info* gGPIOInfo[MAX_GPIO_PINS];
 static status_t
 init_hardware_cursor(accelerant_info* info)
 {
+	CALLED();
     uint32 cursorSize = 64 * 64 * 4; // 16 KB (ARGB32)
     uint32 alignment = 4096;         // Allineamento richiesto dall'hardware AMD
 
@@ -94,6 +96,7 @@ init_hardware_cursor(accelerant_info* info)
 static status_t
 init_common(int device, bool isClone)
 {
+	CALLED();
 	// initialize global accelerant info structure
 
 	gInfo = (accelerant_info*)malloc(sizeof(accelerant_info));
@@ -242,6 +245,7 @@ uninit_common(void)
 status_t
 radeon_init_accelerant(int device)
 {
+	CALLED();
 	TRACE("%s enter\n", __func__);
 
 	status_t status = init_common(device, false);
@@ -342,6 +346,7 @@ radeon_uninit_accelerant(void)
 status_t
 radeon_get_accelerant_device_info(accelerant_device_info* di)
 {
+	CALLED();
 	radeon_shared_info &info = *gInfo->shared_info;
 
 	di->version = B_ACCELERANT_VERSION;

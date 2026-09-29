@@ -35,12 +35,13 @@ extern "C" void _sPrintf(const char* format, ...);
 #endif
 
 #define ERROR(x...) _sPrintf("radeon_hd: " x)
-
+#define CALLED() debug_printf("RADEON_HD_ACC: CALLED %s\n", __FUNCTION__)
 
 /*! Populate regs with device dependant register locations */
 status_t
 init_registers(register_info* regs, uint8 crtcID)
 {
+	CALLED();
 	memset(regs, 0, sizeof(register_info));
 
 	radeon_shared_info &info = *gInfo->shared_info;
@@ -219,6 +220,7 @@ init_registers(register_info* regs, uint8 crtcID)
 status_t
 detect_crt_ranges(uint32 crtid)
 {
+	CALLED();
 	edid1_info* edid = &gDisplay[crtid]->edidData;
 
 	// Scan each display EDID description for monitor ranges
@@ -244,6 +246,7 @@ detect_crt_ranges(uint32 crtid)
 status_t
 detect_displays()
 {
+	CALLED();
 	// reset known displays
 	for (uint32 id = 0; id < MAX_DISPLAY; id++) {
 		gDisplay[id]->attached = false;
@@ -430,6 +433,7 @@ debug_displays()
 uint32
 display_get_encoder_mode(uint32 connectorIndex)
 {
+	CALLED();
 	// Is external DisplayPort Bridge?
 	if (gConnector[connectorIndex]->encoderExternal.valid == true
 		&& gConnector[connectorIndex]->encoderExternal.isDPBridge == true) {
@@ -506,6 +510,7 @@ display_get_encoder_mode(uint32 connectorIndex)
 void
 display_crtc_lock(uint8 crtcID, int command)
 {
+	CALLED();
 	TRACE("%s\n", __func__);
 
 	ENABLE_CRTC_PS_ALLOCATION args;
@@ -524,6 +529,7 @@ display_crtc_lock(uint8 crtcID, int command)
 void
 display_crtc_blank(uint8 crtcID, int command)
 {
+	CALLED();
 	TRACE("%s\n", __func__);
 
 	BLANK_CRTC_PS_ALLOCATION args;
@@ -545,6 +551,7 @@ display_crtc_blank(uint8 crtcID, int command)
 void
 display_crtc_scale(uint8 crtcID, display_mode* mode)
 {
+	CALLED();
 	TRACE("%s\n", __func__);
 	ENABLE_SCALER_PS_ALLOCATION args;
 	int index = GetIndexIntoMasterTable(COMMAND, EnableScaler);
@@ -561,6 +568,7 @@ display_crtc_scale(uint8 crtcID, display_mode* mode)
 void
 display_crtc_dpms(uint8 crtcID, int mode)
 {
+	CALLED();
 	radeon_shared_info &info = *gInfo->shared_info;
 
 	switch (mode) {
@@ -593,6 +601,7 @@ display_crtc_dpms(uint8 crtcID, int mode)
 void
 display_dce45_crtc_load_lut(uint8 crtcID)
 {
+	CALLED();
 	radeon_shared_info &info = *gInfo->shared_info;
 	register_info* regs = gDisplay[crtcID]->regs;
 
@@ -658,6 +667,7 @@ display_dce45_crtc_load_lut(uint8 crtcID)
 void
 display_avivo_crtc_load_lut(uint8 crtcID)
 {
+	CALLED();
 	radeon_shared_info &info = *gInfo->shared_info;
 	register_info* regs = gDisplay[crtcID]->regs;
 
@@ -694,6 +704,7 @@ display_avivo_crtc_load_lut(uint8 crtcID)
 void
 display_crtc_fb_set(uint8 crtcID, display_mode* mode)
 {
+	CALLED();
 	radeon_shared_info &info = *gInfo->shared_info;
 	register_info* regs = gDisplay[crtcID]->regs;
 
@@ -902,6 +913,7 @@ display_crtc_fb_set(uint8 crtcID, display_mode* mode)
 void
 display_crtc_set(uint8 crtcID, display_mode* mode)
 {
+	CALLED();
 	display_timing& displayTiming = mode->timing;
 
 	TRACE("%s called to do %dx%d\n",
@@ -945,6 +957,7 @@ display_crtc_set(uint8 crtcID, display_mode* mode)
 void
 display_crtc_set_dtd(uint8 crtcID, display_mode* mode)
 {
+	CALLED();
 	display_timing& displayTiming = mode->timing;
 
 	TRACE("%s called to do %dx%d\n", __func__,
@@ -997,6 +1010,7 @@ display_crtc_set_dtd(uint8 crtcID, display_mode* mode)
 void
 display_crtc_ss(pll_info* pll, int command)
 {
+	CALLED();
 	TRACE("%s\n", __func__);
 	radeon_shared_info &info = *gInfo->shared_info;
 
@@ -1112,6 +1126,7 @@ display_crtc_ss(pll_info* pll, int command)
 void
 display_crtc_power(uint8 crtcID, int command)
 {
+	CALLED();
 	TRACE("%s\n", __func__);
 	int index = GetIndexIntoMasterTable(COMMAND, EnableCRTC);
 	ENABLE_CRTC_PS_ALLOCATION args;
@@ -1128,6 +1143,7 @@ display_crtc_power(uint8 crtcID, int command)
 void
 display_crtc_memreq(uint8 crtcID, int command)
 {
+	CALLED();
 	TRACE("%s\n", __func__);
 	int index = GetIndexIntoMasterTable(COMMAND, EnableCRTCMemReq);
 	ENABLE_CRTC_PS_ALLOCATION args;

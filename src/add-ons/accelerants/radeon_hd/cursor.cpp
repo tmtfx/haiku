@@ -5,6 +5,8 @@
 #include <Accelerant.h>
 #include <string.h>
 
+#define CALLED() debug_printf("RADEON_HD_ACC: CALLED %s\n", __FUNCTION__)
+
 // Helper macros to read/write registers provided by accelerant.h
 
 uint32 radeon_get_cursor_bits(void)
@@ -15,6 +17,7 @@ uint32 radeon_get_cursor_bits(void)
 status_t radeon_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
     color_space colorSpace, uint16 bytesPerRow, const uint8* bitmapData)
 {
+	CALLED();
     if (width > 64 || height > 64 || hotX >= width || hotY >= height)
         return B_ERROR;
 
@@ -145,6 +148,7 @@ status_t radeon_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint1
 
 void radeon_move_cursor(uint16 x, uint16 y)
 {
+	CALLED();
 	// Position register: high 16 = x, low 16 = y (match older drivers)
 	uint32 pos = ((uint32)x << 16) | (uint32)y;
 	Write32(OUT, EVERGREEN_CUR_POSITION, pos);
@@ -152,6 +156,7 @@ void radeon_move_cursor(uint16 x, uint16 y)
 
 void radeon_show_cursor(bool isVisible)
 {
+	CALLED();
 	uint32 control = Read32(OUT, EVERGREEN_CUR_CONTROL);
 	if (isVisible)
 		control |= EVERGREEN_CURSOR_EN;

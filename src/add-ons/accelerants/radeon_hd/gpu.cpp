@@ -30,11 +30,12 @@
 #endif
 
 #define ERROR(x...) _sPrintf("radeon_hd: " x)
-
+#define CALLED() debug_printf("RADEON_HD_ACC: CALLED %s\n", __FUNCTION__)
 
 status_t
 radeon_gpu_probe()
 {
+	CALLED();
 	uint8 tableMajor;
 	uint8 tableMinor;
 	uint16 tableOffset;
@@ -94,6 +95,7 @@ radeon_gpu_probe()
 status_t
 radeon_gpu_reset()
 {
+	CALLED();
 	radeon_shared_info &info = *gInfo->shared_info;
 
 	// Read GRBM Command Processor status
@@ -226,6 +228,7 @@ radeon_gpu_reset()
 status_t
 radeon_gpu_quirks()
 {
+	CALLED();
 	radeon_shared_info &info = *gInfo->shared_info;
 
 	// Fix PCIe power distribution issue for Polaris10 XT
@@ -245,6 +248,7 @@ status_t
 radeon_gpu_i2c_cmd(uint16 slaveAddr, uint16 lineNumber, uint8 offset,
 	uint8 data)
 {
+	CALLED();
 	TRACE("%s\n", __func__);
 
 	PROCESS_I2C_CHANNEL_TRANSACTION_PS_ALLOCATION args;
@@ -269,6 +273,7 @@ radeon_gpu_i2c_cmd(uint16 slaveAddr, uint16 lineNumber, uint8 offset,
 void
 radeon_gpu_mc_halt(gpu_state* gpuState)
 {
+	CALLED();
 	// Backup current memory controller state
 	gpuState->d1vgaControl = Read32(OUT, AVIVO_D1VGA_CONTROL);
 	gpuState->d2vgaControl = Read32(OUT, AVIVO_D2VGA_CONTROL);
@@ -293,6 +298,7 @@ radeon_gpu_mc_halt(gpu_state* gpuState)
 void
 radeon_gpu_mc_resume(gpu_state* gpuState)
 {
+	CALLED();
 	Write32(OUT, AVIVO_D1GRPH_PRIMARY_SURFACE_ADDRESS, gInfo->fb.vramStart);
 	Write32(OUT, AVIVO_D1GRPH_SECONDARY_SURFACE_ADDRESS, gInfo->fb.vramStart);
 	Write32(OUT, AVIVO_D2GRPH_PRIMARY_SURFACE_ADDRESS, gInfo->fb.vramStart);
@@ -320,6 +326,7 @@ radeon_gpu_mc_resume(gpu_state* gpuState)
 status_t
 radeon_gpu_mc_idlewait()
 {
+	CALLED();
 	uint32 idleStatus;
 
 	uint32 busyBits
@@ -356,6 +363,7 @@ radeon_gpu_mc_idlewait()
 static status_t
 radeon_gpu_mc_setup_r600()
 {
+	CALLED();
 	// HDP initialization
 	uint32 i;
 	uint32 j;
@@ -414,6 +422,7 @@ radeon_gpu_mc_setup_r600()
 static status_t
 radeon_gpu_mc_setup_r700()
 {
+	CALLED();
 	// HDP initialization
 	uint32 i;
 	uint32 j;
@@ -476,6 +485,7 @@ radeon_gpu_mc_setup_r700()
 static status_t
 radeon_gpu_mc_setup_evergreen()
 {
+	CALLED();
 	// HDP initialization
 	uint32 i;
 	uint32 j;
@@ -547,6 +557,7 @@ radeon_gpu_mc_setup_evergreen()
 void
 radeon_gpu_mc_init()
 {
+	CALLED();
 	radeon_shared_info &info = *gInfo->shared_info;
 
 	uint32 fbVMLocationReg;
@@ -578,6 +589,7 @@ radeon_gpu_mc_init()
 status_t
 radeon_gpu_mc_setup()
 {
+	CALLED();
 	radeon_shared_info &info = *gInfo->shared_info;
 
 	radeon_gpu_mc_init();
@@ -607,6 +619,7 @@ radeon_gpu_mc_setup()
 status_t
 radeon_gpu_ring_setup()
 {
+	CALLED();
 	TRACE("%s called\n", __func__);
 
 	// init GFX ring queue
@@ -627,6 +640,7 @@ radeon_gpu_ring_setup()
 status_t
 radeon_gpu_ring_boot(uint32 ringType)
 {
+	CALLED();
 	TRACE("%s called\n", __func__);
 
 	RingQueue* ring = gInfo->ringQueue[ringType];
@@ -764,6 +778,7 @@ radeon_gpu_ring_boot(uint32 ringType)
 status_t
 radeon_gpu_ss_control(pll_info* pll, bool enable)
 {
+	CALLED();
 	TRACE("%s called\n", __func__);
 
 	radeon_shared_info &info = *gInfo->shared_info;

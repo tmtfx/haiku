@@ -1149,6 +1149,7 @@ KeyStoreServer::_GetOrAskSessionPassword()
 	memcpy(input, passw, passLen);
 	memcpy(input + passLen, shadowSalt, 16); //saltLen); saltLen è sempre 16
 	
+	/* ho già inizializzato crypto prima, proviamo a riusarlo?
 	BCrypto crypto;
 	status_t err = crypto.InitCheck();
 	if (err != B_OK) {
@@ -1156,10 +1157,10 @@ KeyStoreServer::_GetOrAskSessionPassword()
 		delete[] input;
 		LogDebug("[DEBUG] BCrypto InitCheck fallito durante la validazione\n");
 		return err;
-	}
+	}*/
 
 	uint8 hash[64];
-	err = crypto.Digest(B_CRYPTO_BLAKE2B, input, inputLen, hash);
+	status_t err = crypto.Digest(B_CRYPTO_BLAKE2B, input, inputLen, hash);
 	secure_memzero_server(input, inputLen);
 	delete[] input; // Libera la memoria dinamica allocata
 

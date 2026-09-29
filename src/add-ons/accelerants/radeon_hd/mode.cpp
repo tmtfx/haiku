@@ -38,11 +38,12 @@ extern "C" void _sPrintf(const char* format, ...);
 #endif
 
 #define ERROR(x...) _sPrintf("radeon_hd: " x)
-
+#define CALLED() debug_printf("RADEON_HD_ACC: CALLED %s\n", __FUNCTION__)
 
 status_t
 create_mode_list(void)
 {
+	CALLED();
 	// TODO: multi-monitor?  for now we use VESA and not gDisplay edid
 	uint8 crtcID = 0;
 
@@ -110,6 +111,7 @@ radeon_get_preferred_mode(display_mode* preferredMode)
 status_t
 radeon_get_edid_info(void* info, size_t size, uint32* edid_version)
 {
+	CALLED();
 	// TODO: multi-monitor?  for now we use display 0
 	uint8 crtcID = 0;
 
@@ -141,6 +143,7 @@ radeon_dpms_capabilities(void)
 uint32
 radeon_dpms_mode(void)
 {
+	CALLED();
 	// TODO: this really isn't a good long-term solution
 	// we may need to look at the encoder dpms scratch registers
 	return gInfo->dpms_mode;
@@ -150,6 +153,7 @@ radeon_dpms_mode(void)
 void
 radeon_dpms_set(uint8 id, int mode)
 {
+	CALLED();
 	if (mode == B_DPMS_ON) {
 		display_crtc_dpms(id, mode);
 		encoder_dpms_set(id, mode);
@@ -164,6 +168,7 @@ radeon_dpms_set(uint8 id, int mode)
 void
 radeon_dpms_set_hook(int mode)
 {
+	CALLED();
 	// TODO: multi-monitor? 
 
 	uint8 crtcID = 0;
@@ -176,6 +181,7 @@ radeon_dpms_set_hook(int mode)
 status_t
 radeon_set_display_mode(display_mode* mode)
 {
+	CALLED();
 	// TODO: multi-monitor? For now we set the mode on
 	// the first display found.
 
@@ -267,6 +273,7 @@ radeon_set_display_mode(display_mode* mode)
 status_t
 radeon_get_display_mode(display_mode* _currentMode)
 {
+	CALLED();
 	TRACE("%s\n", __func__);
 
 	*_currentMode = gInfo->shared_info->current_mode;
@@ -278,6 +285,7 @@ radeon_get_display_mode(display_mode* _currentMode)
 status_t
 radeon_get_frame_buffer_config(frame_buffer_config* config)
 {
+	CALLED();
 	TRACE("%s\n", __func__);
 
 	config->frame_buffer = gInfo->shared_info->frame_buffer;
@@ -298,6 +306,7 @@ radeon_get_frame_buffer_config(frame_buffer_config* config)
 status_t
 radeon_get_pixel_clock_limits(display_mode* mode, uint32* _low, uint32* _high)
 {
+	CALLED();
 	TRACE("%s\n", __func__);
 
 	if (_low != NULL) {
@@ -326,6 +335,7 @@ radeon_get_pixel_clock_limits(display_mode* mode, uint32* _low, uint32* _high)
 bool
 is_mode_supported(display_mode* mode)
 {
+	CALLED();
 	bool sane = true;
 
 	// Validate modeline is within a sane range
@@ -378,6 +388,7 @@ is_mode_supported(display_mode* mode)
 status_t
 is_mode_sane(display_mode* mode)
 {
+	CALLED();
 	// horizontal timing
 	// validate h_sync_start is less then h_sync_end
 	if (mode->timing.h_sync_start > mode->timing.h_sync_end) {
@@ -428,6 +439,7 @@ is_mode_sane(display_mode* mode)
 uint32
 get_mode_bpp(display_mode* mode)
 {
+	CALLED();
 	// Get bitsPerPixel for given mode
 
 	switch (mode->space) {
@@ -450,6 +462,7 @@ get_mode_bpp(display_mode* mode)
 static uint32_t
 radeon_get_backlight_register()
 {
+	CALLED();
 	// R600 and up is 0x172c else its 0x0018
 	if (gInfo->shared_info->chipsetID >= RADEON_R600)
 		return 0x172c;
@@ -460,6 +473,7 @@ radeon_get_backlight_register()
 status_t
 radeon_set_brightness(float brightness)
 {
+	CALLED();
 	TRACE("%s (%f)\n", __func__, brightness);
 
 	if (brightness < 0 || brightness > 1)
@@ -496,6 +510,7 @@ radeon_set_brightness(float brightness)
 status_t
 radeon_get_brightness(float* brightness)
 {
+	CALLED();
 	TRACE("%s\n", __func__);
 
 	if (brightness == NULL)
