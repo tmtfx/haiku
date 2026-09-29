@@ -58,14 +58,23 @@ BttvProducer::BttvProducer(BMediaAddOn* addOn, const char* name, int32 internalI
 	fOutput = media_output();
 	memset(&fConnectedFormat, 0, sizeof(fConnectedFormat));
 	memset(&fCaptureFormat, 0, sizeof(fCaptureFormat));
+	memset(&fCardInfo, 0, sizeof(fCardInfo));
 
 	fInitStatus = _OpenDriver();
 	if (fInitStatus != B_OK)
 		return;
 
+	if (ioctl(fDriverFD, BTV_GET_CARD_INFO, &fCardInfo, sizeof(fCardInfo)) < 0) {
+		memset(&fCardInfo, 0, sizeof(fCardInfo));
+		fCardInfo.capabilities = BTV_CAP_VIDEO_CAPTURE | BTV_CAP_HAS_COMPOSITE;
+		fCardInfo.video_inputs = 2;
+	}
+
 	fInitStatus = _RefreshCaptureFormat();
 	if (fInitStatus != B_OK)
 		return;
+
+	fCaptureFormat.input = BTV_INPUT_COMPOSITE;
 
 	fInitStatus = _ApplyCaptureFormat();
 	if (fInitStatus != B_OK)
@@ -118,10 +127,12 @@ BttvProducer::AddOn(int32* internalID) const
 status_t
 BttvProducer::HandleMessage(int32 message, const void* data, size_t size)
 {
-	(void)message;
-	(void)data;
-	(void)size;
-	return B_ERROR;
+	if (BBufferProducer::HandleMessage(message, data, size) == B_OK)
+		return B_OK;
+	if (BControllable::HandleMessage(message, data, size) == B_OK)
+		return B_OK;
+
+	return BMediaNode::HandleMessage(message, data, size);
 }
 
 
@@ -728,7 +739,6 @@ status_t
 BttvProducer::_ApplyCaptureFormat(const bttv_capture_format& format)
 {
 	bttv_capture_format desiredFormat = format;
-	desiredFormat.input = BTV_INPUT_COMPOSITE;
 	desiredFormat.pixel_format = BTV_PIXEL_FORMAT_YUY2;
 
 	if (ioctl(fDriverFD, BTV_SET_CAPTURE_FORMAT, &desiredFormat,
@@ -779,7 +789,12 @@ BttvProducer::_CreateParameterWeb()
 	BDiscreteParameter* input = controls->MakeDiscreteParameter(P_INPUT,
 		B_MEDIA_NO_TYPE, "Input", B_INPUT_MUX);
 	input->AddItem(BTV_INPUT_COMPOSITE, "Composite");
-	input->AddItem(BTV_INPUT_TUNER, "Tuner");
+
+	if ((fCardInfo.capabilities & BTV_CAP_HAS_TUNER) != 0)
+		input->AddItem(BTV_INPUT_TUNER, "Tuner (Analog)");
+
+	if ((fCardInfo.capabilities & BTV_CAP_HAS_SVIDEO) != 0)
+		input->AddItem(BTV_INPUT_SVIDEO, "S-Video");
 
 	BDiscreteParameter* standard = controls->MakeDiscreteParameter(P_STANDARD,
 		B_MEDIA_NO_TYPE, "Standard", B_VIDEO_FORMAT);
@@ -845,7 +860,11 @@ status_t
 BttvProducer::_ApplyCaptureSettings(uint32 input, uint32 standard,
 	uint32 resolution)
 {
-	if (input != BTV_INPUT_COMPOSITE && input != BTV_INPUT_TUNER)
+	if (input == BTV_INPUT_SVIDEO && (fCardInfo.capabilities & BTV_CAP_HAS_SVIDEO) == 0)
+		return B_BAD_VALUE;
+	if (fCardInfo.video_inputs > 0 && input >= fCardInfo.video_inputs)
+		return B_BAD_VALUE;
+	if (input != BTV_INPUT_COMPOSITE && input != BTV_INPUT_TUNER && input != BTV_INPUT_SVIDEO)
 		return B_BAD_VALUE;
 	if (standard != BTV_STD_PAL && standard != BTV_STD_NTSC)
 		return B_BAD_VALUE;
@@ -980,7 +999,6 @@ BttvProducer::_SpecializeFormat(media_format* format,
 	captureFormat->frame_size = captureFormat->bytes_per_line * requestedHeight;
 	captureFormat->pixel_format = BTV_PIXEL_FORMAT_YUY2;
 	captureFormat->video_standard = requestedStandard;
-	captureFormat->input = BTV_INPUT_COMPOSITE;
 
 	format->type = B_MEDIA_RAW_VIDEO;
 	format->u.raw_video = media_raw_video_format::wildcard;

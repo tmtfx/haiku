@@ -12,7 +12,8 @@ enum {
 
 enum {
 	BTV_INPUT_TUNER = 0,
-	BTV_INPUT_COMPOSITE = 1
+	BTV_INPUT_COMPOSITE = 1,
+	BTV_INPUT_SVIDEO = 2
 };
 
 enum {
@@ -30,12 +31,18 @@ enum {
 	BTV_SET_CONTROLS
 };
 
+#define BTV_CAP_VIDEO_CAPTURE	0x00000001U
+#define BTV_CAP_HAS_TUNER		0x00000002U
+#define BTV_CAP_HAS_COMPOSITE	0x00000004U
+#define BTV_CAP_HAS_SVIDEO		0x00000008U
+
 typedef struct bttv_card_info {
 	uint16	vendor_id;
 	uint16	device_id;
 	uint16	subsystem_vendor_id;
 	uint16	subsystem_device_id;
 	uint32	capabilities;
+	uint32	video_inputs;
 	char	card_name[32];
 	char	device_name[64];
 } bttv_card_info;
@@ -56,7 +63,5 @@ typedef struct bttv_video_controls {
 	int32	saturation;
 	int32	hue;
 } bttv_video_controls;
-
-#define BTV_CAP_VIDEO_CAPTURE	0x00000001U
 
 #endif

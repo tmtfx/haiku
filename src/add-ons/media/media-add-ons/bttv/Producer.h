@@ -176,6 +176,7 @@ private:
 			uint32				fSelectedInput;
 			uint32				fSelectedStandard;
 			uint32				fResolutionPreset;
+			bttv_card_info		fCardInfo;
 			bttv_video_controls	fControls;
 			bigtime_t			fInputLastChange;
 			bigtime_t			fStandardLastChange;
