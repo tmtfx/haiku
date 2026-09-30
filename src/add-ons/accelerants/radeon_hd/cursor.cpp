@@ -5,7 +5,7 @@
 #include <Accelerant.h>
 #include <string.h>
 
-#define CALLED() debug_printf("RADEON_HD_ACC: CALLED %s\n", __FUNCTION__)
+#define CALLED() LogDebug("RADEON_HD_ACC: CALLED %s\n", __FUNCTION__)
 
 // Helper macros to read/write registers provided by accelerant.h
 

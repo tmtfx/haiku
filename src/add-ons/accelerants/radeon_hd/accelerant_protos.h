@@ -58,6 +58,8 @@ uint32 radeon_get_cursor_bits(void);
 void radeon_move_cursor(uint16 x, uint16 y);
 void radeon_show_cursor(bool isVisible);
 
+// debug
+void LogDebug(const char* format, ...) __attribute__((format(printf, 1, 2)));
 
 #ifdef __cplusplus
 }

@@ -43,7 +43,7 @@
 
 #define ERROR(x...) _sPrintf("radeon_hd: " x)
 
-#define CALLED() debug_printf("RADEON_HD_ACC: CALLED %s\n", __FUNCTION__)
+#define CALLED() LogDebug("RADEON_HD_ACC: CALLED %s\n", __FUNCTION__)
 
 struct accelerant_info* gInfo;
 display_info* gDisplay[MAX_DISPLAY];

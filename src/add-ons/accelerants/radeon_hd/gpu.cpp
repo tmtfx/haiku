@@ -30,7 +30,7 @@
 #endif
 
 #define ERROR(x...) _sPrintf("radeon_hd: " x)
-#define CALLED() debug_printf("RADEON_HD_ACC: CALLED %s\n", __FUNCTION__)
+#define CALLED() LogDebug("RADEON_HD_ACC: CALLED %s\n", __FUNCTION__)
 
 status_t
 radeon_gpu_probe()

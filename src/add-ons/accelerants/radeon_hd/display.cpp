@@ -35,7 +35,7 @@ extern "C" void _sPrintf(const char* format, ...);
 #endif
 
 #define ERROR(x...) _sPrintf("radeon_hd: " x)
-#define CALLED() debug_printf("RADEON_HD_ACC: CALLED %s\n", __FUNCTION__)
+#define CALLED() LogDebug("RADEON_HD_ACC: CALLED %s\n", __FUNCTION__)
 
 /*! Populate regs with device dependant register locations */
 status_t
