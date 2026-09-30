@@ -422,39 +422,9 @@ encoder_mode_set(uint8 crtcID)
 		case ENCODER_OBJECT_ID_INTERNAL_UNIPHY:
 		case ENCODER_OBJECT_ID_INTERNAL_UNIPHY1:
 		case ENCODER_OBJECT_ID_INTERNAL_UNIPHY2:
+		case ENCODER_OBJECT_ID_INTERNAL_UNIPHY3:
 		case ENCODER_OBJECT_ID_INTERNAL_KLDSCP_LVTMA:
-			if ((info.chipsetFlags & CHIP_APU) != 0
-				|| info.dceMajor >= 5) {
-				// Setup DIG encoder
-				encoder_dig_setup(connectorIndex, pixelClock,
-					ATOM_ENCODER_CMD_SETUP);
-				encoder_dig_setup(connectorIndex, pixelClock,
-					ATOM_ENCODER_CMD_SETUP_PANEL_MODE);
-			} else if (info.dceMajor >= 4) {
-				// Disable DIG transmitter
-				transmitter_dig_setup(connectorIndex, pixelClock, 0, 0,
-					ATOM_TRANSMITTER_ACTION_DISABLE);
-				// Setup DIG encoder
-				encoder_dig_setup(connectorIndex, pixelClock,
-					ATOM_ENCODER_CMD_SETUP);
-				// Enable DIG transmitter
-				transmitter_dig_setup(connectorIndex, pixelClock, 0, 0,
-					ATOM_TRANSMITTER_ACTION_ENABLE);
-			} else {
-				// Disable DIG transmitter
-				transmitter_dig_setup(connectorIndex, pixelClock, 0, 0,
-					ATOM_TRANSMITTER_ACTION_DISABLE);
-				// Disable DIG encoder
-				encoder_dig_setup(connectorIndex, pixelClock, ATOM_DISABLE);
-				// Enable the DIG encoder
-				encoder_dig_setup(connectorIndex, pixelClock, ATOM_ENABLE);
-
-				// Setup and enable DIG transmitter
-				transmitter_dig_setup(connectorIndex, pixelClock, 0, 0,
-					ATOM_TRANSMITTER_ACTION_SETUP);
-				transmitter_dig_setup(connectorIndex, pixelClock, 0, 0,
-					ATOM_TRANSMITTER_ACTION_ENABLE);
-			}
+			// Handled in DPMS (see encoder_dpms_set_dig)
 			break;
 		case ENCODER_OBJECT_ID_INTERNAL_DDI:
 		case ENCODER_OBJECT_ID_INTERNAL_DVO1:
@@ -871,7 +841,7 @@ encoder_dig_setup(uint32 connectorIndex, uint32 pixelClock, int command)
 					else
 						args.v5.asStreamParam.ucLaneNum = 4;
 					args.v5.asStreamParam.ulPixelClock
-						= B_HOST_TO_LENDIAN_INT16(pixelClock / 10);
+						= B_HOST_TO_LENDIAN_INT32(pixelClock / 10);
 					args.v5.asStreamParam.ucBitPerColor = encoder_get_bpc();
 					args.v5.asStreamParam.ucLinkRateIn270Mhz = dpClock / 27000;
 					break;
@@ -905,6 +875,22 @@ encoder_dig_setup(uint32 connectorIndex, uint32 pixelClock, int command)
 	#endif
 
 	return result;
+}
+
+
+status_t
+encoder_edp_panel_power(uint32 connectorIndex, int action)
+{
+	TRACE("%s: connector %" B_PRIu32 " action %d\n", __func__,
+		connectorIndex, action);
+
+	int index = GetIndexIntoMasterTable(COMMAND, UNIPHYTransmitterControl);
+	DIG_TRANSMITTER_CONTROL_PS_ALLOCATION args;
+	memset(&args, 0, sizeof(args));
+
+	args.ucAction = action;
+
+	return atom_execute_table(gAtomContext, index, (uint32*)&args);
 }
 
 
@@ -2021,9 +2007,13 @@ encoder_dpms_set_dig(uint8 crtcID, int mode)
 			}
 
 			if (connector->type == VIDEO_CONNECTOR_EDP) {
-				// TODO: If VIDEO_CONNECTOR_EDP, ATOM_TRANSMITTER_ACTION_POWER_ON
-				ERROR("%s: TODO, edp_panel_power!\n",
-					__func__);
+				encoder_edp_panel_power(connectorIndex,
+					ATOM_TRANSMITTER_ACTION_POWER_ON);
+			}
+
+			if (info.dceMajor >= 6) {
+				encoder_dig_setup(connectorIndex, pll->pixelClock,
+					ATOM_ENCODER_CMD_SETUP);
 			}
 
 			// Enable transmitter
@@ -2088,8 +2078,8 @@ encoder_dpms_set_dig(uint8 crtcID, int mode)
 						__func__);
 				}
 				if (connector->type == VIDEO_CONNECTOR_EDP) {
-					// TODO: ATOM_TRANSMITTER_ACTION_POWER_OFF
-					ERROR("%s: TODO, edp_panel_power!\n", __func__);
+					encoder_edp_panel_power(connectorIndex,
+						ATOM_TRANSMITTER_ACTION_POWER_OFF);
 				}
 			}
 			break;

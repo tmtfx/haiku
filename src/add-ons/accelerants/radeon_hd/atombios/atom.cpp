@@ -688,22 +688,21 @@ atom_op_jump(atom_exec_context *ctx, int *ptr, int arg)
 		execute? "yes" : "no", target);
 
 	if (execute) {
-		// Time based jmp timeout
-		if (ctx->lastJump == (ctx->start + target)) {
-			bigtime_t loopDuration = system_time() - ctx->jumpStart;
-			if (loopDuration > ATOM_OP_JMP_TIMEOUT * 1000000) {
-				ERROR("%s: Error: AtomBIOS stuck in loop for more then %d "
-					"seconds. (%" B_PRIu32 " identical jmp op's)\n", __func__,
+		int newPtr = ctx->start + target;
+		// Backward jump indicates a loop
+		if (newPtr <= *ptr) {
+			if (ctx->jumpStart == 0)
+				ctx->jumpStart = system_time();
+			else if (system_time() - ctx->jumpStart > ATOM_OP_JMP_TIMEOUT * 1000000) {
+				ERROR("%s: Error: AtomBIOS stuck in loop for more than %d "
+					"seconds. (%" B_PRIu32 " backward jumps)\n", __func__,
 					ATOM_OP_JMP_TIMEOUT, ctx->lastJumpCount);
 				ctx->abort = true;
-			} else
-				ctx->lastJumpCount++;
-		} else {
-			ctx->jumpStart = system_time();
-			ctx->lastJump = ctx->start + target;
-			ctx->lastJumpCount = 1;
+			}
+			ctx->lastJumpCount++;
 		}
-		*ptr = ctx->start + target;
+		ctx->lastJump = newPtr;
+		*ptr = newPtr;
 	}
 }
 
@@ -1231,7 +1230,18 @@ atom_execute_table_locked(atom_context *ctx, int index, uint32 * params)
 		ectx.ws = NULL;
 
 	debug_depth++;
+	bigtime_t startTime = system_time();
+	uint32 opCount = 0;
 	while (1) {
+		opCount++;
+		if ((opCount & 0x1ff) == 0) {
+			if (system_time() - startTime > 2000000) {
+				ERROR("%s: Error: AtomBIOS table execution timed out (>2s)!\n",
+					__func__);
+				ectx.abort = true;
+			}
+		}
+
 		op = CU8(ptr++);
 		const char* operationName;
 

@@ -194,6 +194,7 @@ radeon_set_display_mode(display_mode* mode)
 	TRACE("  mode->flags: %#" B_PRIx32 "\n", mode->flags);
 
 	uint8 crtcID = 0;
+	radeon_shared_info &info = *gInfo->shared_info;
 
 	if (gDisplay[crtcID]->attached == false)
 		return B_ERROR;
@@ -212,6 +213,8 @@ radeon_set_display_mode(display_mode* mode)
 
 	// *** crtc and encoder prep
 	encoder_output_lock(true);
+	if (info.dceMajor >= 6)
+		display_crtc_powergate(crtcID, ATOM_DISABLE);
 	display_crtc_lock(crtcID, ATOM_ENABLE);
 	radeon_dpms_set(crtcID, B_DPMS_OFF);
 
@@ -235,10 +238,14 @@ radeon_set_display_mode(display_mode* mode)
 	// *** encoder mode set
 	encoder_mode_set(crtcID);
 
-	// *** encoder and CRT controller commit
-	radeon_dpms_set(crtcID, B_DPMS_ON);
+	// *** CRT controller commit
+	display_crtc_dpms(crtcID, B_DPMS_ON);
 	display_crtc_lock(crtcID, ATOM_DISABLE);
+
+	// *** encoder commit
+	encoder_dpms_set(crtcID, B_DPMS_ON);
 	encoder_output_lock(false);
+	gInfo->dpms_mode = B_DPMS_ON;
 
 	#ifdef TRACE_MODE
 	// for debugging
