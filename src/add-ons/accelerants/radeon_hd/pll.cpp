@@ -33,6 +33,7 @@ extern "C" void _sPrintf(const char* format, ...);
 #endif
 
 #define ERROR(x...) _sPrintf("radeon_hd: " x)
+#define CALLED() LogDebug("RADEON_HD_ACC: CALLED %s\n", __FUNCTION__)
 
 // Pixel Clock Storage
 // kHz			Value			Result
@@ -70,6 +71,7 @@ extern "C" void _sPrintf(const char* format, ...);
 status_t
 pll_limit_probe(pll_info* pll)
 {
+	CALLED();
 	uint8 tableMajor;
 	uint8 tableMinor;
 	uint16 tableOffset;
@@ -162,6 +164,7 @@ pll_limit_probe(pll_info* pll)
 status_t
 pll_ppll_ss_probe(pll_info* pll, uint32 ssID)
 {
+	CALLED();
 	uint8 tableMajor;
 	uint8 tableMinor;
 	uint16 headerOffset;
@@ -206,6 +209,7 @@ pll_ppll_ss_probe(pll_info* pll, uint32 ssID)
 status_t
 pll_asic_ss_probe(pll_info* pll, uint32 ssID)
 {
+	CALLED();
 	uint8 tableMajor;
 	uint8 tableMinor;
 	uint16 headerOffset;
@@ -344,6 +348,7 @@ pll_asic_ss_probe(pll_info* pll, uint32 ssID)
 void
 pll_compute_post_divider(pll_info* pll)
 {
+	CALLED();
 	if ((pll->flags & PLL_USE_POST_DIV) != 0) {
 		TRACE("%s: using AtomBIOS post divider\n", __func__);
 		return;
@@ -392,6 +397,7 @@ pll_compute_post_divider(pll_info* pll)
 status_t
 pll_compute(pll_info* pll)
 {
+	CALLED();
 	radeon_shared_info &info = *gInfo->shared_info;
 
 	pll_compute_post_divider(pll);
@@ -539,6 +545,7 @@ pll_compute(pll_info* pll)
 void
 pll_setup_flags(pll_info* pll, uint8 crtcID)
 {
+	CALLED();
 	radeon_shared_info &info = *gInfo->shared_info;
 	uint32 connectorIndex = gDisplay[crtcID]->connectorIndex;
 	uint32 connectorFlags = gConnector[connectorIndex]->flags;
@@ -594,6 +601,7 @@ pll_setup_flags(pll_info* pll, uint8 crtcID)
 status_t
 pll_adjust(pll_info* pll, display_mode* mode, uint8 crtcID)
 {
+	CALLED();
 	radeon_shared_info &info = *gInfo->shared_info;
 
 	uint32 pixelClock = pll->pixelClock;
@@ -745,6 +753,7 @@ pll_adjust(pll_info* pll, display_mode* mode, uint8 crtcID)
 status_t
 pll_set(display_mode* mode, uint8 crtcID)
 {
+	CALLED();
 	uint32 connectorIndex = gDisplay[crtcID]->connectorIndex;
 	uint32 encoderMode = display_get_encoder_mode(connectorIndex);
 	pll_info* pll = &gConnector[connectorIndex]->encoder.pll;
@@ -1000,6 +1009,7 @@ pll_set(display_mode* mode, uint8 crtcID)
 status_t
 pll_set_external(uint32 clock)
 {
+	CALLED();
 	TRACE("%s: set external pll clock to %" B_PRIu32 "\n", __func__, clock);
 
 	if (clock == 0)
@@ -1073,6 +1083,7 @@ pll_set_external(uint32 clock)
 status_t
 pll_set_dce(uint32 clock, uint8 clockType, uint8 clockSource)
 {
+	CALLED();
 	TRACE("%s: set external pll clock to %" B_PRIu32 "\n", __func__, clock);
 
 	if (clock == 0)
@@ -1127,6 +1138,7 @@ pll_set_dce(uint32 clock, uint8 clockType, uint8 clockSource)
 void
 pll_external_init()
 {
+	CALLED();
 	radeon_shared_info &info = *gInfo->shared_info;
 
 	if (info.dceMajor >= 12) {
@@ -1159,6 +1171,7 @@ pll_external_init()
 uint32
 pll_usage_mask()
 {
+	CALLED();
 	uint32 pllMask = 0;
 	for (uint32 id = 0; id < ATOM_MAX_SUPPORTED_DEVICE; id++) {
 		if (gConnector[id]->valid == true) {
@@ -1179,6 +1192,7 @@ pll_usage_mask()
 uint32
 pll_usage_count(uint32 pllID)
 {
+	CALLED();
 	uint32 pllCount = 0;
 	for (uint32 id = 0; id < ATOM_MAX_SUPPORTED_DEVICE; id++) {
 		if (gConnector[id]->valid == true) {
@@ -1200,6 +1214,7 @@ pll_usage_count(uint32 pllID)
 uint32
 pll_shared_dp()
 {
+	CALLED();
 	for (uint32 id = 0; id < ATOM_MAX_SUPPORTED_DEVICE; id++) {
 		if (gConnector[id]->valid == true) {
 			if (connector_is_dp(id)) {
@@ -1220,6 +1235,7 @@ pll_shared_dp()
 uint32
 pll_next_available()
 {
+	CALLED();
 	radeon_shared_info &info = *gInfo->shared_info;
 	uint32 dceVersion = (info.dceMajor * 100) + info.dceMinor;
 
@@ -1247,6 +1263,7 @@ pll_next_available()
 status_t
 pll_pick(uint32 connectorIndex)
 {
+	CALLED();
 	pll_info* pll = &gConnector[connectorIndex]->encoder.pll;
 	radeon_shared_info &info = *gInfo->shared_info;
 	uint32 dceVersion = (info.dceMajor * 100) + info.dceMinor;

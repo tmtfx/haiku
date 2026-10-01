@@ -33,6 +33,7 @@ extern "C" void _sPrintf(const char* format, ...);
 #endif
 
 #define ERROR(x...) _sPrintf("radeon_hd: " x)
+#define CALLED() LogDebug("RADEON_HD_ACC: CALLED %s\n", __FUNCTION__)
 
 
 static uint32
@@ -61,7 +62,8 @@ encoder_get_bpc()
 void
 encoder_init()
 {
-	TRACE("%s: called\n", __func__);
+	CALLED();
+	//TRACE("%s: called\n", __func__);
 	radeon_shared_info &info = *gInfo->shared_info;
 
 	for (uint32 id = 0; id < ATOM_MAX_SUPPORTED_DEVICE; id++) {
@@ -93,7 +95,8 @@ encoder_init()
 void
 encoder_assign_crtc(uint8 crtcID)
 {
-	TRACE("%s\n", __func__);
+	//TRACE("%s\n", __func__);
+	CALLED();
 
 	int index = GetIndexIntoMasterTable(COMMAND, SelectCRTC_Source);
 
@@ -315,6 +318,7 @@ encoder_assign_crtc(uint8 crtcID)
 uint32
 encoder_pick_dig(uint32 connectorIndex)
 {
+	CALLED();
 	TRACE("%s: connector %" B_PRIu32 "\n", __func__, connectorIndex);
 	radeon_shared_info &info = *gInfo->shared_info;
 	uint32 encoderID = gConnector[connectorIndex]->encoder.objectID;
@@ -368,6 +372,7 @@ encoder_pick_dig(uint32 connectorIndex)
 void
 encoder_apply_quirks(uint8 crtcID)
 {
+	CALLED();
 	TRACE("%s: display %" B_PRIu8 "\n", __func__, crtcID);
 	radeon_shared_info &info = *gInfo->shared_info;
 	register_info* regs = gDisplay[crtcID]->regs;
@@ -387,6 +392,7 @@ encoder_apply_quirks(uint8 crtcID)
 void
 encoder_mode_set(uint8 crtcID)
 {
+	CALLED();
 	TRACE("%s: display %" B_PRIu8 "\n", __func__, crtcID);
 	radeon_shared_info &info = *gInfo->shared_info;
 	uint32 connectorIndex = gDisplay[crtcID]->connectorIndex;
@@ -450,6 +456,7 @@ encoder_mode_set(uint8 crtcID)
 status_t
 encoder_tv_setup(uint32 connectorIndex, uint32 pixelClock, int command)
 {
+	CALLED();
 	TRACE("%s: connector %" B_PRIu32 ", pixelClock: %" B_PRIu32 "\n", __func__,
 		connectorIndex, pixelClock);
 
@@ -478,6 +485,7 @@ encoder_tv_setup(uint32 connectorIndex, uint32 pixelClock, int command)
 status_t
 encoder_digital_setup(uint32 connectorIndex, uint32 pixelClock, int command)
 {
+	CALLED();
 	TRACE("%s: connector %" B_PRIu32 ", pixelClock: %" B_PRIu32 "\n", __func__,
 		connectorIndex, pixelClock);
 
@@ -618,6 +626,7 @@ encoder_digital_setup(uint32 connectorIndex, uint32 pixelClock, int command)
 status_t
 encoder_dig_setup(uint32 connectorIndex, uint32 pixelClock, int command)
 {
+	CALLED();
 	TRACE("%s\n", __func__);
 
 	radeon_shared_info &info = *gInfo->shared_info;
@@ -881,6 +890,7 @@ encoder_dig_setup(uint32 connectorIndex, uint32 pixelClock, int command)
 status_t
 encoder_edp_panel_power(uint32 connectorIndex, int action)
 {
+	CALLED();
 	TRACE("%s: connector %" B_PRIu32 " action %d\n", __func__,
 		connectorIndex, action);
 
@@ -897,6 +907,7 @@ encoder_edp_panel_power(uint32 connectorIndex, int action)
 status_t
 encoder_external_setup(uint32 connectorIndex, int command)
 {
+	CALLED();
 	TRACE("%s: connector %" B_PRIu32 "\n", __func__, connectorIndex);
 
 	encoder_info* encoder
@@ -1067,6 +1078,7 @@ encoder_external_setup(uint32 connectorIndex, int command)
 status_t
 encoder_analog_setup(uint32 connectorIndex, uint32 pixelClock, int command)
 {
+	CALLED();
 	TRACE("%s: connector %" B_PRIu32 ", pixelClock: %" B_PRIu32 "\n", __func__,
 		connectorIndex, pixelClock);
 
@@ -1113,6 +1125,7 @@ encoder_analog_setup(uint32 connectorIndex, uint32 pixelClock, int command)
 bool
 encoder_analog_load_detect(uint32 connectorIndex)
 {
+	CALLED();
 	TRACE("%s: connector %" B_PRIu32 "\n", __func__, connectorIndex);
 
 	if (gConnector[connectorIndex]->encoderExternal.valid == true)
@@ -1125,6 +1138,7 @@ encoder_analog_load_detect(uint32 connectorIndex)
 bool
 encoder_dac_load_detect(uint32 connectorIndex)
 {
+	CALLED();
 	TRACE("%s: connector %" B_PRIu32 "\n", __func__, connectorIndex);
 
 	uint32 connectorFlags = gConnector[connectorIndex]->flags;
@@ -1220,6 +1234,7 @@ encoder_dac_load_detect(uint32 connectorIndex)
 bool
 encoder_dig_load_detect(uint32 connectorIndex)
 {
+	CALLED();
 	TRACE("%s: connector %" B_PRIu32 "\n", __func__, connectorIndex);
 	radeon_shared_info &info = *gInfo->shared_info;
 
@@ -1261,6 +1276,7 @@ status_t
 transmitter_dig_setup(uint32 connectorIndex, uint32 pixelClock,
 	uint8 laneNumber, uint8 laneSet, int command)
 {
+	CALLED();
 	TRACE("%s: connector %" B_PRIu32 ", pixelClock: %" B_PRIu32 "\n", __func__,
 		connectorIndex, pixelClock);
 
@@ -1753,6 +1769,7 @@ transmitter_dig_setup(uint32 connectorIndex, uint32 pixelClock,
 void
 encoder_crtc_scratch(uint8 crtcID)
 {
+	CALLED();
 	TRACE("%s: display %" B_PRIu8 "\n", __func__, crtcID);
 
 	uint32 connectorIndex = gDisplay[crtcID]->connectorIndex;
@@ -1802,6 +1819,7 @@ encoder_crtc_scratch(uint8 crtcID)
 void
 encoder_dpms_scratch(uint8 crtcID, bool power)
 {
+	CALLED();
 	TRACE("%s: display %" B_PRIu8 "\n", __func__, crtcID);
 
 	uint32 connectorIndex = gDisplay[crtcID]->connectorIndex;
@@ -1877,6 +1895,7 @@ encoder_dpms_scratch(uint8 crtcID, bool power)
 void
 encoder_dpms_set(uint8 crtcID, int mode)
 {
+	CALLED();
 	TRACE("%s: display %" B_PRIu8 ", power: %s\n", __func__, crtcID,
 		mode == B_DPMS_ON ? "true" : "false");
 
@@ -1973,6 +1992,7 @@ encoder_dpms_set(uint8 crtcID, int mode)
 void
 encoder_dpms_set_dig(uint8 crtcID, int mode)
 {
+	CALLED();
 	TRACE("%s: display %" B_PRIu8 ", power: %s\n", __func__, crtcID,
 		mode == B_DPMS_ON ? "true" : "false");
 
@@ -2090,6 +2110,7 @@ encoder_dpms_set_dig(uint8 crtcID, int mode)
 void
 encoder_dpms_set_dvo(uint8 crtcID, int mode)
 {
+	CALLED();
 	ERROR("%s: TODO, dvo encoder dpms stub\n", __func__);
 }
 
@@ -2097,6 +2118,7 @@ encoder_dpms_set_dvo(uint8 crtcID, int mode)
 void
 encoder_output_lock(bool lock)
 {
+	CALLED();
 	TRACE("%s: %s\n", __func__, lock ? "true" : "false");
 	uint32 biosScratch6 = Read32(OUT, R600_SCRATCH_REG6);
 
@@ -2154,6 +2176,7 @@ static const char* encoder_name_matrix[] = {
 
 const char*
 encoder_name_lookup(uint32 encoderID) {
+	CALLED();
 	if (encoderID < B_COUNT_OF(encoder_name_matrix))
 		return encoder_name_matrix[encoderID];
 	else
@@ -2164,6 +2187,7 @@ encoder_name_lookup(uint32 encoderID) {
 uint32
 encoder_object_lookup(uint32 connectorFlags, uint8 dacID)
 {
+	CALLED();
 	// used on older cards to take a guess at the encoder
 	// object
 
@@ -2240,6 +2264,7 @@ encoder_object_lookup(uint32 connectorFlags, uint8 dacID)
 uint32
 encoder_type_lookup(uint32 encoderID, uint32 connectorFlags)
 {
+	CALLED();
 	switch (encoderID) {
 		case ENCODER_OBJECT_ID_INTERNAL_LVDS:
 		case ENCODER_OBJECT_ID_INTERNAL_TMDS1:
@@ -2295,6 +2320,7 @@ encoder_type_lookup(uint32 encoderID, uint32 connectorFlags)
 bool
 encoder_is_external(uint32 encoderID)
 {
+	CALLED();
 	switch (encoderID) {
 		case ENCODER_OBJECT_ID_SI170B:
 		case ENCODER_OBJECT_ID_CH7303:
@@ -2315,6 +2341,7 @@ encoder_is_external(uint32 encoderID)
 bool
 encoder_is_dp_bridge(uint32 encoderID)
 {
+	CALLED();
 	switch (encoderID) {
 		case ENCODER_OBJECT_ID_TRAVIS:
 		case ENCODER_OBJECT_ID_NUTMEG:

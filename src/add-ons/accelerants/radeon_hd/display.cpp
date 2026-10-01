@@ -437,32 +437,41 @@ display_get_encoder_mode(uint32 connectorIndex)
 	// Is external DisplayPort Bridge?
 	if (gConnector[connectorIndex]->encoderExternal.valid == true
 		&& gConnector[connectorIndex]->encoderExternal.isDPBridge == true) {
+		LogDebug("RADEON_HD_ACC: detected external DisplayPort Bridge, returning %" B_PRIx32 "\n", ATOM_ENCODER_MODE_DP);
 		return ATOM_ENCODER_MODE_DP;
 	}
-
+	LogDebug("RADEON_HD_ACC: is not an external DisplayPort Bridge\n");
 	// DVO Encoders (should be bridges)
 	switch (gConnector[connectorIndex]->encoder.objectID) {
 		case ENCODER_OBJECT_ID_INTERNAL_DVO1:
 		case ENCODER_OBJECT_ID_INTERNAL_DDI:
-		case ENCODER_OBJECT_ID_INTERNAL_KLDSCP_DVO1:
+		case ENCODER_OBJECT_ID_INTERNAL_KLDSCP_DVO1:{
+			LogDebug("RADEON_HD_ACC: detected DVO encoder, returning %" B_PRIx32 "\n", ATOM_ENCODER_MODE_DVO);
 			return ATOM_ENCODER_MODE_DVO;
+		}
 	}
+	LogDebug("RADEON_HD_ACC: is not a DVO encoder\n               going to find the display for connector so we can identify source of edid data...\n");
 
 	// Find display for connector so we can identify source of edid data
 	int32 crtcID = -1;
 	for (int32 id = 0; id < MAX_DISPLAY; id++) {
 		if (gDisplay[id]->connectorIndex == connectorIndex) {
 			crtcID = id;
+			LogDebug("RADEON_HD_ACC: id CRTC = %d\n", id);
 			break;
 		}
 	}
+	
 	bool edidDigital = false;
 	if (crtcID == -1) {
-		ERROR("%s: BUG: executed on connector without assigned display!\n",
+		//ERROR("%s: BUG: executed on connector without assigned display!\n",
+		//	__func__);
+		LogDebug("RADEON_HD_ACC: %s BUG; executed on connector without assigned display!\n",
 			__func__);
 	} else {
 		edid1_info* edid = &gDisplay[crtcID]->edidData;
 		edidDigital = edid->display.input_type ? true : false;
+		LogDebug("RADEON_HD_ACC: display.input_type is %s\n", edidDigital ? "True" : "False");
 	}
 
 	// Normal encoder situations
@@ -471,20 +480,28 @@ display_get_encoder_mode(uint32 connectorIndex)
 		case VIDEO_CONNECTOR_HDMIB: /* HDMI-B is DL-DVI; analog works fine */
 			// TODO: if audio detected on edid and DCE4, ATOM_ENCODER_MODE_DVI
 			//        if audio detected on edid not DCE4, ATOM_ENCODER_MODE_HDMI
-			if (edidDigital)
+			if (edidDigital) {
+				LogDebug("RADEON_HD_ACC: Normal encoder HDMI-B/DL-DVI, returning %" B_PRIx32 "\n", ATOM_ENCODER_MODE_DVI);
 				return ATOM_ENCODER_MODE_DVI;
-			else
+			} else {
+				LogDebug("RADEON_HD_ACC: Normal encoder analog CRT, returning %" B_PRIx32 "\n", ATOM_ENCODER_MODE_CRT);
 				return ATOM_ENCODER_MODE_CRT;
+			}
 			break;
 		case VIDEO_CONNECTOR_DVID:
 		case VIDEO_CONNECTOR_HDMIA:
-		default:
+		default: {
 			// TODO: if audio detected on edid and DCE4, ATOM_ENCODER_MODE_DVI
 			//        if audio detected on edid not DCE4, ATOM_ENCODER_MODE_HDMI
+			LogDebug("RADEON_HD_ACC: Normal encoder DVI, returning %" B_PRIx32 "\n", ATOM_ENCODER_MODE_DVI);
 			return ATOM_ENCODER_MODE_DVI;
-		case VIDEO_CONNECTOR_LVDS:
+		}
+		case VIDEO_CONNECTOR_LVDS: {
+			LogDebug("RADEON_HD_ACC: Normal encoder LVDS, returning %" B_PRIx32 "\n", ATOM_ENCODER_MODE_LVDS);
 			return ATOM_ENCODER_MODE_LVDS;
+		}
 		case VIDEO_CONNECTOR_DP:
+		{
 			// dig_connector = radeon_connector->con_priv;
 			// if ((dig_connector->dp_sink_type
 			//	== CONNECTOR_OBJECT_ID_DISPLAYPORT)
@@ -493,16 +510,27 @@ display_get_encoder_mode(uint32 connectorIndex)
 			// }
 			// TODO: if audio detected on edid and DCE4, ATOM_ENCODER_MODE_DVI
 			//        if audio detected on edid not DCE4, ATOM_ENCODER_MODE_HDMI
+			LogDebug("RADEON_HD_ACC: Normal encoder DisplayPort, returning %" B_PRIx32 "\n", ATOM_ENCODER_MODE_DP);
 			return ATOM_ENCODER_MODE_DP;
+		}
 		case VIDEO_CONNECTOR_EDP:
+		{
+			LogDebug("RADEON_HD_ACC: Normal encoder EmbeddedDisplayPort, returning %" B_PRIx32 "\n", ATOM_ENCODER_MODE_DP);
 			return ATOM_ENCODER_MODE_DP;
+		}
 		case VIDEO_CONNECTOR_DVIA:
 		case VIDEO_CONNECTOR_VGA:
+		{
+			LogDebug("RADEON_HD_ACC: Normal encoder DVIA or VGA, returning %" B_PRIx32 "\n", ATOM_ENCODER_MODE_CRT);
 			return ATOM_ENCODER_MODE_CRT;
+		}
 		case VIDEO_CONNECTOR_COMPOSITE:
 		case VIDEO_CONNECTOR_SVIDEO:
 		case VIDEO_CONNECTOR_9DIN:
+		{
+			LogDebug("RADEON_HD_ACC: Normal encoder Composite/S-Video/9-DIN, returning %" B_PRIx32 "\n", ATOM_ENCODER_MODE_TV);
 			return ATOM_ENCODER_MODE_TV;
+		}
 	}
 }
 
