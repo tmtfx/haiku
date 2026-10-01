@@ -155,6 +155,8 @@ private:
 				BShelf*				Shelf() const;
 
 				status_t			_SaveSettings();
+				
+				void				_RestoreDesklinkItems();
 
 	friend class TReplicantShelf;
 	friend class TBarView;
