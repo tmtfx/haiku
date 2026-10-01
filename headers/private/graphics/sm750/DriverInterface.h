@@ -277,7 +277,8 @@ typedef struct {
 
 /* Stato globale del driver */
 typedef struct {
-	uint32			openCount;
+	//uint32			openCount;
+	int32			openCount;
 	int32			flags;
 	pci_info		pci;			/* Nota: si chiama 'pci' ora */
 	const ChipInfo*	pChipInfo;

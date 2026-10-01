@@ -487,6 +487,7 @@ void sm750_fill_span(engine_token *et, uint32 color, uint16 *spans, uint32 count
 }
 // Questo thread "vive" nell'accelerante e gestisce i cambi di buffer
 //uint32 source = si->card_info->is_panel ? SM750_DISP_PANEL_VIDEO_FB0_ADDR : SM750_DISP_CRT_FB_ADDR;
+/* originale c'è un problema di accumulo di richieste
 int32 sm750_vblank_service_thread(void *arg)
 {
     accelerant_info *ai = (accelerant_info *)arg;
@@ -525,6 +526,39 @@ int32 sm750_vblank_service_thread(void *arg)
             debug_printf("SM750_ACC: Errore acquire_sem: %s\n", strerror(err));
             snooze(50000); // 50ms di pausa per far respirare il sistema
             if (err == B_BAD_SEM_ID) break; // Esci se il semaforo è morto
+        }
+    }
+    return B_OK;
+}*/
+int32 sm750_vblank_service_thread(void *arg)
+{
+    accelerant_info *ai = (accelerant_info *)arg;
+    shared_info *si = ai->si;
+    vuint32* regs = ai->regs;
+    
+    while (atomic_get(&si->irq_enabled) > 0) {
+        // Aspettiamo che il kernel segnali uno o più V-Sync
+        status_t err = acquire_sem_etc(si->vblank_sem, 1, B_CAN_INTERRUPT, 0);
+        if (err == B_OK) {
+            
+            // 1. Gestione dell'eventuale overlay in coda
+            if (ai->overlay_active && ai->next_buffer_to_show != NULL) {
+                uint32 offset = (uint32)(addr_t)ai->next_buffer_to_show->buffer_dma;
+                SM750_WREG32(SM750_DISP_PANEL_VIDEO_FB0_ADDR, offset);
+                ai->current_ob = ai->next_buffer_to_show;
+                ai->next_buffer_to_show = NULL;
+            }
+            
+            // 2. Sblocco dei client in attesa del V-Sync (es. GLTeapot, server grafico)
+            if (si->vblank_sync_sem >= 0) {
+                // Invece di un rilascio fisso di 1, verifichiamo quanti thread sono in attesa 
+                // o rilasciamo un token per evitare di perdere passi se il sistema è carico.
+                // release_sem_etc con B_DO_NOT_RESCHEDULE ottimizza i cambi di contesto.
+                release_sem_etc(si->vblank_sync_sem, 1, B_DO_NOT_RESCHEDULE);
+            }
+        } else {
+            if (err == B_BAD_SEM_ID || err == B_NO_MORE_THREADS) break;
+            snooze(10000); // 10ms di pausa in caso di interruzione anomala
         }
     }
     return B_OK;
