@@ -7,6 +7,7 @@
  *		François Revol
  *		Marcus Overhagen
  *		Jonas Sundström
+ *		Fabio Tomat
  */
 
 //! VolumeControl and link items in Deskbar
