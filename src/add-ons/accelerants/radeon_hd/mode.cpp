@@ -247,6 +247,9 @@ radeon_set_display_mode(display_mode* mode)
 	encoder_output_lock(false);
 	gInfo->dpms_mode = B_DPMS_ON;
 
+	if ((gConnector[connectorIndex]->flags & ATOM_DEVICE_LCD_SUPPORT) != 0)
+		radeon_set_brightness(1.0f);
+
 	#ifdef TRACE_MODE
 	// for debugging
 	debug_dp_info();

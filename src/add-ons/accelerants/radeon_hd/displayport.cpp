@@ -29,7 +29,7 @@
 #   define TRACE(x...) ;
 #endif
 
-#define ERROR(x...) _sPrintf("radeon_hd: " x)
+#define ERROR(x...) do { _sPrintf("radeon_hd: " x); LogDebug("radeon_hd: " x); } while (0)
 
 
 static ssize_t
@@ -370,14 +370,19 @@ dp_get_lane_count(uint32 connectorIndex, display_mode* mode)
 	uint32 dpMaxLaneCount = dpcd_reg_read(connectorIndex,
 			DP_MAX_LANE_COUNT) & DP_MAX_LANE_COUNT_MASK;
 
+	if (dpMaxLaneCount == 0)
+		dpMaxLaneCount = 1;
+
 	uint32 lane;
-	// don't go below 2 lanes or display is jittery
-	for (lane = 2; lane < dpMaxLaneCount; lane <<= 1) {
+	for (lane = 1; lane <= dpMaxLaneCount; lane <<= 1) {
 		uint32 maxPixelClock = dp_get_pixel_clock_max(dpMaxLinkRate, lane,
 			bitsPerPixel);
 		if (mode->timing.pixel_clock <= maxPixelClock)
 			break;
 	}
+
+	if (lane > dpMaxLaneCount)
+		lane = dpMaxLaneCount;
 
 	TRACE("%s: Lanes: %" B_PRIu32 "\n", __func__, lane);
 	return lane;

@@ -902,7 +902,6 @@ encoder_external_setup(uint32 connectorIndex, int command)
 		= &gConnector[connectorIndex]->encoder;
 	encoder_info* extEncoder
 		= &gConnector[connectorIndex]->encoderExternal;
-	uint32 connectorFlags = gConnector[connectorIndex]->flags;
 
 	dp_info* dpInfo
 		= &gConnector[connectorIndex]->dpInfo;
@@ -988,15 +987,15 @@ encoder_external_setup(uint32 connectorIndex, int command)
 							args.v3.sExtEncoder.ucConfig
 								|=EXTERNAL_ENCODER_CONFIG_V3_DPLINKRATE_5_40GHZ;
 						}
-						args.v1.sDigEncoder.ucLaneNum
-							= dpInfo->laneCount;
+						args.v3.sExtEncoder.ucLaneNum
+							= dpInfo->laneCount ? dpInfo->laneCount : 2;
 					} else if (pixelClock > 165000) {
 						args.v3.sExtEncoder.ucLaneNum = 8;
 					} else {
 						args.v3.sExtEncoder.ucLaneNum = 4;
 					}
 
-					switch ((connectorFlags & ENUM_ID_MASK) >> ENUM_ID_SHIFT) {
+					switch (extEncoder->linkEnumeration) {
 						case GRAPH_OBJECT_ENUM_ID1:
 							TRACE("%s: external encoder 1\n", __func__);
 							args.v3.sExtEncoder.ucConfig
@@ -2024,6 +2023,13 @@ encoder_dpms_set_dig(uint8 crtcID, int mode)
 					ATOM_ENCODER_CMD_SETUP);
 			}
 
+			if (hasExternal) {
+				if ((info.chipsetFlags & CHIP_APU) != 0 || info.dceMajor >= 6) {
+					encoder_external_setup(connectorIndex,
+						EXTERNAL_ENCODER_ACTION_V3_ENCODER_SETUP);
+				}
+			}
+
 			// Enable transmitter
 			transmitter_dig_setup(connectorIndex, pll->pixelClock, 0, 0,
 				ATOM_TRANSMITTER_ACTION_ENABLE);
@@ -2044,6 +2050,8 @@ encoder_dpms_set_dig(uint8 crtcID, int mode)
 				Write32(OUT, AVIVO_DP_VID_STREAM_CNTL, 0x201);
 			}
 			if ((connectorFlags & ATOM_DEVICE_LCD_SUPPORT) != 0) {
+				transmitter_dig_setup(connectorIndex, pll->pixelClock,
+					0, 0, ATOM_TRANSMITTER_ACTION_BL_BRIGHTNESS_CONTROL);
 				transmitter_dig_setup(connectorIndex, pll->pixelClock,
 					0, 0, ATOM_TRANSMITTER_ACTION_LCD_BLON);
 			}
