@@ -41,7 +41,7 @@
 #	define TRACE(x...) ;
 #endif
 
-#define ERROR(x...) _sPrintf("radeon_hd: " x)
+#define ERROR(x...) do { _sPrintf("radeon_hd: " x); LogDebug("radeon_hd: " x); } while (0)
 
 #define CALLED() LogDebug("RADEON_HD_ACC: CALLED %s\n", __FUNCTION__)
 

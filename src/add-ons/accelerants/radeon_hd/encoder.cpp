@@ -32,7 +32,7 @@ extern "C" void _sPrintf(const char* format, ...);
 #   define TRACE(x...) ;
 #endif
 
-#define ERROR(x...) _sPrintf("radeon_hd: " x)
+#define ERROR(x...) do { _sPrintf("radeon_hd: " x); LogDebug("radeon_hd: " x); } while (0)
 #define CALLED() LogDebug("RADEON_HD_ACC: CALLED %s\n", __FUNCTION__)
 
 
@@ -672,21 +672,9 @@ encoder_dig_setup(uint32 connectorIndex, uint32 pixelClock, int command)
 	// determine DP panel mode if doing panel mode setup
 	if (command == ATOM_ENCODER_CMD_SETUP_PANEL_MODE) {
 		if (info.dceMajor >= 4 && isDPBridge) {
-			if (connector->encoderExternal.objectID == ENCODER_OBJECT_ID_NUTMEG)
+			if (connector->encoderExternal.objectID == ENCODER_OBJECT_ID_NUTMEG
+				|| connector->encoderExternal.objectID == ENCODER_OBJECT_ID_TRAVIS) {
 				panelMode = DP_PANEL_MODE_INTERNAL_DP1_MODE;
-			else if (connector->encoderExternal.objectID
-				== ENCODER_OBJECT_ID_TRAVIS) {
-				dp_info* dp = &gConnector[connectorIndex]->dpInfo;
-				uint8 id[6];
-				int bit;
-				for (bit = 0; bit < 6; bit++)
-					id[bit] = dpcd_reg_read(dp->auxPin, 0x503 + bit);
-				if (id[0] == 0x73 && id[1] == 0x69 && id[2] == 0x76
-					&& id[3] == 0x61 && id[4] == 0x72 && id[5] == 0x54) {
-					panelMode = DP_PANEL_MODE_INTERNAL_DP1_MODE;
-				} else {
-					panelMode = DP_PANEL_MODE_INTERNAL_DP2_MODE;
-				}
 			} else {
 				panelMode = DP_PANEL_MODE_INTERNAL_DP2_MODE;
 			}
