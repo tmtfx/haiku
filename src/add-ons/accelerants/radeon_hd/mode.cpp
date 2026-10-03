@@ -493,6 +493,7 @@ radeon_set_brightness(float brightness)
 	uint8_t brightnessRaw = (uint8_t)ceilf(brightness * 255);
 	uint32_t level = Read32(OUT, backlightReg);
 	TRACE("brightness level = %lx\n", level);
+	level &= ~ATOM_S2_VRI_BRIGHT_ENABLE;
 	level &= ~ATOM_S2_CURRENT_BL_LEVEL_MASK;
 	level |= (( brightnessRaw << ATOM_S2_CURRENT_BL_LEVEL_SHIFT )
 					& ATOM_S2_CURRENT_BL_LEVEL_MASK);

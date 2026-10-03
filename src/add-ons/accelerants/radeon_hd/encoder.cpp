@@ -111,8 +111,9 @@ encoder_assign_crtc(uint8 crtcID)
 		tableMajor, tableMinor);
 
 	uint16 connectorIndex = gDisplay[crtcID]->connectorIndex;
-	uint16 connectorFlags = gConnector[connectorIndex]->flags;
-	uint16 encoderID = gConnector[connectorIndex]->encoder.objectID;
+	connector_info* connector = gConnector[connectorIndex];
+	uint16 connectorFlags = connector->flags;
+	uint16 encoderID = connector->encoder.objectID;
 
 	// Prepare AtomBIOS command arguments
 	union crtcSourceParam {
@@ -173,8 +174,21 @@ encoder_assign_crtc(uint8 crtcID)
 					break;
 				case 2:
 					args.v2.ucCRTC = crtcID;
-					args.v2.ucEncodeMode
-						= display_get_encoder_mode(connectorIndex);
+					if (connector->encoderExternal.isDPBridge) {
+						if (connector->type == VIDEO_CONNECTOR_LVDS)
+							args.v2.ucEncodeMode = ATOM_ENCODER_MODE_LVDS;
+						else if (connector->type == VIDEO_CONNECTOR_VGA)
+							args.v2.ucEncodeMode = ATOM_ENCODER_MODE_CRT;
+						else {
+							args.v2.ucEncodeMode
+								= display_get_encoder_mode(connectorIndex);
+						}
+					} else if ((connectorFlags & ATOM_DEVICE_LCD_SUPPORT) != 0) {
+						args.v2.ucEncodeMode = ATOM_ENCODER_MODE_LVDS;
+					} else {
+						args.v2.ucEncodeMode
+							= display_get_encoder_mode(connectorIndex);
+					}
 					switch (encoderID) {
 						case ENCODER_OBJECT_ID_INTERNAL_UNIPHY:
 						case ENCODER_OBJECT_ID_INTERNAL_UNIPHY1:

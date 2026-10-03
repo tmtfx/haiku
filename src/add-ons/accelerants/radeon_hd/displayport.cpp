@@ -1013,9 +1013,16 @@ debug_dp_info()
 
 			if (!dp->valid)
 				continue;
+
+			uint8 maxLanes = dpcd_reg_read(id, DP_MAX_LANE_COUNT);
+			if (maxLanes == 0 || maxLanes == 0xFF) {
+				ERROR("   - no DisplayPort device connected\n");
+				continue;
+			}
+
 			ERROR(" + DP Config Data\n");
 			ERROR("   - max lane count:          %d\n",
-				dpcd_reg_read(id, DP_MAX_LANE_COUNT) & DP_MAX_LANE_COUNT_MASK);
+				maxLanes & DP_MAX_LANE_COUNT_MASK);
 			ERROR("   - max link rate:           %d\n",
 				dpcd_reg_read(id, DP_MAX_LINK_RATE));
 			ERROR("   - receiver port count:     %d\n",
