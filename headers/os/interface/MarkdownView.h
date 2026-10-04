@@ -108,20 +108,29 @@ private:
 		int32				currentTRStart;
 		bool				isImage;
 		ImageRegion*		currentImage;
+		BString				currentImageAlt;
 		bool				isLink;
 		LinkRegion*			currentLink;
 		
 		RenderState()
-			: view(NULL),
-			  textColor(make_color(0, 0, 0)),
-			  codeColor(make_color(220, 50, 50)),
-			  isBold(false),
-			  isItalic(false),
-			  isCode(false),
-			  isBlockCode(false),
-			  headingLevel(0),
-			  currentBlockStart(-1)
-		{}
+		: view(NULL),
+		  textColor(make_color(0, 0, 0)),
+		  codeColor(make_color(220, 50, 50)),
+		  isBold(false),
+		  isItalic(false),
+		  isCode(false),
+		  isBlockCode(false),
+		  headingLevel(0),
+		  currentBlockStart(-1),
+		  isTable(false),
+		  isHeaderRow(false),
+		  currentTable(NULL),
+		  currentTRStart(-1),
+		  isImage(false),
+		  currentImage(NULL),
+		  isLink(false),
+		  currentLink(NULL)
+	{}
 	};
 
 	void					_Init();

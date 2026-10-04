@@ -532,22 +532,19 @@ BMarkdownView::_EnterSpanCb(MD_SPANTYPE type, void* detail, void* userdata)
 			break;
 		case MD_SPAN_IMG: {
 			MD_SPAN_IMG_DETAIL* imgDetail = static_cast<MD_SPAN_IMG_DETAIL*>(detail);
-			state->isImage = true;
 
-			ImageRegion* imgRegion = new ImageRegion();
-			imgRegion->startPos = state->view->TextLength();
+	ImageRegion* imgRegion = new ImageRegion();
+	imgRegion->startPos = state->view->TextLength();
 
-			// Estraiamo il percorso/URL dall'attributo src
-			if (imgDetail->src.text != NULL && imgDetail->src.size > 0) {
-				imgRegion->src.SetTo(imgDetail->src.text, imgDetail->src.size);
-			}
+	if (imgDetail->src.text != NULL && imgDetail->src.size > 0)
+		imgRegion->src.SetTo(imgDetail->src.text, imgDetail->src.size);
 
-			// Carichiamo la BBitmap se si tratta di un file locale
-			state->view->_LoadImageForRegion(imgRegion);
+	state->view->_LoadImageForRegion(imgRegion);
 
-			state->currentImage = imgRegion;
-			state->view->Insert("\n"); // A capo prima dell'immagine
-			break;
+	state->currentImage = imgRegion;
+	state->currentImageAlt.SetTo(""); // Azzeriamo il buffer alt temporaneo
+	state->isImage = true;
+	break;
 		}
 		default:
 			break;
@@ -585,29 +582,40 @@ BMarkdownView::_LeaveSpanCb(MD_SPANTYPE type, void* detail, void* userdata)
 			state->isCode = false;
 			break;
 		case MD_SPAN_IMG: {
-			if (state->currentImage != NULL) {
-				state->currentImage->endPos = state->view->TextLength();
+			state->isImage = false; // Disattiviamo subito il flag!
 
-				// Inseriamo righe vuote di spaziatura per riservare l'altezza dell'immagine
-				if (state->currentImage->bitmap != NULL) {
-					float imgHeight = state->currentImage->bitmap->Bounds().Height();
-					font_height fh;
-					state->baseFont.GetHeight(&fh);
-					float lineHeight = fh.ascent + fh.descent + fh.leading;
+	if (state->currentImage != NULL) {
+		// Assegniamo l'alt text raccolto
+		state->currentImage->alt = state->currentImageAlt;
 
-					int32 newLinesNeeded = (int32)(imgHeight / lineHeight) + 1;
-					for (int32 i = 0; i < newLinesNeeded; i++) {
-						state->view->Insert("\n");
-					}
-				} else {
-					state->view->Insert("\n");
-				}
+		if (state->currentImage->bitmap != NULL) {
+			// Immagine trovata: riserviamo le righe vuote
+			float imgHeight = state->currentImage->bitmap->Bounds().Height();
+			font_height fh;
+			state->baseFont.GetHeight(&fh);
+			float lineHeight = fh.ascent + fh.descent + fh.leading;
+			if (lineHeight < 1.0f)
+				lineHeight = 12.0f;
 
-				state->view->fImages.AddItem(state->currentImage);
-				state->currentImage = NULL;
+			int32 newLinesNeeded = (int32)(imgHeight / lineHeight) + 1;
+			for (int32 i = 0; i < newLinesNeeded; i++)
+				state->view->Insert("\n");
+
+			state->currentImage->endPos = state->view->TextLength();
+			state->view->fImages.AddItem(state->currentImage);
+		} else {
+			// Fallback: se l'immagine manca, mostriamo l'alt text tra parentesi
+			if (!state->currentImage->alt.IsEmpty()) {
+				BString altFallback;
+				altFallback.SetToFormat("[%s]", state->currentImage->alt.String());
+				state->view->Insert(altFallback.String());
 			}
-			state->isImage = false;
-			break;
+			state->view->Insert("\n");
+			delete state->currentImage; // Pulizia memoria in caso di fallimento
+		}
+		state->currentImage = NULL;
+	}
+	break;
 		}
 		default:
 			break;
@@ -619,6 +627,17 @@ int
 BMarkdownView::_TextCb(MD_TEXTTYPE type, const MD_CHAR* text, MD_SIZE size, void* userdata)
 {
 	RenderState* state = static_cast<RenderState*>(userdata);
+	
+	if (state == NULL || state->view == NULL)
+		return 0;
+
+	// Se siamo all'interno di uno span immagine, usiamo BString(text, size)
+	// per evitare problemi di puntatori non terminati da '\0'
+	if (state->isImage) {
+		if (text != NULL && size > 0)
+			state->currentImageAlt.Append(text, size);
+		return 0; // NON scriviamo l'alt text nel documento visivo!
+	}
 	
 	int32 startPos = state->view->TextLength();
 	
