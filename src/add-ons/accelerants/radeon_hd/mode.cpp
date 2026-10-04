@@ -150,6 +150,9 @@ radeon_dpms_mode(void)
 void
 radeon_dpms_set(uint8 id, int mode)
 {
+	if (gInfo->dpms_mode == (uint32)mode)
+		return;
+
 	if (mode == B_DPMS_ON) {
 		display_crtc_dpms(id, mode);
 		encoder_dpms_set(id, mode);
@@ -196,6 +199,16 @@ radeon_set_display_mode(display_mode* mode)
 	memcpy(&gDisplay[crtcID]->currentMode, mode, sizeof(display_mode));
 
 	uint32 connectorIndex = gDisplay[crtcID]->connectorIndex;
+	
+	static bool sFirstCall = true;
+	if (sFirstCall) {
+		sFirstCall = false;
+		ERROR("%s: First call: inheriting bootloader mode and active DP link! Updating FB only.\n",
+				__func__);
+		display_crtc_fb_set(crtcID, mode);
+		gInfo->dpms_mode = B_DPMS_ON;
+		return B_OK;
+	}
 
 	// Determine DP lanes if DP
 	if (connector_is_dp(connectorIndex)) {
