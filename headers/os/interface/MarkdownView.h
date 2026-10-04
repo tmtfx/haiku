@@ -11,6 +11,10 @@
 #include <md4c.h>
 
 // Struttura per tracciare le regioni dei blocchi di codice nel testo
+struct HorizontalRuleRegion {
+    int32 pos;
+};
+
 struct LinkRegion {
 	int32	startPos;
 	int32	endPos;
@@ -60,8 +64,12 @@ public:
 							BMarkdownView(const char* name,
 								const BFont* font, const rgb_color* color,
 								uint32 flags = B_WILL_DRAW | B_NAVIGABLE);
+							BMarkdownView(BMessage* archive);
 	virtual					~BMarkdownView();
 
+	static	BArchivable*	Instantiate(BMessage* archive);
+	virtual	status_t		Archive(BMessage* archive, bool deep = true) const override;
+	
 	// Override di BView per il rendering dello sfondo custom dei blocchi
 	virtual void			Draw(BRect updateRect) override;
 	
@@ -71,9 +79,6 @@ public:
 	virtual void			MouseDown(BPoint where) override;
 	virtual void			MouseMoved(BPoint where, uint32 transit, const BMessage* dragMessage) override;
 
-	// Supporto per BMessage/Archiving (se usato da LayoutBuilder / InterfaceKit)
-	static	BArchivable*	Instantiate(BMessage* archive);
-	
 	void					InsertRaw(const char* text);
 	void					InsertRaw(const char* text, int32 length);
 	void					InsertRaw(int32 offset, const char* text,
@@ -91,6 +96,9 @@ public:
 	// virtual BSize			MaxSize() override;
 
 private:
+	// Disabilitiamo copia e assegnazione per sicurezza BeAPI
+	BMarkdownView(const BMarkdownView&);
+	BMarkdownView& operator=(const BMarkdownView&);
 	// Struttura di stato interna usata dal parser durante il traversal di MD4C
 	struct RenderState {
 		BMarkdownView*		view;
@@ -114,6 +122,9 @@ private:
 		BString				currentImageAlt;
 		bool				isLink;
 		LinkRegion*			currentLink;
+		int32				listDepth;
+		bool				isOrderedList;
+		int32				olItemNumber;
 		
 		RenderState()
 		: view(NULL),
@@ -132,11 +143,15 @@ private:
 		  isImage(false),
 		  currentImage(NULL),
 		  isLink(false),
-		  currentLink(NULL)
+		  currentLink(NULL),
+		  listDepth(0),
+		  isOrderedList(false),
+		  olItemNumber(1)
 	{}
 	};
 
-	void					_Init();
+	void                    _Init();
+	void                    _ClearRegions();
 	void					_ApplyCurrentStyle(int32 startPos, RenderState& state);
 
 	// Callbacks C richieste da MD4C
@@ -155,6 +170,7 @@ private:
 	BObjectList<ImageRegion> fImages;
 	BObjectList<LinkRegion> fLinks;
 	LinkRegion*             _LinkAt(BPoint point) const;
+	BList					fHorizontalRules;
 
 };
 

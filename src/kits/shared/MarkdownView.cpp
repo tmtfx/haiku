@@ -13,41 +13,95 @@
 #include <Window.h>
 #include <Url.h>
 
+#include <cstdio>
+
 BMarkdownView::BMarkdownView(const char* name, uint32 flags)
-	:
-	BTextView(name, flags),
-	fHandCursor(B_CURSOR_ID_FOLLOW_LINK),
-	fCodeBlocks(20),
-	fTables(10),
-	fImages(10),
-	fLinks(20)
+    :
+    BTextView(name, flags),
+    fHandCursor(B_CURSOR_ID_FOLLOW_LINK),
+    fCodeBlocks(20),
+    fTables(10),
+    fImages(10),
+    fLinks(20)
 {
-	fRawMarkdown.SetTo("");
-	MakeEditable(false);
-	MakeSelectable(true);
-	SetStylable(true);
+    _Init();
 }
 
+
 BMarkdownView::BMarkdownView(const char* name, const BFont* font,
-	const rgb_color* color, uint32 flags)
+    const rgb_color* color, uint32 flags)
+    :
+    BTextView(name, font, color, flags),
+    fHandCursor(B_CURSOR_ID_FOLLOW_LINK),
+    fCodeBlocks(20),
+    fTables(10),
+    fImages(10),
+    fLinks(20)
+{
+    _Init();
+}
+BMarkdownView::BMarkdownView(BMessage* archive)
 	:
-	BTextView(name, font, color, flags),
+	BTextView(archive),
 	fHandCursor(B_CURSOR_ID_FOLLOW_LINK),
 	fCodeBlocks(20),
 	fTables(10),
 	fImages(10),
 	fLinks(20)
 {
-	fRawMarkdown.SetTo("");
-	MakeEditable(false);
-	MakeSelectable(true);
-	SetStylable(true);
+	_Init();
 }
+
+
+BArchivable*
+BMarkdownView::Instantiate(BMessage* archive)
+{
+	if (validate_instantiation(archive, "BMarkdownView"))
+		return new BMarkdownView(archive);
+
+	return NULL;
+}
+
+
+status_t
+BMarkdownView::Archive(BMessage* archive, bool deep) const
+{
+	status_t status = BTextView::Archive(archive, deep);
+	if (status == B_OK)
+		status = archive->AddString("class", "BMarkdownView");
+
+	return status;
+}
+
+void
+BMarkdownView::_Init()
+{
+    fRawMarkdown.SetTo("");
+    MakeEditable(false);
+    MakeSelectable(true);
+    SetStylable(true);
+}
+void
+BMarkdownView::_ClearRegions()
+{
+    // BObjectList<..., true> elimina automaticamente gli oggetti con MakeEmpty()
+    fCodeBlocks.MakeEmpty();
+    fTables.MakeEmpty();
+    fImages.MakeEmpty();
+    fLinks.MakeEmpty();
+
+    // Per BList dobbiamo eliminare manualmente gli elementi
+    for (int32 i = 0; i < fHorizontalRules.CountItems(); i++) {
+        delete static_cast<HorizontalRuleRegion*>(fHorizontalRules.ItemAt(i));
+    }
+    fHorizontalRules.MakeEmpty();
+}
+
 
 BMarkdownView::~BMarkdownView()
 {
+    _ClearRegions();
 }
-
 void
 BMarkdownView::Draw(BRect updateRect)
 {
@@ -56,6 +110,39 @@ BMarkdownView::Draw(BRect updateRect)
 	BTextView::Draw(updateRect);
 
 	PushState();
+	// rendering divisori
+	int32 hrCount = fHorizontalRules.CountItems();
+    if (hrCount > 0) {
+    	// Colore della linea: un grigio discreto di sistema
+        rgb_color dividerColor = tint_color(ui_color(B_PANEL_BACKGROUND_COLOR), B_DARKEN_2_TINT);
+        SetHighColor(dividerColor);
+        SetPenSize(1.0f);
+
+        float viewWidth = Bounds().Width();
+        float leftMargin = 10.0f;
+        float rightMargin = viewWidth - 10.0f;
+
+        font_height fh;
+        be_plain_font->GetHeight(&fh);
+        float lineHeight = fh.ascent + fh.descent + fh.leading;
+
+        for (int32 i = 0; i < hrCount; i++) {
+            HorizontalRuleRegion* hr = static_cast<HorizontalRuleRegion*>(fHorizontalRules.ItemAt(i));
+            if (hr == NULL || hr->pos < 0 || hr->pos > TextLength())
+                continue;
+
+            // Coordinate visive dell'offset di ancoraggio
+            BPoint pt = PointAt(hr->pos);
+
+            // Calcoliamo la Y centrata nel gap del newline
+            float y = pt.y + (lineHeight / 2.0f);
+
+            BRect hrRect(leftMargin, y - 1.0f, rightMargin, y + 1.0f);
+            if (hrRect.Intersects(updateRect)) {
+                StrokeLine(BPoint(leftMargin, y), BPoint(rightMargin, y));
+            }
+        }
+    }
 	
 	// rendering di immagini se esistono
 	int32 imageCount = fImages.CountItems();
@@ -280,14 +367,12 @@ status_t
 BMarkdownView::SetMarkdown(const char* markdownText)
 {
 	SetText("");
-	fCodeBlocks.MakeEmpty(true);
-	fTables.MakeEmpty(true);
-	fImages.MakeEmpty(true);
-	fLinks.MakeEmpty(true);
-	fRawMarkdown.SetTo(markdownText);
-
+	_ClearRegions();
+	
 	if (markdownText == NULL || strlen(markdownText) == 0)
-		return B_OK;
+		return B_BAD_VALUE;
+
+	fRawMarkdown.SetTo(markdownText);
 
 	RenderState state;
 	state.view = this;
@@ -371,19 +456,20 @@ BMarkdownView::_ApplyCurrentStyle(int32 startPos, RenderState& state)
 	int32 endPos = TextLength();
 	if (startPos >= endPos)
 		return;
+	
+	if (state.isCode || state.isBlockCode || state.isTable) {
+		state.currentFont = *be_fixed_font;
+	} else if (state.isBold || state.headingLevel > 0) {
+		state.currentFont = *be_bold_font;
+	} else {
+		state.currentFont = *be_plain_font;
+	}
 
-	uint16 face = B_REGULAR_FACE;
-	if (state.isBold || state.headingLevel > 0)
-		face |= B_BOLD_FACE;
+	uint16 face = state.currentFont.Face();
 	if (state.isItalic)
 		face |= B_ITALIC_FACE;
 	if (state.isLink)
 		face |= B_UNDERSCORE_FACE; // Sottolineato per i collegamenti
-
-	if (state.isCode || state.isBlockCode)
-		state.currentFont = *be_fixed_font;
-	else
-		state.currentFont = state.baseFont;
 
 	state.currentFont.SetFace(face);
 
@@ -408,8 +494,8 @@ BMarkdownView::_ApplyCurrentStyle(int32 startPos, RenderState& state)
 	} else {
 		colorToApply = state.textColor;
 	}
-
-	SetFontAndColor(startPos, endPos, &state.currentFont, B_FONT_ALL, &colorToApply);
+	
+	SetFontAndColor(startPos, endPos, &state.currentFont, B_FONT_ALL, &colorToApply); //
 }
 
 // -----------------------------------------------------------------------------
@@ -449,6 +535,54 @@ BMarkdownView::_EnterBlockCb(MD_BLOCKTYPE type, void* detail, void* userdata)
 		case MD_BLOCK_TH:
 			state->isBold = true;
 			break;
+		case MD_BLOCK_UL: {
+			state->listDepth++;
+			state->isOrderedList = false;
+			break;
+		}
+		case MD_BLOCK_OL: {
+			MD_BLOCK_OL_DETAIL* olDetail = static_cast<MD_BLOCK_OL_DETAIL*>(detail);
+			state->listDepth++;
+			state->isOrderedList = true;
+			state->olItemNumber = (olDetail != NULL) ? olDetail->start : 1;
+			break;
+		}
+		case MD_BLOCK_LI: {
+			int32 startOffset = state->view->TextLength();
+
+			// Rientro per liste annidate
+			for (int32 i = 0; i < state->listDepth - 1; i++) {
+				state->view->Insert("    ");
+			}
+
+			if (state->isOrderedList) {
+				BString numStr;
+				numStr.SetToFormat("%" B_PRId32 ". ", state->olItemNumber++);
+				state->view->Insert(numStr.String());
+			} else {
+				state->view->Insert("\xE2\x80\xA2 ");
+			}
+
+			int32 endOffset = state->view->TextLength();
+
+			rgb_color textColor = state->textColor;
+			state->view->SetFontAndColor(startOffset, endOffset,
+				be_plain_font, B_FONT_ALL, &textColor);
+			break;
+		}
+		case MD_BLOCK_HR: {
+    // 1. Andiamo a capo per ancorare la linea
+    state->view->Insert("\n");
+
+    // 2. Creiamo la regione per la riga orizzontale
+    HorizontalRuleRegion* hr = new HorizontalRuleRegion();
+    hr->pos = state->view->TextLength();
+    state->view->fHorizontalRules.AddItem(hr);
+
+    // 3. Aggiungiamo un ulteriore \n per distanziare il testo successivo
+    state->view->Insert("\n");
+    break;
+}
 		default:
 			break;
 	}
@@ -518,6 +652,12 @@ BMarkdownView::_LeaveBlockCb(MD_BLOCKTYPE type, void* detail, void* userdata)
 			//state->view->Insert(" | ");
 			state->view->Insert(" \t ");
 			break;
+		case MD_BLOCK_UL:
+		case MD_BLOCK_OL: {
+    if (state->listDepth > 0)
+        state->listDepth--;
+    break;
+}
 		default:
 			break;
 	}
@@ -724,6 +864,7 @@ BMarkdownView::_TextCb(MD_TEXTTYPE type, const MD_CHAR* text, MD_SIZE size, void
 	
 	if (state == NULL || state->view == NULL)
 		return 0;
+	
 
 	// Se siamo all'interno di uno span immagine, usiamo BString(text, size)
 	// per evitare problemi di puntatori non terminati da '\0'
@@ -736,6 +877,7 @@ BMarkdownView::_TextCb(MD_TEXTTYPE type, const MD_CHAR* text, MD_SIZE size, void
 	int32 startPos = state->view->TextLength();
 	
 	BString str(text, size);
+	printf("la stringa da elaborare è: %s\n",str.String());
 	state->view->Insert(str.String());
 
 	state->view->_ApplyCurrentStyle(startPos, *state);
