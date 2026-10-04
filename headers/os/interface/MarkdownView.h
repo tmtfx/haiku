@@ -65,6 +65,9 @@ public:
 	// Override di BView per il rendering dello sfondo custom dei blocchi
 	virtual void			Draw(BRect updateRect) override;
 	
+	//virtual void AttachedToWindow();
+	virtual void FrameResized(float width, float height);
+	
 	virtual void			MouseDown(BPoint where) override;
 	virtual void			MouseMoved(BPoint where, uint32 transit, const BMessage* dragMessage) override;
 

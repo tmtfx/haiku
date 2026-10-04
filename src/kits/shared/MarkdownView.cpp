@@ -315,6 +315,28 @@ BMarkdownView::SetMarkdown(const char* markdownText)
 	Invalidate();
 	return (result == 0) ? B_OK : B_ERROR;
 }
+/*
+void
+BMarkdownView::AttachedToWindow()
+{
+	BTextView::AttachedToWindow();
+
+	// Ora che la vista è agganciata alla finestra, Bounds().Width() è valido!
+	// Se ci sono immagini, rieseguiamo il parsing per calcolare le righe esatte
+	if (fImages.CountItems() > 0 && !fRawMarkdown.IsEmpty()) {
+		SetMarkdown(fRawMarkdown);
+	}
+}*/
+
+void
+BMarkdownView::FrameResized(float width, float height)
+{
+	BTextView::FrameResized(width, height);
+
+	if (fImages.CountItems() > 0 && !fRawMarkdown.IsEmpty()) {
+		SetMarkdown(fRawMarkdown);
+	}
+}
 
 void BMarkdownView::InsertRaw(int32 offset, const char* text, int32 length)
 {
@@ -444,7 +466,7 @@ BMarkdownView::_LeaveBlockCb(MD_BLOCKTYPE type, void* detail, void* userdata)
 			state->view->Insert("\n\n");
 			break;
 		case MD_BLOCK_P:
-			state->view->Insert("\n\n");
+			state->view->Insert("\n");
 			break;
 		case MD_BLOCK_CODE: {
 			state->isBlockCode = false;
@@ -534,7 +556,7 @@ BMarkdownView::_EnterSpanCb(MD_SPANTYPE type, void* detail, void* userdata)
 			MD_SPAN_IMG_DETAIL* imgDetail = static_cast<MD_SPAN_IMG_DETAIL*>(detail);
 
 	ImageRegion* imgRegion = new ImageRegion();
-	imgRegion->startPos = state->view->TextLength();
+	// Nota: non inseriamo inserimenti di testo qui!
 
 	if (imgDetail->src.text != NULL && imgDetail->src.size > 0)
 		imgRegion->src.SetTo(imgDetail->src.text, imgDetail->src.size);
@@ -542,7 +564,7 @@ BMarkdownView::_EnterSpanCb(MD_SPANTYPE type, void* detail, void* userdata)
 	state->view->_LoadImageForRegion(imgRegion);
 
 	state->currentImage = imgRegion;
-	state->currentImageAlt.SetTo(""); // Azzeriamo il buffer alt temporaneo
+	state->currentImageAlt.SetTo("");
 	state->isImage = true;
 	break;
 		}
@@ -582,36 +604,108 @@ BMarkdownView::_LeaveSpanCb(MD_SPANTYPE type, void* detail, void* userdata)
 			state->isCode = false;
 			break;
 		case MD_SPAN_IMG: {
-			state->isImage = false; // Disattiviamo subito il flag!
+			/*
+			state->isImage = false;
 
 	if (state->currentImage != NULL) {
-		// Assegniamo l'alt text raccolto
 		state->currentImage->alt = state->currentImageAlt;
 
-		if (state->currentImage->bitmap != NULL) {
-			// Immagine trovata: riserviamo le righe vuote
+		if (state->currentImage->bitmap != NULL && state->currentImage->bitmap->IsValid()) {
+			// 1. Un solo \n prima dell'immagine per mandarla a capo pulita
+			state->view->Insert("\n");
+			state->currentImage->startPos = state->view->TextLength();
+
 			float imgHeight = state->currentImage->bitmap->Bounds().Height();
 			font_height fh;
 			state->baseFont.GetHeight(&fh);
 			float lineHeight = fh.ascent + fh.descent + fh.leading;
+
 			if (lineHeight < 1.0f)
 				lineHeight = 12.0f;
 
-			int32 newLinesNeeded = (int32)(imgHeight / lineHeight) + 1;
+			// 2. Calcolo preciso: quante righe servono ESATTAMENTE per coprire l'altezza dell'immagine
+			int32 newLinesNeeded = (int32)(imgHeight / lineHeight);
+			if (newLinesNeeded < 1)
+				newLinesNeeded = 1;
+
 			for (int32 i = 0; i < newLinesNeeded; i++)
 				state->view->Insert("\n");
 
 			state->currentImage->endPos = state->view->TextLength();
 			state->view->fImages.AddItem(state->currentImage);
 		} else {
-			// Fallback: se l'immagine manca, mostriamo l'alt text tra parentesi
+			// Fallback se l'immagine manca
 			if (!state->currentImage->alt.IsEmpty()) {
 				BString altFallback;
 				altFallback.SetToFormat("[%s]", state->currentImage->alt.String());
 				state->view->Insert(altFallback.String());
 			}
 			state->view->Insert("\n");
-			delete state->currentImage; // Pulizia memoria in caso di fallimento
+			delete state->currentImage;
+		}
+		state->currentImage = NULL;
+	}
+	break;*/
+	state->isImage = false;
+
+	if (state->currentImage != NULL) {
+		state->currentImage->alt = state->currentImageAlt;
+
+		if (state->currentImage->bitmap != NULL && state->currentImage->bitmap->IsValid()) {
+			int32 startOffset = state->view->TextLength();
+			state->view->Insert("\n");
+
+			// 1. Dimensioni NATIVE della bitmap
+			BRect bitmapBounds = state->currentImage->bitmap->Bounds();
+			float nativeWidth = bitmapBounds.Width();
+			float nativeHeight = bitmapBounds.Height();
+
+			// 2. Larghezza MASSIMA disponibile nella BMarkdownView
+			float viewWidth = state->view->Bounds().Width();
+			float maxWidth = viewWidth - 20.0f; // Padding di sicurezza
+
+			float renderedHeight = nativeHeight;
+
+			// 3. SE L'IMMAGINE VIENE SCALATA, CALCOLIAMO L'ALTEZZA EFFETTIVA A SCHERMO
+			if (maxWidth > 0.0f && nativeWidth > maxWidth) {
+				float scale = maxWidth / nativeWidth;
+				renderedHeight = nativeHeight * scale; // <- Altezza REALE disegnata
+			}
+
+			// 4. Calcoliamo la baseLineHeight neutra
+			font_height fh;
+			state->baseFont.GetHeight(&fh);
+			float baseLineHeight = fh.ascent + fh.descent + fh.leading;
+			if (baseLineHeight < 1.0f)
+				baseLineHeight = 12.0f;
+
+			// 5. Calcoliamo i \n usando 'renderedHeight' (non più nativeHeight!)
+			int32 newLinesNeeded = (int32)(renderedHeight / baseLineHeight);
+			if (newLinesNeeded < 1)
+				newLinesNeeded = 1;
+
+			for (int32 i = 0; i < newLinesNeeded; i++) {
+				state->view->Insert("\n");
+			}
+
+			int32 lineInsertEnd = state->view->TextLength();
+
+			// Applichiamo il font base sulle righe riservate per evitare dilatazioni
+			rgb_color textColor = state->textColor;
+			state->view->SetFontAndColor(startOffset, lineInsertEnd,
+				&state->baseFont, B_FONT_ALL, &textColor);
+
+			state->currentImage->startPos = startOffset;
+			state->currentImage->endPos = lineInsertEnd;
+			state->view->fImages.AddItem(state->currentImage);
+		} else {
+			if (!state->currentImage->alt.IsEmpty()) {
+				BString altFallback;
+				altFallback.SetToFormat("[%s]", state->currentImage->alt.String());
+				state->view->Insert(altFallback.String());
+			}
+			state->view->Insert("\n");
+			delete state->currentImage;
 		}
 		state->currentImage = NULL;
 	}
@@ -653,8 +747,7 @@ BMarkdownView::_LoadImageForRegion(ImageRegion* region)
 {
 	if (region == NULL || region->src.IsEmpty())
 		return;
-	// Non posso usare BTranslationUtils per via di dipendenze circolari
-	
+		
 	// Caricamento da file locale (es. /boot/home/images/photo.png o relativo)
 	region->bitmap = BTranslationUtils::GetBitmap(region->src.String());
 
@@ -705,7 +798,6 @@ BMarkdownView::MouseMoved(BPoint where, uint32 transit, const BMessage* dragMess
 {
 	BTextView::MouseMoved(where, transit, dragMessage);
 	// Cambiamo il cursore in una manina quando il puntatore si trova sopra un link
-	where.PrintToStream();
 	LinkRegion* link = _LinkAt(where);
 	if (link != NULL) {
 		// Sovrascriviamo il cursore I-Beam impostato da BTextView con la manina

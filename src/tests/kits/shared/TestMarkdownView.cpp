@@ -82,7 +82,7 @@ private:
 			"| :--- | :---: | ---: |\n"
 			"| `MD4C Parser` | C Library | ✅ Integrato |\n"
 			"| `BTextView` | Native View | ✅ Esteso |\n"
-			"| `BUrl` | Network Kit | ✅ Attivo |\n"
+			"| `BUrl` | Support Kit | ✅ Attivo |\n"
 			"| `Translation Kit` | Graphics | ✅ Operativo |\n\n"
 			"---\n\n"
 			"### 🖼️ Test Immagini (Translation Kit & BBitmap):\n"
