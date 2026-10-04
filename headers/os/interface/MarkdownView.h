@@ -4,12 +4,50 @@
 #include <TextView.h>
 #include <String.h>
 #include <Font.h>
+#include <Bitmap.h>
 #include <GraphicsDefs.h>
 #include <ObjectList.h>
-
+#include <Cursor.h>
 #include <md4c.h>
 
 // Struttura per tracciare le regioni dei blocchi di codice nel testo
+struct LinkRegion {
+	int32	startPos;
+	int32	endPos;
+	BString	url;
+
+	LinkRegion() : startPos(-1), endPos(-1) {}
+};
+
+struct TableRowRegion {
+	int32 startPos;
+	int32 endPos;
+	bool  isHeader;
+};
+
+struct TableRegion {
+	int32 startPos;
+	int32 endPos;
+	BObjectList<TableRowRegion> rows;
+
+	TableRegion() : rows(10) {}
+};
+
+struct ImageRegion {
+	int32		startPos;
+	int32		endPos;
+	BString		src;
+	BString		alt;
+	BBitmap*	bitmap;
+
+	ImageRegion()
+		: startPos(-1), endPos(-1), bitmap(NULL) {}
+
+	~ImageRegion() {
+		delete bitmap;
+	}
+};
+
 struct CodeBlockRegion {
 	int32	startPos;
 	int32	endPos;
@@ -26,6 +64,9 @@ public:
 
 	// Override di BView per il rendering dello sfondo custom dei blocchi
 	virtual void			Draw(BRect updateRect) override;
+	
+	virtual void			MouseDown(BPoint where) override;
+	virtual void			MouseMoved(BPoint where, uint32 transit, const BMessage* dragMessage) override;
 
 	// Supporto per BMessage/Archiving (se usato da LayoutBuilder / InterfaceKit)
 	static	BArchivable*	Instantiate(BMessage* archive);
@@ -61,6 +102,14 @@ private:
 		bool				isBlockCode;
 		uint32				headingLevel;
 		int32				currentBlockStart;
+		bool				isTable;
+		bool				isHeaderRow;
+		TableRegion*		currentTable;
+		int32				currentTRStart;
+		bool				isImage;
+		ImageRegion*		currentImage;
+		bool				isLink;
+		LinkRegion*			currentLink;
 		
 		RenderState()
 			: view(NULL),
@@ -85,8 +134,16 @@ private:
 	static int				_LeaveSpanCb(MD_SPANTYPE type, void* detail, void* userdata);
 	static int				_TextCb(MD_TEXTTYPE type, const MD_CHAR* text, MD_SIZE size, void* userdata);
 
+	void					_LoadImageForRegion(ImageRegion* region);
+
 	BString					fRawMarkdown;
+	BCursor					fHandCursor;
 	BObjectList<CodeBlockRegion, true> fCodeBlocks;
+	BObjectList<TableRegion> fTables;
+	BObjectList<ImageRegion> fImages;
+	BObjectList<LinkRegion> fLinks;
+	LinkRegion*             _LinkAt(BPoint point) const;
+
 };
 
 #endif // MARKDOWN_VIEW_H

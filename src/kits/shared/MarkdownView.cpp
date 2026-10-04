@@ -1,0 +1,728 @@
+#include "MarkdownView.h"
+
+#include <InterfaceDefs.h>
+#include <TranslationUtils.h>// <- circular dependency replaced by
+// These to not use translationutils
+//#include <BitmapStream.h>
+//#include <File.h>
+//#include <TranslatorRoster.h>
+// --------------------------
+#include <algorithm>
+#include <Cursor.h>
+#include <Path.h>
+#include <Window.h>
+#include <Url.h>
+
+BMarkdownView::BMarkdownView(const char* name, uint32 flags)
+	:
+	BTextView(name, flags),
+	fHandCursor(B_CURSOR_ID_FOLLOW_LINK),
+	fCodeBlocks(20),
+	fTables(10),
+	fImages(10),
+	fLinks(20)
+{
+	fRawMarkdown.SetTo("");
+	MakeEditable(false);
+	MakeSelectable(true);
+	SetStylable(true);
+}
+
+BMarkdownView::BMarkdownView(const char* name, const BFont* font,
+	const rgb_color* color, uint32 flags)
+	:
+	BTextView(name, font, color, flags),
+	fHandCursor(B_CURSOR_ID_FOLLOW_LINK),
+	fCodeBlocks(20),
+	fTables(10),
+	fImages(10),
+	fLinks(20)
+{
+	fRawMarkdown.SetTo("");
+	MakeEditable(false);
+	MakeSelectable(true);
+	SetStylable(true);
+}
+
+BMarkdownView::~BMarkdownView()
+{
+}
+
+void
+BMarkdownView::Draw(BRect updateRect)
+{
+	// 1. BTextView disegna tutto il testo (compreso il testo chiaro del codice)
+	// ma lo fa sullo sfondo bianco standard del documento.
+	BTextView::Draw(updateRect);
+
+	PushState();
+	
+	// rendering di immagini se esistono
+	int32 imageCount = fImages.CountItems();
+	if (imageCount > 0) {
+		for (int32 i = 0; i < imageCount; i++) {
+			ImageRegion* img = fImages.ItemAt(i);
+			if (img == NULL || img->bitmap == NULL)
+				continue;
+
+			BPoint startPt = PointAt(img->startPos);
+			BRect bitmapBounds = img->bitmap->Bounds();
+
+			// Scaliamo l'immagine se supera la larghezza massima della vista
+			float maxWidth = Bounds().Width() - 10.0f;
+			float imgWidth = bitmapBounds.Width();
+			float imgHeight = bitmapBounds.Height();
+
+			if (imgWidth > maxWidth && maxWidth > 0.0f) {
+				float scale = maxWidth / imgWidth;
+				imgWidth = maxWidth;
+				imgHeight *= scale;
+			}
+
+			BRect drawRect(
+				startPt.x + 5.0f,
+				startPt.y + 2.0f,
+				startPt.x + 5.0f + imgWidth,
+				startPt.y + 2.0f + imgHeight
+			);
+
+			if (drawRect.Intersects(updateRect)) {
+				SetDrawingMode(B_OP_ALPHA);
+				SetBlendingMode(B_PIXEL_ALPHA, B_ALPHA_COMPOSITE);
+				DrawBitmap(img->bitmap, img->bitmap->Bounds(), drawRect);
+			}
+		}
+	}
+
+	rgb_color docBg = ui_color(B_DOCUMENT_BACKGROUND_COLOR);
+	float luminance = (0.299f * docBg.red + 0.587f * docBg.green + 0.114f * docBg.blue);
+	
+	// if there's no tables just skip this part
+	int32 tableCount = fTables.CountItems();
+	if ( tableCount > 0) {
+		bool isDark = (luminance < 128.0f);
+		// Palette colori in stile GitHub (Chiaro / Scuro)
+		rgb_color tableBorderColor  = isDark ? (rgb_color){ 60, 65, 70, 255 } : (rgb_color){ 210, 215, 220, 255 };
+		rgb_color headerBgColor      = isDark ? (rgb_color){ 45, 50, 55, 255 } : (rgb_color){ 240, 243, 246, 255 };
+		rgb_color altRowBgColor     = isDark ? (rgb_color){ 35, 38, 42, 255 } : (rgb_color){ 248, 249, 250, 255 };
+		rgb_color normalRowBgColor  = isDark ? (rgb_color){ 28, 30, 33, 255 } : (rgb_color){ 255, 255, 255, 255 };
+
+		// -------------------------------------------------------------------------
+		// A. RENDERING DELLE TABELLE (Sfondi alternati e Bordi)
+		// -------------------------------------------------------------------------
+		
+		for (int32 t = 0; t < tableCount; t++) {
+			TableRegion* table = fTables.ItemAt(t);
+			if (table == NULL || table->rows.CountItems() == 0)
+				continue;
+
+			int32 rowCount = table->rows.CountItems();
+			
+			// Calcoliamo i limiti dell'intera tabella
+			TableRowRegion* firstRow = table->rows.ItemAt(0);
+			TableRowRegion* lastRow  = table->rows.ItemAt(rowCount - 1);
+
+			BPoint startPt = PointAt(firstRow->startPos);
+			int32 lastPosAdjusted = std::max(lastRow->startPos, lastRow->endPos - 1);
+			BPoint endPt = PointAt(lastPosAdjusted);
+
+			BRect totalTableRect;
+			totalTableRect.left = 0.0f;
+			totalTableRect.right = Bounds().Width();
+			totalTableRect.top = startPt.y - 1.0f;
+			totalTableRect.bottom = endPt.y + LineHeight(lastPosAdjusted) + 1.0f;
+			totalTableRect.InsetBy(2.0f, 0.0f);
+
+			if (!totalTableRect.Intersects(updateRect))
+				continue;
+
+			// 1. Sfondo delle righe (Zebra striping + Intestazione)
+			for (int32 r = 0; r < rowCount; r++) {
+				TableRowRegion* row = table->rows.ItemAt(r);
+				BPoint rStartPt = PointAt(row->startPos);
+				int32 rEndAdjusted = std::max(row->startPos, row->endPos - 1);
+				
+				BRect rowRect;
+				rowRect.left = totalTableRect.left;
+				rowRect.right = totalTableRect.right;
+				rowRect.top = rStartPt.y - 1.0f;
+				rowRect.bottom = rStartPt.y + LineHeight(rEndAdjusted) + 1.0f;
+
+				rgb_color rowBg;
+				if (row->isHeader)
+					rowBg = headerBgColor;
+				else if (r % 2 == 1)
+					rowBg = altRowBgColor;
+				else
+					rowBg = normalRowBgColor;
+
+				SetDrawingMode(B_OP_COPY);
+				SetHighColor(rowBg);
+				FillRect(rowRect);
+
+				// Linea divisoria orizzontale sotto ogni riga
+				SetHighColor(tableBorderColor);
+				StrokeLine(BPoint(rowRect.left, rowRect.bottom), BPoint(rowRect.right, rowRect.bottom));
+			}
+
+			// 2. Bordo esterno arrotondato dell'intera tabella
+			SetHighColor(tableBorderColor);
+			StrokeRoundRect(totalTableRect, 4.0f, 4.0f);
+
+			// 3. Ridisegniamo il testo della tabella sopra lo sfondo disegnato
+			SetDrawingMode(B_OP_OVER);
+			SetHighColor(ui_color(B_DOCUMENT_TEXT_COLOR));
+			SetFont(be_fixed_font);
+
+			for (int32 r = 0; r < rowCount; r++) {
+				TableRowRegion* row = table->rows.ItemAt(r);
+				int32 currentOffset = row->startPos;
+				
+				while (currentOffset < row->endPos) {
+					BPoint linePt = PointAt(currentOffset);
+					int32 lineEnd = currentOffset;
+					while (lineEnd < row->endPos && ByteAt(lineEnd) != '\n') {
+						lineEnd++;
+					}
+
+					int32 length = lineEnd - currentOffset;
+					if (length > 0) {
+						BString lineStr;
+						GetText(currentOffset, length, lineStr.LockBuffer(length + 1));
+						lineStr.UnlockBuffer();
+
+						DrawString(lineStr.String(), BPoint(linePt.x, linePt.y + LineHeight(currentOffset) - 3.0f));
+					}
+					currentOffset = lineEnd + 1;
+				}
+			}
+		}
+	}
+	
+	// if there's no codeblocks just exit!
+	int32 count = fCodeBlocks.CountItems();
+	if (count > 0) {
+		// Sfondo del riquadro invertito
+		rgb_color blockBgColor;
+		rgb_color codeTextColor;
+		
+		if (luminance >= 128.0f) {
+			// Tema Chiaro -> Riquadro Scuro, Testo Chiaro
+			blockBgColor  = (rgb_color){ 35, 38, 41, 255 };
+			codeTextColor = (rgb_color){ 235, 238, 242, 255 };
+		} else {
+			// Tema Scuro -> Riquadro Chiaro/Giallino, Testo Scuro
+			blockBgColor  = (rgb_color){ 245, 242, 220, 255 };
+			codeTextColor = (rgb_color){ 25, 25, 25, 255 };
+		}	
+		
+		for (int32 i = 0; i < count; i++) {
+			CodeBlockRegion* block = fCodeBlocks.ItemAt(i);
+			if (block == NULL || block->startPos >= block->endPos)
+				continue;
+
+			BPoint startPt = PointAt(block->startPos);
+			int32 endPosAdjusted = std::max(block->startPos, block->endPos - 1);
+			BPoint endPt = PointAt(endPosAdjusted);
+
+			BRect blockRect;
+			blockRect.left = 0.0f;
+			blockRect.right = Bounds().Width();
+			blockRect.top = startPt.y - 1.0f;
+			blockRect.bottom = endPt.y + LineHeight(endPosAdjusted) + 1.0f;
+
+			blockRect.InsetBy(2.0f, 0.0f);
+
+			if (blockRect.Intersects(updateRect)) {
+				// A. Disegniamo lo sfondo pieno del riquadro (coprendo l'area del codice)
+				SetDrawingMode(B_OP_COPY);
+				SetHighColor(blockBgColor);
+				FillRoundRect(blockRect, 4.0f, 4.0f);
+
+				// B. Ridisegniamo il testo del codice sopra al riquadro con il colore dedicato
+				SetDrawingMode(B_OP_OVER);
+				SetHighColor(codeTextColor);
+				SetFont(be_fixed_font);
+
+				int32 currentOffset = block->startPos;
+				while (currentOffset < block->endPos) {
+					BPoint linePt = PointAt(currentOffset);
+					
+					int32 lineEnd = currentOffset;
+					while (lineEnd < block->endPos && ByteAt(lineEnd) != '\n') {
+						lineEnd++;
+					}
+
+					int32 length = lineEnd - currentOffset;
+					if (length > 0) {
+						BString lineStr;
+						GetText(currentOffset, length, lineStr.LockBuffer(length + 1));
+						lineStr.UnlockBuffer();
+
+						DrawString(lineStr.String(), BPoint(linePt.x, linePt.y + LineHeight(currentOffset) - 3.0f));
+					}
+
+					currentOffset = lineEnd + 1;
+				}
+			}
+		}
+	}
+	PopState();
+}
+
+status_t
+BMarkdownView::SetMarkdown(const BString& markdownText)
+{
+	return SetMarkdown(markdownText.String());
+}
+
+status_t
+BMarkdownView::SetMarkdown(const char* markdownText)
+{
+	SetText("");
+	fCodeBlocks.MakeEmpty(true);
+	fTables.MakeEmpty(true);
+	fImages.MakeEmpty(true);
+	fLinks.MakeEmpty(true);
+	fRawMarkdown.SetTo(markdownText);
+
+	if (markdownText == NULL || strlen(markdownText) == 0)
+		return B_OK;
+
+	RenderState state;
+	state.view = this;
+	
+	SetFontAndColor(be_plain_font);
+	GetFont(&state.baseFont);
+	state.currentFont = state.baseFont;
+	
+	state.textColor = ui_color(B_DOCUMENT_TEXT_COLOR);
+	state.codeColor = (rgb_color){ 200, 40, 40, 255 }; // Usato solo per il codice inline `testo`
+
+	MD_PARSER parser = {
+		0,
+		MD_FLAG_TABLES,
+		_EnterBlockCb,
+		_LeaveBlockCb,
+		_EnterSpanCb,
+		_LeaveSpanCb,
+		_TextCb,
+		NULL,
+		NULL
+	};
+
+	int result = md_parse(markdownText, (MD_SIZE)strlen(markdownText), &parser, &state);
+	Invalidate();
+	return (result == 0) ? B_OK : B_ERROR;
+}
+
+void BMarkdownView::InsertRaw(int32 offset, const char* text, int32 length)
+{
+	fRawMarkdown.Insert(text, length, offset);
+	SetMarkdown(fRawMarkdown);
+}
+
+void BMarkdownView::InsertRaw(const char* text, int32 length)
+{
+	InsertRaw(fRawMarkdown.Length(), text, length);
+}
+
+void BMarkdownView::InsertRaw(const char* text)
+{
+	InsertRaw(fRawMarkdown.Length(), text, strlen(text));
+}
+
+int32 BMarkdownView::RawTextLength() const
+{
+	return fRawMarkdown.Length();
+}
+
+const char*
+BMarkdownView::RawText() const
+{
+	return fRawMarkdown.String();
+}
+
+void
+BMarkdownView::_ApplyCurrentStyle(int32 startPos, RenderState& state)
+{
+	int32 endPos = TextLength();
+	if (startPos >= endPos)
+		return;
+
+	uint16 face = B_REGULAR_FACE;
+	if (state.isBold || state.headingLevel > 0)
+		face |= B_BOLD_FACE;
+	if (state.isItalic)
+		face |= B_ITALIC_FACE;
+	if (state.isLink)
+		face |= B_UNDERSCORE_FACE; // Sottolineato per i collegamenti
+
+	if (state.isCode || state.isBlockCode)
+		state.currentFont = *be_fixed_font;
+	else
+		state.currentFont = state.baseFont;
+
+	state.currentFont.SetFace(face);
+
+	if (state.headingLevel > 0) {
+		float factor = 1.0f + (0.15f * (7 - std::min(state.headingLevel, (uint32)6)));
+		state.currentFont.SetSize(state.baseFont.Size() * factor);
+	} else {
+		state.currentFont.SetSize(state.baseFont.Size());
+	}
+
+	// Selezione del colore del font
+	rgb_color colorToApply;
+	if (state.isLink) {
+		// Blu classico o colore di sistema per i link
+		colorToApply = ui_color(B_LINK_TEXT_COLOR);
+	} else if (state.isBlockCode) {
+		// Nei blocchi usiamo il colore ad alto contrasto per il riquadro invertito
+		colorToApply = state.codeColor;
+	} else if (state.isCode) {
+		// Nel codice inline (`testo`) usiamo una tinta di evidenziazione
+		colorToApply = (rgb_color){ 200, 40, 40, 255 };
+	} else {
+		colorToApply = state.textColor;
+	}
+
+	SetFontAndColor(startPos, endPos, &state.currentFont, B_FONT_ALL, &colorToApply);
+}
+
+// -----------------------------------------------------------------------------
+// Callbacks MD4C
+// -----------------------------------------------------------------------------
+
+int
+BMarkdownView::_EnterBlockCb(MD_BLOCKTYPE type, void* detail, void* userdata)
+{
+	RenderState* state = static_cast<RenderState*>(userdata);
+
+	switch (type) {
+		case MD_BLOCK_H:
+		{
+			MD_BLOCK_H_DETAIL* hDetail = static_cast<MD_BLOCK_H_DETAIL*>(detail);
+			state->headingLevel = hDetail->level;
+			break;
+		}
+		case MD_BLOCK_CODE:
+			state->isBlockCode = true;
+			state->view->Insert("\n");
+			state->currentBlockStart = state->view->TextLength();
+			break;
+		case MD_BLOCK_TABLE:
+			state->isTable = true;
+			state->view->Insert("\n");
+			state->currentTable = new TableRegion();
+			state->currentTable->startPos = state->view->TextLength();
+			break;
+		case MD_BLOCK_THEAD:
+			state->isHeaderRow = true;
+			break;
+		case MD_BLOCK_TR:
+			state->currentTRStart = state->view->TextLength();
+			state->view->Insert("| ");
+			break;
+		case MD_BLOCK_TH:
+			state->isBold = true;
+			break;
+		default:
+			break;
+	}
+	return 0;
+}
+
+int
+BMarkdownView::_LeaveBlockCb(MD_BLOCKTYPE type, void* detail, void* userdata)
+{
+	RenderState* state = static_cast<RenderState*>(userdata);
+
+	switch (type) {
+		case MD_BLOCK_H:
+			state->headingLevel = 0;
+			state->view->Insert("\n\n");
+			break;
+		case MD_BLOCK_P:
+			state->view->Insert("\n\n");
+			break;
+		case MD_BLOCK_CODE: {
+			state->isBlockCode = false;
+			int32 blockEnd = state->view->TextLength();
+			
+			if (state->currentBlockStart != -1 && blockEnd > state->currentBlockStart) {
+				CodeBlockRegion* region = new CodeBlockRegion();
+				region->startPos = state->currentBlockStart;
+				region->endPos = blockEnd;
+				state->view->fCodeBlocks.AddItem(region);
+			}
+			state->currentBlockStart = -1;
+			state->view->Insert("\n\n");
+			break;
+		}
+		case MD_BLOCK_LI:
+			state->view->Insert("\n");
+			break;
+		case MD_BLOCK_TABLE:
+			if (state->currentTable != NULL) {
+				state->currentTable->endPos = state->view->TextLength();
+				state->view->fTables.AddItem(state->currentTable);
+				state->currentTable = NULL;
+			}
+			state->isTable = false;
+			state->view->Insert("\n\n");
+			break;
+		case MD_BLOCK_THEAD:
+			state->isHeaderRow = false;
+			break;
+		case MD_BLOCK_TR: {
+			if (state->currentTable != NULL && state->currentTRStart != -1) {
+				TableRowRegion* row = new TableRowRegion();
+				row->startPos = state->currentTRStart;
+				row->endPos = state->view->TextLength();
+				row->isHeader = state->isHeaderRow;
+				state->currentTable->rows.AddItem(row);
+			}
+			state->currentTRStart = -1;
+			state->view->Insert("\n");
+			break;
+		}
+		case MD_BLOCK_TH:
+			state->isBold = false;
+			//state->view->Insert(" | ");
+			state->view->Insert(" \t ");
+			break;
+		case MD_BLOCK_TD:
+			//state->view->Insert(" | ");
+			state->view->Insert(" \t ");
+			break;
+		default:
+			break;
+	}
+	return 0;
+}
+
+int
+BMarkdownView::_EnterSpanCb(MD_SPANTYPE type, void* detail, void* userdata)
+{
+	RenderState* state = static_cast<RenderState*>(userdata);
+
+	switch (type) {
+		case MD_SPAN_A: {
+			MD_SPAN_A_DETAIL* aDetail = static_cast<MD_SPAN_A_DETAIL*>(detail);
+			state->isLink = true;
+
+			LinkRegion* link = new LinkRegion();
+			link->startPos = state->view->TextLength();
+
+			if (aDetail->href.text != NULL && aDetail->href.size > 0)
+				link->url.SetTo(aDetail->href.text, aDetail->href.size);
+
+			state->currentLink = link;
+			break;
+		}
+		case MD_SPAN_STRONG:
+			state->isBold = true;
+			break;
+		case MD_SPAN_EM:
+			state->isItalic = true;
+			break;
+		case MD_SPAN_CODE:
+			state->isCode = true;
+			break;
+		case MD_SPAN_IMG: {
+			MD_SPAN_IMG_DETAIL* imgDetail = static_cast<MD_SPAN_IMG_DETAIL*>(detail);
+			state->isImage = true;
+
+			ImageRegion* imgRegion = new ImageRegion();
+			imgRegion->startPos = state->view->TextLength();
+
+			// Estraiamo il percorso/URL dall'attributo src
+			if (imgDetail->src.text != NULL && imgDetail->src.size > 0) {
+				imgRegion->src.SetTo(imgDetail->src.text, imgDetail->src.size);
+			}
+
+			// Carichiamo la BBitmap se si tratta di un file locale
+			state->view->_LoadImageForRegion(imgRegion);
+
+			state->currentImage = imgRegion;
+			state->view->Insert("\n"); // A capo prima dell'immagine
+			break;
+		}
+		default:
+			break;
+	}
+	return 0;
+}
+
+int
+BMarkdownView::_LeaveSpanCb(MD_SPANTYPE type, void* detail, void* userdata)
+{
+	RenderState* state = static_cast<RenderState*>(userdata);
+
+	switch (type) {
+		case MD_SPAN_A: {
+			if (state->currentLink != NULL) {
+				state->currentLink->endPos = state->view->TextLength();
+				//state->view->fLinks.AddItem(state->currentLink);
+				if (state->currentLink->endPos > state->currentLink->startPos) {
+					state->view->fLinks.AddItem(state->currentLink);
+				} else {
+					delete state->currentLink;
+				}
+				state->currentLink = NULL;
+			}
+			state->isLink = false; // Disattiva lo stato link!
+			break;
+		}
+		case MD_SPAN_STRONG:
+			state->isBold = false;
+			break;
+		case MD_SPAN_EM:
+			state->isItalic = false;
+			break;
+		case MD_SPAN_CODE:
+			state->isCode = false;
+			break;
+		case MD_SPAN_IMG: {
+			if (state->currentImage != NULL) {
+				state->currentImage->endPos = state->view->TextLength();
+
+				// Inseriamo righe vuote di spaziatura per riservare l'altezza dell'immagine
+				if (state->currentImage->bitmap != NULL) {
+					float imgHeight = state->currentImage->bitmap->Bounds().Height();
+					font_height fh;
+					state->baseFont.GetHeight(&fh);
+					float lineHeight = fh.ascent + fh.descent + fh.leading;
+
+					int32 newLinesNeeded = (int32)(imgHeight / lineHeight) + 1;
+					for (int32 i = 0; i < newLinesNeeded; i++) {
+						state->view->Insert("\n");
+					}
+				} else {
+					state->view->Insert("\n");
+				}
+
+				state->view->fImages.AddItem(state->currentImage);
+				state->currentImage = NULL;
+			}
+			state->isImage = false;
+			break;
+		}
+		default:
+			break;
+	}
+	return 0;
+}
+
+int
+BMarkdownView::_TextCb(MD_TEXTTYPE type, const MD_CHAR* text, MD_SIZE size, void* userdata)
+{
+	RenderState* state = static_cast<RenderState*>(userdata);
+	
+	int32 startPos = state->view->TextLength();
+	
+	BString str(text, size);
+	state->view->Insert(str.String());
+
+	state->view->_ApplyCurrentStyle(startPos, *state);
+
+	return 0;
+}
+void
+BMarkdownView::_LoadImageForRegion(ImageRegion* region)
+{
+	if (region == NULL || region->src.IsEmpty())
+		return;
+	// Non posso usare BTranslationUtils per via di dipendenze circolari
+	
+	// Caricamento da file locale (es. /boot/home/images/photo.png o relativo)
+	region->bitmap = BTranslationUtils::GetBitmap(region->src.String());
+
+	// Se il percorso è relativo o l'immagine non è stata trovata directly
+	if (region->bitmap == NULL && region->src.ByteAt(0) != '/') {
+		// Tentativo c	on percorso assoluto o relativo alla directory corrente
+		BPath path(region->src.String());
+		region->bitmap = BTranslationUtils::GetBitmap(path.Path());
+	}
+	/* senza BTranslationUtils
+	BFile file(region->src.String(), B_READ_ONLY);
+	if (file.InitCheck() != B_OK)
+		return;
+
+	BTranslatorRoster* roster = BTranslatorRoster::Default();
+	if (roster == NULL)
+		return;
+
+	BBitmapStream stream;
+	if (roster->Translate(&file, NULL, NULL, &stream, B_TRANSLATOR_BITMAP) == B_OK) {
+		BBitmap* bitmap = NULL;
+		if (stream.DetachBitmap(&bitmap) == B_OK) {
+			region->bitmap = bitmap;
+		}
+	}*/
+}
+LinkRegion*
+BMarkdownView::_LinkAt(BPoint point) const
+{
+	// Convertiamo le coordinate visive del punto nell'offset di testo della BTextView
+	int32 offset = OffsetAt(point);
+	if (offset < 0 || offset >= TextLength())
+		return NULL;
+
+	int32 linkCount = fLinks.CountItems();
+	for (int32 i = 0; i < linkCount; i++) {
+		LinkRegion* link = fLinks.ItemAt(i);
+		if (link != NULL && offset >= link->startPos && offset < link->endPos) {
+			return link;
+		}
+	}
+
+	return NULL;
+}
+
+void
+BMarkdownView::MouseMoved(BPoint where, uint32 transit, const BMessage* dragMessage)
+{
+	BTextView::MouseMoved(where, transit, dragMessage);
+	// Cambiamo il cursore in una manina quando il puntatore si trova sopra un link
+	where.PrintToStream();
+	LinkRegion* link = _LinkAt(where);
+	if (link != NULL) {
+		// Sovrascriviamo il cursore I-Beam impostato da BTextView con la manina
+		SetViewCursor(&fHandCursor);
+	} else if (transit == B_INSIDE_VIEW || transit == B_ENTERED_VIEW) {
+		// Se non siamo su un link, usiamo il cursore di testo I-Beam
+		BCursor iBeamCursor(B_CURSOR_ID_I_BEAM);
+		SetViewCursor(&iBeamCursor);
+	}
+
+	//BTextView::MouseMoved(where, transit, dragMessage);
+}
+
+void
+BMarkdownView::MouseDown(BPoint where)
+{
+	
+	int32 buttons = 0;
+	if (Window() != NULL && Window()->CurrentMessage() != NULL)
+		Window()->CurrentMessage()->FindInt32("buttons", &buttons);
+
+	if (buttons == B_PRIMARY_MOUSE_BUTTON) {
+		LinkRegion* link = _LinkAt(where);
+		if (link != NULL && !link->url.IsEmpty()) {
+			// Usiamo la classe nativa BUrl
+			BUrl url(link->url.String(),true);
+
+			if (url.IsValid()) {
+				// Metodo nativo reale di BUrl per aprire il link con l'app di sistema
+				status_t err = url.OpenWithPreferredApplication();
+				if (err == B_OK) {
+					return; // Gestito con successo!
+				}
+			}
+		}
+	}
+
+	BTextView::MouseDown(where);
+}
