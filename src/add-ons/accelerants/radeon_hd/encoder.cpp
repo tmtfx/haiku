@@ -2049,19 +2049,15 @@ encoder_dpms_set_dig(uint8 crtcID, int mode)
 				ATOM_TRANSMITTER_ACTION_ENABLE);
 
 			if (connector_is_dp(connectorIndex)) {
-				if (info.dceMajor >= 4) {
-					encoder_dig_setup(connectorIndex, pll->pixelClock,
-						ATOM_ENCODER_CMD_DP_VIDEO_OFF);
-				}
 				// dp link train
 				dp_link_train(crtcID);
 				if (info.dceMajor >= 4) {
 					encoder_dig_setup(connectorIndex, pll->pixelClock,
 						ATOM_ENCODER_CMD_DP_VIDEO_ON);
+				} else {
+					// AVIVO legacy register (DCE 2 / 3 only)
+					Write32(OUT, AVIVO_DP_VID_STREAM_CNTL, 0x201);
 				}
-				// not sure what AtomBIOS table/command sets this
-				// register, but it's required to get the video output
-				Write32(OUT, AVIVO_DP_VID_STREAM_CNTL, 0x201);
 			}
 			if ((connectorFlags & ATOM_DEVICE_LCD_SUPPORT) != 0) {
 				transmitter_dig_setup(connectorIndex, pll->pixelClock,

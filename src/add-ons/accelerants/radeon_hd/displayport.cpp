@@ -859,8 +859,8 @@ dp_link_train(uint8 crtcID)
 	encoder_dig_setup(connectorIndex, mode->timing.pixel_clock,
 		ATOM_ENCODER_CMD_SETUP_PANEL_MODE);
 
-	// Enable enhanced frame if supported
-	sandbox = dpcd_reg_read(connectorIndex, DP_LANE_COUNT);
+	// Set the lane count on the sink, enabling enhanced frame if supported
+	sandbox = dp->laneCount;
 	if (dp->revision >= DP_DPCD_REV_11
 		&& (dpcd_reg_read(connectorIndex, DP_MAX_LANE_COUNT)
 			& DP_ENHANCED_FRAME_CAP)) {
@@ -882,9 +882,6 @@ dp_link_train(uint8 crtcID)
 		dp_encoder_service(ATOM_DP_ACTION_TRAINING_START,
 			mode->timing.pixel_clock, 0, encoderConfig);
 	}
-
-	// Disable the training pattern on the sink
-	dpcd_reg_write(connectorIndex, DP_TRAINING_PATTERN_SET, DP_TRAINING_PATTERN_DISABLE);
 
 	dp_link_train_cr(connectorIndex);
 	dp_link_train_ce(connectorIndex, dpTPS3Supported);
