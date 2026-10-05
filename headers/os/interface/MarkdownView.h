@@ -52,7 +52,29 @@ struct TableRegion {
 	int32 startPos;
 	int32 endPos;
 	BObjectList<TableRowRegion, true> rows;
+	BRect copyRect;
 	TableRegion() : rows(10) {}
+	BString ToText() const {
+		BString result;
+		int32 rowCount = rows.CountItems();
+		for (int32 r = 0; r < rowCount; r++) {
+			TableRowRegion* row = rows.ItemAt(r);
+			if (row == NULL) continue;
+
+			int32 cellCount = row->cells.CountItems();
+			for (int32 c = 0; c < cellCount; c++) {
+				TableCellRegion* cell = row->cells.ItemAt(c);
+				if (cell != NULL) {
+					result.Append(cell->text);
+				}
+				if (c < cellCount - 1) {
+					result.Append("\t"); // Separatore di colonna
+				}
+			}
+			result.Append("\n");
+		}
+		return result;
+	}
 };
 
 struct ImageRegion {
@@ -74,6 +96,7 @@ struct CodeBlockRegion {
 	int32   startPos;
 	int32   endPos;
 	BString codeText;
+	BRect   copyRect;
 };
 
 class BMarkdownView : public BTextView {

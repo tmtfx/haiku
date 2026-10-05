@@ -12,6 +12,7 @@
 #include <Path.h>
 #include <Window.h>
 #include <Url.h>
+#include <Clipboard.h>
 
 #include <cstdio>
 
@@ -390,41 +391,84 @@ BMarkdownView::Draw(BRect updateRect)
 	int32 count = fCodeBlocks.CountItems();
 	if (count > 0) {
 		rgb_color blockBgColor  = (luminance >= 128.0f) ? (rgb_color){ 35, 38, 41, 255 } : (rgb_color){ 245, 242, 220, 255 };
+		rgb_color headerBgColor = (luminance >= 128.0f) ? (rgb_color){ 28, 30, 33, 255 } : (rgb_color){ 230, 227, 205, 255 };
 		rgb_color codeTextColor = (luminance >= 128.0f) ? (rgb_color){ 235, 238, 242, 255 } : (rgb_color){ 25, 25, 25, 255 };
+		rgb_color borderColor   = (luminance >= 128.0f) ? (rgb_color){ 60, 65, 70, 255 } : (rgb_color){ 210, 205, 180, 255 };
+		
+		font_height fh;
+		be_fixed_font->GetHeight(&fh);
+		float lineHeight = fh.ascent + fh.descent + fh.leading;
 
 		for (int32 i = 0; i < count; i++) {
 			CodeBlockRegion* block = fCodeBlocks.ItemAt(i);
 			if (block == NULL || block->codeText.IsEmpty())
 				continue;
 
+			int32 totalLines = 0;
+			int32 strPos = 0;
+			int32 codeLen = block->codeText.Length();
+			while (strPos < codeLen) {
+				totalLines++;
+				int32 lineEnd = block->codeText.FindFirst('\n', strPos);
+				if (lineEnd == B_ERROR)
+					break;
+				strPos = lineEnd + 1;
+			}
+			if (totalLines < 1) totalLines = 1;
+
+			// 2. Calcoliamo la coordinata di partenza top basandoci su startPos
 			BPoint startPt = PointAt(block->startPos);
-			int32 endPosAdjusted = std::max(block->startPos, block->endPos - 1);
-			BPoint endPt = PointAt(endPosAdjusted);
+			float headerHeight = 22.0f;
+			float codeHeight = totalLines * lineHeight;
+			float totalBlockHeight = headerHeight + codeHeight + 12.0f; // 12px di padding globale
 
 			BRect blockRect;
 			blockRect.left = 2.0f;
 			blockRect.right = Bounds().Width() - 2.0f;
-			blockRect.top = startPt.y - 1.0f;
-			blockRect.bottom = endPt.y + LineHeight(endPosAdjusted) + 1.0f;
+			blockRect.top = startPt.y - headerHeight - 4.0f; // Fa salire il riquadro per racchiudere l'header
+			blockRect.bottom = blockRect.top + totalBlockHeight;
 
 			if (blockRect.Intersects(updateRect)) {
-				// Sfondo opaco del riquadro
+				// A. Sfondo del riquadro principale
 				SetDrawingMode(B_OP_COPY);
 				SetHighColor(blockBgColor);
 				FillRoundRect(blockRect, 4.0f, 4.0f);
 
-				// Testo del codice custom disegnato in overlay
+				// B. Barra d'intestazione superiore (Header)
+				BRect headerRect(blockRect.left, blockRect.top, blockRect.right, blockRect.top + headerHeight);
+				SetHighColor(headerBgColor);
+				FillRoundRect(headerRect, 4.0f, 4.0f);
+
+				// Linea di separazione sotto l'header
+				SetHighColor(borderColor);
+				StrokeLine(BPoint(headerRect.left, headerRect.bottom), BPoint(headerRect.right, headerRect.bottom));
+
+				// Bordo esterno arrotondato
+				StrokeRoundRect(blockRect, 4.0f, 4.0f);
+
+				// C. Pulsante "Copia"
 				SetDrawingMode(B_OP_OVER);
 				SetHighColor(codeTextColor);
+				SetFont(be_plain_font);
+
+				const char* copyStr = "📑 Copy";
+				float copyWidth = StringWidth(copyStr);
+
+				block->copyRect.Set(
+					headerRect.right - copyWidth - 12.0f,
+					headerRect.top + 2.0f,
+					headerRect.right - 4.0f,
+					headerRect.bottom - 2.0f
+				);
+
+				DrawString(copyStr, BPoint(block->copyRect.left + 2.0f, headerRect.top + 15.0f));
+
+				// D. Testo del codice sorgente
 				SetFont(be_fixed_font);
-
 				const float codeLeftPadding = 10.0f;
+				float currentY = headerRect.bottom + 6.0f;
 
-				// Disegniamo riga per riga il testo da block->codeText
-				int32 currentOffset = block->startPos;
-				int32 strPos = 0;
-				int32 codeLen = block->codeText.Length();
-
+				strPos = 0;
 				while (strPos < codeLen) {
 					int32 lineEnd = block->codeText.FindFirst('\n', strPos);
 					if (lineEnd == B_ERROR)
@@ -433,11 +477,10 @@ BMarkdownView::Draw(BRect updateRect)
 					BString lineStr;
 					block->codeText.CopyInto(lineStr, strPos, lineEnd - strPos);
 
-					BPoint linePt = PointAt(currentOffset);
-					DrawString(lineStr.String(), BPoint(linePt.x + codeLeftPadding, linePt.y + LineHeight(currentOffset) - 3.0f));
+					DrawString(lineStr.String(), BPoint(blockRect.left + codeLeftPadding, currentY + fh.ascent));
 
+					currentY += lineHeight;
 					strPos = lineEnd + 1;
-					currentOffset++; // Avanza di riga
 				}
 			}
 		}
@@ -604,6 +647,7 @@ BMarkdownView::_EnterBlockCb(MD_BLOCKTYPE type, void* detail, void* userdata)
 		case MD_BLOCK_CODE:
 		{
 			state->isBlockCode = true;
+			state->view->Insert("\n\n"); // Riga riservata per l'header della toolbar
 			CodeBlockRegion* region = new CodeBlockRegion();
 			region->startPos = state->view->TextLength();
 			region->endPos = -1;
@@ -639,9 +683,9 @@ BMarkdownView::_EnterBlockCb(MD_BLOCKTYPE type, void* detail, void* userdata)
 		TableRowRegion* row = state->currentTable->rows.LastItem();
 
 		// Inseriamo un tab per separare fisicamente le colonne nel buffer di BTextView
-		if (state->currentColIndex > 0) {
-			state->view->Insert("\t");
-		}
+		//if (state->currentColIndex > 0) {
+		//	state->view->Insert("\t");
+		//}
 
 		TableCellRegion* cell = new TableCellRegion();
 		cell->startPos = state->view->TextLength();
@@ -741,7 +785,7 @@ BMarkdownView::_LeaveBlockCb(MD_BLOCKTYPE type, void* detail, void* userdata)
 				state->currentCodeBlock = NULL;
 			}
 
-			state->view->Insert("\n");
+			state->view->Insert("\n\n");
 			break;
 		}
 
@@ -1065,20 +1109,44 @@ void
 BMarkdownView::MouseMoved(BPoint where, uint32 transit, const BMessage* dragMessage)
 {
 	BTextView::MouseMoved(where, transit, dragMessage);
-	// Cambiamo il cursore in una manina quando il puntatore si trova sopra un link
-	LinkRegion* link = _LinkAt(where);
-	if (link != NULL) {
-		// Sovrascriviamo il cursore I-Beam impostato da BTextView con la manina
+
+	bool overInteractiveElement = false;
+
+	// 1. Check passaggio su pulsante "Copia" nei CodeBlock
+	int32 codeCount = fCodeBlocks.CountItems();
+	for (int32 i = 0; i < codeCount; i++) {
+		CodeBlockRegion* block = fCodeBlocks.ItemAt(i);
+		if (block != NULL && block->copyRect.Contains(where)) {
+			overInteractiveElement = true;
+			break;
+		}
+	}
+
+	// 2. Check passaggio su pulsante "Copia" nelle Tabelle
+	if (!overInteractiveElement) {
+		int32 tableCount = fTables.CountItems();
+		for (int32 t = 0; t < tableCount; t++) {
+			TableRegion* table = fTables.ItemAt(t);
+			if (table != NULL && table->copyRect.Contains(where)) {
+				overInteractiveElement = true;
+				break;
+			}
+		}
+	}
+
+	// 3. Check passaggio su un Link
+	if (!overInteractiveElement && _LinkAt(where) != NULL) {
+		overInteractiveElement = true;
+	}
+
+	// Gestione dinamica del cursore
+	if (overInteractiveElement) {
 		SetViewCursor(&fHandCursor);
 	} else if (transit == B_INSIDE_VIEW || transit == B_ENTERED_VIEW) {
-		// Se non siamo su un link, usiamo il cursore di testo I-Beam
 		BCursor iBeamCursor(B_CURSOR_ID_I_BEAM);
 		SetViewCursor(&iBeamCursor);
 	}
-
-	//BTextView::MouseMoved(where, transit, dragMessage);
 }
-
 void
 BMarkdownView::MouseDown(BPoint where)
 {
@@ -1088,6 +1156,44 @@ BMarkdownView::MouseDown(BPoint where)
 		Window()->CurrentMessage()->FindInt32("buttons", &buttons);
 
 	if (buttons == B_PRIMARY_MOUSE_BUTTON) {
+		int32 codeCount = fCodeBlocks.CountItems();
+		for (int32 i = 0; i < codeCount; i++) {
+			CodeBlockRegion* block = fCodeBlocks.ItemAt(i);
+			if (block != NULL && block->copyRect.Contains(where)) {
+				if (be_clipboard->Lock()) {
+					be_clipboard->Clear();
+					BMessage* clip = be_clipboard->Data();
+					if (clip != NULL) {
+						clip->AddData("text/plain", B_MIME_TYPE,
+							block->codeText.String(), block->codeText.Length());
+						be_clipboard->Commit();
+					}
+					be_clipboard->Unlock();
+				}
+				return; // Gestito!
+			}
+		}
+
+		// 2. Controllo click sul pulsante "Copia" delle Tabelle
+		int32 tableCount = fTables.CountItems();
+		for (int32 t = 0; t < tableCount; t++) {
+			TableRegion* table = fTables.ItemAt(t);
+			if (table != NULL && table->copyRect.Contains(where)) {
+				BString tableText = table->ToText();
+				if (!tableText.IsEmpty() && be_clipboard->Lock()) {
+					be_clipboard->Clear();
+					BMessage* clip = be_clipboard->Data();
+					if (clip != NULL) {
+						clip->AddData("text/plain", B_MIME_TYPE,
+							tableText.String(), tableText.Length());
+						be_clipboard->Commit();
+					}
+					be_clipboard->Unlock();
+				}
+				return; // Gestito!
+			}
+		}
+		
 		LinkRegion* link = _LinkAt(where);
 		if (link != NULL && !link->url.IsEmpty()) {
 			// Usiamo la classe nativa BUrl
