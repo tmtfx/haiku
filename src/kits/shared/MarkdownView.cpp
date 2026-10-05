@@ -355,10 +355,26 @@ BMarkdownView::Draw(BRect updateRect)
 			SetHighColor(tableBorderColor);
 			StrokeRoundRect(totalTableRect, 4.0f, 4.0f);
 
-			// 4. RIDISEGNO DEL TESTO IN OVERLAY CON PADDING
 			SetDrawingMode(B_OP_OVER);
-			SetFont(be_fixed_font);
+			SetFont(be_plain_font);
+			SetHighColor(isDark ? (rgb_color){ 180, 185, 190, 255 } : (rgb_color){ 100, 105, 110, 255 });
 
+			const char* copyTableStr = "📑 Copy table";
+			float copyWidth = StringWidth(copyTableStr);
+
+			// Calcoliamo il rettangolo cliccabile subito sopra/all'interno del bordo superiore destro
+			table->copyRect.Set(
+				totalTableRect.right - copyWidth - 12.0f,
+				totalTableRect.top - 18.0f,
+				totalTableRect.right,
+				totalTableRect.top + 4.0f
+			);
+
+			DrawString(copyTableStr, BPoint(table->copyRect.left + 2.0f, totalTableRect.top - 4.0f));
+
+			// -----------------------------------------------------------------
+			// 4. RIDISEGNO DEL TESTO DELLE CELLE
+			// -----------------------------------------------------------------
 			float colWidth = (maxCols > 0) ? (totalTableRect.Width() / (float)maxCols) : totalTableRect.Width();
 
 			for (int32 r = 0; r < rowCount; r++) {
@@ -371,8 +387,6 @@ BMarkdownView::Draw(BRect updateRect)
 						continue;
 
 					BPoint linePt = PointAt(row->startPos);
-
-					// Incolonnamento con padding di 10px dal bordo sinistro della colonna
 					float cellX = totalTableRect.left + (c * colWidth) + 10.0f;
 
 					if (row->isHeader)
@@ -647,7 +661,7 @@ BMarkdownView::_EnterBlockCb(MD_BLOCKTYPE type, void* detail, void* userdata)
 		case MD_BLOCK_CODE:
 		{
 			state->isBlockCode = true;
-			state->view->Insert("\n\n"); // Riga riservata per l'header della toolbar
+			state->view->Insert("\n"); // Riga riservata per l'header della toolbar
 			CodeBlockRegion* region = new CodeBlockRegion();
 			region->startPos = state->view->TextLength();
 			region->endPos = -1;
@@ -656,7 +670,7 @@ BMarkdownView::_EnterBlockCb(MD_BLOCKTYPE type, void* detail, void* userdata)
 		}
 		case MD_BLOCK_TABLE:
 			state->isTable = true;
-			state->view->Insert("\n");
+			state->view->Insert("\n");// Spazio extra riservato per il pulsante copia sopra la tabella
 			state->currentTable = new TableRegion();
 			state->currentTable->startPos = state->view->TextLength();
 			break;
@@ -785,7 +799,7 @@ BMarkdownView::_LeaveBlockCb(MD_BLOCKTYPE type, void* detail, void* userdata)
 				state->currentCodeBlock = NULL;
 			}
 
-			state->view->Insert("\n\n");
+			state->view->Insert("\n");
 			break;
 		}
 
@@ -800,7 +814,7 @@ BMarkdownView::_LeaveBlockCb(MD_BLOCKTYPE type, void* detail, void* userdata)
 				state->currentTable = NULL;
 			}
 			state->isTable = false;
-			state->view->Insert("\n\n");
+			state->view->Insert("\n");
 			break;
 
 		case MD_BLOCK_THEAD:
@@ -837,7 +851,7 @@ BMarkdownView::_LeaveBlockCb(MD_BLOCKTYPE type, void* detail, void* userdata)
 		case MD_BLOCK_QUOTE: {
 			if (state->currentQuote != NULL) {
 				state->currentQuote->endPos = state->view->TextLength();
-				state->view->Insert("\n");
+				//state->view->Insert("\n");
 
 				state->view->fQuotes.AddItem(state->currentQuote);
 				state->currentQuote = NULL;
