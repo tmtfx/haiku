@@ -410,6 +410,8 @@ BMarkdownView::Draw(BRect updateRect)
 				SetDrawingMode(B_OP_OVER);
 				SetHighColor(codeTextColor);
 				SetFont(be_fixed_font);
+				
+				const float codeLeftPadding = 10.0f; // Padding visivo dal bordo sinistro
 
 				int32 currentOffset = block->startPos;
 				while (currentOffset < block->endPos) {
@@ -426,7 +428,7 @@ BMarkdownView::Draw(BRect updateRect)
 						GetText(currentOffset, length, lineStr.LockBuffer(length + 1));
 						lineStr.UnlockBuffer();
 
-						DrawString(lineStr.String(), BPoint(linePt.x, linePt.y + LineHeight(currentOffset) - 3.0f));
+						DrawString(lineStr.String(), BPoint(linePt.x + codeLeftPadding, linePt.y + LineHeight(currentOffset) - 3.0f));
 					}
 
 					currentOffset = lineEnd + 1;
@@ -457,9 +459,8 @@ BMarkdownView::SetMarkdown(const char* markdownText)
 	RenderState state;
 	state.view = this;
 	
-	SetFontAndColor(be_plain_font);
-	GetFont(&state.baseFont);
-	state.currentFont = state.baseFont;
+	SetFontAndColor(be_plain_font, B_FONT_ALL);
+	state.currentFont = *be_plain_font;
 	
 	state.textColor = ui_color(B_DOCUMENT_TEXT_COLOR);
 	state.codeColor = (rgb_color){ 200, 40, 40, 255 }; // Usato solo per il codice inline `testo`
@@ -555,9 +556,9 @@ BMarkdownView::_ApplyCurrentStyle(int32 startPos, RenderState& state)
 
 	if (state.headingLevel > 0) {
 		float factor = 1.0f + (0.15f * (7 - std::min(state.headingLevel, (uint32)6)));
-		state.currentFont.SetSize(state.baseFont.Size() * factor);
+		state.currentFont.SetSize(be_plain_font->Size() * factor);
 	} else {
-		state.currentFont.SetSize(state.baseFont.Size());
+		state.currentFont.SetSize(be_plain_font->Size());
 	}
 
 	// Selezione del colore del font
@@ -851,48 +852,6 @@ BMarkdownView::_LeaveSpanCb(MD_SPANTYPE type, void* detail, void* userdata)
 			state->isCode = false;
 			break;
 		case MD_SPAN_IMG: {
-			/*
-			state->isImage = false;
-
-	if (state->currentImage != NULL) {
-		state->currentImage->alt = state->currentImageAlt;
-
-		if (state->currentImage->bitmap != NULL && state->currentImage->bitmap->IsValid()) {
-			// 1. Un solo \n prima dell'immagine per mandarla a capo pulita
-			state->view->Insert("\n");
-			state->currentImage->startPos = state->view->TextLength();
-
-			float imgHeight = state->currentImage->bitmap->Bounds().Height();
-			font_height fh;
-			state->baseFont.GetHeight(&fh);
-			float lineHeight = fh.ascent + fh.descent + fh.leading;
-
-			if (lineHeight < 1.0f)
-				lineHeight = 12.0f;
-
-			// 2. Calcolo preciso: quante righe servono ESATTAMENTE per coprire l'altezza dell'immagine
-			int32 newLinesNeeded = (int32)(imgHeight / lineHeight);
-			if (newLinesNeeded < 1)
-				newLinesNeeded = 1;
-
-			for (int32 i = 0; i < newLinesNeeded; i++)
-				state->view->Insert("\n");
-
-			state->currentImage->endPos = state->view->TextLength();
-			state->view->fImages.AddItem(state->currentImage);
-		} else {
-			// Fallback se l'immagine manca
-			if (!state->currentImage->alt.IsEmpty()) {
-				BString altFallback;
-				altFallback.SetToFormat("[%s]", state->currentImage->alt.String());
-				state->view->Insert(altFallback.String());
-			}
-			state->view->Insert("\n");
-			delete state->currentImage;
-		}
-		state->currentImage = NULL;
-	}
-	break;*/
 	state->isImage = false;
 
 	if (state->currentImage != NULL) {
@@ -921,7 +880,7 @@ BMarkdownView::_LeaveSpanCb(MD_SPANTYPE type, void* detail, void* userdata)
 
 			// 4. Calcoliamo la baseLineHeight neutra
 			font_height fh;
-			state->baseFont.GetHeight(&fh);
+			be_plain_font->GetHeight(&fh);
 			float baseLineHeight = fh.ascent + fh.descent + fh.leading;
 			if (baseLineHeight < 1.0f)
 				baseLineHeight = 12.0f;
@@ -940,7 +899,7 @@ BMarkdownView::_LeaveSpanCb(MD_SPANTYPE type, void* detail, void* userdata)
 			// Applichiamo il font base sulle righe riservate per evitare dilatazioni
 			rgb_color textColor = state->textColor;
 			state->view->SetFontAndColor(startOffset, lineInsertEnd,
-				&state->baseFont, B_FONT_ALL, &textColor);
+				be_plain_font, B_FONT_ALL, &textColor);
 
 			state->currentImage->startPos = startOffset;
 			state->currentImage->endPos = lineInsertEnd;
@@ -984,7 +943,6 @@ BMarkdownView::_TextCb(MD_TEXTTYPE type, const MD_CHAR* text, MD_SIZE size, void
 	int32 startPos = state->view->TextLength();
 	
 	BString str(text, size);
-	printf("la stringa da elaborare è: %s\n",str.String());
 	state->view->Insert(str.String());
 
 	state->view->_ApplyCurrentStyle(startPos, *state);
