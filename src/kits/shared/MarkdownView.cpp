@@ -389,23 +389,12 @@ BMarkdownView::Draw(BRect updateRect)
 	// if there's no codeblocks just exit!
 	int32 count = fCodeBlocks.CountItems();
 	if (count > 0) {
-		// Sfondo del riquadro invertito
-		rgb_color blockBgColor;
-		rgb_color codeTextColor;
-		
-		if (luminance >= 128.0f) {
-			// Tema Chiaro -> Riquadro Scuro, Testo Chiaro
-			blockBgColor  = (rgb_color){ 35, 38, 41, 255 };
-			codeTextColor = (rgb_color){ 235, 238, 242, 255 };
-		} else {
-			// Tema Scuro -> Riquadro Chiaro/Giallino, Testo Scuro
-			blockBgColor  = (rgb_color){ 245, 242, 220, 255 };
-			codeTextColor = (rgb_color){ 25, 25, 25, 255 };
-		}	
-		
+		rgb_color blockBgColor  = (luminance >= 128.0f) ? (rgb_color){ 35, 38, 41, 255 } : (rgb_color){ 245, 242, 220, 255 };
+		rgb_color codeTextColor = (luminance >= 128.0f) ? (rgb_color){ 235, 238, 242, 255 } : (rgb_color){ 25, 25, 25, 255 };
+
 		for (int32 i = 0; i < count; i++) {
 			CodeBlockRegion* block = fCodeBlocks.ItemAt(i);
-			if (block == NULL || block->startPos >= block->endPos)
+			if (block == NULL || block->codeText.IsEmpty())
 				continue;
 
 			BPoint startPt = PointAt(block->startPos);
@@ -413,45 +402,42 @@ BMarkdownView::Draw(BRect updateRect)
 			BPoint endPt = PointAt(endPosAdjusted);
 
 			BRect blockRect;
-			blockRect.left = 0.0f;
-			blockRect.right = Bounds().Width();
+			blockRect.left = 2.0f;
+			blockRect.right = Bounds().Width() - 2.0f;
 			blockRect.top = startPt.y - 1.0f;
 			blockRect.bottom = endPt.y + LineHeight(endPosAdjusted) + 1.0f;
 
-			blockRect.InsetBy(2.0f, 0.0f);
-
 			if (blockRect.Intersects(updateRect)) {
-				// A. Disegniamo lo sfondo pieno del riquadro (coprendo l'area del codice)
+				// Sfondo opaco del riquadro
 				SetDrawingMode(B_OP_COPY);
 				SetHighColor(blockBgColor);
 				FillRoundRect(blockRect, 4.0f, 4.0f);
 
-				// B. Ridisegniamo il testo del codice sopra al riquadro con il colore dedicato
+				// Testo del codice custom disegnato in overlay
 				SetDrawingMode(B_OP_OVER);
 				SetHighColor(codeTextColor);
 				SetFont(be_fixed_font);
-				
-				const float codeLeftPadding = 10.0f; // Padding visivo dal bordo sinistro
 
+				const float codeLeftPadding = 10.0f;
+
+				// Disegniamo riga per riga il testo da block->codeText
 				int32 currentOffset = block->startPos;
-				while (currentOffset < block->endPos) {
+				int32 strPos = 0;
+				int32 codeLen = block->codeText.Length();
+
+				while (strPos < codeLen) {
+					int32 lineEnd = block->codeText.FindFirst('\n', strPos);
+					if (lineEnd == B_ERROR)
+						lineEnd = codeLen;
+
+					BString lineStr;
+					block->codeText.CopyInto(lineStr, strPos, lineEnd - strPos);
+
 					BPoint linePt = PointAt(currentOffset);
-					
-					int32 lineEnd = currentOffset;
-					while (lineEnd < block->endPos && ByteAt(lineEnd) != '\n') {
-						lineEnd++;
-					}
+					DrawString(lineStr.String(), BPoint(linePt.x + codeLeftPadding, linePt.y + LineHeight(currentOffset) - 3.0f));
 
-					int32 length = lineEnd - currentOffset;
-					if (length > 0) {
-						BString lineStr;
-						GetText(currentOffset, length, lineStr.LockBuffer(length + 1));
-						lineStr.UnlockBuffer();
-
-						DrawString(lineStr.String(), BPoint(linePt.x + codeLeftPadding, linePt.y + LineHeight(currentOffset) - 3.0f));
-					}
-
-					currentOffset = lineEnd + 1;
+					strPos = lineEnd + 1;
+					currentOffset++; // Avanza di riga
 				}
 			}
 		}
@@ -616,11 +602,14 @@ BMarkdownView::_EnterBlockCb(MD_BLOCKTYPE type, void* detail, void* userdata)
 			break;
 		}
 		case MD_BLOCK_CODE:
+		{
 			state->isBlockCode = true;
-			state->view->Insert("\n");
-			state->currentBlockStart = state->view->TextLength();
+			CodeBlockRegion* region = new CodeBlockRegion();
+			region->startPos = state->view->TextLength();
+			region->endPos = -1;
+			state->currentCodeBlock = region;
 			break;
-
+		}
 		case MD_BLOCK_TABLE:
 			state->isTable = true;
 			state->view->Insert("\n");
@@ -746,16 +735,13 @@ BMarkdownView::_LeaveBlockCb(MD_BLOCKTYPE type, void* detail, void* userdata)
 
 		case MD_BLOCK_CODE: {
 			state->isBlockCode = false;
-			int32 blockEnd = state->view->TextLength();
-			
-			if (state->currentBlockStart != -1 && blockEnd > state->currentBlockStart) {
-				CodeBlockRegion* region = new CodeBlockRegion();
-				region->startPos = state->currentBlockStart;
-				region->endPos = blockEnd;
-				state->view->fCodeBlocks.AddItem(region);
+			if (state->currentCodeBlock != NULL) {
+				state->currentCodeBlock->endPos = state->view->TextLength();
+				state->view->fCodeBlocks.AddItem(state->currentCodeBlock);
+				state->currentCodeBlock = NULL;
 			}
-			state->currentBlockStart = -1;
-			state->view->Insert("\n\n");
+
+			state->view->Insert("\n");
 			break;
 		}
 
@@ -997,6 +983,22 @@ BMarkdownView::_TextCb(MD_TEXTTYPE type, const MD_CHAR* text, MD_SIZE size, void
 			state->currentCell->text.Append(text, size);
 		}
 		return 0; // Impedisce a BTextView di inserire il testo visibile a margine!
+	}
+	
+	if (state->isBlockCode) {
+		if (text != NULL && size > 0) {
+			// Per mantenere l'altezza verticale corretta nella BTextView,
+			// inseriamo SOLO i caratteri '\n' di a-capo nel buffer di BTextView
+			for (MD_SIZE i = 0; i < size; i++) {
+				if (text[i] == '\n')
+					state->view->Insert("\n");
+			}
+			// Salviamo il testo del codice grezzo nella regione
+			if (state->currentCodeBlock != NULL) {
+				state->currentCodeBlock->codeText.Append(text, size);
+			}
+		}
+		return 0; // Impedisce l'inserimento del testo grezzo nella BTextView!
 	}
 	
 	int32 startPos = state->view->TextLength();
