@@ -28,10 +28,24 @@ struct LinkRegion {
 	LinkRegion() : startPos(-1), endPos(-1) {}
 };
 
+struct TableCellRegion {
+	int32 startPos;
+	int32 endPos;
+	int32 colIndex;
+	BString text;
+};
 struct TableRowRegion {
 	int32 startPos;
 	int32 endPos;
-	bool  isHeader;
+	bool isHeader;
+	BObjectList<TableCellRegion, true> cells; // <- Salviamo le celle della riga
+
+	TableRowRegion()
+		: startPos(-1),
+		  endPos(-1),
+		  isHeader(false),
+		  cells(10)
+	{}
 };
 
 struct TableRegion {
@@ -121,6 +135,8 @@ private:
 		bool				isHeaderRow;
 		TableRegion*		currentTable;
 		int32				currentTRStart;
+		int32				currentColIndex;
+		TableCellRegion*	currentCell;
 		bool				isImage;
 		ImageRegion*		currentImage;
 		BString				currentImageAlt;
@@ -131,6 +147,7 @@ private:
 		int32				olItemNumber;
 		bool				isQuote;
 		QuoteRegion*		currentQuote;
+		
 		
 		RenderState()
 		: view(NULL),

@@ -284,8 +284,6 @@ BMarkdownView::Draw(BRect updateRect)
 				continue;
 
 			int32 rowCount = table->rows.CountItems();
-			
-			// Calcoliamo i limiti dell'intera tabella
 			TableRowRegion* firstRow = table->rows.ItemAt(0);
 			TableRowRegion* lastRow  = table->rows.ItemAt(rowCount - 1);
 
@@ -294,26 +292,25 @@ BMarkdownView::Draw(BRect updateRect)
 			BPoint endPt = PointAt(lastPosAdjusted);
 
 			BRect totalTableRect;
-			totalTableRect.left = 0.0f;
-			totalTableRect.right = Bounds().Width();
-			totalTableRect.top = startPt.y - 1.0f;
-			totalTableRect.bottom = endPt.y + LineHeight(lastPosAdjusted) + 1.0f;
-			totalTableRect.InsetBy(2.0f, 0.0f);
+			totalTableRect.left = 10.0f; // Padding di 10px dal bordo sinistro per evitare sovrapposizioni
+			totalTableRect.right = Bounds().Width() - 10.0f;
+			totalTableRect.top = startPt.y - 2.0f;
+			totalTableRect.bottom = endPt.y + LineHeight(lastPosAdjusted) + 2.0f;
 
 			if (!totalTableRect.Intersects(updateRect))
 				continue;
 
-			// 1. Sfondo delle righe (Zebra striping + Intestazione)
+			// 1. ZEBRA STRIPING DELLE RIGHE (Sfondo e linee orizzontali)
 			for (int32 r = 0; r < rowCount; r++) {
 				TableRowRegion* row = table->rows.ItemAt(r);
 				BPoint rStartPt = PointAt(row->startPos);
 				int32 rEndAdjusted = std::max(row->startPos, row->endPos - 1);
-				
+
 				BRect rowRect;
 				rowRect.left = totalTableRect.left;
 				rowRect.right = totalTableRect.right;
-				rowRect.top = rStartPt.y - 1.0f;
-				rowRect.bottom = rStartPt.y + LineHeight(rEndAdjusted) + 1.0f;
+				rowRect.top = rStartPt.y - 2.0f;
+				rowRect.bottom = rStartPt.y + LineHeight(rEndAdjusted) + 2.0f;
 
 				rgb_color rowBg;
 				if (row->isHeader)
@@ -327,40 +324,63 @@ BMarkdownView::Draw(BRect updateRect)
 				SetHighColor(rowBg);
 				FillRect(rowRect);
 
-				// Linea divisoria orizzontale sotto ogni riga
+				// Linea orizzontale sotto ogni riga
 				SetHighColor(tableBorderColor);
 				StrokeLine(BPoint(rowRect.left, rowRect.bottom), BPoint(rowRect.right, rowRect.bottom));
 			}
 
-			// 2. Bordo esterno arrotondato dell'intera tabella
+			// 2. RENDERING DELLE LINEE VERTICALI DIVISORIE
+			int32 maxCols = 0;
+			for (int32 r = 0; r < rowCount; r++) {
+				TableRowRegion* row = table->rows.ItemAt(r);
+				if (row != NULL && row->cells.CountItems() > maxCols)
+					maxCols = row->cells.CountItems();
+			}
+
+			if (maxCols > 1) {
+				float colWidth = totalTableRect.Width() / (float)maxCols;
+				SetHighColor(tableBorderColor);
+
+				for (int32 c = 1; c < maxCols; c++) {
+					float xLine = totalTableRect.left + (c * colWidth);
+					StrokeLine(
+						BPoint(xLine, totalTableRect.top),
+						BPoint(xLine, totalTableRect.bottom)
+					);
+				}
+			}
+
+			// 3. BORDO ESTERNO ARROTONDATO DELL'INTERA TABELLA
 			SetHighColor(tableBorderColor);
 			StrokeRoundRect(totalTableRect, 4.0f, 4.0f);
 
-			// 3. Ridisegniamo il testo della tabella sopra lo sfondo disegnato
+			// 4. RIDISEGNO DEL TESTO IN OVERLAY CON PADDING
 			SetDrawingMode(B_OP_OVER);
-			SetHighColor(ui_color(B_DOCUMENT_TEXT_COLOR));
 			SetFont(be_fixed_font);
+
+			float colWidth = (maxCols > 0) ? (totalTableRect.Width() / (float)maxCols) : totalTableRect.Width();
 
 			for (int32 r = 0; r < rowCount; r++) {
 				TableRowRegion* row = table->rows.ItemAt(r);
-				int32 currentOffset = row->startPos;
-				
-				while (currentOffset < row->endPos) {
-					BPoint linePt = PointAt(currentOffset);
-					int32 lineEnd = currentOffset;
-					while (lineEnd < row->endPos && ByteAt(lineEnd) != '\n') {
-						lineEnd++;
-					}
+				int32 cellCount = row->cells.CountItems();
 
-					int32 length = lineEnd - currentOffset;
-					if (length > 0) {
-						BString lineStr;
-						GetText(currentOffset, length, lineStr.LockBuffer(length + 1));
-						lineStr.UnlockBuffer();
+				for (int32 c = 0; c < cellCount; c++) {
+					TableCellRegion* cell = row->cells.ItemAt(c);
+					if (cell == NULL || cell->text.IsEmpty())
+						continue;
 
-						DrawString(lineStr.String(), BPoint(linePt.x, linePt.y + LineHeight(currentOffset) - 3.0f));
-					}
-					currentOffset = lineEnd + 1;
+					BPoint linePt = PointAt(row->startPos);
+
+					// Incolonnamento con padding di 10px dal bordo sinistro della colonna
+					float cellX = totalTableRect.left + (c * colWidth) + 10.0f;
+
+					if (row->isHeader)
+						SetFont(be_bold_font);
+					else
+						SetFont(be_fixed_font);
+
+					SetHighColor(ui_color(B_DOCUMENT_TEXT_COLOR));
+					DrawString(cell->text.String(), BPoint(cellX, linePt.y + LineHeight(row->startPos) - 3.0f));
 				}
 			}
 		}
@@ -582,15 +602,15 @@ BMarkdownView::_ApplyCurrentStyle(int32 startPos, RenderState& state)
 // -----------------------------------------------------------------------------
 // Callbacks MD4C
 // -----------------------------------------------------------------------------
-
 int
 BMarkdownView::_EnterBlockCb(MD_BLOCKTYPE type, void* detail, void* userdata)
 {
 	RenderState* state = static_cast<RenderState*>(userdata);
+	if (state == NULL || state->view == NULL)
+		return 0;
 
 	switch (type) {
-		case MD_BLOCK_H:
-		{
+		case MD_BLOCK_H: {
 			MD_BLOCK_H_DETAIL* hDetail = static_cast<MD_BLOCK_H_DETAIL*>(detail);
 			state->headingLevel = hDetail->level;
 			break;
@@ -600,22 +620,48 @@ BMarkdownView::_EnterBlockCb(MD_BLOCKTYPE type, void* detail, void* userdata)
 			state->view->Insert("\n");
 			state->currentBlockStart = state->view->TextLength();
 			break;
+
 		case MD_BLOCK_TABLE:
 			state->isTable = true;
 			state->view->Insert("\n");
 			state->currentTable = new TableRegion();
 			state->currentTable->startPos = state->view->TextLength();
 			break;
+
 		case MD_BLOCK_THEAD:
 			state->isHeaderRow = true;
 			break;
-		case MD_BLOCK_TR:
-			state->currentTRStart = state->view->TextLength();
-			state->view->Insert("| ");
+
+		case MD_BLOCK_TR: {
+			if (state->currentTable != NULL) {
+				TableRowRegion* row = new TableRowRegion();
+				row->startPos = state->view->TextLength();
+				row->isHeader = state->isHeaderRow;
+				state->currentTable->rows.AddItem(row);
+				state->currentColIndex = 0;
+			}
 			break;
+		}
 		case MD_BLOCK_TH:
 			state->isBold = true;
-			break;
+			// fall-through intenzionale verso MD_BLOCK_TD
+		case MD_BLOCK_TD: {
+	if (state->currentTable != NULL && state->currentTable->rows.CountItems() > 0) {
+		TableRowRegion* row = state->currentTable->rows.LastItem();
+
+		// Inseriamo un tab per separare fisicamente le colonne nel buffer di BTextView
+		if (state->currentColIndex > 0) {
+			state->view->Insert("\t");
+		}
+
+		TableCellRegion* cell = new TableCellRegion();
+		cell->startPos = state->view->TextLength();
+		cell->colIndex = state->currentColIndex;
+		row->cells.AddItem(cell);
+		state->currentCell = cell;
+	}
+	break;
+}
 		case MD_BLOCK_UL: {
 			state->listDepth++;
 			state->isOrderedList = false;
@@ -631,7 +677,6 @@ BMarkdownView::_EnterBlockCb(MD_BLOCKTYPE type, void* detail, void* userdata)
 		case MD_BLOCK_LI: {
 			int32 startOffset = state->view->TextLength();
 
-			// Rientro per liste annidate
 			for (int32 i = 0; i < state->listDepth - 1; i++) {
 				state->view->Insert("    ");
 			}
@@ -652,34 +697,30 @@ BMarkdownView::_EnterBlockCb(MD_BLOCKTYPE type, void* detail, void* userdata)
 			break;
 		}
 		case MD_BLOCK_HR: {
-    // 1. Andiamo a capo per ancorare la linea
-    state->view->Insert("\n");
+			state->view->Insert("\n");
 
-    // 2. Creiamo la regione per la riga orizzontale
-    HorizontalRuleRegion* hr = new HorizontalRuleRegion();
-    hr->pos = state->view->TextLength();
-    state->view->fHorizontalRules.AddItem(hr);
+			HorizontalRuleRegion* hr = new HorizontalRuleRegion();
+			hr->pos = state->view->TextLength();
+			state->view->fHorizontalRules.AddItem(hr);
 
-    // 3. Aggiungiamo un ulteriore \n per distanziare il testo successivo
-    state->view->Insert("\n");
-    break;
-}
+			state->view->Insert("\n");
+			break;
+		}
 		case MD_BLOCK_QUOTE: {
-	QuoteRegion* quote = new QuoteRegion();
-	quote->startPos = state->view->TextLength();
-	quote->endPos = -1;
+			QuoteRegion* quote = new QuoteRegion();
+			quote->startPos = state->view->TextLength();
+			quote->endPos = -1;
 
-	state->currentQuote = quote;
-	state->isQuote = true;
-	break;
-}
+			state->currentQuote = quote;
+			state->isQuote = true;
+			break;
+		}
 		case MD_BLOCK_P: {
-	// Se siamo all'interno di una citazione, aggiungiamo del margine a sinistra prima del testo
-	if (state->isQuote) {
-		state->view->Insert("    "); // 4 spazi di rientro visivo dal bordo
-	}
-	break;
-}
+			if (state->isQuote) {
+				state->view->Insert("    ");
+			}
+			break;
+		}
 		default:
 			break;
 	}
@@ -690,15 +731,19 @@ int
 BMarkdownView::_LeaveBlockCb(MD_BLOCKTYPE type, void* detail, void* userdata)
 {
 	RenderState* state = static_cast<RenderState*>(userdata);
+	if (state == NULL || state->view == NULL)
+		return 0;
 
 	switch (type) {
 		case MD_BLOCK_H:
 			state->headingLevel = 0;
 			state->view->Insert("\n\n");
 			break;
+
 		case MD_BLOCK_P:
 			state->view->Insert("\n");
 			break;
+
 		case MD_BLOCK_CODE: {
 			state->isBlockCode = false;
 			int32 blockEnd = state->view->TextLength();
@@ -713,9 +758,11 @@ BMarkdownView::_LeaveBlockCb(MD_BLOCKTYPE type, void* detail, void* userdata)
 			state->view->Insert("\n\n");
 			break;
 		}
+
 		case MD_BLOCK_LI:
 			state->view->Insert("\n");
 			break;
+
 		case MD_BLOCK_TABLE:
 			if (state->currentTable != NULL) {
 				state->currentTable->endPos = state->view->TextLength();
@@ -725,50 +772,54 @@ BMarkdownView::_LeaveBlockCb(MD_BLOCKTYPE type, void* detail, void* userdata)
 			state->isTable = false;
 			state->view->Insert("\n\n");
 			break;
+
 		case MD_BLOCK_THEAD:
 			state->isHeaderRow = false;
 			break;
-		case MD_BLOCK_TR: {
-			if (state->currentTable != NULL && state->currentTRStart != -1) {
-				TableRowRegion* row = new TableRowRegion();
-				row->startPos = state->currentTRStart;
-				row->endPos = state->view->TextLength();
-				row->isHeader = state->isHeaderRow;
-				state->currentTable->rows.AddItem(row);
-			}
-			state->currentTRStart = -1;
-			state->view->Insert("\n");
-			break;
-		}
+
 		case MD_BLOCK_TH:
 			state->isBold = false;
-			//state->view->Insert(" | ");
-			state->view->Insert(" \t ");
-			break;
+			// fall-through intenzionale verso MD_BLOCK_TD
 		case MD_BLOCK_TD:
-			//state->view->Insert(" | ");
-			state->view->Insert(" \t ");
+			if (state->currentCell != NULL) {
+				state->currentCell->endPos = state->view->TextLength();
+				state->currentCell = NULL;
+			}
+			state->currentColIndex++;
 			break;
+
+		case MD_BLOCK_TR: {
+			if (state->currentTable != NULL && state->currentTable->rows.CountItems() > 0) {
+				TableRowRegion* row = state->currentTable->rows.LastItem();
+				row->endPos = state->view->TextLength();
+				state->view->Insert("\n");
+			}
+			break;
+		}
+
 		case MD_BLOCK_UL:
 		case MD_BLOCK_OL: {
-    if (state->listDepth > 0)
-        state->listDepth--;
-    break;
-}
-		case MD_BLOCK_QUOTE: {
-	if (state->currentQuote != NULL) {
-		state->currentQuote->endPos = state->view->TextLength();
-		state->view->Insert("\n");
+			if (state->listDepth > 0)
+				state->listDepth--;
+			break;
+		}
 
-		state->view->fQuotes.AddItem(state->currentQuote);
-		state->currentQuote = NULL;
-	}
-	state->isQuote = false;
-	break;
-}
+		case MD_BLOCK_QUOTE: {
+			if (state->currentQuote != NULL) {
+				state->currentQuote->endPos = state->view->TextLength();
+				state->view->Insert("\n");
+
+				state->view->fQuotes.AddItem(state->currentQuote);
+				state->currentQuote = NULL;
+			}
+			state->isQuote = false;
+			break;
+		}
+
 		default:
 			break;
 	}
+
 	return 0;
 }
 
@@ -938,6 +989,14 @@ BMarkdownView::_TextCb(MD_TEXTTYPE type, const MD_CHAR* text, MD_SIZE size, void
 		if (text != NULL && size > 0)
 			state->currentImageAlt.Append(text, size);
 		return 0; // NON scriviamo l'alt text nel documento visivo!
+	}
+	// Se siamo dentro una cella di una tabella, salviamo il testo NELLA CELLA
+	// e NON inseriamo il testo grezzo nella BTextView!
+	if (state->isTable && state->currentCell != NULL) {
+		if (text != NULL && size > 0) {
+			state->currentCell->text.Append(text, size);
+		}
+		return 0; // Impedisce a BTextView di inserire il testo visibile a margine!
 	}
 	
 	int32 startPos = state->view->TextLength();
