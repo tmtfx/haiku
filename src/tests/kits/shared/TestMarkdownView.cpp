@@ -1,7 +1,8 @@
 #include <Application.h>
 #include <Window.h>
 #include <LayoutBuilder.h>
-#include <ScrollView.h>
+//#include <ScrollView.h>
+#include <MarkdownScrollView.h>
 #include <Button.h>
 #include <StringView.h>
 #include <MarkdownView.h>
@@ -26,7 +27,9 @@ public:
 		fMarkdownView->MakeEditable(false);
 
 		// 2. Mettiamo la vista dentro BScrollView
-		fScrollView = new BScrollView("markdown_scroll", fMarkdownView, 0, false, true);
+		//fScrollView = new BScrollView("markdown_scroll", fMarkdownView, 0, false, true);
+		fScrollView = new BMarkdownScrollView("markdown_scroll", fMarkdownView,
+						B_FOLLOW_ALL, 0, false, true);
 
 		// 3. Pulsanti di controllo
 		BButton* sampleBtn = new BButton("sample_btn", "Ricarica Sample", 

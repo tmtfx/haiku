@@ -8,6 +8,7 @@
 #include <Window.h>
 #include <Url.h>
 #include <Clipboard.h>
+#include <cctype>
 
 #include <cstdio>
 
@@ -103,6 +104,171 @@ BMarkdownView::~BMarkdownView()
 {
     _ClearRegions();
 }
+
+void
+BMarkdownView::CopyRawMarkdownToClipboard()
+{
+	if (!fRawMarkdown.IsEmpty() && be_clipboard->Lock()) {
+		be_clipboard->Clear();
+		BMessage* clip = be_clipboard->Data();
+		if (clip != NULL) {
+			clip->AddData("text/plain", B_MIME_TYPE,
+				fRawMarkdown.String(), fRawMarkdown.Length());
+			be_clipboard->Commit();
+		}
+		be_clipboard->Unlock();
+	}
+}
+
+void
+BMarkdownView::CopyPlainTextToClipboard()
+{
+	if (fRawMarkdown.IsEmpty())
+		return;
+
+	// Depuriamo il Markdown grezzo da tutte le marcature
+	BString plainText = _ConvertMarkdownToPlainText(fRawMarkdown);
+
+	if (!plainText.IsEmpty() && be_clipboard->Lock()) {
+		be_clipboard->Clear();
+		BMessage* clip = be_clipboard->Data();
+		if (clip != NULL) {
+			clip->AddData("text/plain", B_MIME_TYPE,
+				plainText.String(), plainText.Length());
+			be_clipboard->Commit();
+		}
+		be_clipboard->Unlock();
+	}
+}
+
+BString
+BMarkdownView::_ConvertMarkdownToPlainText(const BString& markdown)
+{
+	BString result;
+	int32 len = markdown.Length();
+	int32 i = 0;
+
+	bool inCodeBlock = false;
+
+	while (i < len) {
+		// 1. Gestione blocchi di codice (```)
+		if (markdown.ByteAt(i) == '`' && i + 2 < len 
+			&& markdown.ByteAt(i + 1) == '`' && markdown.ByteAt(i + 2) == '`') {
+			
+			inCodeBlock = !inCodeBlock;
+			i += 3;
+			// Saltiamo l'eventuale identificatore di linguaggio fino al primo \n
+			while (i < len && markdown.ByteAt(i) != '\n') {
+				i++;
+			}
+			if (i < len && markdown.ByteAt(i) == '\n')
+				i++;
+			continue;
+		}
+
+		// Se siamo dentro un blocco di codice, manteniamo il testo intatto
+		if (inCodeBlock) {
+			result.Append(markdown.ByteAt(i), 1);
+			i++;
+			continue;
+		}
+
+		// 2. Inizio riga: rimuoviamo prefissi di Titoli (#), Citazioni (>), Liste (*, -, 1.)
+		if (i == 0 || markdown.ByteAt(i - 1) == '\n') {
+			// Rimuoviamo gli '#' dei titoli
+			while (i < len && markdown.ByteAt(i) == '#')
+				i++;
+
+			// Rimuoviamo gli spazi dopo i titoli
+			if (i < len && markdown.ByteAt(i) == ' ' && markdown.ByteAt(i - 1) == '#')
+				i++;
+
+			// Rimuoviamo il prefisso citazione '> '
+			if (i < len && markdown.ByteAt(i) == '>') {
+				i++;
+				if (i < len && markdown.ByteAt(i) == ' ')
+					i++;
+			}
+
+			// Rimuoviamo i punti elenco e liste numerate (* , - , 1. )
+			if (i < len && (markdown.ByteAt(i) == '*' || markdown.ByteAt(i) == '-') 
+				&& (i + 1 < len && markdown.ByteAt(i + 1) == ' ')) {
+				i += 2;
+			} else if (i < len && isdigit(markdown.ByteAt(i))) {
+				int32 temp = i;
+				while (temp < len && isdigit(markdown.ByteAt(temp)))
+					temp++;
+				if (temp < len && (markdown.ByteAt(temp) == '.' || markdown.ByteAt(temp) == ')')
+					&& temp + 1 < len && markdown.ByteAt(temp + 1) == ' ') {
+					i = temp + 2;
+				}
+			}
+		}
+
+		if (i >= len)
+			break;
+
+		char c = markdown.ByteAt(i);
+
+		// 3. Rimuoviamo marcature inline: Bold/Italic (* o _), Inline Code (`), Strikethrough (~)
+		if (c == '*' || c == '_' || c == '`' || c == '~') {
+			i++;
+			continue;
+		}
+
+		// 4. Gestione Link e Immagini: [Testo](url) o ![Alt](url) -> Teniamo solo 'Testo' o 'Alt'
+		if (c == '!' && i + 1 < len && markdown.ByteAt(i + 1) == '[') {
+			i++; // Saltiamo '!' per trattarlo come link standard
+			c = markdown.ByteAt(i);
+		}
+
+		if (c == '[') {
+			i++;
+			// Svuotiamo il testo dell'etichetta prima delle parentesi tonde
+			while (i < len && markdown.ByteAt(i) != ']') {
+				result.Append(markdown.ByteAt(i), 1);
+				i++;
+			}
+			if (i < len && markdown.ByteAt(i) == ']')
+				i++; // Saltiamo ']'
+
+			// Saltiamo l'URL tra parentesi tonde (url)
+			if (i < len && markdown.ByteAt(i) == '(') {
+				while (i < len && markdown.ByteAt(i) != ')') {
+					i++;
+				}
+				if (i < len && markdown.ByteAt(i) == ')')
+					i++; // Saltiamo ')'
+			}
+			continue;
+		}
+
+		// 5. Gestione Tabelle: Rimuoviamo i separatori di colonna '|' e le righe di intestazione '|---|---|'
+		if (c == '|') {
+			// Se è una riga separatore di tabella (|---|---|), la saltiamo interamente
+			int32 nextNL = markdown.FindFirst('\n', i);
+			if (nextNL != B_ERROR) {
+				BString line;
+				markdown.CopyInto(line, i, nextNL - i);
+				if (line.FindFirst("---") != B_ERROR) {
+					i = nextNL + 1;
+					continue;
+				}
+			}
+			// Altrimenti sostituiamo '|' con uno spazio o tabulazione per separare le celle
+			result.Append("  ");
+			i++;
+			continue;
+		}
+
+		// Carattere testo normale
+		result.Append(c, 1);
+		i++;
+	}
+
+	return result;
+}
+
 void
 BMarkdownView::Draw(BRect updateRect)
 {

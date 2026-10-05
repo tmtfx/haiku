@@ -52,6 +52,7 @@ for architectureObject in [ MultiArchSubDirSetup ] {
 			Keymap.cpp
 			LongAndDragTrackingFilter.cpp
 			MarkdownView.cpp
+			MarkdownScrollView.cpp
 			md4c.c
 			md5.cpp
 			MemoryRingIO.cpp

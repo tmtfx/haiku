@@ -128,12 +128,13 @@ public:
 
 	status_t				SetMarkdown(const char* markdownText);
 	status_t				SetMarkdown(const BString& markdownText);
-	//void					CopyRawMarkdownToClipboard();
-	//void					CopyPlainTextToClipboard();
+	void					CopyRawMarkdownToClipboard();
+	void					CopyPlainTextToClipboard();
 
 private:
 	BMarkdownView(const BMarkdownView&);
 	BMarkdownView& operator=(const BMarkdownView&);
+	BString _ConvertMarkdownToPlainText(const BString& markdown);
 
 	struct RenderState {
 		BMarkdownView*   view;
