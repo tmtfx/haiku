@@ -6,6 +6,8 @@ Application HaikuMCPClient :
     MainWindow.cpp
     :
     be
+    shared
+    translation
     localestub
     libai_api.so
     [ TargetLibsupc++ ]
