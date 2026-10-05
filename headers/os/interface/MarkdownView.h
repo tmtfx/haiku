@@ -107,7 +107,6 @@ private:
 	// Struttura di stato interna usata dal parser durante il traversal di MD4C
 	struct RenderState {
 		BMarkdownView*		view;
-		BFont				baseFont;
 		BFont				currentFont;
 		rgb_color			textColor;
 		rgb_color			codeColor;
