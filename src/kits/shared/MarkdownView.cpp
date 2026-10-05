@@ -392,28 +392,44 @@ BMarkdownView::Draw(BRect updateRect)
 	// rendering citazioni
 	int32 quoteCount = fQuotes.CountItems();
 	if (quoteCount > 0) {
-		PushState();
 
 		rgb_color panelColor = ui_color(B_PANEL_BACKGROUND_COLOR);
-		rgb_color bgColor = tint_color(panelColor, B_DARKEN_1_TINT);
-		rgb_color barColor = tint_color(panelColor, B_DARKEN_3_TINT);
+		rgb_color bgColor    = tint_color(panelColor, B_DARKEN_1_TINT);
+		rgb_color barColor   = tint_color(panelColor, B_DARKEN_3_TINT);
+		rgb_color textColor  = ui_color(B_DOCUMENT_TEXT_COLOR);
+
+		font_height fh;
+		be_plain_font->GetHeight(&fh);
+		float lineHeight = fh.ascent + fh.descent + fh.leading;
 
 		for (int32 i = 0; i < quoteCount; i++) {
 			QuoteRegion* quote = fQuotes.ItemAt(i);
-			if (quote == NULL || quote->startPos < 0 || quote->startPos >= quote->endPos)
+			if (quote == NULL || quote->quoteText.IsEmpty())
 				continue;
 
 			BPoint startPt = PointAt(quote->startPos);
-			int32 endPosAdjusted = std::max(quote->startPos, quote->endPos - 1);
-			BPoint endPt = PointAt(endPosAdjusted);
+			
+			// Calcoliamo le righe totali del testo della citazione
+			int32 totalLines = 0;
+			int32 strPos = 0;
+			int32 textLen = quote->quoteText.Length();
+			while (strPos < textLen) {
+				totalLines++;
+				int32 lineEnd = quote->quoteText.FindFirst('\n', strPos);
+				if (lineEnd == B_ERROR)
+					break;
+				strPos = lineEnd + 1;
+			}
+			if (totalLines < 1) totalLines = 1;
 
-			//float fontHeight = LineHeight(quote->startPos);
+			float headerPadding = 18.0f; // Spazio per il pulsante copia
+			float contentHeight = (totalLines * lineHeight) + 8.0f;
 
 			BRect quoteRect;
 			quoteRect.left = 2.0f;
 			quoteRect.right = Bounds().Width() - 2.0f;
-			quoteRect.top = startPt.y - 1.0f;
-			quoteRect.bottom = endPt.y + LineHeight(endPosAdjusted) + 1.0f;
+			quoteRect.top = startPt.y - headerPadding;
+			quoteRect.bottom = quoteRect.top + headerPadding + contentHeight;
 
 			if (quoteRect.Intersects(updateRect)) {
 				// 1. Sfondo pieno della citazione
@@ -426,40 +442,44 @@ BMarkdownView::Draw(BRect updateRect)
 				SetHighColor(barColor);
 				FillRect(barRect);
 
-				// 3. Ridisegno del testo della citazione sopra lo sfondo
+				// 3. Pulsante "📑 Copy quote" in alto a destra
 				SetDrawingMode(B_OP_OVER);
+				SetFont(be_plain_font);
+				//SetHighColor(tint_color(textColor, B_LIGHTEN_2_TINT));
+				SetHighColor(ui_color(B_DOCUMENT_BACKGROUND_COLOR));
 
-				int32 currentOffset = quote->startPos;
-				while (currentOffset < quote->endPos) {
-					BPoint linePt = PointAt(currentOffset);
+				const char* copyQuoteStr = "📑 Copy quote";
+				float copyWidth = StringWidth(copyQuoteStr);
 
-					int32 lineEnd = currentOffset;
-					while (lineEnd < quote->endPos && ByteAt(lineEnd) != '\n') {
-						lineEnd++;
-					}
+				quote->copyRect.Set(
+					quoteRect.right - copyWidth - 12.0f,
+					quoteRect.top + 2.0f,
+					quoteRect.right - 2.0f,
+					quoteRect.top + 18.0f
+				);
 
-					int32 length = lineEnd - currentOffset;
-					if (length > 0) {
-						BString lineStr;
-						GetText(currentOffset, length, lineStr.LockBuffer(length + 1));
-						lineStr.UnlockBuffer();
+				DrawString(copyQuoteStr, BPoint(quote->copyRect.left + 2.0f, quoteRect.top + 13.0f));
 
-						// Recuperiamo e applichiamo lo stile del font presente in quel punto
-						BFont lineFont;
-						rgb_color lineTextColor;
-						GetFontAndColor(currentOffset, &lineFont, &lineTextColor);
+				// 4. Disegno del testo della citazione riga per riga
+				SetFont(be_plain_font);
+				SetHighColor(textColor);
 
-						SetFont(&lineFont);
-						SetHighColor(lineTextColor);
+				const float textLeftPadding = 14.0f;
+				float currentY = quoteRect.top + headerPadding + 2.0f;
 
-						font_height fh;
-						lineFont.GetHeight(&fh);
+				strPos = 0;
+				while (strPos < textLen) {
+					int32 lineEnd = quote->quoteText.FindFirst('\n', strPos);
+					if (lineEnd == B_ERROR)
+						lineEnd = textLen;
 
-						// Tracciamo la riga di testo posizionata sulla linea di base visiva
-						DrawString(lineStr.String(), BPoint(linePt.x, linePt.y + fh.ascent));
-					}
+					BString lineStr;
+					quote->quoteText.CopyInto(lineStr, strPos, lineEnd - strPos);
 
-					currentOffset = lineEnd + 1;
+					DrawString(lineStr.String(), BPoint(quoteRect.left + textLeftPadding, currentY + fh.ascent));
+
+					currentY += lineHeight;
+					strPos = lineEnd + 1;
 				}
 			}
 		}
@@ -755,6 +775,8 @@ BMarkdownView::_EnterBlockCb(MD_BLOCKTYPE type, void* detail, void* userdata)
 			break;
 		}
 		case MD_BLOCK_QUOTE: {
+			// Riserviamo uno spazio iniziale per il pulsante "Copy quote" in alto
+			state->view->Insert("\n");
 			QuoteRegion* quote = new QuoteRegion();
 			quote->startPos = state->view->TextLength();
 			quote->endPos = -1;
@@ -765,7 +787,7 @@ BMarkdownView::_EnterBlockCb(MD_BLOCKTYPE type, void* detail, void* userdata)
 		}
 		case MD_BLOCK_P: {
 			if (state->isQuote) {
-				state->view->Insert("    ");
+				state->view->Insert("\t");
 			}
 			break;
 		}
@@ -852,15 +874,13 @@ BMarkdownView::_LeaveBlockCb(MD_BLOCKTYPE type, void* detail, void* userdata)
 		case MD_BLOCK_QUOTE: {
 			if (state->currentQuote != NULL) {
 				state->currentQuote->endPos = state->view->TextLength();
-				//state->view->Insert("\n");
-
 				state->view->fQuotes.AddItem(state->currentQuote);
 				state->currentQuote = NULL;
 			}
 			state->isQuote = false;
+			state->view->Insert("\n"); // A capo dopo la citazione
 			break;
 		}
-
 		default:
 			break;
 	}
@@ -1059,6 +1079,20 @@ BMarkdownView::_TextCb(MD_TEXTTYPE type, const MD_CHAR* text, MD_SIZE size, void
 		}
 		return 0; // Impedisce l'inserimento del testo grezzo nella BTextView!
 	}
+	if (state->isQuote) {
+		if (text != NULL && size > 0) {
+			// Inseriamo SOLO i caratteri '\n' nella BTextView per allocare l'altezza verticale
+			for (MD_SIZE i = 0; i < size; i++) {
+				if (text[i] == '\n')
+					state->view->Insert("\n");
+			}
+			// Accumuliamo il testo reale della citazione
+			if (state->currentQuote != NULL) {
+				state->currentQuote->quoteText.Append(text, size);
+			}
+		}
+		return 0; // Impedisce a BTextView di inserire il testo visibile!
+	}
 	
 	int32 startPos = state->view->TextLength();
 	
@@ -1120,7 +1154,6 @@ BMarkdownView::MouseMoved(BPoint where, uint32 transit, const BMessage* dragMess
 			break;
 		}
 	}
-
 	// 2. Check passaggio su pulsante "Copia" nelle Tabelle
 	if (!overInteractiveElement) {
 		int32 tableCount = fTables.CountItems();
@@ -1132,8 +1165,19 @@ BMarkdownView::MouseMoved(BPoint where, uint32 transit, const BMessage* dragMess
 			}
 		}
 	}
+	// 3. Check passaggio su pulsante "Copia" nelle Citazioni (Quotes)
+	if (!overInteractiveElement) {
+		int32 quoteCount = fQuotes.CountItems();
+		for (int32 q = 0; q < quoteCount; q++) {
+			QuoteRegion* quote = fQuotes.ItemAt(q);
+			if (quote != NULL && quote->copyRect.Contains(where)) {
+				overInteractiveElement = true;
+				break;
+			}
+		}
+	}
 
-	// 3. Check passaggio su un Link
+	// 4. Check passaggio su un Link
 	if (!overInteractiveElement && _LinkAt(where) != NULL) {
 		overInteractiveElement = true;
 	}
@@ -1185,6 +1229,24 @@ BMarkdownView::MouseDown(BPoint where)
 					if (clip != NULL) {
 						clip->AddData("text/plain", B_MIME_TYPE,
 							tableText.String(), tableText.Length());
+						be_clipboard->Commit();
+					}
+					be_clipboard->Unlock();
+				}
+				return; // Gestito!
+			}
+		}
+		
+		int32 quoteCount = fQuotes.CountItems();
+		for (int32 q = 0; q < quoteCount; q++) {
+			QuoteRegion* quote = fQuotes.ItemAt(q);
+			if (quote != NULL && quote->copyRect.Contains(where)) {
+				if (!quote->quoteText.IsEmpty() && be_clipboard->Lock()) {
+					be_clipboard->Clear();
+					BMessage* clip = be_clipboard->Data();
+					if (clip != NULL) {
+						clip->AddData("text/plain", B_MIME_TYPE,
+							quote->quoteText.String(), quote->quoteText.Length());
 						be_clipboard->Commit();
 					}
 					be_clipboard->Unlock();

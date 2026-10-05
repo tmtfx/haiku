@@ -13,6 +13,8 @@
 struct QuoteRegion {
 	int32 startPos;
 	int32 endPos;
+	BString quoteText;
+	BRect   copyRect;
 };
 
 struct HorizontalRuleRegion {
@@ -126,6 +128,8 @@ public:
 
 	status_t				SetMarkdown(const char* markdownText);
 	status_t				SetMarkdown(const BString& markdownText);
+	//void					CopyRawMarkdownToClipboard();
+	//void					CopyPlainTextToClipboard();
 
 private:
 	BMarkdownView(const BMarkdownView&);
