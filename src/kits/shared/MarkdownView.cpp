@@ -1,12 +1,7 @@
 #include "MarkdownView.h"
 
 #include <InterfaceDefs.h>
-#include <TranslationUtils.h>// <- circular dependency replaced by
-// These to not use translationutils
-//#include <BitmapStream.h>
-//#include <File.h>
-//#include <TranslatorRoster.h>
-// --------------------------
+#include <TranslationUtils.h>
 #include <algorithm>
 #include <Cursor.h>
 #include <Path.h>
@@ -116,116 +111,8 @@ BMarkdownView::Draw(BRect updateRect)
 	BTextView::Draw(updateRect);
 
 	PushState();
-	// rendering citazioni
-	int32 quoteCount = fQuotes.CountItems();
-	if (quoteCount > 0) {
-		PushState();
-
-		rgb_color panelColor = ui_color(B_PANEL_BACKGROUND_COLOR);
-		rgb_color bgColor = tint_color(panelColor, B_DARKEN_1_TINT);
-		rgb_color barColor = tint_color(panelColor, B_DARKEN_3_TINT);
-
-		for (int32 i = 0; i < quoteCount; i++) {
-			QuoteRegion* quote = fQuotes.ItemAt(i);
-			if (quote == NULL || quote->startPos < 0 || quote->startPos >= quote->endPos)
-				continue;
-
-			BPoint startPt = PointAt(quote->startPos);
-			int32 endPosAdjusted = std::max(quote->startPos, quote->endPos - 1);
-			BPoint endPt = PointAt(endPosAdjusted);
-
-			//float fontHeight = LineHeight(quote->startPos);
-
-			BRect quoteRect;
-			quoteRect.left = 2.0f;
-			quoteRect.right = Bounds().Width() - 2.0f;
-			quoteRect.top = startPt.y - 1.0f;
-			quoteRect.bottom = endPt.y + LineHeight(endPosAdjusted) + 1.0f;
-
-			if (quoteRect.Intersects(updateRect)) {
-				// 1. Sfondo pieno della citazione
-				SetDrawingMode(B_OP_COPY);
-				SetHighColor(bgColor);
-				FillRect(quoteRect);
-
-				// 2. Barra d'accento verticale a sinistra (spessa 4px)
-				BRect barRect(quoteRect.left, quoteRect.top, quoteRect.left + 4.0f, quoteRect.bottom);
-				SetHighColor(barColor);
-				FillRect(barRect);
-
-				// 3. Ridisegno del testo della citazione sopra lo sfondo
-				SetDrawingMode(B_OP_OVER);
-
-				int32 currentOffset = quote->startPos;
-				while (currentOffset < quote->endPos) {
-					BPoint linePt = PointAt(currentOffset);
-
-					int32 lineEnd = currentOffset;
-					while (lineEnd < quote->endPos && ByteAt(lineEnd) != '\n') {
-						lineEnd++;
-					}
-
-					int32 length = lineEnd - currentOffset;
-					if (length > 0) {
-						BString lineStr;
-						GetText(currentOffset, length, lineStr.LockBuffer(length + 1));
-						lineStr.UnlockBuffer();
-
-						// Recuperiamo e applichiamo lo stile del font presente in quel punto
-						BFont lineFont;
-						rgb_color lineTextColor;
-						GetFontAndColor(currentOffset, &lineFont, &lineTextColor);
-
-						SetFont(&lineFont);
-						SetHighColor(lineTextColor);
-
-						font_height fh;
-						lineFont.GetHeight(&fh);
-
-						// Tracciamo la riga di testo posizionata sulla linea di base visiva
-						DrawString(lineStr.String(), BPoint(linePt.x, linePt.y + fh.ascent));
-					}
-
-					currentOffset = lineEnd + 1;
-				}
-			}
-		}
-	}
-	// rendering divisori
-	int32 hrCount = fHorizontalRules.CountItems();
-    if (hrCount > 0) {
-    	// Colore della linea: un grigio discreto di sistema
-        rgb_color dividerColor = tint_color(ui_color(B_PANEL_BACKGROUND_COLOR), B_DARKEN_2_TINT);
-        SetHighColor(dividerColor);
-        SetPenSize(1.0f);
-
-        float viewWidth = Bounds().Width();
-        float leftMargin = 10.0f;
-        float rightMargin = viewWidth - 10.0f;
-
-        font_height fh;
-        be_plain_font->GetHeight(&fh);
-        float lineHeight = fh.ascent + fh.descent + fh.leading;
-
-        for (int32 i = 0; i < hrCount; i++) {
-            HorizontalRuleRegion* hr = static_cast<HorizontalRuleRegion*>(fHorizontalRules.ItemAt(i));
-            if (hr == NULL || hr->pos < 0 || hr->pos > TextLength())
-                continue;
-
-            // Coordinate visive dell'offset di ancoraggio
-            BPoint pt = PointAt(hr->pos);
-
-            // Calcoliamo la Y centrata nel gap del newline
-            float y = pt.y + (lineHeight / 2.0f);
-
-            BRect hrRect(leftMargin, y - 1.0f, rightMargin, y + 1.0f);
-            if (hrRect.Intersects(updateRect)) {
-                StrokeLine(BPoint(leftMargin, y), BPoint(rightMargin, y));
-            }
-        }
-    }
 	
-	// rendering di immagini se esistono
+	// Rendering delle immagini
 	int32 imageCount = fImages.CountItems();
 	if (imageCount > 0) {
 		for (int32 i = 0; i < imageCount; i++) {
@@ -236,17 +123,20 @@ BMarkdownView::Draw(BRect updateRect)
 			BPoint startPt = PointAt(img->startPos);
 			BRect bitmapBounds = img->bitmap->Bounds();
 
-			// Scaliamo l'immagine se supera la larghezza massima della vista
-			float maxWidth = Bounds().Width() - 10.0f;
+			float maxWidth = Bounds().Width() - 20.0f;
 			float imgWidth = bitmapBounds.Width();
 			float imgHeight = bitmapBounds.Height();
 
+			// Scalatura proporzionale
 			if (imgWidth > maxWidth && maxWidth > 0.0f) {
 				float scale = maxWidth / imgWidth;
 				imgWidth = maxWidth;
 				imgHeight *= scale;
 			}
 
+			// Posizionamento preciso: 
+			// startPt.y della BTextView punta alla top-line della riga.
+			// Aggiungiamo un piccolo offset di 2px per centrare visivamente l'immagine nelle righe riservate.
 			BRect drawRect(
 				startPt.x + 5.0f,
 				startPt.y + 2.0f,
@@ -261,7 +151,7 @@ BMarkdownView::Draw(BRect updateRect)
 			}
 		}
 	}
-
+	
 	rgb_color docBg = ui_color(B_DOCUMENT_BACKGROUND_COLOR);
 	float luminance = (0.299f * docBg.red + 0.587f * docBg.green + 0.114f * docBg.blue);
 	
@@ -499,6 +389,115 @@ BMarkdownView::Draw(BRect updateRect)
 			}
 		}
 	}
+	// rendering citazioni
+	int32 quoteCount = fQuotes.CountItems();
+	if (quoteCount > 0) {
+		PushState();
+
+		rgb_color panelColor = ui_color(B_PANEL_BACKGROUND_COLOR);
+		rgb_color bgColor = tint_color(panelColor, B_DARKEN_1_TINT);
+		rgb_color barColor = tint_color(panelColor, B_DARKEN_3_TINT);
+
+		for (int32 i = 0; i < quoteCount; i++) {
+			QuoteRegion* quote = fQuotes.ItemAt(i);
+			if (quote == NULL || quote->startPos < 0 || quote->startPos >= quote->endPos)
+				continue;
+
+			BPoint startPt = PointAt(quote->startPos);
+			int32 endPosAdjusted = std::max(quote->startPos, quote->endPos - 1);
+			BPoint endPt = PointAt(endPosAdjusted);
+
+			//float fontHeight = LineHeight(quote->startPos);
+
+			BRect quoteRect;
+			quoteRect.left = 2.0f;
+			quoteRect.right = Bounds().Width() - 2.0f;
+			quoteRect.top = startPt.y - 1.0f;
+			quoteRect.bottom = endPt.y + LineHeight(endPosAdjusted) + 1.0f;
+
+			if (quoteRect.Intersects(updateRect)) {
+				// 1. Sfondo pieno della citazione
+				SetDrawingMode(B_OP_COPY);
+				SetHighColor(bgColor);
+				FillRect(quoteRect);
+
+				// 2. Barra d'accento verticale a sinistra (spessa 4px)
+				BRect barRect(quoteRect.left, quoteRect.top, quoteRect.left + 4.0f, quoteRect.bottom);
+				SetHighColor(barColor);
+				FillRect(barRect);
+
+				// 3. Ridisegno del testo della citazione sopra lo sfondo
+				SetDrawingMode(B_OP_OVER);
+
+				int32 currentOffset = quote->startPos;
+				while (currentOffset < quote->endPos) {
+					BPoint linePt = PointAt(currentOffset);
+
+					int32 lineEnd = currentOffset;
+					while (lineEnd < quote->endPos && ByteAt(lineEnd) != '\n') {
+						lineEnd++;
+					}
+
+					int32 length = lineEnd - currentOffset;
+					if (length > 0) {
+						BString lineStr;
+						GetText(currentOffset, length, lineStr.LockBuffer(length + 1));
+						lineStr.UnlockBuffer();
+
+						// Recuperiamo e applichiamo lo stile del font presente in quel punto
+						BFont lineFont;
+						rgb_color lineTextColor;
+						GetFontAndColor(currentOffset, &lineFont, &lineTextColor);
+
+						SetFont(&lineFont);
+						SetHighColor(lineTextColor);
+
+						font_height fh;
+						lineFont.GetHeight(&fh);
+
+						// Tracciamo la riga di testo posizionata sulla linea di base visiva
+						DrawString(lineStr.String(), BPoint(linePt.x, linePt.y + fh.ascent));
+					}
+
+					currentOffset = lineEnd + 1;
+				}
+			}
+		}
+	}
+	// rendering divisori
+	int32 hrCount = fHorizontalRules.CountItems();
+    if (hrCount > 0) {
+    	// Colore della linea: un grigio discreto di sistema
+        rgb_color dividerColor = tint_color(ui_color(B_PANEL_BACKGROUND_COLOR), B_DARKEN_2_TINT);
+        SetHighColor(dividerColor);
+        SetPenSize(1.0f);
+
+        float viewWidth = Bounds().Width();
+        float leftMargin = 10.0f;
+        float rightMargin = viewWidth - 10.0f;
+
+        font_height fh;
+        be_plain_font->GetHeight(&fh);
+        float lineHeight = fh.ascent + fh.descent + fh.leading;
+
+        for (int32 i = 0; i < hrCount; i++) {
+            HorizontalRuleRegion* hr = static_cast<HorizontalRuleRegion*>(fHorizontalRules.ItemAt(i));
+            if (hr == NULL || hr->pos < 0 || hr->pos > TextLength())
+                continue;
+
+            // Coordinate visive dell'offset di ancoraggio
+            BPoint pt = PointAt(hr->pos);
+
+            // Calcoliamo la Y centrata nel gap del newline
+            float y = pt.y + (lineHeight / 2.0f);
+
+            BRect hrRect(leftMargin, y - 1.0f, rightMargin, y + 1.0f);
+            if (hrRect.Intersects(updateRect)) {
+                StrokeLine(BPoint(leftMargin, y), BPoint(rightMargin, y));
+            }
+        }
+    }
+	
 	PopState();
 }
 
@@ -564,6 +563,8 @@ BMarkdownView::FrameResized(float width, float height)
 
 	if (fImages.CountItems() > 0 && !fRawMarkdown.IsEmpty()) {
 		SetMarkdown(fRawMarkdown);
+		MakeFocus(IsFocus());
+		Invalidate();
 	}
 }
 
@@ -953,51 +954,51 @@ BMarkdownView::_LeaveSpanCb(MD_SPANTYPE type, void* detail, void* userdata)
 		state->currentImage->alt = state->currentImageAlt;
 
 		if (state->currentImage->bitmap != NULL && state->currentImage->bitmap->IsValid()) {
-			int32 startOffset = state->view->TextLength();
-			state->view->Insert("\n");
-
-			// 1. Dimensioni NATIVE della bitmap
+			// 1. Dimensioni e scalatura
 			BRect bitmapBounds = state->currentImage->bitmap->Bounds();
 			float nativeWidth = bitmapBounds.Width();
 			float nativeHeight = bitmapBounds.Height();
 
-			// 2. Larghezza MASSIMA disponibile nella BMarkdownView
 			float viewWidth = state->view->Bounds().Width();
-			float maxWidth = viewWidth - 20.0f; // Padding di sicurezza
+			float maxWidth = viewWidth - 20.0f;
 
 			float renderedHeight = nativeHeight;
-
-			// 3. SE L'IMMAGINE VIENE SCALATA, CALCOLIAMO L'ALTEZZA EFFETTIVA A SCHERMO
 			if (maxWidth > 0.0f && nativeWidth > maxWidth) {
 				float scale = maxWidth / nativeWidth;
-				renderedHeight = nativeHeight * scale; // <- Altezza REALE disegnata
+				renderedHeight = nativeHeight * scale;
 			}
 
-			// 4. Calcoliamo la baseLineHeight neutra
+			// 2. Misuriamo l'altezza esatta di UNA riga vuota nella BTextView
 			font_height fh;
 			be_plain_font->GetHeight(&fh);
-			float baseLineHeight = fh.ascent + fh.descent + fh.leading;
-			if (baseLineHeight < 1.0f)
-				baseLineHeight = 12.0f;
+			float lineHeight = fh.ascent + fh.descent + fh.leading;
+			if (lineHeight < 1.0f)
+				lineHeight = 16.0f;
 
-			// 5. Calcoliamo i \n usando 'renderedHeight' (non più nativeHeight!)
-			int32 newLinesNeeded = (int32)(renderedHeight / baseLineHeight);
-			if (newLinesNeeded < 1)
+			// 3. Calcolo dei newlines corretti:
+			// Usiamo floorf e sottraiamo 1 per compensare il \n automatico del paragrafo Markdown
+			int32 newLinesNeeded = (int32)floorf(renderedHeight / lineHeight);
+			if (newLinesNeeded > 2) {
+				newLinesNeeded -= 2; // Togliamo i 2 newlines di troppo (margine/paragrafo)
+			} else if (newLinesNeeded < 1) {
 				newLinesNeeded = 1;
+			}
+
+			int32 imageStartPos = state->view->TextLength();
 
 			for (int32 i = 0; i < newLinesNeeded; i++) {
 				state->view->Insert("\n");
 			}
 
-			int32 lineInsertEnd = state->view->TextLength();
+			int32 imageEndPos = state->view->TextLength();
 
-			// Applichiamo il font base sulle righe riservate per evitare dilatazioni
+			// Forziamo il font plain su tutta la spaziatura riservata
 			rgb_color textColor = state->textColor;
-			state->view->SetFontAndColor(startOffset, lineInsertEnd,
+			state->view->SetFontAndColor(imageStartPos, imageEndPos,
 				be_plain_font, B_FONT_ALL, &textColor);
 
-			state->currentImage->startPos = startOffset;
-			state->currentImage->endPos = lineInsertEnd;
+			state->currentImage->startPos = imageStartPos;
+			state->currentImage->endPos = imageEndPos;
 			state->view->fImages.AddItem(state->currentImage);
 		} else {
 			if (!state->currentImage->alt.IsEmpty()) {
@@ -1011,7 +1012,7 @@ BMarkdownView::_LeaveSpanCb(MD_SPANTYPE type, void* detail, void* userdata)
 		state->currentImage = NULL;
 	}
 	break;
-		}
+}
 		default:
 			break;
 	}
@@ -1083,22 +1084,6 @@ BMarkdownView::_LoadImageForRegion(ImageRegion* region)
 		BPath path(region->src.String());
 		region->bitmap = BTranslationUtils::GetBitmap(path.Path());
 	}
-	/* senza BTranslationUtils
-	BFile file(region->src.String(), B_READ_ONLY);
-	if (file.InitCheck() != B_OK)
-		return;
-
-	BTranslatorRoster* roster = BTranslatorRoster::Default();
-	if (roster == NULL)
-		return;
-
-	BBitmapStream stream;
-	if (roster->Translate(&file, NULL, NULL, &stream, B_TRANSLATOR_BITMAP) == B_OK) {
-		BBitmap* bitmap = NULL;
-		if (stream.DetachBitmap(&bitmap) == B_OK) {
-			region->bitmap = bitmap;
-		}
-	}*/
 }
 LinkRegion*
 BMarkdownView::_LinkAt(BPoint point) const
