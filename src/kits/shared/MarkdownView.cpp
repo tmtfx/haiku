@@ -22,7 +22,8 @@ BMarkdownView::BMarkdownView(const char* name, uint32 flags)
     fCodeBlocks(20),
     fTables(10),
     fImages(10),
-    fLinks(20)
+    fLinks(20),
+    fQuotes(20)
 {
     _Init();
 }
@@ -36,7 +37,8 @@ BMarkdownView::BMarkdownView(const char* name, const BFont* font,
     fCodeBlocks(20),
     fTables(10),
     fImages(10),
-    fLinks(20)
+    fLinks(20),
+    fQuotes(20)
 {
     _Init();
 }
@@ -47,7 +49,8 @@ BMarkdownView::BMarkdownView(BMessage* archive)
 	fCodeBlocks(20),
 	fTables(10),
 	fImages(10),
-	fLinks(20)
+	fLinks(20),
+    fQuotes(20)
 {
 	_Init();
 }
@@ -95,6 +98,8 @@ BMarkdownView::_ClearRegions()
         delete static_cast<HorizontalRuleRegion*>(fHorizontalRules.ItemAt(i));
     }
     fHorizontalRules.MakeEmpty();
+    
+    fQuotes.MakeEmpty();
 }
 
 
@@ -110,6 +115,81 @@ BMarkdownView::Draw(BRect updateRect)
 	BTextView::Draw(updateRect);
 
 	PushState();
+	// rendering citazioni
+	int32 quoteCount = fQuotes.CountItems();
+	if (quoteCount > 0) {
+		PushState();
+
+		rgb_color panelColor = ui_color(B_PANEL_BACKGROUND_COLOR);
+		rgb_color bgColor = tint_color(panelColor, B_DARKEN_1_TINT);
+		rgb_color barColor = tint_color(panelColor, B_DARKEN_3_TINT);
+
+		for (int32 i = 0; i < quoteCount; i++) {
+			QuoteRegion* quote = fQuotes.ItemAt(i);
+			if (quote == NULL || quote->startPos < 0 || quote->startPos >= quote->endPos)
+				continue;
+
+			BPoint startPt = PointAt(quote->startPos);
+			int32 endPosAdjusted = std::max(quote->startPos, quote->endPos - 1);
+			BPoint endPt = PointAt(endPosAdjusted);
+
+			//float fontHeight = LineHeight(quote->startPos);
+
+			BRect quoteRect;
+			quoteRect.left = 2.0f;
+			quoteRect.right = Bounds().Width() - 2.0f;
+			quoteRect.top = startPt.y - 1.0f;
+			quoteRect.bottom = endPt.y + LineHeight(endPosAdjusted) + 1.0f;
+
+			if (quoteRect.Intersects(updateRect)) {
+				// 1. Sfondo pieno della citazione
+				SetDrawingMode(B_OP_COPY);
+				SetHighColor(bgColor);
+				FillRect(quoteRect);
+
+				// 2. Barra d'accento verticale a sinistra (spessa 4px)
+				BRect barRect(quoteRect.left, quoteRect.top, quoteRect.left + 4.0f, quoteRect.bottom);
+				SetHighColor(barColor);
+				FillRect(barRect);
+
+				// 3. Ridisegno del testo della citazione sopra lo sfondo
+				SetDrawingMode(B_OP_OVER);
+
+				int32 currentOffset = quote->startPos;
+				while (currentOffset < quote->endPos) {
+					BPoint linePt = PointAt(currentOffset);
+
+					int32 lineEnd = currentOffset;
+					while (lineEnd < quote->endPos && ByteAt(lineEnd) != '\n') {
+						lineEnd++;
+					}
+
+					int32 length = lineEnd - currentOffset;
+					if (length > 0) {
+						BString lineStr;
+						GetText(currentOffset, length, lineStr.LockBuffer(length + 1));
+						lineStr.UnlockBuffer();
+
+						// Recuperiamo e applichiamo lo stile del font presente in quel punto
+						BFont lineFont;
+						rgb_color lineTextColor;
+						GetFontAndColor(currentOffset, &lineFont, &lineTextColor);
+
+						SetFont(&lineFont);
+						SetHighColor(lineTextColor);
+
+						font_height fh;
+						lineFont.GetHeight(&fh);
+
+						// Tracciamo la riga di testo posizionata sulla linea di base visiva
+						DrawString(lineStr.String(), BPoint(linePt.x, linePt.y + fh.ascent));
+					}
+
+					currentOffset = lineEnd + 1;
+				}
+			}
+		}
+	}
 	// rendering divisori
 	int32 hrCount = fHorizontalRules.CountItems();
     if (hrCount > 0) {
@@ -583,6 +663,22 @@ BMarkdownView::_EnterBlockCb(MD_BLOCKTYPE type, void* detail, void* userdata)
     state->view->Insert("\n");
     break;
 }
+		case MD_BLOCK_QUOTE: {
+	QuoteRegion* quote = new QuoteRegion();
+	quote->startPos = state->view->TextLength();
+	quote->endPos = -1;
+
+	state->currentQuote = quote;
+	state->isQuote = true;
+	break;
+}
+		case MD_BLOCK_P: {
+	// Se siamo all'interno di una citazione, aggiungiamo del margine a sinistra prima del testo
+	if (state->isQuote) {
+		state->view->Insert("    "); // 4 spazi di rientro visivo dal bordo
+	}
+	break;
+}
 		default:
 			break;
 	}
@@ -657,6 +753,17 @@ BMarkdownView::_LeaveBlockCb(MD_BLOCKTYPE type, void* detail, void* userdata)
     if (state->listDepth > 0)
         state->listDepth--;
     break;
+}
+		case MD_BLOCK_QUOTE: {
+	if (state->currentQuote != NULL) {
+		state->currentQuote->endPos = state->view->TextLength();
+		state->view->Insert("\n");
+
+		state->view->fQuotes.AddItem(state->currentQuote);
+		state->currentQuote = NULL;
+	}
+	state->isQuote = false;
+	break;
 }
 		default:
 			break;

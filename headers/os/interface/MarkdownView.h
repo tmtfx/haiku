@@ -11,6 +11,11 @@
 #include <md4c.h>
 
 // Struttura per tracciare le regioni dei blocchi di codice nel testo
+struct QuoteRegion {
+	int32 startPos;
+	int32 endPos;
+};
+
 struct HorizontalRuleRegion {
     int32 pos;
 };
@@ -125,6 +130,8 @@ private:
 		int32				listDepth;
 		bool				isOrderedList;
 		int32				olItemNumber;
+		bool				isQuote;
+		QuoteRegion*		currentQuote;
 		
 		RenderState()
 		: view(NULL),
@@ -146,7 +153,9 @@ private:
 		  currentLink(NULL),
 		  listDepth(0),
 		  isOrderedList(false),
-		  olItemNumber(1)
+		  olItemNumber(1),
+		  isQuote(false),
+		  currentQuote(NULL)
 	{}
 	};
 
@@ -171,6 +180,7 @@ private:
 	BObjectList<LinkRegion> fLinks;
 	LinkRegion*             _LinkAt(BPoint point) const;
 	BList					fHorizontalRules;
+	BObjectList<QuoteRegion, true> fQuotes;
 
 };
 
