@@ -9,12 +9,38 @@
 #include <ObjectList.h>
 #include <Cursor.h>
 #include <md4c.h>
+#include <stack>
+
+struct FormattedSegment {
+	BString  text;
+	bool     isBold;
+	bool     isItalic;
+	bool     isCode;
+	bool     isLink;
+	BString  url;
+
+	FormattedSegment()
+		: isBold(false), isItalic(false),
+		  isCode(false), isLink(false) {}
+};
 
 struct QuoteRegion {
-	int32 startPos;
-	int32 endPos;
-	BString quoteText;
-	BRect   copyRect;
+	int32       startPos;
+	int32       endPos;
+	BRect       copyRect;
+	BObjectList<FormattedSegment, true> segments;
+
+	QuoteRegion() : startPos(-1), endPos(-1), segments(10) {}
+	BString ToText() const {
+		BString result;
+		int32 count = segments.CountItems();
+		for (int32 i = 0; i < count; i++) {
+			FormattedSegment* seg = segments.ItemAt(i);
+			if (seg != NULL)
+				result.Append(seg->text);
+		}
+		return result;
+	}
 };
 
 struct HorizontalRuleRegion {
@@ -30,10 +56,30 @@ struct LinkRegion {
 };
 
 struct TableCellRegion {
-	int32   startPos;
-	int32   endPos;
-	int32   colIndex;
-	BString text;
+	int32       startPos;
+	int32       endPos;
+	int32       colIndex;
+	BObjectList<FormattedSegment, true> segments;
+
+	TableCellRegion() : startPos(-1), endPos(-1), colIndex(0), segments(5) {}
+	BString ToText() const {
+		BString result;
+		int32 count = segments.CountItems();
+		for (int32 i = 0; i < count; i++) {
+			FormattedSegment* seg = segments.ItemAt(i);
+			if (seg != NULL)
+				result.Append(seg->text);
+		}
+		return result;
+	}
+};
+
+// Tipi di blocchi per lo Stack
+enum ContainerBlockType {
+	BLOCK_NONE = 0,
+	BLOCK_QUOTE,
+	BLOCK_TABLE_CELL,
+	BLOCK_CODE
 };
 
 struct TableRowRegion {
@@ -66,12 +112,11 @@ struct TableRegion {
 			int32 cellCount = row->cells.CountItems();
 			for (int32 c = 0; c < cellCount; c++) {
 				TableCellRegion* cell = row->cells.ItemAt(c);
-				if (cell != NULL) {
-					result.Append(cell->text);
-				}
-				if (c < cellCount - 1) {
-					result.Append("\t"); // Separatore di colonna
-				}
+				if (cell != NULL)
+					result.Append(cell->ToText());
+
+				if (c < cellCount - 1)
+					result.Append("\t");
 			}
 			result.Append("\n");
 		}
@@ -134,8 +179,8 @@ public:
 private:
 	BMarkdownView(const BMarkdownView&);
 	BMarkdownView& operator=(const BMarkdownView&);
-	BString _ConvertMarkdownToPlainText(const BString& markdown);
 
+	// 1. Spostato RenderState IN CIMA alla sezione private
 	struct RenderState {
 		BMarkdownView*   view;
 		BFont            currentFont;
@@ -158,12 +203,21 @@ private:
 		ImageRegion*     currentImage;
 		BString          currentImageAlt;
 		bool             isLink;
+		BString          currentUrl;
 		LinkRegion*      currentLink;
 		int32            listDepth;
 		bool             isOrderedList;
 		int32            olItemNumber;
 		bool             isQuote;
 		QuoteRegion*     currentQuote;
+		
+		std::stack<ContainerBlockType> blockStack;
+
+		ContainerBlockType CurrentBlock() const {
+			if (blockStack.empty())
+				return BLOCK_NONE;
+			return blockStack.top();
+		}
 
 		RenderState()
 			: view(NULL),
@@ -184,6 +238,7 @@ private:
 			  isImage(false),
 			  currentImage(NULL),
 			  isLink(false),
+			  currentUrl(""),
 			  currentLink(NULL),
 			  listDepth(0),
 			  isOrderedList(false),
@@ -193,30 +248,32 @@ private:
 		{}
 	};
 
-	void					_Init();
-	void					_ClearRegions();
-	void					_ApplyCurrentStyle(int32 startPos, RenderState& state);
+	BString                 _ConvertMarkdownToPlainText(const BString& markdown);
+	void                    _Init();
+	void                    _ClearRegions();
+	void                    _ApplyCurrentStyle(int32 startPos, RenderState& state);
+	void                    _AppendFormattedText(RenderState* state, const char* text, MD_SIZE size);
+	void                    _DrawFormattedSegment(FormattedSegment* seg, BPoint& drawPt, float lineMaxAscent);
 
-	static int				_EnterBlockCb(MD_BLOCKTYPE type, void* detail, void* userdata);
-	static int				_LeaveBlockCb(MD_BLOCKTYPE type, void* detail, void* userdata);
-	static int				_EnterSpanCb(MD_SPANTYPE type, void* detail, void* userdata);
-	static int				_LeaveSpanCb(MD_SPANTYPE type, void* detail, void* userdata);
-	static int				_TextCb(MD_TEXTTYPE type, const MD_CHAR* text, MD_SIZE size, void* userdata);
+	static int              _EnterBlockCb(MD_BLOCKTYPE type, void* detail, void* userdata);
+	static int              _LeaveBlockCb(MD_BLOCKTYPE type, void* detail, void* userdata);
+	static int              _EnterSpanCb(MD_SPANTYPE type, void* detail, void* userdata);
+	static int              _LeaveSpanCb(MD_SPANTYPE type, void* detail, void* userdata);
+	static int              _TextCb(MD_TEXTTYPE type, const MD_CHAR* text, MD_SIZE size, void* userdata);
 
-	void					_LoadImageForRegion(ImageRegion* region);
-	LinkRegion*				_LinkAt(BPoint point) const;
+	void                    _LoadImageForRegion(ImageRegion* region);
+	LinkRegion*             _LinkAt(BPoint point) const;
 
-	BString					fRawMarkdown;
-	BCursor					fHandCursor;
+	BString                 fRawMarkdown;
+	BCursor                  fHandCursor;
 
-	// Gestione sicura della memoria con ownership abilitata (= true)
 	BObjectList<CodeBlockRegion, true> fCodeBlocks;
 	BObjectList<TableRegion, true>     fTables;
 	BObjectList<ImageRegion, true>     fImages;
 	BObjectList<LinkRegion, true>      fLinks;
 	BObjectList<QuoteRegion, true>     fQuotes;
 
-	BList					fHorizontalRules;
+	BList                   fHorizontalRules;
 };
 
 #endif // MARKDOWN_VIEW_H

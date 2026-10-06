@@ -268,7 +268,38 @@ BMarkdownView::_ConvertMarkdownToPlainText(const BString& markdown)
 
 	return result;
 }
+void
+BMarkdownView::_DrawFormattedSegment(FormattedSegment* seg, BPoint& drawPt, float lineMaxAscent)
+{
+	if (seg == NULL || seg->text.IsEmpty())
+		return;
 
+	BFont font(be_plain_font);
+	rgb_color color = ui_color(B_DOCUMENT_TEXT_COLOR);
+
+	uint16 face = font.Face();
+	if (seg->isBold)
+		face |= B_BOLD_FACE;
+	if (seg->isItalic)
+		face |= B_ITALIC_FACE;
+	if (seg->isLink)
+		face |= B_UNDERSCORE_FACE;
+
+	font.SetFace(face);
+
+	if (seg->isCode) {
+		font = *be_fixed_font;
+		color = (rgb_color){ 200, 40, 40, 255 }; // Rosso per codice inline
+	} else if (seg->isLink) {
+		color = ui_color(B_LINK_TEXT_COLOR);
+	}
+
+	SetFont(&font);
+	SetHighColor(color);
+
+	DrawString(seg->text.String(), BPoint(drawPt.x, drawPt.y + lineMaxAscent));
+	drawPt.x += font.StringWidth(seg->text.String());
+}
 void
 BMarkdownView::Draw(BRect updateRect)
 {
@@ -437,21 +468,23 @@ BMarkdownView::Draw(BRect updateRect)
 				TableRowRegion* row = table->rows.ItemAt(r);
 				int32 cellCount = row->cells.CountItems();
 
+				font_height fh;
+				be_plain_font->GetHeight(&fh);
+
 				for (int32 c = 0; c < cellCount; c++) {
 					TableCellRegion* cell = row->cells.ItemAt(c);
-					if (cell == NULL || cell->text.IsEmpty())
+					if (cell == NULL || cell->segments.IsEmpty())
 						continue;
 
 					BPoint linePt = PointAt(row->startPos);
 					float cellX = totalTableRect.left + (c * colWidth) + 10.0f;
+					BPoint drawPt(cellX, linePt.y + LineHeight(row->startPos) - 15.0f);
 
-					if (row->isHeader)
-						SetFont(be_bold_font);
-					else
-						SetFont(be_fixed_font);
-
-					SetHighColor(ui_color(B_DOCUMENT_TEXT_COLOR));
-					DrawString(cell->text.String(), BPoint(cellX, linePt.y + LineHeight(row->startPos) - 3.0f));
+					int32 segCount = cell->segments.CountItems();
+					for (int32 s = 0; s < segCount; s++) {
+						FormattedSegment* seg = cell->segments.ItemAt(s);
+						_DrawFormattedSegment(seg, drawPt, fh.ascent);
+					}
 				}
 			}
 		}
@@ -555,14 +588,15 @@ BMarkdownView::Draw(BRect updateRect)
 			}
 		}
 	}
-	// rendering citazioni
+	
+	// -------------------------------------------------------------------------
+	// RENDERING CITAZIONI CON SEGMENTI FORMATTATI (Bold, Italic, Link, Inline Code)
+	// -------------------------------------------------------------------------
 	int32 quoteCount = fQuotes.CountItems();
 	if (quoteCount > 0) {
-
 		rgb_color panelColor = ui_color(B_PANEL_BACKGROUND_COLOR);
 		rgb_color bgColor    = tint_color(panelColor, B_DARKEN_1_TINT);
 		rgb_color barColor   = tint_color(panelColor, B_DARKEN_3_TINT);
-		rgb_color textColor  = ui_color(B_DOCUMENT_TEXT_COLOR);
 
 		font_height fh;
 		be_plain_font->GetHeight(&fh);
@@ -570,24 +604,24 @@ BMarkdownView::Draw(BRect updateRect)
 
 		for (int32 i = 0; i < quoteCount; i++) {
 			QuoteRegion* quote = fQuotes.ItemAt(i);
-			if (quote == NULL || quote->quoteText.IsEmpty())
+			if (quote == NULL || quote->segments.IsEmpty())
 				continue;
 
-			BPoint startPt = PointAt(quote->startPos);
-			
-			// Calcoliamo le righe totali del testo della citazione
-			int32 totalLines = 0;
-			int32 strPos = 0;
-			int32 textLen = quote->quoteText.Length();
-			while (strPos < textLen) {
-				totalLines++;
-				int32 lineEnd = quote->quoteText.FindFirst('\n', strPos);
-				if (lineEnd == B_ERROR)
-					break;
-				strPos = lineEnd + 1;
+			// 1. Calcoliamo le righe totali contando i '\n' nei segmenti
+			int32 totalLines = 1;
+			int32 segCount = quote->segments.CountItems();
+			for (int32 s = 0; s < segCount; s++) {
+				FormattedSegment* seg = quote->segments.ItemAt(s);
+				if (seg != NULL) {
+					int32 pos = 0;
+					while ((pos = seg->text.FindFirst('\n', pos)) != B_ERROR) {
+						totalLines++;
+						pos++;
+					}
+				}
 			}
-			if (totalLines < 1) totalLines = 1;
 
+			BPoint startPt = PointAt(quote->startPos);
 			float headerPadding = 18.0f; // Spazio per il pulsante copia
 			float contentHeight = (totalLines * lineHeight) + 8.0f;
 
@@ -598,20 +632,19 @@ BMarkdownView::Draw(BRect updateRect)
 			quoteRect.bottom = quoteRect.top + headerPadding + contentHeight;
 
 			if (quoteRect.Intersects(updateRect)) {
-				// 1. Sfondo pieno della citazione
+				// A. Sfondo pieno della citazione
 				SetDrawingMode(B_OP_COPY);
 				SetHighColor(bgColor);
 				FillRect(quoteRect);
 
-				// 2. Barra d'accento verticale a sinistra (spessa 4px)
+				// B. Barra d'accento verticale a sinistra (spessa 4px)
 				BRect barRect(quoteRect.left, quoteRect.top, quoteRect.left + 4.0f, quoteRect.bottom);
 				SetHighColor(barColor);
 				FillRect(barRect);
 
-				// 3. Pulsante "📑 Copy quote" in alto a destra
+				// C. Pulsante "📑 Copy quote" in alto a destra
 				SetDrawingMode(B_OP_OVER);
 				SetFont(be_plain_font);
-				//SetHighColor(tint_color(textColor, B_LIGHTEN_2_TINT));
 				SetHighColor(ui_color(B_DOCUMENT_BACKGROUND_COLOR));
 
 				const char* copyQuoteStr = "📑 Copy quote";
@@ -626,26 +659,47 @@ BMarkdownView::Draw(BRect updateRect)
 
 				DrawString(copyQuoteStr, BPoint(quote->copyRect.left + 2.0f, quoteRect.top + 13.0f));
 
-				// 4. Disegno del testo della citazione riga per riga
-				SetFont(be_plain_font);
-				SetHighColor(textColor);
-
+				// D. Disegno dei segmenti formattati riga per riga
 				const float textLeftPadding = 14.0f;
-				float currentY = quoteRect.top + headerPadding + 2.0f;
+				BPoint drawPt(quoteRect.left + textLeftPadding, quoteRect.top + headerPadding + 2.0f);
 
-				strPos = 0;
-				while (strPos < textLen) {
-					int32 lineEnd = quote->quoteText.FindFirst('\n', strPos);
-					if (lineEnd == B_ERROR)
-						lineEnd = textLen;
+				for (int32 s = 0; s < segCount; s++) {
+					FormattedSegment* seg = quote->segments.ItemAt(s);
+					if (seg == NULL || seg->text.IsEmpty())
+						continue;
 
-					BString lineStr;
-					quote->quoteText.CopyInto(lineStr, strPos, lineEnd - strPos);
+					// Se il segmento contiene dei '\n', lo spezziamo e andiamo a capo
+					int32 strPos = 0;
+					int32 textLen = seg->text.Length();
 
-					DrawString(lineStr.String(), BPoint(quoteRect.left + textLeftPadding, currentY + fh.ascent));
+					while (strPos < textLen) {
+						int32 lineEnd = seg->text.FindFirst('\n', strPos);
+						if (lineEnd == B_ERROR) {
+							// Disegniamo il resto del segmento sulla riga corrente
+							BString subStr;
+							seg->text.CopyInto(subStr, strPos, textLen - strPos);
+							
+							FormattedSegment subSeg = *seg;
+							subSeg.text = subStr;
+							_DrawFormattedSegment(&subSeg, drawPt, fh.ascent);
+							break;
+						} else {
+							// Disegniamo fino al '\n' e andiamo a capo
+							if (lineEnd > strPos) {
+								BString subStr;
+								seg->text.CopyInto(subStr, strPos, lineEnd - strPos);
+								
+								FormattedSegment subSeg = *seg;
+								subSeg.text = subStr;
+								_DrawFormattedSegment(&subSeg, drawPt, fh.ascent);
+							}
 
-					currentY += lineHeight;
-					strPos = lineEnd + 1;
+							// Reset coordinata X e avanzamento Y
+							drawPt.x = quoteRect.left + textLeftPadding;
+							drawPt.y += lineHeight;
+							strPos = lineEnd + 1;
+						}
+					}
 				}
 			}
 		}
@@ -847,12 +901,13 @@ BMarkdownView::_EnterBlockCb(MD_BLOCKTYPE type, void* detail, void* userdata)
 		}
 		case MD_BLOCK_CODE:
 		{
-			state->isBlockCode = true;
+			//state->isBlockCode = true;
 			state->view->Insert("\n"); // Riga riservata per l'header della toolbar
 			CodeBlockRegion* region = new CodeBlockRegion();
 			region->startPos = state->view->TextLength();
 			region->endPos = -1;
 			state->currentCodeBlock = region;
+			state->blockStack.push(BLOCK_CODE);
 			break;
 		}
 		case MD_BLOCK_TABLE:
@@ -877,25 +932,26 @@ BMarkdownView::_EnterBlockCb(MD_BLOCKTYPE type, void* detail, void* userdata)
 			break;
 		}
 		case MD_BLOCK_TH:
-			state->isBold = true;
+			//state->isBold = true;
 			// fall-through intenzionale verso MD_BLOCK_TD
 		case MD_BLOCK_TD: {
-	if (state->currentTable != NULL && state->currentTable->rows.CountItems() > 0) {
-		TableRowRegion* row = state->currentTable->rows.LastItem();
+			if (state->currentTable != NULL && state->currentTable->rows.CountItems() > 0) {
+				TableRowRegion* row = state->currentTable->rows.LastItem();
 
-		// Inseriamo un tab per separare fisicamente le colonne nel buffer di BTextView
-		//if (state->currentColIndex > 0) {
-		//	state->view->Insert("\t");
-		//}
+				// Inseriamo un tab per separare fisicamente le colonne nel buffer di BTextView
+				//if (state->currentColIndex > 0) {
+				//	state->view->Insert("\t");
+				//}
 
-		TableCellRegion* cell = new TableCellRegion();
-		cell->startPos = state->view->TextLength();
-		cell->colIndex = state->currentColIndex;
-		row->cells.AddItem(cell);
-		state->currentCell = cell;
-	}
-	break;
-}
+				TableCellRegion* cell = new TableCellRegion();
+				cell->startPos = state->view->TextLength();
+				cell->colIndex = state->currentColIndex;
+				row->cells.AddItem(cell);
+				state->currentCell = cell;
+				state->blockStack.push(BLOCK_TABLE_CELL);
+			}
+			break;
+		}
 		case MD_BLOCK_UL: {
 			state->listDepth++;
 			state->isOrderedList = false;
@@ -948,7 +1004,8 @@ BMarkdownView::_EnterBlockCb(MD_BLOCKTYPE type, void* detail, void* userdata)
 			quote->endPos = -1;
 
 			state->currentQuote = quote;
-			state->isQuote = true;
+			//state->isQuote = true;
+			state->blockStack.push(BLOCK_QUOTE);
 			break;
 		}
 		case MD_BLOCK_P: {
@@ -987,7 +1044,8 @@ BMarkdownView::_LeaveBlockCb(MD_BLOCKTYPE type, void* detail, void* userdata)
 				state->view->fCodeBlocks.AddItem(state->currentCodeBlock);
 				state->currentCodeBlock = NULL;
 			}
-
+			if (state->CurrentBlock() == BLOCK_CODE)
+				state->blockStack.pop();
 			state->view->Insert("\n");
 			break;
 		}
@@ -1011,13 +1069,15 @@ BMarkdownView::_LeaveBlockCb(MD_BLOCKTYPE type, void* detail, void* userdata)
 			break;
 
 		case MD_BLOCK_TH:
-			state->isBold = false;
+			// state->isBold = false;
 			// fall-through intenzionale verso MD_BLOCK_TD
 		case MD_BLOCK_TD:
 			if (state->currentCell != NULL) {
 				state->currentCell->endPos = state->view->TextLength();
 				state->currentCell = NULL;
 			}
+			if (state->CurrentBlock() == BLOCK_TABLE_CELL)
+				state->blockStack.pop();
 			state->currentColIndex++;
 			break;
 
@@ -1209,10 +1269,10 @@ int
 BMarkdownView::_TextCb(MD_TEXTTYPE type, const MD_CHAR* text, MD_SIZE size, void* userdata)
 {
 	RenderState* state = static_cast<RenderState*>(userdata);
-	
-	if (state == NULL || state->view == NULL)
+	if (state == NULL || state->view == NULL || text == NULL || size == 0)
 		return 0;
-	
+
+	ContainerBlockType currentBlock = state->CurrentBlock();
 
 	// Se siamo all'interno di uno span immagine, usiamo BString(text, size)
 	// per evitare problemi di puntatori non terminati da '\0'
@@ -1221,43 +1281,24 @@ BMarkdownView::_TextCb(MD_TEXTTYPE type, const MD_CHAR* text, MD_SIZE size, void
 			state->currentImageAlt.Append(text, size);
 		return 0; // NON scriviamo l'alt text nel documento visivo!
 	}
-	// Se siamo dentro una cella di una tabella, salviamo il testo NELLA CELLA
-	// e NON inseriamo il testo grezzo nella BTextView!
-	if (state->isTable && state->currentCell != NULL) {
-		if (text != NULL && size > 0) {
-			state->currentCell->text.Append(text, size);
+	
+	if (currentBlock == BLOCK_CODE) {
+		for (MD_SIZE i = 0; i < size; i++) {
+			if (text[i] == '\n')
+				state->view->Insert("\n");
 		}
-		return 0; // Impedisce a BTextView di inserire il testo visibile a margine!
+		if (state->currentCodeBlock != NULL)
+			state->currentCodeBlock->codeText.Append(text, size);
+		return 0;
 	}
 	
-	if (state->isBlockCode) {
-		if (text != NULL && size > 0) {
-			// Per mantenere l'altezza verticale corretta nella BTextView,
-			// inseriamo SOLO i caratteri '\n' di a-capo nel buffer di BTextView
-			for (MD_SIZE i = 0; i < size; i++) {
-				if (text[i] == '\n')
-					state->view->Insert("\n");
-			}
-			// Salviamo il testo del codice grezzo nella regione
-			if (state->currentCodeBlock != NULL) {
-				state->currentCodeBlock->codeText.Append(text, size);
-			}
+	if (currentBlock == BLOCK_QUOTE || currentBlock == BLOCK_TABLE_CELL) {
+		for (MD_SIZE i = 0; i < size; i++) {
+			if (text[i] == '\n')
+				state->view->Insert("\n");
 		}
-		return 0; // Impedisce l'inserimento del testo grezzo nella BTextView!
-	}
-	if (state->isQuote) {
-		if (text != NULL && size > 0) {
-			// Inseriamo SOLO i caratteri '\n' nella BTextView per allocare l'altezza verticale
-			for (MD_SIZE i = 0; i < size; i++) {
-				if (text[i] == '\n')
-					state->view->Insert("\n");
-			}
-			// Accumuliamo il testo reale della citazione
-			if (state->currentQuote != NULL) {
-				state->currentQuote->quoteText.Append(text, size);
-			}
-		}
-		return 0; // Impedisce a BTextView di inserire il testo visibile!
+		state->view->_AppendFormattedText(state, text, size);
+		return 0;
 	}
 	
 	int32 startPos = state->view->TextLength();
@@ -1407,12 +1448,12 @@ BMarkdownView::MouseDown(BPoint where)
 		for (int32 q = 0; q < quoteCount; q++) {
 			QuoteRegion* quote = fQuotes.ItemAt(q);
 			if (quote != NULL && quote->copyRect.Contains(where)) {
-				if (!quote->quoteText.IsEmpty() && be_clipboard->Lock()) {
+				if (!quote->ToText().IsEmpty() && be_clipboard->Lock()) {
 					be_clipboard->Clear();
 					BMessage* clip = be_clipboard->Data();
 					if (clip != NULL) {
-						clip->AddData("text/plain", B_MIME_TYPE,
-							quote->quoteText.String(), quote->quoteText.Length());
+						BString qText = quote->ToText();
+						clip->AddData("text/plain", B_MIME_TYPE, qText.String(), qText.Length());
 						be_clipboard->Commit();
 					}
 					be_clipboard->Unlock();
@@ -1437,4 +1478,28 @@ BMarkdownView::MouseDown(BPoint where)
 	}
 
 	BTextView::MouseDown(where);
+}
+void
+BMarkdownView::_AppendFormattedText(RenderState* state, const char* text, MD_SIZE size)
+{
+	if (text == NULL || size == 0)
+		return;
+
+	FormattedSegment* seg = new FormattedSegment();
+	seg->text.SetTo(text, size);
+	seg->isBold   = state->isBold;
+	seg->isItalic = state->isItalic;
+	seg->isCode   = state->isCode;
+	seg->isLink   = state->isLink;
+	seg->url      = state->currentUrl;
+
+	ContainerBlockType currentBlock = state->CurrentBlock();
+
+	if (currentBlock == BLOCK_QUOTE && state->currentQuote != NULL) {
+		state->currentQuote->segments.AddItem(seg);
+	} else if (currentBlock == BLOCK_TABLE_CELL && state->currentCell != NULL) {
+		state->currentCell->segments.AddItem(seg);
+	} else {
+		delete seg;
+	}
 }
