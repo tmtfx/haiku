@@ -12,6 +12,13 @@ BMarkdownScrollView::BMarkdownScrollView(const char* name, BMarkdownView* target
 	BScrollView(name, target, resizingMode, flags, horizontal, vertical, border),
 	fMarkdownTarget(target)
 {
+	// Ci assicuriamo che la ScrollView riceva gli eventi di ridimensionamento
+	SetFlags(Flags() | B_FRAME_EVENTS | B_FULL_UPDATE_ON_RESIZE);
+
+	if (fMarkdownTarget != NULL) {
+		// Il target deve ridimensionarsi insieme alla ScrollView
+		fMarkdownTarget->SetResizingMode(B_FOLLOW_ALL);
+	}
 	// Creiamo i due pulsanti
 	fCopyRawBtn = new BButton("copy_raw", "📋 Copy Raw", new BMessage(MSG_COPY_RAW_MARKDOWN));
 	fCopyTextBtn = new BButton("copy_text", "📄 Copy Text", new BMessage(MSG_COPY_PLAIN_TEXT));
