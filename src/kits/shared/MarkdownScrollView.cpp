@@ -17,11 +17,13 @@ BMarkdownScrollView::BMarkdownScrollView(const char* name, BMarkdownView* target
 
 	if (fMarkdownTarget != NULL) {
 		// Il target deve ridimensionarsi insieme alla ScrollView
-		fMarkdownTarget->SetResizingMode(B_FOLLOW_ALL);
+		fMarkdownTarget->SetResizingMode(B_FOLLOW_NONE);
 	}
 	// Creiamo i due pulsanti
 	fCopyRawBtn = new BButton("copy_raw", "📋 Copy Raw", new BMessage(MSG_COPY_RAW_MARKDOWN));
 	fCopyTextBtn = new BButton("copy_text", "📄 Copy Text", new BMessage(MSG_COPY_PLAIN_TEXT));
+	fCopyRawBtn->SetResizingMode(B_FOLLOW_RIGHT | B_FOLLOW_TOP);
+	fCopyTextBtn->SetResizingMode(B_FOLLOW_RIGHT | B_FOLLOW_TOP);
 
 	// Font compatto per i pulsanti
 	BFont miniFont(be_plain_font);
@@ -38,50 +40,22 @@ BMarkdownScrollView::~BMarkdownScrollView()
 }
 
 void
+BMarkdownScrollView::FrameResized(float width, float height)
+{
+	BScrollView::FrameResized(width, height);
+	DoLayout();
+}
+
+void
 BMarkdownScrollView::AttachedToWindow()
 {
 	BScrollView::AttachedToWindow();
 
 	fCopyRawBtn->SetTarget(this);
 	fCopyTextBtn->SetTarget(this);
+	DoLayout();
 }
-/*
-void
-BMarkdownScrollView::DoLayout()
-{
-	// 1. Lasciamo che BScrollView calcoli e posizioni fTarget e le BScrollBar
-	BScrollView::DoLayout();
 
-	if (fMarkdownTarget == NULL)
-		return;
-
-	BRect bounds = Bounds();
-	float toolbarHeight = 22.0f;
-
-	// 2. Posizioniamo i due pulsanti in alto a destra
-	float rawWidth = fCopyRawBtn->StringWidth(fCopyRawBtn->Label()) + 12.0f;
-	float textWidth = fCopyTextBtn->StringWidth(fCopyTextBtn->Label()) + 12.0f;
-
-	float rightOffset = 4.0f;
-	if (ScrollBar(B_VERTICAL) != NULL)
-		rightOffset += ScrollBar(B_VERTICAL)->Frame().Width();
-
-	fCopyTextBtn->MoveTo(bounds.right - rightOffset - textWidth, 2.0f);
-	fCopyTextBtn->ResizeTo(textWidth, toolbarHeight - 2.0f);
-
-	fCopyRawBtn->MoveTo(bounds.right - rightOffset - textWidth - rawWidth - 4.0f, 2.0f);
-	fCopyRawBtn->ResizeTo(rawWidth, toolbarHeight - 2.0f);
-
-	// 3. Adattiamo la cornice della BMarkdownView spostandola sotto i pulsanti
-	BRect targetFrame = fMarkdownTarget->Frame();
-	targetFrame.top += toolbarHeight;
-	targetFrame.bottom = bounds.bottom;
-	if (ScrollBar(B_HORIZONTAL) != NULL)
-		targetFrame.bottom -= ScrollBar(B_HORIZONTAL)->Frame().Height();
-
-	fMarkdownTarget->MoveTo(targetFrame.left, targetFrame.top);
-	fMarkdownTarget->ResizeTo(targetFrame.Width(), targetFrame.Height());
-}*/
 void
 BMarkdownScrollView::DoLayout()
 {
@@ -92,7 +66,7 @@ BMarkdownScrollView::DoLayout()
 
 	BRect bounds = Bounds();
 	float toolbarHeight = 22.0f;
-	float border = 2.0f; // kFancyBorderSize
+	float border = 2.0f; // B_FANCY_BORDER
 
 	// Posizioniamo i pulsanti in alto a destra
 	float rawWidth = fCopyRawBtn->StringWidth(fCopyRawBtn->Label()) + 12.0f;
@@ -119,8 +93,24 @@ BMarkdownScrollView::DoLayout()
 	if (ScrollBar(B_HORIZONTAL) != NULL)
 		targetHeight -= ScrollBar(B_HORIZONTAL)->Frame().Height();
 
+	if (targetWidth < 10.0f) targetWidth = 10.0f;
+	if (targetHeight < 10.0f) targetHeight = 10.0f;
+
 	fMarkdownTarget->MoveTo(targetLeft, targetTop);
-	fMarkdownTarget->ResizeTo(targetWidth, targetHeight);
+
+	// 3. Aggiorniamo la dimensione della BTextView e forziamo il ricalcolo del TextRect e della BScrollBar
+	if (fMarkdownTarget->Bounds().Width() != targetWidth
+		|| fMarkdownTarget->Bounds().Height() != targetHeight) {
+
+		fMarkdownTarget->ResizeTo(targetWidth, targetHeight);
+
+		// Aggiorniamo l'area interna di wrapping del testo per BTextView
+		BRect textRect(5.0f, 5.0f, targetWidth - 5.0f, targetHeight - 5.0f);
+		fMarkdownTarget->SetTextRect(textRect);
+
+		// Notifichiamo la BMarkdownView affinché ricalcoli il layout
+		fMarkdownTarget->FrameResized(targetWidth, targetHeight);
+	}
 }
 
 void

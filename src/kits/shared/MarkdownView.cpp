@@ -353,19 +353,21 @@ BMarkdownView::Draw(BRect updateRect)
 	float luminance = (0.299f * docBg.red + 0.587f * docBg.green + 0.114f * docBg.blue);
 	
 	// if there's no tables just skip this part
+	// -------------------------------------------------------------------------
+	// RENDERING DELLE TABELLE (Sfondi alternati, Bordi e Testo)
+	// -------------------------------------------------------------------------
 	int32 tableCount = fTables.CountItems();
-	if ( tableCount > 0) {
+	if (tableCount > 0) {
 		bool isDark = (luminance < 128.0f);
-		// Palette colori in stile GitHub (Chiaro / Scuro)
 		rgb_color tableBorderColor  = isDark ? (rgb_color){ 60, 65, 70, 255 } : (rgb_color){ 210, 215, 220, 255 };
 		rgb_color headerBgColor      = isDark ? (rgb_color){ 45, 50, 55, 255 } : (rgb_color){ 240, 243, 246, 255 };
 		rgb_color altRowBgColor     = isDark ? (rgb_color){ 35, 38, 42, 255 } : (rgb_color){ 248, 249, 250, 255 };
 		rgb_color normalRowBgColor  = isDark ? (rgb_color){ 28, 30, 33, 255 } : (rgb_color){ 255, 255, 255, 255 };
 
-		// -------------------------------------------------------------------------
-		// A. RENDERING DELLE TABELLE (Sfondi alternati e Bordi)
-		// -------------------------------------------------------------------------
-		
+		font_height fh;
+		be_plain_font->GetHeight(&fh);
+		float fontLineHeight = fh.ascent + fh.descent + fh.leading;
+
 		for (int32 t = 0; t < tableCount; t++) {
 			TableRegion* table = fTables.ItemAt(t);
 			if (table == NULL || table->rows.CountItems() == 0)
@@ -379,26 +381,36 @@ BMarkdownView::Draw(BRect updateRect)
 			int32 lastPosAdjusted = std::max(lastRow->startPos, lastRow->endPos - 1);
 			BPoint endPt = PointAt(lastPosAdjusted);
 
-			BRect totalTableRect;
-			totalTableRect.left = 10.0f; // Padding di 10px dal bordo sinistro per evitare sovrapposizioni
-			totalTableRect.right = Bounds().Width() - 10.0f;
-			totalTableRect.top = startPt.y - 2.0f;
-			totalTableRect.bottom = endPt.y + LineHeight(lastPosAdjusted) + 2.0f;
+			// 1. Spazio superiore dedicato per il tasto "Copy table" (20px)
+			float headerBarHeight = 20.0f;
 
-			if (!totalTableRect.Intersects(updateRect))
+			BRect totalTableRect;
+			totalTableRect.left = 10.0f;
+			totalTableRect.right = Bounds().Width() - 10.0f;
+			totalTableRect.top = startPt.y - 4.0f;
+			totalTableRect.bottom = endPt.y + LineHeight(lastPosAdjusted) + 4.0f;
+
+			BRect outerRect = totalTableRect;
+			outerRect.top -= headerBarHeight; // Fa spazio per la label del copia
+
+			if (!outerRect.Intersects(updateRect))
 				continue;
 
-			// 1. ZEBRA STRIPING DELLE RIGHE (Sfondo e linee orizzontali)
+			// 2. ZEBRA STRIPING DELLE RIGHE (Sfondo e linee orizzontali)
 			for (int32 r = 0; r < rowCount; r++) {
 				TableRowRegion* row = table->rows.ItemAt(r);
 				BPoint rStartPt = PointAt(row->startPos);
 				int32 rEndAdjusted = std::max(row->startPos, row->endPos - 1);
 
+				float rHeight = LineHeight(rEndAdjusted);
+				if (rHeight < fontLineHeight)
+					rHeight = fontLineHeight;
+
 				BRect rowRect;
 				rowRect.left = totalTableRect.left;
 				rowRect.right = totalTableRect.right;
 				rowRect.top = rStartPt.y - 2.0f;
-				rowRect.bottom = rStartPt.y + LineHeight(rEndAdjusted) + 2.0f;
+				rowRect.bottom = rowRect.top + rHeight + 4.0f;
 
 				rgb_color rowBg;
 				if (row->isHeader)
@@ -417,7 +429,7 @@ BMarkdownView::Draw(BRect updateRect)
 				StrokeLine(BPoint(rowRect.left, rowRect.bottom), BPoint(rowRect.right, rowRect.bottom));
 			}
 
-			// 2. RENDERING DELLE LINEE VERTICALI DIVISORIE
+			// 3. LINEE VERTICALI DIVISORIE TRA LE COLONNE
 			int32 maxCols = 0;
 			for (int32 r = 0; r < rowCount; r++) {
 				TableRowRegion* row = table->rows.ItemAt(r);
@@ -438,10 +450,11 @@ BMarkdownView::Draw(BRect updateRect)
 				}
 			}
 
-			// 3. BORDO ESTERNO ARROTONDATO DELL'INTERA TABELLA
+			// 4. BORDO ESTERNO ARROTONDATO DELL'INTERA TABELLA
 			SetHighColor(tableBorderColor);
 			StrokeRoundRect(totalTableRect, 4.0f, 4.0f);
 
+			// 5. PULSANTE / LABEL "Copy table" IN ALTO A DESTRA (Sopra la tabella, visibile ed intero)
 			SetDrawingMode(B_OP_OVER);
 			SetFont(be_plain_font);
 			SetHighColor(isDark ? (rgb_color){ 180, 185, 190, 255 } : (rgb_color){ 100, 105, 110, 255 });
@@ -449,36 +462,39 @@ BMarkdownView::Draw(BRect updateRect)
 			const char* copyTableStr = "📑 Copy table";
 			float copyWidth = StringWidth(copyTableStr);
 
-			// Calcoliamo il rettangolo cliccabile subito sopra/all'interno del bordo superiore destro
 			table->copyRect.Set(
-				totalTableRect.right - copyWidth - 12.0f,
-				totalTableRect.top - 18.0f,
+				totalTableRect.right - copyWidth - 8.0f,
+				totalTableRect.top - headerBarHeight + 2.0f,
 				totalTableRect.right,
-				totalTableRect.top + 4.0f
+				totalTableRect.top - 2.0f
 			);
 
-			DrawString(copyTableStr, BPoint(table->copyRect.left + 2.0f, totalTableRect.top - 4.0f));
+			DrawString(copyTableStr, BPoint(table->copyRect.left + 2.0f, totalTableRect.top - 5.0f));
 
-			// -----------------------------------------------------------------
-			// 4. RIDISEGNO DEL TESTO DELLE CELLE
-			// -----------------------------------------------------------------
+			// 6. RIDISEGNO PRECISO DEL TESTO DELLE CELLE ALLINEATO AL CENTRO VERTICALE
 			float colWidth = (maxCols > 0) ? (totalTableRect.Width() / (float)maxCols) : totalTableRect.Width();
 
 			for (int32 r = 0; r < rowCount; r++) {
 				TableRowRegion* row = table->rows.ItemAt(r);
+				if (row == NULL) continue;
+
+				BPoint rStartPt = PointAt(row->startPos);
+				int32 rEndAdjusted = std::max(row->startPos, row->endPos - 1);
+				float rHeight = LineHeight(rEndAdjusted);
+				if (rHeight < fontLineHeight)
+					rHeight = fontLineHeight;
+
+				// Baseline calcolata precisamente per centrare il testo nella riga
+				float textY = rStartPt.y + (rHeight - fontLineHeight) / 2.0f;
+
 				int32 cellCount = row->cells.CountItems();
-
-				font_height fh;
-				be_plain_font->GetHeight(&fh);
-
 				for (int32 c = 0; c < cellCount; c++) {
 					TableCellRegion* cell = row->cells.ItemAt(c);
 					if (cell == NULL || cell->segments.IsEmpty())
 						continue;
 
-					BPoint linePt = PointAt(row->startPos);
-					float cellX = totalTableRect.left + (c * colWidth) + 10.0f;
-					BPoint drawPt(cellX, linePt.y + LineHeight(row->startPos) - 15.0f);
+					float cellX = totalTableRect.left + (c * colWidth) + 8.0f;
+					BPoint drawPt(cellX, textY);
 
 					int32 segCount = cell->segments.CountItems();
 					for (int32 s = 0; s < segCount; s++) {

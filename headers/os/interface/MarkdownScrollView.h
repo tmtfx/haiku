@@ -24,6 +24,7 @@ public:
 	virtual ~BMarkdownScrollView();
 
 	virtual void AttachedToWindow();
+	virtual void FrameResized(float width, float height) override;
 	virtual void DoLayout();
 	virtual void MessageReceived(BMessage* message);
 
