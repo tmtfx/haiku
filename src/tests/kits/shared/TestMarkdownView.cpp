@@ -1,18 +1,20 @@
 #include <Application.h>
 #include <Window.h>
 #include <LayoutBuilder.h>
-//#include <ScrollView.h>
 #include <MarkdownScrollView.h>
 #include <Button.h>
 #include <StringView.h>
 #include <MarkdownView.h>
 #include <Path.h>
+#include <File.h>
+#include <Entry.h>
+#include <Message.h>
 #include <TranslationUtils.h>
 
-// ID dei comandi per la BWindow
 enum {
 	MSG_SET_SAMPLE_MARKDOWN = 'mksp',
-	MSG_CLEAR_MARKDOWN      = 'mkcl'
+	MSG_CLEAR_MARKDOWN      = 'mkcl',
+	MSG_LOAD_MARKDOWN_FILE  = 'mklf'
 };
 
 // --- Finestra di Test ---
@@ -26,8 +28,7 @@ public:
 		fMarkdownView = new BMarkdownView("markdown_view");
 		fMarkdownView->MakeEditable(false);
 
-		// 2. Mettiamo la vista dentro BScrollView
-		//fScrollView = new BScrollView("markdown_scroll", fMarkdownView, 0, false, true);
+		// 2. Mettiamo la vista dentro BMarkdownScrollView
 		fScrollView = new BMarkdownScrollView("markdown_scroll", fMarkdownView,
 						B_FOLLOW_ALL, 0, false, true);
 
@@ -48,20 +49,27 @@ public:
 				.Add(sampleBtn)
 			.End();
 
-		// Carichiamo il contenuto iniziale
-		_LoadDefaultContent();
+		fLoadedFromFile = false;
 	}
 
 	virtual void MessageReceived(BMessage* message) override
 	{
 		switch (message->what) {
 			case MSG_SET_SAMPLE_MARKDOWN:
-				_LoadDefaultContent();
+				LoadDefaultContent();
 				break;
 
 			case MSG_CLEAR_MARKDOWN:
 				fMarkdownView->SetMarkdown("");
 				break;
+
+			case MSG_LOAD_MARKDOWN_FILE: {
+				entry_ref ref;
+				if (message->FindRef("refs", &ref) == B_OK) {
+					LoadFileContent(&ref);
+				}
+				break;
+			}
 
 			default:
 				BWindow::MessageReceived(message);
@@ -69,9 +77,9 @@ public:
 		}
 	}
 
-private:
-	void _LoadDefaultContent()
+	void LoadDefaultContent()
 	{
+		fLoadedFromFile = false;
 		fMarkdownView->SetMarkdown(
 			"# Ahoy Pirate! 🏴‍☠️\n\n"
 			"Benvenuto nel test avanzato di **BMarkdownView** per Haiku OS.\n\n"
@@ -103,26 +111,102 @@ private:
 		);
 	}
 
-	BMarkdownView* fMarkdownView;
-	BScrollView*   fScrollView;
+	void LoadFileContent(const entry_ref* ref)
+	{
+		BFile file(ref, B_READ_ONLY);
+		if (file.InitCheck() != B_OK)
+			return;
+
+		off_t size = 0;
+		file.GetSize(&size);
+		if (size <= 0)
+			return;
+
+		BString buffer;
+		char* charBuffer = buffer.LockBuffer(size + 1);
+		if (charBuffer == NULL)
+			return;
+
+		file.Read(charBuffer, size);
+		charBuffer[size] = '\0';
+		buffer.UnlockBuffer();
+
+		fMarkdownView->SetMarkdown(buffer);
+
+		BPath path(ref);
+		if (path.InitCheck() == B_OK) {
+			BString title("MarkdownView Test - ");
+			title.Append(path.Leaf());
+			SetTitle(title.String());
+		}
+
+		fLoadedFromFile = true;
+	}
+
+	bool HasLoadedFromFile() const { return fLoadedFromFile; }
+
+private:
+	BMarkdownView*       fMarkdownView;
+	BMarkdownScrollView* fScrollView;
+	bool                 fLoadedFromFile;
 };
 
 // --- Applicazione ---
 class TestMarkdownApp : public BApplication {
 public:
 	TestMarkdownApp()
-		: BApplication("application/x-vnd.Haiku-TestMarkdownView")
+		: BApplication("application/x-vnd.Haiku-TestMarkdownView"),
+		  fWindow(NULL),
+		  fHasCustomFile(false)
 	{
+	}
+
+	virtual void ArgvReceived(int32 argc, char** argv) override
+	{
+		if (argc > 1) {
+			entry_ref ref;
+			if (get_ref_for_path(argv[1], &ref) == B_OK) {
+				fFileRef = ref;
+				fHasCustomFile = true;
+			}
+		}
+	}
+
+	virtual void RefsReceived(BMessage* message) override
+	{
+		entry_ref ref;
+		if (message->FindRef("refs", &ref) == B_OK) {
+			fFileRef = ref;
+			fHasCustomFile = true;
+
+			if (fWindow != NULL) {
+				BMessage loadMsg(MSG_LOAD_MARKDOWN_FILE);
+				loadMsg.AddRef("refs", &fFileRef);
+				fWindow->PostMessage(&loadMsg);
+			}
+		}
 	}
 
 	virtual void ReadyToRun() override
 	{
-		TestMarkdownWindow* window = new TestMarkdownWindow();
-		window->Show();
+		fWindow = new TestMarkdownWindow();
+
+		if (fHasCustomFile) {
+			fWindow->LoadFileContent(&fFileRef);
+		} else {
+			fWindow->LoadDefaultContent();
+		}
+
+		fWindow->Show();
 	}
+
+private:
+	TestMarkdownWindow* fWindow;
+	entry_ref           fFileRef;
+	bool                fHasCustomFile;
 };
 
-int main()
+int main(int argc, char** argv)
 {
 	TestMarkdownApp app;
 	app.Run();
