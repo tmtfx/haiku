@@ -407,7 +407,8 @@ status_t sm750_get_accelerant_device_info(accelerant_device_info *adi) {
 
 sem_id sm750_retrace_semaphore(void)
 {
-    return gInfo->si->vblank_sync_sem;
+	// this does not work, it halts the teapot! poor teapot! Let's return B_ERROR
+    return B_ERROR;//gInfo->si->vblank_sync_sem;
 }
 
 
