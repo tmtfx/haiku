@@ -485,7 +485,8 @@ intel_arc_get_accelerant_device_info(accelerant_device_info* info)
 sem_id
 intel_arc_accelerant_retrace_semaphore(void)
 {
-	return gInfo->shared_info != NULL ? gInfo->shared_info->vblank_sem : -1;
+	// It seems I do it in the wrong way so we return B_ERROR for now
+	return B_ERROR;//gInfo->shared_info != NULL ? gInfo->shared_info->vblank_sem : -1;
 }
 
 uint32
