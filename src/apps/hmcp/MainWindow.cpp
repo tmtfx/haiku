@@ -5,7 +5,7 @@
 #include "MainWindow.h"
 #include <TextControl.h>
 #include <Button.h>
-#include <ScrollView.h>
+#include <MarkdownScrollView.h>
 #include <LayoutBuilder.h>
 #include <SplitView.h>
 #include <Application.h>
@@ -71,7 +71,7 @@ MainWindow::MainWindow(const char* context)
 	}
 	fHistoryView->MakeEditable(false);
 	
-	fHistoryScroll = new BScrollView("history_scroll", fHistoryView, B_WILL_DRAW, false, true);
+	fHistoryScroll = new BMarkdownScrollView("history_scroll", fHistoryView, B_FOLLOW_ALL, 0, false, true);
 	fInputView = new InputTextView("input");
 	fInputScroll = new BScrollView("input_scroll", fInputView, B_WILL_DRAW, false, true);
 	fInputView->SetEnabled(true);
