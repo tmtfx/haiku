@@ -13,6 +13,8 @@
 
 extern accelerant_info *gInfo;
 
+bool EnableLogs = false;
+
 status_t 
 sm750_get_edid_info(void* info, size_t size, uint32* _version) 
 {
@@ -34,13 +36,13 @@ sm750_get_edid_info(void* info, size_t size, uint32* _version)
     
     if (!found && si->card_info.has_edid_vesa) {
     	edid_decode(&gInfo->edid_vesa_info, &si->vesa_edid_raw);
-        debug_printf("SM750_ACC: I2C failed, providing a backup VESA EDID.\n");
+        if (EnableLogs) debug_printf("SM750_ACC: I2C failed, providing a backup VESA EDID.\n");
         *target = gInfo->edid_vesa_info;
         found = true;
     }
 
     if (!found) {
-        debug_printf("SM750_ACC: No EDIDs found (I2C failed and no VESA EDID).\n");
+        if (EnableLogs) debug_printf("SM750_ACC: No EDIDs found (I2C failed and no VESA EDID).\n");
         return B_ERROR;
     }
 
@@ -125,8 +127,10 @@ sm750_set_pitch(uint32 pitch, bool is_panel)
     uint32 reg_offset = is_panel ? SM750_DISP_PANEL_FB_OFFSET_WWIDTH : SM750_DISP_CRT_FB_OFFSET_WWIDTH ;
     SM750_WREG32(reg_offset, reg_val);
     
-    //debug_printf("SM750_ACC: Pitch Bytes %u -> Valore Allineato 0x%X\n", pitch, aligned_val);
-    //debug_printf("SM750_ACC: Scrittura Registro 0x80208: 0x%08X\n", reg_val);
+    if (EnableLogs) {
+    	debug_printf("SM750_ACC: Pitch Bytes %u -> Valore Allineato 0x%X\n", pitch, aligned_val);
+    	debug_printf("SM750_ACC: Scrittura Registro 0x80208: 0x%08X\n", reg_val);
+    }
 }
 
 status_t
@@ -142,7 +146,7 @@ sm750_set_fb_addr(uint32 offset, bool is_panel)
         
     // 1. Controllo allineamento (128-bit / 16 byte)
     if (offset & 0xF) {
-        debug_printf("SM750_ACC: ERROR - FB Address 0x%08x is not 128-bit aligned!\n", offset);
+        if (EnableLogs) debug_printf("SM750_ACC: ERROR - FB Address 0x%08x is not 128-bit aligned!\n", offset);
         offset &= ~0xF; // Forza l'allineamento arrotondando per difetto
     }
     
@@ -150,7 +154,7 @@ sm750_set_fb_addr(uint32 offset, bool is_panel)
 
     // 2. Controllo Limiti (Safe Guard per 16MB)
     if (offset >= ramSize) {
-        debug_printf("SM750_ACC: ERROR - FB Address 0x%08x beyond graphics memory size of %d!\n", offset, ramSize);
+        if (EnableLogs) debug_printf("SM750_ACC: ERROR - FB Address 0x%08x beyond graphics memory size of %d!\n", offset, ramSize);
         return B_BAD_VALUE;
     }
 
@@ -167,7 +171,7 @@ sm750_set_fb_addr(uint32 offset, bool is_panel)
     uint32 reg_offset = is_panel ? SM750_DISP_PANEL_FB_ADDR : SM750_DISP_CRT_FB_ADDR ;
     SM750_WREG32(reg_offset, reg_val);
     
-    //debug_printf("SM750_ACC: %s FB Address impostato a: 0x%08x (Reg: 0x%08x)\n", is_panel ? "PANEL": "CRT" ,offset, reg_val);
+    if (EnableLogs) debug_printf("SM750_ACC: %s FB Address impostato a: 0x%08x (Reg: 0x%08x)\n", is_panel ? "PANEL": "CRT" ,offset, reg_val);
     return B_OK;
 }
 static void sm750_set_h_timing(uint32 total, uint32 active, bool is_panel)
@@ -308,8 +312,10 @@ sm750_set_display_mode(display_mode *mode)
     if (isPanel) {
     	uint32 width = mode->virtual_width;
         uint32 height = mode->virtual_height;
-        //debug_printf("original fb_width %" B_PRIx32 "\n",SM750_REG32(SM750_DISP_PANEL_FB_WIDTH));
-        //debug_printf("original fb_height %" B_PRIx32 "\n",SM750_REG32(SM750_DISP_PANEL_FB_HEIGHT));
+        if (EnableLogs) {
+        	debug_printf("original fb_width %" B_PRIx32 "\n",SM750_REG32(SM750_DISP_PANEL_FB_WIDTH));
+        	debug_printf("original fb_height %" B_PRIx32 "\n",SM750_REG32(SM750_DISP_PANEL_FB_HEIGHT));
+        }
     	// PANEL has 2 more regs to set up:
     	// Reg 0x080014 / 0x080214:
         // Bits 27:16 = FB Global Width (in pixel)
@@ -324,19 +330,22 @@ sm750_set_display_mode(display_mode *mode)
         SM750_WREG32(SM750_DISP_PANEL_FB_WIDTH, fb_width_reg);
         SM750_WREG32(SM750_DISP_PANEL_FB_HEIGHT, fb_height_reg);
         //snooze(10);
-        //debug_printf("ora imposto fb_width a %" B_PRIx32 "\n",SM750_REG32(SM750_DISP_PANEL_FB_WIDTH));
-        //debug_printf("ora imposto fb_height a %" B_PRIx32 "\n",SM750_REG32(SM750_DISP_PANEL_FB_HEIGHT));
-        
-        //debug_printf("original primary display plane TL Location %" B_PRIx32 "\n",SM750_REG32(SM750_DISP_PANEL_PLANE_TL_LOC));
-        //debug_printf("original primary display plane BR Location %" B_PRIx32 "\n",SM750_REG32(SM750_DISP_PANEL_PLANE_BR_LOC));
+        if (EnableLogs) {
+        	debug_printf("ora imposto fb_width a %" B_PRIx32 "\n",SM750_REG32(SM750_DISP_PANEL_FB_WIDTH));
+        	debug_printf("ora imposto fb_height a %" B_PRIx32 "\n",SM750_REG32(SM750_DISP_PANEL_FB_HEIGHT));
+                
+        	debug_printf("original primary display plane TL Location %" B_PRIx32 "\n",SM750_REG32(SM750_DISP_PANEL_PLANE_TL_LOC));
+        	debug_printf("original primary display plane BR Location %" B_PRIx32 "\n",SM750_REG32(SM750_DISP_PANEL_PLANE_BR_LOC));
+    	}
         uint32 plane_tl = 0;
         SM750_WREG32(SM750_DISP_PANEL_PLANE_TL_LOC, plane_tl);
         uint32 plane_br = (((height - 1) & 0x07FF) << 16) | ((width - 1) & 0x07FF);
         SM750_WREG32(SM750_DISP_PANEL_PLANE_BR_LOC, plane_br);
         snooze(10);
-        //debug_printf("nuovo valore di primary display plane TL Location: %" B_PRIx32 "\n",SM750_REG32(SM750_DISP_PANEL_PLANE_TL_LOC));
-        //debug_printf("nuovo valore primary display plane BR Location: %" B_PRIx32 "\n",SM750_REG32(SM750_DISP_PANEL_PLANE_BR_LOC));
-        //snooze(10);
+        if (EnableLogs) {
+        	debug_printf("nuovo valore di primary display plane TL Location: %" B_PRIx32 "\n",SM750_REG32(SM750_DISP_PANEL_PLANE_TL_LOC));
+        	debug_printf("nuovo valore primary display plane BR Location: %" B_PRIx32 "\n",SM750_REG32(SM750_DISP_PANEL_PLANE_BR_LOC));
+        }
     }
     
     uint32 ctrl = 0;
@@ -378,12 +387,12 @@ sm750_set_display_mode(display_mode *mode)
 
     si->dm = *mode;
     sm750_init_2d_engine(&(si->dm));
-    
-    //debug_printf("SM750_DEBUG: SPACE=0x%x, BPP=%d\n", mode->space, bpp);
-    //debug_printf("SM750_DEBUG: H_DISPLAY=%d, V_DISPLAY=%d\n", mode->timing.h_display, mode->timing.v_display);
-    //debug_printf("SM750_DEBUG: VIRT_W=%d, VIRT_H=%d\n", mode->virtual_width, mode->virtual_height);
-    //debug_printf("SM750_DEBUG: CALC_PITCH=%d, SI_FBC_PITCH=%d\n", pitch, (int)si->fbc.bytes_per_row);
-    
+    if (EnableLogs) {
+    	debug_printf("SM750_DEBUG: SPACE=0x%x, BPP=%d\n", mode->space, bpp);
+    	debug_printf("SM750_DEBUG: H_DISPLAY=%d, V_DISPLAY=%d\n", mode->timing.h_display, mode->timing.v_display);
+    	debug_printf("SM750_DEBUG: VIRT_W=%d, VIRT_H=%d\n", mode->virtual_width, mode->virtual_height);
+    	debug_printf("SM750_DEBUG: CALC_PITCH=%d, SI_FBC_PITCH=%d\n", pitch, (int)si->fbc.bytes_per_row);
+    }
     return B_OK;
 }
 
@@ -402,8 +411,9 @@ sm750_get_frame_buffer_config(frame_buffer_config *config)
 
         *config = si->fbc2;
     }
-    //debug_printf("SM750_ACC: dw_config ptr=%p, dma=%p, row_bytes=%" B_PRIu32 " (IsPanel: %d)\n",
-    //    config->frame_buffer, config->frame_buffer_dma, config->bytes_per_row, si->card_info.is_panel);
+    if (EnableLogs) 
+    debug_printf("SM750_ACC: dw_config ptr=%p, dma=%p, row_bytes=%" B_PRIu32 " (IsPanel: %d)\n",
+        config->frame_buffer, config->frame_buffer_dma, config->bytes_per_row, si->card_info.is_panel);
     
     
     return B_OK;
@@ -428,7 +438,7 @@ sm750_get_mode_list(display_mode* dm)
     shared_info *si = gInfo->si;
     
     if (si->mode_count == 0 || gInfo->mode_list == NULL) {
-        debug_printf("SM750_ACC: ERROR - No modes found!\n");
+        if (EnableLogs) debug_printf("SM750_ACC: ERROR - No modes found!\n");
         return B_ERROR;
     }
 
@@ -484,7 +494,7 @@ sm750_propose_display_mode(display_mode *target, const display_mode *low, const 
         case B_RGB16: bytesPerPixel = 2; break;
         case B_CMAP8: bytesPerPixel = 1; break;
         default: 
-            debug_printf("SM750: colorspace 0x%x not recognized!\n", target->space);
+            if (EnableLogs) debug_printf("SM750: colorspace 0x%x not recognized!\n", target->space);
             return B_BAD_VALUE;
     }
     
@@ -493,7 +503,7 @@ sm750_propose_display_mode(display_mode *target, const display_mode *low, const 
     // Usiamo 12MB come limite invalicabile per il frame buffer primario
 
     if (memNeeded > gInfo->si->card_info.max_desktop_mem) {
-        debug_printf("SM750: Mode rejected - you need %u bytes, desktop limit is %u\n", 
+        if (EnableLogs) debug_printf("SM750: Mode rejected - you need %u bytes, desktop limit is %u\n", 
                   memNeeded, gInfo->si->card_info.max_desktop_mem);
         return B_BAD_VALUE;
     }
