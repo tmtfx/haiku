@@ -1,6 +1,8 @@
 /*
- * Copyright 2026, GitHub Copilot. All rights reserved.
- * Distributed under the terms of the MIT License.
+ * Copyright 2026, Fabio Tomat.
+ * Copyright 2026, GitHub Copilot.
+ *
+ * Distributed under the terms of the GNU General Public License version 2.
  */
 
 

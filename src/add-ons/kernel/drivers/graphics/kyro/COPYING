@@ -1,0 +1,24 @@
+Kyro/STG4000 subsystem licensing note
+=====================================
+
+This directory contains code distributed under the terms of the
+GNU General Public License version 2 (GPLv2).
+
+In particular:
+
+- the reference code in ./refcode retains its original upstream notices from
+  Imagination Technologies Ltd and STMicroelectronics and is GPL-licensed;
+- the Haiku Kyro driver and accelerant sources derived from or adapted from
+  that reference code are distributed under GPLv2 as noted in their file
+  headers.
+
+Authors and copyright holders include:
+
+- Imagination Technologies Ltd
+- STMicroelectronics
+- Fabio Tomat
+- GitHub Copilot
+
+If you redistribute this subsystem, do so under the GPLv2 terms indicated in
+the source file headers and include the complete GPLv2 license text with your
+distribution.

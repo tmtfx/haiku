@@ -2333,6 +2333,15 @@ AboutView::_CreateCreditsView()
 		.SetLicense(kBSDTwoClause)
 		.SetURL("https://www.tarsnap.com/scrypt.html"));
 
+	// Fork mixed MIT/GPL licensing note
+	_AddPackageCredit(PackageCredit("Fork licensing")
+		.SetCopyrights(
+			B_TRANSLATE(COPYRIGHT_STRING "2026 Fabio Tomat."),
+			B_TRANSLATE(COPYRIGHT_STRING "2026 GitHub Copilot."),
+			NULL)
+		.SetSources(B_TRANSLATE("This fork contains components released under both MIT and GNU GPL v2 licenses."), NULL)
+		.SetLicenses("MIT", kGPLv2, NULL));
+
 	_AddCopyrightsFromAttribute();
 	_AddPackageCreditEntries();
 
