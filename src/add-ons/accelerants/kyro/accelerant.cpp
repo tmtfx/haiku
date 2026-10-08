@@ -10,6 +10,8 @@
 #include <string.h>
 #include <unistd.h>
 
+#define KYRO_ACCEL_TRACE(x...) debug_printf("kyro.accelerant: " x)
+
 
 AccelerantInfo gInfo = {
 	-1,
@@ -36,12 +38,14 @@ disable_hardware_cursor(void)
 
 	*(volatile uint32*)(gInfo.regs + kDACCursorCtrl) = 0;
 	*(volatile uint32*)(gInfo.regs + kDACCursorAddr) = 0;
+	KYRO_ACCEL_TRACE("hardware cursor disabled\n");
 }
 
 
 static status_t
 init_common(int fileDesc, bool isClone)
 {
+	KYRO_ACCEL_TRACE("init_common begin fd=%d isClone=%d\n", fileDesc, isClone);
 	gInfo.deviceFile = fileDesc;
 	gInfo.isClone = isClone;
 	gInfo.modeListArea = -1;
@@ -53,18 +57,26 @@ init_common(int fileDesc, bool isClone)
 	data.magic = KYRO_PRIVATE_DATA_MAGIC;
 	status_t status = ioctl(gInfo.deviceFile, KYRO_GET_PRIVATE_DATA, &data,
 		sizeof(data));
-	if (status != B_OK)
+	if (status != B_OK) {
+		KYRO_ACCEL_TRACE("init_common: KYRO_GET_PRIVATE_DATA failed 0x%" B_PRIx32 "\n",
+			status);
 		return status;
+	}
 
 	gInfo.sharedInfoArea = clone_area("kyro shared info",
 		(void**)&gInfo.sharedInfo, B_ANY_ADDRESS, B_READ_AREA | B_WRITE_AREA,
 		data.sharedInfoArea);
-	if (gInfo.sharedInfoArea < B_OK)
+	if (gInfo.sharedInfoArea < B_OK) {
+		KYRO_ACCEL_TRACE("init_common: clone shared info failed 0x%" B_PRIx32 "\n",
+			gInfo.sharedInfoArea);
 		return gInfo.sharedInfoArea;
+	}
 
 	gInfo.regsArea = clone_area("kyro regs", (void**)&gInfo.regs, B_ANY_ADDRESS,
 		B_READ_AREA | B_WRITE_AREA, gInfo.sharedInfo->regsArea);
 	if (gInfo.regsArea < B_OK) {
+		KYRO_ACCEL_TRACE("init_common: clone regs failed 0x%" B_PRIx32 "\n",
+			gInfo.regsArea);
 		delete_area(gInfo.sharedInfoArea);
 		gInfo.sharedInfoArea = -1;
 		gInfo.sharedInfo = NULL;
@@ -75,6 +87,8 @@ init_common(int fileDesc, bool isClone)
 		(void**)&gInfo.frameBuffer, B_ANY_ADDRESS, B_READ_AREA | B_WRITE_AREA,
 		gInfo.sharedInfo->frameBufferArea);
 	if (gInfo.frameBufferArea < B_OK) {
+		KYRO_ACCEL_TRACE("init_common: clone framebuffer failed 0x%" B_PRIx32 "\n",
+			gInfo.frameBufferArea);
 		delete_area(gInfo.regsArea);
 		delete_area(gInfo.sharedInfoArea);
 		gInfo.regsArea = -1;
@@ -84,6 +98,9 @@ init_common(int fileDesc, bool isClone)
 		return gInfo.frameBufferArea;
 	}
 
+	KYRO_ACCEL_TRACE("init_common done sharedArea=%" B_PRId32 " regsArea=%" B_PRId32
+		" fbArea=%" B_PRId32 "\n", gInfo.sharedInfoArea, gInfo.regsArea,
+		gInfo.frameBufferArea);
 	return B_OK;
 }
 
@@ -91,6 +108,7 @@ init_common(int fileDesc, bool isClone)
 static void
 uninit_common(void)
 {
+	KYRO_ACCEL_TRACE("uninit_common begin isClone=%d\n", gInfo.isClone);
 	if (gInfo.frameBufferArea >= B_OK)
 		delete_area(gInfo.frameBufferArea);
 	if (gInfo.regsArea >= B_OK)
@@ -108,12 +126,14 @@ uninit_common(void)
 	gInfo.regs = NULL;
 	gInfo.frameBufferArea = -1;
 	gInfo.frameBuffer = NULL;
+	KYRO_ACCEL_TRACE("uninit_common done\n");
 }
 
 
 status_t
 InitAccelerant(int fileDesc)
 {
+	KYRO_ACCEL_TRACE("InitAccelerant begin fd=%d\n", fileDesc);
 	status_t status = init_common(fileDesc, false);
 	if (status != B_OK)
 		return status;
@@ -125,12 +145,16 @@ InitAccelerant(int fileDesc)
 
 	status = CreateModeList();
 	if (status != B_OK) {
+		KYRO_ACCEL_TRACE("InitAccelerant: CreateModeList failed 0x%" B_PRIx32 "\n",
+			status);
 		uninit_common();
 		return status;
 	}
 
 	disable_hardware_cursor();
 	gInfo.sharedInfo->accelerantInUse = true;
+	KYRO_ACCEL_TRACE("InitAccelerant done modeCount=%" B_PRIu32 "\n",
+		gInfo.sharedInfo->modeCount);
 	return B_OK;
 }
 
@@ -145,6 +169,7 @@ AccelerantCloneInfoSize(void)
 void
 GetAccelerantCloneInfo(void* data)
 {
+	KYRO_ACCEL_TRACE("GetAccelerantCloneInfo\n");
 	ioctl(gInfo.deviceFile, KYRO_DEVICE_NAME, data, B_PATH_NAME_LENGTH);
 }
 
@@ -152,6 +177,7 @@ GetAccelerantCloneInfo(void* data)
 status_t
 CloneAccelerant(void* data)
 {
+	KYRO_ACCEL_TRACE("CloneAccelerant begin\n");
 	char path[MAXPATHLEN];
 	strlcpy(path, "/dev/", sizeof(path));
 	strlcat(path, (const char*)data, sizeof(path));
@@ -162,6 +188,8 @@ CloneAccelerant(void* data)
 
 	status_t status = init_common(fd, true);
 	if (status != B_OK) {
+		KYRO_ACCEL_TRACE("CloneAccelerant: init_common failed 0x%" B_PRIx32 "\n",
+			status);
 		close(fd);
 		return status;
 	}
@@ -170,11 +198,14 @@ CloneAccelerant(void* data)
 		B_ANY_ADDRESS, B_READ_AREA, gInfo.sharedInfo->modeArea);
 	if (gInfo.modeListArea < B_OK) {
 		status = gInfo.modeListArea;
+		KYRO_ACCEL_TRACE("CloneAccelerant: clone mode list failed 0x%" B_PRIx32 "\n",
+			status);
 		uninit_common();
 		return status;
 	}
 
 	disable_hardware_cursor();
+	KYRO_ACCEL_TRACE("CloneAccelerant done\n");
 	return B_OK;
 }
 
@@ -182,6 +213,7 @@ CloneAccelerant(void* data)
 void
 UninitAccelerant(void)
 {
+	KYRO_ACCEL_TRACE("UninitAccelerant begin\n");
 	if (!gInfo.isClone && gInfo.sharedInfo != NULL)
 		gInfo.sharedInfo->accelerantInUse = false;
 
@@ -191,6 +223,7 @@ UninitAccelerant(void)
 	gInfo.modeList = NULL;
 
 	uninit_common();
+	KYRO_ACCEL_TRACE("UninitAccelerant done\n");
 }
 
 
@@ -203,6 +236,8 @@ GetAccelerantDeviceInfo(accelerant_device_info* info)
 	strlcpy(info->serial_no, "unknown", sizeof(info->serial_no));
 	info->memory = gInfo.sharedInfo->frameBufferSize;
 	info->dac_speed = gInfo.sharedInfo->maxPixelClock / 1000;
+	KYRO_ACCEL_TRACE("GetAccelerantDeviceInfo memory=%" B_PRIu32 " dac=%" B_PRIu32 "\n",
+		info->memory, info->dac_speed);
 	return B_OK;
 }
 

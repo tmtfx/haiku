@@ -8,6 +8,8 @@
 
 #include <string.h>
 
+#define KYRO_OVL_TRACE(x...) debug_printf("kyro.overlay: " x)
+
 
 namespace {
 
@@ -105,6 +107,7 @@ clear_bits(uint32& value, uint32 from, uint32 to)
 static void
 reset_overlay_registers(void)
 {
+	KYRO_OVL_TRACE("reset_overlay_registers\n");
 	uint32 value = read32(kDACOverlayAddr);
 	clear_bits(value, 0, 20);
 	value &= ~(1u << 31);
@@ -183,6 +186,8 @@ aligned(uint32 value, uint32 alignment)
 static void
 set_blend_mode(const overlay_window* window)
 {
+	KYRO_OVL_TRACE("set_blend_mode flags=0x%08" B_PRIx32 "\n",
+		window != NULL ? window->flags : 0);
 	uint32 value = read32(kDACBlendCtrl);
 	clear_bits(value, 28, 30);
 
@@ -206,12 +211,18 @@ enable_overlay_plane(void)
 	write32(kDACPixelFormat, read32(kDACPixelFormat) | (1u << 7));
 	write32(kDACStreamCtrl, read32(kDACStreamCtrl) | (1u << 1));
 	gInfo.sharedInfo->overlay.active = true;
+	KYRO_OVL_TRACE("enable_overlay_plane\n");
 }
 
 
 static status_t
 program_overlay_surface(const OverlaySlotInfo& info)
 {
+	KYRO_OVL_TRACE("program_overlay_surface linear=%d offset=0x%08" B_PRIx32
+		" u=0x%08" B_PRIx32 " v=0x%08" B_PRIx32 " stride=%" B_PRIu32
+		" uvStride=%" B_PRIu32 " format=%" B_PRIu32 "\n",
+		info.linear, info.offset, info.uOffset, info.vOffset, info.stride,
+		info.uvStride, info.pixelFormat);
 	uint32 value = read32(kDACOverlayAddr);
 	clear_bits(value, 0, 20);
 	if (info.linear)
@@ -247,6 +258,12 @@ static status_t
 set_overlay_view_port(const OverlaySlotInfo& info, const overlay_window* window,
 	const overlay_view* view)
 {
+	KYRO_OVL_TRACE("set_overlay_view_port src=(%u,%u %ux%u) dst=(%d,%d %ux%u)"
+		" clip lrtb=(%u,%u,%u,%u)\n",
+		view->h_start, view->v_start, view->width, view->height,
+		window->h_start, window->v_start, window->width, window->height,
+		window->offset_left, window->offset_right, window->offset_top,
+		window->offset_bottom);
 	OverlaySourceDest srcDest = {};
 	srcDest.srcX1 = view->h_start;
 	srcDest.srcY1 = view->v_start;
@@ -401,6 +418,10 @@ set_overlay_view_port(const OverlaySlotInfo& info, const overlay_window* window,
 	clear_bits(horizontal, 16, 17);
 	horizontal |= (hDecim << 16) | (scale & 0xfff);
 	write32(kDACHorizontalScal, horizontal);
+	KYRO_OVL_TRACE("set_overlay_view_port done left=%" B_PRIu32 " right=%" B_PRIu32
+		" height=%" B_PRIu32 " width=%" B_PRIu32 " hDecim=%" B_PRIu32
+		" scale=0x%08" B_PRIx32 " yScale=0x%08" B_PRIx32 "\n",
+		left, right, height, width, hDecim, scale, dacYScale);
 
 	return B_OK;
 }
@@ -451,6 +472,8 @@ kyro_overlay_supported_features(uint32 colorSpace)
 const overlay_buffer*
 kyro_allocate_overlay_buffer(color_space space, uint16 width, uint16 height)
 {
+	KYRO_OVL_TRACE("allocate_overlay_buffer space=0x%08" B_PRIx32 " %ux%u\n",
+		(uint32)space, width, height);
 	if (width == 0 || height == 0 || width > kOverlayMaxWidth
 		|| height > kOverlayMaxHeight) {
 		return NULL;
@@ -551,6 +574,9 @@ kyro_allocate_overlay_buffer(color_space space, uint16 width, uint16 height)
 
 	gInfo.sharedInfo->overlay.bufferAllocated[slot] = true;
 	gInfo.sharedInfo->overlay.bufferOffset[slot] = offset;
+	KYRO_OVL_TRACE("allocate_overlay_buffer slot=%d offset=0x%08" B_PRIx32
+		" size=%" B_PRIu32 " stride=%" B_PRIu32 " uvStride=%" B_PRIu32 "\n",
+		slot, offset, size, strideBytes, uvStrideBytes);
 	return &buffer;
 }
 
@@ -558,6 +584,7 @@ kyro_allocate_overlay_buffer(color_space space, uint16 width, uint16 height)
 status_t
 kyro_release_overlay_buffer(const overlay_buffer* buffer)
 {
+	KYRO_OVL_TRACE("release_overlay_buffer buffer=%p\n", buffer);
 	if (buffer == NULL)
 		return B_BAD_VALUE;
 
@@ -607,6 +634,8 @@ kyro_get_overlay_constraints(const display_mode* mode, const overlay_buffer* buf
 overlay_token
 kyro_allocate_overlay(void)
 {
+	KYRO_OVL_TRACE("allocate_overlay token=%" B_PRIu32 "\n",
+		gInfo.sharedInfo->overlay.token);
 	if (gInfo.sharedInfo->overlay.token != 0)
 		return NULL;
 
@@ -618,6 +647,8 @@ kyro_allocate_overlay(void)
 status_t
 kyro_release_overlay(overlay_token token)
 {
+	KYRO_OVL_TRACE("release_overlay token=%p current=%" B_PRIu32 "\n", token,
+		gInfo.sharedInfo->overlay.token);
 	if ((uint32)(addr_t)token != gInfo.sharedInfo->overlay.token)
 		return B_BAD_VALUE;
 
@@ -631,6 +662,8 @@ status_t
 kyro_configure_overlay(overlay_token token, const overlay_buffer* buffer,
 	const overlay_window* window, const overlay_view* view)
 {
+	KYRO_OVL_TRACE("configure_overlay token=%p buffer=%p window=%p view=%p\n",
+		token, buffer, window, view);
 	if ((uint32)(addr_t)token != gInfo.sharedInfo->overlay.token)
 		return B_BAD_VALUE;
 
@@ -656,6 +689,8 @@ kyro_configure_overlay(overlay_token token, const overlay_buffer* buffer,
 
 	set_blend_mode(window);
 	enable_overlay_plane();
+	KYRO_OVL_TRACE("configure_overlay done active=%d\n",
+		gInfo.sharedInfo->overlay.active);
 	return B_OK;
 }
 
@@ -663,6 +698,7 @@ kyro_configure_overlay(overlay_token token, const overlay_buffer* buffer,
 void
 ResetOverlayState(void)
 {
+	KYRO_OVL_TRACE("ResetOverlayState\n");
 	reset_overlay_registers();
 	gInfo.sharedInfo->overlay.token = 0;
 	memset(gInfo.sharedInfo->overlay.buffers, 0,

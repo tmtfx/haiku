@@ -11,6 +11,8 @@
 
 #include <string.h>
 
+#define KYRO_MODE_TRACE(x...) debug_printf("kyro.mode: " x)
+
 
 namespace {
 
@@ -236,6 +238,10 @@ program_clock(uint32 refClock, uint32 requested100Hz, uint32& feedbackOut,
 	dividerOut = bestR;
 	feedbackOut = bestF;
 	postDividerOut = (bestOD == 2 || bestOD == 3) ? 3 : bestOD;
+	KYRO_MODE_TRACE("program_clock ref=%" B_PRIu32 " req100Hz=%" B_PRIu32
+		" -> clock=%" B_PRIu32 " F=%" B_PRIu32 " R=%" B_PRIu32 " P=%" B_PRIu32 "\n",
+		refClock, requested100Hz, bestClock, feedbackOut, dividerOut,
+		postDividerOut);
 	return bestClock;
 }
 
@@ -291,6 +297,10 @@ initialise_ramdac(const display_mode& mode)
 	uint32 bitsPerPixel = color_space_bits_per_pixel((color_space)mode.space);
 	if (bitsPerPixel == 0)
 		return B_BAD_VALUE;
+	KYRO_MODE_TRACE("initialise_ramdac %ux%u space=0x%08" B_PRIx32
+		" bpp=%" B_PRIu32 " pixel_clock=%" B_PRIu32 "\n",
+		mode.timing.h_display, mode.timing.v_display, mode.space,
+		bitsPerPixel, mode.timing.pixel_clock);
 
 	uint32 physicalDepth = bitsPerPixel;
 	uint32 pixelFormat = read32(kDACPixelFormat) & ~0x307;
@@ -334,6 +344,8 @@ initialise_ramdac(const display_mode& mode)
 	write32(kDACBurstCtrl, 0x0404);
 	write32(kDACCrcTrigger, read32(kDACCrcTrigger) & ~(1u << 0));
 	write32(kDigVidPortCtrl, 0);
+	KYRO_MODE_TRACE("initialise_ramdac done primSize=0x%08" B_PRIx32
+		" pllMode=0x%08" B_PRIx32 "\n", primSize, pllMode);
 	return B_OK;
 }
 
@@ -341,6 +353,10 @@ initialise_ramdac(const display_mode& mode)
 static void
 setup_vtg(const display_mode& mode)
 {
+	KYRO_MODE_TRACE("setup_vtg h=%u/%u/%u/%u v=%u/%u/%u/%u flags=0x%08" B_PRIx32 "\n",
+		mode.timing.h_display, mode.timing.h_sync_start, mode.timing.h_sync_end,
+		mode.timing.h_total, mode.timing.v_display, mode.timing.v_sync_start,
+		mode.timing.v_sync_end, mode.timing.v_total, mode.timing.flags);
 	uint32 hDisplay = mode.timing.h_display;
 	uint32 hFrontPorch = mode.timing.h_sync_start - mode.timing.h_display;
 	uint32 hSync = mode.timing.h_sync_end - mode.timing.h_sync_start;
@@ -393,12 +409,15 @@ setup_vtg(const display_mode& mode)
 		sync &= ~((1u << 3) | (1u << 1));
 
 	write32(kDACSyncCtrl, sync);
+	KYRO_MODE_TRACE("setup_vtg done sync=0x%08" B_PRIx32 "\n", sync);
 }
 
 
 static status_t
 apply_mode(const display_mode& mode)
 {
+	KYRO_MODE_TRACE("apply_mode begin %ux%u space=0x%08" B_PRIx32 "\n",
+		mode.timing.h_display, mode.timing.v_display, mode.space);
 	stop_vtg();
 	disable_output();
 	disable_vga();
@@ -409,6 +428,7 @@ apply_mode(const display_mode& mode)
 	ResetOverlayState();
 	enable_output();
 	start_vtg();
+	KYRO_MODE_TRACE("apply_mode done\n");
 	return B_OK;
 }
 
@@ -422,6 +442,10 @@ update_frame_buffer_config(const display_mode& mode)
 	gInfo.sharedInfo->frameBufferConfig.bytes_per_row
 		= get_line_length(mode.virtual_width,
 			color_space_bits_per_pixel((color_space)mode.space));
+	KYRO_MODE_TRACE("framebuffer_config fb=%p dma=%p bpr=%" B_PRIu32 "\n",
+		gInfo.sharedInfo->frameBufferConfig.frame_buffer,
+		gInfo.sharedInfo->frameBufferConfig.frame_buffer_dma,
+		gInfo.sharedInfo->frameBufferConfig.bytes_per_row);
 }
 
 
@@ -451,6 +475,9 @@ select_initial_mode_if_needed(void)
 	shared.preferredMode = gInfo.modeList[selectedIndex];
 	shared.dpmsMode = B_DPMS_ON;
 	update_frame_buffer_config(shared.currentMode);
+	KYRO_MODE_TRACE("selected initial mode index=%" B_PRIu32 " %ux%u space=0x%08" B_PRIx32 "\n",
+		selectedIndex, shared.currentMode.timing.h_display,
+		shared.currentMode.timing.v_display, shared.currentMode.space);
 }
 
 } // namespace
@@ -459,6 +486,10 @@ select_initial_mode_if_needed(void)
 status_t
 CreateModeList(void)
 {
+	KYRO_MODE_TRACE("CreateModeList begin hasEdid=%d hasBootMode=%d boot=%ux%u depth=%u\n",
+		gInfo.sharedInfo->hasEdid, gInfo.sharedInfo->hasBootMode,
+		gInfo.sharedInfo->bootWidth, gInfo.sharedInfo->bootHeight,
+		gInfo.sharedInfo->bootDepth);
 	const uint32 baseCount = sizeof(kModePresets) / sizeof(kModePresets[0]);
 	display_mode initialModes[baseCount + 1];
 	uint32 initialCount = 0;
@@ -525,6 +556,8 @@ CreateModeList(void)
 
 	gInfo.sharedInfo->modeArea = gInfo.modeListArea;
 	select_initial_mode_if_needed();
+	KYRO_MODE_TRACE("CreateModeList done modeArea=%" B_PRId32 " modeCount=%" B_PRIu32 "\n",
+		gInfo.modeListArea, gInfo.sharedInfo->modeCount);
 	return B_OK;
 }
 
@@ -551,6 +584,8 @@ ProposeDisplayMode(display_mode* target, const display_mode* low,
 {
 	(void)low;
 	(void)high;
+	KYRO_MODE_TRACE("ProposeDisplayMode request %ux%u space=0x%08" B_PRIx32 "\n",
+		target->timing.h_display, target->timing.v_display, target->space);
 
 	for (uint32 i = 0; i < gInfo.sharedInfo->modeCount; i++) {
 		const display_mode& mode = gInfo.modeList[i];
@@ -559,10 +594,13 @@ ProposeDisplayMode(display_mode* target, const display_mode* low,
 			&& target->timing.v_display == mode.timing.v_display
 			&& target->space == mode.space) {
 			*target = mode;
+			KYRO_MODE_TRACE("ProposeDisplayMode matched %ux%u space=0x%08" B_PRIx32 "\n",
+				mode.timing.h_display, mode.timing.v_display, mode.space);
 			return B_OK;
 		}
 	}
 
+	KYRO_MODE_TRACE("ProposeDisplayMode failed\n");
 	return B_BAD_VALUE;
 }
 
@@ -570,6 +608,8 @@ ProposeDisplayMode(display_mode* target, const display_mode* low,
 status_t
 SetDisplayMode(display_mode* mode)
 {
+	KYRO_MODE_TRACE("SetDisplayMode begin req=%ux%u space=0x%08" B_PRIx32 "\n",
+		mode->timing.h_display, mode->timing.v_display, mode->space);
 	display_mode selected = *mode;
 	if (ProposeDisplayMode(&selected, mode, mode) != B_OK)
 		return B_BAD_VALUE;
@@ -588,6 +628,10 @@ SetDisplayMode(display_mode* mode)
 	gInfo.sharedInfo->dpmsMode = B_DPMS_ON;
 	update_frame_buffer_config(selected);
 	*mode = selected;
+	KYRO_MODE_TRACE("SetDisplayMode done mode=%ux%u space=0x%08" B_PRIx32
+		" bpr=%" B_PRIu32 "\n", selected.timing.h_display,
+		selected.timing.v_display, selected.space,
+		gInfo.sharedInfo->frameBufferConfig.bytes_per_row);
 	return B_OK;
 }
 
@@ -596,6 +640,9 @@ status_t
 GetDisplayMode(display_mode* currentMode)
 {
 	*currentMode = gInfo.sharedInfo->currentMode;
+	KYRO_MODE_TRACE("GetDisplayMode -> %ux%u space=0x%08" B_PRIx32 "\n",
+		currentMode->timing.h_display, currentMode->timing.v_display,
+		currentMode->space);
 	return B_OK;
 }
 
@@ -604,6 +651,8 @@ status_t
 GetFrameBufferConfig(frame_buffer_config* config)
 {
 	*config = gInfo.sharedInfo->frameBufferConfig;
+	KYRO_MODE_TRACE("GetFrameBufferConfig -> fb=%p dma=%p bpr=%" B_PRIu32 "\n",
+		config->frame_buffer, config->frame_buffer_dma, config->bytes_per_row);
 	return B_OK;
 }
 
@@ -620,6 +669,9 @@ GetPixelClockLimits(display_mode* mode, uint32* low, uint32* high)
 		*low = lower;
 	if (high != NULL)
 		*high = gInfo.sharedInfo->maxPixelClock;
+	KYRO_MODE_TRACE("GetPixelClockLimits %ux%u -> low=%" B_PRIu32 " high=%" B_PRIu32 "\n",
+		mode->timing.h_display, mode->timing.v_display,
+		low != NULL ? *low : 0, high != NULL ? *high : 0);
 	return B_OK;
 }
 
@@ -627,6 +679,7 @@ GetPixelClockLimits(display_mode* mode, uint32* low, uint32* high)
 status_t
 MoveDisplay(uint16 horizontalStart, uint16 verticalStart)
 {
+	KYRO_MODE_TRACE("MoveDisplay h=%u v=%u\n", horizontalStart, verticalStart);
 	if (horizontalStart != 0 || verticalStart != 0)
 		return B_UNSUPPORTED;
 
@@ -652,6 +705,7 @@ GetTimingConstraints(display_timing_constraints* constraints)
 	constraints->v_sync_max = 16;
 	constraints->v_blank_min = 1;
 	constraints->v_blank_max = 256;
+	KYRO_MODE_TRACE("GetTimingConstraints done\n");
 	return B_OK;
 }
 
@@ -661,6 +715,8 @@ GetPreferredDisplayMode(display_mode* mode)
 {
 	*mode = gInfo.sharedInfo->preferredMode.virtual_width != 0
 		? gInfo.sharedInfo->preferredMode : gInfo.sharedInfo->currentMode;
+	KYRO_MODE_TRACE("GetPreferredDisplayMode -> %ux%u space=0x%08" B_PRIx32 "\n",
+		mode->timing.h_display, mode->timing.v_display, mode->space);
 	return B_OK;
 }
 
@@ -676,6 +732,7 @@ GetEdidInfo(void* info, size_t size, uint32* version)
 	memcpy(info, &gInfo.sharedInfo->edidInfo, sizeof(edid1_info));
 	if (version != NULL)
 		*version = EDID_VERSION_1;
+	KYRO_MODE_TRACE("GetEdidInfo returned cached bootloader EDID\n");
 	return B_OK;
 }
 
@@ -697,6 +754,7 @@ kyro_dpms_capabilities(void)
 status_t
 kyro_set_dpms_mode(uint32 mode)
 {
+	KYRO_MODE_TRACE("kyro_set_dpms_mode mode=0x%08" B_PRIx32 "\n", mode);
 	switch (mode) {
 		case B_DPMS_ON:
 			enable_output();

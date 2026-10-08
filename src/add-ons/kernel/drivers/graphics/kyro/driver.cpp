@@ -54,6 +54,8 @@
 #define PMX2_SOFTRESET_REG_RST			0x4000
 #define PMX2_SOFTRESET_ALL				0x7fff
 
+#define KYRO_TRACE(x...) dprintf("kyro.driver: " x)
+
 
 int32 api_version = B_CUR_DRIVER_API_VERSION;
 
@@ -180,6 +182,9 @@ program_clock(uint32 refClock, uint32 coreClock, uint32& feedbackOut,
 	dividerOut = bestR;
 	feedbackOut = bestF;
 	postDividerOut = (bestOd == 2 || bestOd == 3) ? 3 : bestOd;
+	KYRO_TRACE("program_clock ref=%" B_PRIu32 " core=%" B_PRIu32
+		" -> clock=%" B_PRIu32 " F=%" B_PRIu32 " R=%" B_PRIu32 " P=%" B_PRIu32 "\n",
+		refClock, coreClock, bestClock, feedbackOut, dividerOut, postDividerOut);
 	return bestClock;
 }
 
@@ -198,6 +203,10 @@ init_sdram_registers(DeviceInfo& device, uint32 subSystemId, uint32 revision)
 	if (memTypeIndex > 4 || chipSpeedIndex > 2)
 		return 0;
 
+	KYRO_TRACE("init_sdram_registers subsys=0x%08" B_PRIx32 " rev=%" B_PRIu32
+		" memType=%" B_PRIu32 " chipSpeed=%" B_PRIu32 "\n",
+		subSystemId, revision, memTypeIndex, chipSpeedIndex);
+
 	write_reg(device, REG_SDRAM_ARBITER_CONF, kSdramArbiter[memTypeIndex]);
 	if (revision < 5) {
 		write_reg(device, REG_SDRAM_CONF0, 0x49a1);
@@ -209,6 +218,10 @@ init_sdram_registers(DeviceInfo& device, uint32 subSystemId, uint32 revision)
 
 	write_reg(device, REG_SDRAM_CONF2, 0x31);
 	write_reg(device, REG_SDRAM_REFRESH, kRefresh[chipSpeedIndex]);
+	KYRO_TRACE("SDRAM programmed: arb=0x%02x cfg0=0x%04x cfg1=0x%04x cfg2=0x31 refresh=%" B_PRIu8 "\n",
+		kSdramArbiter[memTypeIndex], revision < 5 ? 0x49a1 : 0x4df1,
+		revision < 5 ? kSdramCfg1[memTypeIndex] : kSdramCfg2[memTypeIndex],
+		kRefresh[chipSpeedIndex]);
 	return kChipSpeed[chipSpeedIndex] * 10000;
 }
 
@@ -226,6 +239,7 @@ busy_delay(uint32 iterations)
 static status_t
 initialize_chip(DeviceInfo& device)
 {
+	KYRO_TRACE("initialize_chip begin device=%s\n", device.name);
 	write_reg(device, REG_INT_MASK, 0xffff);
 
 	uint32 value = read_reg(device, REG_THREAD0_ENABLE);
@@ -253,14 +267,18 @@ initialize_chip(DeviceInfo& device)
 		device.pciInfo.device, device.pciInfo.function, PCI_CONFIG_SUBSYS_ID, 2);
 	uint32 chipSpeed = init_sdram_registers(device, subSystemId,
 		device.pciInfo.revision);
-	if (chipSpeed == 0)
+	if (chipSpeed == 0) {
+		KYRO_TRACE("initialize_chip failed: unsupported subsystem/revision\n");
 		return B_ERROR;
+	}
 
 	uint32 feedback;
 	uint32 divider;
 	uint32 postDivider;
-	if (program_clock(14318, 1000000, feedback, divider, postDivider) == 0)
+	if (program_clock(14318, 1000000, feedback, divider, postDivider) == 0) {
+		KYRO_TRACE("initialize_chip failed: core PLL program_clock returned 0\n");
 		return B_ERROR;
+	}
 
 	uint16 corePll = (uint16)(postDivider | ((feedback - 2) << 2)
 		| ((divider - 2) << 11));
@@ -286,6 +304,8 @@ initialize_chip(DeviceInfo& device)
 	busy_delay(1000000);
 
 	write_reg(device, REG_SOFTWARE_RESET, PMX2_SOFTRESET_ALL);
+	KYRO_TRACE("initialize_chip done chipSpeed=%" B_PRIu32 " corePll=0x%04" B_PRIx16 "\n",
+		chipSpeed, corePll);
 	return B_OK;
 }
 
@@ -304,6 +324,10 @@ map_physical(const char* name, phys_addr_t physical, uint32 size,
 	else
 		*virtualAddress = NULL;
 
+	KYRO_TRACE("map_physical name=%s phys=0x%" B_PRIxPHYSADDR " size=%" B_PRIu32
+		" flags=0x%" B_PRIx32 " prot=0x%" B_PRIx32 " -> area=%" B_PRId32 " addr=%p\n",
+		name, physical, size, flags, protection, area, address);
+
 	return area;
 }
 
@@ -311,11 +335,16 @@ map_physical(const char* name, phys_addr_t physical, uint32 size,
 static void
 load_settings(void)
 {
+	KYRO_TRACE("load_settings begin\n");
 	void* handle = load_driver_settings("kyro.settings");
-	if (handle == NULL)
+	if (handle == NULL) {
+		KYRO_TRACE("load_settings: no kyro.settings found\n");
 		return;
+	}
 
 	unload_driver_settings(handle);
+	KYRO_TRACE("load_settings done hardcursor=%d cursorbits=%" B_PRIu32 "\n",
+		gSettings.hardcursor, gSettings.cursorbits);
 }
 
 
@@ -326,6 +355,7 @@ fill_boot_mode(SharedInfo& si)
 		FRAME_BUFFER_BOOT_INFO, NULL);
 	if (bootInfo == NULL) {
 		si.hasBootMode = false;
+		KYRO_TRACE("fill_boot_mode: no FRAME_BUFFER_BOOT_INFO\n");
 		return;
 	}
 
@@ -333,6 +363,10 @@ fill_boot_mode(SharedInfo& si)
 	si.bootWidth = bootInfo->width;
 	si.bootHeight = bootInfo->height;
 	si.bootDepth = bootInfo->depth;
+	KYRO_TRACE("fill_boot_mode: %" B_PRId32 "x%" B_PRId32 " depth=%" B_PRId32
+		" bytesPerRow=%" B_PRId32 "\n",
+		bootInfo->width, bootInfo->height, bootInfo->depth,
+		bootInfo->bytes_per_row);
 }
 
 
@@ -341,6 +375,8 @@ map_device(DeviceInfo& device)
 {
 	pci_info& pciInfo = device.pciInfo;
 	SharedInfo& shared = *device.sharedInfo;
+	KYRO_TRACE("map_device begin %s pci=%02x:%02x.%01x\n", device.name,
+		pciInfo.bus, pciInfo.device, pciInfo.function);
 
 	gPCI->write_pci_config(pciInfo.bus, pciInfo.device, pciInfo.function,
 		PCI_command, 2, gPCI->read_pci_config(pciInfo.bus, pciInfo.device,
@@ -356,6 +392,9 @@ map_device(DeviceInfo& device)
 		frameBufferSize = 16 * 1024 * 1024;
 	if (regsSize == 0)
 		regsSize = 128 * 1024;
+	KYRO_TRACE("map_device BAR0 fb base=0x%08" B_PRIx32 " size=%" B_PRIu32
+		" BAR1 regs base=0x%08" B_PRIx32 " size=%" B_PRIu32 "\n",
+		frameBufferBase, frameBufferSize, regsBase, regsSize);
 
 	shared.regsArea = map_physical("kyro regs", regsBase, regsSize,
 		B_ANY_KERNEL_ADDRESS,
@@ -383,6 +422,10 @@ map_device(DeviceInfo& device)
 
 	shared.frameBufferPCI = pciInfo.u.h0.base_registers_pci[0] & ~0x0f;
 	shared.frameBufferSize = frameBufferSize;
+	KYRO_TRACE("map_device done regsArea=%" B_PRId32 " fbArea=%" B_PRId32
+		" fbPCI=0x%" B_PRIxPHYSADDR " fbSize=%" B_PRIu32 "\n",
+		shared.regsArea, shared.frameBufferArea, shared.frameBufferPCI,
+		shared.frameBufferSize);
 	return B_OK;
 }
 
@@ -391,6 +434,8 @@ static void
 unmap_device(DeviceInfo& device)
 {
 	SharedInfo& shared = *device.sharedInfo;
+	KYRO_TRACE("unmap_device %s regsArea=%" B_PRId32 " fbArea=%" B_PRId32 "\n",
+		device.name, shared.regsArea, shared.frameBufferArea);
 
 	if (shared.regsArea >= B_OK)
 		delete_area(shared.regsArea);
@@ -407,6 +452,7 @@ unmap_device(DeviceInfo& device)
 static status_t
 init_device(DeviceInfo& device)
 {
+	KYRO_TRACE("init_device begin %s\n", device.name);
 	char areaName[B_OS_NAME_LENGTH];
 	snprintf(areaName, sizeof(areaName), DEVICE_FORMAT " shared",
 		device.pciInfo.vendor_id, device.pciInfo.device_id, device.pciInfo.bus,
@@ -442,6 +488,7 @@ init_device(DeviceInfo& device)
 
 	status_t status = map_device(device);
 	if (status < B_OK) {
+		KYRO_TRACE("init_device map_device failed: %" B_PRIx32 "\n", status);
 		delete_area(device.sharedArea);
 		device.sharedArea = -1;
 		device.sharedInfo = NULL;
@@ -450,6 +497,7 @@ init_device(DeviceInfo& device)
 
 	status = initialize_chip(device);
 	if (status != B_OK) {
+		KYRO_TRACE("init_device initialize_chip failed: %" B_PRIx32 "\n", status);
 		unmap_device(device);
 		delete_area(device.sharedArea);
 		device.sharedArea = -1;
@@ -466,8 +514,15 @@ init_device(DeviceInfo& device)
 	if (bootEdid != NULL) {
 		device.sharedInfo->hasEdid = true;
 		memcpy(&device.sharedInfo->edidInfo, bootEdid, sizeof(edid1_info));
-	} else
+		KYRO_TRACE("init_device: bootloader EDID found\n");
+	} else {
 		device.sharedInfo->hasEdid = false;
+		KYRO_TRACE("init_device: no bootloader EDID available\n");
+	}
+
+	KYRO_TRACE("init_device done sharedArea=%" B_PRId32 " cursorOffset=%" B_PRIu32
+		" maxPixelClock=%" B_PRIu32 "\n", device.sharedArea,
+		device.sharedInfo->cursorOffset, device.sharedInfo->maxPixelClock);
 
 	return B_OK;
 }
@@ -476,6 +531,7 @@ init_device(DeviceInfo& device)
 status_t
 init_hardware(void)
 {
+	KYRO_TRACE("init_hardware begin\n");
 	if (get_module(B_PCI_MODULE_NAME, (module_info**)&gPCI) != B_OK)
 		return B_ERROR;
 
@@ -490,6 +546,7 @@ init_hardware(void)
 	}
 
 	put_module(B_PCI_MODULE_NAME);
+	KYRO_TRACE("init_hardware result=%d\n", found);
 	return found ? B_OK : B_ERROR;
 }
 
@@ -497,6 +554,7 @@ init_hardware(void)
 status_t
 init_driver(void)
 {
+	KYRO_TRACE("init_driver begin\n");
 	if (get_module(B_PCI_MODULE_NAME, (module_info**)&gPCI) != B_OK)
 		return B_ERROR;
 
@@ -520,16 +578,20 @@ init_driver(void)
 		snprintf(device.name, sizeof(device.name), "graphics/" DEVICE_FORMAT,
 			pciInfo.vendor_id, pciInfo.device_id, pciInfo.bus, pciInfo.device,
 			pciInfo.function);
+		KYRO_TRACE("init_driver found device[%" B_PRIu32 "]=%s rev=%" B_PRIu8 "\n",
+			count, device.name, pciInfo.revision);
 		gDeviceNames[count] = device.name;
 		count++;
 	}
 
 	gDeviceNames[count] = NULL;
 	if (count == 0) {
+		KYRO_TRACE("init_driver: no supported devices found\n");
 		put_module(B_PCI_MODULE_NAME);
 		return B_ERROR;
 	}
 
+	KYRO_TRACE("init_driver done count=%" B_PRIu32 "\n", count);
 	return B_OK;
 }
 
@@ -537,6 +599,7 @@ init_driver(void)
 void
 uninit_driver(void)
 {
+	KYRO_TRACE("uninit_driver\n");
 	put_module(B_PCI_MODULE_NAME);
 }
 
@@ -563,6 +626,7 @@ static status_t
 device_open(const char* name, uint32 flags, void** cookie)
 {
 	(void)flags;
+	KYRO_TRACE("device_open name=%s\n", name);
 	for (int32 i = 0; gDeviceNames[i] != NULL; i++) {
 		DeviceInfo& device = gDeviceInfo[i];
 		if (strcmp(name, device.name) != 0)
@@ -576,9 +640,12 @@ device_open(const char* name, uint32 flags, void** cookie)
 
 		device.openCount++;
 		*cookie = &device;
+		KYRO_TRACE("device_open success name=%s openCount=%" B_PRIu32 "\n",
+			name, device.openCount);
 		return B_OK;
 	}
 
+	KYRO_TRACE("device_open failed: unknown device %s\n", name);
 	return B_BAD_VALUE;
 }
 
@@ -587,6 +654,7 @@ static status_t
 device_close(void* cookie)
 {
 	(void)cookie;
+	KYRO_TRACE("device_close\n");
 	return B_OK;
 }
 
@@ -595,6 +663,8 @@ static status_t
 device_free(void* cookie)
 {
 	DeviceInfo& device = *(DeviceInfo*)cookie;
+	KYRO_TRACE("device_free name=%s openCount=%" B_PRIu32 "\n",
+		device.name, device.openCount);
 	if (device.openCount == 0)
 		return B_BAD_VALUE;
 
@@ -605,6 +675,9 @@ device_free(void* cookie)
 		device.sharedInfo = NULL;
 	}
 
+	KYRO_TRACE("device_free done name=%s newOpenCount=%" B_PRIu32 "\n",
+		device.name, device.openCount);
+
 	return B_OK;
 }
 
@@ -614,6 +687,8 @@ device_ioctl(void* cookie, uint32 msg, void* buf, size_t len)
 {
 	DeviceInfo& device = *(DeviceInfo*)cookie;
 	(void)len;
+	KYRO_TRACE("device_ioctl name=%s msg=0x%" B_PRIx32 " len=%" B_PRIuSIZE "\n",
+		device.name, msg, len);
 
 	switch (msg) {
 		case B_GET_ACCELERANT_SIGNATURE:
