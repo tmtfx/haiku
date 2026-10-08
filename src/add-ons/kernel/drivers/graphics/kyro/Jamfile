@@ -1,0 +1,13 @@
+SubDir HAIKU_TOP src add-ons kernel drivers graphics kyro ;
+
+UsePrivateHeaders graphics ;
+UsePrivateHeaders [ FDirName graphics kyro ] ;
+UsePrivateHeaders [ FDirName graphics common ] ;
+UsePrivateHeaders [ FDirName graphics vesa ] ;
+UsePrivateHeaders graphics kernel ;
+UsePrivateSystemHeaders ;
+UsePrivateKernelHeaders ;
+
+KernelAddon kyro :
+	driver.cpp
+;

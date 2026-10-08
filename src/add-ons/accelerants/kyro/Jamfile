@@ -1,0 +1,17 @@
+SubDir HAIKU_TOP src add-ons accelerants kyro ;
+
+UsePrivateHeaders graphics ;
+UsePrivateHeaders [ FDirName graphics kyro ] ;
+UsePrivateHeaders [ FDirName graphics common ] ;
+
+Addon kyro.accelerant :
+	accelerant.cpp
+	cursor.cpp
+	hooks.cpp
+	mode.cpp
+	overlay.cpp
+
+	: be libaccelerantscommon.a
+;
+
+Depends kyro.accelerant : kyro ;

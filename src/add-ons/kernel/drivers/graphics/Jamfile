@@ -8,6 +8,7 @@ SubInclude HAIKU_TOP src add-ons kernel drivers graphics framebuffer ;
 SubInclude HAIKU_TOP src add-ons kernel drivers graphics intel_810 ;
 SubInclude HAIKU_TOP src add-ons kernel drivers graphics intel_arc ;
 SubInclude HAIKU_TOP src add-ons kernel drivers graphics intel_extreme ;
+SubInclude HAIKU_TOP src add-ons kernel drivers graphics kyro ;
 SubInclude HAIKU_TOP src add-ons kernel drivers graphics matrox ;
 SubInclude HAIKU_TOP src add-ons kernel drivers graphics neomagic ;
 SubInclude HAIKU_TOP src add-ons kernel drivers graphics nvidia ;
