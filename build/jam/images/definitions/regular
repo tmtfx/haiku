@@ -188,6 +188,7 @@ SYSTEM_ADD_ONS_ACCELERANTS += [ FFilterByBuildFeatures
 		intel_810.accelerant
 		intel_arc.accelerant
 		intel_extreme.accelerant
+		kyro.accelerant
 		matrox.accelerant
 		nvidia.accelerant
 		radeon.accelerant
@@ -322,6 +323,7 @@ SYSTEM_ADD_ONS_DRIVERS_GRAPHICS += [ FFilterByBuildFeatures
 		intel_810
 		intel_arc
 		intel_extreme
+		kyro
 		matrox
 		nvidia
 		radeon
