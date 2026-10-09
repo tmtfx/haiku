@@ -242,8 +242,14 @@ FricoVideoView::_InitMediaPlayback()
     }
 
     if (fVideoTrack != NULL) {
-        BMessage msg(MSG_NEXT_FRAME);
-        fRunner = new BMessageRunner(BMessenger(this), &msg, fFrameDelay);
+        media_format decodedFormat = {};
+        decodedFormat.type = B_MEDIA_RAW_VIDEO;
+        fVideoTrack->DecodedFormat(&decodedFormat);
+        
+        if (decodedFormat.u.raw_video.field_rate > 0) {
+            BMessage msg(MSG_NEXT_FRAME);
+            fRunner = new BMessageRunner(BMessenger(this), &msg, fFrameDelay);
+        }
     }
 }
 
