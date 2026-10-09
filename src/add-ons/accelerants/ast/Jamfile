@@ -1,0 +1,11 @@
+SubDir HAIKU_TOP src add-ons accelerants ast ;
+
+UsePrivateHeaders graphics ;
+UsePrivateHeaders [ FDirName graphics ast ] ;
+
+Addon ast.accelerant :
+	accelerant.cpp
+	ddc.cpp
+	mode.cpp
+	: be libaccelerantscommon.a
+;
