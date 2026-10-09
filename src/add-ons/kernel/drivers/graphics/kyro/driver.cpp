@@ -26,6 +26,9 @@
 #include <vesa_info.h>
 
 #include "DriverInterface.h"
+#ifdef IS_PIRATI_BUILD
+#include "kyro_logo.h"
+#endif
 
 
 #define KYRO_VENDOR_ID					0x104a
@@ -454,6 +457,68 @@ unmap_device(DeviceInfo& device)
 	device.regs = NULL;
 }
 
+#ifdef IS_PIRATI_BUILD
+static void draw_logo(DeviceInfo& di)
+{
+    SharedInfo& si = *(di.sharedInfo);
+    
+    if (si.videoMemArea < 0)
+        return;
+
+    // Retrieve framebuffer info from bootloader
+    struct frame_buffer_boot_info* bi = (struct frame_buffer_boot_info*)get_boot_item(
+        FRAME_BUFFER_BOOT_INFO, NULL);
+    
+    if (!bi)
+        return;
+
+    if (bi->depth != 32)
+        return;
+
+    uint32 screenWidth = bi->width;
+    uint32 screenHeight = bi->height;
+    
+    uint32 bytesPerRow = bi->bytes_per_row;
+    if (bytesPerRow == 0)
+        bytesPerRow = screenWidth * 4;
+
+    uint32 fbPitch = bytesPerRow / 4;
+
+    uint32 logoW = kBitmapWidth;   // 800
+    uint32 logoH = kBitmapHeight;  // 436
+
+    // Centering
+    int32 startX = (int32)((screenWidth - logoW) / 2);
+    if (startX < 0) startX = 0;
+    int32 startY = (int32)((screenHeight - logoH) / 2);
+    if (startY < 0) startY = 0;
+
+    uint8* fb = (uint8*)si.videoMemAddr;
+    if (fb == NULL) {
+        fb = (uint8*)bi->frame_buffer;
+    }
+    if (fb == NULL)
+        return;
+
+    for (uint32 y = 0; y < logoH && (startY + y) < screenHeight; y++) {
+        // Offset di destinazione nel framebuffer (in byte)
+        uint32 fbOffset = ((startY + y) * fbPitch + startX) * sizeof(uint32);
+        
+        // Offset di origine nell'array dell'immagine (4 byte per pixel in RGBA32)
+        uint32 logoRowOffset = y * logoW * 4;
+        
+        uint32 remainingWidth = screenWidth - startX;
+        uint32 copyPixels = (logoW < remainingWidth) ? logoW : remainingWidth;
+        
+        // Dimensione totale del blocco da copiare in byte per la riga
+        uint32 copySize = copyPixels * 4; 
+
+        // Copia sicura dalla memoria kernel allo spazio del framebuffer
+        // (Sostituisci kkyro_ship_pngBits con il nome esatto definito nel tuo header)
+        user_memcpy(fb + fbOffset, (void*)&kkyro_ship_pngBits[logoRowOffset], copySize);
+    }
+}
+#endif
 
 static status_t
 init_device(DeviceInfo& device)
@@ -529,6 +594,10 @@ init_device(DeviceInfo& device)
 	KYRO_TRACE("init_device done sharedArea=%" B_PRId32 " cursorOffset=%" B_PRIu32
 		" maxPixelClock=%" B_PRIu32 "\n", device.sharedArea,
 		device.sharedInfo->cursorOffset, device.sharedInfo->maxPixelClock);
+#ifdef IS_PIRATI_BUILD
+	draw_logo(device);
+	snooze(2000000);
+#endif
 
 	return B_OK;
 }
