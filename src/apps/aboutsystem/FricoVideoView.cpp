@@ -15,6 +15,7 @@
 
 //test, rimuovere risolto il bug
 #include <stdlib.h> // Per setenv
+#include <cstdio>
 // fino qui
 
 FricoVideoView::FricoVideoView(const char* name)
@@ -130,7 +131,6 @@ FricoVideoView::PlayVideo(const void* data, size_t size)
     _InitMediaPlayback();
 }
 
-
 void
 FricoVideoView::_InitMediaPlayback()
 {
@@ -164,64 +164,63 @@ FricoVideoView::_InitMediaPlayback()
         }
     }
 
-    if (fVideoTrack == NULL) {
+    if (fVideoTrack == NULL && fAudioTrack == NULL) {
         StopVideo();
         return;
     }
 
-    // 1. Chiediamo il formato RAW YUV422 nativo per l'Overlay HW
-    media_format decodedFormat = {};
-    decodedFormat.type = B_MEDIA_RAW_VIDEO;
-    decodedFormat.u.raw_video = media_raw_video_format::wildcard;
+    // Se abbiamo una traccia video (o la copertina dell'MP3), la configuriamo
+    if (fVideoTrack != NULL) {
+        media_format decodedFormat = {};
+        decodedFormat.type = B_MEDIA_RAW_VIDEO;
+        decodedFormat.u.raw_video = media_raw_video_format::wildcard;
 
-    //Questo funziona
-    decodedFormat.u.raw_video.display.format = B_RGB32;
-    if (fVideoTrack->DecodedFormat(&decodedFormat) != B_OK) {
-        StopVideo();
-        return;
-    }
-    /* Questo genera artefatti o crasha
-    decodedFormat.u.raw_video.display.format = B_YCbCr422;
-    if (fVideoTrack->DecodedFormat(&decodedFormat) != B_OK) {
         decodedFormat.u.raw_video.display.format = B_RGB32;
         if (fVideoTrack->DecodedFormat(&decodedFormat) != B_OK) {
             StopVideo();
             return;
         }
-    }*/
 
-    color_space space = decodedFormat.u.raw_video.display.format;
+        color_space space = decodedFormat.u.raw_video.display.format;
 
-    float frameRate = decodedFormat.u.raw_video.field_rate;
-    if (frameRate > 0)
-        fFrameDelay = (bigtime_t)(1000000.0f / frameRate);
+        float frameRate = decodedFormat.u.raw_video.field_rate;
+        if (frameRate > 0)
+            fFrameDelay = (bigtime_t)(1000000.0f / frameRate);
+        else
+            fFrameDelay = 1000000; // Fallback generico per singoli frame se il framerate è 0
 
-    uint32 width = decodedFormat.u.raw_video.display.line_width;
-    uint32 height = decodedFormat.u.raw_video.display.line_count;
-    BRect frameRect(0, 0, width - 1, height - 1);
+        uint32 width = decodedFormat.u.raw_video.display.line_width;
+        uint32 height = decodedFormat.u.raw_video.display.line_count;
+        BRect frameRect(0, 0, width - 1, height - 1);
 
-    // 2. Overlay HW o fallback software
-    if (space == B_YUV422 || space == B_YCbCr422) {
-        fCurrentFrame = new BBitmap(frameRect, B_BITMAP_WILL_OVERLAY, space);
-        if (fCurrentFrame->InitCheck() == B_OK) {
-            fUseOverlay = true;
-        } else {
-            delete fCurrentFrame;
-            fCurrentFrame = NULL;
-            fUseOverlay = false;
+        // Overlay HW o fallback software
+        if (space == B_YUV422 || space == B_YCbCr422) {
+            fCurrentFrame = new BBitmap(frameRect, B_BITMAP_WILL_OVERLAY, space);
+            if (fCurrentFrame->InitCheck() == B_OK) {
+                fUseOverlay = true;
+            } else {
+                delete fCurrentFrame;
+                fCurrentFrame = NULL;
+                fUseOverlay = false;
+            }
         }
-    }
 
-    if (!fUseOverlay) {
-        if (space != B_RGB32) {
-            decodedFormat.u.raw_video.display.format = B_RGB32;
-            fVideoTrack->DecodedFormat(&decodedFormat);
+        if (!fUseOverlay) {
+            if (space != B_RGB32) {
+                decodedFormat.u.raw_video.display.format = B_RGB32;
+                fVideoTrack->DecodedFormat(&decodedFormat);
+            }
+            fCurrentFrame = new BBitmap(frameRect, B_RGB32);
         }
-        fCurrentFrame = new BBitmap(frameRect, B_RGB32);
-    }
 
-    if (fUseOverlay) {
-        _UpdateOverlay();
+        if (fUseOverlay) {
+            _UpdateOverlay();
+        }
+        
+        // Leggiamo subito il primo frame (utile per caricare l'immagine statica/copertina)
+        int64 frameCount = 0;
+        media_header header;
+        fVideoTrack->ReadFrames(fCurrentFrame->Bits(), &frameCount, &header);
     }
 
     // 3. Riproduzione audio
@@ -242,10 +241,11 @@ FricoVideoView::_InitMediaPlayback()
         }
     }
 
-    BMessage msg(MSG_NEXT_FRAME);
-    fRunner = new BMessageRunner(BMessenger(this), &msg, fFrameDelay);
+    if (fVideoTrack != NULL) {
+        BMessage msg(MSG_NEXT_FRAME);
+        fRunner = new BMessageRunner(BMessenger(this), &msg, fFrameDelay);
+    }
 }
-
 
 void
 FricoVideoView::_DecodeNextFrame()
@@ -259,23 +259,20 @@ FricoVideoView::_DecodeNextFrame()
     status_t err = fVideoTrack->ReadFrames(fCurrentFrame->Bits(), &frameCount, &header);
 
     if (err != B_OK || frameCount < 1) {
-        // Fine video: riavvolgiamo SIA il video SIA l'audio simultaneamente
+        // Se è un'immagine statica (es. la copertina dell'MP3 con 1 solo frame),
+        // ci basta riportare la testina al frame 0 e continuare a mostrarla,
+        // oppure se l'audio è in loop, manterremo la sincronia.
         int64 frame = 0;
         fVideoTrack->SeekToFrame(&frame);
-
-        if (fAudioTrack != NULL) {
-            fAudioTrack->SeekToFrame(&frame);
-            fAudioBufferPos = 0;
-            fAudioBufferSize = 0;
-        }
-        return;
+        
+        // Leggiamo subito il primo frame per rinfrescare il bitmap ed evitare errori successivi
+        fVideoTrack->ReadFrames(fCurrentFrame->Bits(), &frameCount, &header);
     }
 
     if (!fUseOverlay) {
         Invalidate();
     }
 }
-
 
 void
 FricoVideoView::StopVideo()
