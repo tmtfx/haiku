@@ -180,6 +180,7 @@ DrawingEngine::DrawingEngine(HWInterface* interface)
 	:
 	fPainter(new Painter()),
 	fGraphicsCard(NULL),
+	fAvailableHWAcceleration(0),
 	fCopyToFront(true)
 {
 	SetHWInterface(interface);
@@ -247,6 +248,7 @@ DrawingEngine::FrameBufferChanged()
 {
 	if (!fGraphicsCard) {
 		fPainter->DetachFromBuffer();
+		fAvailableHWAcceleration = 0;
 		return;
 	}
 
@@ -254,6 +256,7 @@ DrawingEngine::FrameBufferChanged()
 	// in the thread that changed the frame buffer...
 	if (LockExclusiveAccess()) {
 		fPainter->AttachToBuffer(fGraphicsCard->DrawingBuffer());
+		fAvailableHWAcceleration = fGraphicsCard->AvailableHWAcceleration();
 		UnlockExclusiveAccess();
 	}
 }
@@ -598,18 +601,41 @@ DrawingEngine::CopyRegion(/*const*/ BRegion* region, int32 xOffset,
 	// to. If their "indegree" count reaches zero, put them onto the
 	// stack as well.
 
+	clipping_rect* sortedRectList = NULL;
+	int32 nextSortedIndex = 0;
+
+	if ((fAvailableHWAcceleration & HW_ACC_COPY_REGION) != 0) {
+		sortedRectList = new(std::nothrow) clipping_rect[count];
+		if (sortedRectList == NULL)
+			return;
+	}
+
 	while (!inDegreeZeroNodes.empty()) {
 		node* n = inDegreeZeroNodes.top();
 		inDegreeZeroNodes.pop();
 
 		BRect touched = CopyRect(n->rect, xOffset, yOffset);
-		fGraphicsCard->Invalidate(touched);
+
+		if (sortedRectList != NULL) {
+			sortedRectList[nextSortedIndex].left = (int32)n->rect.left;
+			sortedRectList[nextSortedIndex].top = (int32)n->rect.top;
+			sortedRectList[nextSortedIndex].right = (int32)n->rect.right;
+			sortedRectList[nextSortedIndex].bottom = (int32)n->rect.bottom;
+			nextSortedIndex++;
+		} else {
+			fGraphicsCard->Invalidate(touched);
+		}
 
 		for (int32 k = 0; k < n->next_pointer; k++) {
 			n->pointers[k]->in_degree--;
 			if (n->pointers[k]->in_degree == 0)
 				inDegreeZeroNodes.push(n->pointers[k]);
 		}
+	}
+
+	if (sortedRectList != NULL) {
+		fGraphicsCard->CopyRegion(sortedRectList, count, xOffset, yOffset);
+		delete[] sortedRectList;
 	}
 }
 

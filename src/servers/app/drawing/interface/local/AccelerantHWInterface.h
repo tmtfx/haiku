@@ -65,6 +65,15 @@ public:
 	virtual status_t			GetAccelerantPath(BString& path);
 	virtual status_t			GetDriverPath(BString& path);
 
+	// query for available hardware acceleration
+	virtual	uint32				AvailableHWAcceleration() const;
+
+	// accelerated drawing
+	virtual	void				CopyRegion(const clipping_rect* sortedRectList,
+									uint32 count, int32 xOffset, int32 yOffset);
+
+	virtual	void				Sync();
+
 	// overlay support
 	virtual overlay_token		AcquireOverlayChannel();
 	virtual void				ReleaseOverlayChannel(overlay_token token);
@@ -109,6 +118,8 @@ private:
 			status_t			_UpdateFrameBufferConfig();
 			void				_RegionToRectParams(/*const*/ BRegion* region,
 									uint32* count) const;
+			void				_CopyRegion(const clipping_rect* sortedRectList,
+									uint32 count, int32 xOffset, int32 yOffset);
 			uint32				_NativeColor(const rgb_color& color) const;
 			status_t			_FindBestMode(const display_mode& compareMode,
 									float compareAspectRatio,
@@ -135,11 +146,15 @@ private:
 			get_pixel_clock_limits	fAccGetPixelClockLimits;
 
 			// optional accelerant hooks
+			acquire_engine		fAccAcquireEngine;
+			release_engine		fAccReleaseEngine;
+			sync_to_token		fAccSyncToToken;
 			get_timing_constraints	fAccGetTimingConstraints;
 			propose_display_mode	fAccProposeDisplayMode;
 			get_preferred_display_mode fAccGetPreferredDisplayMode;
 			get_monitor_info		fAccGetMonitorInfo;
 			get_edid_info			fAccGetEDIDInfo;
+			screen_to_screen_blit	fAccScreenBlit;
 			set_cursor_shape		fAccSetCursorShape;
 			set_cursor_bitmap		fAccSetCursorBitmap;
 			get_cursor_bits			fAccGetCursorBits;

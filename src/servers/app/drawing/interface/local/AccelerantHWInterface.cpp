@@ -116,8 +116,12 @@ AccelerantHWInterface::AccelerantHWInterface()
 	fAccGetPixelClockLimits(NULL),
 
 	// optional accelerant hooks
+	fAccAcquireEngine(NULL),
+	fAccReleaseEngine(NULL),
+	fAccSyncToToken(NULL),
 	fAccGetTimingConstraints(NULL),
 	fAccProposeDisplayMode(NULL),
+	fAccScreenBlit(NULL),
 	fAccSetCursorShape(NULL),
 	fAccSetCursorBitmap(NULL),
 	fAccGetCursorBits(NULL),
@@ -411,6 +415,10 @@ AccelerantHWInterface::_SetupDefaultHooks()
 	}
 
 	// optional
+	fAccAcquireEngine = (acquire_engine)fAccelerantHook(B_ACQUIRE_ENGINE, NULL);
+	fAccReleaseEngine = (release_engine)fAccelerantHook(B_RELEASE_ENGINE, NULL);
+	fAccSyncToToken = (sync_to_token)fAccelerantHook(B_SYNC_TO_TOKEN, NULL);
+
 	fAccGetTimingConstraints = (get_timing_constraints)fAccelerantHook(
 		B_GET_TIMING_CONSTRAINTS, NULL);
 	fAccProposeDisplayMode = (propose_display_mode)fAccelerantHook(
@@ -450,6 +458,10 @@ AccelerantHWInterface::_SetupDefaultHooks()
 void
 AccelerantHWInterface::_UpdateHooksAfterModeChange()
 {
+	// 2D acceleration hooks
+	fAccScreenBlit = (screen_to_screen_blit)fAccelerantHook(
+		B_SCREEN_TO_SCREEN_BLIT, (void*)&fDisplayMode);
+
 	// overlay
 	fAccOverlayCount = (overlay_count)fAccelerantHook(B_OVERLAY_COUNT, NULL);
 	fAccOverlaySupportedSpaces = (overlay_supported_spaces)fAccelerantHook(
@@ -474,6 +486,11 @@ AccelerantHWInterface::_UpdateHooksAfterModeChange()
 status_t
 AccelerantHWInterface::Shutdown()
 {
+	fAccAcquireEngine = NULL;
+	fAccReleaseEngine = NULL;
+	fAccSyncToToken = NULL;
+	fAccScreenBlit = NULL;
+
 	if (fAccelerantHook != NULL) {
 		uninit_accelerant uninitAccelerant
 			= (uninit_accelerant)fAccelerantHook(B_UNINIT_ACCELERANT, NULL);
@@ -1132,6 +1149,139 @@ AccelerantHWInterface::GetDriverPath(BString& string)
 	getCloneInfo((void*)path);
 	string.SetTo(path);
 	return B_OK;
+}
+
+
+// #pragma mark - acceleration
+
+
+uint32
+AccelerantHWInterface::AvailableHWAcceleration() const
+{
+	uint32 flags = 0;
+
+	if (fAccScreenBlit != NULL && fAccAcquireEngine != NULL)
+		flags |= HW_ACC_COPY_REGION;
+
+	return flags;
+}
+
+
+void
+AccelerantHWInterface::CopyRegion(const clipping_rect* sortedRectList,
+	uint32 count, int32 xOffset, int32 yOffset)
+{
+	_CopyRegion(sortedRectList, count, xOffset, yOffset);
+}
+
+
+void
+AccelerantHWInterface::_CopyRegion(const clipping_rect* sortedRectList,
+	uint32 count, int32 xOffset, int32 yOffset)
+{
+	if (fAccScreenBlit == NULL || fAccAcquireEngine == NULL || count == 0)
+		return;
+
+	RenderingBuffer* frontBuffer = FrontBuffer();
+	if (frontBuffer == NULL)
+		return;
+
+	int32 maxWidth = frontBuffer->Width();
+	int32 maxHeight = frontBuffer->Height();
+
+	if (!fHardwareCursorEnabled)
+		_RestoreCursorArea();
+
+	if (fAccAcquireEngine(B_2D_ACCELERATION, 0xff, &fSyncToken,
+			&fEngineToken) >= B_OK) {
+		if (fBlitParamsCount < count) {
+			fBlitParamsCount = (count / kDefaultParamsCount + 1)
+				* kDefaultParamsCount;
+			blit_params* params = new (nothrow) blit_params[fBlitParamsCount];
+			if (params != NULL) {
+				delete[] fBlitParams;
+				fBlitParams = params;
+			} else {
+				count = fBlitParamsCount;
+			}
+		}
+
+		uint32 validCount = 0;
+		for (uint32 i = 0; i < count; i++) {
+			clipping_rect src = sortedRectList[i];
+			clipping_rect dst;
+			dst.left = src.left + xOffset;
+			dst.top = src.top + yOffset;
+			dst.right = src.right + xOffset;
+			dst.bottom = src.bottom + yOffset;
+
+			// Clip src and dst to screen bounds
+			if (src.left < 0) {
+				dst.left -= src.left;
+				src.left = 0;
+			}
+			if (src.top < 0) {
+				dst.top -= src.top;
+				src.top = 0;
+			}
+			if (src.right >= maxWidth) {
+				dst.right -= (src.right - maxWidth + 1);
+				src.right = maxWidth - 1;
+			}
+			if (src.bottom >= maxHeight) {
+				dst.bottom -= (src.bottom - maxHeight + 1);
+				src.bottom = maxHeight - 1;
+			}
+
+			if (dst.left < 0) {
+				src.left -= dst.left;
+				dst.left = 0;
+			}
+			if (dst.top < 0) {
+				src.top -= dst.top;
+				dst.top = 0;
+			}
+			if (dst.right >= maxWidth) {
+				src.right -= (dst.right - maxWidth + 1);
+				dst.right = maxWidth - 1;
+			}
+			if (dst.bottom >= maxHeight) {
+				dst.bottom -= (dst.bottom - maxHeight + 1);
+				dst.bottom = maxHeight - 1;
+			}
+
+			if (src.left <= src.right && src.top <= src.bottom
+				&& dst.left <= dst.right && dst.top <= dst.bottom) {
+				fBlitParams[validCount].src_left = (uint16)src.left;
+				fBlitParams[validCount].src_top = (uint16)src.top;
+				fBlitParams[validCount].dest_left = (uint16)dst.left;
+				fBlitParams[validCount].dest_top = (uint16)dst.top;
+				fBlitParams[validCount].width = (uint16)(src.right - src.left);
+				fBlitParams[validCount].height = (uint16)(src.bottom - src.top);
+				validCount++;
+			}
+		}
+
+		if (validCount > 0)
+			fAccScreenBlit(fEngineToken, fBlitParams, validCount);
+
+		if (fAccReleaseEngine != NULL)
+			fAccReleaseEngine(fEngineToken, &fSyncToken);
+
+		if (fAccSyncToToken != NULL)
+			fAccSyncToToken(&fSyncToken);
+	}
+
+	if (!fHardwareCursorEnabled)
+		_DrawCursor(_CursorFrame());
+}
+
+
+void
+AccelerantHWInterface::Sync()
+{
+	if (fAccSyncToToken != NULL)
+		fAccSyncToToken(&fSyncToken);
 }
 
 

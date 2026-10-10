@@ -50,6 +50,9 @@ public:
 								{ return fCopyToFront; }
 	virtual	void			CopyToFront(/*const*/ BRegion& region);
 
+			uint32			AvailableHWAcceleration() const
+								{ return fAvailableHWAcceleration; }
+
 	// locking
 			bool			LockParallelAccess();
 #if DEBUG
@@ -210,6 +213,7 @@ private:
 			ObjectDeleter<Painter>
 							fPainter;
 			HWInterface*	fGraphicsCard;
+			uint32			fAvailableHWAcceleration;
 			bool			fCopyToFront;
 };
 
