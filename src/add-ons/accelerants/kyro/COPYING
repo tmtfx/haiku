@@ -1,0 +1,19 @@
+Kyro accelerant licensing note
+==============================
+
+This directory is part of the Kyro/STG4000 graphics subsystem.
+
+The Kyro accelerant sources in this directory are distributed under the terms
+of the GNU General Public License version 2 (GPLv2), as indicated in their
+file headers.
+
+The licensing rationale is documented in:
+
+- ../kernel/drivers/graphics/kyro/COPYING
+
+Relevant copyright holders include:
+
+- Imagination Technologies Ltd
+- STMicroelectronics
+- Fabio Tomat
+- GitHub Copilot
