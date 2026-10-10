@@ -38,6 +38,7 @@ static const uint32 kDACStreamCtrl = 0x1480;
 static const uint32 kOverlayMaxWidth = 720;
 static const uint32 kOverlayMaxHeight = 576;
 static const uint32 kOverlaySlots = 4;
+static const uint32 kOverlayExtraLines = 65;
 
 static const uint32 kDecim8[33] = {
 	0xffffffff, 0xfffeffff, 0xffdffbff, 0xfefefeff, 0xfdf7efbf,
@@ -251,7 +252,8 @@ program_overlay_surface(const OverlaySlotInfo& info)
 	}
 
 	value = read32(kDACPixelFormat);
-	clear_bits(value, 4, 9);
+	clear_bits(value, 4, 6);
+	clear_bits(value, 8, 9);
 	if (info.linear)
 		value |= (info.pixelFormat & 0x3u) << 4;
 	write32(kDACPixelFormat, value);
@@ -366,10 +368,10 @@ set_overlay_view_port(const OverlaySlotInfo& info, const overlay_window* window,
 
 	if (!info.linear) {
 		srcLeft &= ~0x1f;
-		srcRight = aligned(srcRight + 1, 32);
+		srcRight = (srcRight + 0x1f) & ~0x1f;
 	} else {
 		srcLeft &= ~0x7;
-		srcRight = aligned(srcRight + 1, 8);
+		srcRight = (srcRight + 0x7) & ~0x7;
 	}
 
 	width = srcRight - srcLeft;
@@ -416,6 +418,7 @@ set_overlay_view_port(const OverlaySlotInfo& info, const overlay_window* window,
 	write32(kDACVidWinEnd, (right << 16) | srcDest.dstY2);
 
 	uint32 pixelFormat = read32(kDACPixelFormat);
+	clear_bits(pixelFormat, 16, 22);
 	pixelFormat = ((excessPixels << 16) | pixelFormat) & 0x7fffffff;
 	write32(kDACPixelFormat, pixelFormat);
 
@@ -448,10 +451,9 @@ kyro_overlay_supported_spaces(const display_mode* mode)
 {
 	(void)mode;
 	static const uint32 spaces[] = {
-		B_YCbCr422,
 		B_YUV422,
-		B_YCbCr420,
 		B_YUV420,
+		B_YCbCr420,
 		0
 	};
 	return spaces;
@@ -462,10 +464,9 @@ uint32
 kyro_overlay_supported_features(uint32 colorSpace)
 {
 	switch (colorSpace) {
-		case B_YCbCr422:
 		case B_YUV422:
-		case B_YCbCr420:
 		case B_YUV420:
+		case B_YCbCr420:
 			return B_OVERLAY_COLOR_KEY
 				| B_OVERLAY_HORIZONTAL_FILTERING
 				| B_OVERLAY_VERTICAL_FILTERING;
@@ -488,16 +489,12 @@ kyro_allocate_overlay_buffer(color_space space, uint16 width, uint16 height)
 	bool linear;
 	uint32 pixelFormat = kUYVY;
 	switch (space) {
-		case B_YCbCr422:
-			linear = true;
-			pixelFormat = kYUYV;
-			break;
 		case B_YUV422:
 			linear = true;
 			pixelFormat = kUYVY;
 			break;
-		case B_YCbCr420:
 		case B_YUV420:
+		case B_YCbCr420:
 			linear = false;
 			break;
 		default:
@@ -525,7 +522,7 @@ kyro_allocate_overlay_buffer(color_space space, uint16 width, uint16 height)
 	if (linear) {
 		strideWords = ((width & 0x7) == 0) ? (width / 8) : ((width + 8) / 8);
 		strideBytes = strideWords * 16;
-		size = strideBytes * height;
+		size = strideBytes * (height + kOverlayExtraLines);
 	} else {
 		strideWords = ((width & 0xf) == 0) ? (width / 16) : ((width + 16) / 16);
 		strideBytes = strideWords * 16;
@@ -537,7 +534,7 @@ kyro_allocate_overlay_buffer(color_space space, uint16 width, uint16 height)
 
 		uint32 uOffset = aligned(strideBytes * height, 32);
 		uint32 vOffset = aligned(uOffset + (height / 2) * uvStrideBytes, 32);
-		size = vOffset + (height / 2) * uvStrideBytes;
+		size = vOffset + (height / 2) * uvStrideBytes + strideBytes * kOverlayExtraLines;
 	}
 
 	uint32 offset = base;
@@ -615,10 +612,11 @@ kyro_get_overlay_constraints(const display_mode* mode, const overlay_buffer* buf
 		return B_BAD_VALUE;
 
 	memset(constraints, 0, sizeof(*constraints));
-	constraints->view.width_alignment = buffer->space == B_YCbCr420
-		|| buffer->space == B_YUV420 ? 1 : 0;
-	constraints->view.height_alignment = buffer->space == B_YCbCr420
-		|| buffer->space == B_YUV420 ? 1 : 0;
+	bool isPlanar = (buffer->space == B_YCbCr420 || buffer->space == B_YUV420);
+	constraints->view.h_alignment = isPlanar ? 31 : 7;
+	constraints->view.v_alignment = isPlanar ? 1 : 0;
+	constraints->view.width_alignment = isPlanar ? 31 : 7;
+	constraints->view.height_alignment = isPlanar ? 1 : 0;
 	constraints->window.width_alignment = 0;
 	constraints->window.height_alignment = 0;
 	constraints->view.width.min = 32;
@@ -682,7 +680,6 @@ kyro_configure_overlay(overlay_token token, const overlay_buffer* buffer,
 	if (slot < 0)
 		return B_BAD_VALUE;
 
-	reset_overlay_registers();
 	status_t status = program_overlay_surface(sOverlayInfo[slot]);
 	if (status != B_OK)
 		return status;
