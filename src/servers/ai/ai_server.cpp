@@ -1566,7 +1566,7 @@ public:
                 if (msg->FindMessage("arguments", &arguments) != B_OK) {
                     // FALLBACK RETROCOMPATIBILE: Se il client invia ancora la stringa JSON grezza
                     if (!argsJson.IsEmpty()) {
-                        BString path, cmd, text, title, content, action, name, value, pattern;
+                        BString path, cmd, text, title, content, action, name, value, pattern, host, toy_id, intensity_str, duration_str, port_str;
                         
                         // 1. I percorsi e i comandi/pattern non devono MAI interpretare i caratteri di controllo (SEMPRE false)
                         if (ExtractStringFromJson(argsJson.String(), "path", path, false) || 
@@ -1600,6 +1600,12 @@ public:
                         if (ExtractStringFromJson(argsJson.String(), "title", title, true))     arguments.AddString("title", title);
                         if (ExtractStringFromJson(argsJson.String(), "action", action, true))   arguments.AddString("action", action);
                         if (ExtractStringFromJson(argsJson.String(), "name", name, true))       arguments.AddString("name", name);
+                        if (ExtractStringFromJson(argsJson.String(), "host", host, true))       arguments.AddString("host", host);
+                        if (ExtractStringFromJson(argsJson.String(), "toy_id", toy_id, true) ||
+                            ExtractStringFromJson(argsJson.String(), "toy", toy_id, true))      arguments.AddString("toy_id", toy_id);
+                        if (ExtractStringFromJson(argsJson.String(), "intensity", intensity_str, true)) arguments.AddInt32("intensity", atoi(intensity_str.String()));
+                        if (ExtractStringFromJson(argsJson.String(), "duration", duration_str, true))   arguments.AddInt32("duration", atoi(duration_str.String()));
+                        if (ExtractStringFromJson(argsJson.String(), "port", port_str, true))           arguments.AddInt32("port", atoi(port_str.String()));
                     }
                 } else {
                     // ECCELLENTE: Il plugin ha inviato direttamente il BMessage analizzato in sicurezza.
@@ -1614,6 +1620,12 @@ public:
                     // === QUI AGGIUNGI IL CONTROLLO NEL RAMO BMESSAGE DIRETTI ===
                     if (!arguments.HasString("pattern") && arguments.HasString("query")) {
                         arguments.AddString("pattern", arguments.FindString("query"));
+                    }
+                    if (!arguments.HasString("toy_id") && arguments.HasString("toy")) {
+                        arguments.AddString("toy_id", arguments.FindString("toy"));
+                    }
+                    if (!arguments.HasString("action") && arguments.HasString("act")) {
+                        arguments.AddString("action", arguments.FindString("act"));
                     }
                 }
 
@@ -1654,6 +1666,19 @@ public:
 						const char* pattern = arguments.FindString("pattern");
 						const char* filePath = arguments.FindString("path");
 						notificationText.SetToFormat("\n🔍 [Ricerca pattern '%s' in: %s]\n", pattern ? pattern : "", filePath ? filePath : "");
+					} else if (toolName == "lovense_control") {
+						const char* action = arguments.FindString("action");
+						int32 intensity = 0;
+						if (arguments.FindInt32("intensity", &intensity) != B_OK) {
+							int64 i64;
+							if (arguments.FindInt64("intensity", &i64) == B_OK) intensity = (int32)i64;
+						}
+						notificationText.SetToFormat("\n💖 [Lovense: %s (Intensità: %" B_PRId32 ")]\n", 
+							action ? action : "Azione", intensity);
+					} else if (toolName == "lovense_get_toys") {
+						notificationText = "\n🔍 [Ricerca dispositivi Lovense connessi...]\n";
+					} else if (toolName == "lovense_stop_all") {
+						notificationText = "\n🛑 [Arresto tutti i dispositivi Lovense]\n";
 					} else if (toolName == "get_system_stats") {
 						notificationText = "\n📊 [Lettura statistiche di sistema]\n";
 					} else {

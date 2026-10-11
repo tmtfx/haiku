@@ -1,5 +1,6 @@
 SubDir HAIKU_TOP src servers ai ;
 
+UsePrivateHeaders network netservices shared ;
 UseHeaders [ FDirName $(HAIKU_TOP) src kits ai ] : true ;
 UsePublicHeaders ai ;
 
@@ -12,4 +13,5 @@ Application ai_server :
     localestub
 ;
 
-LinkAgainst ai_server : be [ TargetLibstdc++ ] libai_api.so ;
+LinkAgainst ai_server : be [ TargetLibstdc++ ] libai_api.so libbnetapi.so libnetservices.a <$(TARGET_PACKAGING_ARCH)>libshared.a $(TARGET_NETWORK_LIBS) ;
+

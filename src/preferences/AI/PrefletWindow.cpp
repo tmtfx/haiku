@@ -56,6 +56,7 @@ static const uint32 MSG_BASE_URL_OVERRIDE = 'BOVR';
 static const uint32 MSG_SESSIONS_FETCHED = 'SFCH';
 static const uint32 MSG_READ_PERM_CHANGED = 'RPCH';
 static const uint32 MSG_WRITE_PERM_CHANGED = 'WPCH';
+static const uint32 MSG_TOGGLE_LOVENSE = 'TGLV';
 
 // Simple JSON array parser for flat arrays of strings: ["a","b"]
 static void parse_models_json(const char* json, BPopUpMenu* menu) {
@@ -273,6 +274,10 @@ PrefletWindow::PrefletWindow()
 
     fSystemInfoCheckBox = new BCheckBox("perm_sys_info", B_TRANSLATE("Allow System Info Tool"), nullptr);
     fRunCommandsCheckBox = new BCheckBox("perm_run_cmds", B_TRANSLATE("Allow Run Terminal Commands Tool"), nullptr);
+    fLovenseCheckBox = new BCheckBox("perm_lovense", B_TRANSLATE("Allow Lovense Toys Control"), new BMessage(MSG_TOGGLE_LOVENSE));
+    fLovenseHostControl = new BTextControl("lovense_host", B_TRANSLATE("Host:"), "127.0.0.1", nullptr);
+    fLovensePortControl = new BTextControl("lovense_port", B_TRANSLATE("Port:"), "20010", nullptr);
+    fLovensePortControl->SetExplicitMaxSize(BSize(120, B_SIZE_UNSET));
 
     BBox* pluginConfigBox = new BBox("plugin_config");
     pluginConfigBox->SetLabel(B_TRANSLATE("Plugin Configuration"));
@@ -321,6 +326,19 @@ PrefletWindow::PrefletWindow()
         .End()
     .End();
     
+    BBox* lovenseBox = new BBox("lovense_box");
+    lovenseBox->SetLabel(B_TRANSLATE("Lovense Toys"));
+
+    BLayoutBuilder::Group<>(lovenseBox, B_VERTICAL, 5)
+        .SetInsets(10, 15, 10, 10)
+        .Add(fLovenseCheckBox)
+        .AddGroup(B_HORIZONTAL, 5)
+            .SetInsets(15, 0, 0, 0)
+            .Add(fLovenseHostControl)
+            .Add(fLovensePortControl)
+        .End()
+    .End();
+
     BLayoutBuilder::Group<>(mcpPermissionsBox, B_VERTICAL, 5)
         .SetInsets(10, 20, 10, 10)
         .Add(fSystemInfoCheckBox)
@@ -330,6 +348,7 @@ PrefletWindow::PrefletWindow()
             .Add(WriteAccessGroup)
         .End()
         .Add(fRunCommandsCheckBox)
+        .Add(lovenseBox)
     .End();
 
     BLayoutBuilder::Group<>(pluginConfigBox, B_VERTICAL, 10)
@@ -472,6 +491,12 @@ void PrefletWindow::MessageReceived(BMessage* msg)
     		break;
     	}
     	case MSG_WRITE_PERM_CHANGED: {
+    		break;
+    	}
+    	case MSG_TOGGLE_LOVENSE: {
+    		bool lovenseEnabled = (fLovenseCheckBox->Value() == B_CONTROL_ON);
+    		fLovenseHostControl->SetEnabled(lovenseEnabled);
+    		fLovensePortControl->SetEnabled(lovenseEnabled);
     		break;
     	}
         case MSG_ENGINE_LOCAL:
@@ -801,6 +826,11 @@ void PrefletWindow::MessageReceived(BMessage* msg)
             else if (fWriteAskRadio->Value() == B_CONTROL_ON) s.mcp_permissions |= AI_PERM_WRITE_ASK;
             else s.mcp_permissions |= AI_PERM_WRITE_NO;
             if (fRunCommandsCheckBox->Value() == B_CONTROL_ON) s.mcp_permissions |= AI_PERM_RUN_COMMANDS;
+            if (fLovenseCheckBox->Value() == B_CONTROL_ON) s.mcp_permissions |= AI_PERM_LOVENSE;
+            s.lovense_host = fLovenseHostControl->Text();
+            if (s.lovense_host.IsEmpty()) s.lovense_host = "127.0.0.1";
+            s.lovense_port = atoi(fLovensePortControl->Text());
+            if (s.lovense_port <= 0) s.lovense_port = 20010;
 
             fprintf(stderr, "[LOG] Sto scrivendo su file config:\n  Engine: '%s'\n  Plugin: '%s'\n  Model: '%s'\n", 
                     s.engine.String(), s.plugin.String(), s.model.String());
@@ -1035,6 +1065,7 @@ void PrefletWindow::_UpdatePluginDetails()
 		fWriteNeverRadio->SetEnabled(true);
         //fFileSystemCheckBox->SetEnabled(true);
         fRunCommandsCheckBox->SetEnabled(true);
+        fLovenseCheckBox->SetEnabled(true);
 
         AISettings s;
         if (LoadAISettings(s)) {
@@ -1048,6 +1079,15 @@ void PrefletWindow::_UpdatePluginDetails()
                 fWriteAskRadio->SetValue((s.mcp_permissions & AI_PERM_WRITE_MASK) == AI_PERM_WRITE_ASK);
                 fWriteNeverRadio->SetValue((s.mcp_permissions & AI_PERM_WRITE_MASK) == AI_PERM_WRITE_NO);
                 fRunCommandsCheckBox->SetValue((s.mcp_permissions & AI_PERM_RUN_COMMANDS) ? B_CONTROL_ON : B_CONTROL_OFF);
+
+                bool lovenseOn = (s.mcp_permissions & AI_PERM_LOVENSE) != 0;
+                fLovenseCheckBox->SetValue(lovenseOn ? B_CONTROL_ON : B_CONTROL_OFF);
+                fLovenseHostControl->SetText(s.lovense_host.IsEmpty() ? "127.0.0.1" : s.lovense_host.String());
+                BString portStr;
+                portStr << (s.lovense_port > 0 ? s.lovense_port : 20010);
+                fLovensePortControl->SetText(portStr.String());
+                fLovenseHostControl->SetEnabled(lovenseOn);
+                fLovensePortControl->SetEnabled(lovenseOn);
             } else {
                 fSystemInfoCheckBox->SetValue(B_CONTROL_OFF);
                 //fFileSystemCheckBox->SetValue(B_CONTROL_OFF);
@@ -1058,6 +1098,12 @@ void PrefletWindow::_UpdatePluginDetails()
                 fWriteAskRadio->SetValue(B_CONTROL_OFF);
                 fWriteNeverRadio->SetValue(B_CONTROL_ON);
                 fRunCommandsCheckBox->SetValue(B_CONTROL_OFF);
+
+                fLovenseCheckBox->SetValue(B_CONTROL_OFF);
+                fLovenseHostControl->SetText("127.0.0.1");
+                fLovensePortControl->SetText("20010");
+                fLovenseHostControl->SetEnabled(false);
+                fLovensePortControl->SetEnabled(false);
             }
         } else {
             fSystemInfoCheckBox->SetValue(B_CONTROL_OFF);
@@ -1069,6 +1115,12 @@ void PrefletWindow::_UpdatePluginDetails()
             fWriteAskRadio->SetValue(B_CONTROL_OFF);
             fWriteNeverRadio->SetValue(B_CONTROL_ON);
             fRunCommandsCheckBox->SetValue(B_CONTROL_OFF);
+
+            fLovenseCheckBox->SetValue(B_CONTROL_OFF);
+            fLovenseHostControl->SetText("127.0.0.1");
+            fLovensePortControl->SetText("20010");
+            fLovenseHostControl->SetEnabled(false);
+            fLovensePortControl->SetEnabled(false);
         }
     } else {
         fSystemInfoCheckBox->SetEnabled(false);
@@ -1080,6 +1132,9 @@ void PrefletWindow::_UpdatePluginDetails()
 		fWriteAskRadio->SetEnabled(false);
 		fWriteNeverRadio->SetEnabled(false);
         fRunCommandsCheckBox->SetEnabled(false);
+        fLovenseCheckBox->SetEnabled(false);
+        fLovenseHostControl->SetEnabled(false);
+        fLovensePortControl->SetEnabled(false);
 
         fSystemInfoCheckBox->SetValue(B_CONTROL_OFF);
         //fFileSystemCheckBox->SetValue(B_CONTROL_OFF);
@@ -1090,6 +1145,7 @@ void PrefletWindow::_UpdatePluginDetails()
         fWriteAskRadio->SetValue(B_CONTROL_OFF);
         fWriteNeverRadio->SetValue(B_CONTROL_ON);
         fRunCommandsCheckBox->SetValue(B_CONTROL_OFF);
+        fLovenseCheckBox->SetValue(B_CONTROL_OFF);
     }
 }
 

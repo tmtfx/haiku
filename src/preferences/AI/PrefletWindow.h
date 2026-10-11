@@ -75,6 +75,9 @@ private:
     BRadioButton* fWriteNeverRadio;
 
     BCheckBox* fRunCommandsCheckBox;
+    BCheckBox* fLovenseCheckBox;
+    BTextControl* fLovenseHostControl;
+    BTextControl* fLovensePortControl;
 
     BCheckBox*   fBaseUrlOverrideCheckBox;
 
