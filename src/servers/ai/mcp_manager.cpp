@@ -17,6 +17,7 @@
 #include <vector>
 #include <sstream>
 
+#ifdef LOVE_IS_IN_THE_AIR
 #include <Url.h>
 #include <UrlProtocolRoster.h>
 #include <UrlProtocolListener.h>
@@ -33,10 +34,10 @@ public:
     LovenseHttpListener() {}
     virtual ~LovenseHttpListener() {}
 
-    bool CertificateVerificationFailed(BUrlRequest* request,
-                                       BCertificate& certificate,
+    bool CertificateVerificationFailed(BUrlRequest* request, 
+                                       BCertificate& certificate, 
                                        const char* message) override {
-        return false;
+        return false; 
     }
 };
 
@@ -119,6 +120,7 @@ static BString ExtractStrArg(const BMessage& args, const char* name, const char*
     if (str != nullptr) return BString(str);
     return BString(defaultVal);
 }
+#endif // LOVE_IS_IN_THE_AIR
 
 
 BString ExtractExecutable(const char* fullCmd) {
@@ -645,6 +647,7 @@ BString ExecuteLocalTool(ClientSession* session, const char* tool_name, const BM
 		result = RunSystemCommand(cmd.String());
 	}
 
+#ifdef LOVE_IS_IN_THE_AIR
     // --- LOVENSE TOOLS ---
     else if (name == "lovense_get_toys") {
         if (!(permissions & AI_PERM_LOVENSE))
@@ -734,6 +737,7 @@ BString ExecuteLocalTool(ClientSession* session, const char* tool_name, const BM
         BString payload = "{\"command\":\"Function\",\"action\":\"Stop\",\"timeSec\":0,\"apiVer\":1}";
         result = SendLovenseHttpRequest(host.String(), port, payload.String());
     }
+#endif // LOVE_IS_IN_THE_AIR
     else {
         result.SetToFormat("{\"error\":\"Unknown tool: %s\"}", tool_name);
     }
@@ -907,6 +911,7 @@ void PopulateMcpTools(BList& mpcManager, uint32 permissions) {
             "Run any arbitrary terminal shell command under the current user context. WARNING: Use with extreme caution.", &properties, "cmd"));
     }
 
+#ifdef LOVE_IS_IN_THE_AIR
     // 6. Area Lovense (AI_PERM_LOVENSE)
     if (permissions & AI_PERM_LOVENSE) {
         {
@@ -976,4 +981,5 @@ void PopulateMcpTools(BList& mpcManager, uint32 permissions) {
                 &properties));
         }
     }
+#endif // LOVE_IS_IN_THE_AIR
 }

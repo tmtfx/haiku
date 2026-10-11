@@ -75,9 +75,11 @@ private:
     BRadioButton* fWriteNeverRadio;
 
     BCheckBox* fRunCommandsCheckBox;
+#ifdef LOVE_IS_IN_THE_AIR
     BCheckBox* fLovenseCheckBox;
     BTextControl* fLovenseHostControl;
     BTextControl* fLovensePortControl;
+#endif
 
     BCheckBox*   fBaseUrlOverrideCheckBox;
 

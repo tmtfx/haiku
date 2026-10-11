@@ -322,6 +322,7 @@ bool LoadAISettings(AISettings& out)
         out.mcp_permissions = 0;
     }
 
+#ifdef LOVE_IS_IN_THE_AIR
     if (m.FindString("lovense_host", &val) == B_OK) {
         out.lovense_host = val;
     } else {
@@ -331,6 +332,7 @@ bool LoadAISettings(AISettings& out)
     if (m.FindInt32("lovense_port", &out.lovense_port) != B_OK) {
         out.lovense_port = 20010;
     }
+#endif
 
     return true;
 }
@@ -355,8 +357,10 @@ bool SaveAISettings(const AISettings& settings)
     m.AddBool("base_url_override", settings.base_url_override);
     m.AddBool("use_remote_context", settings.use_remote_context);
     m.AddInt32("mcp_permissions", (int32)settings.mcp_permissions);
+#ifdef LOVE_IS_IN_THE_AIR
     m.AddString("lovense_host", settings.lovense_host.IsEmpty() ? "127.0.0.1" : settings.lovense_host.String());
     m.AddInt32("lovense_port", settings.lovense_port > 0 ? settings.lovense_port : 20010);
+#endif
     // Do NOT store api_key in the settings file. Store it securely in KeyStore.
 
     if (m.Flatten(&file) != B_OK) return false;

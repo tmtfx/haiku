@@ -1,5 +1,9 @@
 SubDir HAIKU_TOP src preferences AI ;
 
+if $(LOVE_IS_IN_THE_AIR) {
+    SubDirC++Flags -DLOVE_IS_IN_THE_AIR ;
+}
+
 UsePrivateHeaders preferences shared app interface ;
 UsePublicHeaders ai ;
 
