@@ -29,6 +29,7 @@ public:
 	virtual						~AccelerantHWInterface();
 
 	virtual bool HasSetCursorBitmap() const;
+	virtual bool Has2DAcceleration() const;
 	virtual	status_t			Initialize();
 	virtual	status_t			Shutdown();
 
@@ -101,6 +102,7 @@ public:
 	virtual	RenderingBuffer*	BackBuffer() const;
 	virtual	bool				IsDoubleBuffered() const;
 	virtual void 				SetUserHardwareCursor(bool enable);
+	virtual void 				SetUser2DAcceleration(bool enable);
 
 protected:
 	virtual	void				_CopyBackToFront(/*const*/ BRegion& region);
@@ -204,6 +206,8 @@ private:
 
 			// user preference: if false, avoid calling accelerant bitmap cursor hook
 			bool			fUserEnableHardwareCursor;
+			// user preference: if false, disable 2D hardware acceleration (pure AGG)
+			bool			fUserEnable2DAcceleration;
 };
 
 #endif // ACCELERANT_HW_INTERFACE_H

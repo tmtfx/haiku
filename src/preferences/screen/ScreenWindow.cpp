@@ -492,6 +492,24 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 		else
 	fHardwareCursorCheckbox->SetValue(B_CONTROL_OFF);
 
+	f2DAccelerationCheckbox = new BCheckBox("2d_acceleration",
+		B_TRANSLATE("Enable 2D hardware acceleration"),
+		new BMessage(TOGGLE_2D_ACCELERATION_MSG));
+	bool has2DAcceleration = false;
+	{
+		BMessenger msgr("application/x-vnd.haiku-app_server");
+		BMessage request('h2da');
+		BMessage reply;
+		if (msgr.IsValid() && msgr.SendMessage(&request, &reply, 200000) == B_OK) {
+			reply.FindBool("has_2d_acceleration", &has2DAcceleration);
+		}
+	}
+	f2DAccelerationCheckbox->SetEnabled(has2DAcceleration);
+	if (fSettings->Acceleration2DEnabled())
+		f2DAccelerationCheckbox->SetValue(B_CONTROL_ON);
+	else
+		f2DAccelerationCheckbox->SetValue(B_CONTROL_OFF);
+
 	// enlarged area for multi-monitor settings
 	{
 		bool dummy;
@@ -608,8 +626,9 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 			.Add(fTVStandardField->CreateMenuBarLayoutItem(), 1, 6)
 		.End();
 
-	// add the checkbox below the grid
+	// add the checkboxes below the grid
 	outerControlsView->AddChild(fHardwareCursorCheckbox);
+	outerControlsView->AddChild(f2DAccelerationCheckbox);
 
 	// TODO: we don't support getting the screen's preferred settings
 	/* fDefaultsButton = new BButton(buttonRect, "DefaultsButton", "Defaults",
@@ -1273,6 +1292,13 @@ ScreenWindow::MessageReceived(BMessage* message)
 		{
 			bool enabled = fHardwareCursorCheckbox->Value() == B_CONTROL_ON;
 			fSettings->SetHardwareCursorEnabled(enabled);
+			break;
+		}
+
+		case TOGGLE_2D_ACCELERATION_MSG:
+		{
+			bool enabled = f2DAccelerationCheckbox->Value() == B_CONTROL_ON;
+			fSettings->SetAcceleration2DEnabled(enabled);
 			break;
 		}
 

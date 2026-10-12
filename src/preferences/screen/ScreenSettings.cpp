@@ -24,7 +24,7 @@ static const char* kSettingsFileName = "Screen_data";
 
 
 static void
-_WriteSettingsFile(const BPoint& offset, bool hardwareCursorEnabled)
+_WriteSettingsFile(const BPoint& offset, bool hardwareCursorEnabled, bool acceleration2DEnabled)
 {
 	BPath path;
 	if (find_directory(B_USER_SETTINGS_DIRECTORY, &path) < B_OK)
@@ -36,6 +36,7 @@ _WriteSettingsFile(const BPoint& offset, bool hardwareCursorEnabled)
 	if (file.InitCheck() == B_OK) {
 		file.Write(&offset, sizeof(BPoint));
 		file.Write(&hardwareCursorEnabled, sizeof(bool));
+		file.Write(&acceleration2DEnabled, sizeof(bool));
 	}
 }
 
@@ -45,6 +46,7 @@ ScreenSettings::ScreenSettings()
 	fWindowFrame.Set(0, 0, 450, 250);
 	BPoint offset;
 	fHardwareCursorEnabled = true; // default
+	fAcceleration2DEnabled = false; // default
 
 	BPath path;
 	if (find_directory(B_USER_SETTINGS_DIRECTORY, &path) == B_OK) {
@@ -60,6 +62,12 @@ ScreenSettings::ScreenSettings()
 				ssize_t read2 = file.Read(&hw, sizeof(bool));
 				if (read2 == (ssize_t)sizeof(bool))
 					fHardwareCursorEnabled = hw;
+
+				// try to read saved 2D acceleration flag
+				bool acc = false;
+				ssize_t read3 = file.Read(&acc, sizeof(bool));
+				if (read3 == (ssize_t)sizeof(bool))
+					fAcceleration2DEnabled = acc;
 			}
 		}
 	}
@@ -71,7 +79,7 @@ ScreenSettings::ScreenSettings()
 ScreenSettings::~ScreenSettings()
 {
 	BPoint offset = fWindowFrame.LeftTop();
-	_WriteSettingsFile(offset, fHardwareCursorEnabled);
+	_WriteSettingsFile(offset, fHardwareCursorEnabled, fAcceleration2DEnabled);
 }
 
 
@@ -88,9 +96,24 @@ ScreenSettings::SetHardwareCursorEnabled(bool enabled)
 	fHardwareCursorEnabled = enabled;
 	// persist immediately
 	BPoint offset = fWindowFrame.LeftTop();
-	_WriteSettingsFile(offset, fHardwareCursorEnabled);
+	_WriteSettingsFile(offset, fHardwareCursorEnabled, fAcceleration2DEnabled);
 	// communicate with app_server
 	BMessage msg(AS_SET_HW_CUR_BITMAP_ENABLED);
+	msg.AddBool("enable", enabled);
+	BMessenger appServerMessenger("application/x-vnd.Haiku-app_server");
+	appServerMessenger.SendMessage(&msg);
+}
+
+
+void
+ScreenSettings::SetAcceleration2DEnabled(bool enabled)
+{
+	fAcceleration2DEnabled = enabled;
+	// persist immediately
+	BPoint offset = fWindowFrame.LeftTop();
+	_WriteSettingsFile(offset, fHardwareCursorEnabled, fAcceleration2DEnabled);
+	// communicate with app_server
+	BMessage msg(AS_SET_2D_ACCELERATION_ENABLED);
 	msg.AddBool("enable", enabled);
 	BMessenger appServerMessenger("application/x-vnd.Haiku-app_server");
 	appServerMessenger.SendMessage(&msg);

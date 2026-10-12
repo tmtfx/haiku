@@ -26,9 +26,14 @@ class ScreenSettings {
 		bool HardwareCursorEnabled() const { return fHardwareCursorEnabled; };
 		void SetHardwareCursorEnabled(bool enabled);
 
+		// 2d acceleration preference
+		bool Acceleration2DEnabled() const { return fAcceleration2DEnabled; }
+		void SetAcceleration2DEnabled(bool enabled);
+
 	private:
 		BRect fWindowFrame;
 		bool fHardwareCursorEnabled;
+		bool fAcceleration2DEnabled;
 };
 
 #endif	// SCREEN_SETTINGS_H

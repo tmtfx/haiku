@@ -167,6 +167,25 @@ AppServer::MessageReceived(BMessage* message)
 			break;
 		}
 
+		case AS_SET_2D_ACCELERATION_ENABLED:
+		{
+			bool enable;
+			if (message->FindBool("enable", &enable) == B_OK) {
+				BAutolock locker(gScreenManager);
+				if (gScreenManager && gScreenManager->CountScreens() > 0) {
+					Screen* s = gScreenManager->ScreenAt(0);
+
+					if (s != NULL && s->HWInterface() != NULL) {
+						AccelerantHWInterface* interface = dynamic_cast<AccelerantHWInterface*>(s->HWInterface());
+
+						if (interface != NULL)
+							interface->SetUser2DAcceleration(enable);
+					}
+				}
+			}
+			break;
+		}
+
 		case 'hsbm':
 		{
 			bool has = false;
@@ -179,6 +198,22 @@ AppServer::MessageReceived(BMessage* message)
 
 			BMessage reply;
 			reply.AddBool("has_set_cursor_bitmap", has);
+			message->SendReply(&reply);
+			break;
+		}
+
+		case 'h2da':
+		{
+			bool has = false;
+			BAutolock locker(gScreenManager);
+			if (gScreenManager && gScreenManager->CountScreens() > 0) {
+				Screen* s = gScreenManager->ScreenAt(0);
+				if (s && s->HWInterface())
+					has = s->HWInterface()->Has2DAcceleration();
+			}
+
+			BMessage reply;
+			reply.AddBool("has_2d_acceleration", has);
 			message->SendReply(&reply);
 			break;
 		}

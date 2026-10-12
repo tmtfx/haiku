@@ -164,7 +164,8 @@ AccelerantHWInterface::AccelerantHWInterface()
 	fBlitParams(new (nothrow) blit_params[kDefaultParamsCount]),
 	fBlitParamsCount(kDefaultParamsCount),
 
-	fUserEnableHardwareCursor(true)
+	fUserEnableHardwareCursor(true),
+	fUserEnable2DAcceleration(false)
 {
 	fDisplayMode.virtual_width = 0;
 	fDisplayMode.virtual_height = 0;
@@ -190,6 +191,13 @@ bool
 AccelerantHWInterface::HasSetCursorBitmap() const
 {
 	return fAccSetCursorBitmap != NULL;
+}
+
+
+bool
+AccelerantHWInterface::Has2DAcceleration() const
+{
+	return fAccScreenBlit != NULL && fAccAcquireEngine != NULL;
 }
 
 
@@ -233,6 +241,9 @@ AccelerantHWInterface::Initialize()
 					bool hw = true;
 					if (file.Read(&hw, sizeof(bool)) == (ssize_t)sizeof(bool))
 						fUserEnableHardwareCursor = hw;
+					bool acc = false;
+					if (file.Read(&acc, sizeof(bool)) == (ssize_t)sizeof(bool))
+						fUserEnable2DAcceleration = acc;
 				}
 			}
 		}
@@ -1158,6 +1169,9 @@ AccelerantHWInterface::GetDriverPath(BString& string)
 uint32
 AccelerantHWInterface::AvailableHWAcceleration() const
 {
+	if (!fUserEnable2DAcceleration)
+		return 0;
+
 	uint32 flags = 0;
 
 	if (fAccScreenBlit != NULL && fAccAcquireEngine != NULL)
@@ -1539,6 +1553,14 @@ AccelerantHWInterface::SetCursor(ServerCursor* cursor)
 void AccelerantHWInterface::SetUserHardwareCursor(bool enable)
 {
 	fUserEnableHardwareCursor = enable; 
+}
+
+void AccelerantHWInterface::SetUser2DAcceleration(bool enable)
+{
+	if (fUserEnable2DAcceleration != enable) {
+		fUserEnable2DAcceleration = enable;
+		_NotifyFrameBufferChanged();
+	}
 }
 
 void
