@@ -473,6 +473,15 @@ AccelerantHWInterface::_UpdateHooksAfterModeChange()
 	fAccScreenBlit = (screen_to_screen_blit)fAccelerantHook(
 		B_SCREEN_TO_SCREEN_BLIT, (void*)&fDisplayMode);
 
+	// pre-query retrace semaphore while under mode-switch write lock
+	accelerant_retrace_semaphore AccelerantRetraceSemaphore =
+		(accelerant_retrace_semaphore)fAccelerantHook(
+			B_ACCELERANT_RETRACE_SEMAPHORE, NULL);
+	if (!AccelerantRetraceSemaphore)
+		fRetraceSemaphore = B_UNSUPPORTED;
+	else
+		fRetraceSemaphore = AccelerantRetraceSemaphore();
+
 	// overlay
 	fAccOverlayCount = (overlay_count)fAccelerantHook(B_OVERLAY_COUNT, NULL);
 	fAccOverlaySupportedSpaces = (overlay_supported_spaces)fAccelerantHook(
@@ -1044,6 +1053,9 @@ AccelerantHWInterface::GetMonitorInfo(monitor_info* info)
 sem_id
 AccelerantHWInterface::RetraceSemaphore()
 {
+	if (fRetraceSemaphore != -1)
+		return fRetraceSemaphore;
+
 	AutoWriteLocker _(this);
 
 	if (fRetraceSemaphore != -1)
@@ -1189,6 +1201,23 @@ AccelerantHWInterface::CopyRegion(const clipping_rect* sortedRectList,
 }
 
 
+bigtime_t
+AccelerantHWInterface::_RetraceTimeout() const
+{
+	if (fDisplayMode.timing.pixel_clock > 0
+		&& fDisplayMode.timing.h_total > 0
+		&& fDisplayMode.timing.v_total > 0) {
+		uint64 period = ((uint64)fDisplayMode.timing.h_total
+			* fDisplayMode.timing.v_total * 1000)
+			/ fDisplayMode.timing.pixel_clock;
+		// 1.5x frame period to ensure catching the next VBLANK interval
+		return (bigtime_t)(period + period / 2);
+	}
+
+	return 25000;
+}
+
+
 void
 AccelerantHWInterface::_CopyRegion(const clipping_rect* sortedRectList,
 	uint32 count, int32 xOffset, int32 yOffset)
@@ -1205,6 +1234,9 @@ AccelerantHWInterface::_CopyRegion(const clipping_rect* sortedRectList,
 
 	if (!fHardwareCursorEnabled)
 		_RestoreCursorArea();
+
+	// Wait for vertical blanking to synchronize the hardware blit with display refresh
+	WaitForRetrace(_RetraceTimeout());
 
 	if (fAccAcquireEngine(B_2D_ACCELERATION, 0xff, &fSyncToken,
 			&fEngineToken) >= B_OK) {

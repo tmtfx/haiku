@@ -131,6 +131,7 @@ private:
 			void				_SetSystemPalette();
 			void				_SetGrayscalePalette();
 			void				_UpdateHardwareCursor(bool wasHardwareCursorEnabled);
+			bigtime_t			_RetraceTimeout() const;
 
 private:
 			int					fCardFD;
