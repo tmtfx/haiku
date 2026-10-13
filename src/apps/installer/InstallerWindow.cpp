@@ -892,10 +892,13 @@ InstallerWindow::MessageReceived(BMessage *msg)
 			}
 			break;
 		}
-
 		case BENCHMARK_CHECKBOX_CHANGED:
+		{
+			bool enable2D = (fBench2DCheckbox != NULL
+				&& fBench2DCheckbox->Value() == B_CONTROL_ON);
+			_SaveScreenSettings(enable2D);
 			break;
-
+		}
 		case kGoToMP2:
 		{
 			fMasterPassword2->MakeFocus(true);
