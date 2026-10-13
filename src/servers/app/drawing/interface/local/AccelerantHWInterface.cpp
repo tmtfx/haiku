@@ -157,7 +157,7 @@ AccelerantHWInterface::AccelerantHWInterface()
 
 	fInitialModeSwitch(true),
 
-	fRetraceSemaphore(-1),
+	fRetraceSemaphore(B_UNSUPPORTED),
 
 	fRectParams(new (nothrow) fill_rect_params[kDefaultParamsCount]),
 	fRectParamsCount(kDefaultParamsCount),
@@ -477,10 +477,13 @@ AccelerantHWInterface::_UpdateHooksAfterModeChange()
 	accelerant_retrace_semaphore AccelerantRetraceSemaphore =
 		(accelerant_retrace_semaphore)fAccelerantHook(
 			B_ACCELERANT_RETRACE_SEMAPHORE, NULL);
-	if (!AccelerantRetraceSemaphore)
-		fRetraceSemaphore = B_UNSUPPORTED;
-	else
+	if (AccelerantRetraceSemaphore != NULL) {
 		fRetraceSemaphore = AccelerantRetraceSemaphore();
+		if (fRetraceSemaphore < 0)
+			fRetraceSemaphore = B_UNSUPPORTED;
+	} else {
+		fRetraceSemaphore = B_UNSUPPORTED;
+	}
 
 	// overlay
 	fAccOverlayCount = (overlay_count)fAccelerantHook(B_OVERLAY_COUNT, NULL);
@@ -510,6 +513,7 @@ AccelerantHWInterface::Shutdown()
 	fAccReleaseEngine = NULL;
 	fAccSyncToToken = NULL;
 	fAccScreenBlit = NULL;
+	fRetraceSemaphore = B_UNSUPPORTED;
 
 	if (fAccelerantHook != NULL) {
 		uninit_accelerant uninitAccelerant
@@ -1053,22 +1057,6 @@ AccelerantHWInterface::GetMonitorInfo(monitor_info* info)
 sem_id
 AccelerantHWInterface::RetraceSemaphore()
 {
-	if (fRetraceSemaphore != -1)
-		return fRetraceSemaphore;
-
-	AutoWriteLocker _(this);
-
-	if (fRetraceSemaphore != -1)
-		return fRetraceSemaphore;
-
-	accelerant_retrace_semaphore AccelerantRetraceSemaphore =
-		(accelerant_retrace_semaphore)fAccelerantHook(
-			B_ACCELERANT_RETRACE_SEMAPHORE, NULL);
-	if (!AccelerantRetraceSemaphore)
-		fRetraceSemaphore = B_UNSUPPORTED;
-	else
-		fRetraceSemaphore = AccelerantRetraceSemaphore();
-
 	return fRetraceSemaphore;
 }
 
@@ -1076,11 +1064,10 @@ AccelerantHWInterface::RetraceSemaphore()
 status_t
 AccelerantHWInterface::WaitForRetrace(bigtime_t timeout)
 {
-	sem_id sem = RetraceSemaphore();
-	if (sem < 0)
-		return sem;
+	if (fRetraceSemaphore < 0)
+		return fRetraceSemaphore;
 
-	return acquire_sem_etc(sem, 1, B_RELATIVE_TIMEOUT, timeout);
+	return acquire_sem_etc(fRetraceSemaphore, 1, B_RELATIVE_TIMEOUT, timeout);
 }
 
 
@@ -1236,7 +1223,9 @@ AccelerantHWInterface::_CopyRegion(const clipping_rect* sortedRectList,
 		_RestoreCursorArea();
 
 	// Wait for vertical blanking to synchronize the hardware blit with display refresh
-	WaitForRetrace(_RetraceTimeout());
+	// ONLY if supported by the driver (if RetraceSemaphore < 0, e.g. S3 ViRGE returning B_ERROR, proceed without V-Sync)
+	if (fRetraceSemaphore >= 0)
+		WaitForRetrace(_RetraceTimeout());
 
 	if (fAccAcquireEngine(B_2D_ACCELERATION, 0xff, &fSyncToken,
 			&fEngineToken) >= B_OK) {
