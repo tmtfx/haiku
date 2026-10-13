@@ -823,14 +823,12 @@ InstallerWindow::MessageReceived(BMessage *msg)
 
 		case MASTER_PASSWORD_SHOW:
 		{
-	    if (fMasterPassword1 != NULL)
-    	    fMasterPassword1->Mask(!fMasterPassword1->IsMasked());
-
-	    if (fMasterPassword2 != NULL)
-        	fMasterPassword2->Mask(!fMasterPassword2->IsMasked());
-        
-    	break;
-	}
+			if (fMasterPassword1 != NULL)
+				fMasterPassword1->Mask(!fMasterPassword1->IsMasked());
+			if (fMasterPassword2 != NULL)
+				fMasterPassword2->Mask(!fMasterPassword2->IsMasked());
+			break;
+		}
 		/*{
 			// Toggle masked/visible on both fields simultaneously.
 			bool showText = fMasterPassword1->IsMasked();
@@ -881,7 +879,7 @@ InstallerWindow::MessageReceived(BMessage *msg)
                 _RunBenchmark();
             }
 			break;
-
+		}
 		case BENCHMARK_DONE:
 		{
 			bool enable2D = (fBench2DCheckbox != NULL
@@ -897,7 +895,7 @@ InstallerWindow::MessageReceived(BMessage *msg)
 
 		case BENCHMARK_CHECKBOX_CHANGED:
 			break;
-		}
+
 		case kGoToMP2:
 		{
 			fMasterPassword2->MakeFocus(true);
