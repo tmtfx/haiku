@@ -186,19 +186,18 @@ uint8 i;
      * The srcAddr must be 4 bytes aligned and is always for standard
      * resolutions.
      */
-    srcAddr = (uint32)si->framebuffer - (uint32)si->memory +
-        si->dm.virtual_width * si->dm.virtual_height * bpp;
+    srcAddr = si->dm.virtual_width * si->dm.virtual_height * bpp;
 
     switch(bpp) {
         case 2:
             set8(mmRegs+0x92, 0x80, 0x02); /* 4x1 source wrap */
             for (i = 0; i < 2; i++) /* copy the color to source address */
-                ((vuint16 *)((uint32)si->memory + srcAddr))[i] = (uint16)color;
+                ((vuint16 *)((uint8 *)localMemory + srcAddr))[i] = (uint16)color;
             break;
         case 3:
             set8(mmRegs+0x92, 0x80, 0x0a); /* 3x1 source wrap */
             for (i = 0; i < 3; i++) /* copy the color to source address */
-                ((vuint8 *)((uint32)si->memory + srcAddr))[i] = ((uint8 *)&color)[i];
+                ((vuint8 *)((uint8 *)localMemory + srcAddr))[i] = ((uint8 *)&color)[i];
 
             break;
     }

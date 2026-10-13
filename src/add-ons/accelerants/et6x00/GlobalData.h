@@ -17,6 +17,8 @@ extern display_mode *et6000ModesList;
 extern area_id et6000ModesListArea;
 extern int accelerantIsClone;
 extern volatile unsigned char *mmRegs; /* memory mapped registers */
+extern void *localMemory;
+extern area_id localMemoryArea;
 /*****************************************************************************/
 
 

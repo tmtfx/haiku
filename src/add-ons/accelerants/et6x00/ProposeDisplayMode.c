@@ -101,7 +101,7 @@ color_space spaces[] = {B_RGB15_LITTLE, B_RGB16_LITTLE, B_RGB24_LITTLE};
     /* Create an area to hold the info */
     si->modesArea = et6000ModesListArea =
         create_area("ET6000 accelerant mode info", (void **)&et6000ModesList,
-            B_ANY_ADDRESS, maxSize, B_NO_LOCK, B_READ_AREA | B_WRITE_AREA);
+            B_ANY_ADDRESS, maxSize, B_NO_LOCK, B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA);
 
     if (et6000ModesListArea < B_OK)
         return et6000ModesListArea;

@@ -354,8 +354,8 @@ uint32 memSize = 0;
         et6000EnableLinearMemoryMapping(pciConfigSpace);
 
         /* Check whether the memory beyond 2.25Mb really exists */
-        *(volatile uint32 *)((uint32)memory + 2359296) = 0xaa55aa55;
-        if (*(volatile uint32 *)((uint32)memory + 2359296) != 0xaa55aa55)
+        *(volatile uint32 *)((volatile uint8 *)memory + 2359296) = 0xaa55aa55;
+        if (*(volatile uint32 *)((volatile uint8 *)memory + 2359296) != 0xaa55aa55)
             memSize = 2359296; /* It's 2.25Mb */
 
         ioSet8(pciConfigSpace+0x40, 0x00, pci40); /* Restore */
@@ -398,16 +398,16 @@ pci_info *pcii = &(di->pcii);
         di->pcii.u.h0.base_registers[0],
         di->pcii.u.h0.base_register_sizes[0],
 		B_ANY_KERNEL_BLOCK_ADDRESS | B_UNCACHED_MEMORY,
-        B_READ_AREA + B_WRITE_AREA,
+        B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA,
         &(si->memory));
 
     si->framebuffer = si->memory;
-    si->mmRegs = (void *)((uint32)si->memory + 0x003fff00);
-    si->emRegs = (void *)((uint32)si->memory + 0x003fe000);
+    si->mmRegs = (void *)((uint8 *)si->memory + 0x003fff00);
+    si->emRegs = (void *)((uint8 *)si->memory + 0x003fe000);
 
     /* remember the physical addresses */
     si->physMemory = si->physFramebuffer =
-        (void *) di->pcii.u.h0.base_registers_pci[0];
+        (void *)(addr_t)di->pcii.u.h0.base_registers_pci[0];
 
     si->memSize = et6000GetOnboardMemorySize(si->pciConfigSpace, si->memory);
 
@@ -466,7 +466,7 @@ char shared_name[B_OS_NAME_LENGTH];
         di->pcii.bus, di->pcii.device, di->pcii.function);
     /* create this area with NO user-space read or write permissions, to prevent accidental dammage */
     di->sharedArea = create_area(shared_name, (void **)&(di->si), B_ANY_KERNEL_ADDRESS, ((sizeof(ET6000SharedInfo) + (B_PAGE_SIZE - 1)) & ~(B_PAGE_SIZE - 1)), B_FULL_LOCK,
-		B_FULL_LOCK, B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA | B_CLONEABLE_AREA);
+		B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA | B_CLONEABLE_AREA);
     if (di->sharedArea < 0) {
         /* return the error */
         result = di->sharedArea;
@@ -628,61 +628,75 @@ static status_t et6000ControlHook(void* dev, uint32 msg, void *buf, size_t len) 
 ET6000DeviceInfo *di = (ET6000DeviceInfo *)dev;
 status_t result = B_DEV_INVALID_IOCTL;
 
-    /* ddprintf(("ioctl: %d, buf: 0x%08x, len: %d\n", msg, buf, len)); */
     switch (msg) {
         /* the only PUBLIC ioctl */
         case B_GET_ACCELERANT_SIGNATURE: {
-            char *sig = (char *)buf;
-            strcpy(sig, "et6000.accelerant");
+            if (user_strlcpy((char *)buf, "et6x00.accelerant", len) < B_OK)
+                return B_BAD_ADDRESS;
             result = B_OK;
         } break;
 
         /* PRIVATE ioctl from here on */
         case ET6000_GET_PRIVATE_DATA: {
-            ET6000GetPrivateData *gpd = (ET6000GetPrivateData *)buf;
-            if (gpd->magic == ET6000_PRIVATE_DATA_MAGIC) {
-                gpd->sharedInfoArea = di->sharedArea;
-                result = B_OK;
+            ET6000GetPrivateData gpd;
+            if (user_memcpy(&gpd, buf, sizeof(ET6000GetPrivateData)) < B_OK)
+                return B_BAD_ADDRESS;
+            if (gpd.magic == ET6000_PRIVATE_DATA_MAGIC) {
+                gpd.sharedInfoArea = di->sharedArea;
+                result = user_memcpy(buf, &gpd, sizeof(ET6000GetPrivateData));
             }
         } break;
 
         case ET6000_GET_PCI: {
-            ET6000GetSetPCI *gsp = (ET6000GetSetPCI *)buf;
-            if (gsp->magic == ET6000_PRIVATE_DATA_MAGIC) {
+            ET6000GetSetPCI gsp;
+            if (user_memcpy(&gsp, buf, sizeof(ET6000GetSetPCI)) < B_OK)
+                return B_BAD_ADDRESS;
+            if (gsp.magic == ET6000_PRIVATE_DATA_MAGIC) {
                 pci_info *pcii = &(di->pcii);
-                gsp->value = get_pci(gsp->offset, gsp->size);
-                result = B_OK;
+                gsp.value = get_pci(gsp.offset, gsp.size);
+                result = user_memcpy(buf, &gsp, sizeof(ET6000GetSetPCI));
             }
         } break;
 
         case ET6000_SET_PCI: {
-            ET6000GetSetPCI *gsp = (ET6000GetSetPCI *)buf;
-            if (gsp->magic == ET6000_PRIVATE_DATA_MAGIC) {
+            ET6000GetSetPCI gsp;
+            if (user_memcpy(&gsp, buf, sizeof(ET6000GetSetPCI)) < B_OK)
+                return B_BAD_ADDRESS;
+            if (gsp.magic == ET6000_PRIVATE_DATA_MAGIC) {
                 pci_info *pcii = &(di->pcii);
-                set_pci(gsp->offset, gsp->size, gsp->value);
+                set_pci(gsp.offset, gsp.size, gsp.value);
                 result = B_OK;
             }
         } break;
 
         case ET6000_DEVICE_NAME: {   /* Needed for cloning */
-            ET6000DeviceName *dn = (ET6000DeviceName *)buf;
-            if(dn->magic == ET6000_PRIVATE_DATA_MAGIC) {
-                strncpy(dn->name, di->name, B_OS_NAME_LENGTH);
+            ET6000DeviceName dn;
+            if (user_memcpy(&dn, buf, sizeof(ET6000DeviceName)) < B_OK)
+                return B_BAD_ADDRESS;
+            if (dn.magic == ET6000_PRIVATE_DATA_MAGIC) {
+                if (user_strlcpy(dn.name, di->name, B_OS_NAME_LENGTH) < B_OK)
+                    return B_BAD_ADDRESS;
                 result = B_OK;
             }
         } break;
 
         case ET6000_PROPOSE_DISPLAY_MODE: {
-            ET6000DisplayMode *dm = (ET6000DisplayMode *)buf;
-            if(dm->magic == ET6000_PRIVATE_DATA_MAGIC) {
-                result = et6000ProposeMode(&dm->mode, dm->memSize);
+            ET6000DisplayMode dm;
+            if (user_memcpy(&dm, buf, sizeof(ET6000DisplayMode)) < B_OK)
+                return B_BAD_ADDRESS;
+            if (dm.magic == ET6000_PRIVATE_DATA_MAGIC) {
+                result = et6000ProposeMode(&dm.mode, dm.memSize);
+                if (result == B_OK)
+                    result = user_memcpy(buf, &dm, sizeof(ET6000DisplayMode));
             }
         } break;
 
         case ET6000_SET_DISPLAY_MODE: {
-            ET6000DisplayMode *dm = (ET6000DisplayMode *)buf;
-            if(dm->magic == ET6000_PRIVATE_DATA_MAGIC) {
-                result = et6000SetMode(&dm->mode, dm->pciConfigSpace);
+            ET6000DisplayMode dm;
+            if (user_memcpy(&dm, buf, sizeof(ET6000DisplayMode)) < B_OK)
+                return B_BAD_ADDRESS;
+            if (dm.magic == ET6000_PRIVATE_DATA_MAGIC) {
+                result = et6000SetMode(&dm.mode, dm.pciConfigSpace);
             }
         } break;
     }

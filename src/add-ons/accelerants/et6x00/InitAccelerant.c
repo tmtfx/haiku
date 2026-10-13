@@ -38,8 +38,22 @@ ET6000GetPrivateData gpd;
         goto error0;
     }
 
-    mmRegs = si->mmRegs;
+    /* clone the video memory and registers area for our use */
+    localMemoryArea = clone_area("ET6000 cloned memory", (void **)&localMemory,
+        B_ANY_ADDRESS, B_READ_AREA | B_WRITE_AREA, si->memoryArea);
+    if (localMemoryArea < 0) {
+        result = localMemoryArea;
+        goto error1;
+    }
 
+    mmRegs = (volatile unsigned char *)localMemory + 0x003fff00;
+
+    return B_OK;
+
+error1:
+    delete_area(sharedInfoArea);
+    sharedInfoArea = -1;
+    si = NULL;
 error0:
     return result;
 }
@@ -48,9 +62,19 @@ error0:
  * Clean up code shared between primary and cloned accelrants.
  */
 static void uninitCommon(void) {
+    if (localMemoryArea >= 0) {
+        delete_area(localMemoryArea);
+        localMemoryArea = -1;
+    }
+    localMemory = NULL;
+    mmRegs = NULL;
+
     /* release our copy of the shared info from the kernel driver */
-    delete_area(sharedInfoArea);
-    si = 0;
+    if (sharedInfoArea >= 0) {
+        delete_area(sharedInfoArea);
+        sharedInfoArea = -1;
+    }
+    si = NULL;
 }
 /*****************************************************************************/
 /*
@@ -89,7 +113,7 @@ status_t result;
      * We store this info in a frame_buffer_config structure to
      * make it convienient to return to the app_server later.
      */
-    si->fbc.frame_buffer = si->framebuffer;
+    si->fbc.frame_buffer = localMemory;
     si->fbc.frame_buffer_dma = si->physFramebuffer;
 
     /* init the shared semaphore */
@@ -146,13 +170,11 @@ ssize_t ACCELERANT_CLONE_INFO_SIZE(void) {
  */
 void GET_ACCELERANT_CLONE_INFO(void *data) {
 ET6000DeviceName dn;
-status_t result;
-
-    /* call the kernel driver to get the device name */
+/* call the kernel driver to get the device name */
     dn.magic = ET6000_PRIVATE_DATA_MAGIC;
     /* store the returned info directly into the passed buffer */
     dn.name = (char *)data;
-    result = ioctl(fd, ET6000_DEVICE_NAME, &dn, sizeof(dn));
+    ioctl(fd, ET6000_DEVICE_NAME, &dn, sizeof(dn));
 }
 /*****************************************************************************/
 /*
@@ -203,8 +225,15 @@ error0:
 /*****************************************************************************/
 void UNINIT_ACCELERANT(void) {
     /* free our mode list area */
-    delete_area(et6000ModesListArea);
-    et6000ModesList = 0;
+    if (et6000ModesListArea >= 0) {
+        delete_area(et6000ModesListArea);
+        et6000ModesListArea = -1;
+    }
+    et6000ModesList = NULL;
+
+    if (!accelerantIsClone && si != NULL) {
+        DELETE_BEN(si->engine.lock);
+    }
 
     /* release our cloned data */
     uninitCommon();

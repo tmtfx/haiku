@@ -14,4 +14,6 @@ display_mode *et6000ModesList;
 area_id et6000ModesListArea;
 int accelerantIsClone;
 volatile unsigned char *mmRegs; /* memory mapped registers */
+void *localMemory;
+area_id localMemoryArea;
 /*****************************************************************************/
