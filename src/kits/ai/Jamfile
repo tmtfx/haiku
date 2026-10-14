@@ -1,9 +1,5 @@
 SubDir HAIKU_TOP src kits ai ;
 
-if $(LOVE_IS_IN_THE_AIR) {
-    SubDirC++Flags -DLOVE_IS_IN_THE_AIR ;
-}
-
 SetSubDirSupportedPlatforms haiku ;
 UsePrivateHeaders shared ;
 

@@ -28,9 +28,6 @@ enum ai_mpc_perm_WRITE {
 enum ai_mcp_permissions {
     AI_PERM_SYSTEM_INFO     = 1 << 0,
     AI_PERM_RUN_COMMANDS    = 1 << 1,
-#ifdef LOVE_IS_IN_THE_AIR
-    AI_PERM_LOVENSE         = 1 << 2,
-#endif
 
     // File Read (Bit 8-9)
     AI_PERM_READ_SHIFT      = 8,
@@ -58,10 +55,6 @@ struct AISettings {
     bool    base_url_override; // allow editing base_url even for remote plugins when true
     bool    use_remote_context;
     uint32  mcp_permissions;
-#ifdef LOVE_IS_IN_THE_AIR
-    BString lovense_host;
-    int32   lovense_port;
-#endif
 };
 
 // Load settings from ~/config/settings/AIService_settings (BMessage flattened)

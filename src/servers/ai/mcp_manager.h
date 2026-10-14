@@ -20,11 +20,6 @@ bool ExtractStringFromJson(const char* json, const char* key, BString& out, bool
 // Esegue uno specifico strumento locale in sicurezza e ne restituisce il risultato
 BString ExecuteLocalTool(ClientSession* session, const char* toolName, const BMessage& arguments);
 
-#ifdef LOVE_IS_IN_THE_AIR
-// Invia una richiesta HTTP all'API locale di Lovense Connect
-BString SendLovenseHttpRequest(const char* host, int32 port, const char* jsonPayload);
-#endif
-
 // Esegue un comando generico di sistema tramite shell
 BString RunSystemCommand(const char* command);
 
