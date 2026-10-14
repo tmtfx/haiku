@@ -19,19 +19,69 @@ static status_t
 padlock_rng_generate(uint8* buffer, size_t length)
 {
     size_t generated = 0;
+
+    while (generated < length) {
+        // 1. Allineamento rigoroso a 16 byte per xstore
+        alignas(16) uint32 value[4] = {0};
+        uint32 statusFlag = 1;
+        uint32 bytesGenerated = 0;
+
+        // 2. Loop con tentativi limitati per evitare il freeze infinito
+        int retryCount = 5000;
+        while (retryCount-- > 0) {
+            asm volatile (
+                "xorl %%edx, %%edx\n\t"     // EDX = 0 (fattore di qualità/nessun filtro)
+                ".byte 0x0f, 0xa7, 0xc0\n\t" // Opcode esplicito per xstore (Compatibile con tutti i GCC)
+                "setc %%cl\n\t"              // CL = 1 se Carry (errore/dati non pronti)
+                "movzbl %%cl, %0\n\t"
+                "movl %%eax, %1\n\t"         // EAX restituisce i byte scritti
+                : "=r"(statusFlag), "=r"(bytesGenerated)
+                : "D"(value)                 // RDI/EDI punta al buffer allineato a 16 byte
+                : "eax", "edx", "ecx", "memory", "cc"
+            );
+
+            if (statusFlag == 0 && bytesGenerated > 0)
+                break; // Dati pronti ed estratti con successo
+
+            // Breve riposo per le pipeline della CPU
+            #if defined(__x86_64__) || defined(__i386__)
+            asm volatile("pause" ::: "memory");
+            #endif
+        }
+
+        // 3. Se l'hardware non risponde dopo i tentativi, cedi il controllo allo scheduler di Haiku
+        if (statusFlag != 0 || bytesGenerated == 0) {
+            snooze(50); // Cede il passo per 50 microsecondi
+            continue;
+        }
+
+        size_t toCopy = (length - generated < bytesGenerated) 
+            ? (length - generated) : bytesGenerated;
+        
+        memcpy(buffer + generated, value, toCopy);
+        generated += toCopy;
+    }
+
+    return B_OK;
+}
+/*
+static status_t
+padlock_rng_generate(uint8* buffer, size_t length)
+{
+    size_t generated = 0;
     
     while (generated < length) {
         uint32 value[2]; // Usiamo 8 byte per sicurezza, xstore è avido
         uint32 statusFlag;
 
-        /*
-         * xstore (VIA PadLock RNG):
-         * EDI = puntatore alla destinazione
-         * EDX = 0 (qualità massima/nessun filtraggio hardware extra)
-         * Risultato:
-         * EAX = numero di byte generati (di solito 0 o 8)
-         * Carry Flag = 0 se successo, 1 se errore/dati non pronti
-         */
+        //
+        // xstore (VIA PadLock RNG):
+        // EDI = puntatore alla destinazione
+        // EDX = 0 (qualità massima/nessun filtraggio hardware extra)
+        // Risultato:
+        // EAX = numero di byte generati (di solito 0 o 8)
+        // Carry Flag = 0 se successo, 1 se errore/dati non pronti
+        //
         asm volatile (
             "movl $0, %%edx\n\t"        // Qualità 0
             "xstore\n\t"                // Scrive in (EDI)
@@ -57,7 +107,7 @@ padlock_rng_generate(uint8* buffer, size_t length)
     }
     
     return B_OK;
-}
+}*/
 
 static status_t
 padlock_rng_process(BCryptoRequest* request)
