@@ -17,6 +17,112 @@
 #include <vector>
 #include <sstream>
 
+#ifdef LOVE_IS_IN_THE_AIR
+#include <Url.h>
+#include <UrlProtocolRoster.h>
+#include <UrlProtocolListener.h>
+#include <UrlRequest.h>
+#include <HttpRequest.h>
+#include <HttpResult.h>
+#include <HttpHeaders.h>
+#include <DataIO.h>
+
+using namespace BPrivate::Network;
+
+class LovenseHttpListener : public BUrlProtocolListener {
+public:
+    LovenseHttpListener() {}
+    virtual ~LovenseHttpListener() {}
+
+    bool CertificateVerificationFailed(BUrlRequest* request, 
+                                       BCertificate& certificate, 
+                                       const char* message) override {
+        return false; 
+    }
+};
+
+BString SendLovenseHttpRequest(const char* host, int32 port, const char* jsonPayload)
+{
+    if (host == nullptr || host[0] == '\0') host = "127.0.0.1";
+    if (port <= 0) port = 20010;
+
+    BString targetUrl;
+    targetUrl.SetToFormat("http://%s:%" B_PRId32 "/command", host, port);
+
+    BUrl url(targetUrl.String(), true);
+    BMallocIO* outBuffer = new BMallocIO();
+    LovenseHttpListener listener;
+    BUrlContext context;
+
+    BUrlRequest* req = BUrlProtocolRoster::MakeRequest(url, outBuffer, &listener, &context);
+    if (req == nullptr) {
+        delete outBuffer;
+        return "{\"error\":\"Failed to create HTTP request for Lovense\"}";
+    }
+
+    req->SetTimeout(5000000); // 5s timeout
+
+    BHttpRequest* http = dynamic_cast<BHttpRequest*>(req);
+    if (http != nullptr) {
+        http->SetMethod(B_HTTP_POST);
+
+        if (jsonPayload != nullptr && strlen(jsonPayload) > 0) {
+            BMallocIO* inBuffer = new BMallocIO();
+            inBuffer->WriteExactly(jsonPayload, strlen(jsonPayload));
+            http->AdoptInputData(inBuffer, strlen(jsonPayload));
+        }
+
+        BHttpHeaders headers;
+        headers.AddHeader("Content-Type", "application/json");
+        http->SetHeaders(headers);
+    }
+
+    thread_id thread = req->Run();
+    status_t rc = B_ERROR;
+    if (thread >= 0) {
+        wait_for_thread(thread, &rc);
+    } else {
+        rc = thread;
+    }
+
+    const void* rawBuf = outBuffer->Buffer();
+    size_t len = outBuffer->BufferLength();
+    BString response;
+
+    if (rawBuf != nullptr && len > 0) {
+        response.SetTo((const char*)rawBuf, len);
+    } else {
+        response = "{\"error\":\"Empty response from Lovense Connect or device unreachable.\"}";
+    }
+
+    delete req;
+    delete outBuffer;
+
+    return response;
+}
+
+static int32 ExtractIntArg(const BMessage& args, const char* name, int32 defaultVal = 0)
+{
+    int32 val32;
+    if (args.FindInt32(name, &val32) == B_OK) return val32;
+    int64 val64;
+    if (args.FindInt64(name, &val64) == B_OK) return (int32)val64;
+    double vald;
+    if (args.FindDouble(name, &vald) == B_OK) return (int32)vald;
+    const char* str = args.FindString(name);
+    if (str != nullptr && strlen(str) > 0) return atoi(str);
+    return defaultVal;
+}
+
+static BString ExtractStrArg(const BMessage& args, const char* name, const char* defaultVal = "")
+{
+    const char* str = args.FindString(name);
+    if (str != nullptr) return BString(str);
+    return BString(defaultVal);
+}
+#endif // LOVE_IS_IN_THE_AIR
+
+
 BString ExtractExecutable(const char* fullCmd) {
     if (!fullCmd || strlen(fullCmd) == 0)
         return "";
@@ -540,6 +646,98 @@ BString ExecuteLocalTool(ClientSession* session, const char* tool_name, const BM
 		// 4. Esecuzione del comando
 		result = RunSystemCommand(cmd.String());
 	}
+
+#ifdef LOVE_IS_IN_THE_AIR
+    // --- LOVENSE TOOLS ---
+    else if (name == "lovense_get_toys") {
+        if (!(permissions & AI_PERM_LOVENSE))
+            return "{\"error\":\"Permission denied: Lovense access is disabled in AI settings.\"}";
+
+        AISettings settings;
+        LoadAISettings(settings);
+
+        BString host = ExtractStrArg(arguments, "host");
+        if (host.IsEmpty()) host = settings.lovense_host.IsEmpty() ? "127.0.0.1" : settings.lovense_host;
+
+        int32 port = ExtractIntArg(arguments, "port", settings.lovense_port > 0 ? settings.lovense_port : 20010);
+
+        BString payload = "{\"command\":\"GetToys\"}";
+        result = SendLovenseHttpRequest(host.String(), port, payload.String());
+    }
+    else if (name == "lovense_control") {
+        if (!(permissions & AI_PERM_LOVENSE))
+            return "{\"error\":\"Permission denied: Lovense access is disabled in AI settings.\"}";
+
+        AISettings settings;
+        LoadAISettings(settings);
+
+        BString host = ExtractStrArg(arguments, "host");
+        if (host.IsEmpty()) host = settings.lovense_host.IsEmpty() ? "127.0.0.1" : settings.lovense_host;
+
+        int32 port = ExtractIntArg(arguments, "port", settings.lovense_port > 0 ? settings.lovense_port : 20010);
+
+        BString action = ExtractStrArg(arguments, "action");
+        if (action.IsEmpty()) action = ExtractStrArg(arguments, "act");
+        if (action.IsEmpty()) return "{\"error\":\"Missing action argument (e.g. Vibrate, Rotate, Pump, Stop)\"}";
+
+        int32 intensity = ExtractIntArg(arguments, "intensity", 0);
+        int32 duration = ExtractIntArg(arguments, "duration", 0);
+        if (duration < 0) duration = 0;
+
+        BString toyId = ExtractStrArg(arguments, "toy_id");
+        if (toyId.IsEmpty()) toyId = ExtractStrArg(arguments, "toy");
+
+        BString payload;
+        if (action.ICompare("Stop") == 0) {
+            if (toyId.IsEmpty()) {
+                payload = "{\"command\":\"Function\",\"action\":\"Stop\",\"timeSec\":0,\"apiVer\":1}";
+            } else {
+                payload.SetToFormat("{\"command\":\"Function\",\"action\":\"Stop\",\"timeSec\":0,\"toy\":\"%s\",\"apiVer\":1}",
+                    toyId.String());
+            }
+        } else {
+            BString actCmd = action;
+            if (actCmd.FindFirst(':') == B_ERROR) {
+                if (actCmd.ICompare("Pump") == 0) {
+                    if (intensity < 0) intensity = 0;
+                    if (intensity > 3) intensity = 3;
+                } else if (actCmd.ICompare("Preset") == 0) {
+                    if (intensity < 1) intensity = 1;
+                    if (intensity > 3) intensity = 3;
+                } else {
+                    if (intensity < 0) intensity = 0;
+                    if (intensity > 20) intensity = 20;
+                }
+                actCmd.SetToFormat("%s:%" B_PRId32, action.String(), intensity);
+            }
+
+            if (toyId.IsEmpty()) {
+                payload.SetToFormat("{\"command\":\"Function\",\"action\":\"%s\",\"timeSec\":%" B_PRId32 ",\"apiVer\":1}",
+                    actCmd.String(), duration);
+            } else {
+                payload.SetToFormat("{\"command\":\"Function\",\"action\":\"%s\",\"timeSec\":%" B_PRId32 ",\"toy\":\"%s\",\"apiVer\":1}",
+                    actCmd.String(), duration, toyId.String());
+            }
+        }
+
+        result = SendLovenseHttpRequest(host.String(), port, payload.String());
+    }
+    else if (name == "lovense_stop_all") {
+        if (!(permissions & AI_PERM_LOVENSE))
+            return "{\"error\":\"Permission denied: Lovense access is disabled in AI settings.\"}";
+
+        AISettings settings;
+        LoadAISettings(settings);
+
+        BString host = ExtractStrArg(arguments, "host");
+        if (host.IsEmpty()) host = settings.lovense_host.IsEmpty() ? "127.0.0.1" : settings.lovense_host;
+
+        int32 port = ExtractIntArg(arguments, "port", settings.lovense_port > 0 ? settings.lovense_port : 20010);
+
+        BString payload = "{\"command\":\"Function\",\"action\":\"Stop\",\"timeSec\":0,\"apiVer\":1}";
+        result = SendLovenseHttpRequest(host.String(), port, payload.String());
+    }
+#endif // LOVE_IS_IN_THE_AIR
     else {
         result.SetToFormat("{\"error\":\"Unknown tool: %s\"}", tool_name);
     }
@@ -712,4 +910,76 @@ void PopulateMcpTools(BList& mpcManager, uint32 permissions) {
         mpcManager.AddItem(CreateToolMessage("run_terminal_command", 
             "Run any arbitrary terminal shell command under the current user context. WARNING: Use with extreme caution.", &properties, "cmd"));
     }
+
+#ifdef LOVE_IS_IN_THE_AIR
+    // 6. Area Lovense (AI_PERM_LOVENSE)
+    if (permissions & AI_PERM_LOVENSE) {
+        {
+            BMessage properties;
+            BMessage hostProp;
+            hostProp.AddString("type", "string");
+            hostProp.AddString("description", "Optional IP address of Lovense Connect (defaults to configured host).");
+            properties.AddMessage("host", &hostProp);
+            BMessage portProp;
+            portProp.AddString("type", "integer");
+            portProp.AddString("description", "Optional HTTP port of Lovense Connect (defaults to 20010).");
+            properties.AddMessage("port", &portProp);
+
+            mpcManager.AddItem(CreateToolMessage("lovense_get_toys", 
+                "Get the list of all connected Lovense sexual toys/devices via Lovense Connect (returns toy IDs, names, status, and battery percentage).", 
+                &properties));
+        }
+        {
+            BMessage properties;
+            BMessage actionProp;
+            actionProp.AddString("type", "string");
+            actionProp.AddString("description", "Action to perform: 'Vibrate', 'Rotate', 'Pump', 'Thrusting', 'Fingering', 'Suction', 'Preset', or 'Stop'.");
+            properties.AddMessage("action", &actionProp);
+
+            BMessage intensityProp;
+            intensityProp.AddString("type", "integer");
+            intensityProp.AddString("description", "Intensity level from 0 to 20 (0 stops; for Pump 0-3, for Preset 1-3). Default is 0.");
+            properties.AddMessage("intensity", &intensityProp);
+
+            BMessage durationProp;
+            durationProp.AddString("type", "integer");
+            durationProp.AddString("description", "Duration in seconds (0 = continuous until stopped). Default is 0.");
+            properties.AddMessage("duration", &durationProp);
+
+            BMessage toyIdProp;
+            toyIdProp.AddString("type", "string");
+            toyIdProp.AddString("description", "Optional specific toy ID. If omitted, applies to all connected toys.");
+            properties.AddMessage("toy_id", &toyIdProp);
+
+            BMessage hostProp;
+            hostProp.AddString("type", "string");
+            hostProp.AddString("description", "Optional IP address of Lovense Connect.");
+            properties.AddMessage("host", &hostProp);
+
+            BMessage portProp;
+            portProp.AddString("type", "integer");
+            portProp.AddString("description", "Optional HTTP port of Lovense Connect.");
+            properties.AddMessage("port", &portProp);
+
+            mpcManager.AddItem(CreateToolMessage("lovense_control", 
+                "Send a vibration, rotation, thrusting, pumping, suction, or stop command to connected Lovense toys.", 
+                &properties, "action"));
+        }
+        {
+            BMessage properties;
+            BMessage hostProp;
+            hostProp.AddString("type", "string");
+            hostProp.AddString("description", "Optional IP address of Lovense Connect.");
+            properties.AddMessage("host", &hostProp);
+            BMessage portProp;
+            portProp.AddString("type", "integer");
+            portProp.AddString("description", "Optional HTTP port of Lovense Connect.");
+            properties.AddMessage("port", &portProp);
+
+            mpcManager.AddItem(CreateToolMessage("lovense_stop_all", 
+                "Immediately stop all vibrations, rotations, and movements on all connected Lovense toys.", 
+                &properties));
+        }
+    }
+#endif // LOVE_IS_IN_THE_AIR
 }
