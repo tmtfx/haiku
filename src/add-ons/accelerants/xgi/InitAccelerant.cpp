@@ -355,6 +355,26 @@ get_accelerant_hook(uint32 feature, void* data)
 		case B_FILL_SPAN:
 			return (void*)xgi_fill_span;
 
+		/* Video Overlay */
+		case B_OVERLAY_COUNT:
+			return (void*)xgi_overlay_count;
+		case B_OVERLAY_SUPPORTED_SPACES:
+			return (void*)xgi_overlay_supported_spaces;
+		case B_OVERLAY_SUPPORTED_FEATURES:
+			return (void*)xgi_overlay_supported_features;
+		case B_ALLOCATE_OVERLAY_BUFFER:
+			return (void*)xgi_allocate_overlay_buffer;
+		case B_RELEASE_OVERLAY_BUFFER:
+			return (void*)xgi_release_overlay_buffer;
+		case B_GET_OVERLAY_CONSTRAINTS:
+			return (void*)xgi_get_overlay_constraints;
+		case B_ALLOCATE_OVERLAY:
+			return (void*)xgi_allocate_overlay;
+		case B_RELEASE_OVERLAY:
+			return (void*)xgi_release_overlay;
+		case B_CONFIGURE_OVERLAY:
+			return (void*)xgi_configure_overlay;
+
 		default:
 			return NULL;
 	}

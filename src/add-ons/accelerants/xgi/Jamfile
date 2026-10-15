@@ -12,6 +12,7 @@ Addon xgi.accelerant :
 	DisplayModes.cpp
 	Cursor.cpp
 	Engine.cpp
+	Overlay.cpp
 	: be libaccelerantscommon.a
 ;
 

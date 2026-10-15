@@ -53,12 +53,12 @@
  * all copies or substantial portions of the Software.
  *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
- * THE COPYRIGHT HOLDER(S) OR AUTHOR(S) BE LIABLE FOR ANY CLAIM, DAMAGES OR
- * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
- * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
- * OTHER DEALINGS IN THE SOFTWARE.
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE COPYRIGHT HOLDER(S) OR AUTHOR(S) BE LIABLE FOR ANY
+ * CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT
+ * OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR
+ * THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 #ifndef XGI_DRIVER_INTERFACE_H
 #define XGI_DRIVER_INTERFACE_H
@@ -69,6 +69,7 @@
 #include <PCI.h>
 #include <OS.h>
 #include <edid.h>
+#include <video_overlay.h>
 
 #define XGI_DRIVER_NAME            "xgi"
 #define XGI_ACCELERANT_NAME        "xgi.accelerant"
@@ -224,6 +225,16 @@ struct SharedInfo {
         Benaphore   lock;
         uint32      count;
     } engine;
+
+    /* Video Overlay */
+    struct {
+        uint32          token;
+        overlay_buffer  buffers[4];
+        bool            bufferAllocated[4];
+        uint32          bufferOffset[4];
+        uint32          bufferSize[4];
+        bool            active;
+    } overlay;
 
     xgi_settings    settings;
     bool            accelerantInUse;
