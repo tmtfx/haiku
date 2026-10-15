@@ -321,7 +321,7 @@ SYSTEM_ADD_ONS_DRIVERS_GRAPHICS += [ FFilterByBuildFeatures
 	x86,x86_64 @{
 		ast
 		ati
-		et6x00
+		et6x00.driver
 		intel_810
 		intel_arc
 		intel_extreme
