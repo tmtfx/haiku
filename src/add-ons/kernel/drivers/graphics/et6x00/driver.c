@@ -392,12 +392,14 @@ pci_info *pcii = &(di->pcii);
     * We map the whole graphics card memory area (which consist of RAM memory
     * and memory mapped registers) at once. Memory mapped registers must not
     * be cacheble, so the whole area is mapped with B_UNCACHED_MEMORY.
+    * but if I map with B_UNCACHED_MEMORY I get memory overlapping, thus I
+    * remove it. Seems to work this way
     */
     si->memoryArea = map_physical_memory(buffer,
         (phys_addr_t)di->pcii.u.h0.base_registers[0],
         (size_t)di->pcii.u.h0.base_register_sizes[0],
         B_ANY_KERNEL_ADDRESS,
-        B_READ_AREA | B_WRITE_AREA,
+        B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA | B_CLONEABLE_AREA,
         &(si->memory));
 
     if (si->memoryArea < 0)
