@@ -364,7 +364,6 @@ uint32 memSize = 0;
     return memSize;
 }
 /*****************************************************************************/
-/*****************************************************************************/
 static status_t et6000MapDevice(ET6000DeviceInfo *di) {
 char buffer[B_OS_NAME_LENGTH];
 ET6000SharedInfo *si = di->si;
@@ -388,13 +387,18 @@ pci_info *pcii = &(di->pcii);
         di->pcii.vendor_id, di->pcii.device_id,
         di->pcii.bus, di->pcii.device, di->pcii.function);
 
-   /*
-    * We map the whole graphics card memory area (which consist of RAM memory
-    * and memory mapped registers) at once. Memory mapped registers must not
-    * be cacheble, so the whole area is mapped with B_UNCACHED_MEMORY.
-    * but if I map with B_UNCACHED_MEMORY I get memory overlapping, thus I
-    * remove it. Seems to work this way
-    */
+    /* original comment:
+     * We map the whole graphics card memory area (which consist of RAM memory
+     * and memory mapped registers) at once. Memory mapped registers must not
+	 * be cacheble, so the whole area is mapped with B_UNCACHED_MEMORY.
+     * We certainly could map separately the RAM memory with write combining
+	 * and the memory mapped registers with B_UNCACHED_MEMORY.
+     *
+     * PDF:
+     * but if I map with B_UNCACHED_MEMORY I get memory overlapping, thus I
+     * remove it. In this way the driver seems to work correctly and boots
+     * without panics
+     */
     si->memoryArea = map_physical_memory(buffer,
         (phys_addr_t)di->pcii.u.h0.base_registers[0],
         (size_t)di->pcii.u.h0.base_register_sizes[0],
@@ -418,57 +422,6 @@ pci_info *pcii = &(di->pcii);
     /* in any case, return the result */
     return B_OK;
 }
-/*
-static status_t et6000MapDevice(ET6000DeviceInfo *di) {
-char buffer[B_OS_NAME_LENGTH];
-ET6000SharedInfo *si = di->si;
-uint32  tmpUlong;
-pci_info *pcii = &(di->pcii);
-
-    // Enable memory space access and I/O space access
-    tmpUlong = get_pci(PCI_command, 4);
-    tmpUlong |= 0x00000003;
-    set_pci(PCI_command, 4, tmpUlong);
-
-    // Enable ROM decoding
-    tmpUlong = get_pci(PCI_rom_base, 4);
-    tmpUlong |= 0x00000001;
-    set_pci(PCI_rom_base, 4, tmpUlong);
-
-    // PCI header base address in I/O space
-    si->pciConfigSpace = (uint16)di->pcii.u.h0.base_registers[1];
-
-    sprintf(buffer, "%04X_%04X_%02X%02X%02X videomemory",
-        di->pcii.vendor_id, di->pcii.device_id,
-        di->pcii.bus, di->pcii.device, di->pcii.function);
-
-    //
-    // We map the whole graphics card memory area (which consist of RAM memory
-    // and memory mapped registers) at once. Memory mapped registers must not
-	// be cacheble, so the whole area is mapped with B_UNCACHED_MEMORY.
-    // We certainly could map separately the RAM memory with write combining
-	// and the memory mapped registers with B_UNCACHED_MEMORY.
-    //
-    si->memoryArea = map_physical_memory(buffer,
-        di->pcii.u.h0.base_registers[0],
-        di->pcii.u.h0.base_register_sizes[0],
-		B_ANY_KERNEL_BLOCK_ADDRESS | B_UNCACHED_MEMORY,
-        B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA,
-        &(si->memory));
-
-    si->framebuffer = si->memory;
-    si->mmRegs = (void *)((uint8 *)si->memory + 0x003fff00);
-    si->emRegs = (void *)((uint8 *)si->memory + 0x003fe000);
-
-    // remember the physical addresses
-    si->physMemory = si->physFramebuffer =
-        (void *)(addr_t)di->pcii.u.h0.base_registers_pci[0];
-
-    si->memSize = et6000GetOnboardMemorySize(si->pciConfigSpace, si->memory);
-
-    // in any case, return the result
-    return si->memoryArea;
-}*/
 /*****************************************************************************/
 static void et6000UnmapDevice(ET6000DeviceInfo *di) {
 ET6000SharedInfo *si = di->si;
