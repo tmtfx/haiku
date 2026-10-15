@@ -12,4 +12,11 @@ Application ai_server :
     localestub
 ;
 
-LinkAgainst ai_server : be [ TargetLibstdc++ ] libai_api.so ;
+if $(LOVE_IS_IN_THE_AIR) {
+    SubDirC++Flags -DLOVE_IS_IN_THE_AIR ;
+    UsePrivateHeaders network netservices shared ;
+    LinkAgainst ai_server : be [ TargetLibstdc++ ] libai_api.so libbnetapi.so libnetservices.a <$(TARGET_PACKAGING_ARCH)>libshared.a $(TARGET_NETWORK_LIBS) ;
+} else {
+    LinkAgainst ai_server : be [ TargetLibstdc++ ] libai_api.so ;
+}
+
