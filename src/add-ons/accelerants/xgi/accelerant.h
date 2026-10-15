@@ -70,6 +70,7 @@
 #include <PCI.h>
 #include <OS.h>
 #include <edid.h>
+#include <video_overlay.h>
 
 #include "DriverInterface.h"
 
@@ -136,6 +137,38 @@
 #define XGI_REG_CURSOR_X		0x850C
 #define XGI_REG_CURSOR_Y		0x8510
 #define XGI_CURSOR_ENABLE		(1U << 30)
+
+/* Video Overlay Register Indices (accessed via RelIO + 0x02 index, RelIO + 0x03 data) */
+#define XGI_VI_INDEX_WIN_HOR_START_LOW		0x01
+#define XGI_VI_INDEX_WIN_HOR_END_LOW		0x02
+#define XGI_VI_INDEX_WIN_HOR_OVER			0x03
+#define XGI_VI_INDEX_WIN_VER_START_LOW		0x04
+#define XGI_VI_INDEX_WIN_VER_END_LOW		0x05
+#define XGI_VI_INDEX_WIN_VER_OVER			0x06
+#define XGI_VI_INDEX_DISP_Y_BUF_START_LOW	0x07
+#define XGI_VI_INDEX_DISP_Y_BUF_START_MID	0x08
+#define XGI_VI_INDEX_DISP_Y_BUF_START_HIGH	0x09
+#define XGI_VI_INDEX_DISP_Y_BUF_PITCH_LOW	0x10
+#define XGI_VI_INDEX_DISP_Y_UV_PITCH_HIGH	0x12
+#define XGI_VI_INDEX_HOR_UP_SCALE_LOW		0x18
+#define XGI_VI_INDEX_HOR_UP_SCALE_HIGH		0x19
+#define XGI_VI_INDEX_VER_UP_SCALE_LOW		0x1A
+#define XGI_VI_INDEX_VER_UP_SCALE_HIGH		0x1B
+#define XGI_VI_INDEX_SCALE_CONTROL			0x1C
+#define XGI_VI_INDEX_LINE_BUF_SIZE			0x1F
+#define XGI_VI_INDEX_COLORKEY_RED_MIN		0x20
+#define XGI_VI_INDEX_COLORKEY_GREEN_MIN		0x21
+#define XGI_VI_INDEX_COLORKEY_BLUE_MIN		0x22
+#define XGI_VI_INDEX_COLORKEY_RED_MAX		0x23
+#define XGI_VI_INDEX_COLORKEY_GREEN_MAX		0x24
+#define XGI_VI_INDEX_COLORKEY_BLUE_MAX		0x25
+#define XGI_VI_INDEX_CONTRAST_FACTOR		0x2C
+#define XGI_VI_INDEX_BRIGHTNESS				0x2D
+#define XGI_VI_INDEX_KEY_OVERLAY_OP			0x2F
+#define XGI_VI_INDEX_CONTROL_MISC0			0x30
+#define XGI_VI_INDEX_CONTROL_MISC1			0x31
+#define XGI_VI_INDEX_CONTROL_MISC2			0x32
+#define XGI_VI_INDEX_DISP_Y_BUF_EXT_HIGH	0x6B
 
 /* Internal Accelerant state */
 struct AccelerantInfo {
@@ -273,5 +306,22 @@ void		xgi_invert_rectangle(engine_token* et, fill_rect_params* list,
 void		xgi_fill_span(engine_token* et, uint32 color, uint16* list,
 				uint32 count);
 void		xgi_init_2d_engine(display_mode* mode);
+
+/* Prototypes - Overlay.cpp */
+uint32					xgi_overlay_count(const display_mode* mode);
+const uint32*			xgi_overlay_supported_spaces(const display_mode* mode);
+uint32					xgi_overlay_supported_features(uint32 colorSpace);
+const overlay_buffer*	xgi_allocate_overlay_buffer(color_space space,
+							uint16 width, uint16 height);
+status_t				xgi_release_overlay_buffer(const overlay_buffer* buffer);
+status_t				xgi_get_overlay_constraints(const display_mode* mode,
+							const overlay_buffer* buffer,
+							overlay_constraints* constraints);
+overlay_token			xgi_allocate_overlay(void);
+status_t				xgi_release_overlay(overlay_token token);
+status_t				xgi_configure_overlay(overlay_token token,
+							const overlay_buffer* buffer,
+							const overlay_window* window,
+							const overlay_view* view);
 
 #endif /* XGI_ACCELERANT_H */
