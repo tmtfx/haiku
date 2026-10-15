@@ -21,3 +21,4 @@ SubInclude HAIKU_TOP src add-ons accelerants trident ;
 SubInclude HAIKU_TOP src add-ons accelerants vesa ;
 SubInclude HAIKU_TOP src add-ons accelerants via ;
 SubInclude HAIKU_TOP src add-ons accelerants virtio ;
+SubInclude HAIKU_TOP src add-ons accelerants xgi ;

@@ -1,0 +1,18 @@
+SubDir HAIKU_TOP src add-ons accelerants xgi ;
+
+SubDirCcFlags -DIS_PIRATI_BUILD ;
+SubDirC++Flags -DIS_PIRATI_BUILD ;
+
+UsePrivateHeaders graphics ;
+UsePrivateHeaders [ FDirName graphics xgi ] ;
+UsePrivateHeaders [ FDirName graphics common ] ;
+
+Addon xgi.accelerant :
+	InitAccelerant.cpp
+	DisplayModes.cpp
+	Cursor.cpp
+	Engine.cpp
+	: be libaccelerantscommon.a
+;
+
+Depends xgi.accelerant : xgi ;

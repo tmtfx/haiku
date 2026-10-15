@@ -1,0 +1,7 @@
+# Settings file for the XGI graphics driver and accelerant
+
+# Hardware cursor: true / false
+hardcursor true
+
+# Accelerant module to load
+accelerant xgi.accelerant
