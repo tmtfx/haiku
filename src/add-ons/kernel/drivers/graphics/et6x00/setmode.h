@@ -10,7 +10,15 @@
 
 
 /*****************************************************************************/
-__inline void et6000EnableLinearMemoryMapping(uint16 pciConfigSpace);
+static inline void et6000EnableLinearMemoryMapping(uint16 pciConfigSpace)
+{
+    /*
+     * Relocate memory via PCI Base Address 0; don't enable MMU;
+     * enable memory mapped registers; enable system linear memory mapping.
+     */
+    ioSet8(pciConfigSpace+0x40, 0xf0, 0x0b);
+}
+
 status_t et6000SetMode(display_mode *mode, uint16 pciConfigSpace);
 status_t et6000ProposeMode(display_mode *mode, uint32 memSize);
 /*****************************************************************************/

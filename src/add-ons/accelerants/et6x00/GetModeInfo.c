@@ -24,6 +24,7 @@ status_t GET_DISPLAY_MODE(display_mode *current_mode) {
 status_t GET_FRAME_BUFFER_CONFIG(frame_buffer_config *afb) {
     /* easy again, as the last mode set stored the info in a convienient form */
     *afb = si->fbc;
+    afb->frame_buffer = localMemory;
     return B_OK;
 }
 /*****************************************************************************/

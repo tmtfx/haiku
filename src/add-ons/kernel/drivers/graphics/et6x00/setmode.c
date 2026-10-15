@@ -177,15 +177,6 @@ struct {
 
 #define CLOCK0MN (sizeof(clock0MN) / sizeof(clock0MN[0]))
 /*****************************************************************************/
-__inline void et6000EnableLinearMemoryMapping(uint16 pciConfigSpace)
-{
-    /*
-     * Relocate memory via PCI Base Address 0; don't enable MMU;
-     * enable memory mapped registers; enable system linear memory mapping.
-     */
-    ioSet8(pciConfigSpace+0x40, 0xf0, 0x0b);
-}
-/*****************************************************************************/
 static void setPCIConfigSpaceRegisters41to5E(uint16 pciConfigSpace,
                                              VIDEO_MODE_INFORMATION *mi,
                                              uint32 m)
@@ -234,13 +225,12 @@ static void setATC(uint8 bpp) {
 uint8 atc[7] = {0x21, 0x00, 0x30, 0x00, 0x00}, atc16 = 0x80;///
 ///uint8 atc[7] = {0x01, 0x00, 0x0f, 0x00, 0x00}, atc16 = 0x80;///zzz
 uint8 i, atcIndexReg;
-volatile uint8 f;
 
-    f = ioGet8(0x3da); /* Set index/data flip-flop to index mode */
+    (void)ioGet8(0x3da); /* Set index/data flip-flop to index mode */
     atcIndexReg = ioGet8(0x3c0) & 0xe0; /* Save bits[7:5] */
 
     for (i = 0x10; i < 0x15; i++) {
-        f = ioGet8(0x3da); /* Set index/data flip-flop to index mode */
+        (void)ioGet8(0x3da); /* Set index/data flip-flop to index mode */
         ioSet8(0x3c0, 0x00, i | atcIndexReg);
         ioSet8(0x3c0, 0x00, atc[i-0x10]);
     }
@@ -253,7 +243,7 @@ volatile uint8 f;
         atc16 |= 0x10;
         break;
     }
-    f = ioGet8(0x3da); /* Set index/data flip-flop to index mode */
+    (void)ioGet8(0x3da); /* Set index/data flip-flop to index mode */
     ioSet8(0x3c0, 0x00, 0x16 | atcIndexReg);
     ioSet8(0x3c0, 0x00, atc16);
 }
