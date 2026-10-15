@@ -462,7 +462,7 @@ static void draw_logo(DeviceInfo& di)
 {
     SharedInfo& si = *(di.sharedInfo);
     
-    if (si.videoMemArea < 0)
+    if (si.frameBufferArea < 0)
         return;
 
     // Retrieve framebuffer info from bootloader
@@ -493,7 +493,7 @@ static void draw_logo(DeviceInfo& di)
     int32 startY = (int32)((screenHeight - logoH) / 2);
     if (startY < 0) startY = 0;
 
-    uint8* fb = (uint8*)si.videoMemAddr;
+    uint8* fb = si.frameBuffer;
     if (fb == NULL) {
         fb = (uint8*)bi->frame_buffer;
     }
