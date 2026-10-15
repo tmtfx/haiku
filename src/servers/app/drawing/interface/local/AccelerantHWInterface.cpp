@@ -1303,8 +1303,10 @@ AccelerantHWInterface::_CopyRegion(const clipping_rect* sortedRectList,
 		if (fAccReleaseEngine != NULL)
 			fAccReleaseEngine(fEngineToken, &fSyncToken);
 
-		if (fAccSyncToToken != NULL)
-			fAccSyncToToken(&fSyncToken);
+		// NOTE: We intentionally do NOT call fAccSyncToToken here!
+		// Leaving the GPU to execute the blit asynchronously in VRAM allows
+		// the CPU to immediately rasterize the exposed background in RAM with AGG.
+		// Synchronization occurs on-demand when flushing to VRAM in _CopyBackToFront().
 	}
 
 	if (!fHardwareCursorEnabled)
@@ -1671,7 +1673,8 @@ AccelerantHWInterface::IsDoubleBuffered() const
 void
 AccelerantHWInterface::_CopyBackToFront(/*const*/ BRegion& region)
 {
-	return HWInterface::_CopyBackToFront(region);
+	Sync();
+	HWInterface::_CopyBackToFront(region);
 }
 
 
@@ -1681,8 +1684,10 @@ AccelerantHWInterface::_CopyBackToFront(/*const*/ BRegion& region)
 void
 AccelerantHWInterface::_DrawCursor(IntRect area) const
 {
-	if (!fHardwareCursorEnabled)
+	if (!fHardwareCursorEnabled) {
+		const_cast<AccelerantHWInterface*>(this)->Sync();
 		HWInterface::_DrawCursor(area);
+	}
 }
 
 
