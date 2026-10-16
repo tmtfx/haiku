@@ -95,6 +95,89 @@ use_fail_safe_video_mode()
 }
 
 
+// Visual 2D acceleration debug indicator (3x3 pixels at bottom-right of screen):
+// When true:
+// - Idle / AGG only: Dark gray (35, 35, 35)
+// - Hardware Screen-to-Screen Blit: Red (255, 0, 0)
+// - Hardware Fill Rectangle: Green (0, 255, 0)
+static bool sVisual2DDebug = true;
+
+
+static void
+_Fill3x3(RenderingBuffer* buffer, uint8 r, uint8 g, uint8 b)
+{
+	if (buffer == NULL || buffer->Bits() == NULL)
+		return;
+
+	int32 width = buffer->Width();
+	int32 height = buffer->Height();
+	if (width < 3 || height < 3)
+		return;
+
+	uint8* base = (uint8*)buffer->Bits();
+	uint32 bpr = buffer->BytesPerRow();
+	color_space cs = buffer->ColorSpace();
+
+	int32 startX = width - 3;
+	int32 startY = height - 3;
+
+	for (int32 y = startY; y < height; y++) {
+		uint8* row = base + y * bpr;
+		for (int32 x = startX; x < width; x++) {
+			switch (cs) {
+				case B_RGB32:
+				case B_RGBA32:
+				case B_RGB32_BIG:
+				case B_RGBA32_BIG:
+				{
+					uint32* pixel = (uint32*)(row + x * 4);
+					*pixel = (uint32)((255 << 24) | (r << 16) | (g << 8) | b);
+					break;
+				}
+				case B_RGB16:
+				case B_RGB16_BIG:
+				{
+					uint16* pixel = (uint16*)(row + x * 2);
+					*pixel = (uint16)(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
+					break;
+				}
+				case B_RGB15:
+				case B_RGBA15:
+				case B_RGB15_BIG:
+				case B_RGBA15_BIG:
+				{
+					uint16* pixel = (uint16*)(row + x * 2);
+					*pixel = (uint16)(((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3));
+					break;
+				}
+				case B_CMAP8:
+				case B_GRAY8:
+				{
+					uint8* pixel = row + x;
+					*pixel = (r > 128 || g > 128) ? 0xFF : 0x00;
+					break;
+				}
+				default:
+					break;
+			}
+		}
+	}
+}
+
+
+static void
+_Set2DDebugIndicator(AccelerantHWInterface* hw, uint8 r, uint8 g, uint8 b,
+	bool updateBackBuffer = false)
+{
+	if (!sVisual2DDebug || hw == NULL)
+		return;
+
+	_Fill3x3(hw->FrontBuffer(), r, g, b);
+	if (updateBackBuffer)
+		_Fill3x3(hw->BackBuffer(), r, g, b);
+}
+
+
 //	#pragma mark - AccelerantHWInterface
 
 
@@ -507,6 +590,10 @@ AccelerantHWInterface::_UpdateHooksAfterModeChange()
 		= (release_overlay)fAccelerantHook(B_RELEASE_OVERLAY, NULL);
 	fAccConfigureOverlay
 		= (configure_overlay)fAccelerantHook(B_CONFIGURE_OVERLAY, NULL);
+
+	// initialize visual 2D debug indicator to idle dark gray
+	if (sVisual2DDebug)
+		_Set2DDebugIndicator(this, 35, 35, 35, true);
 }
 
 
@@ -1301,16 +1388,21 @@ AccelerantHWInterface::_CopyRegion(const clipping_rect* sortedRectList,
 			}
 		}
 
-		if (validCount > 0)
+		if (validCount > 0) {
+			if (sVisual2DDebug)
+				_Set2DDebugIndicator(this, 255, 0, 0);
+
 			fAccScreenBlit(fEngineToken, fBlitParams, validCount);
+		}
 
 		if (fAccReleaseEngine != NULL)
 			fAccReleaseEngine(fEngineToken, &fSyncToken);
 
-		// NOTE: We intentionally do NOT call fAccSyncToToken here!
-		// Leaving the GPU to execute the blit asynchronously in VRAM allows
-		// the CPU to immediately rasterize the exposed background in RAM with AGG.
-		// Synchronization occurs on-demand when flushing to VRAM in _CopyBackToFront().
+		if (sVisual2DDebug) {
+			if (fAccSyncToToken != NULL)
+				fAccSyncToToken(&fSyncToken);
+			_Set2DDebugIndicator(this, 35, 35, 35);
+		}
 	}
 
 	if (!fHardwareCursorEnabled)
@@ -1332,11 +1424,21 @@ AccelerantHWInterface::FillRegion(const BRegion& region, const rgb_color& color)
 		uint32 count = 0;
 		_RegionToRectParams(&const_cast<BRegion&>(region), &count);
 
-		if (count > 0)
+		if (count > 0) {
+			if (sVisual2DDebug)
+				_Set2DDebugIndicator(this, 0, 255, 0);
+
 			fAccFillRect(fEngineToken, _NativeColor(color), fRectParams, count);
+		}
 
 		if (fAccReleaseEngine != NULL)
 			fAccReleaseEngine(fEngineToken, &fSyncToken);
+
+		if (sVisual2DDebug) {
+			if (fAccSyncToToken != NULL)
+				fAccSyncToToken(&fSyncToken);
+			_Set2DDebugIndicator(this, 35, 35, 35);
+		}
 	}
 
 	if (!fHardwareCursorEnabled)
@@ -1705,6 +1807,8 @@ AccelerantHWInterface::_CopyBackToFront(/*const*/ BRegion& region)
 {
 	Sync();
 	HWInterface::_CopyBackToFront(region);
+	if (sVisual2DDebug)
+		_Set2DDebugIndicator(this, 35, 35, 35);
 }
 
 
