@@ -2910,14 +2910,6 @@ Desktop::_DispatchMessage(int32 code, BPrivate::LinkReceiver& link)
 			break;
 		}
 
-		case AS_FLUSH_DRAG_DELTA:
-		{
-			Window* window = MouseEventWindow();
-			if (window != NULL)
-				_SendFakeMouseMoved(window);
-			break;
-		}
-
 		default:
 			printf("Desktop %d:%s received unexpected code %" B_PRId32 "\n", 0,
 				"baron", code);

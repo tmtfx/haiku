@@ -917,17 +917,11 @@ DrawingEngine::FillRegion(BRegion& r, const rgb_color& color)
 		return;
 	}
 
-	AutoFloatingOverlaysHider _(fGraphicsCard, frame);
+	DrawTransaction transaction(this, r);
 
 	int32 count = r.CountRects();
 	for (int32 i = 0; i < count; i++)
 		fPainter->FillRectNoClipping(r.RectAtInt(i), color);
-
-	if ((fAvailableHWAcceleration & HW_ACC_FILL_REGION) != 0) {
-		fGraphicsCard->FillRegion(r, color);
-	} else {
-		DrawTransaction transaction(this, r);
-	}
 }
 
 

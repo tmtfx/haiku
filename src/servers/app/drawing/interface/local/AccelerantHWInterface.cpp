@@ -122,7 +122,6 @@ AccelerantHWInterface::AccelerantHWInterface()
 	fAccGetTimingConstraints(NULL),
 	fAccProposeDisplayMode(NULL),
 	fAccScreenBlit(NULL),
-	fAccFillRect(NULL),
 	fAccSetCursorShape(NULL),
 	fAccSetCursorBitmap(NULL),
 	fAccGetCursorBits(NULL),
@@ -198,8 +197,7 @@ AccelerantHWInterface::HasSetCursorBitmap() const
 bool
 AccelerantHWInterface::Has2DAcceleration() const
 {
-	return fAccAcquireEngine != NULL
-		&& (fAccScreenBlit != NULL || fAccFillRect != NULL);
+	return fAccScreenBlit != NULL && fAccAcquireEngine != NULL;
 }
 
 
@@ -474,8 +472,6 @@ AccelerantHWInterface::_UpdateHooksAfterModeChange()
 	// 2D acceleration hooks
 	fAccScreenBlit = (screen_to_screen_blit)fAccelerantHook(
 		B_SCREEN_TO_SCREEN_BLIT, (void*)&fDisplayMode);
-	fAccFillRect = (fill_rectangle)fAccelerantHook(
-		B_FILL_RECTANGLE, (void*)&fDisplayMode);
 
 	// pre-query retrace semaphore while under mode-switch write lock
 	accelerant_retrace_semaphore AccelerantRetraceSemaphore =
@@ -517,7 +513,6 @@ AccelerantHWInterface::Shutdown()
 	fAccReleaseEngine = NULL;
 	fAccSyncToToken = NULL;
 	fAccScreenBlit = NULL;
-	fAccFillRect = NULL;
 	fRetraceSemaphore = B_UNSUPPORTED;
 
 	if (fAccelerantHook != NULL) {
@@ -1178,12 +1173,8 @@ AccelerantHWInterface::AvailableHWAcceleration() const
 
 	uint32 flags = 0;
 
-	if (fAccAcquireEngine != NULL) {
-		if (fAccScreenBlit != NULL)
-			flags |= HW_ACC_COPY_REGION;
-		if (fAccFillRect != NULL)
-			flags |= HW_ACC_FILL_REGION;
-	}
+	if (fAccScreenBlit != NULL && fAccAcquireEngine != NULL)
+		flags |= HW_ACC_COPY_REGION;
 
 	return flags;
 }
@@ -1198,7 +1189,7 @@ AccelerantHWInterface::CopyRegion(const clipping_rect* sortedRectList,
 
 
 bigtime_t
-AccelerantHWInterface::FrameInterval() const
+AccelerantHWInterface::_RetraceTimeout() const
 {
 	if (fDisplayMode.timing.pixel_clock > 0
 		&& fDisplayMode.timing.h_total > 0
@@ -1206,19 +1197,11 @@ AccelerantHWInterface::FrameInterval() const
 		uint64 period = ((uint64)fDisplayMode.timing.h_total
 			* fDisplayMode.timing.v_total * 1000)
 			/ fDisplayMode.timing.pixel_clock;
-		if (period >= 4000 && period <= 50000)
-			return (bigtime_t)period;
+		// 1.5x frame period to ensure catching the next VBLANK interval
+		return (bigtime_t)(period + period / 2);
 	}
 
-	return 16666;
-}
-
-
-bigtime_t
-AccelerantHWInterface::_RetraceTimeout() const
-{
-	bigtime_t interval = FrameInterval();
-	return interval + interval / 2;
+	return 25000;
 }
 
 
@@ -1324,32 +1307,6 @@ AccelerantHWInterface::_CopyRegion(const clipping_rect* sortedRectList,
 		// Leaving the GPU to execute the blit asynchronously in VRAM allows
 		// the CPU to immediately rasterize the exposed background in RAM with AGG.
 		// Synchronization occurs on-demand when flushing to VRAM in _CopyBackToFront().
-	}
-
-	if (!fHardwareCursorEnabled)
-		_DrawCursor(_CursorFrame());
-}
-
-
-void
-AccelerantHWInterface::FillRegion(const BRegion& region, const rgb_color& color)
-{
-	if (fAccFillRect == NULL || fAccAcquireEngine == NULL || region.CountRects() == 0)
-		return;
-
-	if (!fHardwareCursorEnabled)
-		_RestoreCursorArea();
-
-	if (fAccAcquireEngine(B_2D_ACCELERATION, 0xff, &fSyncToken,
-			&fEngineToken) >= B_OK) {
-		uint32 count = 0;
-		_RegionToRectParams(&const_cast<BRegion&>(region), &count);
-
-		if (count > 0)
-			fAccFillRect(fEngineToken, _NativeColor(color), fRectParams, count);
-
-		if (fAccReleaseEngine != NULL)
-			fAccReleaseEngine(fEngineToken, &fSyncToken);
 	}
 
 	if (!fHardwareCursorEnabled)
