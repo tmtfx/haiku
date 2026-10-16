@@ -210,7 +210,7 @@ static const bt878_card_profile kWonderVE = {
 	"ATI TV Wonder VE",
 	2,
 	BTV_INPUT_COMPOSITE,
-	BTV_CAP_VIDEO_CAPTURE | BTV_CAP_HAS_COMPOSITE | BTV_CAP_HAS_TUNER,
+	BTV_CAP_VIDEO_CAPTURE | BTV_CAP_HAS_COMPOSITE,
 	0x1,
 	{ 0, 0, 0, 0 },
 	{ BT848_IFORM_MUX2, BT848_IFORM_MUX3, 0, 0 }
@@ -222,7 +222,7 @@ static const bt878_card_profile kWonder = {
 	"ATI TV Wonder",
 	3,
 	BTV_INPUT_COMPOSITE,
-	BTV_CAP_VIDEO_CAPTURE | BTV_CAP_HAS_COMPOSITE | BTV_CAP_HAS_TUNER | BTV_CAP_HAS_SVIDEO,
+	BTV_CAP_VIDEO_CAPTURE | BTV_CAP_HAS_COMPOSITE | BTV_CAP_HAS_SVIDEO,
 	0x1,
 	{ 0, 0, 1, 0 },
 	{ BT848_IFORM_MUX2, BT848_IFORM_MUX3, BT848_IFORM_MUX1, 0 }
@@ -234,7 +234,7 @@ static const bt878_card_profile kGenericBt878 = {
 	"Generic Bt878",
 	2,
 	BTV_INPUT_COMPOSITE,
-	BTV_CAP_VIDEO_CAPTURE | BTV_CAP_HAS_COMPOSITE | BTV_CAP_HAS_TUNER,
+	BTV_CAP_VIDEO_CAPTURE | BTV_CAP_HAS_COMPOSITE,
 	0,
 	{ 0, 0, 0, 0 },
 	{ BT848_IFORM_MUX2, BT848_IFORM_MUX1, 0, 0 }
@@ -764,10 +764,9 @@ bt878_stop_capture_locked(bt878_device* device)
 	device->capturing = false;
 	device->frame_ready = false;
 
-	int32 semCount;
-	get_sem_count(device->frame_sem, &semCount);
-	if (semCount > 0)
-		acquire_sem_etc(device->frame_sem, semCount, 0, 0);
+	// Recreate semaphore to immediately wake any thread waiting in bt878_read
+	delete_sem(device->frame_sem);
+	device->frame_sem = create_sem(0, "bttv frame");
 }
 
 

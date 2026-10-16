@@ -393,7 +393,6 @@ BttvProducer::PrepareToConnect(const media_source& source,
 	if (status != B_OK)
 		return status;
 
-	fOutput.destination = destination;
 	fPendingCaptureFormat = captureFormat;
 	fHasPendingFormat = true;
 	*outSource = fOutput.source;
@@ -407,8 +406,10 @@ BttvProducer::Connect(status_t error, const media_source& source,
 	const media_destination& destination, const media_format& format,
 	char* ioName)
 {
-	if (error != B_OK || source != fOutput.source)
+	if (error != B_OK || source != fOutput.source) {
+		fHasPendingFormat = false;
 		return;
+	}
 
 	if (fHasPendingFormat) {
 		if (_ApplyCaptureFormat(fPendingCaptureFormat) == B_OK) {
@@ -1063,6 +1064,7 @@ BttvProducer::_HandleStop()
 status_t
 BttvProducer::_EnsureBufferGroup()
 {
+	BAutolock locker(&fLock);
 	if (fBufferGroup != NULL)
 		return B_OK;
 
@@ -1114,8 +1116,10 @@ BttvProducer::_CaptureThread()
 		{
 			BAutolock locker(&fLock);
 			bufferGroup = fBufferGroup;
-			if (bufferGroup == NULL)
+			if (bufferGroup == NULL) {
+				snooze(10000);
 				continue;
+			}
 			source = fOutput.source;
 			destination = fOutput.destination;
 			captureFormat = fCaptureFormat;
@@ -1127,7 +1131,6 @@ BttvProducer::_CaptureThread()
 			continue;
 		}
 
-		bigtime_t started = system_time();
 		ssize_t bytesRead = read(fDriverFD, buffer->Data(), captureFormat.frame_size);
 		if (bytesRead < 0) {
 			buffer->Recycle();
@@ -1136,10 +1139,11 @@ BttvProducer::_CaptureThread()
 		}
 		if ((size_t)bytesRead != captureFormat.frame_size) {
 			buffer->Recycle();
+			snooze(2000);
 			continue;
 		}
 
-		fProcessingLatency = system_time() - started;
+		bigtime_t processStart = system_time();
 
 		media_header* header = buffer->Header();
 		header->type = B_MEDIA_RAW_VIDEO;
@@ -1158,6 +1162,8 @@ BttvProducer::_CaptureThread()
 
 		if (SendBuffer(buffer, source, destination) != B_OK)
 			buffer->Recycle();
+
+		fProcessingLatency = system_time() - processStart;
 	}
 
 	return B_OK;
