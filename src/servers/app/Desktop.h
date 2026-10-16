@@ -146,7 +146,7 @@ public:
 			bool				Compositor2DEnabled() const
 									{ return fCompositor2DEnabled; }
 			void				SetCompositor2DEnabled(bool enabled);
-			void				CompositeDirtyRegion(const BRegion& dirtyRegion);
+			void				CompositeDirtyRegion(BRegion& dirtyRegion);
 
 			void				RebuildAndRedrawAfterWindowChange(
 									Window* window, BRegion& dirty);

@@ -2307,7 +2307,7 @@ BlendSpan(uint32* dst, const uint32* src, int32 count)
 
 
 void
-Desktop::CompositeDirtyRegion(const BRegion& dirtyRegion)
+Desktop::CompositeDirtyRegion(BRegion& dirtyRegion)
 {
 	RenderingBuffer* frontBuffer = HWInterface() != NULL ? HWInterface()->FrontBuffer() : NULL;
 	if (frontBuffer == NULL || frontBuffer->Bits() == NULL || dirtyRegion.CountRects() == 0)
@@ -3360,14 +3360,21 @@ Desktop::_ShowWindow(Window* window, bool affectsOtherWindows)
 
 	BRegion dirty(window->VisibleRegion());
 
-	if (!affectsOtherWindows) {
-		// everything that is now visible in the
-		// window needs a redraw, but other windows
-		// are not affected, we can call ProcessDirtyRegion()
-		// of the window, and don't have to use MarkDirty()
-		window->ProcessDirtyRegion(dirty);
-	} else
-		MarkDirty(dirty);
+	if (fCompositor2DEnabled) {
+		if (!window->HasBackingStore())
+			window->AllocateBackingStore();
+		else
+			CompositeDirtyRegion(dirty);
+	} else {
+		if (!affectsOtherWindows) {
+			// everything that is now visible in the
+			// window needs a redraw, but other windows
+			// are not affected, we can call ProcessDirtyRegion()
+			// of the window, and don't have to use MarkDirty()
+			window->ProcessDirtyRegion(dirty);
+		} else
+			MarkDirty(dirty);
+	}
 
 	if (window->ServerWindow()->HasDirectFrameBufferAccess()) {
 		window->ServerWindow()->HandleDirectConnection(
@@ -3679,6 +3686,11 @@ Desktop::_RebuildClippingForAllWindows(BRegion& stillAvailableOnScreen)
 void
 Desktop::_TriggerWindowRedrawing(BRegion& dirtyRegion, BRegion& exposeRegion)
 {
+	if (fCompositor2DEnabled) {
+		CompositeDirtyRegion(dirtyRegion);
+		return;
+	}
+
 	// send redraw messages to all windows intersecting the dirty region
 	for (Window* window = CurrentWindows().LastWindow(); window != NULL;
 			window = window->PreviousWindow(fCurrentWorkspace)) {
