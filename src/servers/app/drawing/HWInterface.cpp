@@ -111,6 +111,25 @@ HWInterface::GetMonitorInfo(monitor_info* info)
 }
 
 
+bigtime_t
+HWInterface::FrameInterval() const
+{
+	display_mode mode;
+	const_cast<HWInterface*>(this)->GetMode(&mode);
+	if (mode.timing.pixel_clock > 0
+		&& mode.timing.h_total > 0
+		&& mode.timing.v_total > 0) {
+		uint64 period = ((uint64)mode.timing.h_total
+			* mode.timing.v_total * 1000)
+			/ mode.timing.pixel_clock;
+		if (period >= 4000 && period <= 50000)
+			return (bigtime_t)period;
+	}
+
+	return 16666;
+}
+
+
 // #pragma mark -
 
 

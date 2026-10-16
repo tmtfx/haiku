@@ -104,6 +104,8 @@ public:
 	virtual	status_t			GetPreferredMode(display_mode* mode);
 	virtual status_t			GetMonitorInfo(monitor_info* info);
 
+	virtual bigtime_t			FrameInterval() const;
+
 	virtual sem_id				RetraceSemaphore() = 0;
 	virtual status_t			WaitForRetrace(
 									bigtime_t timeout = B_INFINITE_TIMEOUT) = 0;
@@ -125,6 +127,10 @@ public:
 
 	virtual	void				CopyRegion(const clipping_rect* sortedRectList,
 									uint32 count, int32 xOffset, int32 yOffset)
+									{}
+
+	virtual	void				FillRegion(const BRegion& region,
+									const rgb_color& color)
 									{}
 
 	virtual	void				Sync() {}

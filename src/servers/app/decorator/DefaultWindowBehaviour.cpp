@@ -25,6 +25,8 @@
 #include "AppServer.h"
 #include "ClickTarget.h"
 #include "Desktop.h"
+#include "DelayedMessage.h"
+#include "ServerProtocol.h"
 #include "DefaultDecorator.h"
 #include "DrawingEngine.h"
 #include "Window.h"
@@ -211,12 +213,27 @@ protected:
 
 
 struct DefaultWindowBehaviour::DragState : MouseTrackingState {
+	bigtime_t	fLastMoveTime;
+	BPoint		fPendingDelta;
+
 	DragState(DefaultWindowBehaviour& behavior, BPoint where,
 		bool activateOnMouseUp, bool minimizeCheckOnMouseUp)
 		:
 		MouseTrackingState(behavior, where, activateOnMouseUp,
-			minimizeCheckOnMouseUp)
+			minimizeCheckOnMouseUp),
+		fLastMoveTime(0),
+		fPendingDelta(B_ORIGIN)
 	{
+	}
+
+	virtual void ExitState(State* nextState)
+	{
+		if (fPendingDelta != B_ORIGIN && (fWindow->Flags() & B_NOT_MOVABLE) == 0) {
+			BPoint delta = fPendingDelta;
+			fPendingDelta = B_ORIGIN;
+			fBehavior.AlterDeltaForSnap(fWindow, delta, system_time());
+			fDesktop->MoveWindowBy(fWindow, delta.x, delta.y);
+		}
 	}
 
 	virtual bool MouseDown(BMessage* message, BPoint where, bool& _unhandled)
@@ -237,15 +254,41 @@ struct DefaultWindowBehaviour::DragState : MouseTrackingState {
 	virtual void MouseMovedAction(BPoint& delta, bigtime_t now)
 	{
 		if ((fWindow->Flags() & B_NOT_MOVABLE) == 0) {
-			BPoint oldLeftTop = fWindow->Frame().LeftTop();
+			fPendingDelta += delta;
 
-			fBehavior.AlterDeltaForSnap(fWindow, delta, now);
-			fDesktop->MoveWindowBy(fWindow, delta.x, delta.y);
+			// Throttle window movement updates to the dynamic monitor refresh rate.
+			// This prevents processing hundreds of moves per second on high-frequency USB mice,
+			// exactly matching the physical display rate and cutting CPU usage and power consumption.
+			bigtime_t frameInterval = fDesktop->HWInterface()
+				? fDesktop->HWInterface()->FrameInterval() : 16666;
+			if (now - fLastMoveTime < frameInterval) {
+				bigtime_t delay = frameInterval - (now - fLastMoveTime);
+				if (delay < 1000)
+					delay = 1000;
+
+				DelayedMessage delayed(AS_FLUSH_DRAG_DELTA, delay);
+				delayed.AddTarget(fDesktop->MessagePort());
+				delayed.SetMerge(DM_MERGE_REPLACE);
+				delayed.Flush();
+
+				delta = B_ORIGIN;
+				return;
+			}
+
+			BPoint oldLeftTop = fWindow->Frame().LeftTop();
+			BPoint moveDelta = fPendingDelta;
+			fPendingDelta = B_ORIGIN;
+
+			fBehavior.AlterDeltaForSnap(fWindow, moveDelta, now);
+			fDesktop->MoveWindowBy(fWindow, moveDelta.x, moveDelta.y);
+			fLastMoveTime = now;
 
 			// constrain delta to true change in position
 			delta = fWindow->Frame().LeftTop() - oldLeftTop;
-		} else
+		} else {
+			fPendingDelta = B_ORIGIN;
 			delta = BPoint(0, 0);
+		}
 	}
 };
 
@@ -254,14 +297,18 @@ struct DefaultWindowBehaviour::DragState : MouseTrackingState {
 
 
 struct DefaultWindowBehaviour::ResizeState : MouseTrackingState {
-	BPoint fDelta;
+	BPoint		fDelta;
+	bigtime_t	fLastMoveTime;
+	BPoint		fPendingDelta;
 
 	ResizeState(DefaultWindowBehaviour& behavior, BPoint where,
 		bool activateOnMouseUp, bool minimizeCheckOnMouseUp)
 		:
-		MouseTrackingState(behavior, where, activateOnMouseUp, minimizeCheckOnMouseUp)
+		MouseTrackingState(behavior, where, activateOnMouseUp, minimizeCheckOnMouseUp),
+		fDelta(B_ORIGIN),
+		fLastMoveTime(0),
+		fPendingDelta(B_ORIGIN)
 	{
-		fDelta = BPoint(0, 0);
 	}
 
 	virtual void EnterState(State* prevState)
@@ -273,6 +320,14 @@ struct DefaultWindowBehaviour::ResizeState : MouseTrackingState {
 		if ((fWindow->Flags() & B_OUTLINE_RESIZE) != 0) {
 			fDesktop->SetWindowOutlinesDelta(fWindow, BPoint(0, 0));
 			fDesktop->ResizeWindowBy(fWindow, fDelta.x, fDelta.y);
+		} else if (fPendingDelta != B_ORIGIN && (fWindow->Flags() & B_NOT_RESIZABLE) == 0) {
+			BPoint delta = fPendingDelta;
+		fPendingDelta = B_ORIGIN;
+			if ((fWindow->Flags() & B_NOT_V_RESIZABLE) != 0)
+				delta.y = 0;
+			if ((fWindow->Flags() & B_NOT_H_RESIZABLE) != 0)
+				delta.x = 0;
+			fDesktop->ResizeWindowBy(fWindow, delta.x, delta.y);
 		}
 	}
 
@@ -284,18 +339,45 @@ struct DefaultWindowBehaviour::ResizeState : MouseTrackingState {
 			if ((fWindow->Flags() & B_NOT_H_RESIZABLE) != 0)
 				delta.x = 0;
 
-			BPoint oldRightBottom = fWindow->Frame().RightBottom();
-
 			if ((fWindow->Flags() & B_OUTLINE_RESIZE) != 0) {
+				BPoint oldRightBottom = fWindow->Frame().RightBottom();
 				fDelta = delta;
 				fDesktop->SetWindowOutlinesDelta(fWindow, delta);
-			} else
-				fDesktop->ResizeWindowBy(fWindow, delta.x, delta.y);
+				delta = fWindow->Frame().RightBottom() - oldRightBottom;
+				return;
+			}
+
+			fPendingDelta += delta;
+
+			bigtime_t frameInterval = fDesktop->HWInterface()
+				? fDesktop->HWInterface()->FrameInterval() : 16666;
+			if (now - fLastMoveTime < frameInterval) {
+				bigtime_t delay = frameInterval - (now - fLastMoveTime);
+				if (delay < 1000)
+					delay = 1000;
+
+				DelayedMessage delayed(AS_FLUSH_DRAG_DELTA, delay);
+				delayed.AddTarget(fDesktop->MessagePort());
+				delayed.SetMerge(DM_MERGE_REPLACE);
+				delayed.Flush();
+
+				delta = B_ORIGIN;
+				return;
+			}
+
+			BPoint oldRightBottom = fWindow->Frame().RightBottom();
+			BPoint resizeDelta = fPendingDelta;
+		fPendingDelta = B_ORIGIN;
+
+			fDesktop->ResizeWindowBy(fWindow, resizeDelta.x, resizeDelta.y);
+			fLastMoveTime = now;
 
 			// constrain delta to true change in size
 			delta = fWindow->Frame().RightBottom() - oldRightBottom;
-		} else
+		} else {
+			fPendingDelta = B_ORIGIN;
 			delta = BPoint(0, 0);
+		}
 	}
 };
 
@@ -371,13 +453,18 @@ struct DefaultWindowBehaviour::SlideTabState : MouseTrackingState {
 
 
 struct DefaultWindowBehaviour::ResizeBorderState : MouseTrackingState {
-	BPoint fDelta;
+	BPoint		fDelta;
+	bigtime_t	fLastMoveTime;
+	BPoint		fPendingDelta;
 
 	ResizeBorderState(DefaultWindowBehaviour& behavior, BPoint where,
 		Decorator::Region region)
 		:
 		MouseTrackingState(behavior, where, true, false,
 			B_SECONDARY_MOUSE_BUTTON),
+		fDelta(B_ORIGIN),
+		fLastMoveTime(0),
+		fPendingDelta(B_ORIGIN),
 		fHorizontal(NONE),
 		fVertical(NONE)
 	{
@@ -416,8 +503,6 @@ struct DefaultWindowBehaviour::ResizeBorderState : MouseTrackingState {
 			default:
 				break;
 		}
-
-		fDelta = B_ORIGIN;
 	}
 
 	ResizeBorderState(DefaultWindowBehaviour& behavior, BPoint where,
@@ -425,10 +510,12 @@ struct DefaultWindowBehaviour::ResizeBorderState : MouseTrackingState {
 		:
 		MouseTrackingState(behavior, where, true, false,
 			B_SECONDARY_MOUSE_BUTTON),
+		fDelta(B_ORIGIN),
+		fLastMoveTime(0),
+		fPendingDelta(B_ORIGIN),
 		fHorizontal(horizontal),
 		fVertical(vertical)
 	{
-		fDelta = B_ORIGIN;
 	}
 
 	virtual void EnterState(State* previousState)
@@ -452,31 +539,19 @@ struct DefaultWindowBehaviour::ResizeBorderState : MouseTrackingState {
 		if (fWindow->Flags() & B_OUTLINE_RESIZE) {
 			fDesktop->SetWindowOutlinesDelta(fWindow, B_ORIGIN);
 			fDesktop->ResizeWindowBy(fWindow, fDelta.x, fDelta.y);
+		} else if (fPendingDelta != B_ORIGIN && (fWindow->Flags() & B_NOT_RESIZABLE) == 0) {
+			BPoint delta = fPendingDelta;
+			fPendingDelta = B_ORIGIN;
+			_DoResize(delta);
 		}
 	}
 
-	virtual void MouseMovedAction(BPoint& delta, bigtime_t now)
+	BPoint _DoResize(BPoint delta)
 	{
-		if (fHorizontal == NONE)
-			delta.x = 0;
-		if (fVertical == NONE)
-			delta.y = 0;
-
-		if (delta.x == 0 && delta.y == 0)
-			return;
-
-		// Resize first -- due to the window size limits this is not unlikely
-		// to turn out differently from what we request.
 		BPoint oldRightBottom = fWindow->Frame().RightBottom();
 
-		if (fWindow->Flags() & B_OUTLINE_RESIZE) {
-			fDelta = delta;
-			fDesktop->SetWindowOutlinesDelta(fWindow, BPoint(
-				delta.x * fHorizontal, delta.y * fVertical));
-		} else {
-			fDesktop->ResizeWindowBy(fWindow, delta.x * fHorizontal,
-				delta.y * fVertical);
-		}
+		fDesktop->ResizeWindowBy(fWindow, delta.x * fHorizontal,
+			delta.y * fVertical);
 
 		// constrain delta to true change in size
 		delta = fWindow->Frame().RightBottom() - oldRightBottom;
@@ -489,6 +564,54 @@ struct DefaultWindowBehaviour::ResizeBorderState : MouseTrackingState {
 
 		if (moveX != 0 || moveY != 0)
 			fDesktop->MoveWindowBy(fWindow, moveX, moveY);
+
+		return delta;
+	}
+
+	virtual void MouseMovedAction(BPoint& delta, bigtime_t now)
+	{
+		if (fHorizontal == NONE)
+		delta.x = 0;
+		if (fVertical == NONE)
+		delta.y = 0;
+
+		if (delta.x == 0 && delta.y == 0)
+			return;
+
+		if (fWindow->Flags() & B_OUTLINE_RESIZE) {
+			BPoint oldRightBottom = fWindow->Frame().RightBottom();
+			fDelta = delta;
+			fDesktop->SetWindowOutlinesDelta(fWindow, BPoint(
+				delta.x * fHorizontal, delta.y * fVertical));
+			delta = fWindow->Frame().RightBottom() - oldRightBottom;
+			delta.x *= fHorizontal;
+			delta.y *= fVertical;
+			return;
+		}
+
+		fPendingDelta += delta;
+
+		bigtime_t frameInterval = fDesktop->HWInterface()
+			? fDesktop->HWInterface()->FrameInterval() : 16666;
+		if (now - fLastMoveTime < frameInterval) {
+			bigtime_t delay = frameInterval - (now - fLastMoveTime);
+			if (delay < 1000)
+				delay = 1000;
+
+			DelayedMessage delayed(AS_FLUSH_DRAG_DELTA, delay);
+			delayed.AddTarget(fDesktop->MessagePort());
+			delayed.SetMerge(DM_MERGE_REPLACE);
+			delayed.Flush();
+
+			delta = B_ORIGIN;
+			return;
+		}
+
+		BPoint resizeDelta = fPendingDelta;
+		fPendingDelta = B_ORIGIN;
+		fLastMoveTime = now;
+
+		delta = _DoResize(resizeDelta);
 	}
 
 	virtual void MouseUpWindowAction()

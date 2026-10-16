@@ -52,6 +52,8 @@ public:
 	virtual	status_t			GetPreferredMode(display_mode* mode);
 	virtual status_t			GetMonitorInfo(monitor_info* info);
 
+	virtual bigtime_t			FrameInterval() const;
+
 	virtual sem_id				RetraceSemaphore();
 	virtual status_t			WaitForRetrace(
 									bigtime_t timeout = B_INFINITE_TIMEOUT);
@@ -72,6 +74,8 @@ public:
 	// accelerated drawing
 	virtual	void				CopyRegion(const clipping_rect* sortedRectList,
 									uint32 count, int32 xOffset, int32 yOffset);
+	virtual	void				FillRegion(const BRegion& region,
+									const rgb_color& color);
 
 	virtual	void				Sync();
 
@@ -158,6 +162,7 @@ private:
 			get_monitor_info		fAccGetMonitorInfo;
 			get_edid_info			fAccGetEDIDInfo;
 			screen_to_screen_blit	fAccScreenBlit;
+			fill_rectangle			fAccFillRect;
 			set_cursor_shape		fAccSetCursorShape;
 			set_cursor_bitmap		fAccSetCursorBitmap;
 			get_cursor_bits			fAccGetCursorBits;
