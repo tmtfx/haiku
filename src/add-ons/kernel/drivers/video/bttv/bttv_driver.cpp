@@ -24,6 +24,7 @@
 #define ATI_TV_WONDER_ID		0x0001
 #define ATI_TV_WONDER_VE_ID		0x0003
 
+#define BT848_DSTATUS			0x000
 #define BT848_IFORM				0x004
 #define BT848_TDEC				0x008
 #define BT848_E_CROP			0x00c
@@ -49,6 +50,7 @@
 #define BT848_ADC				0x068
 #define BT848_E_VTC			0x06c
 #define BT848_SRESET			0x07c
+#define BT848_TGCTRL			0x084
 #define BT848_O_CROP			0x08c
 #define BT848_O_VDELAY_LO		0x090
 #define BT848_O_VACTIVE_LO		0x094
@@ -68,16 +70,26 @@
 #define BT848_INT_STAT			0x100
 #define BT848_INT_MASK			0x104
 #define BT848_GPIO_DMA_CTL		0x10c
+#define BT848_PLL_F_LO			0x110
+#define BT848_PLL_F_HI			0x111
+#define BT848_PLL_XCI			0x112
 #define BT848_RISC_STRT_ADD		0x114
 #define BT848_GPIO_OUT_EN		0x118
 #define BT848_GPIO_DATA			0x200
 
+#define BT848_DSTATUS_PRES		(1 << 6)
+#define BT848_DSTATUS_HLOC		(1 << 5)
+#define BT848_DSTATUS_NUML		(1 << 4)
+#define BT848_DSTATUS_PLOCK		(1 << 0)
+
+#define BT848_PLL_X				(1 << 4)
+
 #define BT848_IFORM_HACTIVE		(1 << 7)
 #define BT848_IFORM_MUXSEL		(3 << 5)
-#define BT848_IFORM_MUX0		(2 << 5)
-#define BT848_IFORM_MUX1		(3 << 5)
-#define BT848_IFORM_MUX2		(1 << 5)
-#define BT848_IFORM_MUX3		(0 << 5)
+#define BT848_IFORM_MUX0		(0 << 5)
+#define BT848_IFORM_MUX1		(1 << 5)
+#define BT848_IFORM_MUX2		(2 << 5)
+#define BT848_IFORM_MUX3		(3 << 5)
 #define BT848_IFORM_XT0			(1 << 3)
 #define BT848_IFORM_XT1			(2 << 3)
 #define BT848_IFORM_PAL_BDGHI	3
@@ -201,7 +213,7 @@ static const bt878_card_profile kWonderVE = {
 	BTV_CAP_VIDEO_CAPTURE | BTV_CAP_HAS_COMPOSITE | BTV_CAP_HAS_TUNER,
 	0x1,
 	{ 0, 0, 0, 0 },
-	{ BT848_IFORM_MUX2, BT848_IFORM_MUX1, 0, 0 }
+	{ BT848_IFORM_MUX2, BT848_IFORM_MUX3, 0, 0 }
 };
 
 static const bt878_card_profile kWonder = {
@@ -213,7 +225,7 @@ static const bt878_card_profile kWonder = {
 	BTV_CAP_VIDEO_CAPTURE | BTV_CAP_HAS_COMPOSITE | BTV_CAP_HAS_TUNER | BTV_CAP_HAS_SVIDEO,
 	0x1,
 	{ 0, 0, 1, 0 },
-	{ BT848_IFORM_MUX2, BT848_IFORM_MUX1, BT848_IFORM_MUX0, 0 }
+	{ BT848_IFORM_MUX2, BT848_IFORM_MUX3, BT848_IFORM_MUX1, 0 }
 };
 
 static const bt878_card_profile kGenericBt878 = {
@@ -519,9 +531,9 @@ bt878_build_risc_program(bt878_device* device)
 
 	uint32 wordsPerBuffer;
 	if (interlaced)
-		wordsPerBuffer = 2 + linesPerField * 2 + 2 + 2 + linesPerField * 2 + 2;
+		wordsPerBuffer = 2 + linesPerField * 2 + 2 + linesPerField * 2;
 	else
-		wordsPerBuffer = 2 + linesPerField * 2 + 2;
+		wordsPerBuffer = 2 + format.height * 2;
 
 	uint32 totalWords = wordsPerBuffer * NUM_FRAME_BUFFERS + 2;
 	size_t requiredSize = totalWords * sizeof(uint32);
@@ -534,8 +546,8 @@ bt878_build_risc_program(bt878_device* device)
 		phys_addr_t phys = device->frame_buffers[buf].phys;
 
 		if (interlaced) {
-			// Field 1 (Even field): lines 0, 2, 4, ...
-			*program++ = B_HOST_TO_LENDIAN_INT32(BT848_RISC_SYNC | BT848_FIFO_STATUS_FM1);
+			// Field 1 (Even field): wait for VRE, write lines 0, 2, 4, ...
+			*program++ = B_HOST_TO_LENDIAN_INT32(BT848_RISC_SYNC | BT848_FIFO_STATUS_VRE);
 			*program++ = 0;
 
 			for (uint32 line = 0; line < linesPerField; line++) {
@@ -547,11 +559,8 @@ bt878_build_risc_program(bt878_device* device)
 					(uint32)(phys + lineIdx * format.bytes_per_line));
 			}
 
-			*program++ = B_HOST_TO_LENDIAN_INT32(BT848_RISC_SYNC | BT848_FIFO_STATUS_VRE);
-			*program++ = 0;
-
-			// Field 2 (Odd field): lines 1, 3, 5, ...
-			*program++ = B_HOST_TO_LENDIAN_INT32(BT848_RISC_SYNC | BT848_FIFO_STATUS_FM1);
+			// Field 2 (Odd field): wait for VRO, write lines 1, 3, 5, ...
+			*program++ = B_HOST_TO_LENDIAN_INT32(BT848_RISC_SYNC | BT848_FIFO_STATUS_VRO);
 			*program++ = 0;
 
 			for (uint32 line = 0; line < linesPerField; line++) {
@@ -565,12 +574,9 @@ bt878_build_risc_program(bt878_device* device)
 				*program++ = B_HOST_TO_LENDIAN_INT32(
 					(uint32)(phys + lineIdx * format.bytes_per_line));
 			}
-
-			*program++ = B_HOST_TO_LENDIAN_INT32(BT848_RISC_SYNC | BT848_FIFO_STATUS_VRO);
-			*program++ = 0;
 		} else {
-			// Progressive (half vertical resolution): single field
-			*program++ = B_HOST_TO_LENDIAN_INT32(BT848_RISC_SYNC | BT848_FIFO_STATUS_FM1);
+			// Progressive (half vertical resolution): wait for VRE, write single field
+			*program++ = B_HOST_TO_LENDIAN_INT32(BT848_RISC_SYNC | BT848_FIFO_STATUS_VRE);
 			*program++ = 0;
 
 			for (uint32 line = 0; line < format.height; line++) {
@@ -583,9 +589,6 @@ bt878_build_risc_program(bt878_device* device)
 				*program++ = B_HOST_TO_LENDIAN_INT32(
 					(uint32)(phys + line * format.bytes_per_line));
 			}
-
-			*program++ = B_HOST_TO_LENDIAN_INT32(BT848_RISC_SYNC | BT848_FIFO_STATUS_VRE);
-			*program++ = 0;
 		}
 	}
 
@@ -598,18 +601,69 @@ bt878_build_risc_program(bt878_device* device)
 }
 
 
+static status_t
+bt878_set_pll(bt878_device* device)
+{
+	if (device->video_standard == BTV_STD_NTSC) {
+		// NTSC crystal on ATI TV Wonder VE is 28.636363 MHz; PLL can sleep
+		bt878_write8(device, BT848_TGCTRL, 0x00);
+		bt878_write8(device, BT848_PLL_XCI, 0x00);
+		return B_OK;
+	}
+
+	// PAL standard requires 35.468950 MHz clock (CLKx2 = 2 * 17.734475 MHz)
+	// Input crystal fin = 28.636363 MHz, target fout = 35.468950 MHz
+	// PAL parameters: PLL_X = 1 (pre-divider 2), PLL_I = 0x0e, PLL_F = 0xdcf9, PLL_C = 0
+	uint32 fin = 28636363 / 4;
+	uint32 fout = 35468950 / 4;
+
+	fout *= 12;
+	uint8 fi = (uint8)(fout / fin);
+
+	fout = (fout % fin) * 256;
+	uint8 fh = (uint8)(fout / fin);
+
+	fout = (fout % fin) * 256;
+	uint8 fl = (uint8)(fout / fin);
+
+	bt878_write8(device, BT848_PLL_F_LO, fl);
+	bt878_write8(device, BT848_PLL_F_HI, fh);
+	bt878_write8(device, BT848_PLL_XCI, fi | BT848_PLL_X);
+
+	// Wait up to 100ms for PLL to lock
+	for (int i = 0; i < 10; i++) {
+		snooze(10000);
+		if ((bt878_read8(device, BT848_DSTATUS) & BT848_DSTATUS_PLOCK) != 0) {
+			bt878_write8(device, BT848_DSTATUS, 0x00);
+		} else {
+			// PLL locked: enable PLL clock for timing generator
+			bt878_write8(device, BT848_TGCTRL, 0x08);
+			return B_OK;
+		}
+	}
+
+	return B_TIMED_OUT;
+}
+
+
 static void
 bt878_program_capture(bt878_device* device)
 {
+	bt878_set_pll(device);
+
 	bt878_geometry geometry;
 	bt878_compute_geometry(device, &geometry);
+
+	uint8 control = 0;
+	if (device->input == BTV_INPUT_SVIDEO)
+		control |= BT848_CONTROL_COMP;
 
 	bt878_write8(device, BT848_IFORM, geometry.iform | BT848_IFORM_HACTIVE);
 	bt878_write8(device, BT848_TDEC, 0);
 	bt878_write8(device, BT848_ADELAY, geometry.adelay);
 	bt878_write8(device, BT848_BDELAY, geometry.bdelay);
-	bt878_write8(device, BT848_E_CONTROL, BT848_CONTROL_COMP);
-	bt878_write8(device, BT848_O_CONTROL, BT848_CONTROL_COMP);
+	bt878_write8(device, BT848_E_CONTROL, control);
+	bt878_write8(device, BT848_O_CONTROL, control);
 	bt878_write8(device, BT848_E_SCLOOP, BT848_SCLOOP_CAGC | BT848_SCLOOP_CKILL);
 	bt878_write8(device, BT848_O_SCLOOP, BT848_SCLOOP_CAGC | BT848_SCLOOP_CKILL);
 	bt878_write8(device, BT848_OFORM, BT848_OFORM_RANGE);
@@ -673,6 +727,11 @@ bt878_start_capture_locked(bt878_device* device)
 	device->last_completed_buffer = 0;
 	device->frame_ready = false;
 
+	int32 semCount;
+	get_sem_count(device->frame_sem, &semCount);
+	if (semCount > 0)
+		acquire_sem_etc(device->frame_sem, semCount, 0, 0);
+
 	status_t status = bt878_build_risc_program(device);
 	if (status != B_OK)
 		return status;
@@ -704,6 +763,11 @@ bt878_stop_capture_locked(bt878_device* device)
 	bt878_write32(device, BT848_GPIO_DMA_CTL, 0);
 	device->capturing = false;
 	device->frame_ready = false;
+
+	int32 semCount;
+	get_sem_count(device->frame_sem, &semCount);
+	if (semCount > 0)
+		acquire_sem_etc(device->frame_sem, semCount, 0, 0);
 }
 
 
@@ -813,7 +877,7 @@ bt878_interrupt(void* data)
 
 		int32 semCount;
 		get_sem_count(device->frame_sem, &semCount);
-		if (semCount <= 0)
+		if (semCount < 1)
 			release_sem_etc(device->frame_sem, 1, B_DO_NOT_RESCHEDULE);
 		return B_INVOKE_SCHEDULER;
 	}
@@ -877,20 +941,24 @@ bt878_read(void* cookie, off_t position, void* buffer, size_t* numBytes)
 	if (!device->capturing)
 		return B_NOT_ALLOWED;
 
-	if (!device->frame_ready) {
-		if (device->non_blocking)
-			return B_WOULD_BLOCK;
-
-		status_t status = acquire_sem_etc(device->frame_sem, 1,
-			B_CAN_INTERRUPT | B_RELATIVE_TIMEOUT, FRAME_TIMEOUT);
-		if (status != B_OK)
-			return status;
-	}
-
 	if (position < 0 || (size_t)position >= device->frame_size) {
 		*numBytes = 0;
-		device->frame_ready = false;
 		return B_OK;
+	}
+
+	if (position == 0) {
+		status_t status;
+		if (device->non_blocking) {
+			status = acquire_sem_etc(device->frame_sem, 1,
+				B_CAN_INTERRUPT | B_RELATIVE_TIMEOUT, 0);
+			if (status != B_OK)
+				return B_WOULD_BLOCK;
+		} else {
+			status = acquire_sem_etc(device->frame_sem, 1,
+				B_CAN_INTERRUPT | B_RELATIVE_TIMEOUT, FRAME_TIMEOUT);
+			if (status != B_OK)
+				return status;
+		}
 	}
 
 	int32 bufIdx = device->last_completed_buffer;
@@ -903,7 +971,6 @@ bt878_read(void* cookie, off_t position, void* buffer, size_t* numBytes)
 	}
 
 	*numBytes = toCopy;
-	device->frame_ready = false;
 	return B_OK;
 }
 
@@ -939,7 +1006,9 @@ bt878_control(void* cookie, uint32 op, void* arg, size_t length)
 
 		case B_GET_READ_STATUS:
 		{
-			bool canRead = device->frame_ready;
+			int32 semCount = 0;
+			get_sem_count(device->frame_sem, &semCount);
+			bool canRead = (semCount > 0);
 			return user_memcpy(arg, &canRead, sizeof(canRead)) == B_OK
 				? B_OK : B_BAD_ADDRESS;
 		}
