@@ -169,6 +169,8 @@ Window::Window(const BRect& frame, const char *name,
 
 Window::~Window()
 {
+	FreeBackingStore();
+
 	if (fTopView.IsSet()) {
 		fTopView->DetachedFromWindow();
 	}
@@ -176,6 +178,80 @@ Window::~Window()
 	DetachFromWindowStack(false);
 
 	gDecorManager.CleanupForWindow(this);
+}
+
+
+BRect
+Window::FullFrame() const
+{
+	::Decorator* decorator = Decorator();
+	if (decorator != NULL) {
+		BRect r = decorator->GetFootprint().Frame();
+		if (r.IsValid())
+			return r | fFrame;
+	}
+	return fFrame;
+}
+
+
+void
+Window::AllocateBackingStore()
+{
+	FreeBackingStore();
+
+	if (IsOffscreenWindow() || (fFlags & kWindowScreenFlag) != 0)
+		return;
+
+	BRect full = FullFrame();
+	int32 width = (int32)ceilf(full.Width()) + 1;
+	int32 height = (int32)ceilf(full.Height()) + 1;
+	if (width <= 0 || height <= 0)
+		return;
+
+	fBackingBitmap.SetTo(new (std::nothrow) UtilityBitmap(
+		BRect(0, 0, width - 1, height - 1), B_RGBA32, 0), true);
+	if (!fBackingBitmap.IsSet() || fBackingBitmap->Bits() == NULL) {
+		fBackingBitmap.Unset();
+		return;
+	}
+
+	memset(fBackingBitmap->Bits(), 0, fBackingBitmap->BitsLength());
+
+	fBackingHWInterface.SetTo(new (std::nothrow) BitmapHWInterface(fBackingBitmap.Get()));
+	if (!fBackingHWInterface.IsSet() || fBackingHWInterface->Initialize() != B_OK) {
+		FreeBackingStore();
+		return;
+	}
+
+	if (GetDrawingEngine() != NULL) {
+		GetDrawingEngine()->SetHWInterface(fBackingHWInterface.Get());
+		GetDrawingEngine()->SetRendererOffset((int32)full.left, (int32)full.top);
+	}
+
+	fDirtyRegion.Include(full);
+	ServerWindow()->RequestRedraw();
+}
+
+
+void
+Window::FreeBackingStore()
+{
+	if (!fBackingBitmap.IsSet())
+		return;
+
+	if (GetDrawingEngine() != NULL && fDesktop != NULL) {
+		GetDrawingEngine()->SetHWInterface(fDesktop->HWInterface());
+		GetDrawingEngine()->SetRendererOffset(0, 0);
+	}
+
+	if (fBackingHWInterface.IsSet()) {
+		fBackingHWInterface->LockExclusiveAccess();
+		fBackingHWInterface->Shutdown();
+		fBackingHWInterface->UnlockExclusiveAccess();
+		fBackingHWInterface.Unset();
+	}
+
+	fBackingBitmap.Unset();
 }
 
 
@@ -322,6 +398,11 @@ Window::MoveBy(int32 x, int32 y, bool moveStack)
 
 	// the desktop will take care of dirty regions
 
+	if (HasBackingStore() && GetDrawingEngine() != NULL) {
+		BRect full = FullFrame();
+		GetDrawingEngine()->SetRendererOffset((int32)full.left, (int32)full.top);
+	}
+
 	// dispatch a message to the client informing about the changed size
 	BMessage msg(B_WINDOW_MOVED);
 	msg.AddInt64("when", system_time());
@@ -385,6 +466,9 @@ Window::ResizeBy(int32 x, int32 y, BRegion* dirtyRegion, bool resizeStack)
 			window->ResizeBy(x, y, dirtyRegion, false);
 		}
 	}
+
+	if (HasBackingStore())
+		AllocateBackingStore();
 
 	// send a message to the client informing about the changed size
 	BRect frame(Frame());
@@ -698,7 +782,10 @@ void
 Window::GetEffectiveDrawingRegion(View* view, BRegion& region)
 {
 	if (!fEffectiveDrawingRegionValid) {
-		fEffectiveDrawingRegion = VisibleContentRegion();
+		if (HasBackingStore())
+			GetContentRegion(&fEffectiveDrawingRegion);
+		else
+			fEffectiveDrawingRegion = VisibleContentRegion();
 		if (fUpdateRequested && !fInUpdate) {
 			// We requested an update, but the client has not started it yet,
 			// so it is only allowed to draw outside the pending update sessions
@@ -1820,6 +1907,8 @@ Window::_DrawBorder()
 
 		engine->SetCopyToFrontEnabled(copyToFrontEnabled);
 		engine->CopyToFront(*dirtyBorderRegion);
+		if (HasBackingStore() && fDesktop != NULL)
+			fDesktop->CompositeDirtyRegion(*dirtyBorderRegion);
 
 // TODO: remove this once the DrawState stuff is handled
 // more cleanly. The reason why this is needed is that
@@ -1983,6 +2072,9 @@ Window::EndUpdate()
 			dirty->IntersectWith(&VisibleContentRegion());
 
 			fDrawingEngine->CopyToFront(*dirty);
+			if (HasBackingStore() && fDesktop != NULL)
+				fDesktop->CompositeDirtyRegion(*dirty);
+
 			fRegionPool.Recycle(dirty);
 		}
 

@@ -16,7 +16,9 @@
 #define WINDOW_H
 
 
+#include "BitmapHWInterface.h"
 #include "RegionPool.h"
+#include "ServerBitmap.h"
 #include "ServerWindow.h"
 #include "View.h"
 #include "WindowList.h"
@@ -138,6 +140,14 @@ public:
 			View*				ViewAt(const BPoint& where);
 
 	virtual	bool				IsOffscreenWindow() const { return false; }
+
+			bool				HasBackingStore() const
+									{ return fBackingBitmap.IsSet(); }
+			ServerBitmap*		BackingStoreBitmap() const
+									{ return fBackingBitmap.Get(); }
+			BRect				FullFrame() const;
+			void				AllocateBackingStore();
+			void				FreeBackingStore();
 
 			void				GetEffectiveDrawingRegion(View* view,
 									BRegion& region);
@@ -386,6 +396,11 @@ protected:
 			ObjectDeleter<DrawingEngine>
 								fDrawingEngine;
 			::Desktop*			fDesktop;
+
+			BReference<ServerBitmap>
+								fBackingBitmap;
+			ObjectDeleter<BitmapHWInterface>
+								fBackingHWInterface;
 
 			// The synchronization, which client drawing commands
 			// belong to the redraw of which dirty region is handled

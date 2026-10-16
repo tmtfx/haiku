@@ -100,6 +100,7 @@ private:
 			BSlider*		fBrightnessSlider;
 			BCheckBox* 	fHardwareCursorCheckbox;
 			BCheckBox* 	f2DAccelerationCheckbox;
+			BCheckBox* 	f2DCompositorCheckbox;
 
 			BButton*		fDefaultsButton;
 			BButton*		fApplyButton;

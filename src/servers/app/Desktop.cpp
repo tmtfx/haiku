@@ -29,6 +29,7 @@
 #include <debugger.h>
 #include <DirectWindow.h>
 #include <Entry.h>
+#include <File.h>
 #include <FindDirectory.h>
 #include <Message.h>
 #include <MessageFilter.h>
@@ -50,6 +51,7 @@
 #include "DrawingEngine.h"
 #include "GlobalFontManager.h"
 #include "HWInterface.h"
+#include "RenderingBuffer.h"
 #include "InputManager.h"
 #include "Screen.h"
 #include "ScreenManager.h"
@@ -445,7 +447,9 @@ Desktop::Desktop(uid_t userID, const char* targetScreen)
 
 	fFocus(NULL),
 	fFront(NULL),
-	fBack(NULL)
+	fBack(NULL),
+
+	fCompositor2DEnabled(false)
 {
 	memset(fLastWorkspaceFocus, 0, sizeof(fLastWorkspaceFocus));
 
@@ -538,6 +542,34 @@ Desktop::Init()
 				hasInfo ? &info : NULL);
 		if (stored != NULL && stored->brightness > 0)
 			HWInterface()->SetBrightness(stored->brightness);
+	}
+
+	// Restore 2D compositor preference
+	{
+		BPath path;
+		if (find_directory(B_USER_SETTINGS_DIRECTORY, &path) == B_OK) {
+			path.Append("Screen_data");
+			BFile file(path.Path(), B_READ_ONLY);
+			if (file.InitCheck() == B_OK) {
+				BPoint offset;
+				file.Read(&offset, sizeof(BPoint));
+				bool hw = true;
+				file.Read(&hw, sizeof(bool));
+				bool acc = false;
+				file.Read(&acc, sizeof(bool));
+				bool comp = false;
+				if (file.Read(&comp, sizeof(bool)) == (ssize_t)sizeof(bool) && comp) {
+					system_info sysInfo;
+					if (get_system_info(&sysInfo) == B_OK) {
+						uint64 totalRAM = (uint64)sysInfo.max_pages * B_PAGE_SIZE;
+						if (totalRAM >= 3800ULL * 1024 * 1024
+							&& HWInterface()->Has2DAcceleration()) {
+							fCompositor2DEnabled = true;
+						}
+					}
+				}
+			}
+		}
 	}
 
 	// now that the mode is set, see if we should increase the default font size
@@ -2222,14 +2254,148 @@ Desktop::FindTarget(BMessenger& messenger)
 
 
 void
+Desktop::SetCompositor2DEnabled(bool enable)
+{
+	if (fCompositor2DEnabled == enable)
+		return;
+
+	AutoWriteLocker _(fWindowLock);
+	fCompositor2DEnabled = enable;
+
+	for (Window* window = fAllWindows.FirstWindow(); window != NULL;
+			window = window->NextWindow(kAllWindowList)) {
+		if (enable)
+			window->AllocateBackingStore();
+		else
+			window->FreeBackingStore();
+	}
+
+	BRegion dirty(fVirtualScreen.Frame());
+	MarkDirty(dirty);
+}
+
+
+static inline void
+BlendSpan(uint32* dst, const uint32* src, int32 count)
+{
+	int32 i = 0;
+	while (i < count) {
+		uint32 s = src[i];
+		uint32 alpha = (s >> 24) & 0xff;
+		if (alpha == 255) {
+			// Contiguous run of opaque pixels: fast memcpy
+			int32 start = i;
+			while (i < count && ((src[i] >> 24) & 0xff) == 255)
+				i++;
+			memcpy(&dst[start], &src[start], (i - start) * sizeof(uint32));
+		} else if (alpha == 0) {
+			// Fully transparent pixel: skip
+			i++;
+		} else {
+			// Semi-transparent pixel: perform exact alpha blend
+			uint32 invAlpha = 255 - alpha;
+			uint8* d = (uint8*)&dst[i];
+			const uint8* sc = (const uint8*)&s;
+			d[0] = (uint8)(((uint32)sc[0] * alpha + (uint32)d[0] * invAlpha + 127) / 255);
+			d[1] = (uint8)(((uint32)sc[1] * alpha + (uint32)d[1] * invAlpha + 127) / 255);
+			d[2] = (uint8)(((uint32)sc[2] * alpha + (uint32)d[2] * invAlpha + 127) / 255);
+			d[3] = 255;
+			i++;
+		}
+	}
+}
+
+
+void
+Desktop::CompositeDirtyRegion(const BRegion& dirtyRegion)
+{
+	RenderingBuffer* frontBuffer = HWInterface() != NULL ? HWInterface()->FrontBuffer() : NULL;
+	if (frontBuffer == NULL || frontBuffer->Bits() == NULL || dirtyRegion.CountRects() == 0)
+		return;
+
+	// 1. Fill background for the dirty region first
+	if (GetDrawingEngine()->LockParallelAccess()) {
+		GetDrawingEngine()->FillRegion(dirtyRegion,
+			fWorkspaces[fCurrentWorkspace].Color());
+		GetDrawingEngine()->UnlockParallelAccess();
+	}
+
+	uint8* dstBits = (uint8*)frontBuffer->Bits();
+	uint32 dstBytesPerRow = frontBuffer->BytesPerRow();
+	uint32 bytesPerPixel = 4;
+
+	// 2. Composite all visible windows back-to-front
+	for (Window* window = CurrentWindows().FirstWindow(); window != NULL;
+			window = window->NextWindow(fCurrentWorkspace)) {
+		if (window->IsHidden() || !window->IsVisible())
+			continue;
+
+		ServerBitmap* bitmap = window->BackingStoreBitmap();
+		if (bitmap == NULL || bitmap->Bits() == NULL)
+			continue;
+
+		BRegion windowDirty(dirtyRegion);
+		windowDirty.IntersectWith(&window->VisibleRegion());
+		if (windowDirty.CountRects() == 0)
+			continue;
+
+		BRect fullFrame = window->FullFrame();
+		int32 fullLeft = (int32)fullFrame.left;
+		int32 fullTop = (int32)fullFrame.top;
+
+		uint8* srcBits = (uint8*)bitmap->Bits();
+		uint32 srcBytesPerRow = bitmap->BytesPerRow();
+		int32 bmpWidth = bitmap->Width();
+		int32 bmpHeight = bitmap->Height();
+
+		int32 rectCount = windowDirty.CountRects();
+		for (int32 i = 0; i < rectCount; i++) {
+			clipping_rect r = windowDirty.RectAtInt(i);
+
+			int32 srcX = r.left - fullLeft;
+			int32 srcY = r.top - fullTop;
+
+			if (srcX < 0 || srcY < 0 || srcX >= bmpWidth || srcY >= bmpHeight)
+				continue;
+
+			int32 copyWidth = r.right - r.left + 1;
+			int32 copyHeight = r.bottom - r.top + 1;
+
+			if (srcX + copyWidth > bmpWidth)
+				copyWidth = bmpWidth - srcX;
+			if (srcY + copyHeight > bmpHeight)
+				copyHeight = bmpHeight - srcY;
+
+			if (copyWidth <= 0 || copyHeight <= 0)
+				continue;
+
+			for (int32 y = 0; y < copyHeight; y++) {
+				uint32* d = (uint32*)(dstBits + ((r.top + y) * dstBytesPerRow) + (r.left * bytesPerPixel));
+				const uint32* s = (const uint32*)(srcBits + ((srcY + y) * srcBytesPerRow) + (srcX * bytesPerPixel));
+
+				BlendSpan(d, s, copyWidth);
+			}
+		}
+	}
+
+	if (HWInterface() != NULL)
+		HWInterface()->InvalidateRegion(dirtyRegion);
+}
+
+
+void
 Desktop::MarkDirty(BRegion& dirtyRegion, BRegion& exposeRegion)
 {
 	if (dirtyRegion.CountRects() == 0)
 		return;
 
 	if (LockAllWindows()) {
-		// send redraw messages to all windows intersecting the dirty region
-		_TriggerWindowRedrawing(dirtyRegion, exposeRegion);
+		if (fCompositor2DEnabled) {
+			CompositeDirtyRegion(dirtyRegion);
+		} else {
+			// send redraw messages to all windows intersecting the dirty region
+			_TriggerWindowRedrawing(dirtyRegion, exposeRegion);
+		}
 
 		UnlockAllWindows();
 	}

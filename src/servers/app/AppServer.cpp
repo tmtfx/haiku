@@ -186,6 +186,20 @@ AppServer::MessageReceived(BMessage* message)
 			break;
 		}
 
+		case AS_SET_2D_COMPOSITOR_ENABLED:
+		{
+			bool enable;
+			if (message->FindBool("enable", &enable) == B_OK) {
+				BAutolock locker(fDesktopLock);
+				for (int32 i = 0; i < fDesktops.CountItems(); i++) {
+					Desktop* desktop = fDesktops.ItemAt(i);
+					if (desktop != NULL)
+						desktop->SetCompositor2DEnabled(enable);
+				}
+			}
+			break;
+		}
+
 		case 'hsbm':
 		{
 			bool has = false;

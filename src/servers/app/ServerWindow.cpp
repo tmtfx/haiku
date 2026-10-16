@@ -4416,8 +4416,12 @@ ServerWindow::MakeWindow(BRect frame, const char* name,
 {
 	// The non-offscreen ServerWindow uses the DrawingEngine instance from
 	// the desktop.
-	return new(std::nothrow) ::Window(frame, name, look, feel, flags,
+	::Window* window = new(std::nothrow) ::Window(frame, name, look, feel, flags,
 		workspace, this, fDesktop->HWInterface()->CreateDrawingEngine());
+	if (window != NULL && fDesktop->Compositor2DEnabled())
+		window->AllocateBackingStore();
+
+	return window;
 }
 
 
