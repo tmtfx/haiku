@@ -100,17 +100,6 @@ xgi_init_2d_engine(display_mode* mode)
 	if (gInfo.regs == NULL)
 		return;
 
-	/* Enable 2D accelerator in SR1E */
-	uint16 relIO = gInfo.sharedInfo->ioBase;
-	uint16 srIndex = (relIO != 0) ? (relIO + 0x44) : 0x3C4;
-	out8(0x05, srIndex);
-	out8(0x86, srIndex + 1);
-
-	out8(0x1E, srIndex);
-	uint8 sr1e = in8(srIndex + 1);
-	out8(0x1E, srIndex);
-	out8(sr1e | 0xDA, srIndex + 1);
-
 	xgi_wait_engine_idle();
 
 	uint32 bppCode = get_bpp_code((color_space)mode->space);

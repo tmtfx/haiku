@@ -69,6 +69,7 @@
 #include <GraphicsDefs.h>
 #include <PCI.h>
 #include <OS.h>
+#include <unistd.h>
 #include <edid.h>
 #include <video_overlay.h>
 
@@ -218,35 +219,29 @@ write8(uint32 offset, uint8 value)
 	*(volatile uint8*)(gInfo.regs + offset) = value;
 }
 
-#if defined(__x86_64__) || defined(__i386__)
 static inline void
-out8(uint8 value, uint16 port)
+xgi_out8(uint8 value, uint16 port)
 {
-	__asm__ volatile ("outb %0, %1" : : "a"(value), "d"(port));
+	XgiGetSetPIO pio;
+	pio.magic = XGI_PRIVATE_DATA_MAGIC;
+	pio.port = port;
+	pio.value = value;
+	ioctl(gInfo.deviceFD, XGI_SET_PIO, &pio, sizeof(pio));
 }
 
 static inline uint8
-in8(uint16 port)
+xgi_in8(uint16 port)
 {
-	uint8 value;
-	__asm__ volatile ("inb %1, %0" : "=a"(value) : "d"(port));
-	return value;
-}
-#else
-static inline void
-out8(uint8 value, uint16 port)
-{
-	(void)value;
-	(void)port;
+	XgiGetSetPIO pio;
+	pio.magic = XGI_PRIVATE_DATA_MAGIC;
+	pio.port = port;
+	pio.value = 0;
+	ioctl(gInfo.deviceFD, XGI_GET_PIO, &pio, sizeof(pio));
+	return pio.value;
 }
 
-static inline uint8
-in8(uint16 port)
-{
-	(void)port;
-	return 0;
-}
-#endif
+#define out8(value, port) xgi_out8((value), (port))
+#define in8(port)         xgi_in8((port))
 
 /* Prototypes - InitAccelerant.cpp */
 status_t	xgi_init_accelerant(int fd);

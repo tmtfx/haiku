@@ -101,7 +101,15 @@ enum xgi_chip_type {
 enum {
     XGI_GET_PRIVATE_DATA = B_DEVICE_OP_CODES_END + 1,
     XGI_DEVICE_NAME,
-    XGI_GET_EDID
+    XGI_GET_EDID,
+    XGI_GET_PIO,
+    XGI_SET_PIO
+};
+
+struct XgiGetSetPIO {
+    uint32  magic;
+    uint16  port;
+    uint8   value;
 };
 
 struct XgiGetPrivateData {

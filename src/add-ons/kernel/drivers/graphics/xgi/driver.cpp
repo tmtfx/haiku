@@ -180,6 +180,12 @@ unlock_and_detect_vram(DeviceInfo& device, uint32& frameBufferSize)
 	out8(0x05, srIndexPort);
 	out8(0x86, srDataPort);
 
+	/* Enable 2D accelerator in SR1E */
+	out8(0x1E, srIndexPort);
+	uint8 sr1e = in8(srDataPort);
+	out8(0x1E, srIndexPort);
+	out8(sr1e | 0xDA, srDataPort);
+
 	/* Read SR14 for memory configuration */
 	out8(0x14, srIndexPort);
 	uint8 memConfig = in8(srDataPort);
@@ -683,6 +689,26 @@ device_ioctl(void* cookie, uint32 msg, void* buf, size_t len)
 			if (len < sizeof(edid1_info))
 				return B_BUFFER_OVERFLOW;
 			return user_memcpy(buf, &device->sharedInfo->edidInfo, sizeof(edid1_info));
+		}
+
+		case XGI_GET_PIO: {
+			XgiGetSetPIO pio;
+			if (user_memcpy(&pio, buf, sizeof(pio)) != B_OK)
+				return B_BAD_ADDRESS;
+			if (pio.magic != XGI_PRIVATE_DATA_MAGIC)
+				return B_BAD_VALUE;
+			pio.value = in8(pio.port);
+			return user_memcpy(buf, &pio, sizeof(pio));
+		}
+
+		case XGI_SET_PIO: {
+			XgiGetSetPIO pio;
+			if (user_memcpy(&pio, buf, sizeof(pio)) != B_OK)
+				return B_BAD_ADDRESS;
+			if (pio.magic != XGI_PRIVATE_DATA_MAGIC)
+				return B_BAD_VALUE;
+		out8(pio.value, pio.port);
+			return B_OK;
 		}
 
 		default:
