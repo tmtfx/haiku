@@ -127,6 +127,10 @@ public:
 									uint32 count, int32 xOffset, int32 yOffset)
 									{}
 
+	virtual	void				FillRegion(const BRegion& region,
+									const rgb_color& color)
+									{}
+
 	virtual	void				Sync() {}
 
 	// cursor handling (these do their own Read/Write locking)

@@ -887,6 +887,16 @@ DrawingEngine::FillRect(BRect r, const rgb_color& color)
 
 	make_rect_valid(r);
 	r = fPainter->ClipRect(r);
+
+	if ((fAvailableHWAcceleration & HW_ACC_FILL_REGION) != 0
+		&& r.IsValid() && (r.Width() + 1) * (r.Height() + 1) >= 100) {
+		AutoFloatingOverlaysHider _(fGraphicsCard, r);
+		fPainter->FillRect(r, color);
+		BRegion region(r);
+		fGraphicsCard->FillRegion(region, color);
+		return;
+	}
+
 	DrawTransaction transaction(this, r);
 	if (!transaction.IsDirty())
 		return;
@@ -917,11 +927,17 @@ DrawingEngine::FillRegion(BRegion& r, const rgb_color& color)
 		return;
 	}
 
-	DrawTransaction transaction(this, r);
+	AutoFloatingOverlaysHider _(fGraphicsCard, frame);
 
 	int32 count = r.CountRects();
 	for (int32 i = 0; i < count; i++)
 		fPainter->FillRectNoClipping(r.RectAtInt(i), color);
+
+	if ((fAvailableHWAcceleration & HW_ACC_FILL_REGION) != 0) {
+		fGraphicsCard->FillRegion(r, color);
+	} else {
+		DrawTransaction transaction(this, r);
+	}
 }
 
 
