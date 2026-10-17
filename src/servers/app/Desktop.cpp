@@ -1600,6 +1600,13 @@ Desktop::MoveWindowBy(Window* window, float x, float y, int32 workspace)
 	copyRegion.OffsetBy((int32)x, (int32)y);
 	newDirtyRegion.Exclude(&copyRegion);
 
+	if (fCompositor2DEnabled) {
+		BRegion newlyVisible(window->VisibleRegion());
+		newlyVisible.Exclude(&copyRegion);
+		if (newlyVisible.CountRects() > 0)
+			window->ProcessDirtyRegion(newlyVisible);
+	}
+
 	MarkDirty(newDirtyRegion);
 	_SetBackground(background);
 	_WindowChanged(window);
@@ -3605,21 +3612,17 @@ Desktop::_ShowWindow(Window* window, bool affectsOtherWindows)
 
 	BRegion dirty(window->VisibleRegion());
 
-	if (fCompositor2DEnabled) {
-		if (!window->HasBackingStore())
-			window->AllocateBackingStore();
-		else
-			CompositeDirtyRegion(dirty);
-	} else {
-		if (!affectsOtherWindows) {
-			// everything that is now visible in the
-			// window needs a redraw, but other windows
-			// are not affected, we can call ProcessDirtyRegion()
-			// of the window, and don't have to use MarkDirty()
-			window->ProcessDirtyRegion(dirty);
-		} else
-			MarkDirty(dirty);
-	}
+	if (fCompositor2DEnabled && !window->HasBackingStore())
+		window->AllocateBackingStore();
+
+	if (!affectsOtherWindows) {
+		// everything that is now visible in the
+		// window needs a redraw, but other windows
+		// are not affected, we can call ProcessDirtyRegion()
+		// of the window, and don't have to use MarkDirty()
+		window->ProcessDirtyRegion(dirty);
+	} else
+		MarkDirty(dirty);
 
 	if (window->ServerWindow()->HasDirectFrameBufferAccess()) {
 		window->ServerWindow()->HandleDirectConnection(

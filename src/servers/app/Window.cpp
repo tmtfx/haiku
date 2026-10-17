@@ -398,12 +398,22 @@ Window::MoveBy(int32 x, int32 y, bool moveStack)
 
 	// the desktop will take care of dirty regions
 
-	if (HasBackingStore() && GetDrawingEngine() != NULL) {
-		BRegion fullRegion;
-		GetFullRegion(&fullRegion);
-		fullRegion.OffsetBy(-x, -y);
-		if (GetDrawingEngine()->LockParallelAccess()) {
-			GetDrawingEngine()->CopyRegion(&fullRegion, x, y);
+	if (HasBackingStore() && GetDrawingEngine() != NULL && fDesktop != NULL) {
+		BRect screenBounds = fDesktop->VirtualScreen().Frame();
+		BRegion screenRegion(screenBounds);
+		BRegion validRegion;
+		GetFullRegion(&validRegion);
+		validRegion.OffsetBy(-x, -y);
+		validRegion.IntersectWith(&screenRegion);
+
+		BRegion destRegion(validRegion);
+		destRegion.OffsetBy(x, y);
+		destRegion.IntersectWith(&screenRegion);
+		destRegion.OffsetBy(-x, -y);
+		validRegion.IntersectWith(&destRegion);
+
+		if (validRegion.CountRects() > 0 && GetDrawingEngine()->LockParallelAccess()) {
+			GetDrawingEngine()->CopyRegion(&validRegion, x, y);
 			GetDrawingEngine()->UnlockParallelAccess();
 		}
 	}
@@ -1899,10 +1909,12 @@ Window::_DrawBorder()
 	if (!dirtyBorderRegion)
 		return;
 	GetBorderRegion(dirtyBorderRegion);
-	// intersect with our visible region
-	dirtyBorderRegion->IntersectWith(&fVisibleRegion);
-	// intersect with the dirty region
-	dirtyBorderRegion->IntersectWith(&fDirtyRegion);
+	if (!HasBackingStore()) {
+		// intersect with our visible region
+		dirtyBorderRegion->IntersectWith(&fVisibleRegion);
+		// intersect with the dirty region
+		dirtyBorderRegion->IntersectWith(&fDirtyRegion);
+	}
 
 	DrawingEngine* engine = decorator->GetDrawingEngine();
 	if (dirtyBorderRegion->CountRects() > 0 && engine->LockParallelAccess()) {
