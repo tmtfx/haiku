@@ -1909,7 +1909,10 @@ Window::_DrawBorder()
 	if (!dirtyBorderRegion)
 		return;
 	GetBorderRegion(dirtyBorderRegion);
-	if (!HasBackingStore()) {
+	if (HasBackingStore() && fBackingBitmap.IsSet()) {
+		BRegion bufferRegion(fBackingBitmap->Bounds());
+		dirtyBorderRegion->IntersectWith(&bufferRegion);
+	} else {
 		// intersect with our visible region
 		dirtyBorderRegion->IntersectWith(&fVisibleRegion);
 		// intersect with the dirty region
