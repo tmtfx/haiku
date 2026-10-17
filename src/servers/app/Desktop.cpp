@@ -2534,6 +2534,12 @@ Desktop::CompositeDirtyRegion(BRegion& dirtyRegion)
 		int32 bmpWidth = bitmap->Width();
 		int32 bmpHeight = bitmap->Height();
 
+		BRect contentFrame = window->Frame();
+		int32 cLeft = (int32)contentFrame.left;
+		int32 cTop = (int32)contentFrame.top;
+		int32 cRight = (int32)contentFrame.right;
+		int32 cBottom = (int32)contentFrame.bottom;
+
 		int32 rectCount = windowDirty.CountRects();
 		for (int32 i = 0; i < rectCount; i++) {
 			clipping_rect r = windowDirty.RectAtInt(i);
@@ -2582,6 +2588,10 @@ Desktop::CompositeDirtyRegion(BRegion& dirtyRegion)
 				const uint32* s = (const uint32*)(srcBits + ((srcY + y) * srcBytesPerRow) + (srcX * 4));
 				int32 screenY = r.top + y;
 
+				int32 segContentStart = max_c((int32)r.left, cLeft);
+				int32 segContentEnd = min_c((int32)(r.left + copyWidth - 1), cRight);
+				bool hasContent = (screenY >= cTop && screenY <= cBottom && segContentStart <= segContentEnd);
+
 				switch (dstSpace) {
 					case B_RGB32:
 					case B_RGBA32:
@@ -2589,7 +2599,23 @@ Desktop::CompositeDirtyRegion(BRegion& dirtyRegion)
 					case B_RGBA32_BIG:
 					{
 						uint32* d = (uint32*)(dstBits + (screenY * dstBytesPerRow) + (r.left * 4));
-						BlendSpanRGB32(d, s, copyWidth);
+						if (!hasContent) {
+							BlendSpanRGB32(d, s, copyWidth);
+						} else {
+							int32 cStartIdx = segContentStart - r.left;
+							int32 cEndIdx = segContentEnd - r.left;
+
+							if (cStartIdx > 0)
+								BlendSpanRGB32(d, s, cStartIdx);
+
+							memcpy(d + cStartIdx, s + cStartIdx,
+								(cEndIdx - cStartIdx + 1) * sizeof(uint32));
+
+							if (cEndIdx + 1 < copyWidth) {
+								BlendSpanRGB32(d + cEndIdx + 1, s + cEndIdx + 1,
+									copyWidth - (cEndIdx + 1));
+							}
+						}
 						break;
 					}
 
@@ -2613,7 +2639,28 @@ Desktop::CompositeDirtyRegion(BRegion& dirtyRegion)
 					case B_RGB16_BIG:
 					{
 						uint16* d = (uint16*)(dstBits + (screenY * dstBytesPerRow) + (r.left * 2));
-						BlendSpanRGB16(d, s, copyWidth);
+						if (!hasContent) {
+							BlendSpanRGB16(d, s, copyWidth);
+						} else {
+							int32 cStartIdx = segContentStart - r.left;
+							int32 cEndIdx = segContentEnd - r.left;
+
+							if (cStartIdx > 0)
+								BlendSpanRGB16(d, s, cStartIdx);
+
+							for (int32 px = cStartIdx; px <= cEndIdx; px++) {
+								uint32 sp = s[px];
+								uint8 b = sp & 0xff;
+								uint8 g = (sp >> 8) & 0xff;
+								uint8 r_c = (sp >> 16) & 0xff;
+								d[px] = (uint16)(((r_c & 0xf8) << 8) | ((g & 0xfc) << 3) | (b >> 3));
+							}
+
+							if (cEndIdx + 1 < copyWidth) {
+								BlendSpanRGB16(d + cEndIdx + 1, s + cEndIdx + 1,
+									copyWidth - (cEndIdx + 1));
+							}
+						}
 						break;
 					}
 
@@ -2623,7 +2670,28 @@ Desktop::CompositeDirtyRegion(BRegion& dirtyRegion)
 					case B_RGBA15_BIG:
 					{
 						uint16* d = (uint16*)(dstBits + (screenY * dstBytesPerRow) + (r.left * 2));
-						BlendSpanRGB15(d, s, copyWidth);
+						if (!hasContent) {
+							BlendSpanRGB15(d, s, copyWidth);
+						} else {
+							int32 cStartIdx = segContentStart - r.left;
+							int32 cEndIdx = segContentEnd - r.left;
+
+							if (cStartIdx > 0)
+								BlendSpanRGB15(d, s, cStartIdx);
+
+							for (int32 px = cStartIdx; px <= cEndIdx; px++) {
+								uint32 sp = s[px];
+								uint8 b = sp & 0xff;
+								uint8 g = (sp >> 8) & 0xff;
+								uint8 r_c = (sp >> 16) & 0xff;
+								d[px] = (uint16)(((r_c & 0xf8) << 7) | ((g & 0xf8) << 2) | (b >> 3));
+							}
+
+							if (cEndIdx + 1 < copyWidth) {
+								BlendSpanRGB15(d + cEndIdx + 1, s + cEndIdx + 1,
+									copyWidth - (cEndIdx + 1));
+							}
+						}
 						break;
 					}
 
