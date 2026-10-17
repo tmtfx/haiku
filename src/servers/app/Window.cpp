@@ -215,11 +215,7 @@ Window::AllocateBackingStore()
 		return;
 	}
 
-	uint32 panelColor = 0xffd8d8d8;
-	uint32* bits = (uint32*)fBackingBitmap->Bits();
-	int32 pixelCount = fBackingBitmap->BitsLength() / 4;
-	for (int32 i = 0; i < pixelCount; i++)
-		bits[i] = panelColor;
+	memset(fBackingBitmap->Bits(), 0, fBackingBitmap->BitsLength());
 
 	fBackingHWInterface.SetTo(new (std::nothrow) BitmapHWInterface(fBackingBitmap.Get()));
 	if (!fBackingHWInterface.IsSet() || fBackingHWInterface->Initialize() != B_OK) {

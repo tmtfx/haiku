@@ -2403,27 +2403,17 @@ BlendSpanGRAY8(uint8* dst, const uint32* src, int32 count)
 
 
 static inline void
-BlendSpanRGB32(uint32* dst, const uint32* src, int32 count, bool isContent = false)
+BlendSpanRGB32(uint32* dst, const uint32* src, int32 count)
 {
-	if (isContent) {
-		memcpy(dst, src, count * sizeof(uint32));
-		return;
-	}
-
-	int32 i = 0;
-	while (i < count) {
+	for (int32 i = 0; i < count; i++) {
 		uint32 s = src[i];
+		if (s == 0)
+			continue;
+
 		uint32 alpha = (s >> 24) & 0xff;
-		if (alpha == 255) {
-			// Contiguous run of opaque pixels: fast memcpy
-			int32 start = i;
-			while (i < count && ((src[i] >> 24) & 0xff) == 255)
-				i++;
-			memcpy(&dst[start], &src[start], (i - start) * sizeof(uint32));
-		} else if (alpha == 0) {
-			i++;
+		if (alpha == 255 || alpha == 0) {
+			dst[i] = s | 0xff000000;
 		} else {
-			// Semi-transparent pixel: exact alpha blend
 			uint32 invAlpha = 255 - alpha;
 			uint8* d = (uint8*)&dst[i];
 			const uint8* sc = (const uint8*)&s;
@@ -2431,24 +2421,26 @@ BlendSpanRGB32(uint32* dst, const uint32* src, int32 count, bool isContent = fal
 			d[1] = (uint8)(((uint32)sc[1] * alpha + (uint32)d[1] * invAlpha + 127) / 255);
 			d[2] = (uint8)(((uint32)sc[2] * alpha + (uint32)d[2] * invAlpha + 127) / 255);
 			d[3] = 255;
-			i++;
 		}
 	}
 }
 
 
 static inline void
-BlendSpanRGB16(uint16* dst, const uint32* src, int32 count, bool isContent = false)
+BlendSpanRGB16(uint16* dst, const uint32* src, int32 count)
 {
 	for (int32 i = 0; i < count; i++) {
 		uint32 s = src[i];
+		if (s == 0)
+			continue;
+
 		uint32 alpha = (s >> 24) & 0xff;
-		if (isContent || alpha == 255) {
+		if (alpha == 255 || alpha == 0) {
 			uint8 b = s & 0xff;
 			uint8 g = (s >> 8) & 0xff;
 			uint8 r = (s >> 16) & 0xff;
 			dst[i] = (uint16)(((r & 0xf8) << 8) | ((g & 0xfc) << 3) | (b >> 3));
-		} else if (alpha > 0) {
+		} else {
 			uint8 s_b = s & 0xff;
 			uint8 s_g = (s >> 8) & 0xff;
 			uint8 s_r = (s >> 16) & 0xff;
@@ -2470,17 +2462,20 @@ BlendSpanRGB16(uint16* dst, const uint32* src, int32 count, bool isContent = fal
 
 
 static inline void
-BlendSpanRGB15(uint16* dst, const uint32* src, int32 count, bool isContent = false)
+BlendSpanRGB15(uint16* dst, const uint32* src, int32 count)
 {
 	for (int32 i = 0; i < count; i++) {
 		uint32 s = src[i];
+		if (s == 0)
+			continue;
+
 		uint32 alpha = (s >> 24) & 0xff;
-		if (isContent || alpha == 255) {
+		if (alpha == 255 || alpha == 0) {
 			uint8 b = s & 0xff;
 			uint8 g = (s >> 8) & 0xff;
 			uint8 r = (s >> 16) & 0xff;
 			dst[i] = (uint16)(((r & 0xf8) << 7) | ((g & 0xf8) << 2) | (b >> 3));
-		} else if (alpha > 0) {
+		} else {
 			uint8 s_b = s & 0xff;
 			uint8 s_g = (s >> 8) & 0xff;
 			uint8 s_r = (s >> 16) & 0xff;
@@ -2539,8 +2534,6 @@ Desktop::CompositeDirtyRegion(BRegion& dirtyRegion)
 		int32 bmpWidth = bitmap->Width();
 		int32 bmpHeight = bitmap->Height();
 
-		BRect frame = window->Frame();
-
 		int32 rectCount = windowDirty.CountRects();
 		for (int32 i = 0; i < rectCount; i++) {
 			clipping_rect r = windowDirty.RectAtInt(i);
@@ -2588,10 +2581,6 @@ Desktop::CompositeDirtyRegion(BRegion& dirtyRegion)
 			for (int32 y = 0; y < copyHeight; y++) {
 				const uint32* s = (const uint32*)(srcBits + ((srcY + y) * srcBytesPerRow) + (srcX * 4));
 				int32 screenY = r.top + y;
-				bool isContent = (screenY >= (int32)frame.top
-					&& screenY <= (int32)frame.bottom
-					&& r.left >= (int32)frame.left
-					&& (r.left + copyWidth - 1) <= (int32)frame.right);
 
 				switch (dstSpace) {
 					case B_RGB32:
@@ -2600,7 +2589,7 @@ Desktop::CompositeDirtyRegion(BRegion& dirtyRegion)
 					case B_RGBA32_BIG:
 					{
 						uint32* d = (uint32*)(dstBits + (screenY * dstBytesPerRow) + (r.left * 4));
-						BlendSpanRGB32(d, s, copyWidth, isContent);
+						BlendSpanRGB32(d, s, copyWidth);
 						break;
 					}
 
@@ -2624,7 +2613,7 @@ Desktop::CompositeDirtyRegion(BRegion& dirtyRegion)
 					case B_RGB16_BIG:
 					{
 						uint16* d = (uint16*)(dstBits + (screenY * dstBytesPerRow) + (r.left * 2));
-						BlendSpanRGB16(d, s, copyWidth, isContent);
+						BlendSpanRGB16(d, s, copyWidth);
 						break;
 					}
 
@@ -2634,7 +2623,7 @@ Desktop::CompositeDirtyRegion(BRegion& dirtyRegion)
 					case B_RGBA15_BIG:
 					{
 						uint16* d = (uint16*)(dstBits + (screenY * dstBytesPerRow) + (r.left * 2));
-						BlendSpanRGB15(d, s, copyWidth, isContent);
+						BlendSpanRGB15(d, s, copyWidth);
 						break;
 					}
 
