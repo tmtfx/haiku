@@ -2509,24 +2509,13 @@ Desktop::CompositeDirtyRegion(BRegion& dirtyRegion)
 	if (drawingBuffer == NULL || drawingBuffer->Bits() == NULL || dirtyRegion.CountRects() == 0)
 		return;
 
-	// 1. Fill background only for areas not covered by any window
-	BRegion backgroundDirty(dirtyRegion);
-	backgroundDirty.IntersectWith(&fBackgroundRegion);
-	if (backgroundDirty.CountRects() > 0) {
-		if (GetDrawingEngine()->LockParallelAccess()) {
-			GetDrawingEngine()->FillRegion(backgroundDirty,
-				fWorkspaces[fCurrentWorkspace].Color());
-			GetDrawingEngine()->UnlockParallelAccess();
-		}
-	}
-
 	uint8* dstBits = (uint8*)drawingBuffer->Bits();
 	uint32 dstBytesPerRow = drawingBuffer->BytesPerRow();
 	int32 dstWidth = drawingBuffer->Width();
 	int32 dstHeight = drawingBuffer->Height();
 	color_space dstSpace = drawingBuffer->ColorSpace();
 
-	// 2. Composite all visible windows back-to-front
+	// Composite all visible windows back-to-front
 	for (Window* window = CurrentWindows().FirstWindow(); window != NULL;
 			window = window->NextWindow(fCurrentWorkspace)) {
 		if (window->IsHidden() || !window->IsVisible())
