@@ -203,6 +203,17 @@ public:
 
 			void			SetRendererOffset(int32 offsetX, int32 offsetY);
 
+			void			SetWindowOrigin(int32 x, int32 y)
+								{ fOriginX = x; fOriginY = y; }
+			int32			WindowOriginX() const { return fOriginX; }
+			int32			WindowOriginY() const { return fOriginY; }
+
+			inline BPoint	_Translate(const BPoint& pt) const
+								{ return BPoint(pt.x - fOriginX, pt.y - fOriginY); }
+			inline BRect	_Translate(const BRect& r) const
+								{ return BRect(r.left - fOriginX, r.top - fOriginY,
+									r.right - fOriginX, r.bottom - fOriginY); }
+
 private:
 	friend class DrawTransaction;
 
@@ -215,6 +226,8 @@ private:
 			HWInterface*	fGraphicsCard;
 			uint32			fAvailableHWAcceleration;
 			bool			fCopyToFront;
+			int32			fOriginX;
+			int32			fOriginY;
 };
 
 #endif // DRAWING_ENGINE_H_

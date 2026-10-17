@@ -1602,11 +1602,6 @@ Desktop::MoveWindowBy(Window* window, float x, float y, int32 workspace)
 
 	if (fCompositor2DEnabled) {
 		CompositeDirtyRegion(newDirtyRegion);
-
-		BRegion newlyVisible(window->VisibleRegion());
-		newlyVisible.Exclude(&copyRegion);
-		if (newlyVisible.CountRects() > 0)
-			window->ProcessDirtyRegion(newlyVisible);
 	} else {
 		MarkDirty(newDirtyRegion);
 	}
@@ -2537,34 +2532,61 @@ Desktop::CompositeDirtyRegion(BRegion& dirtyRegion)
 		if (windowDirty.CountRects() == 0)
 			continue;
 
+		BRect fullFrame = window->FullFrame();
+		int32 fullLeft = (int32)fullFrame.left;
+		int32 fullTop = (int32)fullFrame.top;
+
 		uint8* srcBits = (uint8*)bitmap->Bits();
 		uint32 srcBytesPerRow = bitmap->BytesPerRow();
 		int32 bmpWidth = bitmap->Width();
 		int32 bmpHeight = bitmap->Height();
 
-		int32 maxWidth = min_c(dstWidth, bmpWidth);
-		int32 maxHeight = min_c(dstHeight, bmpHeight);
-
 		int32 rectCount = windowDirty.CountRects();
 		for (int32 i = 0; i < rectCount; i++) {
 			clipping_rect r = windowDirty.RectAtInt(i);
 
-			if (r.left < 0 || r.top < 0 || r.left >= maxWidth || r.top >= maxHeight)
-				continue;
-
+			int32 srcX = r.left - fullLeft;
+			int32 srcY = r.top - fullTop;
 			int32 copyWidth = r.right - r.left + 1;
 			int32 copyHeight = r.bottom - r.top + 1;
 
-			if (r.left + copyWidth > maxWidth)
-				copyWidth = maxWidth - r.left;
-			if (r.top + copyHeight > maxHeight)
-				copyHeight = maxHeight - r.top;
+			// Clamp source
+			if (srcX < 0) {
+				copyWidth += srcX;
+				r.left -= srcX;
+				srcX = 0;
+			}
+			if (srcY < 0) {
+				copyHeight += srcY;
+				r.top -= srcY;
+				srcY = 0;
+			}
+			if (srcX + copyWidth > bmpWidth)
+				copyWidth = bmpWidth - srcX;
+			if (srcY + copyHeight > bmpHeight)
+				copyHeight = bmpHeight - srcY;
+
+			// Clamp destination
+			if (r.left < 0) {
+				copyWidth += r.left;
+				srcX -= r.left;
+				r.left = 0;
+			}
+			if (r.top < 0) {
+				copyHeight += r.top;
+				srcY -= r.top;
+				r.top = 0;
+			}
+			if (r.left + copyWidth > dstWidth)
+				copyWidth = dstWidth - r.left;
+			if (r.top + copyHeight > dstHeight)
+				copyHeight = dstHeight - r.top;
 
 			if (copyWidth <= 0 || copyHeight <= 0)
 				continue;
 
 			for (int32 y = 0; y < copyHeight; y++) {
-				const uint32* s = (const uint32*)(srcBits + ((r.top + y) * srcBytesPerRow) + (r.left * 4));
+				const uint32* s = (const uint32*)(srcBits + ((srcY + y) * srcBytesPerRow) + (srcX * 4));
 
 				switch (dstSpace) {
 					case B_RGB32:
@@ -4070,18 +4092,11 @@ Desktop::_ScreenChanged(Screen* screen)
 
 	fVirtualScreen.UpdateFrame();
 
-	BRect newFrame = fVirtualScreen.Frame();
-	int32 newWidth = (int32)ceilf(newFrame.Width()) + 1;
-	int32 newHeight = (int32)ceilf(newFrame.Height()) + 1;
-
 	if (fCompositor2DEnabled) {
 		for (Window* window = fAllWindows.FirstWindow(); window != NULL;
 				window = window->NextWindow(kAllWindowList)) {
-			ServerBitmap* bitmap = window->BackingStoreBitmap();
-			if (bitmap == NULL || bitmap->Width() != newWidth
-				|| bitmap->Height() != newHeight) {
+			if (!window->HasBackingStore())
 				window->AllocateBackingStore();
-			}
 		}
 	}
 
