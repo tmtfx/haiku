@@ -7,7 +7,6 @@ UsePrivateSystemHeaders ;
 
 UseHeaders [ FDirName $(HAIKU_TOP) src servers app ] ;
 UseHeaders [ FDirName $(HAIKU_TOP) src servers app font ] ;
-UseHeaders [ FDirName $(HAIKU_TOP) src servers app stackandtile ] ;
 UseHeaders [ FDirName $(HAIKU_TOP) src servers app drawing Painter ] ;
 UseHeaders [ FDirName $(HAIKU_TOP) src servers app drawing Painter drawing_modes ] ;
 UseHeaders [ FDirName $(HAIKU_TOP) src servers app drawing Painter font_support ] ;

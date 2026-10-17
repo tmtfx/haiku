@@ -226,7 +226,6 @@ Window::AllocateBackingStore()
 	if (GetDrawingEngine() != NULL) {
 		GetDrawingEngine()->SetHWInterface(fBackingHWInterface.Get());
 		GetDrawingEngine()->SetWindowOrigin((int32)full.left, (int32)full.top);
-		GetDrawingEngine()->SetCompositorDesktop(fDesktop);
 	}
 
 	fDirtyRegion.Include(FullFrame());
@@ -241,7 +240,6 @@ Window::FreeBackingStore()
 		return;
 
 	if (GetDrawingEngine() != NULL && fDesktop != NULL) {
-		GetDrawingEngine()->SetCompositorDesktop(NULL);
 		GetDrawingEngine()->SetHWInterface(fDesktop->HWInterface());
 		GetDrawingEngine()->SetWindowOrigin(0, 0);
 	}
@@ -787,23 +785,24 @@ void
 Window::GetEffectiveDrawingRegion(View* view, BRegion& region)
 {
 	if (!fEffectiveDrawingRegionValid) {
-		if (HasBackingStore())
+		if (HasBackingStore()) {
 			GetContentRegion(&fEffectiveDrawingRegion);
-		else
-			fEffectiveDrawingRegion = VisibleContentRegion();
-		if (fUpdateRequested && !fInUpdate) {
-			// We requested an update, but the client has not started it yet,
-			// so it is only allowed to draw outside the pending update sessions
-			// region
-			fEffectiveDrawingRegion.Exclude(
-				&fPendingUpdateSession->DirtyRegion());
-		} else if (fInUpdate) {
-			// enforce the dirty region of the update session
-			fEffectiveDrawingRegion.IntersectWith(
-				&fCurrentUpdateSession->DirtyRegion());
 		} else {
-			// not in update, the view can draw everywhere
-//printf("Window(%s)::GetEffectiveDrawingRegion(for %s) - outside update\n", Title(), view->Name());
+			fEffectiveDrawingRegion = VisibleContentRegion();
+			if (fUpdateRequested && !fInUpdate) {
+				// We requested an update, but the client has not started it yet,
+				// so it is only allowed to draw outside the pending update sessions
+				// region
+				fEffectiveDrawingRegion.Exclude(
+					&fPendingUpdateSession->DirtyRegion());
+			} else if (fInUpdate) {
+				// enforce the dirty region of the update session
+				fEffectiveDrawingRegion.IntersectWith(
+					&fCurrentUpdateSession->DirtyRegion());
+			} else {
+				// not in update, the view can draw everywhere
+	//printf("Window(%s)::GetEffectiveDrawingRegion(for %s) - outside update\n", Title(), view->Name());
+			}
 		}
 
 		fEffectiveDrawingRegionValid = true;
@@ -1187,11 +1186,7 @@ Window::SetFocus(bool focus)
 		dirty = fRegionPool.GetRegion(decorator->GetFootprint());
 	if (dirty) {
 		dirty->IntersectWith(&fVisibleRegion);
-		if (HasBackingStore()) {
-			_DrawBorder();
-		} else {
-			fDesktop->MarkDirty(*dirty);
-		}
+		fDesktop->MarkDirty(*dirty);
 		fRegionPool.Recycle(dirty);
 	}
 
@@ -1901,10 +1896,7 @@ Window::_DrawBorder()
 	if (!dirtyBorderRegion)
 		return;
 	GetBorderRegion(dirtyBorderRegion);
-	if (HasBackingStore() && fBackingBitmap.IsSet()) {
-		BRegion bufferRegion(fBackingBitmap->Bounds());
-		dirtyBorderRegion->IntersectWith(&bufferRegion);
-	} else {
+	if (!HasBackingStore()) {
 		// intersect with our visible region
 		dirtyBorderRegion->IntersectWith(&fVisibleRegion);
 		// intersect with the dirty region

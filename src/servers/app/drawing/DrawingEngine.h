@@ -26,7 +26,6 @@
 class BPoint;
 class BRect;
 class BRegion;
-class Desktop;
 
 class DrawState;
 class Painter;
@@ -202,11 +201,6 @@ public:
 	virtual	BRect			CopyRect(BRect rect, int32 xOffset,
 								int32 yOffset) const;
 
-			void			SetCompositorDesktop(Desktop* desktop)
-								{ fCompositorDesktop = desktop; }
-			Desktop*		CompositorDesktop() const
-								{ return fCompositorDesktop; }
-
 			void			SetRendererOffset(int32 offsetX, int32 offsetY);
 
 			void			SetWindowOrigin(int32 x, int32 y)
@@ -234,7 +228,6 @@ private:
 			bool			fCopyToFront;
 			int32			fOriginX;
 			int32			fOriginY;
-			Desktop*		fCompositorDesktop;
 			BRegion			fLocalClippingRegion;
 };
 
