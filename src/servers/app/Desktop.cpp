@@ -2504,7 +2504,12 @@ Desktop::CompositeDirtyRegion(BRegion& dirtyRegion)
 	if (drawingBuffer == NULL || drawingBuffer->Bits() == NULL || dirtyRegion.CountRects() == 0)
 		return;
 
-	BRegion remainingDirty(dirtyRegion);
+	// 1. Fill background for the dirty region first
+	if (GetDrawingEngine()->LockParallelAccess()) {
+		GetDrawingEngine()->FillRegion(dirtyRegion,
+			fWorkspaces[fCurrentWorkspace].Color());
+		GetDrawingEngine()->UnlockParallelAccess();
+	}
 
 	uint8* dstBits = (uint8*)drawingBuffer->Bits();
 	uint32 dstBytesPerRow = drawingBuffer->BytesPerRow();
@@ -2512,9 +2517,9 @@ Desktop::CompositeDirtyRegion(BRegion& dirtyRegion)
 	int32 dstHeight = drawingBuffer->Height();
 	color_space dstSpace = drawingBuffer->ColorSpace();
 
-	// 1. Composite all visible windows front-to-back
-	for (Window* window = CurrentWindows().LastWindow(); window != NULL;
-			window = window->PreviousWindow(fCurrentWorkspace)) {
+	// 2. Composite all visible windows back-to-front
+	for (Window* window = CurrentWindows().FirstWindow(); window != NULL;
+			window = window->NextWindow(fCurrentWorkspace)) {
 		if (window->IsHidden() || !window->IsVisible())
 			continue;
 
@@ -2522,7 +2527,7 @@ Desktop::CompositeDirtyRegion(BRegion& dirtyRegion)
 		if (bitmap == NULL || bitmap->Bits() == NULL)
 			continue;
 
-		BRegion windowDirty(remainingDirty);
+		BRegion windowDirty(dirtyRegion);
 		windowDirty.IntersectWith(&window->VisibleRegion());
 		if (windowDirty.CountRects() == 0)
 			continue;
@@ -2646,19 +2651,6 @@ Desktop::CompositeDirtyRegion(BRegion& dirtyRegion)
 						break;
 				}
 			}
-		}
-
-		remainingDirty.Exclude(&windowDirty);
-		if (remainingDirty.CountRects() == 0)
-			break;
-	}
-
-	// 2. Only whatever region is NOT covered by any window gets filled with desktop background color!
-	if (remainingDirty.CountRects() > 0) {
-		if (GetDrawingEngine()->LockParallelAccess()) {
-			GetDrawingEngine()->FillRegion(remainingDirty,
-				fWorkspaces[fCurrentWorkspace].Color());
-			GetDrawingEngine()->UnlockParallelAccess();
 		}
 	}
 

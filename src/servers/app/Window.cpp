@@ -1186,7 +1186,11 @@ Window::SetFocus(bool focus)
 		dirty = fRegionPool.GetRegion(decorator->GetFootprint());
 	if (dirty) {
 		dirty->IntersectWith(&fVisibleRegion);
-		fDesktop->MarkDirty(*dirty);
+		if (HasBackingStore()) {
+			_DrawBorder();
+		} else {
+			fDesktop->MarkDirty(*dirty);
+		}
 		fRegionPool.Recycle(dirty);
 	}
 
