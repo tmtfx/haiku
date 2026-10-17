@@ -226,6 +226,7 @@ Window::AllocateBackingStore()
 	if (GetDrawingEngine() != NULL) {
 		GetDrawingEngine()->SetHWInterface(fBackingHWInterface.Get());
 		GetDrawingEngine()->SetWindowOrigin((int32)full.left, (int32)full.top);
+		GetDrawingEngine()->SetCompositorDesktop(fDesktop);
 	}
 
 	fDirtyRegion.Include(FullFrame());
@@ -240,6 +241,7 @@ Window::FreeBackingStore()
 		return;
 
 	if (GetDrawingEngine() != NULL && fDesktop != NULL) {
+		GetDrawingEngine()->SetCompositorDesktop(NULL);
 		GetDrawingEngine()->SetHWInterface(fDesktop->HWInterface());
 		GetDrawingEngine()->SetWindowOrigin(0, 0);
 	}
@@ -1174,19 +1176,23 @@ Window::SetFocus(bool focus)
 	// so the window thread cannot be
 	// accessing fIsFocus
 
+	fIsFocus = focus;
+	if (decorator) {
+		int32 index = PositionInStack();
+		decorator->SetFocus(index, focus);
+	}
+
 	BRegion* dirty = NULL;
 	if (decorator)
 		dirty = fRegionPool.GetRegion(decorator->GetFootprint());
 	if (dirty) {
 		dirty->IntersectWith(&fVisibleRegion);
-		fDesktop->MarkDirty(*dirty);
+		if (HasBackingStore()) {
+			_DrawBorder();
+		} else {
+			fDesktop->MarkDirty(*dirty);
+		}
 		fRegionPool.Recycle(dirty);
-	}
-
-	fIsFocus = focus;
-	if (decorator) {
-		int32 index = PositionInStack();
-		decorator->SetFocus(index, focus);
 	}
 
 	Activated(focus);

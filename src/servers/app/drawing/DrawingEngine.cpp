@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <stack>
 
+#include "Desktop.h"
 #include "DrawState.h"
 #include "GlyphLayoutEngine.h"
 #include "Painter.h"
@@ -139,8 +140,14 @@ public:
 
 	~DrawTransaction()
 	{
-		if (fEngine->fCopyToFront)
+		if (fEngine->fCopyToFront) {
 			fEngine->fGraphicsCard->InvalidateRegion(fDirty);
+			if (fEngine->fCompositorDesktop != NULL && fDirty.CountRects() > 0) {
+				BRegion screenDirty(fDirty);
+				screenDirty.OffsetBy(fEngine->fOriginX, fEngine->fOriginY);
+				fEngine->fCompositorDesktop->CompositeDirtyRegion(screenDirty);
+			}
+		}
 		if (fOverlaysHidden)
 			fEngine->fGraphicsCard->ShowFloatingOverlays();
 	}
@@ -183,7 +190,8 @@ DrawingEngine::DrawingEngine(HWInterface* interface)
 	fAvailableHWAcceleration(0),
 	fCopyToFront(true),
 	fOriginX(0),
-	fOriginY(0)
+	fOriginY(0),
+	fCompositorDesktop(NULL)
 {
 	SetHWInterface(interface);
 }
@@ -293,6 +301,11 @@ void
 DrawingEngine::CopyToFront(/*const*/ BRegion& region)
 {
 	fGraphicsCard->InvalidateRegion(region);
+	if (fCompositorDesktop != NULL && region.CountRects() > 0) {
+		BRegion screenDirty(region);
+		screenDirty.OffsetBy(fOriginX, fOriginY);
+		fCompositorDesktop->CompositeDirtyRegion(screenDirty);
+	}
 }
 
 
