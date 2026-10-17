@@ -173,6 +173,7 @@ private:
 			ObjectDeleter<DirectWindowInfo>
 								fDirectWindowInfo;
 			bool				fIsDirectlyAccessing;
+			bool				fViewDrawingDispatched;
 };
 
 #endif	// SERVER_WINDOW_H

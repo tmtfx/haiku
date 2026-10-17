@@ -177,7 +177,8 @@ ServerWindow::ServerWindow(const char* title, ServerApp* app,
 	fCurrentDrawingRegion(),
 	fCurrentDrawingRegionValid(false),
 
-	fIsDirectlyAccessing(false)
+	fIsDirectlyAccessing(false),
+	fViewDrawingDispatched(false)
 {
 	STRACE(("ServerWindow(%s)::ServerWindow()\n", title));
 
@@ -1039,6 +1040,12 @@ ServerWindow::_DispatchMessage(int32 code, BPrivate::LinkReceiver& link)
 			// client and server queues are in sync (earlier, the client
 			// may have pushed drawing commands at the server and now it
 			// knows they have all been carried out)
+			if (fWindow->HasBackingStore() && !fWindow->InUpdate()) {
+				BRegion visible(fWindow->VisibleRegion());
+				if (visible.CountRects() > 0)
+					fDesktop->CompositeDirtyRegion(visible);
+				fViewDrawingDispatched = false;
+			}
 			fLink.StartMessage(B_OK);
 			fLink.Flush();
 			break;
@@ -2455,6 +2462,7 @@ fDesktop->LockSingleWindow();
 			// so we need to account for that here.
 			try {
 				_DispatchViewDrawingMessage(code, link);
+				fViewDrawingDispatched = true;
 			} catch (std::bad_alloc&) {
 				// Cancel any message we were in the middle of sending.
 				fLink.CancelMessage();
@@ -4358,6 +4366,12 @@ ServerWindow::_MessageLooper()
 			// Desktop locked), but don't hold the lock longer than 10 ms
 			if (!receiver.HasMessages() || ++messagesProcessed > 70
 				|| system_time() - processingStart > 10000) {
+				if (fViewDrawingDispatched && fWindow->HasBackingStore() && !fWindow->InUpdate()) {
+					BRegion visible(fWindow->VisibleRegion());
+					if (visible.CountRects() > 0)
+						fDesktop->CompositeDirtyRegion(visible);
+					fViewDrawingDispatched = false;
+				}
 				if (lockedDesktopSingleWindow)
 					fDesktop->UnlockSingleWindow();
 				break;
