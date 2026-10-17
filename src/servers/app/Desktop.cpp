@@ -2280,6 +2280,125 @@ Desktop::SetCompositor2DEnabled(bool enable)
 
 
 static inline void
+BlendSpanRGB30(uint32* dst, const uint32* src, int32 count)
+{
+	for (int32 i = 0; i < count; i++) {
+		uint32 s = src[i];
+		uint32 alpha = (s >> 24) & 0xff;
+		if (alpha == 255) {
+			uint32 b = s & 0xff;
+			uint32 g = (s >> 8) & 0xff;
+			uint32 r = (s >> 16) & 0xff;
+			dst[i] = ((r * 1023 / 255))
+				| (((g * 1023 / 255)) << 10)
+				| (((b * 1023 / 255)) << 20);
+		} else if (alpha > 0) {
+			uint32 d = dst[i];
+			uint32 d_r = (d & 0x3ff) * 255 / 1023;
+			uint32 d_g = ((d >> 10) & 0x3ff) * 255 / 1023;
+			uint32 d_b = ((d >> 20) & 0x3ff) * 255 / 1023;
+
+			uint32 s_b = s & 0xff;
+			uint32 s_g = (s >> 8) & 0xff;
+			uint32 s_r = (s >> 16) & 0xff;
+
+			uint32 invAlpha = 255 - alpha;
+			uint32 r = (s_r * alpha + d_r * invAlpha + 127) / 255;
+			uint32 g = (s_g * alpha + d_g * invAlpha + 127) / 255;
+			uint32 b = (s_b * alpha + d_b * invAlpha + 127) / 255;
+
+			dst[i] = ((r * 1023 / 255))
+				| (((g * 1023 / 255)) << 10)
+				| (((b * 1023 / 255)) << 20);
+		}
+	}
+}
+
+
+static inline void
+BlendSpanRGB24(uint8* dst, const uint32* src, int32 count)
+{
+	for (int32 i = 0; i < count; i++) {
+		uint32 s = src[i];
+		uint32 alpha = (s >> 24) & 0xff;
+		uint8* d = dst + (i * 3);
+		if (alpha == 255) {
+			d[0] = (uint8)(s & 0xff);
+			d[1] = (uint8)((s >> 8) & 0xff);
+			d[2] = (uint8)((s >> 16) & 0xff);
+		} else if (alpha > 0) {
+			uint32 invAlpha = 255 - alpha;
+			uint32 s_b = s & 0xff;
+			uint32 s_g = (s >> 8) & 0xff;
+			uint32 s_r = (s >> 16) & 0xff;
+
+			d[0] = (uint8)((s_b * alpha + (uint32)d[0] * invAlpha + 127) / 255);
+			d[1] = (uint8)((s_g * alpha + (uint32)d[1] * invAlpha + 127) / 255);
+			d[2] = (uint8)((s_r * alpha + (uint32)d[2] * invAlpha + 127) / 255);
+		}
+	}
+}
+
+
+static inline void
+BlendSpanCMAP8(uint8* dst, const uint32* src, int32 count)
+{
+	const color_map* colorMap = SystemColorMap();
+	const rgb_color* palette = SystemPalette();
+	if (colorMap == NULL || palette == NULL)
+		return;
+
+	for (int32 i = 0; i < count; i++) {
+		uint32 s = src[i];
+		uint32 alpha = (s >> 24) & 0xff;
+		if (alpha == 255) {
+			uint8 b = s & 0xff;
+			uint8 g = (s >> 8) & 0xff;
+			uint8 r = (s >> 16) & 0xff;
+			uint16 index = ((r & 0xf8) << 7) | ((g & 0xf8) << 2) | (b >> 3);
+			dst[i] = colorMap->index_map[index];
+		} else if (alpha > 0) {
+			uint8 currentIdx = dst[i];
+			rgb_color d = palette[currentIdx];
+
+			uint32 s_b = s & 0xff;
+			uint32 s_g = (s >> 8) & 0xff;
+			uint32 s_r = (s >> 16) & 0xff;
+
+			uint32 invAlpha = 255 - alpha;
+			uint32 r = (s_r * alpha + (uint32)d.red * invAlpha + 127) / 255;
+			uint32 g = (s_g * alpha + (uint32)d.green * invAlpha + 127) / 255;
+			uint32 b = (s_b * alpha + (uint32)d.blue * invAlpha + 127) / 255;
+
+			uint16 index = ((r & 0xf8) << 7) | ((g & 0xf8) << 2) | (b >> 3);
+			dst[i] = colorMap->index_map[index];
+		}
+	}
+}
+
+
+static inline void
+BlendSpanGRAY8(uint8* dst, const uint32* src, int32 count)
+{
+	for (int32 i = 0; i < count; i++) {
+		uint32 s = src[i];
+		uint32 alpha = (s >> 24) & 0xff;
+		uint32 s_b = s & 0xff;
+		uint32 s_g = (s >> 8) & 0xff;
+		uint32 s_r = (s >> 16) & 0xff;
+		uint8 s_gray = (uint8)((308 * s_r + 600 * s_g + 116 * s_b) / 1024);
+
+		if (alpha == 255) {
+			dst[i] = s_gray;
+		} else if (alpha > 0) {
+			uint32 invAlpha = 255 - alpha;
+			dst[i] = (uint8)((s_gray * alpha + (uint32)dst[i] * invAlpha + 127) / 255);
+		}
+	}
+}
+
+
+static inline void
 BlendSpanRGB32(uint32* dst, const uint32* src, int32 count)
 {
 	int32 i = 0;
@@ -2441,9 +2560,27 @@ Desktop::CompositeDirtyRegion(BRegion& dirtyRegion)
 				switch (dstSpace) {
 					case B_RGB32:
 					case B_RGBA32:
+					case B_RGB32_BIG:
+					case B_RGBA32_BIG:
 					{
 						uint32* d = (uint32*)(dstBits + ((r.top + y) * dstBytesPerRow) + (r.left * 4));
 						BlendSpanRGB32(d, s, copyWidth);
+						break;
+					}
+
+					case B_RGB30:
+					case B_RGB30_BIG:
+					{
+						uint32* d = (uint32*)(dstBits + ((r.top + y) * dstBytesPerRow) + (r.left * 4));
+						BlendSpanRGB30(d, s, copyWidth);
+						break;
+					}
+
+					case B_RGB24:
+					case B_RGB24_BIG:
+					{
+						uint8* d = dstBits + ((r.top + y) * dstBytesPerRow) + (r.left * 3);
+						BlendSpanRGB24(d, s, copyWidth);
 						break;
 					}
 
@@ -2462,6 +2599,20 @@ Desktop::CompositeDirtyRegion(BRegion& dirtyRegion)
 					{
 						uint16* d = (uint16*)(dstBits + ((r.top + y) * dstBytesPerRow) + (r.left * 2));
 						BlendSpanRGB15(d, s, copyWidth);
+						break;
+					}
+
+					case B_CMAP8:
+					{
+						uint8* d = dstBits + ((r.top + y) * dstBytesPerRow) + r.left;
+						BlendSpanCMAP8(d, s, copyWidth);
+						break;
+					}
+
+					case B_GRAY8:
+					{
+						uint8* d = dstBits + ((r.top + y) * dstBytesPerRow) + r.left;
+						BlendSpanGRAY8(d, s, copyWidth);
 						break;
 					}
 
