@@ -306,9 +306,9 @@ DrawingEngine::ConstrainClippingRegion(const BRegion* region)
 	ASSERT_PARALLEL_LOCKED();
 
 	if ((fOriginX != 0 || fOriginY != 0) && region != NULL) {
-		BRegion localRegion(*region);
-		localRegion.OffsetBy(-fOriginX, -fOriginY);
-		fPainter->ConstrainClipping(&localRegion);
+		fLocalClippingRegion = *region;
+		fLocalClippingRegion.OffsetBy(-fOriginX, -fOriginY);
+		fPainter->ConstrainClipping(&fLocalClippingRegion);
 	} else {
 		fPainter->ConstrainClipping(region);
 	}

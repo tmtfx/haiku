@@ -228,6 +228,7 @@ private:
 			bool			fCopyToFront;
 			int32			fOriginX;
 			int32			fOriginY;
+			BRegion			fLocalClippingRegion;
 };
 
 #endif // DRAWING_ENGINE_H_
