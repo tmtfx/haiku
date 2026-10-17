@@ -199,12 +199,12 @@ Window::AllocateBackingStore()
 {
 	FreeBackingStore();
 
-	if (IsOffscreenWindow() || (fFlags & kWindowScreenFlag) != 0)
+	if (IsOffscreenWindow() || (fFlags & kWindowScreenFlag) != 0 || fDesktop == NULL)
 		return;
 
-	BRect full = FullFrame();
-	int32 width = (int32)ceilf(full.Width()) + 1;
-	int32 height = (int32)ceilf(full.Height()) + 1;
+	BRect screenFrame = fDesktop->VirtualScreen().Frame();
+	int32 width = (int32)ceilf(screenFrame.Width()) + 1;
+	int32 height = (int32)ceilf(screenFrame.Height()) + 1;
 	if (width <= 0 || height <= 0)
 		return;
 
@@ -224,11 +224,13 @@ Window::AllocateBackingStore()
 	}
 
 	if (GetDrawingEngine() != NULL) {
+		GetDrawingEngine()->LockExclusiveAccess();
 		GetDrawingEngine()->SetHWInterface(fBackingHWInterface.Get());
-		GetDrawingEngine()->SetRendererOffset((int32)full.left, (int32)full.top);
+		GetDrawingEngine()->SetRendererOffset(0, 0);
+		GetDrawingEngine()->UnlockExclusiveAccess();
 	}
 
-	fDirtyRegion.Include(full);
+	fDirtyRegion.Include(FullFrame());
 	ServerWindow()->RequestRedraw();
 }
 
@@ -240,8 +242,10 @@ Window::FreeBackingStore()
 		return;
 
 	if (GetDrawingEngine() != NULL && fDesktop != NULL) {
+		GetDrawingEngine()->LockExclusiveAccess();
 		GetDrawingEngine()->SetHWInterface(fDesktop->HWInterface());
 		GetDrawingEngine()->SetRendererOffset(0, 0);
+		GetDrawingEngine()->UnlockExclusiveAccess();
 	}
 
 	if (fBackingHWInterface.IsSet()) {
@@ -399,8 +403,13 @@ Window::MoveBy(int32 x, int32 y, bool moveStack)
 	// the desktop will take care of dirty regions
 
 	if (HasBackingStore() && GetDrawingEngine() != NULL) {
-		BRect full = FullFrame();
-		GetDrawingEngine()->SetRendererOffset((int32)full.left, (int32)full.top);
+		BRegion fullRegion;
+		GetFullRegion(&fullRegion);
+		fullRegion.OffsetBy(-x, -y);
+		if (GetDrawingEngine()->LockParallelAccess()) {
+			GetDrawingEngine()->CopyRegion(&fullRegion, x, y);
+			GetDrawingEngine()->UnlockParallelAccess();
+		}
 	}
 
 	// dispatch a message to the client informing about the changed size
@@ -467,8 +476,10 @@ Window::ResizeBy(int32 x, int32 y, BRegion* dirtyRegion, bool resizeStack)
 		}
 	}
 
-	if (HasBackingStore())
-		AllocateBackingStore();
+	if (HasBackingStore()) {
+		fDirtyRegion.Include(FullFrame());
+		ServerWindow()->RequestRedraw();
+	}
 
 	// send a message to the client informing about the changed size
 	BRect frame(Frame());

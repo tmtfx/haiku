@@ -2259,7 +2259,9 @@ Desktop::SetCompositor2DEnabled(bool enable)
 	if (fCompositor2DEnabled == enable)
 		return;
 
-	AutoWriteLocker _(fWindowLock);
+	if (!LockAllWindows())
+		return;
+
 	fCompositor2DEnabled = enable;
 
 	for (Window* window = fAllWindows.FirstWindow(); window != NULL;
@@ -2270,13 +2272,15 @@ Desktop::SetCompositor2DEnabled(bool enable)
 			window->FreeBackingStore();
 	}
 
+	UnlockAllWindows();
+
 	BRegion dirty(fVirtualScreen.Frame());
 	MarkDirty(dirty);
 }
 
 
 static inline void
-BlendSpan(uint32* dst, const uint32* src, int32 count)
+BlendSpanRGB32(uint32* dst, const uint32* src, int32 count)
 {
 	int32 i = 0;
 	while (i < count) {
@@ -2289,10 +2293,9 @@ BlendSpan(uint32* dst, const uint32* src, int32 count)
 				i++;
 			memcpy(&dst[start], &src[start], (i - start) * sizeof(uint32));
 		} else if (alpha == 0) {
-			// Fully transparent pixel: skip
 			i++;
 		} else {
-			// Semi-transparent pixel: perform exact alpha blend
+			// Semi-transparent pixel: exact alpha blend
 			uint32 invAlpha = 255 - alpha;
 			uint8* d = (uint8*)&dst[i];
 			const uint8* sc = (const uint8*)&s;
@@ -2306,11 +2309,76 @@ BlendSpan(uint32* dst, const uint32* src, int32 count)
 }
 
 
+static inline void
+BlendSpanRGB16(uint16* dst, const uint32* src, int32 count)
+{
+	for (int32 i = 0; i < count; i++) {
+		uint32 s = src[i];
+		uint32 alpha = (s >> 24) & 0xff;
+		if (alpha == 255) {
+			uint8 b = s & 0xff;
+			uint8 g = (s >> 8) & 0xff;
+			uint8 r = (s >> 16) & 0xff;
+			dst[i] = (uint16)(((r & 0xf8) << 8) | ((g & 0xfc) << 3) | (b >> 3));
+		} else if (alpha > 0) {
+			uint8 s_b = s & 0xff;
+			uint8 s_g = (s >> 8) & 0xff;
+			uint8 s_r = (s >> 16) & 0xff;
+
+			uint16 d = dst[i];
+			uint32 d_r = (d >> 8) & 0xf8;
+			uint32 d_g = (d >> 3) & 0xfc;
+			uint32 d_b = (d << 3) & 0xf8;
+
+			uint32 invAlpha = 255 - alpha;
+			uint32 r = (s_r * alpha + d_r * invAlpha + 127) / 255;
+			uint32 g = (s_g * alpha + d_g * invAlpha + 127) / 255;
+			uint32 b = (s_b * alpha + d_b * invAlpha + 127) / 255;
+
+			dst[i] = (uint16)(((r & 0xf8) << 8) | ((g & 0xfc) << 3) | (b >> 3));
+		}
+	}
+}
+
+
+static inline void
+BlendSpanRGB15(uint16* dst, const uint32* src, int32 count)
+{
+	for (int32 i = 0; i < count; i++) {
+		uint32 s = src[i];
+		uint32 alpha = (s >> 24) & 0xff;
+		if (alpha == 255) {
+			uint8 b = s & 0xff;
+			uint8 g = (s >> 8) & 0xff;
+			uint8 r = (s >> 16) & 0xff;
+			dst[i] = (uint16)(((r & 0xf8) << 7) | ((g & 0xf8) << 2) | (b >> 3));
+		} else if (alpha > 0) {
+			uint8 s_b = s & 0xff;
+			uint8 s_g = (s >> 8) & 0xff;
+			uint8 s_r = (s >> 16) & 0xff;
+
+			uint16 d = dst[i];
+			uint32 d_r = (d >> 7) & 0xf8;
+			uint32 d_g = (d >> 2) & 0xf8;
+			uint32 d_b = (d << 3) & 0xf8;
+
+			uint32 invAlpha = 255 - alpha;
+			uint32 r = (s_r * alpha + d_r * invAlpha + 127) / 255;
+			uint32 g = (s_g * alpha + d_g * invAlpha + 127) / 255;
+			uint32 b = (s_b * alpha + d_b * invAlpha + 127) / 255;
+
+			dst[i] = (uint16)(((r & 0xf8) << 7) | ((g & 0xf8) << 2) | (b >> 3));
+		}
+	}
+}
+
+
 void
 Desktop::CompositeDirtyRegion(BRegion& dirtyRegion)
 {
-	RenderingBuffer* frontBuffer = HWInterface() != NULL ? HWInterface()->FrontBuffer() : NULL;
-	if (frontBuffer == NULL || frontBuffer->Bits() == NULL || dirtyRegion.CountRects() == 0)
+	RenderingBuffer* drawingBuffer = HWInterface() != NULL
+		? HWInterface()->DrawingBuffer() : NULL;
+	if (drawingBuffer == NULL || drawingBuffer->Bits() == NULL || dirtyRegion.CountRects() == 0)
 		return;
 
 	// 1. Fill background for the dirty region first
@@ -2320,9 +2388,11 @@ Desktop::CompositeDirtyRegion(BRegion& dirtyRegion)
 		GetDrawingEngine()->UnlockParallelAccess();
 	}
 
-	uint8* dstBits = (uint8*)frontBuffer->Bits();
-	uint32 dstBytesPerRow = frontBuffer->BytesPerRow();
-	uint32 bytesPerPixel = 4;
+	uint8* dstBits = (uint8*)drawingBuffer->Bits();
+	uint32 dstBytesPerRow = drawingBuffer->BytesPerRow();
+	int32 dstWidth = drawingBuffer->Width();
+	int32 dstHeight = drawingBuffer->Height();
+	color_space dstSpace = drawingBuffer->ColorSpace();
 
 	// 2. Composite all visible windows back-to-front
 	for (Window* window = CurrentWindows().FirstWindow(); window != NULL;
@@ -2339,41 +2409,65 @@ Desktop::CompositeDirtyRegion(BRegion& dirtyRegion)
 		if (windowDirty.CountRects() == 0)
 			continue;
 
-		BRect fullFrame = window->FullFrame();
-		int32 fullLeft = (int32)fullFrame.left;
-		int32 fullTop = (int32)fullFrame.top;
-
 		uint8* srcBits = (uint8*)bitmap->Bits();
 		uint32 srcBytesPerRow = bitmap->BytesPerRow();
 		int32 bmpWidth = bitmap->Width();
 		int32 bmpHeight = bitmap->Height();
 
+		int32 maxWidth = min_c(dstWidth, bmpWidth);
+		int32 maxHeight = min_c(dstHeight, bmpHeight);
+
 		int32 rectCount = windowDirty.CountRects();
 		for (int32 i = 0; i < rectCount; i++) {
 			clipping_rect r = windowDirty.RectAtInt(i);
 
-			int32 srcX = r.left - fullLeft;
-			int32 srcY = r.top - fullTop;
-
-			if (srcX < 0 || srcY < 0 || srcX >= bmpWidth || srcY >= bmpHeight)
+			if (r.left < 0 || r.top < 0 || r.left >= maxWidth || r.top >= maxHeight)
 				continue;
 
 			int32 copyWidth = r.right - r.left + 1;
 			int32 copyHeight = r.bottom - r.top + 1;
 
-			if (srcX + copyWidth > bmpWidth)
-				copyWidth = bmpWidth - srcX;
-			if (srcY + copyHeight > bmpHeight)
-				copyHeight = bmpHeight - srcY;
+			if (r.left + copyWidth > maxWidth)
+				copyWidth = maxWidth - r.left;
+			if (r.top + copyHeight > maxHeight)
+				copyHeight = maxHeight - r.top;
 
 			if (copyWidth <= 0 || copyHeight <= 0)
 				continue;
 
 			for (int32 y = 0; y < copyHeight; y++) {
-				uint32* d = (uint32*)(dstBits + ((r.top + y) * dstBytesPerRow) + (r.left * bytesPerPixel));
-				const uint32* s = (const uint32*)(srcBits + ((srcY + y) * srcBytesPerRow) + (srcX * bytesPerPixel));
+				const uint32* s = (const uint32*)(srcBits + ((r.top + y) * srcBytesPerRow) + (r.left * 4));
 
-				BlendSpan(d, s, copyWidth);
+				switch (dstSpace) {
+					case B_RGB32:
+					case B_RGBA32:
+					{
+						uint32* d = (uint32*)(dstBits + ((r.top + y) * dstBytesPerRow) + (r.left * 4));
+						BlendSpanRGB32(d, s, copyWidth);
+						break;
+					}
+
+					case B_RGB16:
+					case B_RGB16_BIG:
+					{
+						uint16* d = (uint16*)(dstBits + ((r.top + y) * dstBytesPerRow) + (r.left * 2));
+						BlendSpanRGB16(d, s, copyWidth);
+						break;
+					}
+
+					case B_RGB15:
+					case B_RGBA15:
+					case B_RGB15_BIG:
+					case B_RGBA15_BIG:
+					{
+						uint16* d = (uint16*)(dstBits + ((r.top + y) * dstBytesPerRow) + (r.left * 2));
+						BlendSpanRGB15(d, s, copyWidth);
+						break;
+					}
+
+					default:
+						break;
+				}
 			}
 		}
 	}
