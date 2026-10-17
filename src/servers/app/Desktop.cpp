@@ -4065,6 +4065,23 @@ Desktop::_ScreenChanged(Screen* screen)
 {
 	ASSERT_MULTI_WRITE_LOCKED(fWindowLock);
 
+	fVirtualScreen.UpdateFrame();
+
+	BRect newFrame = fVirtualScreen.Frame();
+	int32 newWidth = (int32)ceilf(newFrame.Width()) + 1;
+	int32 newHeight = (int32)ceilf(newFrame.Height()) + 1;
+
+	if (fCompositor2DEnabled) {
+		for (Window* window = fAllWindows.FirstWindow(); window != NULL;
+				window = window->NextWindow(kAllWindowList)) {
+			ServerBitmap* bitmap = window->BackingStoreBitmap();
+			if (bitmap == NULL || bitmap->Width() != newWidth
+				|| bitmap->Height() != newHeight) {
+				window->AllocateBackingStore();
+			}
+		}
+	}
+
 	// the entire screen is dirty, because we're actually
 	// operating on an all new buffer in memory
 	BRegion dirty(screen->Frame());
@@ -4089,8 +4106,6 @@ Desktop::_ScreenChanged(Screen* screen)
 	update.AddInt64("when", real_time_clock_usecs());
 	update.AddRect("frame", screen->Frame());
 	update.AddInt32("mode", screen->ColorSpace());
-
-	fVirtualScreen.UpdateFrame();
 
 	for (Window* window = fAllWindows.FirstWindow(); window != NULL;
 			window = window->NextWindow(kAllWindowList)) {
