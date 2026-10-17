@@ -870,15 +870,27 @@ Window::RedrawDirtyRegion()
 	if (IsVisible()) {
 		_DrawBorder();
 
-		BRegion* dirtyContentRegion = fRegionPool.GetRegion(VisibleContentRegion());
-		BRegion* exposeContentRegion = fRegionPool.GetRegion(VisibleContentRegion());
-		dirtyContentRegion->IntersectWith(&fDirtyRegion);
-		exposeContentRegion->IntersectWith(&fExposeRegion);
+		BRegion* dirtyContentRegion = NULL;
+		BRegion* exposeContentRegion = NULL;
+		if (HasBackingStore()) {
+			BRegion content;
+			GetContentRegion(&content);
+			dirtyContentRegion = fRegionPool.GetRegion(content);
+			exposeContentRegion = fRegionPool.GetRegion(content);
+		} else {
+			dirtyContentRegion = fRegionPool.GetRegion(VisibleContentRegion());
+			exposeContentRegion = fRegionPool.GetRegion(VisibleContentRegion());
+		}
 
-		_TriggerContentRedraw(*dirtyContentRegion, *exposeContentRegion);
+		if (dirtyContentRegion && exposeContentRegion) {
+			dirtyContentRegion->IntersectWith(&fDirtyRegion);
+			exposeContentRegion->IntersectWith(&fExposeRegion);
 
-		fRegionPool.Recycle(dirtyContentRegion);
-		fRegionPool.Recycle(exposeContentRegion);
+			_TriggerContentRedraw(*dirtyContentRegion, *exposeContentRegion);
+
+			fRegionPool.Recycle(dirtyContentRegion);
+			fRegionPool.Recycle(exposeContentRegion);
+		}
 	}
 
 	// reset the dirty region, since
@@ -915,8 +927,13 @@ Window::MarkContentDirty(BRegion& dirtyRegion, BRegion& exposeRegion)
 	if (fHidden || IsOffscreenWindow())
 		return;
 
-	dirtyRegion.IntersectWith(&VisibleContentRegion());
-	exposeRegion.IntersectWith(&VisibleContentRegion());
+	if (HasBackingStore()) {
+		dirtyRegion.IntersectWith(&fContentRegion);
+		exposeRegion.IntersectWith(&fContentRegion);
+	} else {
+		dirtyRegion.IntersectWith(&VisibleContentRegion());
+		exposeRegion.IntersectWith(&VisibleContentRegion());
+	}
 	_TriggerContentRedraw(dirtyRegion, exposeRegion);
 }
 
@@ -928,7 +945,10 @@ Window::MarkContentDirtyAsync(BRegion& dirtyRegion)
 	if (fHidden || IsOffscreenWindow())
 		return;
 
-	dirtyRegion.IntersectWith(&VisibleContentRegion());
+	if (HasBackingStore())
+		dirtyRegion.IntersectWith(&fContentRegion);
+	else
+		dirtyRegion.IntersectWith(&VisibleContentRegion());
 
 	if (fDirtyRegion.CountRects() == 0) {
 		ServerWindow()->RequestRedraw();
@@ -946,7 +966,10 @@ Window::InvalidateView(View* view, BRegion& viewRegion)
 			_UpdateContentRegion();
 
 		view->LocalToScreenTransform().Apply(&viewRegion);
-		viewRegion.IntersectWith(&VisibleContentRegion());
+		if (HasBackingStore())
+			viewRegion.IntersectWith(&fContentRegion);
+		else
+			viewRegion.IntersectWith(&VisibleContentRegion());
 		if (viewRegion.CountRects() > 0) {
 			viewRegion.IntersectWith(
 				&view->ScreenAndUserClipping(&fContentRegion));
@@ -2082,7 +2105,10 @@ Window::EndUpdate()
 			fCurrentUpdateSession->DirtyRegion());
 
 		if (dirty) {
-			dirty->IntersectWith(&VisibleContentRegion());
+			if (HasBackingStore())
+				dirty->IntersectWith(&fContentRegion);
+			else
+				dirty->IntersectWith(&VisibleContentRegion());
 
 			fDrawingEngine->CopyToFront(*dirty);
 			if (HasBackingStore() && fDesktop != NULL)
