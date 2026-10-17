@@ -618,6 +618,9 @@ Window::CopyContents(BRegion* region, int32 xOffset, int32 yOffset)
 					// ... and even exclude them from the pending dirty region!
 					if (fPendingUpdateSession->IsUsed())
 						fPendingUpdateSession->DirtyRegion().Exclude(copyRegion);
+
+					if (HasBackingStore() && fDesktop != NULL)
+						fDesktop->CompositeDirtyRegion(*copyRegion);
 				}
 
 				fRegionPool.Recycle(copyRegion);
@@ -2039,7 +2042,10 @@ Window::BeginUpdate(BPrivate::PortLink& link)
 		return;
 	}
 
-	dirty->IntersectWith(&VisibleContentRegion());
+	if (HasBackingStore())
+		dirty->IntersectWith(&fContentRegion);
+	else
+		dirty->IntersectWith(&VisibleContentRegion());
 
 //if (!fCurrentUpdateSession->IsExpose()) {
 ////sCurrentColor.red = rand() % 255;

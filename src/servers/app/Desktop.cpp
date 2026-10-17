@@ -1601,13 +1601,15 @@ Desktop::MoveWindowBy(Window* window, float x, float y, int32 workspace)
 	newDirtyRegion.Exclude(&copyRegion);
 
 	if (fCompositor2DEnabled) {
+		CompositeDirtyRegion(newDirtyRegion);
+
 		BRegion newlyVisible(window->VisibleRegion());
 		newlyVisible.Exclude(&copyRegion);
 		if (newlyVisible.CountRects() > 0)
 			window->ProcessDirtyRegion(newlyVisible);
+	} else {
+		MarkDirty(newDirtyRegion);
 	}
-
-	MarkDirty(newDirtyRegion);
 	_SetBackground(background);
 	_WindowChanged(window);
 
@@ -3654,7 +3656,10 @@ Desktop::_HideWindow(Window* window)
 	_SetBackground(background);
 	_WindowChanged(window);
 
-	MarkDirty(dirty);
+	if (fCompositor2DEnabled)
+		CompositeDirtyRegion(dirty);
+	else
+		MarkDirty(dirty);
 }
 
 
@@ -3934,11 +3939,6 @@ Desktop::_RebuildClippingForAllWindows(BRegion& stillAvailableOnScreen)
 void
 Desktop::_TriggerWindowRedrawing(BRegion& dirtyRegion, BRegion& exposeRegion)
 {
-	if (fCompositor2DEnabled) {
-		CompositeDirtyRegion(dirtyRegion);
-		return;
-	}
-
 	// send redraw messages to all windows intersecting the dirty region
 	for (Window* window = CurrentWindows().LastWindow(); window != NULL;
 			window = window->PreviousWindow(fCurrentWorkspace)) {
