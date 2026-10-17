@@ -2403,8 +2403,13 @@ BlendSpanGRAY8(uint8* dst, const uint32* src, int32 count)
 
 
 static inline void
-BlendSpanRGB32(uint32* dst, const uint32* src, int32 count)
+BlendSpanRGB32(uint32* dst, const uint32* src, int32 count, bool isContent = false)
 {
+	if (isContent) {
+		memcpy(dst, src, count * sizeof(uint32));
+		return;
+	}
+
 	int32 i = 0;
 	while (i < count) {
 		uint32 s = src[i];
@@ -2433,12 +2438,12 @@ BlendSpanRGB32(uint32* dst, const uint32* src, int32 count)
 
 
 static inline void
-BlendSpanRGB16(uint16* dst, const uint32* src, int32 count)
+BlendSpanRGB16(uint16* dst, const uint32* src, int32 count, bool isContent = false)
 {
 	for (int32 i = 0; i < count; i++) {
 		uint32 s = src[i];
 		uint32 alpha = (s >> 24) & 0xff;
-		if (alpha == 255) {
+		if (isContent || alpha == 255) {
 			uint8 b = s & 0xff;
 			uint8 g = (s >> 8) & 0xff;
 			uint8 r = (s >> 16) & 0xff;
@@ -2465,12 +2470,12 @@ BlendSpanRGB16(uint16* dst, const uint32* src, int32 count)
 
 
 static inline void
-BlendSpanRGB15(uint16* dst, const uint32* src, int32 count)
+BlendSpanRGB15(uint16* dst, const uint32* src, int32 count, bool isContent = false)
 {
 	for (int32 i = 0; i < count; i++) {
 		uint32 s = src[i];
 		uint32 alpha = (s >> 24) & 0xff;
-		if (alpha == 255) {
+		if (isContent || alpha == 255) {
 			uint8 b = s & 0xff;
 			uint8 g = (s >> 8) & 0xff;
 			uint8 r = (s >> 16) & 0xff;
@@ -2541,6 +2546,8 @@ Desktop::CompositeDirtyRegion(BRegion& dirtyRegion)
 		int32 bmpWidth = bitmap->Width();
 		int32 bmpHeight = bitmap->Height();
 
+		BRect frame = window->Frame();
+
 		int32 rectCount = windowDirty.CountRects();
 		for (int32 i = 0; i < rectCount; i++) {
 			clipping_rect r = windowDirty.RectAtInt(i);
@@ -2587,6 +2594,11 @@ Desktop::CompositeDirtyRegion(BRegion& dirtyRegion)
 
 			for (int32 y = 0; y < copyHeight; y++) {
 				const uint32* s = (const uint32*)(srcBits + ((srcY + y) * srcBytesPerRow) + (srcX * 4));
+				int32 screenY = r.top + y;
+				bool isContent = (screenY >= (int32)frame.top
+					&& screenY <= (int32)frame.bottom
+					&& r.left >= (int32)frame.left
+					&& (r.left + copyWidth - 1) <= (int32)frame.right);
 
 				switch (dstSpace) {
 					case B_RGB32:
@@ -2594,15 +2606,15 @@ Desktop::CompositeDirtyRegion(BRegion& dirtyRegion)
 					case B_RGB32_BIG:
 					case B_RGBA32_BIG:
 					{
-						uint32* d = (uint32*)(dstBits + ((r.top + y) * dstBytesPerRow) + (r.left * 4));
-						BlendSpanRGB32(d, s, copyWidth);
+						uint32* d = (uint32*)(dstBits + (screenY * dstBytesPerRow) + (r.left * 4));
+						BlendSpanRGB32(d, s, copyWidth, isContent);
 						break;
 					}
 
 					case B_RGB30:
 					case B_RGB30_BIG:
 					{
-						uint32* d = (uint32*)(dstBits + ((r.top + y) * dstBytesPerRow) + (r.left * 4));
+						uint32* d = (uint32*)(dstBits + (screenY * dstBytesPerRow) + (r.left * 4));
 						BlendSpanRGB30(d, s, copyWidth);
 						break;
 					}
@@ -2610,7 +2622,7 @@ Desktop::CompositeDirtyRegion(BRegion& dirtyRegion)
 					case B_RGB24:
 					case B_RGB24_BIG:
 					{
-						uint8* d = dstBits + ((r.top + y) * dstBytesPerRow) + (r.left * 3);
+						uint8* d = dstBits + (screenY * dstBytesPerRow) + (r.left * 3);
 						BlendSpanRGB24(d, s, copyWidth);
 						break;
 					}
@@ -2618,8 +2630,8 @@ Desktop::CompositeDirtyRegion(BRegion& dirtyRegion)
 					case B_RGB16:
 					case B_RGB16_BIG:
 					{
-						uint16* d = (uint16*)(dstBits + ((r.top + y) * dstBytesPerRow) + (r.left * 2));
-						BlendSpanRGB16(d, s, copyWidth);
+						uint16* d = (uint16*)(dstBits + (screenY * dstBytesPerRow) + (r.left * 2));
+						BlendSpanRGB16(d, s, copyWidth, isContent);
 						break;
 					}
 
@@ -2628,8 +2640,8 @@ Desktop::CompositeDirtyRegion(BRegion& dirtyRegion)
 					case B_RGB15_BIG:
 					case B_RGBA15_BIG:
 					{
-						uint16* d = (uint16*)(dstBits + ((r.top + y) * dstBytesPerRow) + (r.left * 2));
-						BlendSpanRGB15(d, s, copyWidth);
+						uint16* d = (uint16*)(dstBits + (screenY * dstBytesPerRow) + (r.left * 2));
+						BlendSpanRGB15(d, s, copyWidth, isContent);
 						break;
 					}
 
@@ -2666,12 +2678,10 @@ Desktop::MarkDirty(BRegion& dirtyRegion, BRegion& exposeRegion)
 		return;
 
 	if (LockAllWindows()) {
-		if (fCompositor2DEnabled) {
+		_TriggerWindowRedrawing(dirtyRegion, exposeRegion);
+
+		if (fCompositor2DEnabled)
 			CompositeDirtyRegion(dirtyRegion);
-		} else {
-			// send redraw messages to all windows intersecting the dirty region
-			_TriggerWindowRedrawing(dirtyRegion, exposeRegion);
-		}
 
 		UnlockAllWindows();
 	}
