@@ -224,10 +224,8 @@ Window::AllocateBackingStore()
 	}
 
 	if (GetDrawingEngine() != NULL) {
-		GetDrawingEngine()->LockExclusiveAccess();
 		GetDrawingEngine()->SetHWInterface(fBackingHWInterface.Get());
 		GetDrawingEngine()->SetRendererOffset(0, 0);
-		GetDrawingEngine()->UnlockExclusiveAccess();
 	}
 
 	fDirtyRegion.Include(FullFrame());
@@ -242,10 +240,8 @@ Window::FreeBackingStore()
 		return;
 
 	if (GetDrawingEngine() != NULL && fDesktop != NULL) {
-		GetDrawingEngine()->LockExclusiveAccess();
 		GetDrawingEngine()->SetHWInterface(fDesktop->HWInterface());
 		GetDrawingEngine()->SetRendererOffset(0, 0);
-		GetDrawingEngine()->UnlockExclusiveAccess();
 	}
 
 	if (fBackingHWInterface.IsSet()) {
