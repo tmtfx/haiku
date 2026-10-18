@@ -492,6 +492,45 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 		else
 	fHardwareCursorCheckbox->SetValue(B_CONTROL_OFF);
 
+	f2DAccelerationCheckbox = new BCheckBox("2d_acceleration",
+		B_TRANSLATE("Enable 2D hardware acceleration"),
+		new BMessage(TOGGLE_2D_ACCELERATION_MSG));
+	bool has2DAcceleration = false;
+	{
+		BMessenger msgr("application/x-vnd.haiku-app_server");
+		BMessage request('h2da');
+		BMessage reply;
+		if (msgr.IsValid() && msgr.SendMessage(&request, &reply, 200000) == B_OK) {
+			reply.FindBool("has_2d_acceleration", &has2DAcceleration);
+		}
+	}
+	f2DAccelerationCheckbox->SetEnabled(has2DAcceleration);
+	if (fSettings->Acceleration2DEnabled())
+		f2DAccelerationCheckbox->SetValue(B_CONTROL_ON);
+	else
+		f2DAccelerationCheckbox->SetValue(B_CONTROL_OFF);
+
+	f2DCompositorCheckbox = new BCheckBox("2d_compositor",
+		B_TRANSLATE("Enable 2D compositor (requires 4GB+ RAM)"),
+		new BMessage(TOGGLE_2D_COMPOSITOR_MSG));
+
+	bool hasEnoughRAM = false;
+	system_info sysInfo;
+	if (get_system_info(&sysInfo) == B_OK) {
+		uint64 totalRAM = (uint64)sysInfo.max_pages * B_PAGE_SIZE;
+		// Check for at least ~3.8 GB (accounting for reserved BIOS memory on 4GB systems)
+		if (totalRAM >= 3800ULL * 1024 * 1024)
+			hasEnoughRAM = true;
+	}
+
+	bool canEnableCompositor = has2DAcceleration && hasEnoughRAM
+		&& fSettings->Acceleration2DEnabled();
+	f2DCompositorCheckbox->SetEnabled(canEnableCompositor);
+	if (canEnableCompositor && fSettings->Compositor2DEnabled())
+		f2DCompositorCheckbox->SetValue(B_CONTROL_ON);
+	else
+		f2DCompositorCheckbox->SetValue(B_CONTROL_OFF);
+
 	// enlarged area for multi-monitor settings
 	{
 		bool dummy;
@@ -608,8 +647,10 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 			.Add(fTVStandardField->CreateMenuBarLayoutItem(), 1, 6)
 		.End();
 
-	// add the checkbox below the grid
+	// add the checkboxes below the grid
 	outerControlsView->AddChild(fHardwareCursorCheckbox);
+	outerControlsView->AddChild(f2DAccelerationCheckbox);
+	outerControlsView->AddChild(f2DCompositorCheckbox);
 
 	// TODO: we don't support getting the screen's preferred settings
 	/* fDefaultsButton = new BButton(buttonRect, "DefaultsButton", "Defaults",
@@ -1273,6 +1314,36 @@ ScreenWindow::MessageReceived(BMessage* message)
 		{
 			bool enabled = fHardwareCursorCheckbox->Value() == B_CONTROL_ON;
 			fSettings->SetHardwareCursorEnabled(enabled);
+			break;
+		}
+
+		case TOGGLE_2D_ACCELERATION_MSG:
+		{
+			bool enabled = f2DAccelerationCheckbox->Value() == B_CONTROL_ON;
+			fSettings->SetAcceleration2DEnabled(enabled);
+
+			bool hasEnoughRAM = false;
+			system_info sysInfo;
+			if (get_system_info(&sysInfo) == B_OK) {
+				uint64 totalRAM = (uint64)sysInfo.max_pages * B_PAGE_SIZE;
+				if (totalRAM >= 3800ULL * 1024 * 1024)
+					hasEnoughRAM = true;
+			}
+
+			if (enabled && hasEnoughRAM) {
+				f2DCompositorCheckbox->SetEnabled(true);
+			} else {
+				f2DCompositorCheckbox->SetValue(B_CONTROL_OFF);
+				f2DCompositorCheckbox->SetEnabled(false);
+				fSettings->SetCompositor2DEnabled(false);
+			}
+			break;
+		}
+
+		case TOGGLE_2D_COMPOSITOR_MSG:
+		{
+			bool enabled = f2DCompositorCheckbox->Value() == B_CONTROL_ON;
+			fSettings->SetCompositor2DEnabled(enabled);
 			break;
 		}
 

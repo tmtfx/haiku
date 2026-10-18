@@ -617,9 +617,12 @@ Painter::StraightLine(BPoint a, BPoint b, const rgb_color& c) const
 
 	if (a.x == b.x) {
 		// vertical
+		int32 x = (int32)a.x;
+		if (x < 0 || x >= (int32)fBuffer.width())
+			return true;
+
 		uint8* dst = fBuffer.row_ptr(0);
 		uint32 bpr = fBuffer.stride();
-		int32 x = (int32)a.x;
 		dst += x * 4;
 		int32 y1 = (int32)min_c(a.y, b.y);
 		int32 y2 = (int32)max_c(a.y, b.y);

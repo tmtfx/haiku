@@ -44,6 +44,8 @@ static const uint32 kMsgWorkspaceLayoutChanged = 'wslc';
 static const uint32 kMsgWorkspaceColumnsChanged = 'wscc';
 static const uint32 kMsgWorkspaceRowsChanged = 'wsrc';
 static const uint32 TOGGLE_HARDWARE_CURSOR_MSG = 'thcr';
+static const uint32 TOGGLE_2D_ACCELERATION_MSG = 't2da';
+static const uint32 TOGGLE_2D_COMPOSITOR_MSG = 't2dc';
 
 // Constants
 extern const char* kBackgroundsSignature;

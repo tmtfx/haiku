@@ -34,6 +34,13 @@ class RenderingBuffer;
 class ServerBitmap;
 
 
+enum {
+	HW_ACC_COPY_REGION		= 0x00000001,
+	HW_ACC_FILL_REGION		= 0x00000002,
+	HW_ACC_INVERT_REGION	= 0x00000004,
+};
+
+
 class HWInterfaceListener {
 public:
 								HWInterfaceListener();
@@ -54,6 +61,8 @@ public:
 
 	// Query whether this HWInterface supports the accelerant bitmap cursor hook
 	virtual bool HasSetCursorBitmap() const { return false; }
+	// Query whether this HWInterface supports 2D hardware acceleration
+	virtual bool Has2DAcceleration() const { return false; }
 	// locking
 			bool				LockParallelAccess() { return ReadLock(); }
 #if DEBUG
@@ -108,6 +117,21 @@ public:
 
 	virtual status_t			GetAccelerantPath(BString& path);
 	virtual status_t			GetDriverPath(BString& path);
+
+	// query for available hardware acceleration and perform it
+	// (Initialize() must have been called already)
+	virtual	uint32				AvailableHWAcceleration() const
+									{ return 0; }
+
+	virtual	void				CopyRegion(const clipping_rect* sortedRectList,
+									uint32 count, int32 xOffset, int32 yOffset)
+									{}
+
+	virtual	void				FillRegion(const BRegion& region,
+									const rgb_color& color)
+									{}
+
+	virtual	void				Sync() {}
 
 	// cursor handling (these do their own Read/Write locking)
 			ServerCursorReference Cursor() const;

@@ -143,6 +143,11 @@ public:
 			::HWInterface*		HWInterface() const
 									{ return fVirtualScreen.HWInterface(); }
 
+			bool				Compositor2DEnabled() const
+									{ return fCompositor2DEnabled; }
+			void				SetCompositor2DEnabled(bool enabled);
+			void				CompositeDirtyRegion(BRegion& dirtyRegion);
+
 			void				RebuildAndRedrawAfterWindowChange(
 									Window* window, BRegion& dirty);
 									// the window lock must be held when calling
@@ -385,6 +390,7 @@ private:
 			StackAndTile		fStackAndTile;
 
 			BMessage			fPendingColors;
+			bool				fCompositor2DEnabled;
 };
 
 #endif	// DESKTOP_H

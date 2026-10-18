@@ -29,6 +29,7 @@ public:
 	virtual						~AccelerantHWInterface();
 
 	virtual bool HasSetCursorBitmap() const;
+	virtual bool Has2DAcceleration() const;
 	virtual	status_t			Initialize();
 	virtual	status_t			Shutdown();
 
@@ -65,6 +66,17 @@ public:
 	virtual status_t			GetAccelerantPath(BString& path);
 	virtual status_t			GetDriverPath(BString& path);
 
+	// query for available hardware acceleration
+	virtual	uint32				AvailableHWAcceleration() const;
+
+	// accelerated drawing
+	virtual	void				CopyRegion(const clipping_rect* sortedRectList,
+									uint32 count, int32 xOffset, int32 yOffset);
+	virtual	void				FillRegion(const BRegion& region,
+									const rgb_color& color);
+
+	virtual	void				Sync();
+
 	// overlay support
 	virtual overlay_token		AcquireOverlayChannel();
 	virtual void				ReleaseOverlayChannel(overlay_token token);
@@ -92,6 +104,7 @@ public:
 	virtual	RenderingBuffer*	BackBuffer() const;
 	virtual	bool				IsDoubleBuffered() const;
 	virtual void 				SetUserHardwareCursor(bool enable);
+	virtual void 				SetUser2DAcceleration(bool enable);
 
 protected:
 	virtual	void				_CopyBackToFront(/*const*/ BRegion& region);
@@ -109,6 +122,8 @@ private:
 			status_t			_UpdateFrameBufferConfig();
 			void				_RegionToRectParams(/*const*/ BRegion* region,
 									uint32* count) const;
+			void				_CopyRegion(const clipping_rect* sortedRectList,
+									uint32 count, int32 xOffset, int32 yOffset);
 			uint32				_NativeColor(const rgb_color& color) const;
 			status_t			_FindBestMode(const display_mode& compareMode,
 									float compareAspectRatio,
@@ -118,6 +133,7 @@ private:
 			void				_SetSystemPalette();
 			void				_SetGrayscalePalette();
 			void				_UpdateHardwareCursor(bool wasHardwareCursorEnabled);
+			bigtime_t			_RetraceTimeout() const;
 
 private:
 			int					fCardFD;
@@ -135,11 +151,16 @@ private:
 			get_pixel_clock_limits	fAccGetPixelClockLimits;
 
 			// optional accelerant hooks
+			acquire_engine		fAccAcquireEngine;
+			release_engine		fAccReleaseEngine;
+			sync_to_token		fAccSyncToToken;
 			get_timing_constraints	fAccGetTimingConstraints;
 			propose_display_mode	fAccProposeDisplayMode;
 			get_preferred_display_mode fAccGetPreferredDisplayMode;
 			get_monitor_info		fAccGetMonitorInfo;
 			get_edid_info			fAccGetEDIDInfo;
+			screen_to_screen_blit	fAccScreenBlit;
+			fill_rectangle			fAccFillRect;
 			set_cursor_shape		fAccSetCursorShape;
 			set_cursor_bitmap		fAccSetCursorBitmap;
 			get_cursor_bits			fAccGetCursorBits;
@@ -189,6 +210,8 @@ private:
 
 			// user preference: if false, avoid calling accelerant bitmap cursor hook
 			bool			fUserEnableHardwareCursor;
+			// user preference: if false, disable 2D hardware acceleration (pure AGG)
+			bool			fUserEnable2DAcceleration;
 };
 
 #endif // ACCELERANT_HW_INTERFACE_H

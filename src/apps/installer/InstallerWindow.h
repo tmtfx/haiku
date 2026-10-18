@@ -19,6 +19,8 @@ namespace BPrivate {
 using namespace BPrivate;
 
 class BButton;
+class BCheckBox;
+class BPath;
 class BLayoutItem;
 class BGroupView;
 class BMenu;
@@ -59,6 +61,9 @@ private:
 									bool alreadyLocked = false);
 			void				_QuitCopyEngine(bool askUser);
 			// outSalt must point to a 16-byte buffer; caller zeros it after use.
+			status_t			_GetDestinationPath(BPath& destPath);
+			void				_RunBenchmark();
+			status_t			_SaveScreenSettings(bool enable2D);
 			status_t			_WriteMasterPasswordShadow(uint8* outSalt);
 			status_t			_WriteKeystore(const uint8* salt);
 
@@ -95,6 +100,13 @@ private:
 			BTextControl*			fMasterPassword1;
 			BTextControl*			fMasterPassword2;
 			BButton*			mpSave;
+
+			BGroupView*			fBenchmarkView;
+			BStatusBar*			fCpuStatusBar;
+			BStatusBar*			fGpuStatusBar;
+			BStringView*		fBenchResultView;
+			BCheckBox*			fBench2DCheckbox;
+			BButton*			fBenchDoneButton;
 
 			bool				fEncouragedToSetupPartitions;
 

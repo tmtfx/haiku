@@ -180,7 +180,10 @@ DrawingEngine::DrawingEngine(HWInterface* interface)
 	:
 	fPainter(new Painter()),
 	fGraphicsCard(NULL),
-	fCopyToFront(true)
+	fAvailableHWAcceleration(0),
+	fCopyToFront(true),
+	fOriginX(0),
+	fOriginY(0)
 {
 	SetHWInterface(interface);
 }
@@ -247,6 +250,7 @@ DrawingEngine::FrameBufferChanged()
 {
 	if (!fGraphicsCard) {
 		fPainter->DetachFromBuffer();
+		fAvailableHWAcceleration = 0;
 		return;
 	}
 
@@ -254,6 +258,7 @@ DrawingEngine::FrameBufferChanged()
 	// in the thread that changed the frame buffer...
 	if (LockExclusiveAccess()) {
 		fPainter->AttachToBuffer(fGraphicsCard->DrawingBuffer());
+		fAvailableHWAcceleration = fGraphicsCard->AvailableHWAcceleration();
 		UnlockExclusiveAccess();
 	}
 }
@@ -300,7 +305,13 @@ DrawingEngine::ConstrainClippingRegion(const BRegion* region)
 {
 	ASSERT_PARALLEL_LOCKED();
 
-	fPainter->ConstrainClipping(region);
+	if ((fOriginX != 0 || fOriginY != 0) && region != NULL) {
+		fLocalClippingRegion = *region;
+		fLocalClippingRegion.OffsetBy(-fOriginX, -fOriginY);
+		fPainter->ConstrainClipping(&fLocalClippingRegion);
+	} else {
+		fPainter->ConstrainClipping(region);
+	}
 }
 
 
@@ -308,7 +319,7 @@ void
 DrawingEngine::SetDrawState(const DrawState* state, int32 xOffset,
 	int32 yOffset)
 {
-	fPainter->SetDrawState(state, xOffset, yOffset);
+	fPainter->SetDrawState(state, xOffset - fOriginX, yOffset - fOriginY);
 }
 
 
@@ -526,26 +537,30 @@ DrawingEngine::CopyRegion(/*const*/ BRegion* region, int32 xOffset,
 	// NOTE: region is already clipped
 	ASSERT_PARALLEL_LOCKED();
 
-	BRect frame = region->Frame();
+	BRegion localRegion(*region);
+	if (fOriginX != 0 || fOriginY != 0)
+		localRegion.OffsetBy(-fOriginX, -fOriginY);
+
+	BRect frame = localRegion.Frame();
 	frame = frame | frame.OffsetByCopy(xOffset, yOffset);
 
 	AutoFloatingOverlaysHider _(fGraphicsCard, frame);
 
-	int32 count = region->CountRects();
+	int32 count = localRegion.CountRects();
 
 	// TODO: make this step unnecessary
 	// (by using different stack impl inside node)
 	BStackOrHeapArray<node, 64> nodes(count);
 	for (int32 i= 0; i < count; i++) {
-		nodes[i].init(region->RectAt(i), count);
+		nodes[i].init(localRegion.RectAt(i), count);
 		if (nodes[i].pointers == NULL)
 			return;
 	}
 
 	for (int32 i = 0; i < count; i++) {
-		BRect a = region->RectAt(i);
+		BRect a = localRegion.RectAt(i);
 		for (int32 k = i + 1; k < count; k++) {
-			BRect b = region->RectAt(k);
+			BRect b = localRegion.RectAt(k);
 			int cmp = 0;
 			// compare horizontally
 			if (xOffset > 0) {
@@ -598,18 +613,41 @@ DrawingEngine::CopyRegion(/*const*/ BRegion* region, int32 xOffset,
 	// to. If their "indegree" count reaches zero, put them onto the
 	// stack as well.
 
+	clipping_rect* sortedRectList = NULL;
+	int32 nextSortedIndex = 0;
+
+	if ((fAvailableHWAcceleration & HW_ACC_COPY_REGION) != 0) {
+		sortedRectList = new(std::nothrow) clipping_rect[count];
+		if (sortedRectList == NULL)
+			return;
+	}
+
 	while (!inDegreeZeroNodes.empty()) {
 		node* n = inDegreeZeroNodes.top();
 		inDegreeZeroNodes.pop();
 
 		BRect touched = CopyRect(n->rect, xOffset, yOffset);
-		fGraphicsCard->Invalidate(touched);
+
+		if (sortedRectList != NULL) {
+			sortedRectList[nextSortedIndex].left = (int32)n->rect.left;
+			sortedRectList[nextSortedIndex].top = (int32)n->rect.top;
+			sortedRectList[nextSortedIndex].right = (int32)n->rect.right;
+			sortedRectList[nextSortedIndex].bottom = (int32)n->rect.bottom;
+			nextSortedIndex++;
+		} else {
+			fGraphicsCard->Invalidate(touched);
+		}
 
 		for (int32 k = 0; k < n->next_pointer; k++) {
 			n->pointers[k]->in_degree--;
 			if (n->pointers[k]->in_degree == 0)
 				inDegreeZeroNodes.push(n->pointers[k]);
 		}
+	}
+
+	if (sortedRectList != NULL) {
+		fGraphicsCard->CopyRegion(sortedRectList, count, xOffset, yOffset);
+		delete[] sortedRectList;
 	}
 }
 
@@ -619,6 +657,7 @@ DrawingEngine::InvertRect(BRect r)
 {
 	ASSERT_PARALLEL_LOCKED();
 
+	r = _Translate(r);
 	make_rect_valid(r);
 	// NOTE: Currently ignores view transformation, so no TransformAndClipRect()
 	DrawTransaction transaction(this, fPainter->ClipRect(r));
@@ -635,9 +674,10 @@ DrawingEngine::DrawBitmap(ServerBitmap* bitmap, const BRect& bitmapRect,
 {
 	ASSERT_PARALLEL_LOCKED();
 
-	DrawTransaction transaction(this, fPainter->TransformAndClipRect(viewRect));
+	BRect localViewRect = _Translate(viewRect);
+	DrawTransaction transaction(this, fPainter->TransformAndClipRect(localViewRect));
 	if (transaction.IsDirty())
-		fPainter->DrawBitmap(bitmap, bitmapRect, viewRect, options);
+		fPainter->DrawBitmap(bitmap, bitmapRect, localViewRect, options);
 }
 
 
@@ -647,6 +687,7 @@ DrawingEngine::DrawArc(BRect r, const float& angle, const float& span,
 {
 	ASSERT_PARALLEL_LOCKED();
 
+	r = _Translate(r);
 	make_rect_valid(r);
 	fPainter->AlignEllipseRect(&r, filled);
 
@@ -675,6 +716,7 @@ DrawingEngine::DrawArc(BRect r, const float& angle, const float& span,
 {
 	ASSERT_PARALLEL_LOCKED();
 
+	r = _Translate(r);
 	make_rect_valid(r);
 	fPainter->AlignEllipseRect(&r, true);
 	DrawTransaction transaction(this, fPainter->TransformAndClipRect(r));
@@ -698,10 +740,16 @@ DrawingEngine::DrawBezier(BPoint* pts, bool filled)
 {
 	ASSERT_PARALLEL_LOCKED();
 
-	// TODO: figure out bounds and hide cursor depending on that
 	DrawTransaction transaction(this);
 
-	transaction.SetDirty(fPainter->DrawBezier(pts, filled));
+	if (fOriginX != 0 || fOriginY != 0) {
+		BPoint localPts[4];
+		for (int i = 0; i < 4; i++)
+			localPts[i] = _Translate(pts[i]);
+		transaction.SetDirty(fPainter->DrawBezier(localPts, filled));
+	} else {
+		transaction.SetDirty(fPainter->DrawBezier(pts, filled));
+	}
 }
 
 
@@ -710,10 +758,16 @@ DrawingEngine::DrawBezier(BPoint* pts, bool filled, const BGradient& gradient)
 {
 	ASSERT_PARALLEL_LOCKED();
 
-	// TODO: figure out bounds and hide cursor depending on that
 	DrawTransaction transaction(this);
 
-	transaction.SetDirty(fPainter->DrawBezier(pts, filled, gradient));
+	if (fOriginX != 0 || fOriginY != 0) {
+		BPoint localPts[4];
+		for (int i = 0; i < 4; i++)
+			localPts[i] = _Translate(pts[i]);
+		transaction.SetDirty(fPainter->DrawBezier(localPts, filled, gradient));
+	} else {
+		transaction.SetDirty(fPainter->DrawBezier(pts, filled, gradient));
+	}
 }
 
 
@@ -722,6 +776,7 @@ DrawingEngine::DrawEllipse(BRect r, bool filled)
 {
 	ASSERT_PARALLEL_LOCKED();
 
+	r = _Translate(r);
 	make_rect_valid(r);
 	BRect clipped = r;
 	fPainter->AlignEllipseRect(&clipped, filled);
@@ -747,12 +802,10 @@ DrawingEngine::DrawEllipse(BRect r, bool filled, const BGradient& gradient)
 {
 	ASSERT_PARALLEL_LOCKED();
 
+	r = _Translate(r);
 	make_rect_valid(r);
 	BRect clipped = r;
 	fPainter->AlignEllipseRect(&clipped, filled);
-
-	if (!filled)
-		extend_by_stroke_width(clipped, fPainter->PenSize());
 
 	clipped.left = floorf(clipped.left);
 	clipped.top = floorf(clipped.top);
@@ -773,6 +826,7 @@ DrawingEngine::DrawPolygon(BPoint* ptlist, int32 numpts, BRect bounds,
 {
 	ASSERT_PARALLEL_LOCKED();
 
+	bounds = _Translate(bounds);
 	make_rect_valid(bounds);
 	if (!filled)
 		extend_by_stroke_width(bounds, fPainter->PenSize());
@@ -780,7 +834,17 @@ DrawingEngine::DrawPolygon(BPoint* ptlist, int32 numpts, BRect bounds,
 	if (!transaction.IsDirty())
 		return;
 
-	fPainter->DrawPolygon(ptlist, numpts, filled, closed);
+	if (fOriginX != 0 || fOriginY != 0) {
+		BPoint* localPts = new (std::nothrow) BPoint[numpts];
+		if (localPts != NULL) {
+			for (int32 i = 0; i < numpts; i++)
+				localPts[i] = _Translate(ptlist[i]);
+			fPainter->DrawPolygon(localPts, numpts, filled, closed);
+			delete[] localPts;
+		}
+	} else {
+		fPainter->DrawPolygon(ptlist, numpts, filled, closed);
+	}
 }
 
 
@@ -790,6 +854,7 @@ DrawingEngine::DrawPolygon(BPoint* ptlist, int32 numpts, BRect bounds,
 {
 	ASSERT_PARALLEL_LOCKED();
 
+	bounds = _Translate(bounds);
 	make_rect_valid(bounds);
 	if (!filled)
 		extend_by_stroke_width(bounds, fPainter->PenSize());
@@ -797,7 +862,17 @@ DrawingEngine::DrawPolygon(BPoint* ptlist, int32 numpts, BRect bounds,
 	if (!transaction.IsDirty())
 		return;
 
-	fPainter->DrawPolygon(ptlist, numpts, filled, closed, gradient);
+	if (fOriginX != 0 || fOriginY != 0) {
+		BPoint* localPts = new (std::nothrow) BPoint[numpts];
+		if (localPts != NULL) {
+			for (int32 i = 0; i < numpts; i++)
+				localPts[i] = _Translate(ptlist[i]);
+			fPainter->DrawPolygon(localPts, numpts, filled, closed, gradient);
+			delete[] localPts;
+		}
+	} else {
+		fPainter->DrawPolygon(ptlist, numpts, filled, closed, gradient);
+	}
 }
 
 
@@ -820,18 +895,20 @@ DrawingEngine::StrokeLine(const BPoint& start, const BPoint& end,
 {
 	ASSERT_PARALLEL_LOCKED();
 
-	BRect touched(start, end);
+	BPoint s = _Translate(start);
+	BPoint e = _Translate(end);
+	BRect touched(s, e);
 	make_rect_valid(touched);
 	touched = fPainter->ClipRect(touched);
 	DrawTransaction transaction(this, touched);
 
-	if (!fPainter->StraightLine(start, end, color)) {
+	if (!fPainter->StraightLine(s, e, color)) {
 		rgb_color previousColor = fPainter->HighColor();
 		drawing_mode previousMode = fPainter->DrawingMode();
 
 		fPainter->SetHighColor(color);
 		fPainter->SetDrawingMode(B_OP_OVER);
-		fPainter->StrokeLine(start, end);
+		fPainter->StrokeLine(s, e);
 
 		fPainter->SetDrawingMode(previousMode);
 		fPainter->SetHighColor(previousColor);
@@ -845,6 +922,7 @@ DrawingEngine::StrokeRect(BRect r, const rgb_color& color)
 {
 	ASSERT_PARALLEL_LOCKED();
 
+	r = _Translate(r);
 	make_rect_valid(r);
 	DrawTransaction transaction(this, fPainter->ClipRect(r));
 	if (!transaction.IsDirty())
@@ -859,8 +937,19 @@ DrawingEngine::FillRect(BRect r, const rgb_color& color)
 {
 	ASSERT_PARALLEL_LOCKED();
 
+	r = _Translate(r);
 	make_rect_valid(r);
 	r = fPainter->ClipRect(r);
+
+	if ((fAvailableHWAcceleration & HW_ACC_FILL_REGION) != 0
+		&& r.IsValid() && (r.Width() + 1) * (r.Height() + 1) >= 100) {
+		AutoFloatingOverlaysHider _(fGraphicsCard, r);
+		fPainter->FillRect(r, color);
+		BRegion region(r);
+		fGraphicsCard->FillRegion(region, color);
+		return;
+	}
+
 	DrawTransaction transaction(this, r);
 	if (!transaction.IsDirty())
 		return;
@@ -874,28 +963,26 @@ DrawingEngine::FillRegion(BRegion& r, const rgb_color& color)
 {
 	ASSERT_PARALLEL_LOCKED();
 
-	// NOTE: region expected to be already clipped correctly!!
-	BRect frame = r.Frame();
+	BRegion localRegion(r);
+	if (fOriginX != 0 || fOriginY != 0)
+		localRegion.OffsetBy(-fOriginX, -fOriginY);
+
+	BRect frame = localRegion.Frame();
 	if (!fPainter->Bounds().Contains(frame)) {
-		// NOTE: I am not quite sure yet how this can happen, but apparently it
-		// can (see bug #634).
-		// This function is used for internal app_server painting, in the case of
-		// bug #634, the background of views is painted. But the view region
-		// should never be outside the frame buffer bounds.
-//		char message[1024];
-//		BRect bounds = fPainter->Bounds();
-//		sprintf(message, "FillRegion() - painter: (%d, %d)->(%d, %d), region: (%d, %d)->(%d, %d)",
-//			(int)bounds.left, (int)bounds.top, (int)bounds.right, (int)bounds.bottom,
-//			(int)frame.left, (int)frame.top, (int)frame.right, (int)frame.bottom);
-//		debugger(message);
 		return;
 	}
 
-	DrawTransaction transaction(this, r);
+	AutoFloatingOverlaysHider _(fGraphicsCard, frame);
 
-	int32 count = r.CountRects();
+	int32 count = localRegion.CountRects();
 	for (int32 i = 0; i < count; i++)
-		fPainter->FillRectNoClipping(r.RectAtInt(i), color);
+		fPainter->FillRectNoClipping(localRegion.RectAtInt(i), color);
+
+	if ((fAvailableHWAcceleration & HW_ACC_FILL_REGION) != 0) {
+		fGraphicsCard->FillRegion(localRegion, color);
+	} else {
+		DrawTransaction transaction(this, localRegion);
+	}
 }
 
 
@@ -907,7 +994,7 @@ DrawingEngine::StrokeRect(BRect r)
 {
 	ASSERT_PARALLEL_LOCKED();
 
-	// support invalid rects
+	r = _Translate(r);
 	make_rect_valid(r);
 	BRect clipped(r);
 	extend_by_stroke_width(clipped, fPainter->PenSize());
@@ -924,6 +1011,7 @@ DrawingEngine::FillRect(BRect r)
 {
 	ASSERT_PARALLEL_LOCKED();
 
+	r = _Translate(r);
 	make_rect_valid(r);
 
 	r = fPainter->AlignRect(r);
@@ -941,7 +1029,7 @@ DrawingEngine::StrokeRect(BRect r, const BGradient& gradient)
 {
 	ASSERT_PARALLEL_LOCKED();
 
-	// support invalid rects
+	r = _Translate(r);
 	make_rect_valid(r);
 	BRect clipped(r);
 	extend_by_stroke_width(clipped, fPainter->PenSize());
@@ -958,6 +1046,7 @@ DrawingEngine::FillRect(BRect r, const BGradient& gradient)
 {
 	ASSERT_PARALLEL_LOCKED();
 
+	r = _Translate(r);
 	make_rect_valid(r);
 	r = fPainter->AlignRect(r);
 
@@ -974,14 +1063,18 @@ DrawingEngine::FillRegion(BRegion& r)
 {
 	ASSERT_PARALLEL_LOCKED();
 
-	BRect clipped = fPainter->TransformAndClipRect(r.Frame());
+	BRegion localRegion(r);
+	if (fOriginX != 0 || fOriginY != 0)
+		localRegion.OffsetBy(-fOriginX, -fOriginY);
+
+	BRect clipped = fPainter->TransformAndClipRect(localRegion.Frame());
 	DrawTransaction transaction(this, clipped);
 	if (!transaction.IsDirty())
 		return;
 
-	int32 count = r.CountRects();
+	int32 count = localRegion.CountRects();
 	for (int32 i = 0; i < count; i++)
-		fPainter->FillRect(r.RectAt(i));
+		fPainter->FillRect(localRegion.RectAt(i));
 }
 
 
@@ -990,14 +1083,18 @@ DrawingEngine::FillRegion(BRegion& r, const BGradient& gradient)
 {
 	ASSERT_PARALLEL_LOCKED();
 
-	BRect clipped = fPainter->TransformAndClipRect(r.Frame());
+	BRegion localRegion(r);
+	if (fOriginX != 0 || fOriginY != 0)
+		localRegion.OffsetBy(-fOriginX, -fOriginY);
+
+	BRect clipped = fPainter->TransformAndClipRect(localRegion.Frame());
 	DrawTransaction transaction(this, clipped);
 	if (!transaction.IsDirty())
 		return;
 
-	int32 count = r.CountRects();
+	int32 count = localRegion.CountRects();
 	for (int32 i = 0; i < count; i++)
-		fPainter->FillRect(r.RectAt(i), gradient);
+		fPainter->FillRect(localRegion.RectAt(i), gradient);
 }
 
 
@@ -1006,6 +1103,7 @@ DrawingEngine::DrawRoundRect(BRect r, float xrad, float yrad, bool filled)
 {
 	ASSERT_PARALLEL_LOCKED();
 
+	r = _Translate(r);
 	make_rect_valid(r);
 	if (!filled)
 		extend_by_stroke_width(r, fPainter->PenSize());
@@ -1033,6 +1131,7 @@ DrawingEngine::DrawRoundRect(BRect r, float xrad, float yrad,
 {
 	ASSERT_PARALLEL_LOCKED();
 
+	r = _Translate(r);
 	make_rect_valid(r);
 	if (!filled)
 		extend_by_stroke_width(r, fPainter->PenSize());
@@ -1061,24 +1160,11 @@ DrawingEngine::DrawShape(const BRect& bounds, int32 opCount,
 {
 	ASSERT_PARALLEL_LOCKED();
 
-// TODO: bounds probably does not take curves and arcs into account...
-//	BRect clipped(bounds);
-//	if (!filled)
-//		extend_by_stroke_width(clipped, fPainter->PenSize());
-//	clipped = fPainter->TransformAndClipRect(bounds);
-//
-//	clipped.left = floorf(clipped.left);
-//	clipped.top = floorf(clipped.top);
-//	clipped.right = ceilf(clipped.right);
-//	clipped.bottom = ceilf(clipped.bottom);
-//
-//	DrawTransaction transaction(this, clipped);
-//	if (!transaction.IsDirty())
-//		return;
+	BPoint localOffset = viewToScreenOffset - BPoint(fOriginX, fOriginY);
 	DrawTransaction transaction(this);
 
 	transaction.SetDirty(fPainter->DrawShape(opCount, opList, ptCount, ptList,
-		filled, viewToScreenOffset, viewScale));
+		filled, localOffset, viewScale));
 }
 
 
@@ -1101,10 +1187,11 @@ DrawingEngine::DrawShape(const BRect& bounds, int32 opCount,
 //	DrawTransaction transaction(this, clipped);
 //	if (!transaction.IsDirty())
 //		return;
+	BPoint localOffset = viewToScreenOffset - BPoint(fOriginX, fOriginY);
 	DrawTransaction transaction(this);
 
 	transaction.SetDirty(fPainter->DrawShape(opCount, opList, ptCount, ptList,
-		filled, gradient, viewToScreenOffset, viewScale));
+		filled, gradient, localOffset, viewScale));
 }
 
 
@@ -1113,17 +1200,21 @@ DrawingEngine::DrawTriangle(BPoint* pts, const BRect& bounds, bool filled)
 {
 	ASSERT_PARALLEL_LOCKED();
 
-	BRect clipped(bounds);
+	BRect clipped = _Translate(bounds);
 	if (!filled)
 		extend_by_stroke_width(clipped, fPainter->PenSize());
 	DrawTransaction transaction(this, fPainter->TransformAndClipRect(clipped));
 	if (!transaction.IsDirty())
 		return;
 
+	BPoint localPts[3];
+	for (int i = 0; i < 3; i++)
+		localPts[i] = _Translate(pts[i]);
+
 	if (filled)
-		fPainter->FillTriangle(pts[0], pts[1], pts[2]);
+		fPainter->FillTriangle(localPts[0], localPts[1], localPts[2]);
 	else
-		fPainter->StrokeTriangle(pts[0], pts[1], pts[2]);
+		fPainter->StrokeTriangle(localPts[0], localPts[1], localPts[2]);
 }
 
 
@@ -1133,17 +1224,21 @@ DrawingEngine::DrawTriangle(BPoint* pts, const BRect& bounds,
 {
 	ASSERT_PARALLEL_LOCKED();
 
-	BRect clipped(bounds);
+	BRect clipped = _Translate(bounds);
 	if (!filled)
 		extend_by_stroke_width(clipped, fPainter->PenSize());
 	DrawTransaction transaction(this, fPainter->TransformAndClipRect(clipped));
 	if (!transaction.IsDirty())
 		return;
 
+	BPoint localPts[3];
+	for (int i = 0; i < 3; i++)
+		localPts[i] = _Translate(pts[i]);
+
 	if (filled)
-		fPainter->FillTriangle(pts[0], pts[1], pts[2], gradient);
+		fPainter->FillTriangle(localPts[0], localPts[1], localPts[2], gradient);
 	else
-		fPainter->StrokeTriangle(pts[0], pts[1], pts[2], gradient);
+		fPainter->StrokeTriangle(localPts[0], localPts[1], localPts[2], gradient);
 }
 
 
@@ -1152,14 +1247,16 @@ DrawingEngine::StrokeLine(const BPoint& start, const BPoint& end)
 {
 	ASSERT_PARALLEL_LOCKED();
 
-	BRect touched(start, end);
+	BPoint s = _Translate(start);
+	BPoint e = _Translate(end);
+	BRect touched(s, e);
 	make_rect_valid(touched);
 	extend_by_stroke_width(touched, fPainter->PenSize());
 	DrawTransaction transaction(this, fPainter->TransformAndClipRect(touched));
 	if (!transaction.IsDirty())
 		return;
 
-	fPainter->StrokeLine(start, end);
+	fPainter->StrokeLine(s, e);
 }
 
 
@@ -1168,14 +1265,16 @@ DrawingEngine::StrokeLine(const BPoint& start, const BPoint& end, const BGradien
 {
 	ASSERT_PARALLEL_LOCKED();
 
-	BRect touched(start, end);
+	BPoint s = _Translate(start);
+	BPoint e = _Translate(end);
+	BRect touched(s, e);
 	make_rect_valid(touched);
 	extend_by_stroke_width(touched, fPainter->PenSize());
 	DrawTransaction transaction(this, fPainter->TransformAndClipRect(touched));
 	if (!transaction.IsDirty())
 		return;
 
-	fPainter->StrokeLine(start, end, gradient);
+	fPainter->StrokeLine(s, e, gradient);
 }
 
 
@@ -1188,46 +1287,48 @@ DrawingEngine::StrokeLineArray(int32 numLines,
 	if (!lineData || numLines <= 0)
 		return;
 
-	// figure out bounding box for line array
-	const ViewLineArrayInfo* data = (const ViewLineArrayInfo*)&lineData[0];
-	BRect touched(min_c(data->startPoint.x, data->endPoint.x),
-		min_c(data->startPoint.y, data->endPoint.y),
-		max_c(data->startPoint.x, data->endPoint.x),
-		max_c(data->startPoint.y, data->endPoint.y));
+	ViewLineArrayInfo* localData = new (std::nothrow) ViewLineArrayInfo[numLines];
+	if (localData == NULL)
+		return;
+
+	for (int32 i = 0; i < numLines; i++) {
+		localData[i].color = lineData[i].color;
+		localData[i].startPoint = _Translate(lineData[i].startPoint);
+		localData[i].endPoint = _Translate(lineData[i].endPoint);
+	}
+
+	BRect touched(min_c(localData[0].startPoint.x, localData[0].endPoint.x),
+		min_c(localData[0].startPoint.y, localData[0].endPoint.y),
+		max_c(localData[0].startPoint.x, localData[0].endPoint.x),
+		max_c(localData[0].startPoint.y, localData[0].endPoint.y));
 
 	for (int32 i = 1; i < numLines; i++) {
-		data = (const ViewLineArrayInfo*)&lineData[i];
-		BRect box(min_c(data->startPoint.x, data->endPoint.x),
-			min_c(data->startPoint.y, data->endPoint.y),
-			max_c(data->startPoint.x, data->endPoint.x),
-			max_c(data->startPoint.y, data->endPoint.y));
+		BRect box(min_c(localData[i].startPoint.x, localData[i].endPoint.x),
+			min_c(localData[i].startPoint.y, localData[i].endPoint.y),
+			max_c(localData[i].startPoint.x, localData[i].endPoint.x),
+			max_c(localData[i].startPoint.y, localData[i].endPoint.y));
 		touched = touched | box;
 	}
 	extend_by_stroke_width(touched, fPainter->PenSize());
 	DrawTransaction transaction(this, fPainter->TransformAndClipRect(touched));
-	if (!transaction.IsDirty())
+	if (!transaction.IsDirty()) {
+		delete[] localData;
 		return;
+	}
 
-	data = (const ViewLineArrayInfo*)&(lineData[0]);
-
-	// store current graphics state, we mess with the
-	// high color and pattern...
 	rgb_color oldColor = fPainter->HighColor();
 	struct pattern pattern = fPainter->Pattern();
 
-	fPainter->SetHighColor(data->color);
 	fPainter->SetPattern(B_SOLID_HIGH);
-	fPainter->StrokeLine(data->startPoint, data->endPoint);
 
-	for (int32 i = 1; i < numLines; i++) {
-		data = (const ViewLineArrayInfo*)&(lineData[i]);
-		fPainter->SetHighColor(data->color);
-		fPainter->StrokeLine(data->startPoint, data->endPoint);
+	for (int32 i = 0; i < numLines; i++) {
+		fPainter->SetHighColor(localData[i].color);
+		fPainter->StrokeLine(localData[i].startPoint, localData[i].endPoint);
 	}
 
-	// restore correct drawing state highcolor and pattern
 	fPainter->SetHighColor(oldColor);
 	fPainter->SetPattern(pattern);
+	delete[] localData;
 }
 
 
@@ -1240,7 +1341,8 @@ DrawingEngine::DrawString(const char* string, int32 length,
 {
 	ASSERT_PARALLEL_LOCKED();
 
-	BPoint penLocation = pt;
+	BPoint localPt = _Translate(pt);
+	BPoint penLocation = localPt;
 
 	// try a fast clipping path
 	if (fPainter->ClippingRegion() != NULL
@@ -1248,11 +1350,11 @@ DrawingEngine::DrawString(const char* string, int32 length,
 		&& fPainter->IsIdentityTransform()) {
 		float fontSize = fPainter->Font().Size();
 		BRect clippingFrame = fPainter->ClippingRegion()->Frame();
-		if (pt.x - fontSize > clippingFrame.right
-			|| pt.y + fontSize < clippingFrame.top
-			|| pt.y - fontSize > clippingFrame.bottom) {
+		if (localPt.x - fontSize > clippingFrame.right
+			|| localPt.y + fontSize < clippingFrame.top
+			|| localPt.y - fontSize > clippingFrame.bottom) {
 			penLocation.x += StringWidth(string, length, delta);
-			return penLocation;
+			return penLocation + BPoint(fOriginX, fOriginY);
 		}
 	}
 
@@ -1260,27 +1362,15 @@ DrawingEngine::DrawString(const char* string, int32 length,
 	// drawing the string
 	FontCacheReference cacheReference;
 
-//bigtime_t now = system_time();
-// TODO: BoundingBox is quite slow!! Optimizing it will be beneficial.
-// Cursiously, the DrawString after it is actually faster!?!
-// TODO: make the availability of the hardware cursor part of the
-// HW acceleration flags and skip all calculations for HideFloatingOverlays
-// in case we don't have one.
-// TODO: Watch out about penLocation and use Painter::PenLocation() when
-// not using BoundindBox anymore.
-	BRect b = fPainter->BoundingBox(string, length, pt, &penLocation, delta,
+	BRect b = fPainter->BoundingBox(string, length, localPt, &penLocation, delta,
 		&cacheReference);
 	// stop here if we're supposed to render outside of the clipping
 	DrawTransaction transaction(this, fPainter->ClipRect(b));
 	if (transaction.IsDirty()) {
-//printf("bounding box '%s': %lld µs\n", string, system_time() - now);
-
-//now = system_time();
-		fPainter->DrawString(string, length, pt, delta, &cacheReference);
-//printf("drawing string: %lld µs\n", system_time() - now);
+		fPainter->DrawString(string, length, localPt, delta, &cacheReference);
 	}
 
-	return penLocation;
+	return penLocation + BPoint(fOriginX, fOriginY);
 }
 
 
@@ -1294,20 +1384,29 @@ DrawingEngine::DrawString(const char* string, int32 length,
 	// drawing the string
 	FontCacheReference cacheReference;
 
+	BPoint* localOffsets = NULL;
+	if (offsets != NULL && (fOriginX != 0 || fOriginY != 0)) {
+		localOffsets = new (std::nothrow) BPoint[length];
+		if (localOffsets != NULL) {
+			for (int32 i = 0; i < length; i++)
+				localOffsets[i] = _Translate(offsets[i]);
+		}
+	}
+
+	const BPoint* useOffsets = localOffsets != NULL ? localOffsets : offsets;
+
 	BPoint penLocation;
-	BRect b = fPainter->BoundingBox(string, length, offsets, &penLocation,
+	BRect b = fPainter->BoundingBox(string, length, useOffsets, &penLocation,
 		&cacheReference);
 	// stop here if we're supposed to render outside of the clipping
 	DrawTransaction transaction(this, fPainter->ClipRect(b));
 	if (transaction.IsDirty()) {
-//printf("bounding box '%s': %lld µs\n", string, system_time() - now);
-
-//now = system_time();
-		fPainter->DrawString(string, length, offsets, &cacheReference);
-//printf("drawing string: %lld µs\n", system_time() - now);
+		fPainter->DrawString(string, length, useOffsets, &cacheReference);
 	}
 
-	return penLocation;
+	delete[] localOffsets;
+
+	return penLocation + BPoint(fOriginX, fOriginY);
 }
 
 

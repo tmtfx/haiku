@@ -2634,6 +2634,13 @@ ServerWindow::_DispatchViewDrawingMessage(int32 code,
 
 			fCurrentView->PenToScreenTransform().Apply(&rect);
 			drawingEngine->FillRect(rect);
+			if (fWindow->HasBackingStore() && !fWindow->InUpdate()
+				&& fWindow->Feel() != kMenuWindowFeel) {
+				BRegion dirty(rect);
+				dirty.IntersectWith(&fWindow->VisibleRegion());
+				if (dirty.CountRects() > 0)
+					fDesktop->CompositeDirtyRegion(dirty);
+			}
 			break;
 		}
 		case AS_STROKE_RECT_GRADIENT:
@@ -2710,6 +2717,14 @@ ServerWindow::_DispatchViewDrawingMessage(int32 code,
 
 				drawingEngine->DrawBitmap(bitmap, info.bitmapRect,
 					info.viewRect, info.options);
+
+				if (fWindow->HasBackingStore() && !fWindow->InUpdate()
+					&& fWindow->Feel() != kMenuWindowFeel) {
+					BRegion dirty(info.viewRect);
+					dirty.IntersectWith(&fWindow->VisibleRegion());
+					if (dirty.CountRects() > 0)
+						fDesktop->CompositeDirtyRegion(dirty);
+				}
 			}
 			break;
 		}
@@ -4416,8 +4431,12 @@ ServerWindow::MakeWindow(BRect frame, const char* name,
 {
 	// The non-offscreen ServerWindow uses the DrawingEngine instance from
 	// the desktop.
-	return new(std::nothrow) ::Window(frame, name, look, feel, flags,
+	::Window* window = new(std::nothrow) ::Window(frame, name, look, feel, flags,
 		workspace, this, fDesktop->HWInterface()->CreateDrawingEngine());
+	if (window != NULL && fDesktop->Compositor2DEnabled())
+		window->AllocateBackingStore();
+
+	return window;
 }
 
 

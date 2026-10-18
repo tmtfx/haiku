@@ -169,6 +169,8 @@ Window::Window(const BRect& frame, const char *name,
 
 Window::~Window()
 {
+	FreeBackingStore();
+
 	if (fTopView.IsSet()) {
 		fTopView->DetachedFromWindow();
 	}
@@ -176,6 +178,80 @@ Window::~Window()
 	DetachFromWindowStack(false);
 
 	gDecorManager.CleanupForWindow(this);
+}
+
+
+BRect
+Window::FullFrame() const
+{
+	::Decorator* decorator = Decorator();
+	if (decorator != NULL) {
+		BRect r = decorator->GetFootprint().Frame();
+		if (r.IsValid())
+			return r | fFrame;
+	}
+	return fFrame;
+}
+
+
+void
+Window::AllocateBackingStore()
+{
+	FreeBackingStore();
+
+	if (IsOffscreenWindow() || (fFlags & kWindowScreenFlag) != 0 || fDesktop == NULL)
+		return;
+
+	BRect full = FullFrame();
+	int32 width = (int32)ceilf(full.Width()) + 1;
+	int32 height = (int32)ceilf(full.Height()) + 1;
+	if (width <= 0 || height <= 0)
+		return;
+
+	fBackingBitmap.SetTo(new (std::nothrow) UtilityBitmap(
+		BRect(0, 0, width - 1, height - 1), B_RGBA32, 0), true);
+	if (!fBackingBitmap.IsSet() || fBackingBitmap->Bits() == NULL) {
+		fBackingBitmap.Unset();
+		return;
+	}
+
+	memset(fBackingBitmap->Bits(), 0, fBackingBitmap->BitsLength());
+
+	fBackingHWInterface.SetTo(new (std::nothrow) BitmapHWInterface(fBackingBitmap.Get()));
+	if (!fBackingHWInterface.IsSet() || fBackingHWInterface->Initialize() != B_OK) {
+		FreeBackingStore();
+		return;
+	}
+
+	if (GetDrawingEngine() != NULL) {
+		GetDrawingEngine()->SetHWInterface(fBackingHWInterface.Get());
+		GetDrawingEngine()->SetWindowOrigin((int32)full.left, (int32)full.top);
+	}
+
+	fDirtyRegion.Include(FullFrame());
+	ServerWindow()->RequestRedraw();
+}
+
+
+void
+Window::FreeBackingStore()
+{
+	if (!fBackingBitmap.IsSet())
+		return;
+
+	if (GetDrawingEngine() != NULL && fDesktop != NULL) {
+		GetDrawingEngine()->SetHWInterface(fDesktop->HWInterface());
+		GetDrawingEngine()->SetWindowOrigin(0, 0);
+	}
+
+	if (fBackingHWInterface.IsSet()) {
+		fBackingHWInterface->LockExclusiveAccess();
+		fBackingHWInterface->Shutdown();
+		fBackingHWInterface->UnlockExclusiveAccess();
+		fBackingHWInterface.Unset();
+	}
+
+	fBackingBitmap.Unset();
 }
 
 
@@ -322,6 +398,11 @@ Window::MoveBy(int32 x, int32 y, bool moveStack)
 
 	// the desktop will take care of dirty regions
 
+	if (HasBackingStore() && GetDrawingEngine() != NULL) {
+		BRect full = FullFrame();
+		GetDrawingEngine()->SetWindowOrigin((int32)full.left, (int32)full.top);
+	}
+
 	// dispatch a message to the client informing about the changed size
 	BMessage msg(B_WINDOW_MOVED);
 	msg.AddInt64("when", system_time());
@@ -385,6 +466,9 @@ Window::ResizeBy(int32 x, int32 y, BRegion* dirtyRegion, bool resizeStack)
 			window->ResizeBy(x, y, dirtyRegion, false);
 		}
 	}
+
+	if (HasBackingStore())
+		AllocateBackingStore();
 
 	// send a message to the client informing about the changed size
 	BRect frame(Frame());
@@ -517,6 +601,9 @@ Window::CopyContents(BRegion* region, int32 xOffset, int32 yOffset)
 					// ... and even exclude them from the pending dirty region!
 					if (fPendingUpdateSession->IsUsed())
 						fPendingUpdateSession->DirtyRegion().Exclude(copyRegion);
+
+					if (HasBackingStore() && fDesktop != NULL)
+						fDesktop->CompositeDirtyRegion(*copyRegion);
 				}
 
 				fRegionPool.Recycle(copyRegion);
@@ -698,20 +785,29 @@ void
 Window::GetEffectiveDrawingRegion(View* view, BRegion& region)
 {
 	if (!fEffectiveDrawingRegionValid) {
-		fEffectiveDrawingRegion = VisibleContentRegion();
-		if (fUpdateRequested && !fInUpdate) {
-			// We requested an update, but the client has not started it yet,
-			// so it is only allowed to draw outside the pending update sessions
-			// region
-			fEffectiveDrawingRegion.Exclude(
-				&fPendingUpdateSession->DirtyRegion());
-		} else if (fInUpdate) {
-			// enforce the dirty region of the update session
-			fEffectiveDrawingRegion.IntersectWith(
-				&fCurrentUpdateSession->DirtyRegion());
+		if (HasBackingStore()) {
+			GetContentRegion(&fEffectiveDrawingRegion);
+			if (fInUpdate) {
+				// enforce the dirty region of the update session
+				fEffectiveDrawingRegion.IntersectWith(
+					&fCurrentUpdateSession->DirtyRegion());
+			}
 		} else {
-			// not in update, the view can draw everywhere
-//printf("Window(%s)::GetEffectiveDrawingRegion(for %s) - outside update\n", Title(), view->Name());
+			fEffectiveDrawingRegion = VisibleContentRegion();
+			if (fUpdateRequested && !fInUpdate) {
+				// We requested an update, but the client has not started it yet,
+				// so it is only allowed to draw outside the pending update sessions
+				// region
+				fEffectiveDrawingRegion.Exclude(
+					&fPendingUpdateSession->DirtyRegion());
+			} else if (fInUpdate) {
+				// enforce the dirty region of the update session
+				fEffectiveDrawingRegion.IntersectWith(
+					&fCurrentUpdateSession->DirtyRegion());
+			} else {
+				// not in update, the view can draw everywhere
+	//printf("Window(%s)::GetEffectiveDrawingRegion(for %s) - outside update\n", Title(), view->Name());
+			}
 		}
 
 		fEffectiveDrawingRegionValid = true;
@@ -779,15 +875,27 @@ Window::RedrawDirtyRegion()
 	if (IsVisible()) {
 		_DrawBorder();
 
-		BRegion* dirtyContentRegion = fRegionPool.GetRegion(VisibleContentRegion());
-		BRegion* exposeContentRegion = fRegionPool.GetRegion(VisibleContentRegion());
-		dirtyContentRegion->IntersectWith(&fDirtyRegion);
-		exposeContentRegion->IntersectWith(&fExposeRegion);
+		BRegion* dirtyContentRegion = NULL;
+		BRegion* exposeContentRegion = NULL;
+		if (HasBackingStore()) {
+			BRegion content;
+			GetContentRegion(&content);
+			dirtyContentRegion = fRegionPool.GetRegion(content);
+			exposeContentRegion = fRegionPool.GetRegion(content);
+		} else {
+			dirtyContentRegion = fRegionPool.GetRegion(VisibleContentRegion());
+			exposeContentRegion = fRegionPool.GetRegion(VisibleContentRegion());
+		}
 
-		_TriggerContentRedraw(*dirtyContentRegion, *exposeContentRegion);
+		if (dirtyContentRegion && exposeContentRegion) {
+			dirtyContentRegion->IntersectWith(&fDirtyRegion);
+			exposeContentRegion->IntersectWith(&fExposeRegion);
 
-		fRegionPool.Recycle(dirtyContentRegion);
-		fRegionPool.Recycle(exposeContentRegion);
+			_TriggerContentRedraw(*dirtyContentRegion, *exposeContentRegion);
+
+			fRegionPool.Recycle(dirtyContentRegion);
+			fRegionPool.Recycle(exposeContentRegion);
+		}
 	}
 
 	// reset the dirty region, since
@@ -824,8 +932,13 @@ Window::MarkContentDirty(BRegion& dirtyRegion, BRegion& exposeRegion)
 	if (fHidden || IsOffscreenWindow())
 		return;
 
-	dirtyRegion.IntersectWith(&VisibleContentRegion());
-	exposeRegion.IntersectWith(&VisibleContentRegion());
+	if (HasBackingStore()) {
+		dirtyRegion.IntersectWith(&fContentRegion);
+		exposeRegion.IntersectWith(&fContentRegion);
+	} else {
+		dirtyRegion.IntersectWith(&VisibleContentRegion());
+		exposeRegion.IntersectWith(&VisibleContentRegion());
+	}
 	_TriggerContentRedraw(dirtyRegion, exposeRegion);
 }
 
@@ -837,7 +950,10 @@ Window::MarkContentDirtyAsync(BRegion& dirtyRegion)
 	if (fHidden || IsOffscreenWindow())
 		return;
 
-	dirtyRegion.IntersectWith(&VisibleContentRegion());
+	if (HasBackingStore())
+		dirtyRegion.IntersectWith(&fContentRegion);
+	else
+		dirtyRegion.IntersectWith(&VisibleContentRegion());
 
 	if (fDirtyRegion.CountRects() == 0) {
 		ServerWindow()->RequestRedraw();
@@ -855,7 +971,10 @@ Window::InvalidateView(View* view, BRegion& viewRegion)
 			_UpdateContentRegion();
 
 		view->LocalToScreenTransform().Apply(&viewRegion);
-		viewRegion.IntersectWith(&VisibleContentRegion());
+		if (HasBackingStore())
+			viewRegion.IntersectWith(&fContentRegion);
+		else
+			viewRegion.IntersectWith(&VisibleContentRegion());
 		if (viewRegion.CountRects() > 0) {
 			viewRegion.IntersectWith(
 				&view->ScreenAndUserClipping(&fContentRegion));
@@ -1084,19 +1203,23 @@ Window::SetFocus(bool focus)
 	// so the window thread cannot be
 	// accessing fIsFocus
 
+	fIsFocus = focus;
+	if (decorator) {
+		int32 index = PositionInStack();
+		decorator->SetFocus(index, focus);
+	}
+
 	BRegion* dirty = NULL;
 	if (decorator)
 		dirty = fRegionPool.GetRegion(decorator->GetFootprint());
 	if (dirty) {
 		dirty->IntersectWith(&fVisibleRegion);
-		fDesktop->MarkDirty(*dirty);
+		if (HasBackingStore()) {
+			_DrawBorder();
+		} else {
+			fDesktop->MarkDirty(*dirty);
+		}
 		fRegionPool.Recycle(dirty);
-	}
-
-	fIsFocus = focus;
-	if (decorator) {
-		int32 index = PositionInStack();
-		decorator->SetFocus(index, focus);
 	}
 
 	Activated(focus);
@@ -1805,10 +1928,12 @@ Window::_DrawBorder()
 	if (!dirtyBorderRegion)
 		return;
 	GetBorderRegion(dirtyBorderRegion);
-	// intersect with our visible region
-	dirtyBorderRegion->IntersectWith(&fVisibleRegion);
-	// intersect with the dirty region
-	dirtyBorderRegion->IntersectWith(&fDirtyRegion);
+	if (!HasBackingStore()) {
+		// intersect with our visible region
+		dirtyBorderRegion->IntersectWith(&fVisibleRegion);
+		// intersect with the dirty region
+		dirtyBorderRegion->IntersectWith(&fDirtyRegion);
+	}
 
 	DrawingEngine* engine = decorator->GetDrawingEngine();
 	if (dirtyBorderRegion->CountRects() > 0 && engine->LockParallelAccess()) {
@@ -1820,6 +1945,8 @@ Window::_DrawBorder()
 
 		engine->SetCopyToFrontEnabled(copyToFrontEnabled);
 		engine->CopyToFront(*dirtyBorderRegion);
+		if (HasBackingStore() && fDesktop != NULL)
+			fDesktop->CompositeDirtyRegion(*dirtyBorderRegion);
 
 // TODO: remove this once the DrawState stuff is handled
 // more cleanly. The reason why this is needed is that
@@ -1928,7 +2055,10 @@ Window::BeginUpdate(BPrivate::PortLink& link)
 		return;
 	}
 
-	dirty->IntersectWith(&VisibleContentRegion());
+	if (HasBackingStore())
+		dirty->IntersectWith(&fContentRegion);
+	else
+		dirty->IntersectWith(&VisibleContentRegion());
 
 //if (!fCurrentUpdateSession->IsExpose()) {
 ////sCurrentColor.red = rand() % 255;
@@ -1980,9 +2110,15 @@ Window::EndUpdate()
 			fCurrentUpdateSession->DirtyRegion());
 
 		if (dirty) {
-			dirty->IntersectWith(&VisibleContentRegion());
+			if (HasBackingStore())
+				dirty->IntersectWith(&fContentRegion);
+			else
+				dirty->IntersectWith(&VisibleContentRegion());
 
 			fDrawingEngine->CopyToFront(*dirty);
+			if (HasBackingStore() && fDesktop != NULL)
+				fDesktop->CompositeDirtyRegion(*dirty);
+
 			fRegionPool.Recycle(dirty);
 		}
 

@@ -1,6 +1,6 @@
 SubDir HAIKU_TOP src apps installer ;
 
-UsePrivateHeaders interface shared storage tracker ;
+UsePrivateHeaders app interface shared storage tracker ;
 UsePrivateSystemHeaders ;
 UsePublicHeaders crypto support ;
 

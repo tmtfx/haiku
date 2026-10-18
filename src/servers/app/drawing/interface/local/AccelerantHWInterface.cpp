@@ -95,6 +95,89 @@ use_fail_safe_video_mode()
 }
 
 
+// Visual 2D acceleration debug indicator (3x3 pixels at bottom-right of screen):
+// When true:
+// - Idle / AGG only: Dark gray (35, 35, 35)
+// - Hardware Screen-to-Screen Blit: Red (255, 0, 0)
+// - Hardware Fill Rectangle: Green (0, 255, 0)
+static bool sVisual2DDebug = true;
+
+
+static void
+_Fill3x3(RenderingBuffer* buffer, uint8 r, uint8 g, uint8 b)
+{
+	if (buffer == NULL || buffer->Bits() == NULL)
+		return;
+
+	int32 width = buffer->Width();
+	int32 height = buffer->Height();
+	if (width < 3 || height < 3)
+		return;
+
+	uint8* base = (uint8*)buffer->Bits();
+	uint32 bpr = buffer->BytesPerRow();
+	color_space cs = buffer->ColorSpace();
+
+	int32 startX = width - 3;
+	int32 startY = height - 3;
+
+	for (int32 y = startY; y < height; y++) {
+		uint8* row = base + y * bpr;
+		for (int32 x = startX; x < width; x++) {
+			switch (cs) {
+				case B_RGB32:
+				case B_RGBA32:
+				case B_RGB32_BIG:
+				case B_RGBA32_BIG:
+				{
+					uint32* pixel = (uint32*)(row + x * 4);
+					*pixel = (uint32)((255 << 24) | (r << 16) | (g << 8) | b);
+					break;
+				}
+				case B_RGB16:
+				case B_RGB16_BIG:
+				{
+					uint16* pixel = (uint16*)(row + x * 2);
+					*pixel = (uint16)(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
+					break;
+				}
+				case B_RGB15:
+				case B_RGBA15:
+				case B_RGB15_BIG:
+				case B_RGBA15_BIG:
+				{
+					uint16* pixel = (uint16*)(row + x * 2);
+					*pixel = (uint16)(((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3));
+					break;
+				}
+				case B_CMAP8:
+				case B_GRAY8:
+				{
+					uint8* pixel = row + x;
+					*pixel = (r > 128 || g > 128) ? 0xFF : 0x00;
+					break;
+				}
+				default:
+					break;
+			}
+		}
+	}
+}
+
+
+static void
+_Set2DDebugIndicator(AccelerantHWInterface* hw, uint8 r, uint8 g, uint8 b,
+	bool updateBackBuffer = false)
+{
+	if (!sVisual2DDebug || hw == NULL)
+		return;
+
+	_Fill3x3(hw->FrontBuffer(), r, g, b);
+	if (updateBackBuffer)
+		_Fill3x3(hw->BackBuffer(), r, g, b);
+}
+
+
 //	#pragma mark - AccelerantHWInterface
 
 
@@ -116,8 +199,13 @@ AccelerantHWInterface::AccelerantHWInterface()
 	fAccGetPixelClockLimits(NULL),
 
 	// optional accelerant hooks
+	fAccAcquireEngine(NULL),
+	fAccReleaseEngine(NULL),
+	fAccSyncToToken(NULL),
 	fAccGetTimingConstraints(NULL),
 	fAccProposeDisplayMode(NULL),
+	fAccScreenBlit(NULL),
+	fAccFillRect(NULL),
 	fAccSetCursorShape(NULL),
 	fAccSetCursorBitmap(NULL),
 	fAccGetCursorBits(NULL),
@@ -153,14 +241,15 @@ AccelerantHWInterface::AccelerantHWInterface()
 
 	fInitialModeSwitch(true),
 
-	fRetraceSemaphore(-1),
+	fRetraceSemaphore(B_UNSUPPORTED),
 
 	fRectParams(new (nothrow) fill_rect_params[kDefaultParamsCount]),
 	fRectParamsCount(kDefaultParamsCount),
 	fBlitParams(new (nothrow) blit_params[kDefaultParamsCount]),
 	fBlitParamsCount(kDefaultParamsCount),
 
-	fUserEnableHardwareCursor(true)
+	fUserEnableHardwareCursor(true),
+	fUserEnable2DAcceleration(false)
 {
 	fDisplayMode.virtual_width = 0;
 	fDisplayMode.virtual_height = 0;
@@ -186,6 +275,14 @@ bool
 AccelerantHWInterface::HasSetCursorBitmap() const
 {
 	return fAccSetCursorBitmap != NULL;
+}
+
+
+bool
+AccelerantHWInterface::Has2DAcceleration() const
+{
+	return fAccAcquireEngine != NULL
+		&& (fAccScreenBlit != NULL || fAccFillRect != NULL);
 }
 
 
@@ -229,6 +326,9 @@ AccelerantHWInterface::Initialize()
 					bool hw = true;
 					if (file.Read(&hw, sizeof(bool)) == (ssize_t)sizeof(bool))
 						fUserEnableHardwareCursor = hw;
+					bool acc = false;
+					if (file.Read(&acc, sizeof(bool)) == (ssize_t)sizeof(bool))
+						fUserEnable2DAcceleration = acc;
 				}
 			}
 		}
@@ -411,6 +511,10 @@ AccelerantHWInterface::_SetupDefaultHooks()
 	}
 
 	// optional
+	fAccAcquireEngine = (acquire_engine)fAccelerantHook(B_ACQUIRE_ENGINE, NULL);
+	fAccReleaseEngine = (release_engine)fAccelerantHook(B_RELEASE_ENGINE, NULL);
+	fAccSyncToToken = (sync_to_token)fAccelerantHook(B_SYNC_TO_TOKEN, NULL);
+
 	fAccGetTimingConstraints = (get_timing_constraints)fAccelerantHook(
 		B_GET_TIMING_CONSTRAINTS, NULL);
 	fAccProposeDisplayMode = (propose_display_mode)fAccelerantHook(
@@ -450,6 +554,24 @@ AccelerantHWInterface::_SetupDefaultHooks()
 void
 AccelerantHWInterface::_UpdateHooksAfterModeChange()
 {
+	// 2D acceleration hooks
+	fAccScreenBlit = (screen_to_screen_blit)fAccelerantHook(
+		B_SCREEN_TO_SCREEN_BLIT, (void*)&fDisplayMode);
+	fAccFillRect = (fill_rectangle)fAccelerantHook(
+		B_FILL_RECTANGLE, (void*)&fDisplayMode);
+
+	// pre-query retrace semaphore while under mode-switch write lock
+	accelerant_retrace_semaphore AccelerantRetraceSemaphore =
+		(accelerant_retrace_semaphore)fAccelerantHook(
+			B_ACCELERANT_RETRACE_SEMAPHORE, NULL);
+	if (AccelerantRetraceSemaphore != NULL) {
+		fRetraceSemaphore = AccelerantRetraceSemaphore();
+		if (fRetraceSemaphore < 0)
+			fRetraceSemaphore = B_UNSUPPORTED;
+	} else {
+		fRetraceSemaphore = B_UNSUPPORTED;
+	}
+
 	// overlay
 	fAccOverlayCount = (overlay_count)fAccelerantHook(B_OVERLAY_COUNT, NULL);
 	fAccOverlaySupportedSpaces = (overlay_supported_spaces)fAccelerantHook(
@@ -468,12 +590,23 @@ AccelerantHWInterface::_UpdateHooksAfterModeChange()
 		= (release_overlay)fAccelerantHook(B_RELEASE_OVERLAY, NULL);
 	fAccConfigureOverlay
 		= (configure_overlay)fAccelerantHook(B_CONFIGURE_OVERLAY, NULL);
+
+	// initialize visual 2D debug indicator to idle dark gray
+	if (sVisual2DDebug)
+		_Set2DDebugIndicator(this, 35, 35, 35, true);
 }
 
 
 status_t
 AccelerantHWInterface::Shutdown()
 {
+	fAccAcquireEngine = NULL;
+	fAccReleaseEngine = NULL;
+	fAccSyncToToken = NULL;
+	fAccScreenBlit = NULL;
+	fAccFillRect = NULL;
+	fRetraceSemaphore = B_UNSUPPORTED;
+
 	if (fAccelerantHook != NULL) {
 		uninit_accelerant uninitAccelerant
 			= (uninit_accelerant)fAccelerantHook(B_UNINIT_ACCELERANT, NULL);
@@ -1016,19 +1149,6 @@ AccelerantHWInterface::GetMonitorInfo(monitor_info* info)
 sem_id
 AccelerantHWInterface::RetraceSemaphore()
 {
-	AutoWriteLocker _(this);
-
-	if (fRetraceSemaphore != -1)
-		return fRetraceSemaphore;
-
-	accelerant_retrace_semaphore AccelerantRetraceSemaphore =
-		(accelerant_retrace_semaphore)fAccelerantHook(
-			B_ACCELERANT_RETRACE_SEMAPHORE, NULL);
-	if (!AccelerantRetraceSemaphore)
-		fRetraceSemaphore = B_UNSUPPORTED;
-	else
-		fRetraceSemaphore = AccelerantRetraceSemaphore();
-
 	return fRetraceSemaphore;
 }
 
@@ -1036,11 +1156,10 @@ AccelerantHWInterface::RetraceSemaphore()
 status_t
 AccelerantHWInterface::WaitForRetrace(bigtime_t timeout)
 {
-	sem_id sem = RetraceSemaphore();
-	if (sem < 0)
-		return sem;
+	if (fRetraceSemaphore < 0)
+		return fRetraceSemaphore;
 
-	return acquire_sem_etc(sem, 1, B_RELATIVE_TIMEOUT, timeout);
+	return acquire_sem_etc(fRetraceSemaphore, 1, B_RELATIVE_TIMEOUT, timeout);
 }
 
 
@@ -1132,6 +1251,206 @@ AccelerantHWInterface::GetDriverPath(BString& string)
 	getCloneInfo((void*)path);
 	string.SetTo(path);
 	return B_OK;
+}
+
+
+// #pragma mark - acceleration
+
+
+uint32
+AccelerantHWInterface::AvailableHWAcceleration() const
+{
+	if (!fUserEnable2DAcceleration)
+		return 0;
+
+	uint32 flags = 0;
+
+	if (fAccAcquireEngine != NULL) {
+		if (fAccScreenBlit != NULL)
+			flags |= HW_ACC_COPY_REGION;
+		if (fAccFillRect != NULL)
+			flags |= HW_ACC_FILL_REGION;
+	}
+
+	return flags;
+}
+
+
+void
+AccelerantHWInterface::CopyRegion(const clipping_rect* sortedRectList,
+	uint32 count, int32 xOffset, int32 yOffset)
+{
+	_CopyRegion(sortedRectList, count, xOffset, yOffset);
+}
+
+
+bigtime_t
+AccelerantHWInterface::_RetraceTimeout() const
+{
+	if (fDisplayMode.timing.pixel_clock > 0
+		&& fDisplayMode.timing.h_total > 0
+		&& fDisplayMode.timing.v_total > 0) {
+		uint64 period = ((uint64)fDisplayMode.timing.h_total
+			* fDisplayMode.timing.v_total * 1000)
+			/ fDisplayMode.timing.pixel_clock;
+		// 1.5x frame period to ensure catching the next VBLANK interval
+		return (bigtime_t)(period + period / 2);
+	}
+
+	return 25000;
+}
+
+
+void
+AccelerantHWInterface::_CopyRegion(const clipping_rect* sortedRectList,
+	uint32 count, int32 xOffset, int32 yOffset)
+{
+	if (fAccScreenBlit == NULL || fAccAcquireEngine == NULL || count == 0)
+		return;
+
+	RenderingBuffer* frontBuffer = FrontBuffer();
+	if (frontBuffer == NULL)
+		return;
+
+	int32 maxWidth = frontBuffer->Width();
+	int32 maxHeight = frontBuffer->Height();
+
+	if (!fHardwareCursorEnabled)
+		_RestoreCursorArea();
+
+	if (fAccAcquireEngine(B_2D_ACCELERATION, 0xff, &fSyncToken,
+			&fEngineToken) >= B_OK) {
+		if (fBlitParamsCount < count) {
+			fBlitParamsCount = (count / kDefaultParamsCount + 1)
+				* kDefaultParamsCount;
+			blit_params* params = new (nothrow) blit_params[fBlitParamsCount];
+			if (params != NULL) {
+				delete[] fBlitParams;
+				fBlitParams = params;
+			} else {
+				count = fBlitParamsCount;
+			}
+		}
+
+		uint32 validCount = 0;
+		for (uint32 i = 0; i < count; i++) {
+			clipping_rect src = sortedRectList[i];
+			clipping_rect dst;
+			dst.left = src.left + xOffset;
+			dst.top = src.top + yOffset;
+			dst.right = src.right + xOffset;
+			dst.bottom = src.bottom + yOffset;
+
+			// Clip src and dst to screen bounds
+			if (src.left < 0) {
+				dst.left -= src.left;
+				src.left = 0;
+			}
+			if (src.top < 0) {
+				dst.top -= src.top;
+				src.top = 0;
+			}
+			if (src.right >= maxWidth) {
+				dst.right -= (src.right - maxWidth + 1);
+				src.right = maxWidth - 1;
+			}
+			if (src.bottom >= maxHeight) {
+				dst.bottom -= (src.bottom - maxHeight + 1);
+				src.bottom = maxHeight - 1;
+			}
+
+			if (dst.left < 0) {
+				src.left -= dst.left;
+				dst.left = 0;
+			}
+			if (dst.top < 0) {
+				src.top -= dst.top;
+				dst.top = 0;
+			}
+			if (dst.right >= maxWidth) {
+				src.right -= (dst.right - maxWidth + 1);
+				dst.right = maxWidth - 1;
+			}
+			if (dst.bottom >= maxHeight) {
+				dst.bottom -= (dst.bottom - maxHeight + 1);
+				dst.bottom = maxHeight - 1;
+			}
+
+			if (src.left <= src.right && src.top <= src.bottom
+				&& dst.left <= dst.right && dst.top <= dst.bottom) {
+				fBlitParams[validCount].src_left = (uint16)src.left;
+				fBlitParams[validCount].src_top = (uint16)src.top;
+				fBlitParams[validCount].dest_left = (uint16)dst.left;
+				fBlitParams[validCount].dest_top = (uint16)dst.top;
+				fBlitParams[validCount].width = (uint16)(src.right - src.left);
+				fBlitParams[validCount].height = (uint16)(src.bottom - src.top);
+				validCount++;
+			}
+		}
+
+		if (validCount > 0) {
+			if (sVisual2DDebug)
+				_Set2DDebugIndicator(this, 255, 0, 0);
+
+			fAccScreenBlit(fEngineToken, fBlitParams, validCount);
+		}
+
+		if (fAccReleaseEngine != NULL)
+			fAccReleaseEngine(fEngineToken, &fSyncToken);
+
+		if (sVisual2DDebug) {
+			if (fAccSyncToToken != NULL)
+				fAccSyncToToken(&fSyncToken);
+			_Set2DDebugIndicator(this, 35, 35, 35);
+		}
+	}
+
+	if (!fHardwareCursorEnabled)
+		_DrawCursor(_CursorFrame());
+}
+
+
+void
+AccelerantHWInterface::FillRegion(const BRegion& region, const rgb_color& color)
+{
+	if (fAccFillRect == NULL || fAccAcquireEngine == NULL || region.CountRects() == 0)
+		return;
+
+	if (!fHardwareCursorEnabled)
+		_RestoreCursorArea();
+
+	if (fAccAcquireEngine(B_2D_ACCELERATION, 0xff, &fSyncToken,
+			&fEngineToken) >= B_OK) {
+		uint32 count = 0;
+		_RegionToRectParams(&const_cast<BRegion&>(region), &count);
+
+		if (count > 0) {
+			if (sVisual2DDebug)
+				_Set2DDebugIndicator(this, 0, 255, 0);
+
+			fAccFillRect(fEngineToken, _NativeColor(color), fRectParams, count);
+		}
+
+		if (fAccReleaseEngine != NULL)
+			fAccReleaseEngine(fEngineToken, &fSyncToken);
+
+		if (sVisual2DDebug) {
+			if (fAccSyncToToken != NULL)
+				fAccSyncToToken(&fSyncToken);
+			_Set2DDebugIndicator(this, 35, 35, 35);
+		}
+	}
+
+	if (!fHardwareCursorEnabled)
+		_DrawCursor(_CursorFrame());
+}
+
+
+void
+AccelerantHWInterface::Sync()
+{
+	if (fAccSyncToToken != NULL)
+		fAccSyncToToken(&fSyncToken);
 }
 
 
@@ -1391,6 +1710,14 @@ void AccelerantHWInterface::SetUserHardwareCursor(bool enable)
 	fUserEnableHardwareCursor = enable; 
 }
 
+void AccelerantHWInterface::SetUser2DAcceleration(bool enable)
+{
+	if (fUserEnable2DAcceleration != enable) {
+		fUserEnable2DAcceleration = enable;
+		_NotifyFrameBufferChanged();
+	}
+}
+
 void
 AccelerantHWInterface::SetDragBitmap(const ServerBitmap* bitmap,
 	const BPoint& offsetFromCursor)
@@ -1478,7 +1805,10 @@ AccelerantHWInterface::IsDoubleBuffered() const
 void
 AccelerantHWInterface::_CopyBackToFront(/*const*/ BRegion& region)
 {
-	return HWInterface::_CopyBackToFront(region);
+	Sync();
+	HWInterface::_CopyBackToFront(region);
+	if (sVisual2DDebug)
+		_Set2DDebugIndicator(this, 35, 35, 35);
 }
 
 
@@ -1488,8 +1818,10 @@ AccelerantHWInterface::_CopyBackToFront(/*const*/ BRegion& region)
 void
 AccelerantHWInterface::_DrawCursor(IntRect area) const
 {
-	if (!fHardwareCursorEnabled)
+	if (!fHardwareCursorEnabled) {
+		const_cast<AccelerantHWInterface*>(this)->Sync();
 		HWInterface::_DrawCursor(area);
+	}
 }
 
 

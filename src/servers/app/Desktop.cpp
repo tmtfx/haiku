@@ -29,6 +29,7 @@
 #include <debugger.h>
 #include <DirectWindow.h>
 #include <Entry.h>
+#include <File.h>
 #include <FindDirectory.h>
 #include <Message.h>
 #include <MessageFilter.h>
@@ -50,6 +51,7 @@
 #include "DrawingEngine.h"
 #include "GlobalFontManager.h"
 #include "HWInterface.h"
+#include "RenderingBuffer.h"
 #include "InputManager.h"
 #include "Screen.h"
 #include "ScreenManager.h"
@@ -445,7 +447,9 @@ Desktop::Desktop(uid_t userID, const char* targetScreen)
 
 	fFocus(NULL),
 	fFront(NULL),
-	fBack(NULL)
+	fBack(NULL),
+
+	fCompositor2DEnabled(false)
 {
 	memset(fLastWorkspaceFocus, 0, sizeof(fLastWorkspaceFocus));
 
@@ -538,6 +542,34 @@ Desktop::Init()
 				hasInfo ? &info : NULL);
 		if (stored != NULL && stored->brightness > 0)
 			HWInterface()->SetBrightness(stored->brightness);
+	}
+
+	// Restore 2D compositor preference
+	{
+		BPath path;
+		if (find_directory(B_USER_SETTINGS_DIRECTORY, &path) == B_OK) {
+			path.Append("Screen_data");
+			BFile file(path.Path(), B_READ_ONLY);
+			if (file.InitCheck() == B_OK) {
+				BPoint offset;
+				file.Read(&offset, sizeof(BPoint));
+				bool hw = true;
+				file.Read(&hw, sizeof(bool));
+				bool acc = false;
+				file.Read(&acc, sizeof(bool));
+				bool comp = false;
+				if (file.Read(&comp, sizeof(bool)) == (ssize_t)sizeof(bool) && comp) {
+					system_info sysInfo;
+					if (get_system_info(&sysInfo) == B_OK) {
+						uint64 totalRAM = (uint64)sysInfo.max_pages * B_PAGE_SIZE;
+						if (totalRAM >= 3800ULL * 1024 * 1024
+							&& HWInterface()->Has2DAcceleration()) {
+							fCompositor2DEnabled = true;
+						}
+					}
+				}
+			}
+		}
 	}
 
 	// now that the mode is set, see if we should increase the default font size
@@ -1568,7 +1600,11 @@ Desktop::MoveWindowBy(Window* window, float x, float y, int32 workspace)
 	copyRegion.OffsetBy((int32)x, (int32)y);
 	newDirtyRegion.Exclude(&copyRegion);
 
-	MarkDirty(newDirtyRegion);
+	if (fCompositor2DEnabled) {
+		CompositeDirtyRegion(newDirtyRegion);
+	} else {
+		MarkDirty(newDirtyRegion);
+	}
 	_SetBackground(background);
 	_WindowChanged(window);
 
@@ -2222,14 +2258,480 @@ Desktop::FindTarget(BMessenger& messenger)
 
 
 void
+Desktop::SetCompositor2DEnabled(bool enable)
+{
+	if (fCompositor2DEnabled == enable)
+		return;
+
+	if (!LockAllWindows())
+		return;
+
+	fCompositor2DEnabled = enable;
+
+	for (Window* window = fAllWindows.FirstWindow(); window != NULL;
+			window = window->NextWindow(kAllWindowList)) {
+		if (enable)
+			window->AllocateBackingStore();
+		else
+			window->FreeBackingStore();
+	}
+
+	UnlockAllWindows();
+
+	BRegion dirty(fVirtualScreen.Frame());
+	MarkDirty(dirty);
+}
+
+
+static inline void
+BlendSpanRGB30(uint32* dst, const uint32* src, int32 count)
+{
+	for (int32 i = 0; i < count; i++) {
+		uint32 s = src[i];
+		uint32 alpha = (s >> 24) & 0xff;
+		if (alpha == 255) {
+			uint32 b = s & 0xff;
+			uint32 g = (s >> 8) & 0xff;
+			uint32 r = (s >> 16) & 0xff;
+			dst[i] = ((r * 1023 / 255))
+				| (((g * 1023 / 255)) << 10)
+				| (((b * 1023 / 255)) << 20);
+		} else if (alpha > 0) {
+			uint32 d = dst[i];
+			uint32 d_r = (d & 0x3ff) * 255 / 1023;
+			uint32 d_g = ((d >> 10) & 0x3ff) * 255 / 1023;
+			uint32 d_b = ((d >> 20) & 0x3ff) * 255 / 1023;
+
+			uint32 s_b = s & 0xff;
+			uint32 s_g = (s >> 8) & 0xff;
+			uint32 s_r = (s >> 16) & 0xff;
+
+			uint32 invAlpha = 255 - alpha;
+			uint32 r = (s_r * alpha + d_r * invAlpha + 127) / 255;
+			uint32 g = (s_g * alpha + d_g * invAlpha + 127) / 255;
+			uint32 b = (s_b * alpha + d_b * invAlpha + 127) / 255;
+
+			dst[i] = ((r * 1023 / 255))
+				| (((g * 1023 / 255)) << 10)
+				| (((b * 1023 / 255)) << 20);
+		}
+	}
+}
+
+
+static inline void
+BlendSpanRGB24(uint8* dst, const uint32* src, int32 count)
+{
+	for (int32 i = 0; i < count; i++) {
+		uint32 s = src[i];
+		uint32 alpha = (s >> 24) & 0xff;
+		uint8* d = dst + (i * 3);
+		if (alpha == 255) {
+			d[0] = (uint8)(s & 0xff);
+			d[1] = (uint8)((s >> 8) & 0xff);
+			d[2] = (uint8)((s >> 16) & 0xff);
+		} else if (alpha > 0) {
+			uint32 invAlpha = 255 - alpha;
+			uint32 s_b = s & 0xff;
+			uint32 s_g = (s >> 8) & 0xff;
+			uint32 s_r = (s >> 16) & 0xff;
+
+			d[0] = (uint8)((s_b * alpha + (uint32)d[0] * invAlpha + 127) / 255);
+			d[1] = (uint8)((s_g * alpha + (uint32)d[1] * invAlpha + 127) / 255);
+			d[2] = (uint8)((s_r * alpha + (uint32)d[2] * invAlpha + 127) / 255);
+		}
+	}
+}
+
+
+static inline void
+BlendSpanCMAP8(uint8* dst, const uint32* src, int32 count)
+{
+	const color_map* colorMap = SystemColorMap();
+	const rgb_color* palette = SystemPalette();
+	if (colorMap == NULL || palette == NULL)
+		return;
+
+	for (int32 i = 0; i < count; i++) {
+		uint32 s = src[i];
+		uint32 alpha = (s >> 24) & 0xff;
+		if (alpha == 255) {
+			uint8 b = s & 0xff;
+			uint8 g = (s >> 8) & 0xff;
+			uint8 r = (s >> 16) & 0xff;
+			uint16 index = ((r & 0xf8) << 7) | ((g & 0xf8) << 2) | (b >> 3);
+			dst[i] = colorMap->index_map[index];
+		} else if (alpha > 0) {
+			uint8 currentIdx = dst[i];
+			rgb_color d = palette[currentIdx];
+
+			uint32 s_b = s & 0xff;
+			uint32 s_g = (s >> 8) & 0xff;
+			uint32 s_r = (s >> 16) & 0xff;
+
+			uint32 invAlpha = 255 - alpha;
+			uint32 r = (s_r * alpha + (uint32)d.red * invAlpha + 127) / 255;
+			uint32 g = (s_g * alpha + (uint32)d.green * invAlpha + 127) / 255;
+			uint32 b = (s_b * alpha + (uint32)d.blue * invAlpha + 127) / 255;
+
+			uint16 index = ((r & 0xf8) << 7) | ((g & 0xf8) << 2) | (b >> 3);
+			dst[i] = colorMap->index_map[index];
+		}
+	}
+}
+
+
+static inline void
+BlendSpanGRAY8(uint8* dst, const uint32* src, int32 count)
+{
+	for (int32 i = 0; i < count; i++) {
+		uint32 s = src[i];
+		uint32 alpha = (s >> 24) & 0xff;
+		uint32 s_b = s & 0xff;
+		uint32 s_g = (s >> 8) & 0xff;
+		uint32 s_r = (s >> 16) & 0xff;
+		uint8 s_gray = (uint8)((308 * s_r + 600 * s_g + 116 * s_b) / 1024);
+
+		if (alpha == 255) {
+			dst[i] = s_gray;
+		} else if (alpha > 0) {
+			uint32 invAlpha = 255 - alpha;
+			dst[i] = (uint8)((s_gray * alpha + (uint32)dst[i] * invAlpha + 127) / 255);
+		}
+	}
+}
+
+
+static inline void
+BlendSpanRGB32(uint32* dst, const uint32* src, int32 count)
+{
+	for (int32 i = 0; i < count; i++) {
+		uint32 s = src[i];
+		if (s == 0)
+			continue;
+
+		uint32 alpha = (s >> 24) & 0xff;
+		if (alpha == 255 || alpha == 0) {
+			dst[i] = s | 0xff000000;
+		} else {
+			uint32 invAlpha = 255 - alpha;
+			uint8* d = (uint8*)&dst[i];
+			const uint8* sc = (const uint8*)&s;
+			d[0] = (uint8)(((uint32)sc[0] * alpha + (uint32)d[0] * invAlpha + 127) / 255);
+			d[1] = (uint8)(((uint32)sc[1] * alpha + (uint32)d[1] * invAlpha + 127) / 255);
+			d[2] = (uint8)(((uint32)sc[2] * alpha + (uint32)d[2] * invAlpha + 127) / 255);
+			d[3] = 255;
+		}
+	}
+}
+
+
+static inline void
+BlendSpanRGB16(uint16* dst, const uint32* src, int32 count)
+{
+	for (int32 i = 0; i < count; i++) {
+		uint32 s = src[i];
+		if (s == 0)
+			continue;
+
+		uint32 alpha = (s >> 24) & 0xff;
+		if (alpha == 255 || alpha == 0) {
+			uint8 b = s & 0xff;
+			uint8 g = (s >> 8) & 0xff;
+			uint8 r = (s >> 16) & 0xff;
+			dst[i] = (uint16)(((r & 0xf8) << 8) | ((g & 0xfc) << 3) | (b >> 3));
+		} else {
+			uint8 s_b = s & 0xff;
+			uint8 s_g = (s >> 8) & 0xff;
+			uint8 s_r = (s >> 16) & 0xff;
+
+			uint16 d = dst[i];
+			uint32 d_r = (d >> 8) & 0xf8;
+			uint32 d_g = (d >> 3) & 0xfc;
+			uint32 d_b = (d << 3) & 0xf8;
+
+			uint32 invAlpha = 255 - alpha;
+			uint32 r = (s_r * alpha + d_r * invAlpha + 127) / 255;
+			uint32 g = (s_g * alpha + d_g * invAlpha + 127) / 255;
+			uint32 b = (s_b * alpha + d_b * invAlpha + 127) / 255;
+
+			dst[i] = (uint16)(((r & 0xf8) << 8) | ((g & 0xfc) << 3) | (b >> 3));
+		}
+	}
+}
+
+
+static inline void
+BlendSpanRGB15(uint16* dst, const uint32* src, int32 count)
+{
+	for (int32 i = 0; i < count; i++) {
+		uint32 s = src[i];
+		if (s == 0)
+			continue;
+
+		uint32 alpha = (s >> 24) & 0xff;
+		if (alpha == 255 || alpha == 0) {
+			uint8 b = s & 0xff;
+			uint8 g = (s >> 8) & 0xff;
+			uint8 r = (s >> 16) & 0xff;
+			dst[i] = (uint16)(((r & 0xf8) << 7) | ((g & 0xf8) << 2) | (b >> 3));
+		} else {
+			uint8 s_b = s & 0xff;
+			uint8 s_g = (s >> 8) & 0xff;
+			uint8 s_r = (s >> 16) & 0xff;
+
+			uint16 d = dst[i];
+			uint32 d_r = (d >> 7) & 0xf8;
+			uint32 d_g = (d >> 2) & 0xf8;
+			uint32 d_b = (d << 3) & 0xf8;
+
+			uint32 invAlpha = 255 - alpha;
+			uint32 r = (s_r * alpha + d_r * invAlpha + 127) / 255;
+			uint32 g = (s_g * alpha + d_g * invAlpha + 127) / 255;
+			uint32 b = (s_b * alpha + d_b * invAlpha + 127) / 255;
+
+			dst[i] = (uint16)(((r & 0xf8) << 7) | ((g & 0xf8) << 2) | (b >> 3));
+		}
+	}
+}
+
+
+void
+Desktop::CompositeDirtyRegion(BRegion& dirtyRegion)
+{
+	RenderingBuffer* drawingBuffer = HWInterface() != NULL
+		? HWInterface()->DrawingBuffer() : NULL;
+	if (drawingBuffer == NULL || drawingBuffer->Bits() == NULL || dirtyRegion.CountRects() == 0)
+		return;
+
+	uint8* dstBits = (uint8*)drawingBuffer->Bits();
+	uint32 dstBytesPerRow = drawingBuffer->BytesPerRow();
+	int32 dstWidth = drawingBuffer->Width();
+	int32 dstHeight = drawingBuffer->Height();
+	color_space dstSpace = drawingBuffer->ColorSpace();
+
+	// Composite all visible windows back-to-front
+	for (Window* window = CurrentWindows().FirstWindow(); window != NULL;
+			window = window->NextWindow(fCurrentWorkspace)) {
+		if (window->IsHidden() || !window->IsVisible())
+			continue;
+
+		ServerBitmap* bitmap = window->BackingStoreBitmap();
+		if (bitmap == NULL || bitmap->Bits() == NULL)
+			continue;
+
+		BRegion windowDirty(dirtyRegion);
+		windowDirty.IntersectWith(&window->VisibleRegion());
+		if (windowDirty.CountRects() == 0)
+			continue;
+
+		BRect fullFrame = window->FullFrame();
+		int32 fullLeft = (int32)fullFrame.left;
+		int32 fullTop = (int32)fullFrame.top;
+
+		uint8* srcBits = (uint8*)bitmap->Bits();
+		uint32 srcBytesPerRow = bitmap->BytesPerRow();
+		int32 bmpWidth = bitmap->Width();
+		int32 bmpHeight = bitmap->Height();
+
+		BRect contentFrame = window->Frame();
+		int32 cLeft = (int32)contentFrame.left;
+		int32 cTop = (int32)contentFrame.top;
+		int32 cRight = (int32)contentFrame.right;
+		int32 cBottom = (int32)contentFrame.bottom;
+
+		int32 rectCount = windowDirty.CountRects();
+		for (int32 i = 0; i < rectCount; i++) {
+			clipping_rect r = windowDirty.RectAtInt(i);
+
+			int32 srcX = r.left - fullLeft;
+			int32 srcY = r.top - fullTop;
+			int32 copyWidth = r.right - r.left + 1;
+			int32 copyHeight = r.bottom - r.top + 1;
+
+			// Clamp source
+			if (srcX < 0) {
+				copyWidth += srcX;
+				r.left -= srcX;
+				srcX = 0;
+			}
+			if (srcY < 0) {
+				copyHeight += srcY;
+				r.top -= srcY;
+				srcY = 0;
+			}
+			if (srcX + copyWidth > bmpWidth)
+				copyWidth = bmpWidth - srcX;
+			if (srcY + copyHeight > bmpHeight)
+				copyHeight = bmpHeight - srcY;
+
+			// Clamp destination
+			if (r.left < 0) {
+				copyWidth += r.left;
+				srcX -= r.left;
+				r.left = 0;
+			}
+			if (r.top < 0) {
+				copyHeight += r.top;
+				srcY -= r.top;
+				r.top = 0;
+			}
+			if (r.left + copyWidth > dstWidth)
+				copyWidth = dstWidth - r.left;
+			if (r.top + copyHeight > dstHeight)
+				copyHeight = dstHeight - r.top;
+
+			if (copyWidth <= 0 || copyHeight <= 0)
+				continue;
+
+			for (int32 y = 0; y < copyHeight; y++) {
+				const uint32* s = (const uint32*)(srcBits + ((srcY + y) * srcBytesPerRow) + (srcX * 4));
+				int32 screenY = r.top + y;
+
+				int32 segContentStart = max_c((int32)r.left, cLeft);
+				int32 segContentEnd = min_c((int32)(r.left + copyWidth - 1), cRight);
+				bool hasContent = (screenY >= cTop && screenY <= cBottom && segContentStart <= segContentEnd);
+
+				switch (dstSpace) {
+					case B_RGB32:
+					case B_RGBA32:
+					case B_RGB32_BIG:
+					case B_RGBA32_BIG:
+					{
+						uint32* d = (uint32*)(dstBits + (screenY * dstBytesPerRow) + (r.left * 4));
+						if (!hasContent) {
+							BlendSpanRGB32(d, s, copyWidth);
+						} else {
+							int32 cStartIdx = segContentStart - r.left;
+							int32 cEndIdx = segContentEnd - r.left;
+
+							if (cStartIdx > 0)
+								BlendSpanRGB32(d, s, cStartIdx);
+
+							memcpy(d + cStartIdx, s + cStartIdx,
+								(cEndIdx - cStartIdx + 1) * sizeof(uint32));
+
+							if (cEndIdx + 1 < copyWidth) {
+								BlendSpanRGB32(d + cEndIdx + 1, s + cEndIdx + 1,
+									copyWidth - (cEndIdx + 1));
+							}
+						}
+						break;
+					}
+
+					case B_RGB30:
+					case B_RGB30_BIG:
+					{
+						uint32* d = (uint32*)(dstBits + (screenY * dstBytesPerRow) + (r.left * 4));
+						BlendSpanRGB30(d, s, copyWidth);
+						break;
+					}
+
+					case B_RGB24:
+					case B_RGB24_BIG:
+					{
+						uint8* d = dstBits + (screenY * dstBytesPerRow) + (r.left * 3);
+						BlendSpanRGB24(d, s, copyWidth);
+						break;
+					}
+
+					case B_RGB16:
+					case B_RGB16_BIG:
+					{
+						uint16* d = (uint16*)(dstBits + (screenY * dstBytesPerRow) + (r.left * 2));
+						if (!hasContent) {
+							BlendSpanRGB16(d, s, copyWidth);
+						} else {
+							int32 cStartIdx = segContentStart - r.left;
+							int32 cEndIdx = segContentEnd - r.left;
+
+							if (cStartIdx > 0)
+								BlendSpanRGB16(d, s, cStartIdx);
+
+							for (int32 px = cStartIdx; px <= cEndIdx; px++) {
+								uint32 sp = s[px];
+								uint8 b = sp & 0xff;
+								uint8 g = (sp >> 8) & 0xff;
+								uint8 r_c = (sp >> 16) & 0xff;
+								d[px] = (uint16)(((r_c & 0xf8) << 8) | ((g & 0xfc) << 3) | (b >> 3));
+							}
+
+							if (cEndIdx + 1 < copyWidth) {
+								BlendSpanRGB16(d + cEndIdx + 1, s + cEndIdx + 1,
+									copyWidth - (cEndIdx + 1));
+							}
+						}
+						break;
+					}
+
+					case B_RGB15:
+					case B_RGBA15:
+					case B_RGB15_BIG:
+					case B_RGBA15_BIG:
+					{
+						uint16* d = (uint16*)(dstBits + (screenY * dstBytesPerRow) + (r.left * 2));
+						if (!hasContent) {
+							BlendSpanRGB15(d, s, copyWidth);
+						} else {
+							int32 cStartIdx = segContentStart - r.left;
+							int32 cEndIdx = segContentEnd - r.left;
+
+							if (cStartIdx > 0)
+								BlendSpanRGB15(d, s, cStartIdx);
+
+							for (int32 px = cStartIdx; px <= cEndIdx; px++) {
+								uint32 sp = s[px];
+								uint8 b = sp & 0xff;
+								uint8 g = (sp >> 8) & 0xff;
+								uint8 r_c = (sp >> 16) & 0xff;
+								d[px] = (uint16)(((r_c & 0xf8) << 7) | ((g & 0xf8) << 2) | (b >> 3));
+							}
+
+							if (cEndIdx + 1 < copyWidth) {
+								BlendSpanRGB15(d + cEndIdx + 1, s + cEndIdx + 1,
+									copyWidth - (cEndIdx + 1));
+							}
+						}
+						break;
+					}
+
+					case B_CMAP8:
+					{
+						uint8* d = dstBits + ((r.top + y) * dstBytesPerRow) + r.left;
+						BlendSpanCMAP8(d, s, copyWidth);
+						break;
+					}
+
+					case B_GRAY8:
+					{
+						uint8* d = dstBits + ((r.top + y) * dstBytesPerRow) + r.left;
+						BlendSpanGRAY8(d, s, copyWidth);
+						break;
+					}
+
+					default:
+						break;
+				}
+			}
+		}
+	}
+
+	if (HWInterface() != NULL)
+		HWInterface()->InvalidateRegion(dirtyRegion);
+}
+
+
+void
 Desktop::MarkDirty(BRegion& dirtyRegion, BRegion& exposeRegion)
 {
 	if (dirtyRegion.CountRects() == 0)
 		return;
 
 	if (LockAllWindows()) {
-		// send redraw messages to all windows intersecting the dirty region
 		_TriggerWindowRedrawing(dirtyRegion, exposeRegion);
+
+		if (fCompositor2DEnabled)
+			CompositeDirtyRegion(dirtyRegion);
 
 		UnlockAllWindows();
 	}
@@ -3194,6 +3696,9 @@ Desktop::_ShowWindow(Window* window, bool affectsOtherWindows)
 
 	BRegion dirty(window->VisibleRegion());
 
+	if (fCompositor2DEnabled && !window->HasBackingStore())
+		window->AllocateBackingStore();
+
 	if (!affectsOtherWindows) {
 		// everything that is now visible in the
 		// window needs a redraw, but other windows
@@ -3233,7 +3738,10 @@ Desktop::_HideWindow(Window* window)
 	_SetBackground(background);
 	_WindowChanged(window);
 
-	MarkDirty(dirty);
+	if (fCompositor2DEnabled)
+		CompositeDirtyRegion(dirty);
+	else
+		MarkDirty(dirty);
 }
 
 
@@ -3642,6 +4150,16 @@ Desktop::_ScreenChanged(Screen* screen)
 {
 	ASSERT_MULTI_WRITE_LOCKED(fWindowLock);
 
+	fVirtualScreen.UpdateFrame();
+
+	if (fCompositor2DEnabled) {
+		for (Window* window = fAllWindows.FirstWindow(); window != NULL;
+				window = window->NextWindow(kAllWindowList)) {
+			if (!window->HasBackingStore())
+				window->AllocateBackingStore();
+		}
+	}
+
 	// the entire screen is dirty, because we're actually
 	// operating on an all new buffer in memory
 	BRegion dirty(screen->Frame());
@@ -3666,8 +4184,6 @@ Desktop::_ScreenChanged(Screen* screen)
 	update.AddInt64("when", real_time_clock_usecs());
 	update.AddRect("frame", screen->Frame());
 	update.AddInt32("mode", screen->ColorSpace());
-
-	fVirtualScreen.UpdateFrame();
 
 	for (Window* window = fAllWindows.FirstWindow(); window != NULL;
 			window = window->NextWindow(kAllWindowList)) {

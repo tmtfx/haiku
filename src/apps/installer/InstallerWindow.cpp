@@ -33,6 +33,9 @@
 #include <PopUpMenu.h>
 #include <Roster.h>
 #include <Screen.h>
+#include <CheckBox.h>
+#include <StringView.h>
+#include "ServerProtocol.h"
 #include <ScrollView.h>
 #include <SeparatorView.h>
 #include <SpaceLayoutItem.h>
@@ -84,6 +87,8 @@ const uint32 MASTER_PASSWORD_SHOW   = 'MPSH';
 const uint32 MASTER_PASSWORD_SAVE   = 'MPSV';
 const uint32 kGoToMP2 = 'GTP2';
 const uint32 kGoToSave = 'GTBS';
+const uint32 BENCHMARK_DONE = 'BMDN';
+const uint32 BENCHMARK_CHECKBOX_CHANGED = 'BMCB';
 
 class PasswordTC : public BTextControl {
 public:
@@ -430,9 +435,81 @@ InstallerWindow::InstallerWindow()
         .Add(fCardLayout)
     .End();
 
-    // Inseriamo i due grandi contenitori dentro il CardLayout
+    // -----------------------------------------------------------------
+    // CONTENITORE 3: Benchmark hardware e configurazione grafica 2D
+    // -----------------------------------------------------------------
+    BStringView* benchTitle = new BStringView("benchTitle",
+        B_TRANSLATE("Graphics & Hardware Optimization"));
+    benchTitle->SetFont(&titleFont);
+    benchTitle->SetExplicitAlignment(
+        BAlignment(B_ALIGN_HORIZONTAL_CENTER, B_ALIGN_VERTICAL_UNSET));
+
+    BStringView* benchSubtitle = new BStringView("benchSubtitle",
+        B_TRANSLATE("Evaluating system performance to choose the optimal rendering mode (Pure AGG vs 2D Hardware Acceleration)."));
+    benchSubtitle->SetExplicitAlignment(
+        BAlignment(B_ALIGN_HORIZONTAL_CENTER, B_ALIGN_VERTICAL_UNSET));
+
+    fCpuStatusBar = new BStatusBar("cpuBar",
+        B_TRANSLATE("CPU & Memory throughput:"));
+    fCpuStatusBar->SetMaxValue(10000.0);
+
+    fGpuStatusBar = new BStatusBar("gpuBar",
+        B_TRANSLATE("2D GPU Acceleration & Bus:"));
+    fGpuStatusBar->SetMaxValue(100.0);
+
+    fBenchResultView = new BStringView("benchResult", "");
+    BFont boldFont(be_bold_font);
+    fBenchResultView->SetFont(&boldFont);
+    fBenchResultView->SetExplicitAlignment(
+        BAlignment(B_ALIGN_HORIZONTAL_CENTER, B_ALIGN_VERTICAL_UNSET));
+
+    fBench2DCheckbox = new BCheckBox("bench2D",
+        B_TRANSLATE("Enable 2D hardware acceleration"),
+        new BMessage(BENCHMARK_CHECKBOX_CHANGED));
+
+    fBenchDoneButton = new BButton("benchDone",
+        B_TRANSLATE("Continue"), new BMessage(BENCHMARK_DONE));
+
+    fBenchmarkView = new BGroupView("benchmarkView", B_VERTICAL, 0);
+    fBenchmarkView->SetViewUIColor(B_PANEL_BACKGROUND_COLOR);
+
+    BLayoutBuilder::Group<>(fBenchmarkView->GroupLayout())
+        .SetInsets(B_USE_WINDOW_SPACING)
+        .AddGlue()
+        .AddGroup(B_HORIZONTAL)
+            .AddGlue()
+            .Add(benchTitle)
+            .AddGlue()
+        .End()
+        .AddStrut(B_USE_ITEM_SPACING)
+        .AddGroup(B_HORIZONTAL)
+            .AddGlue()
+            .Add(benchSubtitle)
+            .AddGlue()
+        .End()
+        .AddStrut(B_USE_ITEM_SPACING * 2)
+        .AddGroup(B_HORIZONTAL)
+            .AddGlue()
+            .AddGroup(B_VERTICAL, B_USE_ITEM_SPACING)
+                .Add(fCpuStatusBar)
+                .Add(fGpuStatusBar)
+                .AddStrut(B_USE_ITEM_SPACING)
+                .Add(fBenchResultView)
+                .AddStrut(B_USE_ITEM_SPACING)
+                .Add(fBench2DCheckbox)
+            .End()
+            .AddGlue()
+        .End()
+        .AddGlue()
+        .AddGroup(B_HORIZONTAL)
+            .AddGlue()
+            .Add(fBenchDoneButton)
+        .End();
+
+    // Inseriamo i contenitori dentro il CardLayout
     fCardLayout->AddView(mainInstallerContainer); // Carta indice 0
     fCardLayout->AddView(fMasterPasswordView);    // Carta indice 1
+    fCardLayout->AddView(fBenchmarkView);         // Carta indice 2
 
     // Mostriamo l'installer standard all'avvio dell'applicazione
     fCardLayout->SetVisibleItem((int32)0);
@@ -746,14 +823,12 @@ InstallerWindow::MessageReceived(BMessage *msg)
 
 		case MASTER_PASSWORD_SHOW:
 		{
-	    if (fMasterPassword1 != NULL)
-    	    fMasterPassword1->Mask(!fMasterPassword1->IsMasked());
-
-	    if (fMasterPassword2 != NULL)
-        	fMasterPassword2->Mask(!fMasterPassword2->IsMasked());
-        
-    	break;
-	}
+			if (fMasterPassword1 != NULL)
+				fMasterPassword1->Mask(!fMasterPassword1->IsMasked());
+			if (fMasterPassword2 != NULL)
+				fMasterPassword2->Mask(!fMasterPassword2->IsMasked());
+			break;
+		}
 		/*{
 			// Toggle masked/visible on both fields simultaneously.
 			bool showText = fMasterPassword1->IsMasked();
@@ -800,9 +875,28 @@ InstallerWindow::MessageReceived(BMessage *msg)
 			}
 			
 			if (fCardLayout != NULL) {
-                fCardLayout->SetVisibleItem(0);
-                fBeginButton->SetEnabled(true);
+                fCardLayout->SetVisibleItem(2);
+                _RunBenchmark();
             }
+			break;
+		}
+		case BENCHMARK_DONE:
+		{
+			bool enable2D = (fBench2DCheckbox != NULL
+				&& fBench2DCheckbox->Value() == B_CONTROL_ON);
+			_SaveScreenSettings(enable2D);
+
+			if (fCardLayout != NULL) {
+				fCardLayout->SetVisibleItem((int32)0);
+				fBeginButton->SetEnabled(true);
+			}
+			break;
+		}
+		case BENCHMARK_CHECKBOX_CHANGED:
+		{
+			bool enable2D = (fBench2DCheckbox != NULL
+				&& fBench2DCheckbox->Value() == B_CONTROL_ON);
+			_SaveScreenSettings(enable2D);
 			break;
 		}
 		case kGoToMP2:
@@ -828,18 +922,18 @@ InstallerWindow::FrameResized(float newWidth, float newHeight)
 	// Keep the master password overlay covering the entire client area.
 	if (fMasterPasswordView != NULL)
 		fMasterPasswordView->ResizeTo(newWidth, newHeight);
+	if (fBenchmarkView != NULL)
+		fBenchmarkView->ResizeTo(newWidth, newHeight);
 }
 
 
 status_t
-InstallerWindow::_WriteMasterPasswordShadow(uint8* outSalt)
+InstallerWindow::_GetDestinationPath(BPath& destRoot)
 {
-	fprintf(stderr, "[Installer Shadow] Inizio procedura _WriteMasterPasswordShadow\n");
-	// --- 1. Resolve destination partition mount point ---
 	PartitionMenuItem* dstItem
 		= (PartitionMenuItem*)fDestMenu->FindMarked();
-	if (dstItem == NULL){
-		fprintf(stderr, "[Installer Shadow] ERRORE: Nessuna partizione di destinazione contrassegnata.\n");
+	if (dstItem == NULL) {
+		fprintf(stderr, "[Installer] ERRORE: Nessuna partizione di destinazione contrassegnata.\n");
 		return B_BAD_VALUE;
 	}
 
@@ -848,22 +942,153 @@ InstallerWindow::_WriteMasterPasswordShadow(uint8* outSalt)
 	BPartition* partition = NULL;
 
 	status_t err = roster.GetPartitionWithID(dstItem->ID(), &device, &partition);
-	if (err != B_OK){
-		fprintf(stderr, "[Installer Shadow] ERRORE GetPartitionWithID: %s (0x%" B_PRIx32 ")\n", strerror(err), err);
+	if (err != B_OK) {
+		fprintf(stderr, "[Installer] ERRORE GetPartitionWithID: %s (0x%" B_PRIx32 ")\n", strerror(err), err);
 		return err;
 	}
 
-	BPath destRoot;
 	if (partition != NULL)
 		err = partition->GetMountPoint(&destRoot);
 	else
 		err = device.GetMountPoint(&destRoot);
-	if (err != B_OK){
-		fprintf(stderr, "[Installer Shadow] ERRORE GetMountPoint: %s (0x%" B_PRIx32 ")\n", strerror(err), err);
+
+	if (err != B_OK) {
+		fprintf(stderr, "[Installer] ERRORE GetMountPoint: %s (0x%" B_PRIx32 ")\n", strerror(err), err);
 		return err;
 	}
-	
-    fprintf(stderr, "[Installer Shadow] Mount point destinazione: %s\n", destRoot.Path());
+
+	return B_OK;
+}
+
+
+void
+InstallerWindow::_RunBenchmark()
+{
+	// 1. Benchmark CPU Memory Throughput
+	const size_t bufferSize = 4 * 1024 * 1024; // 4 MB
+	uint8* srcBuf = new(std::nothrow) uint8[bufferSize];
+	uint8* dstBuf = new(std::nothrow) uint8[bufferSize];
+
+	double speedMBs = 0.0;
+	if (srcBuf != NULL && dstBuf != NULL) {
+		memset(srcBuf, 0xAA, bufferSize);
+		memcpy(dstBuf, srcBuf, bufferSize); // warm-up
+
+		const int kIterations = 8; // 32 MB total
+		bigtime_t start = system_time();
+		for (int i = 0; i < kIterations; i++)
+			memcpy(dstBuf, srcBuf, bufferSize);
+		bigtime_t elapsed = system_time() - start;
+
+		delete[] srcBuf;
+		delete[] dstBuf;
+
+		if (elapsed > 0) {
+			speedMBs = (double(kIterations * bufferSize) / (1024.0 * 1024.0))
+				/ (double(elapsed) / 1000000.0);
+		}
+	}
+
+	char cpuText[64];
+	snprintf(cpuText, sizeof(cpuText), "%.1f MB/s", speedMBs);
+	fCpuStatusBar->Reset();
+	fCpuStatusBar->Update(speedMBs > 10000.0 ? 10000.0 : (float)speedMBs, cpuText, "");
+
+	// 2. Query 2D GPU acceleration capability from app_server
+	bool has2D = false;
+	{
+		BMessenger msgr("application/x-vnd.haiku-app_server");
+		BMessage request('h2da');
+		BMessage reply;
+		if (msgr.IsValid() && msgr.SendMessage(&request, &reply, 200000) == B_OK)
+			reply.FindBool("has_2d_acceleration", &has2D);
+	}
+
+	fGpuStatusBar->Reset();
+	if (has2D) {
+		fGpuStatusBar->Update(100.0,
+			B_TRANSLATE("Supported (Screen-to-Screen Blit)"), "");
+		fBench2DCheckbox->SetEnabled(true);
+	} else {
+		fGpuStatusBar->Update(0.0,
+			B_TRANSLATE("Not supported (Generic VESA / Framebuffer)"), "");
+		fBench2DCheckbox->SetEnabled(false);
+	}
+
+	// 3. Make optimization decision
+	if (has2D) {
+		if (speedMBs >= 3000.0) {
+			fBenchResultView->SetText(B_TRANSLATE(
+				"High-performance CPU: pure AGG software rendering recommended."));
+			fBench2DCheckbox->SetValue(B_CONTROL_OFF);
+		} else {
+			fBenchResultView->SetText(B_TRANSLATE(
+				"Resource-constrained CPU: 2D hardware acceleration recommended to reduce CPU load."));
+			fBench2DCheckbox->SetValue(B_CONTROL_ON);
+		}
+	} else {
+		fBenchResultView->SetText(B_TRANSLATE(
+			"Hardware 2D acceleration not supported by driver: pure AGG active."));
+		fBench2DCheckbox->SetValue(B_CONTROL_OFF);
+	}
+
+	fBenchDoneButton->MakeFocus(true);
+}
+
+
+status_t
+InstallerWindow::_SaveScreenSettings(bool enable2D)
+{
+	BPoint offset(0, 0);
+	bool hwCursor = true;
+
+	// 1. Save to target installed volume
+	BPath destRoot;
+	if (_GetDestinationPath(destRoot) == B_OK) {
+		BPath settingsDir(destRoot.Path(), "home/config/settings");
+		create_directory(settingsDir.Path(), 0755);
+		settingsDir.Append("Screen_data");
+
+		BFile file(settingsDir.Path(), B_WRITE_ONLY | B_CREATE_FILE | B_ERASE_FILE);
+		if (file.InitCheck() == B_OK) {
+			file.Write(&offset, sizeof(BPoint));
+			file.Write(&hwCursor, sizeof(bool));
+			file.Write(&enable2D, sizeof(bool));
+		}
+	}
+
+	// 2. Also save to live session user settings
+	BPath livePath;
+	if (find_directory(B_USER_SETTINGS_DIRECTORY, &livePath) == B_OK) {
+		livePath.Append("Screen_data");
+		BFile liveFile(livePath.Path(), B_WRITE_ONLY | B_CREATE_FILE | B_ERASE_FILE);
+		if (liveFile.InitCheck() == B_OK) {
+			liveFile.Write(&offset, sizeof(BPoint));
+			liveFile.Write(&hwCursor, sizeof(bool));
+			liveFile.Write(&enable2D, sizeof(bool));
+		}
+	}
+
+	// 3. Notify running app_server
+	BMessage msg(AS_SET_2D_ACCELERATION_ENABLED);
+	msg.AddBool("enable", enable2D);
+	BMessenger("application/x-vnd.Haiku-app_server").SendMessage(&msg);
+
+	return B_OK;
+}
+
+
+status_t
+InstallerWindow::_WriteMasterPasswordShadow(uint8* outSalt)
+{
+	fprintf(stderr, "[Installer Shadow] Inizio procedura _WriteMasterPasswordShadow\n");
+	// --- 1. Resolve destination partition mount point ---
+	BPath destRoot;
+	status_t err = _GetDestinationPath(destRoot);
+	if (err != B_OK)
+		return err;
+
+	fprintf(stderr, "[Installer Shadow] Mount point destinazione: %s\n", destRoot.Path());
 	// --- 2. Ensure settings directory exists ---
 	BPath settingsDir(destRoot.Path(), "home/config/settings");
 	err = create_directory(settingsDir.Path(), 0755);
