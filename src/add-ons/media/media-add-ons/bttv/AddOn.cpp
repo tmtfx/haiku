@@ -17,8 +17,8 @@ BttvMediaAddOn::BttvMediaAddOn(image_id image)
 	:
 	BMediaAddOn(image)
 {
-	fFlavorInfo.name = "Bt878 Composite Capture";
-	fFlavorInfo.info = "Media source for the bttv Bt878 composite capture driver";
+	fFlavorInfo.name = "Bt848/Bt878 Composite Capture";
+	fFlavorInfo.info = "Media source for the bttv Bt848/Bt878 composite capture driver";
 	fFlavorInfo.kinds = B_BUFFER_PRODUCER | B_CONTROLLABLE | B_PHYSICAL_INPUT;
 	fFlavorInfo.flavor_flags = 0;
 	fFlavorInfo.internal_id = 0;

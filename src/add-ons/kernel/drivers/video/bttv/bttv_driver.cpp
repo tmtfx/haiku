@@ -17,6 +17,8 @@
 #define MAX_DEVICES				4
 
 #define BT878_VENDOR_ID			0x109e
+#define BT848_DEVICE_ID			0x0350
+#define BT849_DEVICE_ID			0x0351
 #define BT878_DEVICE_ID			0x036e
 #define BT879_DEVICE_ID			0x036f
 
@@ -240,6 +242,18 @@ static const bt878_card_profile kGenericBt878 = {
 	{ BT848_IFORM_MUX2, BT848_IFORM_MUX1, 0, 0 }
 };
 
+static const bt878_card_profile kGenericBt848 = {
+	0,
+	0,
+	"Generic Bt848",
+	2,
+	BTV_INPUT_COMPOSITE,
+	BTV_CAP_VIDEO_CAPTURE | BTV_CAP_HAS_COMPOSITE,
+	0,
+	{ 0, 0, 0, 0 },
+	{ BT848_IFORM_MUX2, BT848_IFORM_MUX1, 0, 0 }
+};
+
 
 static pci_module_info* sPCI;
 static bt878_device sDevices[MAX_DEVICES];
@@ -364,7 +378,10 @@ static bool
 bt878_is_supported(const pci_info& info)
 {
 	return info.vendor_id == BT878_VENDOR_ID
-		&& (info.device_id == BT878_DEVICE_ID || info.device_id == BT879_DEVICE_ID)
+		&& (info.device_id == BT878_DEVICE_ID
+			|| info.device_id == BT879_DEVICE_ID
+			|| info.device_id == BT848_DEVICE_ID
+			|| info.device_id == BT849_DEVICE_ID)
 		&& (info.header_type & PCI_header_type_mask) == PCI_header_type_generic;
 }
 
@@ -378,6 +395,9 @@ bt878_profile_for(const pci_info& info)
 		if (info.u.h0.subsystem_id == ATI_TV_WONDER_ID)
 			return &kWonder;
 	}
+
+	if (info.device_id == BT848_DEVICE_ID || info.device_id == BT849_DEVICE_ID)
+		return &kGenericBt848;
 
 	return &kGenericBt878;
 }
