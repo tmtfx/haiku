@@ -5,6 +5,13 @@
 	Other authors:
 	Mark Watson;
 	Rudolf Cornelissen 3/2002-1/2016.
+
+	Portions based on the OpenChrome Project (https://www.freedesktop.org/wiki/Openchrome):
+	Copyright 2005-2016 The OpenChrome Project
+	Copyright 2004-2005 The Unichrome Project
+	Copyright 1998-2003 VIA Technologies, Inc.
+	Copyright 2001-2003 S3 Graphics, Inc.
+	Authors: Kevin Brace, James Simmons, Xavier Bachelot, Thomas Hellström, Luc Verhaegen
 */
 
 /* standard kernel driver stuff */
@@ -99,12 +106,21 @@ static device_hooks graphics_device_hooks = {
 #define VENDOR_ID_VIA	0x1106 /* Via */
 
 static uint16 via_device_list[] = {
-	0x3022, /* CLE266 Unichrome Pro (CLE3022) */
-	0x3108, /* K8M800 Unichrome Pro (unknown chiptype) */
-	0x3122, /* CLE266 Unichrome Pro (CLE3122) */
-	0x3205, /* KM400 Unichrome (VT3205) */
-//	0x3344, /* P4M800 Pro (VT3344) */
-	0x7205, /* KM400 Unichrome (VT7205) */
+	0x3022, /* CLE266 (CLE3022) */
+	0x3122, /* CLE266 (CLE3122) */
+	0x3205, /* KM400 / KN400 (VT3205) */
+	0x7205, /* KM400 / KN400 / P4M800 (VT7205) */
+	0x3108, /* K8M800 / K8N800 (VT3204) */
+	0x3118, /* PM800 / PN800 / PM880 (VT3259) */
+	0x3344, /* P4M800 Pro / VN800 / CN700 (VT3314) */
+	0x3157, /* CX700 / VX700 (VT3324) */
+	0x3225, /* CN750 (VT3293) */
+	0x3343, /* P4M890 / VN890 / CN800 (VT3327) */
+	0x3230, /* K8M890 / K8N890 (VT3336) */
+	0x3371, /* P4M900 / VN896 / CN896 (VT3364) */
+	0x1122, /* VX800 / VX820 Chrome9 HC3 (VT3353) */
+	0x5122, /* VX855 / VX875 Chrome9 HCM (VT3409) */
+	0x7122, /* VX900 Chrome9 HD (VT3410) */
 	0
 };
 
@@ -334,6 +350,54 @@ void uninit_driver(void) {
 		put_module(B_AGP_GART_MODULE_NAME);
 }
 
+/* Probe video RAM from VIA host bridge / DRAM controller PCI registers (OpenChrome logic) */
+static uint32 probe_vram(device_info *di)
+{
+	uint32 detectedVideoRAM = 0;
+	uint16 hostBridgeVendorID, hostBridgeDeviceID;
+	uint8 videoRAM = 0;
+
+	hostBridgeVendorID = (*pci_bus->read_pci_config)(0, 0, 0, PCI_vendor_id, 2);
+	if (hostBridgeVendorID != VENDOR_ID_VIA)
+		return 0;
+
+	hostBridgeDeviceID = (*pci_bus->read_pci_config)(0, 0, 0, PCI_device_id, 2);
+
+	switch (hostBridgeDeviceID) {
+	case 0x3123: /* CLE266 */
+	case 0x3205: /* KM400 */
+		videoRAM = (*pci_bus->read_pci_config)(0, 0, 0, 0xE1, 1);
+		detectedVideoRAM = (1 << ((videoRAM & 0x70) >> 4)) * 1024 * 1024;
+		break;
+	case 0x0296: /* P4M800 */
+	case 0x0314: /* P4M800 Pro */
+	case 0x0259: /* PM800 */
+	case 0x0204: /* K8M800 */
+		videoRAM = (*pci_bus->read_pci_config)(0, 0, 3, 0xA1, 1);
+		detectedVideoRAM = (1 << ((videoRAM & 0x70) >> 4)) * 1024 * 1024;
+		break;
+	case 0x0324: /* CX700 */
+	case 0x0327: /* P4M890 */
+	case 0x0336: /* K8M890 */
+	case 0x0364: /* P4M900 */
+	case 0x0353: /* VX800 */
+	case 0x0409: /* VX855 */
+	case 0x0410: /* VX900 */
+		videoRAM = (*pci_bus->read_pci_config)(0, 0, 3, 0xA1, 1);
+		detectedVideoRAM = (1 << ((videoRAM & 0x70) >> 4)) * 4 * 1024 * 1024;
+		break;
+	default:
+		/* Fallback for VX900 / VX855 / VX800 if host bridge device ID differs: check DRAM controller directly */
+		if (di->pcii.device_id == 0x7122 || di->pcii.device_id == 0x5122 || di->pcii.device_id == 0x1122) {
+			videoRAM = (*pci_bus->read_pci_config)(0, 0, 3, 0xA1, 1);
+			if (videoRAM != 0 && videoRAM != 0xFF)
+				detectedVideoRAM = (1 << ((videoRAM & 0x70) >> 4)) * 4 * 1024 * 1024;
+		}
+		break;
+	}
+	return detectedVideoRAM;
+}
+
 static status_t map_device(device_info *di)
 {
 	char buffer[B_OS_NAME_LENGTH]; /*memory for device name*/
@@ -350,9 +414,9 @@ static status_t map_device(device_info *di)
 	uint8* rom_temp;
 	area_id rom_area;
 
-	/* Nvidia cards have registers in [0] and framebuffer in [1] */
+	/* On VIA VX900 (0x7122), framebuffer is BAR 2; on earlier chips it is BAR 0. Registers are BAR 1. */
 	int registers = 1;
-	int frame_buffer = 0;
+	int frame_buffer = (di->pcii.device_id == 0x7122) ? 2 : 0;
 //	int pseudo_dma = 2;
 
 	/* enable memory mapped IO, disable VGA I/O - this is defined in the PCI standard */
@@ -473,12 +537,19 @@ static status_t map_device(device_info *di)
 		di->pcii.vendor_id, di->pcii.device_id,
 		di->pcii.bus, di->pcii.device, di->pcii.function);
 
+	/* determine physical framebuffer address and aperture size (support 64-bit BARs) */
+	phys_addr_t fb_pci = di->pcii.u.h0.base_registers_pci[frame_buffer];
+	size_t fb_size = di->pcii.u.h0.base_register_sizes[frame_buffer];
+	if ((di->pcii.u.h0.base_register_flags[frame_buffer] & PCI_address_type) == PCI_address_type_64) {
+		fb_pci |= ((uint64)di->pcii.u.h0.base_registers_pci[frame_buffer + 1] << 32);
+		fb_size |= ((uint64)di->pcii.u.h0.base_register_sizes[frame_buffer + 1] << 32);
+	}
+
 	/* map the framebuffer into vmem, using Write Combining*/
 	si->fb_area = map_physical_memory(
 		buffer,
-		/* WARNING: Nvidia needs to map framebuffer as viewed from PCI space! */
-		di->pcii.u.h0.base_registers_pci[frame_buffer],
-		di->pcii.u.h0.base_register_sizes[frame_buffer],
+		fb_pci,
+		fb_size,
 		B_ANY_KERNEL_BLOCK_ADDRESS | B_WRITE_COMBINING_MEMORY,
 		B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA,
 		&(si->framebuffer));
@@ -487,9 +558,8 @@ static status_t map_device(device_info *di)
 	if (si->fb_area < 0) {
 		si->fb_area = map_physical_memory(
 			buffer,
-			/* WARNING: Nvidia needs to map framebuffer as viewed from PCI space! */
-			di->pcii.u.h0.base_registers_pci[frame_buffer],
-			di->pcii.u.h0.base_register_sizes[frame_buffer],
+			fb_pci,
+			fb_size,
 			B_ANY_KERNEL_BLOCK_ADDRESS,
 			B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA,
 			&(si->framebuffer));
@@ -504,7 +574,16 @@ static status_t map_device(device_info *di)
 	}
 //fixme: retest for card coldstart and PCI/virt_mem mapping!!
 	/* remember the DMA address of the frame buffer for BDirectWindow?? purposes */
-	si->framebuffer_pci = (void *)(addr_t) di->pcii.u.h0.base_registers_pci[frame_buffer];
+	si->framebuffer_pci = (void *)(addr_t) fb_pci;
+
+	/* probe and store detected video RAM size */
+	{
+		uint32 vram = probe_vram(di);
+		if (vram > 0)
+			si->ps.memory_size = vram;
+		else if (fb_size > 0 && fb_size <= 512 * 1024 * 1024)
+			si->ps.memory_size = fb_size;
+	}
 
 	// remember settings for use here and in accelerant
 	si->settings = current_settings;

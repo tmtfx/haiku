@@ -5,6 +5,13 @@
 	Other authors for NV driver:
 	Mark Watson,
 	Rudolf Cornelissen 9/2002-11/2005
+
+	Portions based on the OpenChrome Project (https://www.freedesktop.org/wiki/Openchrome):
+	Copyright 2005-2016 The OpenChrome Project
+	Copyright 2004-2005 The Unichrome Project
+	Copyright 1998-2003 VIA Technologies, Inc.
+	Copyright 2001-2003 S3 Graphics, Inc.
+	Authors: Kevin Brace, James Simmons, Xavier Bachelot, Thomas Hellström, Luc Verhaegen
 */
 
 #define MODULE_BIT 0x00400000
@@ -89,6 +96,11 @@ static const display_mode mode_list[] = {
 { { 147100, 1680, 1784, 1968, 2256, 1050, 1051, 1054, 1087, T_POSITIVE_SYNC}, B_CMAP8, 1680, 1050, 0, 0, MODE_FLAGS}, /* Vesa_Monitor_@60Hz_(1680X1050) */
 /* 16:10 panel mode; 2.304M pixels */
 { { 193200, 1920, 2048, 2256, 2592, 1200, 1201, 1204, 1242, T_POSITIVE_SYNC}, B_CMAP8, 1920, 1200, 0, 0, MODE_FLAGS}, /* Vesa_Monitor_@60Hz_(1920X1200) */
+/* 16:9 widescreen modes */
+{ { 74250, 1280, 1390, 1430, 1650, 720, 725, 730, 750, T_POSITIVE_SYNC }, B_CMAP8, 1280, 720, 0, 0, MODE_FLAGS }, /* 1280x720@60Hz (720p) */
+{ { 85500, 1360, 1424, 1536, 1792, 768, 771, 777, 798, T_POSITIVE_SYNC }, B_CMAP8, 1360, 768, 0, 0, MODE_FLAGS }, /* 1360x768@60Hz */
+{ { 108000, 1600, 1624, 1704, 1800, 900, 901, 904, 1000, T_POSITIVE_SYNC }, B_CMAP8, 1600, 900, 0, 0, MODE_FLAGS }, /* 1600x900@60Hz */
+{ { 148500, 1920, 2008, 2052, 2200, 1080, 1084, 1089, 1125, T_POSITIVE_SYNC }, B_CMAP8, 1920, 1080, 0, 0, MODE_FLAGS }, /* 1920x1080@60Hz (1080p) */
 };
 
 /*
@@ -228,17 +240,12 @@ status_t PROPOSE_DISPLAY_MODE(display_mode *target, const display_mode *low, con
 		}
 		break;
 	default: /* at least one analog monitor is connected, or nothing detected at all */
-		if (target_aspect > 1.34)
-		{
-			LOG(4, ("PROPOSEMODE: not all output devices can display widescreen modes, aborted.\n"));
-			return B_ERROR;
-		}
+		/* Modern analog VGA displays and LCDs support widescreen modes freely */
 		break;
 	}
 
-	/* only export widescreen panel-TV modes when an exact resolution match exists,
-	 * to prevent the modelist from becoming too crowded */
-	if (target_aspect > 1.61)
+	/* only restrict widescreen modes if fixed digital panels (TMDS without scaler) are active */
+	if ((si->ps.tmds1_active || si->ps.tmds2_active) && target_aspect > 1.61)
 	{
 		status_t panel_TV_stat = B_ERROR;
 

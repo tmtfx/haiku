@@ -1,6 +1,13 @@
 /* program the DAC */
 /* Author:
    Rudolf Cornelissen 12/2003-1/2016
+
+   Portions based on the OpenChrome Project (https://www.freedesktop.org/wiki/Openchrome):
+   Copyright 2005-2016 The OpenChrome Project
+   Copyright 2004-2005 The Unichrome Project
+   Copyright 1998-2003 VIA Technologies, Inc.
+   Copyright 2001-2003 S3 Graphics, Inc.
+   Authors: Kevin Brace, James Simmons, Xavier Bachelot, Thomas Hellström, Luc Verhaegen
 */
 
 #define MODULE_BIT 0x00010000
@@ -142,6 +149,64 @@ if (0)
 }
 
 /*program the pixpll - frequency in kHz*/
+/* Compute dot clock PLL parameters for UniChrome Pro and Chrome9 (from OpenChrome) */
+static uint32 ViaComputeProDotClock(unsigned clock)
+{
+	double fvco, fout, err, minErr;
+	uint32 dr = 0, dn, dm, maxdm, maxdn;
+	uint32 factual;
+	union {
+		struct {
+			uint32 dtz : 2;
+			uint32 dr  : 3;
+			uint32 dn  : 7;
+			uint32 dm  : 10;
+		} params;
+		uint32 packed;
+	} bestClock;
+
+	fout = (double)clock * 1.e3;
+
+	factual = ~0;
+	maxdm = factual / 14318000U;
+	minErr = 1.e10;
+	bestClock.packed = 0U;
+
+	do {
+		fvco = fout * (1 << dr);
+	} while (fvco < 300.e6 && dr++ < 8);
+
+	if (dr == 8)
+		return 0;
+
+	if (clock < 30000)
+		maxdn = 8;
+	else if (clock < 45000)
+		maxdn = 7;
+	else if (clock < 170000)
+		maxdn = 6;
+	else
+		maxdn = 5;
+
+	for (dn = 2; dn < maxdn; ++dn) {
+		for (dm = 2; dm < maxdm; ++dm) {
+			factual = 14318000U * dm;
+			factual /= dn << dr;
+			if ((err = fabs((double)factual / fout - 1.)) < 0.005) {
+				if (err < minErr) {
+					minErr = err;
+					bestClock.params.dtz = 1;
+					bestClock.params.dr = dr;
+					bestClock.params.dn = dn;
+					bestClock.params.dm = dm;
+				}
+			}
+		}
+	}
+
+	return bestClock.packed;
+}
+
 status_t eng_dac_set_pix_pll(display_mode target)
 {
 	uint8 m=0,n=0,p=0;
@@ -187,19 +252,38 @@ status_t eng_dac_set_pix_pll(display_mode target)
 	snooze(1000);
 	SEQW(PLL_RESET, ((SEQR(PLL_RESET)) & ~0x02));
 
+
+
 	/* program new frequency */
-	if (si->ps.card_arch != K8M800)
+	if (si->ps.card_arch < K8M800)
 	{
-		/* fixme: b7 is a lock-indicator or a filter select: to be determined! */
+		/* CLE266 / KM400 */
 		SEQW(PPLL_N_CLE, (n & 0x7f));
 		SEQW(PPLL_MP_CLE, ((m & 0x3f) | ((p & 0x03) << 6)));
 	}
 	else
 	{
-		/* fixme: preliminary, still needs to be confirmed */
-		SEQW(PPLL_N_OTH, (n & 0xff));
-		SEQW(PPLL_M_OTH, (m & 0x1f));
-		SEQW(PPLL_P_OTH, (p & 0x03) << 2);
+		/* UniChrome Pro & Chrome9 (including VX855 and VX900) - OpenChrome method */
+		uint32 packed = ViaComputeProDotClock(target.timing.pixel_clock);
+		if (packed != 0) {
+			int dtz = (packed >> 0) & 0x03;
+			int dr  = (packed >> 2) & 0x07;
+			int dn  = (packed >> 5) & 0x7f;
+			int dm  = (packed >> 12) & 0x3ff;
+
+			if (si->ps.card_arch != VX855 && si->ps.card_arch != VX900) {
+				dm -= 2;
+				dn -= 2;
+			}
+
+			SEQW(PPLL_N_OTH, dm & 0xff);
+			SEQW(PPLL_P_OTH, ((dm >> 8) & 0x03) | (dr << 2) | ((dtz & 1) << 7));
+			SEQW(PPLL_M_OTH, (dn & 0x7f) | ((dtz & 2) << 6));
+		} else {
+			SEQW(PPLL_N_OTH, (n & 0xff));
+			SEQW(PPLL_M_OTH, (m & 0x1f));
+			SEQW(PPLL_P_OTH, (p & 0x03) << 2);
+		}
 	}
 
 	/* reset primary pixelPLL (playing it safe) */
@@ -238,13 +322,10 @@ status_t eng_dac_set_pix_pll(display_mode target)
 status_t eng_dac_pix_pll_find
 	(display_mode target,float * calc_pclk,uint8 * m_result,uint8 * n_result,uint8 * p_result, uint8 test)
 {
-	//fixme: add K8M800 calcs if needed..
-	switch (si->ps.card_arch) {
-		case K8M800:
-			return k8m800_dac_pix_pll_find(target, calc_pclk, m_result, n_result, p_result, test);
-		default:
-			return cle266_km400_dac_pix_pll_find(target, calc_pclk, m_result, n_result, p_result, test);
-	}
+	if (si->ps.card_arch >= K8M800)
+		return k8m800_dac_pix_pll_find(target, calc_pclk, m_result, n_result, p_result, test);
+	else
+		return cle266_km400_dac_pix_pll_find(target, calc_pclk, m_result, n_result, p_result, test);
 	return B_ERROR;
 }
 

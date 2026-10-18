@@ -2,6 +2,13 @@
 /* some bits are hacks, where PINS is not known */
 /* Author:
    Rudolf Cornelissen 7/2003-5/2006
+
+   Portions based on the OpenChrome Project (https://www.freedesktop.org/wiki/Openchrome):
+   Copyright 2005-2016 The OpenChrome Project
+   Copyright 2004-2005 The Unichrome Project
+   Copyright 1998-2003 VIA Technologies, Inc.
+   Copyright 2001-2003 S3 Graphics, Inc.
+   Authors: Kevin Brace, James Simmons, Xavier Bachelot, Thomas Hellström, Luc Verhaegen
 */
 
 #define MODULE_BIT 0x00002000
@@ -10,6 +17,62 @@
 
 static void detect_panels(void);
 static void setup_output_matrix(void);
+static void pins_unichrome_pro_fake(void)
+{
+	si->ps.f_ref = 14.31818;
+	si->ps.ext_pll = true;
+	si->ps.max_system_vco = 400;
+	si->ps.min_system_vco = 50;
+	si->ps.max_pixel_vco = 800;
+	si->ps.min_pixel_vco = 200;
+	si->ps.max_video_vco = 0;
+	si->ps.min_video_vco = 0;
+	si->ps.max_dac1_clock = 300;
+	si->ps.max_dac1_clock_8 = 300;
+	si->ps.max_dac1_clock_16 = 300;
+	si->ps.max_dac1_clock_24 = 250;
+	si->ps.max_dac1_clock_32 = 250;
+	si->ps.max_dac1_clock_32dh = 250;
+	si->ps.max_dac2_clock = 0;
+	si->ps.max_dac2_clock_8 = 0;
+	si->ps.max_dac2_clock_16 = 0;
+	si->ps.max_dac2_clock_24 = 0;
+	si->ps.max_dac2_clock_32 = 0;
+	si->ps.max_dac2_clock_32dh = 0;
+	si->ps.primary_dvi = false;
+	si->ps.secondary_dvi = false;
+	si->ps.std_engine_clock = 150;
+	si->ps.std_memory_clock = 150;
+}
+
+static void pins_chrome9_fake(void)
+{
+	si->ps.f_ref = 14.31818;
+	si->ps.ext_pll = true;
+	si->ps.max_system_vco = 600;
+	si->ps.min_system_vco = 100;
+	si->ps.max_pixel_vco = 1000;
+	si->ps.min_pixel_vco = 300;
+	si->ps.max_video_vco = 0;
+	si->ps.min_video_vco = 0;
+	si->ps.max_dac1_clock = 350;
+	si->ps.max_dac1_clock_8 = 350;
+	si->ps.max_dac1_clock_16 = 350;
+	si->ps.max_dac1_clock_24 = 350;
+	si->ps.max_dac1_clock_32 = 350;
+	si->ps.max_dac1_clock_32dh = 350;
+	si->ps.max_dac2_clock = 0;
+	si->ps.max_dac2_clock_8 = 0;
+	si->ps.max_dac2_clock_16 = 0;
+	si->ps.max_dac2_clock_24 = 0;
+	si->ps.max_dac2_clock_32 = 0;
+	si->ps.max_dac2_clock_32dh = 0;
+	si->ps.primary_dvi = false;
+	si->ps.secondary_dvi = false;
+	si->ps.std_engine_clock = 200;
+	si->ps.std_memory_clock = 200;
+}
+
 static void pins_cle266_fake(void);
 static void pinsnv5_nv5m64_fake(void);
 static void pinsnv6_fake(void);
@@ -80,7 +143,23 @@ void set_specs(void)
 	/* set failsave speeds */
 	switch (si->ps.card_arch)
 	{
+	case K8M890:
+	case P4M900:
+	case VX800:
+	case VX855:
+	case VX900:
+		pins_chrome9_fake();
+		break;
+	case K8M800:
+	case PM800:
+	case P4M800PRO:
+	case CX700:
+	case CN750:
+	case P4M890:
+		pins_unichrome_pro_fake();
+		break;
 	case CLE266:
+	case KM400:
 	default:
 		pins_cle266_fake();
 		break;
@@ -921,6 +1000,13 @@ static void getRAMsize(void)
 {
 	uint8 ram_size = 0;
 
+	/* If memory size was already probed by kernel driver, keep it */
+	if (si->ps.memory_size > 0)
+	{
+		LOG(2,("INFO: using kernel driver probed RAM size (%d MB)\n", (int)(si->ps.memory_size / (1024 * 1024))));
+		return;
+	}
+
 	if (si->ps.card_arch == CLE266)
 	{
 		ram_size = SEQR(MSIZE_CLE266);
@@ -944,8 +1030,13 @@ static void getRAMsize(void)
 		}
 		else
 		{
-			LOG(8,("INFO: unable to detect RAMsize (read $%02x), assuming 16Mb\n"));
-			si->ps.memory_size = 16 * 1024 * 1024;
+			if (si->ps.card_arch >= K8M890)
+				si->ps.memory_size = 128 * 1024 * 1024;
+			else if (si->ps.card_arch >= K8M800)
+				si->ps.memory_size = 64 * 1024 * 1024;
+			else
+				si->ps.memory_size = 16 * 1024 * 1024;
+			LOG(8,("INFO: unable to detect RAMsize (read $%02x), assuming %dMb\n", ram_size, (int)(si->ps.memory_size / (1024 * 1024))));
 		}
 	}
 }

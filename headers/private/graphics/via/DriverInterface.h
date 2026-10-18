@@ -6,6 +6,13 @@
 	Mark Watson;
 	Apsed;
 	Rudolf Cornelissen 10/2002-1/2016.
+
+	Portions based on the OpenChrome Project (https://www.freedesktop.org/wiki/Openchrome):
+	Copyright 2005-2016 The OpenChrome Project
+	Copyright 2004-2005 The Unichrome Project
+	Copyright 1998-2003 VIA Technologies, Inc.
+	Copyright 2001-2003 S3 Graphics, Inc.
+	Authors: Kevin Brace, James Simmons, Xavier Bachelot, Thomas Hellström, Luc Verhaegen
 */
 
 #ifndef DRIVERINTERFACE_H
@@ -106,6 +113,16 @@ enum
 	VT3205,
 	VT3108,
 	VT3204NC,
+	VT3118,		/* PM800 / PN800 / PM880 */
+	VT3314,		/* P4M800 Pro / VN800 / CN700 */
+	VT3157,		/* CX700 / VX700 */
+	VT3225,		/* CN750 */
+	VT3327,		/* P4M890 / VN890 / CN800 */
+	VT3336,		/* K8M890 / K8N890 */
+	VT3364,		/* P4M900 / VN896 / CN896 */
+	VT3353,		/* VX800 / VX820 */
+	VT3409,		/* VX855 / VX875 */
+	VT3410,		/* VX900 */
 	NV04,
 	NV05,
 	NV05M64,
@@ -137,6 +154,16 @@ enum
 	CLE266 = 0,
 	KM400,
 	K8M800,
+	PM800,
+	P4M800PRO,
+	CX700,
+	CN750,
+	P4M890,
+	K8M890,
+	P4M900,
+	VX800,
+	VX855,
+	VX900,
 	NV04A,
 	NV10A,
 	NV20A,

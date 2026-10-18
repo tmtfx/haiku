@@ -1,6 +1,14 @@
 /* registers definitions and macros for access to them */
 
-/* documentation can be found at http://unichrome.sourceforge.net/ */
+/* documentation can be found at http://unichrome.sourceforge.net/
+   and OpenChrome project: https://www.freedesktop.org/wiki/Openchrome/
+   Credits and Copyright:
+   Copyright 1998-2003 VIA Technologies, Inc.
+   Copyright 2001-2003 S3 Graphics, Inc.
+   Copyright 2004-2005 The Unichrome Project
+   Copyright 2005-2016 The OpenChrome Project
+   Authors: Kevin Brace, James Simmons, Xavier Bachelot, Thomas Hellström, Luc Verhaegen
+*/
 
 /* PCI_config_space */
 #define ENCFG_DEVID		0x00
@@ -584,6 +592,9 @@
 #define ENCRTCX_HTIMEXT2	0x36
 #define ENCRTCX_TVTYPE		0x3b //TVtype jumper: b1=1 = PAL, else NTSC
 #define ENCRTCX_MEMCLK		0x3d
+#define ENCRTCX_CR45		0x45
+#define ENCRTCX_CR47		0x47
+#define ENCRTCX_CR48		0x48
 //end via
 /* Nvidia specific registers: */
 #define ENCRTCX_REPAINT0	0x19
@@ -653,6 +664,7 @@
 #define ENSEQX_MSIZE_CLE266	0x34
 #define ENSEQX_MSIZE_OTHER	0x39
 #define ENSEQX_PLL_RESET	0x40
+#define ENSEQX_CR5E			0x5e
 #define ENSEQX_PPLL2_MP_CLE	0x44
 #define ENSEQX_PPLL2_N_CLE	0x45
 #define ENSEQX_PPLL_N_OTH	0x44

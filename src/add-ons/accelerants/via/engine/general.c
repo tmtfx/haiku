@@ -2,6 +2,13 @@
    Mark Watson 12/1999,
    Apsed,
    Rudolf Cornelissen 10/2002-2/2016
+
+   Portions based on the OpenChrome Project (https://www.freedesktop.org/wiki/Openchrome):
+   Copyright 2005-2016 The OpenChrome Project
+   Copyright 2004-2005 The Unichrome Project
+   Copyright 1998-2003 VIA Technologies, Inc.
+   Copyright 2001-2003 S3 Graphics, Inc.
+   Authors: Kevin Brace, James Simmons, Xavier Bachelot, Thomas Hellström, Luc Verhaegen
 */
 
 #define MODULE_BIT 0x00008000
@@ -90,7 +97,7 @@ status_t eng_general_powerup()
 {
 	status_t status;
 
-	LOG(1,("POWERUP: Haiku VIA Accelerant 0.19 running.\n"));
+	LOG(1,("POWERUP: Haiku VIA Accelerant 0.20 running.\n"));
 
 	/* preset no laptop */
 	si->ps.laptop = false;
@@ -127,6 +134,66 @@ status_t eng_general_powerup()
 		si->ps.card_type = VT7205;
 		si->ps.card_arch = KM400;
 		LOG(4,("POWERUP: Detected VIA KM400 Unichrome (VT7205)\n"));
+		status = engxx_general_powerup();
+		break;
+	case 0x31181106:
+		si->ps.card_type = VT3118;
+		si->ps.card_arch = PM800;
+		LOG(4,("POWERUP: Detected VIA PM800 / PN800 / PM880 (VT3118)\n"));
+		status = engxx_general_powerup();
+		break;
+	case 0x33441106:
+		si->ps.card_type = VT3314;
+		si->ps.card_arch = P4M800PRO;
+		LOG(4,("POWERUP: Detected VIA P4M800 Pro / VN800 / CN700 (VT3314)\n"));
+		status = engxx_general_powerup();
+		break;
+	case 0x31571106:
+		si->ps.card_type = VT3157;
+		si->ps.card_arch = CX700;
+		LOG(4,("POWERUP: Detected VIA CX700 / VX700 (VT3157)\n"));
+		status = engxx_general_powerup();
+		break;
+	case 0x32251106:
+		si->ps.card_type = VT3225;
+		si->ps.card_arch = CN750;
+		LOG(4,("POWERUP: Detected VIA CN750 (VT3225)\n"));
+		status = engxx_general_powerup();
+		break;
+	case 0x33431106:
+		si->ps.card_type = VT3327;
+		si->ps.card_arch = P4M890;
+		LOG(4,("POWERUP: Detected VIA P4M890 / VN890 / CN800 (VT3327)\n"));
+		status = engxx_general_powerup();
+		break;
+	case 0x32301106:
+		si->ps.card_type = VT3336;
+		si->ps.card_arch = K8M890;
+		LOG(4,("POWERUP: Detected VIA K8M890 / K8N890 (VT3336)\n"));
+		status = engxx_general_powerup();
+		break;
+	case 0x33711106:
+		si->ps.card_type = VT3364;
+		si->ps.card_arch = P4M900;
+		LOG(4,("POWERUP: Detected VIA P4M900 / VN896 / CN896 (VT3364)\n"));
+		status = engxx_general_powerup();
+		break;
+	case 0x11221106:
+		si->ps.card_type = VT3353;
+		si->ps.card_arch = VX800;
+		LOG(4,("POWERUP: Detected VIA VX800 / VX820 Chrome9 HC3 (VT3353)\n"));
+		status = engxx_general_powerup();
+		break;
+	case 0x51221106:
+		si->ps.card_type = VT3409;
+		si->ps.card_arch = VX855;
+		LOG(4,("POWERUP: Detected VIA VX855 / VX875 Chrome9 HCM (VT3409)\n"));
+		status = engxx_general_powerup();
+		break;
+	case 0x71221106:
+		si->ps.card_type = VT3410;
+		si->ps.card_arch = VX900;
+		LOG(4,("POWERUP: Detected VIA VX900 Chrome9 HD (VT3410)\n"));
 		status = engxx_general_powerup();
 		break;
 	default:
@@ -454,6 +521,22 @@ static status_t eng_general_bios_to_powergraphics()
 	/* unlock (extended) registers for R/W access */
 	SEQW(LOCK, 0x01);
 	CRTCW(VSYNCE ,(CRTCR(VSYNCE) & 0x7f));
+
+	/* enable MMIO based on architecture (OpenChrome logic) */
+	if (si->ps.card_arch >= CX700)
+		SEQW(MMIO_EN, (SEQR(MMIO_EN) | 0x08));
+	else
+		SEQW(MMIO_EN, (SEQR(MMIO_EN) | 0x68));
+
+	/* unprotect CRT timing registers: bit 4 for VX855/VX900, bit 0 for earlier */
+	if (si->ps.card_arch >= VX855)
+		CRTCW(CR47, (CRTCR(CR47) & ~0x10));
+	else
+		CRTCW(CR47, (CRTCR(CR47) & ~0x01));
+
+	/* ensure DAC is not shut down on CX700 and VX series */
+	if (si->ps.card_arch == CX700 || si->ps.card_arch >= VX800)
+		SEQW(CR5E, (SEQR(CR5E) & ~0x01));
 
 	/* turn off both displays and the hardcursors (also disables transfers) */
 	head1_dpms(false, false, false);

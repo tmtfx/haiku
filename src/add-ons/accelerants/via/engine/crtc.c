@@ -1,6 +1,13 @@
 /* CTRC functionality */
 /* Author:
    Rudolf Cornelissen 11/2002-9/2005
+
+   Portions based on the OpenChrome Project (https://www.freedesktop.org/wiki/Openchrome):
+   Copyright 2005-2016 The OpenChrome Project
+   Copyright 2004-2005 The Unichrome Project
+   Copyright 1998-2003 VIA Technologies, Inc.
+   Copyright 2001-2003 S3 Graphics, Inc.
+   Authors: Kevin Brace, James Simmons, Xavier Bachelot, Thomas Hellström, Luc Verhaegen
 */
 
 #define MODULE_BIT 0x00040000
@@ -27,11 +34,13 @@ status_t eng_crtc_validate_timing(
 	if (*ht   > ((0x01ff + 5) << 3)) *ht   = ((0x01ff + 5) << 3);
 
 	/* NOTE: keep horizontal timing at multiples of 8! */
-	/* confine to a reasonable width */
+	/* confine to a reasonable width (VX900 supports up to 4096, others 2048) */
 	if (*hd_e < 640) *hd_e = 640;
-	/* assuming all VIA unichrome cards to have same max. constraint.. */
-	//fixme: checkout correct max...
-	if (*hd_e > 1600) *hd_e = 1600;
+	if (si->ps.card_arch == VX900) {
+		if (*hd_e > 4096) *hd_e = 4096;
+	} else {
+		if (*hd_e > 2048) *hd_e = 2048;
+	}
 
 	/* if hor. total does not leave room for a sensible sync pulse, increase it! */
 	if (*ht < (*hd_e + 80)) *ht = (*hd_e + 80);
@@ -54,11 +63,9 @@ status_t eng_crtc_validate_timing(
 	if (*vs_e >  0x7ff     ) *vs_e =  0x7ff     ;
 	if (*vt   > (0x7ff + 2)) *vt   = (0x7ff + 2);
 
-	/* confine to a reasonable height */
+	/* confine to a reasonable height (OpenChrome supports up to 2048) */
 	if (*vd_e < 480) *vd_e = 480;
-	/* assuming all VIA unichrome cards to have same max. constraint.. */
-	//fixme: checkout correct max...
-	if (*vd_e > 1200) *vd_e = 1200;
+	if (*vd_e > 2048) *vd_e = 2048;
 
 	/*if vertical total does not leave room for a sync pulse, increase it!*/
 	if (*vt < (*vd_e + 3)) *vt = (*vd_e + 3);
@@ -243,6 +250,34 @@ status_t eng_crtc_set_timing(display_mode target)
 			((vblnk_s & 0x400) >> (10 - 3)) |
 			((linecomp & 0x2000) >> (13 - 4))
 			));
+
+		/* on VX900: Horizontal Display End Bit 8 and Horizontal Blank Start Bit 8 are in CR45 */
+		if (si->ps.card_arch == VX900) {
+			CRTCW(CR45, (CRTCR(CR45) & ~0x06) |
+				(((hdisp_e >> 8) & 0x01) << 1) |
+				(((hblnk_s >> 8) & 0x01) << 2));
+		}
+
+		/* unprotect CRT timing registers: bit 4 for VX855/VX900, bit 0 for earlier */
+		if (si->ps.card_arch >= VX855)
+			CRTCW(CR47, (CRTCR(CR47) & ~0x10));
+		else
+			CRTCW(CR47, (CRTCR(CR47) & ~0x01));
+
+		/* Set horizontal display fetch count (SR1C and SR1D) as in OpenChrome */
+		{
+			uint8 bpp = 1;
+			switch (target.space) {
+				case B_RGB15_LITTLE:
+				case B_RGB16_LITTLE: bpp = 2; break;
+				case B_RGB24_LITTLE: bpp = 3; break;
+				case B_RGB32_LITTLE: bpp = 4; break;
+				default: bpp = 1; break;
+			}
+			uint32 fetch = (target.timing.h_display * bpp) >> 4;
+			SEQW(FETCHCNTLO, fetch & 0xff);
+			SEQW(FETCHCNTHI, (SEQR(FETCHCNTHI) & ~0x03) | ((fetch >> 8) & 0x03));
+		}
 
 		/* setup HSYNC & VSYNC polarity */
 		LOG(2,("CRTC: sync polarity: "));
@@ -602,7 +637,13 @@ status_t eng_crtc_set_display_start(uint32 startadd,uint8 bpp)
 	/* (VIA: startadress in 64bit words (b3 - b16): checked CLE266) */
 	CRTCW(FBSTADDL, ((startadd & 0x000001f8) >> 1));
 	CRTCW(FBSTADDH, ((startadd & 0x0001fe00) >> 9));
-	/* set extended bits: (b17-24) */
+
+	/* set higher overflow bits on Chrome9/PCIe chips (bits 24-28): CR48 */
+	if (si->ps.card_arch >= K8M890) {
+		CRTCW(CR48, (CRTCR(CR48) & ~0x1f) | ((startadd >> 25) & 0x1f));
+	}
+
+	/* set extended bits: (b17-24) - fire bits, written last */
 	CRTCW(FBSTADDE, ((startadd & 0x01fe0000) >> 17));
 
 	/* VIA doesn't support pixelpanning (checked CLE266). */
