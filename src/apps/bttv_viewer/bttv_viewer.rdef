@@ -1,0 +1,13 @@
+resource app_signature "application/x-vnd.Haiku-BttvViewer";
+
+resource app_version {
+	major  = 1,
+	middle = 0,
+	minor  = 0,
+	variety = B_APPV_BETA,
+	internal = 0,
+	short_info = "BttvViewer",
+	long_info = "Video viewer for Bt848/Bt878 capture cards on Haiku"
+};
+
+resource app_flags B_SINGLE_LAUNCH;
