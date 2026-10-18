@@ -553,15 +553,20 @@ Window::CopyContents(BRegion* region, int32 xOffset, int32 yOffset)
 
 	BRegion* newDirty = fRegionPool.GetRegion(*region);
 
-	// clip the region to the visible contents at the
-	// source and destination location (note that VisibleContentRegion()
-	// is used once to make sure it is valid, then fVisibleContentRegion
-	// is used directly)
-	region->IntersectWith(&VisibleContentRegion());
+	// clip the region to the contents at the
+	// source and destination location
+	if (HasBackingStore()) {
+		region->IntersectWith(&fContentRegion);
+	} else {
+		region->IntersectWith(&VisibleContentRegion());
+	}
 	if (region->CountRects() > 0) {
 		// Constrain to content region at destination
 		region->OffsetBy(xOffset, yOffset);
-		region->IntersectWith(&fVisibleContentRegion);
+		if (HasBackingStore())
+			region->IntersectWith(&fContentRegion);
+		else
+			region->IntersectWith(&fVisibleContentRegion);
 		if (region->CountRects() > 0) {
 			// if the region still contains any rects
 			// offset to source location again
@@ -627,7 +632,10 @@ Window::CopyContents(BRegion* region, int32 xOffset, int32 yOffset)
 	// since these parts will now be in newDirty anyways
 	// (with the right offset)
 	newDirty->OffsetBy(xOffset, yOffset);
-	newDirty->IntersectWith(&fVisibleContentRegion);
+	if (HasBackingStore())
+		newDirty->IntersectWith(&fContentRegion);
+	else
+		newDirty->IntersectWith(&fVisibleContentRegion);
 	if (newDirty->CountRects() > 0)
 		ProcessDirtyRegion(*newDirty);
 
