@@ -967,10 +967,12 @@ DrawingEngine::FillRegion(BRegion& r, const rgb_color& color)
 	if (fOriginX != 0 || fOriginY != 0)
 		localRegion.OffsetBy(-fOriginX, -fOriginY);
 
-	BRect frame = localRegion.Frame();
-	if (!fPainter->Bounds().Contains(frame)) {
+	BRegion boundsRegion(fPainter->Bounds());
+	localRegion.IntersectWith(&boundsRegion);
+	if (localRegion.CountRects() == 0)
 		return;
-	}
+
+	BRect frame = localRegion.Frame();
 
 	AutoFloatingOverlaysHider _(fGraphicsCard, frame);
 
