@@ -4025,7 +4025,6 @@ Desktop::_TriggerWindowRedrawing(BRegion& dirtyRegion, BRegion& exposeRegion)
 	for (Window* window = CurrentWindows().LastWindow(); window != NULL;
 			window = window->PreviousWindow(fCurrentWorkspace)) {
 		if (!window->IsHidden()
-			&& (!fCompositor2DEnabled || !window->HasBackingStore())
 			&& dirtyRegion.Intersects(window->VisibleRegion().Frame()))
 			window->ProcessDirtyRegion(dirtyRegion, exposeRegion);
 	}
