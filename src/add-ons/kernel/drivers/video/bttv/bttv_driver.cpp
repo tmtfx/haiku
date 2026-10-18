@@ -5,11 +5,38 @@
 #include <PCI.h>
 #include <OS.h>
 #include <fcntl.h>
-
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "bttv_driver.h"
+
+static bool sEnableKernelLog = true;
+static const char* const kKernelLogPath = "/boot/home/bttv_kernel.log";
+
+
+static void
+bttv_klog(const char* fmt, ...)
+{
+	if (!sEnableKernelLog)
+		return;
+
+	char buffer[512];
+	va_list args;
+	va_start(args, fmt);
+	vsnprintf(buffer, sizeof(buffer), fmt, args);
+	va_end(args);
+
+	dprintf("bttv: %s", buffer);
+
+	int fd = open(kKernelLogPath, O_WRONLY | O_CREAT | O_APPEND, 0666);
+	if (fd >= 0) {
+		write(fd, buffer, strlen(buffer));
+		fsync(fd);
+		close(fd);
+	}
+}
 
 
 #define DRIVER_NAME				"bttv"
@@ -630,9 +657,13 @@ bt878_build_risc_program(bt878_device* device)
 static status_t
 bt878_set_pll(bt878_device* device)
 {
+	bttv_klog("[KERNEL] bt878_set_pll: ENTER (dev_id=0x%04x, std=%d)\n",
+		device->pci.device_id, device->video_standard);
+
 	// Bt848 and Bt849 have no on-chip PLL; always run directly from crystal
 	if (device->pci.device_id == BT848_DEVICE_ID
 		|| device->pci.device_id == BT849_DEVICE_ID) {
+		bttv_klog("[KERNEL] bt878_set_pll: Bt848/849 detected, using crystal clock (TGCTRL=0x00)\n");
 		bt878_write8(device, BT848_TGCTRL, 0x00);
 		bt878_write8(device, BT848_PLL_XCI, 0x00);
 		return B_OK;
@@ -640,14 +671,13 @@ bt878_set_pll(bt878_device* device)
 
 	if (device->video_standard == BTV_STD_NTSC) {
 		// NTSC crystal on ATI TV Wonder VE is 28.636363 MHz; PLL can sleep
+		bttv_klog("[KERNEL] bt878_set_pll: NTSC standard, using crystal clock (TGCTRL=0x00)\n");
 		bt878_write8(device, BT848_TGCTRL, 0x00);
 		bt878_write8(device, BT848_PLL_XCI, 0x00);
 		return B_OK;
 	}
 
-	// PAL standard requires 35.468950 MHz clock (CLKx2 = 2 * 17.734475 MHz)
-	// Input crystal fin = 28.636363 MHz, target fout = 35.468950 MHz
-	// PAL parameters: PLL_X = 1 (pre-divider 2), PLL_I = 0x0e, PLL_F = 0xdcf9, PLL_C = 0
+	bttv_klog("[KERNEL] bt878_set_pll: PAL standard on Bt878/879, programming PLL...\n");
 	uint32 fin = 28636363 / 4;
 	uint32 fout = 35468950 / 4;
 
@@ -670,13 +700,14 @@ bt878_set_pll(bt878_device* device)
 		if ((bt878_read8(device, BT848_DSTATUS) & BT848_DSTATUS_PLOCK) != 0) {
 			bt878_write8(device, BT848_DSTATUS, 0x00);
 		} else {
-			// PLL locked: enable PLL clock for timing generator
+			bttv_klog("[KERNEL] bt878_set_pll: PLL locked successfully (TGCTRL=0x08)\n");
 			bt878_write8(device, BT848_TGCTRL, 0x08);
 			return B_OK;
 		}
 	}
 
 	// If PLL failed to lock, fall back to crystal clock rather than killing the clock with 0x08
+	bttv_klog("[KERNEL] bt878_set_pll: PLL timed out! Falling back to crystal clock (TGCTRL=0x00)\n");
 	bt878_write8(device, BT848_TGCTRL, 0x00);
 	return B_TIMED_OUT;
 }
@@ -685,11 +716,14 @@ bt878_set_pll(bt878_device* device)
 static void
 bt878_program_capture(bt878_device* device)
 {
+	bttv_klog("[KERNEL] bt878_program_capture: ENTER\n");
 	bt878_set_pll(device);
 
+	bttv_klog("[KERNEL] bt878_program_capture: computing geometry...\n");
 	bt878_geometry geometry;
 	bt878_compute_geometry(device, &geometry);
 
+	bttv_klog("[KERNEL] bt878_program_capture: writing geometry registers...\n");
 	uint8 control = 0;
 	if (device->input == BTV_INPUT_SVIDEO)
 		control |= BT848_CONTROL_COMP;
@@ -756,46 +790,68 @@ bt878_reset(bt878_device* device)
 static status_t
 bt878_start_capture_locked(bt878_device* device)
 {
-	if (device->capturing)
+	bttv_klog("[KERNEL] bt878_start_capture_locked: ENTER (capturing=%d)\n", device->capturing);
+	if (device->capturing) {
+		bttv_klog("[KERNEL] bt878_start_capture_locked: already capturing -> B_BUSY\n");
 		return B_BUSY;
+	}
 
 	device->next_buffer = 0;
 	device->last_completed_buffer = 0;
 	device->frame_ready = false;
 
+	bttv_klog("[KERNEL] bt878_start_capture_locked: draining semaphores...\n");
 	int32 semCount;
 	get_sem_count(device->frame_sem, &semCount);
 	if (semCount > 0)
 		acquire_sem_etc(device->frame_sem, semCount, 0, 0);
 
+	bttv_klog("[KERNEL] bt878_start_capture_locked: calling bt878_build_risc_program...\n");
 	status_t status = bt878_build_risc_program(device);
-	if (status != B_OK)
+	if (status != B_OK) {
+		bttv_klog("[KERNEL] bt878_start_capture_locked: bt878_build_risc_program FAILED (%s)\n", strerror(status));
 		return status;
+	}
+	bttv_klog("[KERNEL] bt878_start_capture_locked: risc program built, phys=0x%" B_PRIxPHYSADDR "\n",
+		device->risc_buffer.phys);
 
+	bttv_klog("[KERNEL] bt878_start_capture_locked: calling bt878_program_capture...\n");
 	bt878_program_capture(device);
+	bttv_klog("[KERNEL] bt878_start_capture_locked: bt878_program_capture done\n");
 
-	// Clear any pending interrupt status bits before installing handler
+	bttv_klog("[KERNEL] bt878_start_capture_locked: clearing INT_STAT...\n");
 	bt878_write32(device, BT848_INT_STAT, 0xffffffff);
 
-	// Install interrupt handler dynamically only while capture is active
+	bttv_klog("[KERNEL] bt878_start_capture_locked: installing interrupt handler on irq %d...\n",
+		device->pci.u.h0.interrupt_line);
 	status = install_io_interrupt_handler(device->pci.u.h0.interrupt_line,
 		&bt878_interrupt, device, 0);
-	if (status != B_OK)
+	if (status != B_OK) {
+		bttv_klog("[KERNEL] bt878_start_capture_locked: install_io_interrupt_handler FAILED (%s)\n", strerror(status));
 		return status;
+	}
+	bttv_klog("[KERNEL] bt878_start_capture_locked: interrupt handler installed\n");
 
 	// Enable only frame completion IRQ (RISCI), synchronization errors, and PCI burst fix.
-	// We intentionally do NOT enable OFLOW, FDSR, FMTCHG, or PABORT to avoid interrupt storms.
+	bttv_klog("[KERNEL] bt878_start_capture_locked: setting INT_MASK...\n");
 	bt878_write32(device, BT848_INT_MASK,
 		BT848_INT_RISCI | BT848_INT_SCERR | BT848_INT_OCERR | BT848_INT_ETBF);
 
+	bttv_klog("[KERNEL] bt878_start_capture_locked: writing RISC_STRT_ADD (0x%" B_PRIx32 ")...\n",
+		(uint32)device->risc_buffer.phys);
 	bt878_write32(device, BT848_RISC_STRT_ADD, (uint32)device->risc_buffer.phys);
+
+	bttv_klog("[KERNEL] bt878_start_capture_locked: writing GPIO_DMA_CTL (FIFO+RISC enable)...\n");
 	bt878_write32(device, BT848_GPIO_DMA_CTL,
 		BT848_GPIO_DMA_CTL_FIFO_ENABLE | BT848_GPIO_DMA_CTL_RISC_ENABLE);
+
+	bttv_klog("[KERNEL] bt878_start_capture_locked: writing CAP_CTL (EVEN+ODD enable)...\n");
 	bt878_write8(device, BT848_CAP_CTL,
 		BT848_CAP_CTL_CAPTURE_EVEN | BT848_CAP_CTL_CAPTURE_ODD);
 
 	device->capturing = true;
 	device->frame_ready = false;
+	bttv_klog("[KERNEL] bt878_start_capture_locked: EXIT SUCCESS\n");
 	return B_OK;
 }
 
@@ -803,24 +859,31 @@ bt878_start_capture_locked(bt878_device* device)
 static void
 bt878_stop_capture_locked(bt878_device* device)
 {
-	if (!device->capturing)
+	bttv_klog("[KERNEL] bt878_stop_capture_locked: ENTER (capturing=%d)\n", device->capturing);
+	if (!device->capturing) {
+		bttv_klog("[KERNEL] bt878_stop_capture_locked: not capturing, exit\n");
 		return;
+	}
 
+	bttv_klog("[KERNEL] bt878_stop_capture_locked: writing CAP_CTL=0, INT_MASK=0, DMA_CTL=0...\n");
 	bt878_write8(device, BT848_CAP_CTL, 0);
 	bt878_write32(device, BT848_INT_MASK, 0);
 	bt878_write32(device, BT848_GPIO_DMA_CTL, 0);
 	bt878_write32(device, BT848_INT_STAT, 0xffffffff);
 
+	bttv_klog("[KERNEL] bt878_stop_capture_locked: removing interrupt handler on irq %d...\n",
+		device->pci.u.h0.interrupt_line);
 	remove_io_interrupt_handler(device->pci.u.h0.interrupt_line,
 		&bt878_interrupt, device);
 
 	device->capturing = false;
 	device->frame_ready = false;
 
-	// Wake up any thread waiting in bt878_read without invalidating the semaphore
+	bttv_klog("[KERNEL] bt878_stop_capture_locked: waking up waiting threads...\n");
 	int32 semCount;
 	if (get_sem_count(device->frame_sem, &semCount) == B_OK && semCount < 0)
 		release_sem_etc(device->frame_sem, -semCount, 0);
+	bttv_klog("[KERNEL] bt878_stop_capture_locked: EXIT DONE\n");
 }
 
 
@@ -940,23 +1003,32 @@ bt878_interrupt(void* data)
 static status_t
 bt878_open(const char* name, uint32 flags, void** cookie)
 {
+	bttv_klog("[KERNEL] bt878_open: ENTER (name=%s, flags=0x%" B_PRIx32 ")\n", name, flags);
 	bt878_device* device = bt878_find_device(name);
-	if (device == NULL)
+	if (device == NULL) {
+		bttv_klog("[KERNEL] bt878_open: device not found -> B_NAME_NOT_FOUND\n");
 		return B_NAME_NOT_FOUND;
+	}
 
-	if (atomic_add(&device->open_count, 1) == 0) {
+	int32 prevCount = atomic_add(&device->open_count, 1);
+	bttv_klog("[KERNEL] bt878_open: open_count was %" B_PRId32 "\n", prevCount);
+	if (prevCount == 0) {
 		device->non_blocking = (flags & O_NONBLOCK) != 0;
+		bttv_klog("[KERNEL] bt878_open: first open, calling bt878_initialize...\n");
 		status_t status = bt878_initialize(device);
 		if (status != B_OK) {
+			bttv_klog("[KERNEL] bt878_open: bt878_initialize FAILED (%s)\n", strerror(status));
 			atomic_add(&device->open_count, -1);
 			return status;
 		}
+		bttv_klog("[KERNEL] bt878_open: bt878_initialize SUCCESS\n");
 	} else {
 		if ((flags & O_NONBLOCK) != 0)
 			device->non_blocking = true;
 	}
 
 	*cookie = device;
+	bttv_klog("[KERNEL] bt878_open: EXIT SUCCESS (cookie=%p)\n", device);
 	return B_OK;
 }
 
@@ -964,6 +1036,7 @@ bt878_open(const char* name, uint32 flags, void** cookie)
 static status_t
 bt878_close(void* cookie)
 {
+	bttv_klog("[KERNEL] bt878_close: cookie=%p\n", cookie);
 	return cookie != NULL ? B_OK : B_BAD_VALUE;
 }
 
@@ -971,12 +1044,18 @@ bt878_close(void* cookie)
 static status_t
 bt878_free(void* cookie)
 {
+	bttv_klog("[KERNEL] bt878_free: cookie=%p\n", cookie);
 	bt878_device* device = (bt878_device*)cookie;
 	if (device == NULL)
 		return B_BAD_VALUE;
 
-	if (atomic_add(&device->open_count, -1) == 1)
+	int32 prevCount = atomic_add(&device->open_count, -1);
+	bttv_klog("[KERNEL] bt878_free: open_count was %" B_PRId32 "\n", prevCount);
+	if (prevCount == 1) {
+		bttv_klog("[KERNEL] bt878_free: last open closed, calling bt878_shutdown...\n");
 		bt878_shutdown(device);
+		bttv_klog("[KERNEL] bt878_free: bt878_shutdown done\n");
+	}
 
 	return B_OK;
 }
@@ -1042,6 +1121,8 @@ bt878_control(void* cookie, uint32 op, void* arg, size_t length)
 	if (device == NULL)
 		return B_BAD_VALUE;
 
+	bttv_klog("[KERNEL] bt878_control: op=0x%" B_PRIx32 "\n", op);
+
 	switch (op) {
 		case B_SET_NONBLOCKING_IO:
 			device->non_blocking = true;
@@ -1092,6 +1173,7 @@ bt878_control(void* cookie, uint32 op, void* arg, size_t length)
 
 		case BTV_SET_CAPTURE_FORMAT:
 		{
+			bttv_klog("[KERNEL] bt878_control: BTV_SET_CAPTURE_FORMAT\n");
 			bttv_capture_format format;
 			if (user_memcpy(&format, arg, sizeof(format)) != B_OK)
 				return B_BAD_ADDRESS;
@@ -1115,6 +1197,7 @@ bt878_control(void* cookie, uint32 op, void* arg, size_t length)
 
 		case BTV_SET_INPUT:
 		{
+			bttv_klog("[KERNEL] bt878_control: BTV_SET_INPUT\n");
 			uint32 input = 0;
 			if (user_memcpy(&input, arg, sizeof(input)) != B_OK)
 				return B_BAD_ADDRESS;
@@ -1135,6 +1218,7 @@ bt878_control(void* cookie, uint32 op, void* arg, size_t length)
 
 		case BTV_SET_CONTROLS:
 		{
+			bttv_klog("[KERNEL] bt878_control: BTV_SET_CONTROLS\n");
 			bttv_video_controls controls;
 			if (user_memcpy(&controls, arg, sizeof(controls)) != B_OK)
 				return B_BAD_ADDRESS;
@@ -1151,9 +1235,11 @@ bt878_control(void* cookie, uint32 op, void* arg, size_t length)
 		}
 
 		case BTV_START_CAPTURE:
+			bttv_klog("[KERNEL] bt878_control: BTV_START_CAPTURE\n");
 			return bt878_start_capture_locked(device);
 
 		case BTV_STOP_CAPTURE:
+			bttv_klog("[KERNEL] bt878_control: BTV_STOP_CAPTURE\n");
 			bt878_stop_capture_locked(device);
 			return B_OK;
 

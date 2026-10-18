@@ -13,8 +13,35 @@
 #include <TimeSource.h>
 
 #include <algorithm>
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+
+static bool sEnableProducerLog = true;
+static const char* const kProducerLogPath = "/boot/home/bttv_media_addon.log";
+
+
+static void
+producer_log(const char* fmt, ...)
+{
+	if (!sEnableProducerLog)
+		return;
+
+	char buffer[512];
+	va_list args;
+	va_start(args, fmt);
+	vsnprintf(buffer, sizeof(buffer), fmt, args);
+	va_end(args);
+
+	FILE* f = fopen(kProducerLogPath, "a");
+	if (f != NULL) {
+		fputs(buffer, f);
+		fflush(f);
+		fsync(fileno(f));
+		fclose(f);
+	}
+}
+
 
 static const uint32 kMaxFrameWidth = 720;
 static const uint32 kMaxFrameHeightPAL = 576;
@@ -54,32 +81,42 @@ BttvProducer::BttvProducer(BMediaAddOn* addOn, const char* name, int32 internalI
 	fHueLastChange(0),
 	fFrameSequence(0)
 {
+	producer_log("[PRODUCER] BttvProducer::BttvProducer: ENTER (driver=%s)\n", driverPath);
+
 	AddNodeKind(B_PHYSICAL_INPUT);
 	fOutput = media_output();
 	memset(&fConnectedFormat, 0, sizeof(fConnectedFormat));
 	memset(&fCaptureFormat, 0, sizeof(fCaptureFormat));
 	memset(&fCardInfo, 0, sizeof(fCardInfo));
 
+	producer_log("[PRODUCER] BttvProducer: calling _OpenDriver()...\n");
 	fInitStatus = _OpenDriver();
-	if (fInitStatus != B_OK)
+	if (fInitStatus != B_OK) {
+		producer_log("[PRODUCER] BttvProducer: _OpenDriver() FAILED (%s)\n", strerror(fInitStatus));
 		return;
+	}
+	producer_log("[PRODUCER] BttvProducer: _OpenDriver() SUCCESS, fd=%d\n", fDriverFD);
 
 	if (ioctl(fDriverFD, BTV_GET_CARD_INFO, &fCardInfo, sizeof(fCardInfo)) < 0) {
+		producer_log("[PRODUCER] BttvProducer: BTV_GET_CARD_INFO ioctl failed, using fallback\n");
 		memset(&fCardInfo, 0, sizeof(fCardInfo));
 		fCardInfo.capabilities = BTV_CAP_VIDEO_CAPTURE | BTV_CAP_HAS_COMPOSITE;
 		fCardInfo.video_inputs = 2;
 	}
 
+	producer_log("[PRODUCER] BttvProducer: calling _RefreshCaptureFormat()...\n");
 	fInitStatus = _RefreshCaptureFormat();
 	if (fInitStatus != B_OK)
 		return;
 
 	fCaptureFormat.input = BTV_INPUT_COMPOSITE;
 
+	producer_log("[PRODUCER] BttvProducer: calling _ApplyCaptureFormat()...\n");
 	fInitStatus = _ApplyCaptureFormat();
 	if (fInitStatus != B_OK)
 		return;
 
+	producer_log("[PRODUCER] BttvProducer: calling _RefreshControls()...\n");
 	fInitStatus = _RefreshControls();
 	if (fInitStatus != B_OK)
 		return;
@@ -93,6 +130,7 @@ BttvProducer::BttvProducer(BMediaAddOn* addOn, const char* name, int32 internalI
 	fBrightnessLastChange = fContrastLastChange = fSaturationLastChange
 		= fHueLastChange = fInputLastChange;
 	fInitStatus = B_OK;
+	producer_log("[PRODUCER] BttvProducer::BttvProducer: EXIT SUCCESS\n");
 }
 
 
@@ -1024,40 +1062,60 @@ BttvProducer::_SpecializeFormat(media_format* format,
 void
 BttvProducer::_HandleStart()
 {
-	if (fRunning)
-		return;
+	producer_log("[PRODUCER] BttvProducer::_HandleStart: ENTER (running=%d, fd=%d)\n",
+		fRunning, fDriverFD);
 
-	if (ioctl(fDriverFD, BTV_START_CAPTURE, NULL, 0) < 0)
+	if (fRunning) {
+		producer_log("[PRODUCER] BttvProducer::_HandleStart: already running\n");
+		return;
+	}
+
+	producer_log("[PRODUCER] BttvProducer::_HandleStart: calling ioctl(BTV_START_CAPTURE)...\n");
+	int ret = ioctl(fDriverFD, BTV_START_CAPTURE, NULL, 0);
+	producer_log("[PRODUCER] BttvProducer::_HandleStart: ioctl(BTV_START_CAPTURE) returned %d\n", ret);
+	if (ret < 0)
 		return;
 
 	fFrameSequence = 0;
 	fRunning = true;
+	producer_log("[PRODUCER] BttvProducer::_HandleStart: spawning capture thread...\n");
 	fCaptureThread = spawn_thread(&_CaptureThreadEntry, "bttv capture",
 		B_DISPLAY_PRIORITY, this);
 	if (fCaptureThread < B_OK) {
+		producer_log("[PRODUCER] BttvProducer::_HandleStart: spawn_thread FAILED\n");
 		fRunning = false;
 		ioctl(fDriverFD, BTV_STOP_CAPTURE, NULL, 0);
 		return;
 	}
 
+	producer_log("[PRODUCER] BttvProducer::_HandleStart: resuming capture thread %" B_PRId32 "...\n",
+		fCaptureThread);
 	resume_thread(fCaptureThread);
+	producer_log("[PRODUCER] BttvProducer::_HandleStart: EXIT SUCCESS\n");
 }
 
 
 void
 BttvProducer::_HandleStop()
 {
+	producer_log("[PRODUCER] BttvProducer::_HandleStop: ENTER (running=%d)\n", fRunning);
 	if (!fRunning)
 		return;
 
 	fRunning = false;
+	producer_log("[PRODUCER] BttvProducer::_HandleStop: calling ioctl(BTV_STOP_CAPTURE)...\n");
 	ioctl(fDriverFD, BTV_STOP_CAPTURE, NULL, 0);
+	producer_log("[PRODUCER] BttvProducer::_HandleStop: ioctl(BTV_STOP_CAPTURE) returned\n");
 
 	if (fCaptureThread >= B_OK) {
+		producer_log("[PRODUCER] BttvProducer::_HandleStop: waiting for thread %" B_PRId32 "...\n",
+			fCaptureThread);
 		status_t result = B_OK;
 		wait_for_thread(fCaptureThread, &result);
+		producer_log("[PRODUCER] BttvProducer::_HandleStop: thread terminated\n");
 		fCaptureThread = -1;
 	}
+	producer_log("[PRODUCER] BttvProducer::_HandleStop: EXIT\n");
 }
 
 
@@ -1103,6 +1161,9 @@ BttvProducer::_CaptureThreadEntry(void* cookie)
 int32
 BttvProducer::_CaptureThread()
 {
+	producer_log("[PRODUCER] BttvProducer::_CaptureThread: thread started\n");
+	uint64 frameIndex = 0;
+
 	while (fRunning) {
 		if (!fConnected || !fEnabled) {
 			snooze(20000);
@@ -1131,7 +1192,18 @@ BttvProducer::_CaptureThread()
 			continue;
 		}
 
+		if (frameIndex < 5) {
+			producer_log("[PRODUCER] BttvProducer::_CaptureThread: calling read(size=%" B_PRIu32 ")...\n",
+				captureFormat.frame_size);
+		}
+
 		ssize_t bytesRead = read(fDriverFD, buffer->Data(), captureFormat.frame_size);
+
+		if (frameIndex < 5) {
+			producer_log("[PRODUCER] BttvProducer::_CaptureThread: read returned %" B_PRIdSSIZE "\n",
+				bytesRead);
+		}
+
 		if (bytesRead < 0) {
 			buffer->Recycle();
 			snooze(2000);
@@ -1143,6 +1215,7 @@ BttvProducer::_CaptureThread()
 			continue;
 		}
 
+		frameIndex++;
 		bigtime_t processStart = system_time();
 
 		media_header* header = buffer->Header();
@@ -1166,5 +1239,7 @@ BttvProducer::_CaptureThread()
 		fProcessingLatency = system_time() - processStart;
 	}
 
+	producer_log("[PRODUCER] BttvProducer::_CaptureThread: thread exiting, totalFrames=%" B_PRIu64 "\n",
+		frameIndex);
 	return B_OK;
 }

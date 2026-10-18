@@ -6,8 +6,35 @@
 #include <ParameterWeb.h>
 #include <Screen.h>
 #include <SeparatorView.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
+
+static bool sEnableMainWindowLog = true;
+static const char* const kMainWindowLogPath = "/boot/home/bttv_viewer.log";
+
+
+static void
+viewer_log(const char* fmt, ...)
+{
+	if (!sEnableMainWindowLog)
+		return;
+
+	char buffer[512];
+	va_list args;
+	va_start(args, fmt);
+	vsnprintf(buffer, sizeof(buffer), fmt, args);
+	va_end(args);
+
+	FILE* f = fopen(kMainWindowLogPath, "a");
+	if (f != NULL) {
+		fputs(buffer, f);
+		fflush(f);
+		fsync(fileno(f));
+		fclose(f);
+	}
+}
 
 
 MainWindow::MainWindow()
@@ -341,6 +368,7 @@ MainWindow::_ApplyControls(const bttv_video_controls& controls)
 status_t
 MainWindow::_StartCapture()
 {
+	viewer_log("[VIEWER] MainWindow::_StartCapture: ENTER (mode=%d)\n", fSourceMode);
 	_StopCapture();
 
 	status_t status = B_OK;
@@ -349,6 +377,9 @@ MainWindow::_StartCapture()
 	} else {
 		status = _StartMediaKit();
 	}
+
+	viewer_log("[VIEWER] MainWindow::_StartCapture: result status=%d (%s)\n",
+		status, strerror(status));
 
 	if (status == B_OK) {
 		fCapturing = true;
@@ -365,6 +396,7 @@ MainWindow::_StartCapture()
 void
 MainWindow::_StopCapture()
 {
+	viewer_log("[VIEWER] MainWindow::_StopCapture: ENTER (mode=%d)\n", fSourceMode);
 	if (fSourceMode == SOURCE_DIRECT_DRIVER) {
 		_StopDirect();
 	} else {
@@ -374,12 +406,14 @@ MainWindow::_StopCapture()
 	fCapturing = false;
 	fStartStopButton->SetLabel("Start Capture");
 	_SetStatus("Capture stopped.");
+	viewer_log("[VIEWER] MainWindow::_StopCapture: EXIT\n");
 }
 
 
 status_t
 MainWindow::_StartDirect()
 {
+	viewer_log("[VIEWER] MainWindow::_StartDirect: ENTER\n");
 	_SetStatus("Direct: Opening /dev/video/bttv/0...");
 	status_t status = fDirectCapture.Start("/dev/video/bttv/0", fInput,
 		fStandard, fWidth, fHeight, fVideoView);
@@ -388,11 +422,15 @@ MainWindow::_StartDirect()
 		snprintf(err, sizeof(err), "Direct Error: failed to start (%s)",
 			strerror(status));
 		_SetStatus(err);
+		viewer_log("[VIEWER] MainWindow::_StartDirect: DirectCapture.Start FAILED (%s)\n",
+			strerror(status));
 		return status;
 	}
 
+	viewer_log("[VIEWER] MainWindow::_StartDirect: setting controls...\n");
 	fDirectCapture.SetControls(fControls);
 	_SetStatus("Direct: Streaming from /dev/video/bttv/0");
+	viewer_log("[VIEWER] MainWindow::_StartDirect: EXIT SUCCESS\n");
 	return B_OK;
 }
 
@@ -400,47 +438,59 @@ MainWindow::_StartDirect()
 void
 MainWindow::_StopDirect()
 {
+	viewer_log("[VIEWER] MainWindow::_StopDirect: calling fDirectCapture.Stop()...\n");
 	fDirectCapture.Stop();
 	if (fVideoView != NULL)
 		fVideoView->Clear();
+	viewer_log("[VIEWER] MainWindow::_StopDirect: EXIT\n");
 }
 
 
 status_t
 MainWindow::_StartMediaKit()
 {
+	viewer_log("[VIEWER] MainWindow::_StartMediaKit: ENTER\n");
 	status_t status = B_OK;
 	fMediaRoster = BMediaRoster::Roster(&status);
 	if (status != B_OK || fMediaRoster == NULL) {
+		viewer_log("[VIEWER] MainWindow::_StartMediaKit: BMediaRoster::Roster FAILED\n");
 		_SetStatus("Media Kit Error: Media Roster unavailable");
 		return status != B_OK ? status : B_ERROR;
 	}
 
 	if (fSourceMode == SOURCE_MEDIA_DEFAULT) {
 		_SetStatus("Media Kit: Acquiring Default Video Input...");
+		viewer_log("[VIEWER] MainWindow::_StartMediaKit: calling GetVideoInput...\n");
 		status = fMediaRoster->GetVideoInput(&fProducerNode);
 		if (status != B_OK) {
+			viewer_log("[VIEWER] MainWindow::_StartMediaKit: GetVideoInput FAILED (%s)\n", strerror(status));
 			_SetStatus("Media Kit: Default Video Input not set or inactive");
 			return status;
 		}
 	} else {
 		_SetStatus("Media Kit: Searching for Bt848/Bt878 Node...");
+		viewer_log("[VIEWER] MainWindow::_StartMediaKit: calling _FindBttvNode...\n");
 		status = _FindBttvNode(&fProducerNode);
 		if (status != B_OK) {
+			viewer_log("[VIEWER] MainWindow::_StartMediaKit: _FindBttvNode FAILED (%s)\n", strerror(status));
 			_SetStatus("Media Kit: Bt848/Bt878 node not found in media server");
 			return status;
 		}
 	}
 
+	viewer_log("[VIEWER] MainWindow::_StartMediaKit: acquiring time source...\n");
 	status = fMediaRoster->GetTimeSource(&fTimeSourceNode);
 	if (status != B_OK) {
+		viewer_log("[VIEWER] MainWindow::_StartMediaKit: GetTimeSource FAILED\n");
 		_SetStatus("Media Kit Error: Cannot acquire time source");
 		return status;
 	}
 
+	viewer_log("[VIEWER] MainWindow::_StartMediaKit: registering VideoConsumer node...\n");
 	fConsumer = new VideoConsumer("BttvViewerConsumer", fVideoView);
 	status = fMediaRoster->RegisterNode(fConsumer);
 	if (status != B_OK) {
+		viewer_log("[VIEWER] MainWindow::_StartMediaKit: RegisterNode FAILED (%s)\n", strerror(status));
 		fConsumer->Release();
 		fConsumer = NULL;
 		_SetStatus("Media Kit Error: Failed to register video consumer");
@@ -448,18 +498,22 @@ MainWindow::_StartMediaKit()
 	}
 
 	int32 count = 0;
+	viewer_log("[VIEWER] MainWindow::_StartMediaKit: getting free outputs from producer...\n");
 	status = fMediaRoster->GetFreeOutputsFor(fProducerNode, &fProducerOutput, 1,
 		&count, B_MEDIA_RAW_VIDEO);
 	if (status != B_OK || count < 1) {
+		viewer_log("[VIEWER] MainWindow::_StartMediaKit: GetFreeOutputsFor FAILED\n");
 		_StopMediaKit();
 		_SetStatus("Media Kit Error: No free video output available on producer");
 		return status != B_OK ? status : B_RESOURCE_UNAVAILABLE;
 	}
 
 	count = 0;
+	viewer_log("[VIEWER] MainWindow::_StartMediaKit: getting free inputs on consumer...\n");
 	status = fMediaRoster->GetFreeInputsFor(fConsumer->Node(), &fConsumerInput,
 		1, &count, B_MEDIA_RAW_VIDEO);
 	if (status != B_OK || count < 1) {
+		viewer_log("[VIEWER] MainWindow::_StartMediaKit: GetFreeInputsFor FAILED\n");
 		_StopMediaKit();
 		_SetStatus("Media Kit Error: No free video input on consumer");
 		return status != B_OK ? status : B_RESOURCE_UNAVAILABLE;
@@ -473,9 +527,11 @@ MainWindow::_StartMediaKit()
 	format.u.raw_video.display.line_count = fHeight;
 	format.u.raw_video.field_rate = (fStandard == BTV_STD_PAL) ? 25.0f : 29.97f;
 
+	viewer_log("[VIEWER] MainWindow::_StartMediaKit: calling Connect...\n");
 	status = fMediaRoster->Connect(fProducerOutput.source,
 		fConsumerInput.destination, &format, &fProducerOutput, &fConsumerInput);
 	if (status != B_OK) {
+		viewer_log("[VIEWER] MainWindow::_StartMediaKit: Connect FAILED (%s)\n", strerror(status));
 		_StopMediaKit();
 		char err[128];
 		snprintf(err, sizeof(err), "Media Kit Error: Connect failed (%s)",
@@ -484,14 +540,18 @@ MainWindow::_StartMediaKit()
 		return status;
 	}
 
+	viewer_log("[VIEWER] MainWindow::_StartMediaKit: setting time source for nodes...\n");
 	fMediaRoster->SetTimeSourceFor(fProducerNode.node, fTimeSourceNode.node);
 	fMediaRoster->SetTimeSourceFor(fConsumer->Node().node, fTimeSourceNode.node);
 
 	bigtime_t startTime = system_time() + 30000;
+	viewer_log("[VIEWER] MainWindow::_StartMediaKit: calling StartNode on producer and consumer...\n");
 	fMediaRoster->StartNode(fProducerNode, startTime);
 	fMediaRoster->StartNode(fConsumer->Node(), startTime);
+	viewer_log("[VIEWER] MainWindow::_StartMediaKit: StartNode called successfully\n");
 
 	_SetStatus("Media Kit: Streaming active");
+	viewer_log("[VIEWER] MainWindow::_StartMediaKit: EXIT SUCCESS\n");
 	return B_OK;
 }
 
@@ -499,33 +559,40 @@ MainWindow::_StartMediaKit()
 void
 MainWindow::_StopMediaKit()
 {
+	viewer_log("[VIEWER] MainWindow::_StopMediaKit: ENTER\n");
 	if (fMediaRoster == NULL)
 		return;
 
 	if (fConsumer != NULL) {
+		viewer_log("[VIEWER] MainWindow::_StopMediaKit: stopping consumer and producer nodes...\n");
 		fMediaRoster->StopNode(fConsumer->Node(), 0, true);
 		if (fProducerNode.node > 0)
 			fMediaRoster->StopNode(fProducerNode, 0, true);
 
 		if (fProducerOutput.source != media_source::null
 			&& fConsumerInput.destination != media_destination::null) {
+			viewer_log("[VIEWER] MainWindow::_StopMediaKit: calling Disconnect...\n");
 			fMediaRoster->Disconnect(fProducerOutput.node.node,
 				fProducerOutput.source, fConsumerInput.node.node,
 				fConsumerInput.destination);
 		}
 
+		viewer_log("[VIEWER] MainWindow::_StopMediaKit: unregistering and releasing consumer...\n");
 		fMediaRoster->UnregisterNode(fConsumer);
 		fConsumer->Release();
 		fConsumer = NULL;
 	}
 
 	if (fProducerNode.node > 0) {
+		viewer_log("[VIEWER] MainWindow::_StopMediaKit: releasing producer node...\n");
 		fMediaRoster->ReleaseNode(fProducerNode);
 		fProducerNode = media_node::null;
 	}
 
 	if (fVideoView != NULL)
 		fVideoView->Clear();
+
+	viewer_log("[VIEWER] MainWindow::_StopMediaKit: EXIT\n");
 }
 
 
