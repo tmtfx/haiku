@@ -109,6 +109,7 @@
 #define BT848_CAP_CTL_CAPTURE_ODD	(1 << 1)
 #define BT848_CAP_CTL_CAPTURE_EVEN	(1 << 0)
 
+#define BT848_INT_ETBF			(1 << 23)
 #define BT848_INT_RISC_EN		(1 << 27)
 #define BT848_INT_RISCI			(1 << 11)
 #define BT848_INT_SCERR			(1 << 19)
@@ -128,6 +129,8 @@
 #define BT848_RISC_IRQ			(1U << 24)
 #define BT848_RISC_EOL			(1U << 26)
 #define BT848_RISC_SOL			(1U << 27)
+#define BT848_RISC_RESYNC		(1U << 15)
+#define BT848_RISC_BYTE_ALL		(0x0fU << 12)
 #define BT848_RISC_WRITE		(0x01U << 28)
 #define BT848_RISC_JUMP			(0x07U << 28)
 #define BT848_RISC_SYNC			(0x08U << 28)
@@ -567,26 +570,28 @@ bt878_build_risc_program(bt878_device* device)
 
 		if (interlaced) {
 			// Field 1 (Even field): wait for VRE, write lines 0, 2, 4, ...
-			*program++ = B_HOST_TO_LENDIAN_INT32(BT848_RISC_SYNC | BT848_FIFO_STATUS_VRE);
+			*program++ = B_HOST_TO_LENDIAN_INT32(
+				BT848_RISC_SYNC | BT848_RISC_RESYNC | BT848_FIFO_STATUS_FM1);
 			*program++ = 0;
 
 			for (uint32 line = 0; line < linesPerField; line++) {
 				uint32 lineIdx = line * 2;
 				uint32 command = BT848_RISC_WRITE | BT848_RISC_SOL | BT848_RISC_EOL
-					| format.bytes_per_line;
+					| BT848_RISC_BYTE_ALL | format.bytes_per_line;
 				*program++ = B_HOST_TO_LENDIAN_INT32(command);
 				*program++ = B_HOST_TO_LENDIAN_INT32(
 					(uint32)(phys + lineIdx * format.bytes_per_line));
 			}
 
 			// Field 2 (Odd field): wait for VRO, write lines 1, 3, 5, ...
-			*program++ = B_HOST_TO_LENDIAN_INT32(BT848_RISC_SYNC | BT848_FIFO_STATUS_VRO);
+			*program++ = B_HOST_TO_LENDIAN_INT32(
+				BT848_RISC_SYNC | BT848_RISC_RESYNC | BT848_FIFO_STATUS_FM1);
 			*program++ = 0;
 
 			for (uint32 line = 0; line < linesPerField; line++) {
 				uint32 lineIdx = line * 2 + 1;
 				uint32 command = BT848_RISC_WRITE | BT848_RISC_SOL | BT848_RISC_EOL
-					| format.bytes_per_line;
+					| BT848_RISC_BYTE_ALL | format.bytes_per_line;
 				if (line + 1 == linesPerField)
 					command |= BT848_RISC_IRQ;
 
@@ -596,12 +601,13 @@ bt878_build_risc_program(bt878_device* device)
 			}
 		} else {
 			// Progressive (half vertical resolution): wait for VRE, write single field
-			*program++ = B_HOST_TO_LENDIAN_INT32(BT848_RISC_SYNC | BT848_FIFO_STATUS_VRE);
+			*program++ = B_HOST_TO_LENDIAN_INT32(
+				BT848_RISC_SYNC | BT848_RISC_RESYNC | BT848_FIFO_STATUS_FM1);
 			*program++ = 0;
 
 			for (uint32 line = 0; line < format.height; line++) {
 				uint32 command = BT848_RISC_WRITE | BT848_RISC_SOL | BT848_RISC_EOL
-					| format.bytes_per_line;
+					| BT848_RISC_BYTE_ALL | format.bytes_per_line;
 				if (line + 1 == format.height)
 					command |= BT848_RISC_IRQ;
 
@@ -757,13 +763,16 @@ bt878_start_capture_locked(bt878_device* device)
 		return status;
 
 	bt878_program_capture(device);
-	bt878_write32(device, BT848_RISC_STRT_ADD, (uint32)device->risc_buffer.phys);
+
+	// Clear any pending interrupt status bits before unmasking
 	bt878_write32(device, BT848_INT_STAT, 0xffffffff);
+
+	// Enable only frame completion IRQ (RISCI), synchronization errors, and PCI burst fix.
+	// We intentionally do NOT enable OFLOW, FDSR, FMTCHG, or PABORT to avoid interrupt storms.
 	bt878_write32(device, BT848_INT_MASK,
-		BT848_INT_RISC_EN | BT848_INT_RISCI | BT848_INT_SCERR
-		| BT848_INT_OCERR | BT848_INT_PABORT | BT848_INT_RIPERR
-		| BT848_INT_PPERR | BT848_INT_FDSR | BT848_INT_FTRGT
-		| BT848_INT_FBUS | BT848_INT_OFLOW | BT848_INT_FMTCHG);
+		BT848_INT_RISCI | BT848_INT_SCERR | BT848_INT_OCERR | BT848_INT_ETBF);
+
+	bt878_write32(device, BT848_RISC_STRT_ADD, (uint32)device->risc_buffer.phys);
 	bt878_write32(device, BT848_GPIO_DMA_CTL,
 		BT848_GPIO_DMA_CTL_FIFO_ENABLE | BT848_GPIO_DMA_CTL_RISC_ENABLE);
 	bt878_write8(device, BT848_CAP_CTL,
@@ -781,12 +790,15 @@ bt878_stop_capture_locked(bt878_device* device)
 	bt878_write8(device, BT848_CAP_CTL, 0);
 	bt878_write32(device, BT848_INT_MASK, 0);
 	bt878_write32(device, BT848_GPIO_DMA_CTL, 0);
+	bt878_write32(device, BT848_INT_STAT, 0xffffffff);
+
 	device->capturing = false;
 	device->frame_ready = false;
 
-	// Recreate semaphore to immediately wake any thread waiting in bt878_read
-	delete_sem(device->frame_sem);
-	device->frame_sem = create_sem(0, "bttv frame");
+	// Wake up any thread waiting in bt878_read without invalidating the semaphore
+	int32 semCount;
+	if (get_sem_count(device->frame_sem, &semCount) == B_OK && semCount < 0)
+		release_sem_etc(device->frame_sem, -semCount, 0);
 }
 
 
@@ -875,33 +887,37 @@ bt878_interrupt(void* data)
 	if (device == NULL || device->regs == NULL)
 		return B_UNHANDLED_INTERRUPT;
 
-	uint32 status = bt878_read32(device, BT848_INT_STAT);
-	if (status == 0 || status == 0xffffffff)
-		return B_UNHANDLED_INTERRUPT;
+	int32 handled = B_UNHANDLED_INTERRUPT;
 
-	bt878_write32(device, BT848_INT_STAT, status);
+	for (int loop = 0; loop < 10; loop++) {
+		uint32 stat = bt878_read32(device, BT848_INT_STAT);
+		if (stat == 0 || stat == 0xffffffff)
+			break;
 
-	// Restart RISC engine if FIFO overflow or DMA sequencing error occurred
-	if ((status & (BT848_INT_SCERR | BT848_INT_OCERR | BT848_INT_OFLOW)) != 0) {
-		bt878_write32(device, BT848_GPIO_DMA_CTL, 0);
-		bt878_write32(device, BT848_RISC_STRT_ADD, (uint32)device->risc_buffer.phys);
-		bt878_write32(device, BT848_GPIO_DMA_CTL,
-			BT848_GPIO_DMA_CTL_FIFO_ENABLE | BT848_GPIO_DMA_CTL_RISC_ENABLE);
+		uint32 mask = bt878_read32(device, BT848_INT_MASK);
+		uint32 astat = stat & mask;
+		if (astat == 0)
+			break;
+
+		handled = B_HANDLED_INTERRUPT;
+
+		// Clear only the asserted interrupt status bits (Write 1 to clear)
+		bt878_write32(device, BT848_INT_STAT, astat);
+
+		if ((astat & BT848_INT_RISCI) != 0) {
+			device->last_completed_buffer = device->next_buffer;
+			device->next_buffer = (device->next_buffer + 1) % NUM_FRAME_BUFFERS;
+			device->frame_ready = true;
+
+			int32 semCount;
+			if (get_sem_count(device->frame_sem, &semCount) == B_OK && semCount < 1)
+				release_sem_etc(device->frame_sem, 1, B_DO_NOT_RESCHEDULE);
+
+			handled = B_INVOKE_SCHEDULER;
+		}
 	}
 
-	if ((status & BT848_INT_RISCI) != 0) {
-		device->last_completed_buffer = device->next_buffer;
-		device->next_buffer = (device->next_buffer + 1) % NUM_FRAME_BUFFERS;
-		device->frame_ready = true;
-
-		int32 semCount;
-		get_sem_count(device->frame_sem, &semCount);
-		if (semCount < 1)
-			release_sem_etc(device->frame_sem, 1, B_DO_NOT_RESCHEDULE);
-		return B_INVOKE_SCHEDULER;
-	}
-
-	return B_HANDLED_INTERRUPT;
+	return handled;
 }
 
 
