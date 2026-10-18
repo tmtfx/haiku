@@ -53,7 +53,7 @@ MainWindow::MainWindow()
 	fStandardMenu(NULL),
 	fResolutionField(NULL),
 	fResolutionMenu(NULL),
-	fSourceMode(SOURCE_MEDIA_DEFAULT),
+	fSourceMode(SOURCE_DIRECT_DRIVER),
 	fInput(BTV_INPUT_COMPOSITE),
 	fStandard(BTV_STD_PAL),
 	fWidth(720),
@@ -82,6 +82,8 @@ MainWindow::MainWindow()
 	// 500 ms periodic timer for status bar updates
 	BMessage pulseMsg(kMsgPulseUpdate);
 	fPulseRunner = new BMessageRunner(BMessenger(this), &pulseMsg, 500000);
+
+	viewer_log("[VIEWER] MainWindow: initialized successfully, default source = DIRECT\n");
 }
 
 
@@ -111,20 +113,21 @@ MainWindow::_BuildLayout()
 {
 	// Source menu
 	fSourceMenu = new BPopUpMenu("SourceMenu");
+	BMessage* srcDirMsg = new BMessage(kMsgSourceChanged);
+	srcDirMsg->AddInt32("source", SOURCE_DIRECT_DRIVER);
+	BMenuItem* itemDir = new BMenuItem("Direct: /dev/video/bttv/0", srcDirMsg);
+	itemDir->SetMarked(true);
+	fSourceMenu->AddItem(itemDir);
+
 	BMessage* srcDefMsg = new BMessage(kMsgSourceChanged);
 	srcDefMsg->AddInt32("source", SOURCE_MEDIA_DEFAULT);
-	BMenuItem* itemDef = new BMenuItem("Media Kit: Default Input", srcDefMsg);
-	itemDef->SetMarked(true);
-	fSourceMenu->AddItem(itemDef);
+	fSourceMenu->AddItem(new BMenuItem("Media Kit: Default Input", srcDefMsg));
 
 	BMessage* srcBttvMsg = new BMessage(kMsgSourceChanged);
 	srcBttvMsg->AddInt32("source", SOURCE_MEDIA_BTTV);
 	fSourceMenu->AddItem(new BMenuItem("Media Kit: Bt848/Bt878 Node", srcBttvMsg));
 
-	BMessage* srcDirMsg = new BMessage(kMsgSourceChanged);
-	srcDirMsg->AddInt32("source", SOURCE_DIRECT_DRIVER);
-	fSourceMenu->AddItem(new BMenuItem("Direct: /dev/video/bttv/0", srcDirMsg));
-
+	fSourceMenu->SetTargetForItems(this);
 	fSourceField = new BMenuField("sourceField", "Source:", fSourceMenu);
 
 	// Input menu
@@ -143,6 +146,7 @@ MainWindow::_BuildLayout()
 	inTunMsg->AddInt32("input", BTV_INPUT_TUNER);
 	fInputMenu->AddItem(new BMenuItem("Tuner", inTunMsg));
 
+	fInputMenu->SetTargetForItems(this);
 	fInputField = new BMenuField("inputField", "Input:", fInputMenu);
 
 	// Standard menu
@@ -157,6 +161,7 @@ MainWindow::_BuildLayout()
 	stdNtscMsg->AddInt32("standard", BTV_STD_NTSC);
 	fStandardMenu->AddItem(new BMenuItem("NTSC (60Hz)", stdNtscMsg));
 
+	fStandardMenu->SetTargetForItems(this);
 	fStandardField = new BMenuField("standardField", "Standard:", fStandardMenu);
 
 	// Resolution menu
@@ -171,6 +176,7 @@ MainWindow::_BuildLayout()
 	resHalfMsg->AddBool("half", true);
 	fResolutionMenu->AddItem(new BMenuItem("Half (360x288)", resHalfMsg));
 
+	fResolutionMenu->SetTargetForItems(this);
 	fResolutionField = new BMenuField("resField", "Res:", fResolutionMenu);
 
 	// Buttons

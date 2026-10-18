@@ -150,6 +150,9 @@ bttv_klog(const char* fmt, ...)
 #define BT848_INT_OFLOW			(1 << 3)
 #define BT848_INT_FMTCHG		(1 << 0)
 
+#define BT848_GPIO_DMA_CTL_PKTP_32		(3 << 4)
+#define BT848_GPIO_DMA_CTL_PLTP1_16		(2 << 6)
+#define BT848_GPIO_DMA_CTL_PLTP23_16	(2 << 8)
 #define BT848_GPIO_DMA_CTL_RISC_ENABLE	(1 << 1)
 #define BT848_GPIO_DMA_CTL_FIFO_ENABLE	(1 << 0)
 
@@ -780,7 +783,9 @@ static void
 bt878_reset(bt878_device* device)
 {
 	bt878_write32(device, BT848_INT_MASK, 0);
-	bt878_write32(device, BT848_GPIO_DMA_CTL, 0);
+	bt878_write32(device, BT848_GPIO_DMA_CTL,
+		BT848_GPIO_DMA_CTL_PKTP_32 | BT848_GPIO_DMA_CTL_PLTP1_16
+		| BT848_GPIO_DMA_CTL_PLTP23_16);
 	bt878_write8(device, BT848_CAP_CTL, 0);
 	bt878_write8(device, BT848_SRESET, 0);
 	bt878_write32(device, BT848_INT_STAT, 0xffffffff);
@@ -843,7 +848,9 @@ bt878_start_capture_locked(bt878_device* device)
 
 	bttv_klog("[KERNEL] bt878_start_capture_locked: writing GPIO_DMA_CTL (FIFO+RISC enable)...\n");
 	bt878_write32(device, BT848_GPIO_DMA_CTL,
-		BT848_GPIO_DMA_CTL_FIFO_ENABLE | BT848_GPIO_DMA_CTL_RISC_ENABLE);
+		BT848_GPIO_DMA_CTL_PKTP_32 | BT848_GPIO_DMA_CTL_PLTP1_16
+		| BT848_GPIO_DMA_CTL_PLTP23_16
+		| BT848_GPIO_DMA_CTL_FIFO_ENABLE | BT848_GPIO_DMA_CTL_RISC_ENABLE);
 
 	bttv_klog("[KERNEL] bt878_start_capture_locked: writing CAP_CTL (EVEN+ODD enable)...\n");
 	bt878_write8(device, BT848_CAP_CTL,
@@ -868,7 +875,9 @@ bt878_stop_capture_locked(bt878_device* device)
 	bttv_klog("[KERNEL] bt878_stop_capture_locked: writing CAP_CTL=0, INT_MASK=0, DMA_CTL=0...\n");
 	bt878_write8(device, BT848_CAP_CTL, 0);
 	bt878_write32(device, BT848_INT_MASK, 0);
-	bt878_write32(device, BT848_GPIO_DMA_CTL, 0);
+	bt878_write32(device, BT848_GPIO_DMA_CTL,
+		BT848_GPIO_DMA_CTL_PKTP_32 | BT848_GPIO_DMA_CTL_PLTP1_16
+		| BT848_GPIO_DMA_CTL_PLTP23_16);
 	bt878_write32(device, BT848_INT_STAT, 0xffffffff);
 
 	bttv_klog("[KERNEL] bt878_stop_capture_locked: removing interrupt handler on irq %d...\n",
