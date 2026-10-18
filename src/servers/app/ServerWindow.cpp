@@ -2718,7 +2718,8 @@ ServerWindow::_DispatchViewDrawingMessage(int32 code,
 				drawingEngine->DrawBitmap(bitmap, info.bitmapRect,
 					info.viewRect, info.options);
 
-				if (fWindow->HasBackingStore() && !fWindow->InUpdate()) {
+				if (fWindow->HasBackingStore() && !fWindow->InUpdate()
+					&& fWindow->Feel() != kMenuWindowFeel) {
 					BRegion dirty(info.viewRect);
 					dirty.IntersectWith(&fWindow->VisibleRegion());
 					if (dirty.CountRects() > 0)

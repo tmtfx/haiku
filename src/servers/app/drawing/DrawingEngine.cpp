@@ -537,26 +537,30 @@ DrawingEngine::CopyRegion(/*const*/ BRegion* region, int32 xOffset,
 	// NOTE: region is already clipped
 	ASSERT_PARALLEL_LOCKED();
 
-	BRect frame = region->Frame();
+	BRegion localRegion(*region);
+	if (fOriginX != 0 || fOriginY != 0)
+		localRegion.OffsetBy(-fOriginX, -fOriginY);
+
+	BRect frame = localRegion.Frame();
 	frame = frame | frame.OffsetByCopy(xOffset, yOffset);
 
 	AutoFloatingOverlaysHider _(fGraphicsCard, frame);
 
-	int32 count = region->CountRects();
+	int32 count = localRegion.CountRects();
 
 	// TODO: make this step unnecessary
 	// (by using different stack impl inside node)
 	BStackOrHeapArray<node, 64> nodes(count);
 	for (int32 i= 0; i < count; i++) {
-		nodes[i].init(region->RectAt(i), count);
+		nodes[i].init(localRegion.RectAt(i), count);
 		if (nodes[i].pointers == NULL)
 			return;
 	}
 
 	for (int32 i = 0; i < count; i++) {
-		BRect a = region->RectAt(i);
+		BRect a = localRegion.RectAt(i);
 		for (int32 k = i + 1; k < count; k++) {
-			BRect b = region->RectAt(k);
+			BRect b = localRegion.RectAt(k);
 			int cmp = 0;
 			// compare horizontally
 			if (xOffset > 0) {
