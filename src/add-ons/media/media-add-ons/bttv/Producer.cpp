@@ -1033,7 +1033,7 @@ BttvProducer::_HandleStart()
 	fFrameSequence = 0;
 	fRunning = true;
 	fCaptureThread = spawn_thread(&_CaptureThreadEntry, "bttv capture",
-		B_REAL_TIME_PRIORITY, this);
+		B_DISPLAY_PRIORITY, this);
 	if (fCaptureThread < B_OK) {
 		fRunning = false;
 		ioctl(fDriverFD, BTV_STOP_CAPTURE, NULL, 0);

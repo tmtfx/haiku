@@ -1,5 +1,6 @@
 #include "DirectCapture.h"
 
+#include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <stdio.h>
@@ -35,8 +36,10 @@ DirectCapture::Start(const char* devicePath, uint32 input, uint32 standard,
 		return B_BAD_VALUE;
 
 	fDriverFD = open(devicePath, O_RDWR);
-	if (fDriverFD < 0)
-		return B_ENTRY_NOT_FOUND;
+	if (fDriverFD < 0) {
+		status_t err = errno != 0 ? -errno : B_ERROR;
+		return err;
+	}
 
 	memset(&fFormat, 0, sizeof(fFormat));
 	fFormat.width = width;

@@ -630,6 +630,14 @@ bt878_build_risc_program(bt878_device* device)
 static status_t
 bt878_set_pll(bt878_device* device)
 {
+	// Bt848 and Bt849 have no on-chip PLL; always run directly from crystal
+	if (device->pci.device_id == BT848_DEVICE_ID
+		|| device->pci.device_id == BT849_DEVICE_ID) {
+		bt878_write8(device, BT848_TGCTRL, 0x00);
+		bt878_write8(device, BT848_PLL_XCI, 0x00);
+		return B_OK;
+	}
+
 	if (device->video_standard == BTV_STD_NTSC) {
 		// NTSC crystal on ATI TV Wonder VE is 28.636363 MHz; PLL can sleep
 		bt878_write8(device, BT848_TGCTRL, 0x00);
@@ -668,6 +676,8 @@ bt878_set_pll(bt878_device* device)
 		}
 	}
 
+	// If PLL failed to lock, fall back to crystal clock rather than killing the clock with 0x08
+	bt878_write8(device, BT848_TGCTRL, 0x00);
 	return B_TIMED_OUT;
 }
 
@@ -747,7 +757,7 @@ static status_t
 bt878_start_capture_locked(bt878_device* device)
 {
 	if (device->capturing)
-		return B_OK;
+		return B_BUSY;
 
 	device->next_buffer = 0;
 	device->last_completed_buffer = 0;
@@ -764,8 +774,14 @@ bt878_start_capture_locked(bt878_device* device)
 
 	bt878_program_capture(device);
 
-	// Clear any pending interrupt status bits before unmasking
+	// Clear any pending interrupt status bits before installing handler
 	bt878_write32(device, BT848_INT_STAT, 0xffffffff);
+
+	// Install interrupt handler dynamically only while capture is active
+	status = install_io_interrupt_handler(device->pci.u.h0.interrupt_line,
+		&bt878_interrupt, device, 0);
+	if (status != B_OK)
+		return status;
 
 	// Enable only frame completion IRQ (RISCI), synchronization errors, and PCI burst fix.
 	// We intentionally do NOT enable OFLOW, FDSR, FMTCHG, or PABORT to avoid interrupt storms.
@@ -787,10 +803,16 @@ bt878_start_capture_locked(bt878_device* device)
 static void
 bt878_stop_capture_locked(bt878_device* device)
 {
+	if (!device->capturing)
+		return;
+
 	bt878_write8(device, BT848_CAP_CTL, 0);
 	bt878_write32(device, BT848_INT_MASK, 0);
 	bt878_write32(device, BT848_GPIO_DMA_CTL, 0);
 	bt878_write32(device, BT848_INT_STAT, 0xffffffff);
+
+	remove_io_interrupt_handler(device->pci.u.h0.interrupt_line,
+		&bt878_interrupt, device);
 
 	device->capturing = false;
 	device->frame_ready = false;
@@ -831,10 +853,6 @@ bt878_initialize(bt878_device* device)
 	}
 
 	bt878_reset(device);
-	status = install_io_interrupt_handler(device->pci.u.h0.interrupt_line,
-		&bt878_interrupt, device, 0);
-	if (status != B_OK)
-		goto fail;
 
 	bt878_default_format(device);
 	bttv_capture_format format;
@@ -864,8 +882,6 @@ bt878_shutdown(bt878_device* device)
 		return;
 
 	bt878_stop_capture_locked(device);
-	remove_io_interrupt_handler(device->pci.u.h0.interrupt_line, &bt878_interrupt,
-		device);
 	bt878_reset(device);
 
 	bt878_free_dma_buffer(&device->risc_buffer);
@@ -928,16 +944,16 @@ bt878_open(const char* name, uint32 flags, void** cookie)
 	if (device == NULL)
 		return B_NAME_NOT_FOUND;
 
-	if (atomic_add(&device->open_count, 1) != 0) {
-		atomic_add(&device->open_count, -1);
-		return B_BUSY;
-	}
-
-	device->non_blocking = (flags & O_NONBLOCK) != 0;
-	status_t status = bt878_initialize(device);
-	if (status != B_OK) {
-		atomic_add(&device->open_count, -1);
-		return status;
+	if (atomic_add(&device->open_count, 1) == 0) {
+		device->non_blocking = (flags & O_NONBLOCK) != 0;
+		status_t status = bt878_initialize(device);
+		if (status != B_OK) {
+			atomic_add(&device->open_count, -1);
+			return status;
+		}
+	} else {
+		if ((flags & O_NONBLOCK) != 0)
+			device->non_blocking = true;
 	}
 
 	*cookie = device;
@@ -1076,9 +1092,6 @@ bt878_control(void* cookie, uint32 op, void* arg, size_t length)
 
 		case BTV_SET_CAPTURE_FORMAT:
 		{
-			if (length < sizeof(bttv_capture_format))
-				return B_BAD_VALUE;
-
 			bttv_capture_format format;
 			if (user_memcpy(&format, arg, sizeof(format)) != B_OK)
 				return B_BAD_ADDRESS;
@@ -1122,9 +1135,6 @@ bt878_control(void* cookie, uint32 op, void* arg, size_t length)
 
 		case BTV_SET_CONTROLS:
 		{
-			if (length < sizeof(bttv_video_controls))
-				return B_BAD_VALUE;
-
 			bttv_video_controls controls;
 			if (user_memcpy(&controls, arg, sizeof(controls)) != B_OK)
 				return B_BAD_ADDRESS;
