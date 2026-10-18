@@ -16,10 +16,7 @@ bool eng_dac2_crt_connected()
 	uint32 output, dac;
 	bool present;
 
-	/* NOTE:
-	 * NV11 can't do this: It will report DAC1 status instead because it HAS no
-	 * actual secondary DAC function. */
-	/* (It DOES have a secondary palette RAM and pixelclock PLL though.) */
+	/* Check if secondary DAC is present */
 
 	/* save output connector setting */
 	output = DAC2R(OUTPUT);
@@ -81,7 +78,7 @@ status_t eng_dac2_mode(int mode,float brightness)
 
 	LOG(4,("DAC2: Setting screen mode %d brightness %f\n", mode, brightness));
 	/* init the palette for brightness specified */
-	/* (Nvidia cards always use MSbits from screenbuffer as index for PAL) */
+	/* DAC2 palette programming */
 	for (i = 0; i < 256; i++)
 	{
 		ri = i * brightness;
@@ -252,7 +249,7 @@ static status_t nv10_nv20_dac2_pix_pll_find(
 		break;
 	}
 */
-	LOG(4,("DAC2: NV10/NV20 restrictions apply\n"));
+	LOG(4,("DAC2: restrictions apply\n"));
 
 	/* determine the max. pixelclock for the current videomode */
 	switch (target.space)
@@ -311,15 +308,7 @@ static status_t nv10_nv20_dac2_pix_pll_find(
 			for (m = 7; m <= 14; m++)
 			{
 				/* check if phase-discriminator will be within operational limits */
-				//fixme: PLL calcs will be resetup/splitup/updated...
-				if (si->ps.card_type == NV36)
-				{
-					if (((si->ps.f_ref / m) < 3.2) || ((si->ps.f_ref / m) > 6.4)) continue;
-				}
-				else
-				{
-					if (((si->ps.f_ref / m) < 1.0) || ((si->ps.f_ref / m) > 2.0)) continue;
-				}
+				if (((si->ps.f_ref / m) < 1.0) || ((si->ps.f_ref / m) > 2.0)) continue;
 
 				/* calculate VCO postscaler setting for current setup.. */
 				n = (int)(((f_vco * m) / si->ps.f_ref) + 0.5);

@@ -423,7 +423,7 @@ status_t GET_OVERLAY_CONSTRAINTS
 		/* VIA has a 'tricked' 1/16 minimum */
 		oc->h_scale.min = 0.0625;
 		oc->v_scale.min = 0.0625;
-		/* all cards have a upscaling limit of 8.0 (see official nVidia specsheets) */
+		/* all cards have a upscaling limit of 8.0 (upscaling limit 8.0) */
 		//checkout.. (fixme)
 		oc->h_scale.max = 8.0;
 		oc->v_scale.max = 8.0;

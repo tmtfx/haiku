@@ -137,12 +137,7 @@ status_t eng_crtc_set_timing(display_mode target)
 		 * OTOH the overlay unit distorts if we reserve too much time! */
 		if (target.timing.h_display == si->ps.p1_timing.h_display)
 		{
-			/* NV11 timing has different constraints than later cards */
-			if (si->ps.card_type == NV11)
-				target.timing.h_total -= 56;
-			else
-				/* confirmed NV34 with 1680x1050 panel */
-				target.timing.h_total -= 32;
+			target.timing.h_total -= 32;
 		}
 
 		if (target.timing.h_sync_start == target.timing.h_display)
@@ -331,8 +326,7 @@ status_t eng_crtc_set_timing(display_mode target)
 	}
 
 	/* always disable interlaced operation */
-	/* (interlace is supported on upto and including NV10, NV15, and NV30 and up) */
-//	CRTCW(INTERLACE, 0xff);
+	//	CRTCW(INTERLACE, 0xff);
 
 	/* disable CRTC slaved mode unless a panel is in use */
 	// fixme: this kills TVout when it was in use...
@@ -360,9 +354,7 @@ status_t eng_crtc_set_timing(display_mode target)
 		DACW(FP_VVALID_S, 0);
 		DACW(FP_VVALID_E, (si->ps.p1_timing.v_display - 1));
 
-		/* nVidia cards support upscaling except on ??? */
-		/* NV11 cards can upscale after all! */
-		if (0)//si->ps.card_type == NV11)
+		if (0)
 		{
 			/* disable last fetched line limiting */
 			DACW(FP_DEBUG2, 0x00000000);
@@ -434,7 +426,7 @@ status_t eng_crtc_set_timing(display_mode target)
 			if ((iscale_y != (1 << 12)) && (si->ps.panel1_aspect < (dm_aspect - 0.10)))
 			{
 				LOG(2,("CRTC: (relative) portrait panel: should tune vertical scaling\n"));
-				/* fixme: implement if this kind of portrait panels exist on nVidia... */
+				/* fixme: portrait panels */
 			}
 		}
 
@@ -532,11 +524,11 @@ status_t eng_crtc_dpms(bool display, bool h, bool v)
 			 * internal transmitters... */
 			/* note:
 			 * the powerbits in this register are hardwired to the DVI connectors,
-			 * instead of to the DACs! (confirmed NV34) */
+			 * instead of to the DACs! */
 			//fixme...
 			DACW(FP_DEBUG0, (DACR(FP_DEBUG0) & 0xcfffffff));
 			/* ... and powerup external TMDS transmitter if it exists */
-			/* (confirmed OK on NV28 and NV34) */
+			
 			CRTCW(0x59, (CRTCR(0x59) | 0x01));
 		}
 
@@ -553,11 +545,11 @@ status_t eng_crtc_dpms(bool display, bool h, bool v)
 			 * internal transmitters... */
 			/* note:
 			 * the powerbits in this register are hardwired to the DVI connectors,
-			 * instead of to the DACs! (confirmed NV34) */
+			 * instead of to the DACs! */
 			//fixme...
 			DACW(FP_DEBUG0, (DACR(FP_DEBUG0) | 0x30000000));
 			/* ... and powerdown external TMDS transmitter if it exists */
-			/* (confirmed OK on NV28 and NV34) */
+			
 			CRTCW(0x59, (CRTCR(0x59) & 0xfe));
 		}
 

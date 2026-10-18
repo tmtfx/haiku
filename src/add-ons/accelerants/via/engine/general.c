@@ -361,24 +361,12 @@ void set_crtc_owner(bool head)
 	{
 		if (!head)
 		{
-			/* note: 'OWNER' is a non-standard register in behaviour(!) on NV11's,
-			 * while non-NV11 cards behave normally.
-			 *
-			 * Double-write action needed on those strange NV11 cards: */
-			/* RESET: needed on NV11 */
-			CRTCW(OWNER, 0xff);
-			/* enable access to CRTC1, SEQ1, GRPH1, ATB1, ??? */
+			/* enable access to CRTC1, SEQ1, GRPH1, ATB1 */
 			CRTCW(OWNER, 0x00);
 		}
 		else
 		{
-			/* note: 'OWNER' is a non-standard register in behaviour(!) on NV11's,
-			 * while non-NV11 cards behave normally.
-			 *
-			 * Double-write action needed on those strange NV11 cards: */
-			/* RESET: needed on NV11 */
-			CRTC2W(OWNER, 0xff);
-			/* enable access to CRTC2, SEQ2, GRPH2, ATB2, ??? */
+			/* enable access to CRTC2, SEQ2, GRPH2, ATB2 */
 			CRTC2W(OWNER, 0x03);
 		}
 	}
@@ -437,34 +425,17 @@ status_t eng_general_output_select(bool cross)
 	/* make sure this call is warranted */
 	if (si->ps.secondary_head)
 	{
-		/* NV11 cards can't switch heads (confirmed) */
-		if (si->ps.card_type != NV11)
+		if (cross)
 		{
-			if (cross)
-			{
-				LOG(4,("INIT: switching analog outputs to be cross-connected\n"));
-
-				/* enable head 2 on connector 1 */
-				/* (b8 = select CRTC (head) for output,
-				 *  b4 = ??? (confirmed not to be a FP switch),
-				 *  b0 = enable CRT) */
-				DACW(OUTPUT, 0x00000101);
-				/* enable head 1 on connector 2 */
-				DAC2W(OUTPUT, 0x00000001);
-			}
-			else
-			{
-				LOG(4,("INIT: switching analog outputs to be straight-through\n"));
-
-				/* enable head 1 on connector 1 */
-				DACW(OUTPUT, 0x00000001);
-				/* enable head 2 on connector 2 */
-				DAC2W(OUTPUT, 0x00000101);
-			}
+			LOG(4,("INIT: switching analog outputs to be cross-connected\n"));
+			DACW(OUTPUT, 0x00000101);
+			DAC2W(OUTPUT, 0x00000001);
 		}
 		else
 		{
-			LOG(4,("INIT: NV11 analog outputs are hardwired to be straight-through\n"));
+			LOG(4,("INIT: switching analog outputs to be straight-through\n"));
+			DACW(OUTPUT, 0x00000001);
+			DAC2W(OUTPUT, 0x00000101);
 		}
 		return B_OK;
 	}
@@ -551,12 +522,6 @@ static status_t eng_general_bios_to_powergraphics()
 	if (0)
 	{
 		/* switch overlay engine to CRTC1 */
-		/* bit 17: GPU FP port #1	(confirmed NV25, NV28, confirmed not on NV34),
-		 * bit 16: GPU FP port #2	(confirmed NV25, NV28, NV34),
-		 * bit 12: overlay engine	(all cards),
-		 * bit  9: TVout chip #2	(confirmed on NV18, NV25, NV28),
-		 * bit  8: TVout chip #1	(all cards),
-		 * bit  4: both I2C busses	(all cards) */
 		ENG_REG32(RG32_2FUNCSEL) &= ~0x00001000;
 		ENG_REG32(RG32_FUNCSEL) |= 0x00001000;
 	}
@@ -667,56 +632,16 @@ status_t eng_general_validate_pic_size (display_mode *target, uint32 *bytes_per_
 	}
 
 	/* set virtual_width limit for accelerated modes */
-//via fixme:
-	switch (si->ps.card_arch)
+	switch (target->space)
 	{
-	case NV04A:
-		/* confirmed for:
-		 * TNT1, TNT2, TNT2-M64 */
-		switch(target->space)
-		{
-			case B_CMAP8: max_acc_width = 8176; break;
-			case B_RGB15: max_acc_width = 4088; break;
-			case B_RGB16: max_acc_width = 4088; break;
-			case B_RGB24: max_acc_width = 2720; break;
-			case B_RGB32: max_acc_width = 2044; break;
-			default:
-				LOG(8,("INIT: unknown color space: 0x%08x\n", target->space));
-				return B_ERROR;
-		}
-		break;
-	default:
-		/* confirmed for:
-		 * GeForce2 MX400, GeForce4 MX440, GeForceFX 5200 */
-		switch(target->space)
-		{
-			case B_CMAP8: max_acc_width = 16368; break;
-			case B_RGB15: max_acc_width =  8184; break;
-			case B_RGB16: max_acc_width =  8184; break;
-			case B_RGB24: max_acc_width =  5456; break;
-			case B_RGB32: max_acc_width =  4092; break;
-			default:
-				LOG(8,("INIT: unknown color space: 0x%08x\n", target->space));
-				return B_ERROR;
-		}
-		/* NV31 (confirmed GeForceFX 5600) has NV20A granularity!
-		 * So let it fall through... */
-		if (si->ps.card_type != NV31) break;
-	case NV20A:
-		/* confirmed for:
-		 * GeForce4 Ti4200 */
-		switch(target->space)
-		{
-			case B_CMAP8: max_acc_width = 16320; break;
-			case B_RGB15: max_acc_width =  8160; break;
-			case B_RGB16: max_acc_width =  8160; break;
-			case B_RGB24: max_acc_width =  5440; break;
-			case B_RGB32: max_acc_width =  4080; break;
-			default:
-				LOG(8,("INIT: unknown color space: 0x%08x\n", target->space));
-				return B_ERROR;
-		}
-		break;
+		case B_CMAP8: max_acc_width = 16368; break;
+		case B_RGB15: max_acc_width =  8184; break;
+		case B_RGB16: max_acc_width =  8184; break;
+		case B_RGB24: max_acc_width =  5456; break;
+		case B_RGB32: max_acc_width =  4092; break;
+		default:
+			LOG(8,("INIT: unknown color space: 0x%08x\n", target->space));
+			return B_ERROR;
 	}
 
 //via ok:

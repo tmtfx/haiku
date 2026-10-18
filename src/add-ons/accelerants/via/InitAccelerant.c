@@ -137,7 +137,7 @@ status_t INIT_ACCELERANT(int the_fd) {
 
 	/*
 	Put the cursor at the start of the frame buffer.
-	Nvidia cursor is 32x32 16 color? takes up 4096 bytes of RAM.
+	VIA cursor takes up 4096 bytes of RAM.
 	*/
 	/* Initialize the rest of the cursor information while we're here */
 	si->cursor.width = 16;

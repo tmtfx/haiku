@@ -180,19 +180,19 @@ static void enable_vbi(vuint32 * regs)
 {
 	/* clear the vblank interrupt */
 //	ENG_REG32(RG32_CRTC_INTS) = 0x00000001;
-	/* enable nVidia interrupt source vblank */
+	/* enable interrupt source vblank */
 //	ENG_REG32(RG32_CRTC_INTE) |= 0x00000001;
-	/* enable nVidia interrupt system hardware (b0-1) */
+	/* enable interrupt system hardware (b0-1) */
 //	ENG_REG32(RG32_MAIN_INTE) = 0x00000001;
 }
 
 static void disable_vbi(vuint32 * regs)
 {
-	/* disable nVidia interrupt source vblank */
+	/* disable interrupt source vblank */
 //	ENG_REG32(RG32_CRTC_INTE) &= 0xfffffffe;
 	/* clear the vblank interrupt */
 //	ENG_REG32(RG32_CRTC_INTS) = 0x00000001;
-	/* disable nVidia interrupt system hardware (b0-1) */
+	/* disable interrupt system hardware (b0-1) */
 //	ENG_REG32(RG32_MAIN_INTE) = 0x00000000;
 }
 
@@ -448,7 +448,6 @@ static status_t map_device(device_info *di)
 	/* get a virtual memory address for the registers*/
 	si->regs_area = map_physical_memory(
 		buffer,
-		/* WARNING: Nvidia needs to map regs as viewed from PCI space! */
 		di->pcii.u.h0.base_registers_pci[registers],
 		di->pcii.u.h0.base_register_sizes[registers],
 		B_ANY_KERNEL_ADDRESS,
@@ -463,14 +462,6 @@ static status_t map_device(device_info *di)
 	sprintf(buffer, DEVICE_FORMAT " rom",
 		di->pcii.vendor_id, di->pcii.device_id,
 		di->pcii.bus, di->pcii.device, di->pcii.function);
-
-	/* disable ROM shadowing, we want the guaranteed exact contents of the chip */
-	/* warning:
-	 * don't touch: (confirmed) NV04, NV05, NV05-M64, NV11 all shutoff otherwise.
-	 * NV18, NV28 and NV34 keep working.
-	 * confirmed NV28 and NV34 to use upper part of shadowed ROM for scratch purposes,
-	 * however the actual ROM content (so the used part) is intact (confirmed). */
-	//set_pci(ENCFG_ROMSHADOW, 4, 0);
 
 	/* get ROM memory mapped base adress - this is defined in the PCI standard */
 	tmpUlong = get_pci(PCI_rom_base, 4);

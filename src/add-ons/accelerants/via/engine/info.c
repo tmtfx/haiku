@@ -17,123 +17,12 @@
 
 static void detect_panels(void);
 static void setup_output_matrix(void);
-static void pins_unichrome_pro_fake(void)
-{
-	si->ps.f_ref = 14.31818;
-	si->ps.ext_pll = true;
-	si->ps.max_system_vco = 400;
-	si->ps.min_system_vco = 50;
-	si->ps.max_pixel_vco = 800;
-	si->ps.min_pixel_vco = 200;
-	si->ps.max_video_vco = 0;
-	si->ps.min_video_vco = 0;
-	si->ps.max_dac1_clock = 300;
-	si->ps.max_dac1_clock_8 = 300;
-	si->ps.max_dac1_clock_16 = 300;
-	si->ps.max_dac1_clock_24 = 250;
-	si->ps.max_dac1_clock_32 = 250;
-	si->ps.max_dac1_clock_32dh = 250;
-	si->ps.max_dac2_clock = 0;
-	si->ps.max_dac2_clock_8 = 0;
-	si->ps.max_dac2_clock_16 = 0;
-	si->ps.max_dac2_clock_24 = 0;
-	si->ps.max_dac2_clock_32 = 0;
-	si->ps.max_dac2_clock_32dh = 0;
-	si->ps.primary_dvi = false;
-	si->ps.secondary_dvi = false;
-	si->ps.std_engine_clock = 150;
-	si->ps.std_memory_clock = 150;
-}
-
-static void pins_chrome9_fake(void)
-{
-	si->ps.f_ref = 14.31818;
-	si->ps.ext_pll = true;
-	si->ps.max_system_vco = 600;
-	si->ps.min_system_vco = 100;
-	si->ps.max_pixel_vco = 1000;
-	si->ps.min_pixel_vco = 300;
-	si->ps.max_video_vco = 0;
-	si->ps.min_video_vco = 0;
-	si->ps.max_dac1_clock = 350;
-	si->ps.max_dac1_clock_8 = 350;
-	si->ps.max_dac1_clock_16 = 350;
-	si->ps.max_dac1_clock_24 = 350;
-	si->ps.max_dac1_clock_32 = 350;
-	si->ps.max_dac1_clock_32dh = 350;
-	si->ps.max_dac2_clock = 0;
-	si->ps.max_dac2_clock_8 = 0;
-	si->ps.max_dac2_clock_16 = 0;
-	si->ps.max_dac2_clock_24 = 0;
-	si->ps.max_dac2_clock_32 = 0;
-	si->ps.max_dac2_clock_32dh = 0;
-	si->ps.primary_dvi = false;
-	si->ps.secondary_dvi = false;
-	si->ps.std_engine_clock = 200;
-	si->ps.std_memory_clock = 200;
-}
-
 static void pins_cle266_fake(void);
-static void pinsnv5_nv5m64_fake(void);
-static void pinsnv6_fake(void);
-static void pinsnv10_arch_fake(void);
-static void pinsnv20_arch_fake(void);
-static void pinsnv30_arch_fake(void);
+static void pins_unichrome_pro_fake(void);
+static void pins_chrome9_fake(void);
 static void getRAMsize(void);
-static void getstrap_arch_nv4(void);
-static void getstrap_arch_nv10_20_30_40(void);
 static status_t eng_crtc_setup_fifo(void);
 
-/* Parse the BIOS PINS structure if there */
-status_t parse_pins ()
-{
-	uint8 *rom;
-	status_t result = B_ERROR;
-
-	/* preset PINS read status to failed */
-	si->ps.pins_status = B_ERROR;
-
-	/* check the validity of PINS */
-	LOG(2,("INFO: Reading PINS info\n"));
-	rom = (uint8 *) si->rom_mirror;
-	/* check BIOS signature - this is defined in the PCI standard */
-	if (rom[0]!=0x55 || rom[1]!=0xaa)
-	{
-		LOG(8,("INFO: BIOS signature not found\n"));
-		return B_ERROR;
-	}
-	LOG(2,("INFO: BIOS signature $AA55 found OK\n"));
-
-	/* find the PINS struct adress */
-	//fixme...
-
-	/* check PINS read result */
-	if (result == B_ERROR)
-	{
-		LOG(8,("INFO: PINS read/decode/execute error\n"));
-		return B_ERROR;
-	}
-	/* PINS scan succeeded */
-	si->ps.pins_status = B_OK;
-	LOG(2,("INFO: PINS scan completed succesfully\n"));
-	return B_OK;
-}
-
-//fixme: move to crtc sourcefile, also setup for crtc2(?)
-static status_t	eng_crtc_setup_fifo()
-{
-	/* enable access to primary head */
-	set_crtc_owner(0);
-
-	//fixme: setup according to colordepth and RAM bus width...
-	/* set CRTC FIFO burst size to 256 */
-	CRTCW(FIFO, 0x03);
-
-	/* set CRTC FIFO low watermark to 32 */
-	CRTCW(FIFO_LWM, 0x20);
-
-	return B_OK;
-}
 
 /* (pre)set 'fixed' card specifications */
 void set_specs(void)
@@ -165,18 +54,7 @@ void set_specs(void)
 		break;
 	}
 
-	/* detect reference crystal frequency and dualhead */
-/*
-	switch (si->ps.card_arch)
-	{
-	case NV04A:
-		getstrap_arch_nv4();
-		break;
-	default:
-		getstrap_arch_nv10_20_30_40();
-		break;
-	}
-*/
+
 }
 
 /* this routine presumes the card was coldstarted by the card's BIOS for panel stuff */
@@ -247,14 +125,14 @@ static void detect_panels()
 	LOG(2,("CRTC1: PIXEL register: $%02x\n", CRTCR(PIXEL)));
 	/* info LCD register:
 	 * b7: 1 = stereo view (shutter glasses use)				(all cards),
-	 * b5: 1 = power ext. TMDS (or something)/0 = TVout	use	(?)	(confirmed NV17, NV28),
-	 * b4: 1 = power ext. TMDS (or something)/0 = TVout use	(?)	(confirmed NV34),
-	 * b3: 1 = ??? (not panel related probably!)				(confirmed NV34),
-	 * b1: 1 = power ext. TMDS (or something) (?)				(confirmed NV05?, NV17),
+	 * b5: 1 = power ext. TMDS (or something)/0 = TVout	use	(?)	
+	 * b4: 1 = power ext. TMDS (or something)/0 = TVout use	(?)	
+	 * b3: 1 = ??? (not panel related probably!)				
+	 * b1: 1 = power ext. TMDS (or something) (?)				
 	 * b0: 1 = select panel encoder / 0 = select TVout encoder	(all cards). */
 	LOG(2,("CRTC1: LCD register: $%02x\n", CRTCR(LCD)));
 	/* info 0x59 register:
-	 * b0: 1 = enable ext. TMDS clock (DPMS)					(confirmed NV28, NV34). */
+	 * b0: 1 = enable ext. TMDS clock (DPMS)					 */
 	LOG(2,("CRTC1: register $59: $%02x\n", CRTCR(0x59)));
 	/* info 0x9f register:
 	 * b4: 0 = TVout use (?). */
@@ -313,24 +191,10 @@ static void detect_panels()
 	 * are used!
 	 * Currently we'd loose the panel setup while not being able to restore it. */
 
-	/* note: (facts)
-	 * -> NV11 and NV17 laptops have LVDS panels, programmed in both sets registers;
-	 * -> NV34 laptops have TMDS panels, programmed in only one set of registers;
-	 * -> NV11, NV25 and NV34 DVI cards, so external panels (TMDS) are programmed
-	 *    in only one set of registers;
-	 * -> a register-set's FP_TG_CTRL register, bit 31 tells you if a LVDS panel is
-	 *    connected to the primary head (0), or to the secondary head (1) except
-	 *    on some NV11's if this bit is '0' there;
-	 * -> for LVDS panels both registersets are programmed identically by the card's
-	 *    BIOSes;
-	 * -> the programmed set of registers tells you where a TMDS (DVI) panel is
-	 *    connected;
-	 * -> On all cards a CRTC is used in slaved mode when a panel is connected,
-	 *    except on NV11: here master mode is (might be?) detected. */
 	/* note also:
 	 * external TMDS encoders are only used for logic-level translation: it's
 	 * modeline registers are not used. Instead the GPU's internal modeline registers
-	 * are used. The external encoder is not connected to a I2C bus (confirmed NV34). */
+	 * are used. The external encoder is not connected to a I2C bus . */
 	if (slaved_for_dev1 && !tvout1)
 	{
 		uint16 width = ((DACR(FP_HDISPEND) & 0x0000ffff) + 1);
@@ -357,33 +221,7 @@ static void detect_panels()
 		}
 	}
 
-	if ((si->ps.card_type == NV11) &&
-		!si->ps.slaved_tmds1 && !tvout1)
-	{
-		uint16 width = ((DACR(FP_HDISPEND) & 0x0000ffff) + 1);
-		uint16 height = ((DACR(FP_VDISPEND) & 0x0000ffff) + 1);
-		if ((width >= 640) && (height >= 480))
-		{
-			si->ps.master_tmds1 = true;
-			si->ps.tmds1_active = true;
-			si->ps.p1_timing.h_display = width;
-			si->ps.p1_timing.v_display = height;
-		}
-	}
 
-	if ((si->ps.card_type == NV11) &&
-		si->ps.secondary_head && !si->ps.slaved_tmds2 && !tvout2)
-	{
-		uint16 width = ((DAC2R(FP_HDISPEND) & 0x0000ffff) + 1);
-		uint16 height = ((DAC2R(FP_VDISPEND) & 0x0000ffff) + 1);
-		if ((width >= 640) && (height >= 480))
-		{
-			si->ps.master_tmds2 = true;
-			si->ps.tmds2_active = true;
-			si->ps.p2_timing.h_display = width;
-			si->ps.p2_timing.v_display = height;
-		}
-	}
 
 	//fixme...:
 	//we are assuming that no DVI is used as external monitor on laptops;
@@ -395,9 +233,9 @@ static void detect_panels()
 	{
 		LOG(2,("INFO: correcting double detection of single panel!\n"));
 
-		if (si->ps.card_type == NV11)
+		if (DACR(FP_TG_CTRL) & 0x80000000)
 		{
-			/* LVDS panel is _always_ on CRTC2, so clear false primary detection */
+			/* LVDS panel is on CRTC2, so clear false primary detection */
 			si->ps.slaved_tmds1 = false;
 			si->ps.master_tmds1 = false;
 			si->ps.tmds1_active = false;
@@ -406,24 +244,12 @@ static void detect_panels()
 		}
 		else
 		{
-			if (DACR(FP_TG_CTRL) & 0x80000000)
-			{
-				/* LVDS panel is on CRTC2, so clear false primary detection */
-				si->ps.slaved_tmds1 = false;
-				si->ps.master_tmds1 = false;
-				si->ps.tmds1_active = false;
-				si->ps.p1_timing.h_display = 0;
-				si->ps.p1_timing.v_display = 0;
-			}
-			else
-			{
-				/* LVDS panel is on CRTC1, so clear false secondary detection */
-				si->ps.slaved_tmds2 = false;
-				si->ps.master_tmds2 = false;
-				si->ps.tmds2_active = false;
-				si->ps.p2_timing.h_display = 0;
-				si->ps.p2_timing.v_display = 0;
-			}
+			/* LVDS panel is on CRTC1, so clear false secondary detection */
+			si->ps.slaved_tmds2 = false;
+			si->ps.master_tmds2 = false;
+			si->ps.tmds2_active = false;
+			si->ps.p2_timing.h_display = 0;
+			si->ps.p2_timing.v_display = 0;
 		}
 	}
 
@@ -546,8 +372,6 @@ static void setup_output_matrix()
 	/* setup output devices and heads */
 	if (0)//si->ps.secondary_head)
 	{
-		if (si->ps.card_type != NV11)
-		{
 			/* setup defaults: */
 			/* connect analog outputs straight through */
 			eng_general_output_select(false);
@@ -555,7 +379,7 @@ static void setup_output_matrix()
 			/* presetup by the card's BIOS, we can't change this (lack of info) */
 			if (si->ps.tmds1_active) si->ps.monitors |= 0x01;
 			if (si->ps.tmds2_active) si->ps.monitors |= 0x10;
-			/* detect analog monitors (confirmed working OK on NV18, NV28 and NV34): */
+			/* detect analog monitors: */
 			/* sense analog monitor on primary connector */
 			if (eng_dac_crt_connected()) si->ps.monitors |= 0x02;
 			/* sense analog monitor on secondary connector */
@@ -639,68 +463,6 @@ static void setup_output_matrix()
 				LOG(2,("INFO: defaulting to head 1 for primary use.\n"));
 				break;
 			}
-		}
-		else /* dualhead NV11 cards */
-		{
-			/* confirmed no analog output switch-options for NV11 */
-			LOG(2,("INFO: NV11 outputs are hardwired to be straight-through\n"));
-
-			/* presetup by the card's BIOS, we can't change this (lack of info) */
-			if (si->ps.tmds1_active) si->ps.monitors |= 0x01;
-			if (si->ps.tmds2_active) si->ps.monitors |= 0x10;
-			/* detect analog monitor (confirmed working OK on NV11): */
-			/* sense analog monitor on primary connector */
-			if (eng_dac_crt_connected()) si->ps.monitors |= 0x02;
-			/* (sense analog monitor on secondary connector is impossible on NV11) */
-
-			/* setup correct output and head use */
-			//fixme? add TVout (only, so no CRT(s) connected) support...
-			switch (si->ps.monitors)
-			{
-			case 0x00: /* no monitor found at all */
-				LOG(2,("INFO: head 1 has nothing connected;\n"));
-				LOG(2,("INFO: head 2 has nothing connected:\n"));
-				LOG(2,("INFO: defaulting to head 1 for primary use.\n"));
-				break;
-			case 0x01: /* digital panel on head 1, nothing on head 2 */
-				LOG(2,("INFO: head 1 has a digital panel;\n"));
-				LOG(2,("INFO: head 2 has nothing connected:\n"));
-				LOG(2,("INFO: defaulting to head 1 for primary use.\n"));
-				break;
-			case 0x02: /* analog panel or CRT on head 1, nothing on head 2 */
-				LOG(2,("INFO: head 1 has an analog panel or CRT;\n"));
-				LOG(2,("INFO: head 2 has nothing connected:\n"));
-				LOG(2,("INFO: defaulting to head 1 for primary use.\n"));
-				break;
-			case 0x03: /* both types on head 1, nothing on head 2 */
-				LOG(2,("INFO: head 1 has a digital panel AND an analog panel or CRT;\n"));
-				LOG(2,("INFO: head 2 has nothing connected:\n"));
-				LOG(2,("INFO: correction not possible...\n"));
-				LOG(2,("INFO: defaulting to head 1 for primary use.\n"));
-				break;
-			case 0x10: /* nothing on head 1, digital panel on head 2 */
-				LOG(2,("INFO: head 1 has nothing connected;\n"));
-				LOG(2,("INFO: head 2 has a digital panel:\n"));
-				LOG(2,("INFO: defaulting to head 2 for primary use.\n"));
-				si->ps.crtc2_prim = true;
-				break;
-			case 0x11: /* digital panels on both heads */
-				LOG(2,("INFO: head 1 has a digital panel;\n"));
-				LOG(2,("INFO: head 2 has a digital panel:\n"));
-				LOG(2,("INFO: defaulting to head 1 for primary use.\n"));
-				break;
-			case 0x12: /* analog panel or CRT on head 1, digital panel on head 2 */
-				LOG(2,("INFO: head 1 has an analog panel or CRT;\n"));
-				LOG(2,("INFO: head 2 has a digital panel:\n"));
-				LOG(2,("INFO: defaulting to head 2 for primary use.\n"));
-				si->ps.crtc2_prim = true;
-				break;
-			default: /* more than two monitors connected to just two outputs: illegal! */
-				LOG(2,("INFO: illegal monitor setup ($%02x):\n", si->ps.monitors));
-				LOG(2,("INFO: defaulting to head 1 for primary use.\n"));
-				break;
-			}
-		}
 	}
 	else /* singlehead cards */
 	{
@@ -790,211 +552,114 @@ static void pins_cle266_fake(void)
 	si->ps.std_memory_clock = 110;
 }
 
-static void pinsnv5_nv5m64_fake(void)
+static void pins_unichrome_pro_fake(void)
 {
-	/* we have a standard PLL */
-	si->ps.ext_pll = false;
-	/* carefull not to take to high limits, and high should be >= 2x low. */
-	si->ps.max_system_vco = 300;
-	si->ps.min_system_vco = 128;
-	si->ps.max_pixel_vco = 300;
-	si->ps.min_pixel_vco = 128;
+	si->ps.f_ref = 14.31818;
+	si->ps.ext_pll = true;
+	si->ps.max_system_vco = 400;
+	si->ps.min_system_vco = 50;
+	si->ps.max_pixel_vco = 800;
+	si->ps.min_pixel_vco = 200;
 	si->ps.max_video_vco = 0;
 	si->ps.min_video_vco = 0;
 	si->ps.max_dac1_clock = 300;
 	si->ps.max_dac1_clock_8 = 300;
 	si->ps.max_dac1_clock_16 = 300;
-	/* 'failsave' values */
-	si->ps.max_dac1_clock_24 = 270;
-	si->ps.max_dac1_clock_32 = 230;
-	si->ps.max_dac1_clock_32dh = 230;
-	/* secondary head */
+	si->ps.max_dac1_clock_24 = 250;
+	si->ps.max_dac1_clock_32 = 250;
+	si->ps.max_dac1_clock_32dh = 250;
 	si->ps.max_dac2_clock = 0;
 	si->ps.max_dac2_clock_8 = 0;
 	si->ps.max_dac2_clock_16 = 0;
 	si->ps.max_dac2_clock_24 = 0;
 	si->ps.max_dac2_clock_32 = 0;
-	/* 'failsave' values */
 	si->ps.max_dac2_clock_32dh = 0;
-	//fixme: primary & secondary_dvi should be overrule-able via skel.settings
 	si->ps.primary_dvi = false;
 	si->ps.secondary_dvi = false;
-	/* not used (yet) because no coldstart will be attempted (yet) */
-	si->ps.std_engine_clock = 125;
+	si->ps.std_engine_clock = 150;
 	si->ps.std_memory_clock = 150;
 }
 
-static void pinsnv6_fake(void)
+static void pins_chrome9_fake(void)
 {
-	/* we have a standard PLL */
-	si->ps.ext_pll = false;
-	/* carefull not to take to high limits, and high should be >= 2x low. */
-	si->ps.max_system_vco = 300;
-	si->ps.min_system_vco = 128;
-	si->ps.max_pixel_vco = 300;
-	si->ps.min_pixel_vco = 128;
+	si->ps.f_ref = 14.31818;
+	si->ps.ext_pll = true;
+	si->ps.max_system_vco = 600;
+	si->ps.min_system_vco = 100;
+	si->ps.max_pixel_vco = 1000;
+	si->ps.min_pixel_vco = 300;
 	si->ps.max_video_vco = 0;
 	si->ps.min_video_vco = 0;
-	si->ps.max_dac1_clock = 300;
-	si->ps.max_dac1_clock_8 = 300;
-	si->ps.max_dac1_clock_16 = 300;
-	/* 'failsave' values */
-	si->ps.max_dac1_clock_24 = 270;
-	si->ps.max_dac1_clock_32 = 230;
-	si->ps.max_dac1_clock_32dh = 230;
-	/* secondary head */
+	si->ps.max_dac1_clock = 350;
+	si->ps.max_dac1_clock_8 = 350;
+	si->ps.max_dac1_clock_16 = 350;
+	si->ps.max_dac1_clock_24 = 350;
+	si->ps.max_dac1_clock_32 = 350;
+	si->ps.max_dac1_clock_32dh = 350;
 	si->ps.max_dac2_clock = 0;
 	si->ps.max_dac2_clock_8 = 0;
 	si->ps.max_dac2_clock_16 = 0;
 	si->ps.max_dac2_clock_24 = 0;
 	si->ps.max_dac2_clock_32 = 0;
-	/* 'failsave' values */
 	si->ps.max_dac2_clock_32dh = 0;
-	//fixme: primary & secondary_dvi should be overrule-able via skel.settings
 	si->ps.primary_dvi = false;
 	si->ps.secondary_dvi = false;
-	/* not used (yet) because no coldstart will be attempted (yet) */
-	si->ps.std_engine_clock = 100;
-	si->ps.std_memory_clock = 125;
-}
-
-static void pinsnv10_arch_fake(void)
-{
-	/* we have a standard PLL */
-	si->ps.ext_pll = false;
-	/* carefull not to take to high limits, and high should be >= 2x low. */
-	si->ps.max_system_vco = 350;
-	si->ps.min_system_vco = 128;
-	si->ps.max_pixel_vco = 350;
-	si->ps.min_pixel_vco = 128;
-	si->ps.max_video_vco = 350;
-	si->ps.min_video_vco = 128;
-	si->ps.max_dac1_clock = 350;
-	si->ps.max_dac1_clock_8 = 350;
-	si->ps.max_dac1_clock_16 = 350;
-	/* 'failsave' values */
-	si->ps.max_dac1_clock_24 = 320;
-	si->ps.max_dac1_clock_32 = 280;
-	si->ps.max_dac1_clock_32dh = 250;
-	/* secondary head */
-	if (si->ps.card_type < NV17)
-	{
-		/* if a GeForce2 has analog VGA dualhead capability,
-		 * it uses an external secondary DAC probably with limited capability. */
-		/* (called twinview technology) */
-		si->ps.max_dac2_clock = 200;
-		si->ps.max_dac2_clock_8 = 200;
-		si->ps.max_dac2_clock_16 = 200;
-		si->ps.max_dac2_clock_24 = 200;
-		si->ps.max_dac2_clock_32 = 200;
-		/* 'failsave' values */
-		si->ps.max_dac2_clock_32dh = 180;
-	}
-	else
-	{
-		/* GeForce4 cards have dual integrated DACs with identical capaability */
-		/* (called nview technology) */
-		si->ps.max_dac2_clock = 350;
-		si->ps.max_dac2_clock_8 = 350;
-		si->ps.max_dac2_clock_16 = 350;
-		/* 'failsave' values */
-		si->ps.max_dac2_clock_24 = 320;
-		si->ps.max_dac2_clock_32 = 280;
-		si->ps.max_dac2_clock_32dh = 250;
-	}
-	//fixme: primary & secondary_dvi should be overrule-able via skel.settings
-	si->ps.primary_dvi = false;
-	si->ps.secondary_dvi = false;
-	/* not used (yet) because no coldstart will be attempted (yet) */
-	si->ps.std_engine_clock = 120;
-	si->ps.std_memory_clock = 150;
-}
-
-static void pinsnv20_arch_fake(void)
-{
-	/* we have a standard PLL */
-	si->ps.ext_pll = false;
-	/* carefull not to take to high limits, and high should be >= 2x low. */
-	si->ps.max_system_vco = 350;
-	si->ps.min_system_vco = 128;
-	si->ps.max_pixel_vco = 350;
-	si->ps.min_pixel_vco = 128;
-	si->ps.max_video_vco = 350;
-	si->ps.min_video_vco = 128;
-	si->ps.max_dac1_clock = 350;
-	si->ps.max_dac1_clock_8 = 350;
-	si->ps.max_dac1_clock_16 = 350;
-	/* 'failsave' values */
-	si->ps.max_dac1_clock_24 = 320;
-	si->ps.max_dac1_clock_32 = 280;
-	si->ps.max_dac1_clock_32dh = 250;
-	/* secondary head */
-	/* GeForce4 cards have dual integrated DACs with identical capaability */
-	/* (called nview technology) */
-	si->ps.max_dac2_clock = 350;
-	si->ps.max_dac2_clock_8 = 350;
-	si->ps.max_dac2_clock_16 = 350;
-	/* 'failsave' values */
-	si->ps.max_dac2_clock_24 = 320;
-	si->ps.max_dac2_clock_32 = 280;
-	si->ps.max_dac2_clock_32dh = 250;
-	//fixme: primary & secondary_dvi should be overrule-able via skel.settings
-	si->ps.primary_dvi = false;
-	si->ps.secondary_dvi = false;
-	/* not used (yet) because no coldstart will be attempted (yet) */
-	si->ps.std_engine_clock = 175;
+	si->ps.std_engine_clock = 200;
 	si->ps.std_memory_clock = 200;
 }
 
-static void pinsnv30_arch_fake(void)
+
+/* Parse the BIOS PINS structure if there */
+status_t parse_pins ()
 {
-	/* determine PLL type */
-	LOG(8,("INFO: NV30 architecture chip, PIXPLLC2 DAC1 = $%08x, DAC2 = $%08x\n",
-		DACR(PIXPLLC2), DAC2R(PIXPLLC2)));
-	switch (si->ps.card_type)
+	uint8 *rom;
+	status_t result = B_ERROR;
+
+	/* preset PINS read status to failed */
+	si->ps.pins_status = B_ERROR;
+
+	/* check the validity of PINS */
+	LOG(2,("INFO: Reading PINS info\n"));
+	rom = (uint8 *) si->rom_mirror;
+	/* check BIOS signature - this is defined in the PCI standard */
+	if (rom[0]!=0x55 || rom[1]!=0xaa)
 	{
-	case NV31:
-	case NV36:
-	case NV40:
-		/* we have a extended PLL */
-		si->ps.ext_pll = true;
-		break;
-	default:
-		/* we have a standard PLL */
-		si->ps.ext_pll = false;
-		break;
+		LOG(8,("INFO: BIOS signature not found\n"));
+		return B_ERROR;
 	}
-	/* carefull not to take to high limits, and high should be >= 2x low. */
-	si->ps.max_system_vco = 350;
-	si->ps.min_system_vco = 128;
-	si->ps.max_pixel_vco = 350;
-	si->ps.min_pixel_vco = 128;
-	si->ps.max_video_vco = 350;
-	si->ps.min_video_vco = 128;
-	si->ps.max_dac1_clock = 350;
-	si->ps.max_dac1_clock_8 = 350;
-	si->ps.max_dac1_clock_16 = 350;
-	/* 'failsave' values */
-	si->ps.max_dac1_clock_24 = 320;
-	si->ps.max_dac1_clock_32 = 280;
-	si->ps.max_dac1_clock_32dh = 250;
-	/* secondary head */
-	/* GeForceFX cards have dual integrated DACs with identical capaability */
-	/* (called nview technology) */
-	si->ps.max_dac2_clock = 350;
-	si->ps.max_dac2_clock_8 = 350;
-	si->ps.max_dac2_clock_16 = 350;
-	/* 'failsave' values */
-	si->ps.max_dac2_clock_24 = 320;
-	si->ps.max_dac2_clock_32 = 280;
-	si->ps.max_dac2_clock_32dh = 250;
-	//fixme: primary & secondary_dvi should be overrule-able via skel.settings
-	si->ps.primary_dvi = false;
-	si->ps.secondary_dvi = false;
-	/* not used (yet) because no coldstart will be attempted (yet) */
-	si->ps.std_engine_clock = 190;
-	si->ps.std_memory_clock = 190;
+	LOG(2,("INFO: BIOS signature $AA55 found OK\n"));
+
+	/* find the PINS struct adress */
+	//fixme...
+
+	/* check PINS read result */
+	if (result == B_ERROR)
+	{
+		LOG(8,("INFO: PINS read/decode/execute error\n"));
+		return B_ERROR;
+	}
+	/* PINS scan succeeded */
+	si->ps.pins_status = B_OK;
+	LOG(2,("INFO: PINS scan completed succesfully\n"));
+	return B_OK;
 }
+
+//fixme: move to crtc sourcefile, also setup for crtc2(?)
+static status_t	eng_crtc_setup_fifo()
+{
+	/* enable access to primary head */
+	set_crtc_owner(0);
+
+	//fixme: setup according to colordepth and RAM bus width...
+	/* set CRTC FIFO burst size to 256 */
+	CRTCW(FIFO, 0x03);
+
+	/* set CRTC FIFO low watermark to 32 */
+	CRTCW(FIFO_LWM, 0x20);
+
+	return B_OK;
+}
+
 
 static void getRAMsize(void)
 {
@@ -1038,85 +703,6 @@ static void getRAMsize(void)
 				si->ps.memory_size = 16 * 1024 * 1024;
 			LOG(8,("INFO: unable to detect RAMsize (read $%02x), assuming %dMb\n", ram_size, (int)(si->ps.memory_size / (1024 * 1024))));
 		}
-	}
-}
-
-static void getstrap_arch_nv4(void)
-{
-	uint32 strapinfo = ENG_REG32(RG32_NVSTRAPINFO2);
-
-	/* determine PLL reference crystal frequency */
-	if (strapinfo & 0x00000040)
-		si->ps.f_ref = 14.31818;
-	else
-		si->ps.f_ref = 13.50000;
-
-	/* these cards are always singlehead */
-	si->ps.secondary_head = false;
-}
-
-static void getstrap_arch_nv10_20_30_40(void)
-{
-	uint32 dev_manID = CFGR(DEVID);
-	uint32 strapinfo = ENG_REG32(RG32_NVSTRAPINFO2);
-
-	/* determine PLL reference crystal frequency: three types are used... */
-	if (strapinfo & 0x00000040)
-		si->ps.f_ref = 14.31818;
-	else
-		si->ps.f_ref = 13.50000;
-
-	switch (dev_manID & 0xfff0ffff)
-	{
-	/* Nvidia cards: */
-	case 0x004010de:
-	case 0x00c010de:
-	case 0x00f010de:
-	case 0x014010de:
-	case 0x017010de:
-	case 0x018010de:
-	case 0x01f010de:
-	case 0x025010de:
-	case 0x028010de:
-	case 0x030010de:
-	case 0x031010de:
-	case 0x032010de:
-	case 0x033010de:
-	case 0x034010de:
-	/* Varisys cards: */
-	case 0x35001888:
-		if (strapinfo & 0x00400000) si->ps.f_ref = 27.00000;
-		break;
-	default:
-		break;
-	}
-
-	/* determine if we have a dualhead card */
-	switch (dev_manID & 0xfff0ffff)
-	{
-	/* Nvidia cards: */
-	case 0x004010de:
-	case 0x00c010de:
-	case 0x00f010de:
-	case 0x011010de:
-	case 0x014010de:
-	case 0x017010de:
-	case 0x018010de:
-	case 0x01f010de:
-	case 0x025010de:
-	case 0x028010de:
-	case 0x030010de:
-	case 0x031010de:
-	case 0x032010de:
-	case 0x033010de:
-	case 0x034010de:
-	/* Varisys cards: */
-	case 0x35001888:
-		si->ps.secondary_head = true;
-		break;
-	default:
-		si->ps.secondary_head = false;
-		break;
 	}
 }
 
@@ -1199,9 +785,6 @@ void dump_pins(void)
 		break;
 	case CX25871:
 		msg = "Conexant CX25871";
-		break;
-	case NVIDIA:
-		msg = "Nvidia internal";
 		break;
 	default:
 		msg = "Unknown";

@@ -126,12 +126,7 @@ status_t eng_crtc2_set_timing(display_mode target)
 		 * OTOH the overlay unit distorts if we reserve too much time! */
 		if (target.timing.h_display == si->ps.p2_timing.h_display)
 		{
-			/* NV11 timing has different constraints than later cards */
-			if (si->ps.card_type == NV11)
-				target.timing.h_total -= 56;
-			else
-				/* confirmed NV34 with 1680x1050 panel */
-				target.timing.h_total -= 32;
+			target.timing.h_total -= 32;
 		}
 
 		if (target.timing.h_sync_start == target.timing.h_display)
@@ -290,8 +285,7 @@ status_t eng_crtc2_set_timing(display_mode target)
 	}
 
 	/* always disable interlaced operation */
-	/* (interlace is supported on upto and including NV10, NV15, and NV30 and up) */
-	CRTC2W(INTERLACE, 0xff);
+		CRTC2W(INTERLACE, 0xff);
 
 	/* disable CRTC slaved mode unless a panel is in use */
 	// fixme: this kills TVout when it was in use...
@@ -319,9 +313,7 @@ status_t eng_crtc2_set_timing(display_mode target)
 		DAC2W(FP_VVALID_S, 0);
 		DAC2W(FP_VVALID_E, (si->ps.p2_timing.v_display - 1));
 
-		/* nVidia cards support upscaling except on ??? */
-		/* NV11 cards can upscale after all! */
-		if (0)//si->ps.card_type == NV11)
+		if (0)
 		{
 			/* disable last fetched line limiting */
 			DAC2W(FP_DEBUG2, 0x00000000);
@@ -393,7 +385,7 @@ status_t eng_crtc2_set_timing(display_mode target)
 			if ((iscale_y != (1 << 12)) && (si->ps.panel2_aspect < (dm_aspect - 0.10)))
 			{
 				LOG(2,("CRTC2: (relative) portrait panel: should tune vertical scaling\n"));
-				/* fixme: implement if this kind of portrait panels exist on nVidia... */
+				/* fixme: portrait panels */
 			}
 		}
 
@@ -483,11 +475,11 @@ status_t eng_crtc2_dpms(bool display, bool h, bool v)
 			 * internal transmitters... */
 			/* note:
 			 * the powerbits in this register are hardwired to the DVI connectors,
-			 * instead of to the DACs! (confirmed NV34) */
+			 * instead of to the DACs! */
 			//fixme...
 			DAC2W(FP_DEBUG0, (DAC2R(FP_DEBUG0) & 0xcfffffff));
 			/* ... and powerup external TMDS transmitter if it exists */
-			/* (confirmed OK on NV28 and NV34) */
+			
 			CRTC2W(0x59, (CRTC2R(0x59) | 0x01));
 		}
 
@@ -504,11 +496,11 @@ status_t eng_crtc2_dpms(bool display, bool h, bool v)
 			 * internal transmitters... */
 			/* note:
 			 * the powerbits in this register are hardwired to the DVI connectors,
-			 * instead of to the DACs! (confirmed NV34) */
+			 * instead of to the DACs! */
 			//fixme...
 			DAC2W(FP_DEBUG0, (DAC2R(FP_DEBUG0) | 0x30000000));
 			/* ... and powerdown external TMDS transmitter if it exists */
-			/* (confirmed OK on NV28 and NV34) */
+			
 			CRTC2W(0x59, (CRTC2R(0x59) & 0xfe));
 		}
 
@@ -603,70 +595,19 @@ status_t eng_crtc2_set_display_start(uint32 startadd,uint8 bpp)
 	/* enable access to secondary head */
 	set_crtc_owner(1);
 
-	/* upto 4Gb RAM adressing: must be used on NV10 and later! */
-	/* NOTE:
-	 * While this register also exists on pre-NV10 cards, it will
-	 * wrap-around at 16Mb boundaries!! */
-
-	/* 30bit adress in 32bit words */
-	ENG_REG32(RG32_NV10FB2STADD32) = (startadd & 0xfffffffc);
-
-	/* set byte adress: (b0 - 1) */
-	ATB2W(HORPIXPAN, ((startadd & 0x00000003) << 1));
+	
+	
+	/* VIA starting address in 64-bit words */
+	CRTC2W(FBSTADDL, ((startadd & 0x000001f8) >> 1));
+	CRTC2W(FBSTADDH, ((startadd & 0x0001fe00) >> 9));
+	CRTC2W(FBSTADDE, ((startadd & 0x01fe0000) >> 17));
 
 	return B_OK;
 }
 
 status_t eng_crtc2_cursor_init()
 {
-	int i;
-	uint32 * fb;
-	/* cursor bitmap will be stored at the start of the framebuffer */
-	const uint32 curadd = 0;
-
-	/* enable access to secondary head */
-	set_crtc_owner(1);
-
-	/* set cursor bitmap adress ... */
-	if (si->ps.laptop)
-	{
-		/* must be used this way on pre-NV10 and on all 'Go' cards! */
-
-		/* cursorbitmap must start on 2Kbyte boundary: */
-		/* set adress bit11-16, and set 'no doublescan' (registerbit 1 = 0) */
-		CRTC2W(CURCTL0, ((curadd & 0x0001f800) >> 9));
-		/* set adress bit17-23, and set graphics mode cursor(?) (registerbit 7 = 1) */
-		CRTC2W(CURCTL1, (((curadd & 0x00fe0000) >> 17) | 0x80));
-		/* set adress bit24-31 */
-		CRTC2W(CURCTL2, ((curadd & 0xff000000) >> 24));
-	}
-	else
-	{
-		/* upto 4Gb RAM adressing:
-		 * can be used on NV10 and later (except for 'Go' cards)! */
-		/* NOTE:
-		 * This register does not exist on pre-NV10 and 'Go' cards. */
-
-		/* cursorbitmap must still start on 2Kbyte boundary: */
-		ENG_REG32(RG32_NV10CUR2ADD32) = (curadd & 0xfffff800);
-	}
-
-	/* set cursor colour: not needed because of direct nature of cursor bitmap. */
-
-	/*clear cursor*/
-	fb = (uint32 *) si->framebuffer + curadd;
-	for (i=0;i<(2048/4);i++)
-	{
-		fb[i]=0;
-	}
-
-	/* select 32x32 pixel, 16bit color cursorbitmap, no doublescan */
-	ENG_REG32(RG32_2CURCONF) = 0x02000100;
-
-	/* activate hardware cursor */
-	eng_crtc2_cursor_show();
-
-	return B_OK;
+	return eng_crtc_cursor_init();
 }
 
 status_t eng_crtc2_cursor_show()
@@ -707,7 +648,7 @@ status_t eng_crtc2_cursor_define(uint8* andMask,uint8* xorMask)
 	cursor = (uint16*) si->framebuffer;
 
 	/* draw the cursor */
-	/* (Nvidia cards have a RGB15 direct color cursor bitmap, bit #16 is transparancy) */
+	/* Cursor bitmap */
 	for (y = 0; y < 16; y++)
 	{
 		b = 0x80;

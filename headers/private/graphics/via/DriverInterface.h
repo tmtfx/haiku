@@ -39,7 +39,7 @@ typedef struct {
 	int32	ben;
 } benaphore;
 
-#define INIT_BEN(x)		x.sem = create_sem(0, "NV "#x" benaphore");  x.ben = 0;
+#define INIT_BEN(x)		x.sem = create_sem(0, "VIA "#x" benaphore");  x.ben = 0;
 #define AQUIRE_BEN(x)	if((atomic_add(&(x.ben), 1)) >= 1) acquire_sem(x.sem);
 #define RELEASE_BEN(x)	if((atomic_add(&(x.ben), -1)) > 1) release_sem(x.sem);
 #define	DELETE_BEN(x)	delete_sem(x.sem);
@@ -106,7 +106,7 @@ typedef struct settings {  // apsed, see comments in skel.settings
 
 /* card info - information gathered from PINS (and other sources) */
 enum
-{	// card_type in order of date of VIA chip design (fixme: check order)
+{	// card_type in order of date of VIA chip design
 	VT3122 = 0,
 	VT3022,
 	VT7205,
@@ -122,32 +122,7 @@ enum
 	VT3364,		/* P4M900 / VN896 / CN896 */
 	VT3353,		/* VX800 / VX820 */
 	VT3409,		/* VX855 / VX875 */
-	VT3410,		/* VX900 */
-	NV04,
-	NV05,
-	NV05M64,
-	NV06,
-	NV10,
-	NV11,
-	NV11M,
-	NV15,
-	NV17,
-	NV17M,
-	NV18,
-	NV18M,
-	NV20,
-	NV25,
-	NV28,
-	NV30,
-	NV31,
-	NV34,
-	NV35,
-	NV36,
-	NV38,
-	NV40,
-	NV41,
-	NV43,
-	NV45
+	VT3410		/* VX900 */
 };
 enum
 {	// card_arch in order of date of VIA chip design
@@ -163,12 +138,7 @@ enum
 	P4M900,
 	VX800,
 	VX855,
-	VX900,
-	NV04A,
-	NV10A,
-	NV20A,
-	NV30A,
-	NV40A
+	VX900
 };
 enum
 {	// tvout_chip_type in order of capability (more or less)
@@ -186,8 +156,7 @@ enum
 	BT868,
 	BT869,
 	CX25870,
-	CX25871,
-	NVIDIA
+	CX25871
 };
 
 
