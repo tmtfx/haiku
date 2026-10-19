@@ -666,16 +666,12 @@ status_t eng_general_validate_pic_size (display_mode *target, uint32 *bytes_per_
 	/* check for acc capability, and adjust mode to adhere to hardware constraints */
 	if (max_acc_width <= max_crtc_width)
 	{
-		/* check if we can setup this mode with acceleration */
-//		*acc_mode = true;
-//blocking acc totally:
-*acc_mode = false;
-		/* virtual_width */
-		if (target->virtual_width > max_acc_width) *acc_mode = false;
-		/* virtual_height */
-		/* (NV cards can even do more than this(?)...
-		 *  but 4096 is confirmed on all cards at max. accelerated width.) */
-		if (target->virtual_height > 4096) *acc_mode = false;
+		/* enable acceleration for valid VIA 2D engine dimensions (up to 2047x2047) */
+		*acc_mode = true;
+		/* virtual_width: Hardware limitation is 2047 for 2D Engine */
+		if (target->virtual_width > 2047) *acc_mode = false;
+		/* virtual_height: Hardware limitation is 2047 for 2D Engine */
+		if (target->virtual_height > 2047) *acc_mode = false;
 
 		/* now check virtual_size based on CRTC constraints */
 		if (target->virtual_width > max_crtc_width) target->virtual_width = max_crtc_width;

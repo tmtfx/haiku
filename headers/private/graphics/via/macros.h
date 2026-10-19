@@ -765,3 +765,53 @@
 #define MAVW(A,B)   (i2c_maven_write(ENMAV_##A ,B))
 #define MAVRW(A)    (i2c_maven_read (ENMAV_##A )|(i2c_maven_read(ENMAV_##A +1)<<8))
 #define MAVWW(A,B)  (i2c_maven_write(ENMAV_##A ,B &0xFF),i2c_maven_write(ENMAV_##A +1,B >>8))
+
+/* VIA 2D Engine definitions */
+#define VIA_MMIO_BLTBASE        0x200000
+
+/* H2 Engine Registers */
+#define VIA_REG_GECMD           0x000
+#define VIA_REG_GEMODE          0x004
+#define VIA_REG_GESTATUS        0x004
+#define VIA_REG_SRCPOS          0x008
+#define VIA_REG_DSTPOS          0x00C
+#define VIA_REG_DIMENSION       0x010
+#define VIA_REG_FGCOLOR         0x018
+#define VIA_REG_BGCOLOR         0x01C
+#define VIA_REG_SRCBASE         0x030
+#define VIA_REG_DSTBASE         0x034
+#define VIA_REG_PITCH           0x038
+
+/* H6 / M1 Engine Registers (Chrome9: VX800, VX855, VX900) */
+#define VIA_REG_GECMD_M1        0x000
+#define VIA_REG_GEMODE_M1       0x004
+#define VIA_REG_GESTATUS_M1     0x004
+#define VIA_REG_PITCH_M1        0x008
+#define VIA_REG_DIMENSION_M1    0x00C
+#define VIA_REG_DSTPOS_M1       0x010
+#define VIA_REG_DSTBASE_M1      0x014
+#define VIA_REG_SRCPOS_M1       0x018
+#define VIA_REG_SRCBASE_M1      0x01C
+#define VIA_REG_MONOPATFGC_M1   0x058
+
+/* GEC Commands */
+#define VIA_GEC_NOOP            0x00000000
+#define VIA_GEC_BLT             0x00000001
+#define VIA_GEC_FIXCOLOR_PAT    0x00002000
+#define VIA_GEC_DECY            0x00004000
+#define VIA_GEC_DECX            0x00008000
+#define VIA_GEC_CLIP_ENABLE     0x00001000
+#define VIA_PITCH_ENABLE        0x80000000
+
+/* Raster Operations (ROP) */
+#define VIA_ROP_S               0xCC
+#define VIA_ROP_P               0xF0
+
+/* Color Depth (GEMODE) */
+#define VIA_GEM_8bpp            0x00000000
+#define VIA_GEM_16bpp           0x00000100
+#define VIA_GEM_32bpp           0x00000300
+
+/* Macro for accessing 2D Engine */
+#define BLTR(A)   (ENG_REG32(VIA_MMIO_BLTBASE + (A)))
+#define BLTW(A,B) (ENG_REG32(VIA_MMIO_BLTBASE + (A)) = (B))
