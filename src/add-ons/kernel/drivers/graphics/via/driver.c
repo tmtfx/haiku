@@ -276,7 +276,7 @@ init_driver(void) {
 		value = strtoul (item, &end, 0);
 		if (*end == '\0') current_settings.memory = value;
 
-		current_settings.hardcursor = get_driver_boolean_parameter (settings_handle, "hardcursor", false, false);
+		current_settings.hardcursor = get_driver_boolean_parameter (settings_handle, "hardcursor", true, true);
 		current_settings.usebios = get_driver_boolean_parameter (settings_handle, "usebios", false, false);
 		current_settings.switchhead = get_driver_boolean_parameter (settings_handle, "switchhead", false, false);
 		current_settings.force_pci = get_driver_boolean_parameter (settings_handle, "force_pci", false, false);
