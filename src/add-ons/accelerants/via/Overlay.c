@@ -1,4 +1,10 @@
-/* Written by Rudolf Cornelissen 05/2002-4/2006 */
+/* Written by Rudolf Cornelissen 05/2002-4/2006
+ *
+ * Portions based on the OpenChrome Project (https://www.freedesktop.org/wiki/Openchrome):
+ * Copyright 1998-2008 VIA Technologies, Inc. All Rights Reserved.
+ * Copyright 2001-2003 S3 Graphics, Inc. All Rights Reserved.
+ * Authors: Kevin Brace, Thomas Hellström, James Simmons, Xavier Bachelot
+ */
 
 /* Note on 'missing features' in BeOS 5.0.3 and DANO:
  * BeOS needs to define more colorspaces! It would be nice if BeOS would support the FourCC 'definitions'
