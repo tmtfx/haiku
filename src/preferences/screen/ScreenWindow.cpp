@@ -505,27 +505,17 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 		}
 	}
 	f2DAccelerationCheckbox->SetEnabled(has2DAcceleration);
-	if (fSettings->Acceleration2DEnabled())
+	if (has2DAcceleration && fSettings->Acceleration2DEnabled())
 		f2DAccelerationCheckbox->SetValue(B_CONTROL_ON);
 	else
 		f2DAccelerationCheckbox->SetValue(B_CONTROL_OFF);
 
 	f2DCompositorCheckbox = new BCheckBox("2d_compositor",
-		B_TRANSLATE("Enable 2D compositor (requires 4GB+ RAM)"),
+		B_TRANSLATE("Enable 2D compositor (requires hardware cursor)"),
 		new BMessage(TOGGLE_2D_COMPOSITOR_MSG));
 
-	bool hasEnoughRAM = false;
-	system_info sysInfo;
-	if (get_system_info(&sysInfo) == B_OK) {
-		uint64 totalRAM = (uint64)sysInfo.max_pages * B_PAGE_SIZE;
-		// Check for at least ~3.8 GB (accounting for reserved BIOS memory on 4GB systems)
-		if (totalRAM >= 3800ULL * 1024 * 1024)
-			hasEnoughRAM = true;
-	}
-
-	bool canEnableCompositor = has2DAcceleration && hasEnoughRAM
-		&& fSettings->Acceleration2DEnabled();
-	f2DCompositorCheckbox->SetEnabled(canEnableCompositor);
+	bool canEnableCompositor = supportsHardwareCursor && (fHardwareCursorCheckbox->Value() == B_CONTROL_ON);
+	f2DCompositorCheckbox->SetEnabled(supportsHardwareCursor);
 	if (canEnableCompositor && fSettings->Compositor2DEnabled())
 		f2DCompositorCheckbox->SetValue(B_CONTROL_ON);
 	else
@@ -1314,6 +1304,14 @@ ScreenWindow::MessageReceived(BMessage* message)
 		{
 			bool enabled = fHardwareCursorCheckbox->Value() == B_CONTROL_ON;
 			fSettings->SetHardwareCursorEnabled(enabled);
+			
+			if (enabled)
+				f2DCompositorCheckbox->SetEnabled(true);
+			else {
+				f2DCompositorCheckbox->SetValue(B_CONTROL_OFF);
+				f2DCompositorCheckbox->SetEnabled(false);
+				fSettings->SetCompositor2DEnabled(false);
+			}
 			break;
 		}
 
@@ -1322,21 +1320,6 @@ ScreenWindow::MessageReceived(BMessage* message)
 			bool enabled = f2DAccelerationCheckbox->Value() == B_CONTROL_ON;
 			fSettings->SetAcceleration2DEnabled(enabled);
 
-			bool hasEnoughRAM = false;
-			system_info sysInfo;
-			if (get_system_info(&sysInfo) == B_OK) {
-				uint64 totalRAM = (uint64)sysInfo.max_pages * B_PAGE_SIZE;
-				if (totalRAM >= 3800ULL * 1024 * 1024)
-					hasEnoughRAM = true;
-			}
-
-			if (enabled && hasEnoughRAM) {
-				f2DCompositorCheckbox->SetEnabled(true);
-			} else {
-				f2DCompositorCheckbox->SetValue(B_CONTROL_OFF);
-				f2DCompositorCheckbox->SetEnabled(false);
-				fSettings->SetCompositor2DEnabled(false);
-			}
 			break;
 		}
 
