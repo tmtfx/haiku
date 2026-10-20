@@ -1,0 +1,5 @@
+In Window.cpp, the AllocateBackingStore() introduced with commit d8f95488b6:
+One time caused app_server to crash with a painter drawing StraightLine error
+maybe painting outside the buffer!
+
+if this happens again consider reviewing this code
