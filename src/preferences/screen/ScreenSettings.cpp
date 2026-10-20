@@ -25,7 +25,7 @@ static const char* kSettingsFileName = "Screen_data";
 
 static void
 _WriteSettingsFile(const BPoint& offset, bool hardwareCursorEnabled, bool acceleration2DEnabled,
-	bool compositor2DEnabled)
+	bool compositor2DEnabled, bool visual2DDebugEnabled)
 {
 	BPath path;
 	if (find_directory(B_USER_SETTINGS_DIRECTORY, &path) < B_OK)
@@ -39,6 +39,7 @@ _WriteSettingsFile(const BPoint& offset, bool hardwareCursorEnabled, bool accele
 		file.Write(&hardwareCursorEnabled, sizeof(bool));
 		file.Write(&acceleration2DEnabled, sizeof(bool));
 		file.Write(&compositor2DEnabled, sizeof(bool));
+		file.Write(&visual2DDebugEnabled, sizeof(bool));
 	}
 }
 
@@ -50,6 +51,7 @@ ScreenSettings::ScreenSettings()
 	fHardwareCursorEnabled = true; // default
 	fAcceleration2DEnabled = false; // default
 	fCompositor2DEnabled = false; // default
+	fVisual2DDebugEnabled = false; // default
 
 	BPath path;
 	if (find_directory(B_USER_SETTINGS_DIRECTORY, &path) == B_OK) {
@@ -77,6 +79,12 @@ ScreenSettings::ScreenSettings()
 				ssize_t read4 = file.Read(&comp, sizeof(bool));
 				if (read4 == (ssize_t)sizeof(bool))
 					fCompositor2DEnabled = comp;
+				
+				// try to read saved 2D visual debug flag
+                bool dbg = false;
+                ssize_t read5 = file.Read(&dbg, sizeof(bool));
+                if (read5 == (ssize_t)sizeof(bool))
+                    fVisual2DDebugEnabled = dbg;
 			}
 		}
 	}
@@ -88,7 +96,7 @@ ScreenSettings::ScreenSettings()
 ScreenSettings::~ScreenSettings()
 {
 	BPoint offset = fWindowFrame.LeftTop();
-	_WriteSettingsFile(offset, fHardwareCursorEnabled, fAcceleration2DEnabled, fCompositor2DEnabled);
+	_WriteSettingsFile(offset, fHardwareCursorEnabled, fAcceleration2DEnabled, fCompositor2DEnabled, fVisual2DDebugEnabled);
 }
 
 
@@ -105,7 +113,7 @@ ScreenSettings::SetHardwareCursorEnabled(bool enabled)
 	fHardwareCursorEnabled = enabled;
 	// persist immediately
 	BPoint offset = fWindowFrame.LeftTop();
-	_WriteSettingsFile(offset, fHardwareCursorEnabled, fAcceleration2DEnabled, fCompositor2DEnabled);
+	_WriteSettingsFile(offset, fHardwareCursorEnabled, fAcceleration2DEnabled, fCompositor2DEnabled, fVisual2DDebugEnabled);
 	// communicate with app_server
 	BMessage msg(AS_SET_HW_CUR_BITMAP_ENABLED);
 	msg.AddBool("enable", enabled);
@@ -120,7 +128,7 @@ ScreenSettings::SetAcceleration2DEnabled(bool enabled)
 	fAcceleration2DEnabled = enabled;
 	// persist immediately
 	BPoint offset = fWindowFrame.LeftTop();
-	_WriteSettingsFile(offset, fHardwareCursorEnabled, fAcceleration2DEnabled, fCompositor2DEnabled);
+	_WriteSettingsFile(offset, fHardwareCursorEnabled, fAcceleration2DEnabled, fCompositor2DEnabled,fVisual2DDebugEnabled);
 	// communicate with app_server
 	BMessage msg(AS_SET_2D_ACCELERATION_ENABLED);
 	msg.AddBool("enable", enabled);
@@ -135,10 +143,24 @@ ScreenSettings::SetCompositor2DEnabled(bool enabled)
 	fCompositor2DEnabled = enabled;
 	// persist immediately
 	BPoint offset = fWindowFrame.LeftTop();
-	_WriteSettingsFile(offset, fHardwareCursorEnabled, fAcceleration2DEnabled, fCompositor2DEnabled);
+	_WriteSettingsFile(offset, fHardwareCursorEnabled, fAcceleration2DEnabled, fCompositor2DEnabled, fVisual2DDebugEnabled);
 	// communicate with app_server
 	BMessage msg(AS_SET_2D_COMPOSITOR_ENABLED);
 	msg.AddBool("enable", enabled);
 	BMessenger appServerMessenger("application/x-vnd.Haiku-app_server");
 	appServerMessenger.SendMessage(&msg);
+}
+
+void
+ScreenSettings::SetVisual2DDebugEnabled(bool enabled)
+{
+    fVisual2DDebugEnabled = enabled;
+    // persist immediately
+    BPoint offset = fWindowFrame.LeftTop();
+    _WriteSettingsFile(offset, fHardwareCursorEnabled, fAcceleration2DEnabled, fCompositor2DEnabled, fVisual2DDebugEnabled);
+    // communicate with app_server
+    BMessage msg(AS_SET_2D_DEBUG_ENABLED);
+    msg.AddBool("enable", enabled);
+    BMessenger appServerMessenger("application/x-vnd.Haiku-app_server");
+    appServerMessenger.SendMessage(&msg);
 }

@@ -105,6 +105,8 @@ public:
 	virtual	bool				IsDoubleBuffered() const;
 	virtual void 				SetUserHardwareCursor(bool enable);
 	virtual void 				SetUser2DAcceleration(bool enable);
+	virtual void				SetUserDebugLed(bool enable);
+	bool						IsVisual2DDebugEnabled() const { return fVisual2DDebug; }
 
 protected:
 	virtual	void				_CopyBackToFront(/*const*/ BRegion& region);
@@ -212,6 +214,8 @@ private:
 			bool			fUserEnableHardwareCursor;
 			// user preference: if false, disable 2D hardware acceleration (pure AGG)
 			bool			fUserEnable2DAcceleration;
+			// user preference: if false, disable small colored square on the bottom right corner for debugging purposes
+			bool			fVisual2DDebug;
 };
 
 #endif // ACCELERANT_HW_INTERFACE_H

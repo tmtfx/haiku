@@ -509,6 +509,17 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 		f2DAccelerationCheckbox->SetValue(B_CONTROL_ON);
 	else
 		f2DAccelerationCheckbox->SetValue(B_CONTROL_OFF);
+	
+	f2DDebugCheckbox = new BCheckBox("2d_debug", 
+		B_TRANSLATE("Enable 2D debug indicator"),
+		new BMessage(TOGGLE_2D_DEBUG_MSG));
+	
+	bool canEnableDebug = has2DAcceleration && (f2DAccelerationCheckbox->Value() == B_CONTROL_ON);
+	f2DDebugCheckbox->SetEnabled(canEnableDebug);
+	if (canEnableDebug && fSettings->Visual2DDebugEnabled())
+		f2DDebugCheckbox->SetValue(B_CONTROL_ON);
+	else
+		f2DDebugCheckbox->SetValue(B_CONTROL_OFF);
 
 	f2DCompositorCheckbox = new BCheckBox("2d_compositor",
 		B_TRANSLATE("Enable 2D compositor (requires hardware cursor)"),
@@ -639,7 +650,13 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 
 	// add the checkboxes below the grid
 	outerControlsView->AddChild(fHardwareCursorCheckbox);
-	outerControlsView->AddChild(f2DAccelerationCheckbox);
+	//outerControlsView->AddChild(f2DAccelerationCheckbox);
+	outerControlsView->AddChild(BLayoutBuilder::Group<>(B_HORIZONTAL, B_USE_DEFAULT_SPACING)
+		.Add(f2DAccelerationCheckbox)
+		.Add(f2DDebugCheckbox)
+		.AddGlue()
+		.View()
+	);
 	outerControlsView->AddChild(f2DCompositorCheckbox);
 
 	// TODO: we don't support getting the screen's preferred settings
@@ -1319,7 +1336,22 @@ ScreenWindow::MessageReceived(BMessage* message)
 		{
 			bool enabled = f2DAccelerationCheckbox->Value() == B_CONTROL_ON;
 			fSettings->SetAcceleration2DEnabled(enabled);
+			
+			if (enabled) {
+				f2DDebugCheckbox->SetEnabled(true);
+			} else {
+				f2DDebugCheckbox->SetValue(B_CONTROL_OFF);
+				f2DDebugCheckbox->SetEnabled(false);
+				fSettings->SetVisual2DDebugEnabled(false);
+			}
 
+			break;
+		}
+		
+		case TOGGLE_2D_DEBUG_MSG:
+		{
+			bool enabled = f2DDebugCheckbox->Value() == B_CONTROL_ON;
+			fSettings->SetVisual2DDebugEnabled(enabled);
 			break;
 		}
 

@@ -199,6 +199,25 @@ AppServer::MessageReceived(BMessage* message)
 			}
 			break;
 		}
+		
+		case AS_SET_2D_DEBUG_ENABLED:
+        {
+            bool enable;
+            if (message->FindBool("enable", &enable) == B_OK) {
+                BAutolock locker(gScreenManager);
+                if (gScreenManager && gScreenManager->CountScreens() > 0) {
+                    Screen* s = gScreenManager->ScreenAt(0);
+
+                    if (s != NULL && s->HWInterface() != NULL) {
+                        AccelerantHWInterface* interface = dynamic_cast<AccelerantHWInterface*>(s->HWInterface());
+
+                        if (interface != NULL)
+                            interface->SetUserDebugLed(enable);
+                    }
+                }
+            }
+            break;
+        }
 
 		case 'hsbm':
 		{

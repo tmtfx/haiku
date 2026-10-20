@@ -100,7 +100,6 @@ use_fail_safe_video_mode()
 // - Idle / AGG only: Dark gray (35, 35, 35)
 // - Hardware Screen-to-Screen Blit: Red (255, 0, 0)
 // - Hardware Fill Rectangle: Green (0, 255, 0)
-static bool sVisual2DDebug = true;
 
 
 static void
@@ -169,7 +168,7 @@ static void
 _Set2DDebugIndicator(AccelerantHWInterface* hw, uint8 r, uint8 g, uint8 b,
 	bool updateBackBuffer = false)
 {
-	if (!sVisual2DDebug || hw == NULL)
+	if (hw == NULL || !hw->IsVisual2DDebugEnabled())
 		return;
 
 	_Fill3x3(hw->FrontBuffer(), r, g, b);
@@ -249,7 +248,8 @@ AccelerantHWInterface::AccelerantHWInterface()
 	fBlitParamsCount(kDefaultParamsCount),
 
 	fUserEnableHardwareCursor(true),
-	fUserEnable2DAcceleration(false)
+	fUserEnable2DAcceleration(false),
+	fVisual2DDebug(false)
 {
 	fDisplayMode.virtual_width = 0;
 	fDisplayMode.virtual_height = 0;
@@ -592,7 +592,7 @@ AccelerantHWInterface::_UpdateHooksAfterModeChange()
 		= (configure_overlay)fAccelerantHook(B_CONFIGURE_OVERLAY, NULL);
 
 	// initialize visual 2D debug indicator to idle dark gray
-	if (sVisual2DDebug)
+	if (fVisual2DDebug)
 		_Set2DDebugIndicator(this, 35, 35, 35, true);
 }
 
@@ -1389,7 +1389,7 @@ AccelerantHWInterface::_CopyRegion(const clipping_rect* sortedRectList,
 		}
 
 		if (validCount > 0) {
-			if (sVisual2DDebug)
+			if (fVisual2DDebug)
 				_Set2DDebugIndicator(this, 255, 0, 0);
 
 			fAccScreenBlit(fEngineToken, fBlitParams, validCount);
@@ -1398,7 +1398,7 @@ AccelerantHWInterface::_CopyRegion(const clipping_rect* sortedRectList,
 		if (fAccReleaseEngine != NULL)
 			fAccReleaseEngine(fEngineToken, &fSyncToken);
 
-		if (sVisual2DDebug) {
+		if (fVisual2DDebug) {
 			if (fAccSyncToToken != NULL)
 				fAccSyncToToken(&fSyncToken);
 			_Set2DDebugIndicator(this, 35, 35, 35);
@@ -1425,7 +1425,7 @@ AccelerantHWInterface::FillRegion(const BRegion& region, const rgb_color& color)
 		_RegionToRectParams(&const_cast<BRegion&>(region), &count);
 
 		if (count > 0) {
-			if (sVisual2DDebug)
+			if (fVisual2DDebug)
 				_Set2DDebugIndicator(this, 0, 255, 0);
 
 			fAccFillRect(fEngineToken, _NativeColor(color), fRectParams, count);
@@ -1434,7 +1434,7 @@ AccelerantHWInterface::FillRegion(const BRegion& region, const rgb_color& color)
 		if (fAccReleaseEngine != NULL)
 			fAccReleaseEngine(fEngineToken, &fSyncToken);
 
-		if (sVisual2DDebug) {
+		if (fVisual2DDebug) {
 			if (fAccSyncToToken != NULL)
 				fAccSyncToToken(&fSyncToken);
 			_Set2DDebugIndicator(this, 35, 35, 35);
@@ -1718,6 +1718,11 @@ void AccelerantHWInterface::SetUser2DAcceleration(bool enable)
 	}
 }
 
+void AccelerantHWInterface::SetUserDebugLed(bool enable)
+{
+	fVisual2DDebug = enable;
+}
+
 void
 AccelerantHWInterface::SetDragBitmap(const ServerBitmap* bitmap,
 	const BPoint& offsetFromCursor)
@@ -1807,7 +1812,7 @@ AccelerantHWInterface::_CopyBackToFront(/*const*/ BRegion& region)
 {
 	Sync();
 	HWInterface::_CopyBackToFront(region);
-	if (sVisual2DDebug)
+	if (fVisual2DDebug)
 		_Set2DDebugIndicator(this, 35, 35, 35);
 }
 

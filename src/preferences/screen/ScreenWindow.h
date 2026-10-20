@@ -98,9 +98,10 @@ private:
 			BMenuField*		fTVStandardField;
 
 			BSlider*		fBrightnessSlider;
-			BCheckBox* 	fHardwareCursorCheckbox;
-			BCheckBox* 	f2DAccelerationCheckbox;
-			BCheckBox* 	f2DCompositorCheckbox;
+			BCheckBox*		fHardwareCursorCheckbox;
+			BCheckBox*		f2DAccelerationCheckbox;
+			BCheckBox*		f2DDebugCheckbox;
+			BCheckBox*		f2DCompositorCheckbox;
 
 			BButton*		fDefaultsButton;
 			BButton*		fApplyButton;
