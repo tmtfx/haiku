@@ -236,9 +236,9 @@ padlock_aes_process_block(bool encrypt, PadLockAESContext* ctx,
 
     uint32 ctrl = 0; 
     switch (ctx->keyLength) {
-        case 16: ctrl = 0x0;   break; // AES-128
-        case 24: ctrl = 0x400; break; // AES-192
-        case 32: ctrl = 0x800; break; // AES-256
+        case 16: ctrl = 0x0;   break;
+        case 24: ctrl = 0x400; break;
+        case 32: ctrl = 0x800; break;
         default: return B_BAD_VALUE;
     }
     if (encrypt) ctrl |= 0x200;
@@ -247,18 +247,16 @@ padlock_aes_process_block(bool encrypt, PadLockAESContext* ctx,
     s_control_word = ctrl;
 
     size_t total_blocks = length / 16;
-    const uint8* key_ptr = ctx->key;
+    const uint8* key_ptr = ctx->key; // Ora ctx->key è garantito allineato a 16 byte dalla struct!
     uint32* cw_ptr = &s_control_word;
 
     alignas(16) uint8 block_in[16];
     alignas(16) uint8 block_out[16];
     alignas(16) uint8 current_iv[16];
     
-    // Copia l'IV iniziale
     memcpy(current_iv, ctx->iv, 16);
 
     for (size_t i = 0; i < total_blocks; i++) {
-        // Caricamento sicuro del blocco (anche da indirizzi non allineati)
         memcpy(block_in, in + (i * 16), 16);
 
         size_t blocks = 1;
@@ -266,7 +264,6 @@ padlock_aes_process_block(bool encrypt, PadLockAESContext* ctx,
         uint8* dst = block_out;
         uint8* iv_ptr = current_iv;
 
-        // Esecuzione pulita con il mnemonico nativo di GCC
         asm volatile(
             "pushfq\n\t"
             "popfq\n\t"
@@ -280,11 +277,9 @@ padlock_aes_process_block(bool encrypt, PadLockAESContext* ctx,
             : "memory", "cc"
         );
 
-        // Salvataggio sicuro nel buffer di destinazione
         memcpy(out + (i * 16), block_out, 16);
     }
 
-    // Restituisce l'IV aggiornato al contesto
     memcpy(ctx->iv, current_iv, 16);
 
     return B_OK;
