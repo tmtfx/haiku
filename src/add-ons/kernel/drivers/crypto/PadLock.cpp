@@ -10,6 +10,10 @@
 #include <debug.h>
 #include <string.h>
 
+#define VIA_PADLOCK_MSR 0x1107
+#define VIA_RNG_ENABLE  (1 << 3) // Bit 3: RNG Enable
+#define VIA_ACE_ENABLE  (1 << 0) // Bit 0: ACE (Advanced Cryptography Engine) Enable
+
 #if defined(__x86_64__) || defined(__i386__)
 
 static void
@@ -20,66 +24,91 @@ secure_memzero(void* p, size_t s)
     while (s--) *cp++ = 0;
 }
 
+static void
+enable_padlock_hardware(void)
+{
+    uint32 low, high;
+
+    asm volatile (
+        "rdmsr"
+        : "=a" (low), "=d" (high)
+        : "c" (VIA_PADLOCK_MSR)
+    );
+
+    uint64 msr = ((uint64)high << 32) | low;
+    uint64 required_flags = VIA_RNG_ENABLE | VIA_ACE_ENABLE;
+
+    if ((msr & required_flags) != required_flags) {
+        msr |= required_flags;
+        low = (uint32)(msr & 0xFFFFFFFF);
+        high = (uint32)(msr >> 32);
+
+        asm volatile (
+            "wrmsr"
+            :
+            : "c" (VIA_PADLOCK_MSR), "a" (low), "d" (high)
+        );
+
+        dprintf("PADLOCK: Hardware ACE & RNG abilitato globalmente via MSR 0x1107 (valore: 0x%lx)\n", msr);
+    }
+}
+
 static status_t
 padlock_aes_process_block(bool encrypt, PadLockAESContext* ctx,
-                         const uint8* in, uint8* out, size_t length)
+                          const uint8* in, uint8* out, size_t length)
 {
-	// 1. Check allineamento (Cruciale per evitare General Protection Fault)
-    // L'istruzione xcryptcbc richiede che source, destination, IV e Key 
-    // siano allineati a 16 byte.
-    if (((uintptr_t)in & 0xF) != 0 || ((uintptr_t)out & 0xF) != 0){
-    	dprintf("PADLOCK: Buffer non allineato! src:%p dst:%p", in, out);
+    // 1. Controllo rigoroso dell'allineamento a 16 byte (Requisito VIA PadLock)
+    if (((uintptr_t)in & 0xF) != 0 || ((uintptr_t)out & 0xF) != 0 ||
+        ((uintptr_t)ctx->key & 0xF) != 0 || ((uintptr_t)ctx->iv & 0xF) != 0) {
+        dprintf("PADLOCK: Buffer non allineato a 16 byte! src:%p dst:%p key:%p iv:%p\n", 
+            in, out, ctx->key, ctx->iv);
         return B_BAD_VALUE;
     }
         
     if (length % 16 != 0) {
-    	dprintf("PADLOCK: lunghezza non multipla di 16");
+        dprintf("PADLOCK: lunghezza non multipla di 16\n");
         return B_BAD_VALUE;
     }
 
     // 2. Control Word per VIA Nano / ACE2
-    // Bit 0-3: Round count (0 = automatico basato sulla chiave)
-    // Bit 9: 0 = Decrypt, 1 = Encrypt
-    // Bit 10-11: Key Size (0 = 128, 1 = 192, 2 = 256)
     uint32 ctrl = 0; 
     switch (ctx->keyLength) {
-        //case 16: ctrl = 0x0080; break;
-        //case 24: ctrl = 0x00C0; break;
-        //case 32: ctrl = 0x0100; break;
-        case 16: ctrl = 0x0;    break; // AES-128: Bit 7 = 0, Bit 8 = 0
-        case 24: ctrl = 0x400;  break; // AES-192: Bit 10 = 1 (alcune versioni) o Bit 7/8
-        case 32: ctrl = 0x800;  break; // AES-256
+        case 16: ctrl = 0x0;   break; // AES-128
+        case 24: ctrl = 0x400; break; // AES-192
+        case 32: ctrl = 0x800; break; // AES-256
         default: return B_BAD_VALUE;
     }
     if (encrypt) ctrl |= 0x200;
 
-    // Variabili locali per gestire i registri che la CPU modificherà
-    size_t blocks = length / 16;
-    uint8* ivPtr = ctx->iv;
-    
-    // Definiamo i suffissi e i registri in base all'architettura
-#ifdef __x86_64__
-    #define PUSHF "pushfq"
-    #define POPF  "popfq"
-    //#define ADDR_REG "r" // a 64-bit i puntatori sono a 64-bit
-#else
-    #define PUSHF "pushfl"
-    #define POPF  "popfl"
-    //#define ADDR_REG "r"
-#endif
+    // Control Word statica allineata a 16 byte nello spazio kernel
+    alignas(16) static uint32 s_control_word;
+    s_control_word = ctrl;
 
+    size_t blocks = length / 16;
+
+    const uint8* src = in;
+    uint8* dst = out;
+    uint8* iv = ctx->iv;
+    const uint8* key_ptr = ctx->key;
+    uint32* cw_ptr = &s_control_word;
+
+    // Esecuzione diretta di xcryptcbc senza overhead di copia dei dati
+    // ESI = src, EDI = dst, EAX = iv, EBX = key_ptr, EDX = cw_ptr, ECX = blocks
     asm volatile(
-        PUSHF "\n\t"
-        POPF  "\n\t"        // Resetta i flag EFLAGS (fondamentale per Padlock)
-        "xcryptcbc\n\t"
-        : "+S"(in), "+D"(out), "+a"(ivPtr), "+c"(blocks)
-        : "d"(ctrl), "b"(ctx->key)
+        "pushfq\n\t"
+        "popfq\n\t"
+        ".byte 0x0f, 0xa7, 0xe8\n\t" // xcryptcbc
+        : "+S" (src),
+          "+D" (dst),
+          "+a" (iv),
+          "+c" (blocks)
+        : "d" (cw_ptr),
+          "b" (key_ptr)
         : "memory", "cc"
     );
 
     return B_OK;
 }
-
 static status_t
 padlock_process(BCryptoRequest* request)
 {
@@ -122,6 +151,8 @@ BInitPadLockCrypto()
     // Verifichiamo se BCryptoCPU ha trovato PadLock
     if (!(BGetStoredCryptoCapabilities() & B_CRYPTO_HW_VIA_PADLOCK))
         return B_UNSUPPORTED;
+    
+    enable_padlock_hardware();
 
     static BCryptoAlgorithm sPadLockAES = {
         .algorithm = B_CRYPTO_AES,
