@@ -918,7 +918,7 @@ BMarkdownView::_EnterBlockCb(MD_BLOCKTYPE type, void* detail, void* userdata)
 		case MD_BLOCK_CODE:
 		{
 			//state->isBlockCode = true;
-			state->view->Insert("\n"); // Riga riservata per l'header della toolbar
+			state->view->Insert("\n\n"); // Riga riservata per l'header della toolbar
 			CodeBlockRegion* region = new CodeBlockRegion();
 			region->startPos = state->view->TextLength();
 			region->endPos = -1;
