@@ -14,7 +14,59 @@
 #include <cstring>
 
 #if defined(__x86_64__) || defined(__i386__)
+static status_t
+padlock_rng_generate(uint8* buffer, size_t length)
+{
+    size_t generated = 0;
 
+    while (generated < length) {
+        alignas(16) uint32 value[4] = {0};
+        uint32 bytesGenerated = 0;
+        uint32 statusFlag = 1;
+
+        int retryCount = 5000;
+        while (retryCount-- > 0) {
+            uint32 result_eax = 0;
+            uint32 control_edx = 0; // 0 = qualità standard / nessun filtro extra
+
+            asm volatile (
+                // xstore scrive all'indirizzo in EDI (o RDI in 64-bit)
+                // EDX = Control word / input metrics
+                // EAX = restituirà lo stato/lunghezza scritti a seconda dell'hardware
+                ".byte 0x0f, 0xa7, 0xc0\n\t" 
+                "setc %b[err]\n\t"           // Setta il byte di errore se c'è Carry
+                : "=a" (result_eax),
+                  [err] "=q" (statusFlag)
+                : "D" (value),
+                  "d" (control_edx)
+                : "memory", "cc"
+            );
+
+            bytesGenerated = result_eax & 0xFFFF; // Estrae i byte generati effettivi
+
+            if (statusFlag == 0 && bytesGenerated > 0)
+                break; 
+
+            #if defined(__x86_64__) || defined(__i386__)
+            asm volatile("pause" ::: "memory");
+            #endif
+        }
+
+        if (statusFlag != 0 || bytesGenerated == 0) {
+            snooze(50);
+            continue;
+        }
+
+        size_t toCopy = (length - generated < bytesGenerated) 
+            ? (length - generated) : bytesGenerated;
+        
+        memcpy(buffer + generated, value, toCopy);
+        generated += toCopy;
+    }
+
+    return B_OK;
+}
+/* crasha
 static status_t
 padlock_rng_generate(uint8* buffer, size_t length)
 {
@@ -63,7 +115,7 @@ padlock_rng_generate(uint8* buffer, size_t length)
     }
 
     return B_OK;
-}
+}*/
 /*
 static status_t
 padlock_rng_generate(uint8* buffer, size_t length)
