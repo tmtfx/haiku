@@ -48,36 +48,6 @@ enable_padlock_hardware(void)
         dprintf("PADLOCK: Hardware ACE & RNG abilitato globalmente via MSR 0x1107 (valore: 0x%lx)\n", msr);
     }
 }
-/*
-static void
-enable_padlock_rng_msr(void)
-{
-    uint32 low, high;
-
-    // Lettura MSR 0x1107 tramite rdmsr inline
-    asm volatile (
-        "rdmsr"
-        : "=a" (low), "=d" (high)
-        : "c" (VIA_PADLOCK_MSR)
-    );
-
-    uint64 msr = ((uint64)high << 32) | low;
-
-    if (!(msr & VIA_RNG_ENABLE)) {
-        msr |= VIA_RNG_ENABLE;
-        low = (uint32)(msr & 0xFFFFFFFF);
-        high = (uint32)(msr >> 32);
-
-        // Scrittura MSR 0x1107 tramite wrmsr inline
-        asm volatile (
-            "wrmsr"
-            :
-            : "c" (VIA_PADLOCK_MSR), "a" (low), "d" (high)
-        );
-
-        dprintf("PADLOCK: RNG abilitato forzatamente tramite MSR 0x1107 (valore: 0x%lx)\n", msr);
-    }
-}*/
 
 static status_t
 padlock_rng_generate(uint8* buffer, size_t length)
