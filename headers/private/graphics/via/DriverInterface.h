@@ -107,22 +107,24 @@ typedef struct settings {  // apsed, see comments in skel.settings
 /* card info - information gathered from PINS (and other sources) */
 enum
 {	// card_type in order of date of VIA chip design
-	VT3122 = 0,
-	VT3022,
-	VT7205,
-	VT3205,
-	VT3108,
-	VT3204NC,
-	VT3118,		/* PM800 / PN800 / PM880 */
+	/* UniChrome */
+	VT3022 = 0,	/* CLE266 (Ax) */
+	VT3122,		/* CLE266 (Cx) */
+	VT3205,		/* KM400 */
+	VT7205,		/* KM400A / KN400 / P4M800 */
+	/* UniChrome Pro */
+	VT3108,		/* K8M800 / K8N800 / K8N800A */
+	VT3118,		/* CN400 / PM800 / PN800 / PM880 / PN880 */
 	VT3314,		/* P4M800 Pro / VN800 / CN700 */
 	VT3157,		/* CX700 / VX700 */
 	VT3225,		/* CN750 */
+	/* Chrome9 / Chrome9 HC / HC3 / HCM / HD */
 	VT3327,		/* P4M890 / VN890 / CN800 */
 	VT3336,		/* K8M890 / K8N890 */
 	VT3364,		/* P4M900 / VN896 / CN896 */
-	VT3353,		/* VX800 / VX820 */
-	VT3409,		/* VX855 / VX875 */
-	VT3410		/* VX900 */
+	VT3353,		/* VX800 / VX820 (Chrome9 HC3) */
+	VT3409,		/* VX855 / VX875 (Chrome9 HCM) */
+	VT3410		/* VX900 (Chrome9 HD) */
 };
 enum
 {	// card_arch in order of date of VIA chip design
