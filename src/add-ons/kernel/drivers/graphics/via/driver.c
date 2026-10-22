@@ -48,6 +48,7 @@
 #define DEVICE_FORMAT "%04x_%04x_%02x%02x%02x" // apsed
 
 #define LOG_PREFIX "[VIA Graphics] "
+bool enableDebug = false;
 
 /* Tell the kernel what revision of the driver API we support */
 int32	api_version = B_CUR_DRIVER_API_VERSION; // apsed, was 2, is 2 in R5
@@ -205,21 +206,21 @@ static void disable_vbi(vuint32 * regs)
 */
 status_t
 init_hardware(void) {
-	dprintf(LOG_PREFIX "init_hardware: starting VIA Graphics hardware check...\n");
+	if (enableDebug) dprintf(LOG_PREFIX "init_hardware: starting VIA Graphics hardware check...\n");
 	long		pci_index = 0;
 	pci_info	pcii;
 	bool		found_one = false;
 
 	/* choke if we can't find the PCI bus */
 	if (get_module(B_PCI_MODULE_NAME, (module_info **)&pci_bus) != B_OK){
-		dprintf(LOG_PREFIX "init_hardware: ERROR - unable to access PCI bus module!\n");
+		if (enableDebug) dprintf(LOG_PREFIX "init_hardware: ERROR - unable to access PCI bus module!\n");
 		return B_ERROR;
 	}
 
 	/* choke if we can't find the ISA bus */
 	if (get_module(B_ISA_MODULE_NAME, (module_info **)&isa_bus) != B_OK)
 	{
-		dprintf(LOG_PREFIX "init_hardware: ERROR - unable to access ISA bus module!\n");
+		if (enableDebug) dprintf(LOG_PREFIX "init_hardware: ERROR - unable to access ISA bus module!\n");
 		put_module(B_PCI_MODULE_NAME);
 		return B_ERROR;
 	}
@@ -236,7 +237,7 @@ init_hardware(void) {
 				while (*devices) {
 					/* if we match a supported device */
 					if (*devices == pcii.device_id ) {
-						dprintf(LOG_PREFIX "init_hardware: FOUND compatible VIA GPU! Vendor=0x%04x, Device=0x%04x [Bus %d, Dev %d, Func %d]\n",
+						if (enableDebug) dprintf(LOG_PREFIX "init_hardware: FOUND compatible VIA GPU! Vendor=0x%04x, Device=0x%04x [Bus %d, Dev %d, Func %d]\n",
 								pcii.vendor_id, pcii.device_id, pcii.bus, pcii.device, pcii.function);
 						found_one = true;
 						goto done;
@@ -258,14 +259,14 @@ done:
 	put_module(B_ISA_MODULE_NAME);
 	
 	if (!found_one)
-		dprintf(LOG_PREFIX "init_hardware: NO compatible VIA graphics hardware detected on system.\n");
+		if (enableDebug) dprintf(LOG_PREFIX "init_hardware: NO compatible VIA graphics hardware detected on system.\n");
 	return (found_one ? B_OK : B_ERROR);
 }
 
 status_t
 init_driver(void) {
 	void *settings_handle;
-	dprintf(LOG_PREFIX "init_driver: initializing kernel driver...\n");
+	if (enableDebug) dprintf(LOG_PREFIX "init_driver: initializing kernel driver...\n");
 
 	// get driver/accelerant settings, apsed
 	settings_handle  = load_driver_settings (DRIVER_PREFIX ".settings");
@@ -273,16 +274,16 @@ init_driver(void) {
 		const char *item;
 		char	   *end;
 		uint32	  value;
-		dprintf(LOG_PREFIX "init_driver: loading driver settings file...\n");
+		if (enableDebug) dprintf(LOG_PREFIX "init_driver: loading driver settings file...\n");
 
 		// for driver
 		item = get_driver_parameter (settings_handle, "accelerant", "", "");
 		if ((strlen (item) > 0) && (strlen (item) < sizeof (current_settings.accelerant) - 1)) {
 			strcpy (current_settings.accelerant, item);
-			dprintf(LOG_PREFIX "settings: override accelerant = %s\n", current_settings.accelerant);
+			if (enableDebug) dprintf(LOG_PREFIX "settings: override accelerant = %s\n", current_settings.accelerant);
 		}
 		current_settings.dumprom = get_driver_boolean_parameter (settings_handle, "dumprom", false, false);
-		dprintf(LOG_PREFIX "settings: dumprom = %s\n", current_settings.dumprom ? "true" : "false");
+		if (enableDebug) dprintf(LOG_PREFIX "settings: dumprom = %s\n", current_settings.dumprom ? "true" : "false");
 
 		// for accelerant
 		item = get_driver_parameter (settings_handle, "logmask", "0x00000000", "0x00000000");
@@ -305,29 +306,30 @@ init_driver(void) {
 
 	/* get a handle for the pci bus */
 	if (get_module(B_PCI_MODULE_NAME, (module_info **)&pci_bus) != B_OK){
-		dprintf(LOG_PREFIX "init_driver: ERROR - failed to acquire PCI bus module handle!\n");
+		if (enableDebug) dprintf(LOG_PREFIX "init_driver: ERROR - failed to acquire PCI bus module handle!\n");
 		return B_ERROR;
 	}
 
 	/* get a handle for the isa bus */
 	if (get_module(B_ISA_MODULE_NAME, (module_info **)&isa_bus) != B_OK)
 	{
-		dprintf(LOG_PREFIX "init_driver: ERROR - failed to acquire ISA bus module handle!\n");
+		if (enableDebug) dprintf(LOG_PREFIX "init_driver: ERROR - failed to acquire ISA bus module handle!\n");
 		put_module(B_PCI_MODULE_NAME);
 		return B_ERROR;
 	}
 
 	/* get a handle for the agp bus if it exists */
 	//get_module(B_AGP_GART_MODULE_NAME, (module_info **)&agp_bus);
-	if (get_module(B_AGP_GART_MODULE_NAME, (module_info **)&agp_bus) == B_OK)
-		dprintf(LOG_PREFIX "init_driver: AGP GART bus module successfully loaded.\n");
-	else
-		dprintf(LOG_PREFIX "init_driver: AGP GART bus module unavailable (PCI/PCIe mode fallback).\n");
+	if (get_module(B_AGP_GART_MODULE_NAME, (module_info **)&agp_bus) == B_OK){
+		if (enableDebug) dprintf(LOG_PREFIX "init_driver: AGP GART bus module successfully loaded.\n");
+	} else {
+		if (enableDebug) dprintf(LOG_PREFIX "init_driver: AGP GART bus module unavailable (PCI/PCIe mode fallback).\n");
+	}
 
 	/* driver private data */
 	pd = (DeviceData *)calloc(1, sizeof(DeviceData));
 	if (!pd) {
-		dprintf(LOG_PREFIX "init_driver: ERROR - failed to allocate memory for DeviceData!\n");
+		if (enableDebug) dprintf(LOG_PREFIX "init_driver: ERROR - failed to allocate memory for DeviceData!\n");
 		if (agp_bus)
 			put_module(B_AGP_GART_MODULE_NAME);
 		put_module(B_ISA_MODULE_NAME);
@@ -338,33 +340,33 @@ init_driver(void) {
 	INIT_BEN(pd->kernel);
 	/* find all of our supported devices */
 	probe_devices();
-	dprintf(LOG_PREFIX "init_driver: completed successfully. %" B_PRIu32 " device(s) ready.\n", pd->count);
+	if (enableDebug) dprintf(LOG_PREFIX "init_driver: completed successfully. %" B_PRIu32 " device(s) ready.\n", pd->count);
 	return B_OK;
 }
 
 const char **
 publish_devices(void) {
 	/* return the list of supported devices */
-	dprintf(LOG_PREFIX "publish_devices: publishing devfs paths...\n");
+	if (enableDebug) dprintf(LOG_PREFIX "publish_devices: publishing devfs paths...\n");
 	return (const char **)pd->device_names;
 }
 
 device_hooks *
 find_device(const char *name) {
 	int index = 0;
-	dprintf(LOG_PREFIX "find_device: searching hook for device name = %s\n", name);
+	if (enableDebug) dprintf(LOG_PREFIX "find_device: searching hook for device name = %s\n", name);
 	while (pd->device_names[index]) {
 		if (strcmp(name, pd->device_names[index]) == 0)
 			return &graphics_device_hooks;
 		index++;
 	}
-	dprintf(LOG_PREFIX "find_device: device %s not managed by this driver.\n", name);
+	if (enableDebug) dprintf(LOG_PREFIX "find_device: device %s not managed by this driver.\n", name);
 	return NULL;
 
 }
 
 void uninit_driver(void) {
-	dprintf(LOG_PREFIX "uninit_driver: shutting down kernel driver...\n");
+	if (enableDebug) dprintf(LOG_PREFIX "uninit_driver: shutting down kernel driver...\n");
 	/* free the driver data */
 	DELETE_BEN(pd->kernel);
 	free(pd);
@@ -377,7 +379,7 @@ void uninit_driver(void) {
 	/* put the agp module away if it's there */
 	if (agp_bus)
 		put_module(B_AGP_GART_MODULE_NAME);
-	dprintf(LOG_PREFIX "uninit_driver: driver modules released successfully.\n");
+	if (enableDebug) dprintf(LOG_PREFIX "uninit_driver: driver modules released successfully.\n");
 }
 
 /* Probe video RAM from VIA host bridge / DRAM controller PCI registers (OpenChrome logic) */
@@ -387,23 +389,23 @@ static uint32 probe_vram(device_info *di)
 	uint16 hostBridgeVendorID, hostBridgeDeviceID;
 	uint8 videoRAM = 0;
 	
-	dprintf(LOG_PREFIX "probe_vram: querying Host Bridge / DRAM Controller PCI configuration...\n");
+	if (enableDebug) dprintf(LOG_PREFIX "probe_vram: querying Host Bridge / DRAM Controller PCI configuration...\n");
 
 	hostBridgeVendorID = (*pci_bus->read_pci_config)(0, 0, 0, PCI_vendor_id, 2);
 	if (hostBridgeVendorID != VENDOR_ID_VIA){
-		dprintf(LOG_PREFIX "probe_vram: Host Bridge Vendor ID 0x%04x is NOT VIA (0x1106)!\n", hostBridgeVendorID);
+		if (enableDebug) dprintf(LOG_PREFIX "probe_vram: Host Bridge Vendor ID 0x%04x is NOT VIA (0x1106)!\n", hostBridgeVendorID);
 		return 0;
 	}
 
 	hostBridgeDeviceID = (*pci_bus->read_pci_config)(0, 0, 0, PCI_device_id, 2);
-	dprintf(LOG_PREFIX "probe_vram: Host Bridge Device ID = 0x%04x\n", hostBridgeDeviceID);
+	if (enableDebug) dprintf(LOG_PREFIX "probe_vram: Host Bridge Device ID = 0x%04x\n", hostBridgeDeviceID);
 
 	switch (hostBridgeDeviceID) {
 	case 0x3123: /* CLE266 */
 	case 0x3205: /* KM400 */
 		videoRAM = (*pci_bus->read_pci_config)(0, 0, 0, 0xE1, 1);
 		detectedVideoRAM = (1 << ((videoRAM & 0x70) >> 4)) * 1024 * 1024;
-		dprintf(LOG_PREFIX "probe_vram: CLE266/KM400 Host Bridge reg 0xE1=0x%02x -> Detected VRAM = %" B_PRIu32 " MB\n",
+		if (enableDebug) dprintf(LOG_PREFIX "probe_vram: CLE266/KM400 Host Bridge reg 0xE1=0x%02x -> Detected VRAM = %" B_PRIu32 " MB\n",
 			videoRAM, detectedVideoRAM / (1024 * 1024));
 		break;
 	case 0x0296: /* P4M800 */
@@ -412,7 +414,7 @@ static uint32 probe_vram(device_info *di)
 	case 0x0204: /* K8M800 */
 		videoRAM = (*pci_bus->read_pci_config)(0, 0, 3, 0xA1, 1);
 		detectedVideoRAM = (1 << ((videoRAM & 0x70) >> 4)) * 1024 * 1024;
-		dprintf(LOG_PREFIX "probe_vram: K8M800/PM800/P4M800 Host Bridge [0,0,3] reg 0xA1=0x%02x -> Detected VRAM = %" B_PRIu32 " MB\n",
+		if (enableDebug) dprintf(LOG_PREFIX "probe_vram: K8M800/PM800/P4M800 Host Bridge [0,0,3] reg 0xA1=0x%02x -> Detected VRAM = %" B_PRIu32 " MB\n",
 			videoRAM, detectedVideoRAM / (1024 * 1024));
 		break;
 	case 0x0324: /* CX700 */
@@ -424,17 +426,17 @@ static uint32 probe_vram(device_info *di)
 	case 0x0410: /* VX900 */
 		videoRAM = (*pci_bus->read_pci_config)(0, 0, 3, 0xA1, 1);
 		detectedVideoRAM = (1 << ((videoRAM & 0x70) >> 4)) * 4 * 1024 * 1024;
-		dprintf(LOG_PREFIX "probe_vram: Modern VIA Host Bridge [0,0,3] reg 0xA1=0x%02x -> Detected VRAM = %" B_PRIu32 " MB\n",
+		if (enableDebug) dprintf(LOG_PREFIX "probe_vram: Modern VIA Host Bridge [0,0,3] reg 0xA1=0x%02x -> Detected VRAM = %" B_PRIu32 " MB\n",
 			videoRAM, detectedVideoRAM / (1024 * 1024));
 		break;
 	default:
 		/* Fallback for VX900 / VX855 / VX800 if host bridge device ID differs: check DRAM controller directly */
-		dprintf(LOG_PREFIX "probe_vram: Unknown Host Bridge ID 0x%04x. Trying direct DRAM controller fallback...\n", hostBridgeDeviceID);
+		if (enableDebug) dprintf(LOG_PREFIX "probe_vram: Unknown Host Bridge ID 0x%04x. Trying direct DRAM controller fallback...\n", hostBridgeDeviceID);
 		if (di->pcii.device_id == 0x7122 || di->pcii.device_id == 0x5122 || di->pcii.device_id == 0x1122) {
 			videoRAM = (*pci_bus->read_pci_config)(0, 0, 3, 0xA1, 1);
 			if (videoRAM != 0 && videoRAM != 0xFF) {
 				detectedVideoRAM = (1 << ((videoRAM & 0x70) >> 4)) * 4 * 1024 * 1024;
-				dprintf(LOG_PREFIX "probe_vram: Fallback read reg 0xA1=0x%02x -> Detected VRAM = %" B_PRIu32 " MB\n", videoRAM, detectedVideoRAM / (1024 * 1024));
+				if (enableDebug) dprintf(LOG_PREFIX "probe_vram: Fallback read reg 0xA1=0x%02x -> Detected VRAM = %" B_PRIu32 " MB\n", videoRAM, detectedVideoRAM / (1024 * 1024));
 			}
 		}
 		break;
@@ -463,12 +465,12 @@ static status_t map_device(device_info *di)
 	int frame_buffer = (di->pcii.device_id == 0x7122) ? 2 : 0;
 //	int pseudo_dma = 2;
 
-	dprintf(LOG_PREFIX "map_device: mapping PCI resources for Device 0x%04x...\n", di->pcii.device_id);
-	dprintf(LOG_PREFIX "map_device: selected BAR assignments -> Framebuffer BAR=%d, Registers BAR=%d\n", frame_buffer, registers);
+	if (enableDebug) dprintf(LOG_PREFIX "map_device: mapping PCI resources for Device 0x%04x...\n", di->pcii.device_id);
+	if (enableDebug) dprintf(LOG_PREFIX "map_device: selected BAR assignments -> Framebuffer BAR=%d, Registers BAR=%d\n", frame_buffer, registers);
 
 	/* enable memory mapped IO, disable VGA I/O - this is defined in the PCI standard */
 	tmpUlong = get_pci(PCI_command, 2);
-	dprintf(LOG_PREFIX "map_device: current PCI_command register = 0x%04" B_PRIx32 "\n", tmpUlong);
+	if (enableDebug) dprintf(LOG_PREFIX "map_device: current PCI_command register = 0x%04" B_PRIx32 "\n", tmpUlong);
 	/* enable PCI access */
 	tmpUlong |= PCI_command_memory;
 	/* enable busmastering */
@@ -476,7 +478,7 @@ static status_t map_device(device_info *di)
 	/* disable ISA I/O access */
 	tmpUlong &= ~PCI_command_io;
 	set_pci(PCI_command, 2, tmpUlong);
-	dprintf(LOG_PREFIX "map_device: updated PCI_command register = 0x%04" B_PRIx32 "\n", get_pci(PCI_command, 2));
+	if (enableDebug) dprintf(LOG_PREFIX "map_device: updated PCI_command register = 0x%04" B_PRIx32 "\n", get_pci(PCI_command, 2));
 
  	/*work out which version of BeOS is running*/
  	get_system_info(&sysinfo);
@@ -497,7 +499,7 @@ static status_t map_device(device_info *di)
 	/* remove this after debug */
 	phys_addr_t regs_pci = di->pcii.u.h0.base_registers_pci[registers];
 	size_t regs_size = di->pcii.u.h0.base_register_sizes[registers];
-	dprintf(LOG_PREFIX "map_device: Registers BAR physical address = 0x%" B_PRIx64 ", Size = %" B_PRIuSIZE " bytes\n",
+	if (enableDebug) dprintf(LOG_PREFIX "map_device: Registers BAR physical address = 0x%" B_PRIx64 ", Size = %" B_PRIuSIZE " bytes\n",
 		(uint64)regs_pci, regs_size);
 	/* *********************** */
 	
@@ -513,10 +515,10 @@ static status_t map_device(device_info *di)
 
 	/* if mapping registers to vmem failed then pass on error */
 	if (si->regs_area < 0) {
-		dprintf(LOG_PREFIX "map_device: ERROR - failed to map registers physical memory! Area error = %" B_PRId32 "\n", si->regs_area);
+		if (enableDebug) dprintf(LOG_PREFIX "map_device: ERROR - failed to map registers physical memory! Area error = %" B_PRId32 "\n", si->regs_area);
 		return si->regs_area;
 	}
-	dprintf(LOG_PREFIX "map_device: Registers mapped successfully to kernel virt addr %p (Area ID = %" B_PRId32 ")\n",
+	if (enableDebug) dprintf(LOG_PREFIX "map_device: Registers mapped successfully to kernel virt addr %p (Area ID = %" B_PRId32 ")\n",
 		di->regs, si->regs_area);
 
 	/* work out a name for the ROM mapping*/
@@ -526,7 +528,7 @@ static status_t map_device(device_info *di)
 
 	/* get ROM memory mapped base adress - this is defined in the PCI standard */
 	tmpUlong = get_pci(PCI_rom_base, 4);
-	dprintf(LOG_PREFIX "map_device: PCI ROM Base Config Register = 0x%08" B_PRIx32 "\n", tmpUlong);
+	if (enableDebug) dprintf(LOG_PREFIX "map_device: PCI ROM Base Config Register = 0x%08" B_PRIx32 "\n", tmpUlong);
 	
 	if (tmpUlong)
 	{
@@ -534,7 +536,7 @@ static status_t map_device(device_info *di)
 		tmpUlong |= 0x00000001;
 		set_pci(PCI_rom_base, 4, tmpUlong);
 		
-		dprintf(LOG_PREFIX "map_device: ROM address mapped in PCI space = 0x%08" B_PRIx32 " (Size = %" B_PRIu32 " bytes)\n",
+		if (enableDebug) dprintf(LOG_PREFIX "map_device: ROM address mapped in PCI space = 0x%08" B_PRIx32 " (Size = %" B_PRIu32 " bytes)\n",
 			di->pcii.u.h0.rom_base_pci, di->pcii.u.h0.rom_size);
 
 		rom_area = map_physical_memory(
@@ -549,21 +551,21 @@ static status_t map_device(device_info *di)
 		/* check if we got the BIOS signature (might fail on laptops..) */
 		if (rom_temp[0]!=0x55 || rom_temp[1]!=0xaa)
 		{
-			dprintf(LOG_PREFIX "map_device: WARNING - ROM signature check failed (0x%02x 0x%02x != 0x55 0xAA)\n", rom_temp[0], rom_temp[1]);
+			if (enableDebug) dprintf(LOG_PREFIX "map_device: WARNING - ROM signature check failed (0x%02x 0x%02x != 0x55 0xAA)\n", rom_temp[0], rom_temp[1]);
 			/* apparantly no ROM is mapped here */
 			delete_area(rom_area);
 			rom_area = -1;
 			/* force using ISA legacy map as fall-back */
 			tmpUlong = 0x00000000;
 		} else {
-			dprintf(LOG_PREFIX "map_device: Valid Video BIOS ROM signature detected at PCI address.\n");
+			if (enableDebug) dprintf(LOG_PREFIX "map_device: Valid Video BIOS ROM signature detected at PCI address.\n");
 		}
 	}
 
 	if (!tmpUlong)
 	{
 		/* ROM was not assigned an adress, fetch it from ISA legacy memory map! */
-		dprintf(LOG_PREFIX "map_device: ROM address missing or unaligned, attempting legacy ISA C0000h fallback...\n");
+		if (enableDebug) dprintf(LOG_PREFIX "map_device: ROM address missing or unaligned, attempting legacy ISA C0000h fallback...\n");
 		rom_area = map_physical_memory(
 			buffer,
 			0x000c0000,
@@ -575,7 +577,7 @@ static status_t map_device(device_info *di)
 	}
 	
 	if (rom_area >= 0) {
-		dprintf(LOG_PREFIX "map_device: ROM mirror mapped at virt addr %p\n", rom_temp);
+		if (enableDebug) dprintf(LOG_PREFIX "map_device: ROM mirror mapped at virt addr %p\n", rom_temp);
 		if (current_settings.dumprom) dumprom (rom_temp, 65536);
 		memcpy (si->rom_mirror, rom_temp, 65536);
 
@@ -584,7 +586,7 @@ static status_t map_device(device_info *di)
 		set_pci(PCI_rom_base, 4, tmpUlong);
 		delete_area(rom_area);
 	} else {
-		dprintf(LOG_PREFIX "map_device: WARNING - failed to read VBIOS ROM! Continuing initialization...\n");
+		if (enableDebug) dprintf(LOG_PREFIX "map_device: WARNING - failed to read VBIOS ROM! Continuing initialization...\n");
 	}
 
 	/* if mapping ROM to vmem failed then clean up and pass on error *
@@ -615,12 +617,12 @@ static status_t map_device(device_info *di)
 	phys_addr_t fb_pci = di->pcii.u.h0.base_registers_pci[frame_buffer];
 	size_t fb_size = di->pcii.u.h0.base_register_sizes[frame_buffer];
 	if ((di->pcii.u.h0.base_register_flags[frame_buffer] & PCI_address_type) == PCI_address_type_64) {
-		dprintf(LOG_PREFIX "map_device: Framebuffer uses a 64-bit BAR aperture!\n");
+		if (enableDebug) dprintf(LOG_PREFIX "map_device: Framebuffer uses a 64-bit BAR aperture!\n");
 		fb_pci |= ((uint64)di->pcii.u.h0.base_registers_pci[frame_buffer + 1] << 32);
 		fb_size |= ((uint64)di->pcii.u.h0.base_register_sizes[frame_buffer + 1] << 32);
 	}
 	
-	dprintf(LOG_PREFIX "map_device: Framebuffer BAR physical aperture = 0x%" B_PRIx64 " (Aperture Size = %" B_PRIuSIZE " MB)\n",
+	if (enableDebug) dprintf(LOG_PREFIX "map_device: Framebuffer BAR physical aperture = 0x%" B_PRIx64 " (Aperture Size = %" B_PRIuSIZE " MB)\n",
 		(uint64)fb_pci, fb_size / (1024 * 1024));
 
 	/* map the framebuffer into vmem, using Write Combining*/
@@ -634,7 +636,7 @@ static status_t map_device(device_info *di)
 
 	/*if failed with write combining try again without*/
 	if (si->fb_area < 0) {
-		dprintf(LOG_PREFIX "map_device: Write Combining mapping failed! Retrying without Write Combining...\n");
+		if (enableDebug) dprintf(LOG_PREFIX "map_device: Write Combining mapping failed! Retrying without Write Combining...\n");
 		si->fb_area = map_physical_memory(
 			buffer,
 			fb_pci,
@@ -647,13 +649,13 @@ static status_t map_device(device_info *di)
 	/* if there was an error, delete our other areas and pass on error*/
 	if (si->fb_area < 0)
 	{
-		dprintf(LOG_PREFIX "map_device: ERROR - failed to map framebuffer! Area error = %" B_PRId32 "\n", si->fb_area);
+		if (enableDebug) dprintf(LOG_PREFIX "map_device: ERROR - failed to map framebuffer! Area error = %" B_PRId32 "\n", si->fb_area);
 		delete_area(si->regs_area);
 		si->regs_area = -1;
 		return si->fb_area;
 	}
 	
-	dprintf(LOG_PREFIX "map_device: Framebuffer mapped successfully at kernel virt addr %p (Area ID = %" B_PRId32 ")\n",
+	if (enableDebug) dprintf(LOG_PREFIX "map_device: Framebuffer mapped successfully at kernel virt addr %p (Area ID = %" B_PRId32 ")\n",
 		si->framebuffer, si->fb_area);
 		
 //fixme: retest for card coldstart and PCI/virt_mem mapping!!
@@ -666,12 +668,12 @@ static status_t map_device(device_info *di)
 		if (vram > 0)
 			si->ps.memory_size = vram;
 		else if (fb_size > 0 && fb_size <= 512 * 1024 * 1024){
-			dprintf(LOG_PREFIX "map_device: VRAM register detection failed, falling back to BAR aperture size.\n");
+			if (enableDebug) dprintf(LOG_PREFIX "map_device: VRAM register detection failed, falling back to BAR aperture size.\n");
 			si->ps.memory_size = fb_size;
 		}
 	}
 	
-	dprintf(LOG_PREFIX "map_device: Final detected VRAM size assigned to accelerant = %" B_PRIu32 " MB\n",
+	if (enableDebug) dprintf(LOG_PREFIX "map_device: Final detected VRAM size assigned to accelerant = %" B_PRIu32 " MB\n",
 		si->ps.memory_size / (1024 * 1024));
 
 	// remember settings for use here and in accelerant
@@ -685,7 +687,7 @@ static void unmap_device(device_info *di) {
 	shared_info *si = di->si;
 	uint32	tmpUlong;
 	
-	dprintf(LOG_PREFIX "unmap_device: unmapping physical memory areas for device %s...\n", di->name);
+	if (enableDebug) dprintf(LOG_PREFIX "unmap_device: unmapping physical memory areas for device %s...\n", di->name);
 	
 	pci_info *pcii = &(di->pcii);
 
@@ -696,11 +698,11 @@ static void unmap_device(device_info *di) {
 	/* delete the areas */
 	if (si->regs_area >= 0) {
 		delete_area(si->regs_area);
-		dprintf(LOG_PREFIX "unmap_device: deleted registers area %" B_PRId32 "\n", si->regs_area);
+		if (enableDebug) dprintf(LOG_PREFIX "unmap_device: deleted registers area %" B_PRId32 "\n", si->regs_area);
 	}
 	if (si->fb_area >= 0) {
 		delete_area(si->fb_area);
-		dprintf(LOG_PREFIX "unmap_device: deleted framebuffer area %" B_PRId32 "\n", si->fb_area);
+		if (enableDebug) dprintf(LOG_PREFIX "unmap_device: deleted framebuffer area %" B_PRId32 "\n", si->fb_area);
 	}
 	si->regs_area = si->fb_area = -1;
 	si->framebuffer = NULL;
@@ -712,7 +714,7 @@ static void probe_devices(void) {
 	uint32 count = 0;
 	device_info *di = pd->di;
 	
-	dprintf(LOG_PREFIX "probe_devices: scanning PCI bus for supported devices...\n");
+	if (enableDebug) dprintf(LOG_PREFIX "probe_devices: scanning PCI bus for supported devices...\n");
 
 	/* while there are more pci devices */
 	while ((count < MAX_DEVICES) && ((*pci_bus->get_nth_pci_info)(pci_index, &(di->pcii)) == B_NO_ERROR)) {
@@ -731,7 +733,7 @@ static void probe_devices(void) {
 							di->pcii.vendor_id, di->pcii.device_id,
 							di->pcii.bus, di->pcii.device, di->pcii.function);
 						
-						dprintf(LOG_PREFIX "probe_devices: Found GPU [%" B_PRIu32 "] -> Path = %s (Subsystem Vendor=0x%04x, Subsystem Device=0x%04x)\n",
+						if (enableDebug) dprintf(LOG_PREFIX "probe_devices: Found GPU [%" B_PRIu32 "] -> Path = %s (Subsystem Vendor=0x%04x, Subsystem Device=0x%04x)\n",
 								count, di->name, di->pcii.u.h0.subsystem_vendor_id, di->pcii.u.h0.subsystem_id);
 
 						/* remember the name */
@@ -763,7 +765,7 @@ next_device:
 	pd->count = count;
 	/* terminate list of device names with a null pointer */
 	pd->device_names[pd->count] = NULL;
-	dprintf(LOG_PREFIX "probe_devices: total matching devices registered = %" B_PRIu32 "\n", pd->count);
+	if (enableDebug) dprintf(LOG_PREFIX "probe_devices: total matching devices registered = %" B_PRIu32 "\n", pd->count);
 }
 
 static uint32 thread_interrupt_work(int32 *flags, vuint32 *regs, shared_info *si) {
@@ -820,7 +822,7 @@ static status_t open_hook (const char* name, uint32 flags, void** cookie) {
 	vuint32		*regs;
 	char shared_name[B_OS_NAME_LENGTH];
 	
-	dprintf(LOG_PREFIX "open_hook: open request received for devfs node = %s\n", name);
+	if (enableDebug) dprintf(LOG_PREFIX "open_hook: open request received for devfs node = %s\n", name);
 
 	/* find the device name in the list of devices */
 	/* we're never passed a name we didn't publish */
@@ -835,21 +837,21 @@ static status_t open_hook (const char* name, uint32 flags, void** cookie) {
 	/* if it's already open for writing */
 	if (di->is_open) {
 		/* mark it open another time */
-		dprintf(LOG_PREFIX "open_hook: device already open (count = %" B_PRIu32 "), incrementing open count.\n", di->is_open);
+		if (enableDebug) dprintf(LOG_PREFIX "open_hook: device already open (count = %" B_PRIu32 "), incrementing open count.\n", di->is_open);
 		goto mark_as_open;
 	}
 	/* create the shared area */
 	sprintf(shared_name, DEVICE_FORMAT " shared",
 		di->pcii.vendor_id, di->pcii.device_id,
 		di->pcii.bus, di->pcii.device, di->pcii.function);
-	dprintf(LOG_PREFIX "open_hook: creating shared area '%s' (size = %" B_PRIuSIZE " bytes)...\n",
+	if (enableDebug) dprintf(LOG_PREFIX "open_hook: creating shared area '%s' (size = %" B_PRIuSIZE " bytes)...\n",
 		shared_name, (sizeof(shared_info) + (B_PAGE_SIZE - 1)) & ~(B_PAGE_SIZE - 1));
 	/* create this area with NO user-space read or write permissions, to prevent accidental dammage */
 	di->shared_area = create_area(shared_name, (void **)&(di->si), B_ANY_KERNEL_ADDRESS, ((sizeof(shared_info) + (B_PAGE_SIZE - 1)) & ~(B_PAGE_SIZE - 1)), B_FULL_LOCK,
 		B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA | B_CLONEABLE_AREA);
 	if (di->shared_area < 0) {
 		/* return the error */
-		dprintf(LOG_PREFIX "open_hook: ERROR - create_area failed for shared info! Error = %" B_PRId32 "\n", di->shared_area);
+		if (enableDebug) dprintf(LOG_PREFIX "open_hook: ERROR - create_area failed for shared info! Error = %" B_PRId32 "\n", di->shared_area);
 		result = di->shared_area;
 		goto done;
 	}
@@ -867,12 +869,12 @@ static status_t open_hook (const char* name, uint32 flags, void** cookie) {
 
 	/* device at bus #0, device #0, function #0 holds byte value at byte-index 0xf6 */
 	si->ps.chip_rev = ((*pci_bus->read_pci_config)(0, 0, 0, 0xf6, 1));
-	dprintf(LOG_PREFIX "open_hook: Chip Revision reg 0xF6 = 0x%02x\n", si->ps.chip_rev);
+	if (enableDebug) dprintf(LOG_PREFIX "open_hook: Chip Revision reg 0xF6 = 0x%02x\n", si->ps.chip_rev);
 	
 	/* map the device */
 	result = map_device(di);
 	if (result < 0){
-		dprintf(LOG_PREFIX "open_hook: ERROR - map_device failed with status = %" B_PRId32 "\n", result);
+		if (enableDebug) dprintf(LOG_PREFIX "open_hook: ERROR - map_device failed with status = %" B_PRId32 "\n", result);
 		goto free_shared;
 	}
 	result = B_OK;
@@ -896,7 +898,7 @@ static status_t open_hook (const char* name, uint32 flags, void** cookie) {
 	/* disable and clear any pending interrupts */
 	disable_vbi(regs);
 	
-	dprintf(LOG_PREFIX "open_hook: checking IRQ configuration -> Pin=%d, Line=%d\n",
+	if (enableDebug) dprintf(LOG_PREFIX "open_hook: checking IRQ configuration -> Pin=%d, Line=%d\n",
 		di->pcii.u.h0.interrupt_pin, di->pcii.u.h0.interrupt_line);
 
 	/* If there is a valid interrupt line assigned then set up interrupts */
@@ -909,18 +911,18 @@ static status_t open_hook (const char* name, uint32 flags, void** cookie) {
 		//result = B_ERROR;
 		/* interrupt does not exist so exit without installing our handler */
 		//goto delete_the_sem;
-		dprintf(LOG_PREFIX "open_hook: WARNING - No valid IRQ line assigned to GPU. Proceeding without IRQ interrupt handler.\n");
+		if (enableDebug) dprintf(LOG_PREFIX "open_hook: WARNING - No valid IRQ line assigned to GPU. Proceeding without IRQ interrupt handler.\n");
 	}
 	else
 	{
 		/* otherwise install our interrupt handler */
 		result = install_io_interrupt_handler(di->pcii.u.h0.interrupt_line, eng_interrupt, (void *)di, 0);
 		if (result != B_OK) {
-			dprintf(LOG_PREFIX "open_hook: ERROR - install_io_interrupt_handler failed for IRQ %d! Error = %" B_PRId32 "\n",
+			if (enableDebug) dprintf(LOG_PREFIX "open_hook: ERROR - install_io_interrupt_handler failed for IRQ %d! Error = %" B_PRId32 "\n",
 				di->pcii.u.h0.interrupt_line, result);
 			goto delete_the_sem;
 		}
-		dprintf(LOG_PREFIX "open_hook: IRQ interrupt handler installed successfully on line %d.\n", di->pcii.u.h0.interrupt_line);
+		if (enableDebug) dprintf(LOG_PREFIX "open_hook: IRQ interrupt handler installed successfully on line %d.\n", di->pcii.u.h0.interrupt_line);
 	}
 
 mark_as_open:
@@ -929,7 +931,7 @@ mark_as_open:
 
 	/* send the cookie to the opener */
 	*cookie = di;
-	dprintf(LOG_PREFIX "open_hook: open_hook completed successfully.\n");
+	if (enableDebug) dprintf(LOG_PREFIX "open_hook: open_hook completed successfully.\n");
 	goto done;
 
 
@@ -980,7 +982,7 @@ static status_t
 close_hook (void* dev)
 {
 	/* we don't do anything on close: there might be dup'd fd */
-	dprintf(LOG_PREFIX "close_hook: closing file descriptor.\n");
+	if (enableDebug) dprintf(LOG_PREFIX "close_hook: closing file descriptor.\n");
 	return B_NO_ERROR;
 }
 
@@ -992,14 +994,14 @@ free_hook (void* dev) {
 	device_info *di = (device_info *)dev;
 	shared_info	*si = di->si;
 	vuint32 *regs = di->regs;
-	dprintf(LOG_PREFIX "free_hook: freeing device resources...\n");
+	if (enableDebug) dprintf(LOG_PREFIX "free_hook: freeing device resources...\n");
 
 	/* lock the driver */
 	AQUIRE_BEN(pd->kernel);
 
 	/* if opened multiple times, decrement the open count and exit */
 	if (di->is_open > 1){
-		dprintf(LOG_PREFIX "free_hook: remaining open instances = %" B_PRIu32 "\n", di->is_open - 1);
+		if (enableDebug) dprintf(LOG_PREFIX "free_hook: remaining open instances = %" B_PRIu32 "\n", di->is_open - 1);
 		goto unlock_and_exit;
 	}
 
@@ -1026,7 +1028,7 @@ unlock_and_exit:
 	di->is_open--;
 	/* unlock the driver */
 	RELEASE_BEN(pd->kernel);
-	dprintf(LOG_PREFIX "free_hook: device closed and cleaned up.\n");
+	if (enableDebug) dprintf(LOG_PREFIX "free_hook: device closed and cleaned up.\n");
 	/* all done */
 	return B_OK;
 }
@@ -1044,7 +1046,7 @@ control_hook (void* dev, uint32 msg, void *buf, size_t len) {
 		/* the only PUBLIC ioctl */
 		case B_GET_ACCELERANT_SIGNATURE: {
 			char *sig = (char *)buf;
-			dprintf(LOG_PREFIX "ioctl: B_GET_ACCELERANT_SIGNATURE -> %s\n", current_settings.accelerant);
+			if (enableDebug) dprintf(LOG_PREFIX "ioctl: B_GET_ACCELERANT_SIGNATURE -> %s\n", current_settings.accelerant);
 			strcpy(sig, current_settings.accelerant);
 			result = B_OK;
 		} break;
@@ -1054,10 +1056,10 @@ control_hook (void* dev, uint32 msg, void *buf, size_t len) {
 			eng_get_private_data *gpd = (eng_get_private_data *)buf;
 			if (gpd->magic == VIA_PRIVATE_DATA_MAGIC) {
 				gpd->shared_info_area = di->shared_area;
-				dprintf(LOG_PREFIX "ioctl: ENG_GET_PRIVATE_DATA -> Shared Area ID = %" B_PRId32 "\n", di->shared_area);
+				if (enableDebug) dprintf(LOG_PREFIX "ioctl: ENG_GET_PRIVATE_DATA -> Shared Area ID = %" B_PRId32 "\n", di->shared_area);
 				result = B_OK;
 			} else {
-                dprintf(LOG_PREFIX "ioctl: ENG_GET_PRIVATE_DATA -> MAGIC MISMATCH! (0x%08" B_PRIx32 " != 0x%08x)\n", gpd->magic, VIA_PRIVATE_DATA_MAGIC);
+                if (enableDebug) dprintf(LOG_PREFIX "ioctl: ENG_GET_PRIVATE_DATA -> MAGIC MISMATCH! (0x%08" B_PRIx32 " != 0x%08x)\n", gpd->magic, VIA_PRIVATE_DATA_MAGIC);
             }
 		} break;
 		case ENG_GET_PCI: {
@@ -1073,7 +1075,7 @@ control_hook (void* dev, uint32 msg, void *buf, size_t len) {
 			if (gsp->magic == VIA_PRIVATE_DATA_MAGIC) {
 				pci_info *pcii = &(di->pcii);
 				set_pci(gsp->offset, gsp->size, gsp->value);
-				dprintf(LOG_PREFIX "ioctl: ENG_SET_PCI -> Offset 0x%04" B_PRIx32 ", Size %" B_PRIu32 ", Val 0x%08" B_PRIx32 "\n", gsp->offset, gsp->size, gsp->value);
+				if (enableDebug) dprintf(LOG_PREFIX "ioctl: ENG_SET_PCI -> Offset 0x%04" B_PRIx32 ", Size %" B_PRIu32 ", Val 0x%08" B_PRIx32 "\n", gsp->offset, gsp->size, gsp->value);
 				result = B_OK;
 			}
 		} break;
@@ -1081,7 +1083,7 @@ control_hook (void* dev, uint32 msg, void *buf, size_t len) {
 			eng_device_name *dn = (eng_device_name *)buf;
 			if (dn->magic == VIA_PRIVATE_DATA_MAGIC) {
 				strcpy(dn->name, di->name);
-				dprintf(LOG_PREFIX "ioctl: ENG_DEVICE_NAME -> %s\n", di->name);
+				if (enableDebug) dprintf(LOG_PREFIX "ioctl: ENG_DEVICE_NAME -> %s\n", di->name);
 				result = B_OK;
 			}
 		} break;
@@ -1089,7 +1091,7 @@ control_hook (void* dev, uint32 msg, void *buf, size_t len) {
 			eng_set_bool_state *ri = (eng_set_bool_state *)buf;
 			if (ri->magic == VIA_PRIVATE_DATA_MAGIC) {
 				vuint32 *regs = di->regs;
-				dprintf(LOG_PREFIX "ioctl: ENG_RUN_INTERRUPTS -> state = %s\n", ri->do_it ? "ENABLE" : "DISABLE");
+				if (enableDebug) dprintf(LOG_PREFIX "ioctl: ENG_RUN_INTERRUPTS -> state = %s\n", ri->do_it ? "ENABLE" : "DISABLE");
 				if (ri->do_it) {
 					enable_vbi(regs);
 				} else {
@@ -1109,7 +1111,7 @@ control_hook (void* dev, uint32 msg, void *buf, size_t len) {
 						nai->exist = true;
 					}
 				}
-				dprintf(LOG_PREFIX "ioctl: ENG_GET_NTH_AGP_INFO [Index %" B_PRIu32 "] -> Exist=%s, AGPBus=%s\n",
+				if (enableDebug) dprintf(LOG_PREFIX "ioctl: ENG_GET_NTH_AGP_INFO [Index %" B_PRIu32 "] -> Exist=%s, AGPBus=%s\n",
                     nai->index, nai->exist ? "YES" : "NO", nai->agp_bus ? "YES" : "NO");
                 result = B_OK;
 			}
@@ -1120,11 +1122,11 @@ control_hook (void* dev, uint32 msg, void *buf, size_t len) {
 				if (agp_bus) {
 					nca->agp_bus = true;
 					nca->cmd = agp_bus->set_agp_mode(nca->cmd);
-					dprintf(LOG_PREFIX "ioctl: ENG_ENABLE_AGP -> Mode Command = 0x%08" B_PRIx32 "\n", nca->cmd);
+					if (enableDebug) dprintf(LOG_PREFIX "ioctl: ENG_ENABLE_AGP -> Mode Command = 0x%08" B_PRIx32 "\n", nca->cmd);
 				} else {
 					nca->agp_bus = false;
 					nca->cmd = 0;
-					dprintf(LOG_PREFIX "ioctl: ENG_ENABLE_AGP -> AGP bus unavailable!\n");
+					if (enableDebug) dprintf(LOG_PREFIX "ioctl: ENG_ENABLE_AGP -> AGP bus unavailable!\n");
 				}
 				result = B_OK;
 			}
@@ -1189,7 +1191,7 @@ control_hook (void* dev, uint32 msg, void *buf, size_t len) {
 		} break;
 		
 		default:
-            dprintf(LOG_PREFIX "ioctl: UNKNOWN IOCTL command received = 0x%08" B_PRIx32 "\n", msg);
+            if (enableDebug) dprintf(LOG_PREFIX "ioctl: UNKNOWN IOCTL command received = 0x%08" B_PRIx32 "\n", msg);
             break;
 	}
 	return result;
