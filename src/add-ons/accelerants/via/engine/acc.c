@@ -26,9 +26,19 @@ status_t eng_acc_wait_idle(void)
 {
 	/* Wait until 2D engine is completely idle */
 	int timeout = 100000;
-	while ((BLTR(VIA_REG_GECMD) & VIA_GEC_BLT) && --timeout)
+	if (is_h6())
 	{
-		snooze(10);
+		while ((BLTR_M1(VIA_REG_STATUS) & (VIA_CMD_RGTR_BUSY_H5 | VIA_2D_ENG_BUSY_H5)) && --timeout)
+		{
+			snooze(10);
+		}
+	}
+	else
+	{
+		while ((BLTR(VIA_REG_GECMD) & VIA_GEC_BLT) && --timeout)
+		{
+			snooze(10);
+		}
 	}
 	return B_OK;
 }
@@ -56,7 +66,7 @@ status_t eng_acc_init(void)
 	eng_acc_wait_idle();
 
 	if (is_h6())
-		BLTW(VIA_REG_GEMODE_M1, s_gemode);
+		BLTW_M1(VIA_REG_GEMODE_M1, s_gemode);
 	else
 		BLTW(VIA_REG_GEMODE, s_gemode);
 
@@ -93,14 +103,14 @@ status_t eng_acc_blit(uint16 xs, uint16 ys, uint16 xd, uint16 yd, uint16 w, uint
 
 	if (is_h6())
 	{
-		BLTW(VIA_REG_GEMODE_M1, s_gemode);
-		BLTW(VIA_REG_PITCH_M1, ((pitch >> 3) << 16) | (pitch >> 3));
-		BLTW(VIA_REG_DIMENSION_M1, ((uint32)h << 16) | ((uint32)w & 0xFFFF));
-		BLTW(VIA_REG_DSTPOS_M1, ((uint32)yd << 16) | ((uint32)xd & 0xFFFF));
-		BLTW(VIA_REG_DSTBASE_M1, base_offset >> 3);
-		BLTW(VIA_REG_SRCPOS_M1, ((uint32)ys << 16) | ((uint32)xs & 0xFFFF));
-		BLTW(VIA_REG_SRCBASE_M1, base_offset >> 3);
-		BLTW(VIA_REG_GECMD_M1, cmd);
+		BLTW_M1(VIA_REG_GEMODE_M1, s_gemode);
+		BLTW_M1(VIA_REG_PITCH_M1, ((pitch >> 3) << 16) | (pitch >> 3));
+		BLTW_M1(VIA_REG_DIMENSION_M1, ((uint32)h << 16) | ((uint32)w & 0xFFFF));
+		BLTW_M1(VIA_REG_DSTPOS_M1, ((uint32)yd << 16) | ((uint32)xd & 0xFFFF));
+		BLTW_M1(VIA_REG_DSTBASE_M1, base_offset >> 3);
+		BLTW_M1(VIA_REG_SRCPOS_M1, ((uint32)ys << 16) | ((uint32)xs & 0xFFFF));
+		BLTW_M1(VIA_REG_SRCBASE_M1, base_offset >> 3);
+		BLTW_M1(VIA_REG_GECMD_M1, cmd);
 	}
 	else
 	{
@@ -136,13 +146,13 @@ status_t eng_acc_rectangle(uint32 xs, uint32 xe, uint32 ys, uint32 yl)
 
 	if (is_h6())
 	{
-		BLTW(VIA_REG_GEMODE_M1, s_gemode);
-		BLTW(VIA_REG_PITCH_M1, ((pitch >> 3) << 16));
-		BLTW(VIA_REG_DIMENSION_M1, (h << 16) | (w & 0xFFFF));
-		BLTW(VIA_REG_DSTPOS_M1, (ys << 16) | (xs & 0xFFFF));
-		BLTW(VIA_REG_DSTBASE_M1, base_offset >> 3);
-		BLTW(VIA_REG_MONOPATFGC_M1, s_fill_color);
-		BLTW(VIA_REG_GECMD_M1, cmd);
+		BLTW_M1(VIA_REG_GEMODE_M1, s_gemode);
+		BLTW_M1(VIA_REG_PITCH_M1, ((pitch >> 3) << 16));
+		BLTW_M1(VIA_REG_DIMENSION_M1, (h << 16) | (w & 0xFFFF));
+		BLTW_M1(VIA_REG_DSTPOS_M1, (ys << 16) | (xs & 0xFFFF));
+		BLTW_M1(VIA_REG_DSTBASE_M1, base_offset >> 3);
+		BLTW_M1(VIA_REG_MONOPATFGC_M1, s_fill_color);
+		BLTW_M1(VIA_REG_GECMD_M1, cmd);
 	}
 	else
 	{
@@ -176,12 +186,12 @@ status_t eng_acc_rectangle_invert(uint32 xs, uint32 xe, uint32 ys, uint32 yl)
 
 	if (is_h6())
 	{
-		BLTW(VIA_REG_GEMODE_M1, s_gemode);
-		BLTW(VIA_REG_PITCH_M1, ((pitch >> 3) << 16));
-		BLTW(VIA_REG_DIMENSION_M1, (h << 16) | (w & 0xFFFF));
-		BLTW(VIA_REG_DSTPOS_M1, (ys << 16) | (xs & 0xFFFF));
-		BLTW(VIA_REG_DSTBASE_M1, base_offset >> 3);
-		BLTW(VIA_REG_GECMD_M1, cmd);
+		BLTW_M1(VIA_REG_GEMODE_M1, s_gemode);
+		BLTW_M1(VIA_REG_PITCH_M1, ((pitch >> 3) << 16));
+		BLTW_M1(VIA_REG_DIMENSION_M1, (h << 16) | (w & 0xFFFF));
+		BLTW_M1(VIA_REG_DSTPOS_M1, (ys << 16) | (xs & 0xFFFF));
+		BLTW_M1(VIA_REG_DSTBASE_M1, base_offset >> 3);
+		BLTW_M1(VIA_REG_GECMD_M1, cmd);
 	}
 	else
 	{

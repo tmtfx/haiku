@@ -58,7 +58,7 @@ status_t SET_CURSOR_SHAPE(uint16 width, uint16 height, uint16 hot_x, uint16 hot_
 						dst[y * 64 + x] = 0xFF000000; /* Invert / solid */
 				}
 			}
-			CRTCDW(CURSOR_MODE, 0x00000001);
+			head1_cursor_show();
 		} else {
 			head1_cursor_define(andMask, xorMask);
 			if ((si->dm.flags & DUALHEAD_BITS) != DUALHEAD_OFF)
@@ -305,8 +305,8 @@ status_t SET_CURSOR_BITMAP(uint16 width, uint16 height, uint16 hotX, uint16 hotY
 			}
 		}
 
-		/* Enable 64x64 ARGB32 cursor: bit 1 = 0 (64x64), bit 0 = 1 (enable) */
-		CRTCDW(CURSOR_MODE, 0x00000001);
+		/* Enable the 64x64 ARGB32 hardware cursor */
+		head1_cursor_show();
 	} else {
 		/* 1-bit Mono cursor (AND / XOR planes converted from 32-bit bitmap) */
 		uint8 andMask[128];

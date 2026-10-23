@@ -450,14 +450,33 @@ status_t eng_crtc_cursor_init()
     uint32 *fb;
     const uint32 curadd = 0;
 
-    LOG_REG32_WRITE("CURSOR_BG", CURSOR_BG, 0xffffffff);
-    LOG_REG32_WRITE("CURSOR_FG", CURSOR_FG, 0x00000000);
-    LOG_REG32_WRITE("CURSOR_MODE", CURSOR_MODE, (curadd & 0xfffffffc));
+    if (si->ps.card_arch >= CX700) {
+        /* Real "Hardware Icon" (ARGB32) cursor engine. The ENCRTC_CURSOR_*
+         * block is dead on this generation (confirmed against OpenChrome,
+         * which never references it for CX700+) - use PRIM_HI_* instead. */
+        LOG_REG32_WRITE("PRIM_HI_TRANSCOLOR", PRIM_HI_TRANSCOLOR, 0x00000000);
+        LOG_REG32_WRITE("PRIM_HI_INVTCOLOR", PRIM_HI_INVTCOLOR, 0x00ffffff);
+        LOG_REG32_WRITE("V327_HI_INVTCOLOR", V327_HI_INVTCOLOR, 0x00ffffff);
+        LOG_REG32_WRITE("PRIM_HI_FIFO", PRIM_HI_FIFO, 0x0d000d0f);
+        /* configured but disabled (bit0 = 0) until a real shape is set */
+        LOG_REG32_WRITE("PRIM_HI_CTRL (init)", PRIM_HI_CTRL, 0x36000004);
+        /* cursor bitmap always lives at VRAM offset 0 (reserved at boot) */
+        LOG_REG32_WRITE("PRIM_HI_FBOFFSET", PRIM_HI_FBOFFSET, curadd);
 
-    fb = (uint32 *)si->framebuffer + curadd;
-    for (i = 0; i < (4096 / 4); i += 2) {
-        fb[i + 0] = 0x00000000;
-        fb[i + 1] = 0xffffffff;
+        /* fill with fully transparent ARGB32 until SET_CURSOR_SHAPE runs */
+        fb = (uint32 *)si->framebuffer + curadd;
+        for (i = 0; i < (16384 / 4); i++)
+            fb[i] = 0x00000000;
+    } else {
+        LOG_REG32_WRITE("CURSOR_BG", CURSOR_BG, 0xffffffff);
+        LOG_REG32_WRITE("CURSOR_FG", CURSOR_FG, 0x00000000);
+        LOG_REG32_WRITE("CURSOR_MODE", CURSOR_MODE, (curadd & 0xfffffffc));
+
+        fb = (uint32 *)si->framebuffer + curadd;
+        for (i = 0; i < (4096 / 4); i += 2) {
+            fb[i + 0] = 0x00000000;
+            fb[i + 1] = 0xffffffff;
+        }
     }
 
     eng_crtc_cursor_show();
@@ -467,14 +486,22 @@ status_t eng_crtc_cursor_init()
 status_t eng_crtc_cursor_show()
 {
     if (enableCRTCDebug) debug_printf(LOG_PREFIX "CRTC: eng_crtc_cursor_show\n");
-    LOG_REG32_WRITE("CURSOR_MODE (Show)", CURSOR_MODE, (CRTCDR(CURSOR_MODE) | 0x00000003));
+    if (si->ps.card_arch >= CX700) {
+        LOG_REG32_WRITE("PRIM_HI_CTRL (Show)", PRIM_HI_CTRL, (CRTCDR(PRIM_HI_CTRL) | 0x00000001));
+    } else {
+        LOG_REG32_WRITE("CURSOR_MODE (Show)", CURSOR_MODE, (CRTCDR(CURSOR_MODE) | 0x00000003));
+    }
     return B_OK;
 }
 
 status_t eng_crtc_cursor_hide()
 {
     if (enableCRTCDebug) debug_printf(LOG_PREFIX "CRTC: eng_crtc_cursor_hide\n");
-    LOG_REG32_WRITE("CURSOR_MODE (Hide)", CURSOR_MODE, (CRTCDR(CURSOR_MODE) & 0xfffffffc));
+    if (si->ps.card_arch >= CX700) {
+        LOG_REG32_WRITE("PRIM_HI_CTRL (Hide)", PRIM_HI_CTRL, (CRTCDR(PRIM_HI_CTRL) & 0xfffffffe));
+    } else {
+        LOG_REG32_WRITE("CURSOR_MODE (Hide)", CURSOR_MODE, (CRTCDR(CURSOR_MODE) & 0xfffffffc));
+    }
     return B_OK;
 }
 
@@ -497,7 +524,14 @@ status_t eng_crtc_cursor_define(uint8* andMask, uint8* xorMask)
 
 status_t eng_crtc_cursor_position(uint16 x, uint16 y)
 {
-    LOG_REG32_WRITE("CURSOR_ORG", CURSOR_ORG, 0x00000000);
-    LOG_REG32_WRITE("CURSOR_POS", CURSOR_POS, (((x & 0x07ff) << 16) | (y & 0x07ff)));
+    if (si->ps.card_arch >= CX700) {
+        LOG_REG32_WRITE("PRIM_HI_POSSTART", PRIM_HI_POSSTART, (((uint32)x << 16) | ((uint32)y & 0x07ff)));
+        /* xoff/yoff (off-screen top/left clipping) left at 0: cosmetic
+         * refinement, not needed for a correctly shaped visible cursor. */
+        LOG_REG32_WRITE("PRIM_HI_CENTEROFFSET", PRIM_HI_CENTEROFFSET, 0x00000000);
+    } else {
+        LOG_REG32_WRITE("CURSOR_ORG", CURSOR_ORG, 0x00000000);
+        LOG_REG32_WRITE("CURSOR_POS", CURSOR_POS, (((x & 0x07ff) << 16) | (y & 0x07ff)));
+    }
     return B_OK;
 }

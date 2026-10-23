@@ -698,6 +698,20 @@
 #define ENCRTC_CURSOR_FG	0x000002e0
 //end new.
 
+/* Real "Hardware Icon" (HW cursor) registers for CX700/P4M890/P4M900/
+ * VX800/VX855/VX900 ("Chrome9"). The ENCRTC_CURSOR_* block above is a
+ * legacy ("Unichrome") register range that OpenChrome's own source never
+ * references for any supported chip - it is dead on this generation.
+ * Offsets taken from OpenChrome's via_eng_regs.h. */
+#define ENCRTC_V327_HI_INVTCOLOR	0x000002e4
+#define ENCRTC_PRIM_HI_FIFO		0x000002e8
+#define ENCRTC_PRIM_HI_TRANSCOLOR	0x000002ec
+#define ENCRTC_PRIM_HI_CTRL		0x000002f0
+#define ENCRTC_PRIM_HI_FBOFFSET	0x000002f4
+#define ENCRTC_PRIM_HI_POSSTART	0x000002f8
+#define ENCRTC_PRIM_HI_CENTEROFFSET	0x000002fc
+#define ENCRTC_PRIM_HI_INVTCOLOR	0x0000120c
+
 /* Macros for convenient accesses to VIA hardware */
 #define ENG_REG8(r_)  ((vuint8  *)regs)[(r_)]
 #define ENG_REG16(r_) ((vuint16 *)regs)[(r_) >> 1]
@@ -794,6 +808,13 @@
 #define VIA_REG_SRCBASE_M1      0x01C
 #define VIA_REG_MONOPATFGC_M1   0x058
 
+/* Engine status register, and H5/M1 (Chrome9: VX800, VX855, VX900) busy
+ * bits. Address is relative to the MMIO BAR base (NOT VIA_MMIO_BLTBASE) -
+ * see BLTR_M1/BLTW_M1 below. Taken from OpenChrome's via_regs.h. */
+#define VIA_REG_STATUS          0x400
+#define VIA_CMD_RGTR_BUSY_H5    0x00000010
+#define VIA_2D_ENG_BUSY_H5      0x00000002
+
 /* GEC Commands */
 #define VIA_GEC_NOOP            0x00000000
 #define VIA_GEC_BLT             0x00000001
@@ -812,6 +833,15 @@
 #define VIA_GEM_16bpp           0x00000100
 #define VIA_GEM_32bpp           0x00000300
 
-/* Macro for accessing 2D Engine */
+/* Macro for accessing 2D Engine (H2 generation and older) */
 #define BLTR(A)   (ENG_REG32(VIA_MMIO_BLTBASE + (A)))
 #define BLTW(A,B) (ENG_REG32(VIA_MMIO_BLTBASE + (A)) = (B))
+
+/* Macro for accessing the H6/M1 2D Engine (Chrome9: VX800, VX855, VX900).
+ * Unlike the H2 engine above, the H6/M1 command registers live at the base
+ * of the MMIO BAR, NOT at VIA_MMIO_BLTBASE (+0x200000) - confirmed against
+ * OpenChrome's viaFlushPCI(), which writes H6/M1 registers via a plain
+ * VIASETREG(offset, value) on the base MMIO mapping; the separate BltBase
+ * mapping is never dereferenced by any EXA (2D) code path there. */
+#define BLTR_M1(A)   (ENG_REG32(A))
+#define BLTW_M1(A,B) (ENG_REG32(A) = (B))
