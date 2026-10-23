@@ -14,7 +14,7 @@
 #include "acc_std.h"
 #include "macros.h"
 #define LOG_PREFIX "[VIA Graphics ACC] "
-bool enableSetModeDebug = true;
+bool enableSetModeDebug = false;
 
 static void dump_crtc_regs(const char *label)
 {

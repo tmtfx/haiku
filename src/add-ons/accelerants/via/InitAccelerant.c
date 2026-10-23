@@ -14,7 +14,7 @@
 #include "acc_std.h"
 
 #define LOG_PREFIX "[VIA Graphics ACC] "
-bool enableDebug = true;
+bool enableDebug = false;
 
 static status_t init_common(int the_fd);
 

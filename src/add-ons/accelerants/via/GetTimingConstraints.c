@@ -7,7 +7,7 @@
 
 #include "acc_std.h"
 #define LOG_PREFIX "[VIA Graphics ACC] "
-bool enableGTCDebug = true;
+bool enableGTCDebug = false;
 
 /* Used to help generate mode lines */
 status_t GET_TIMING_CONSTRAINTS(display_timing_constraints *dtc) 
