@@ -17,8 +17,11 @@
 #define MODULE_BIT 0x00400000
 
 #include "acc_std.h"
-
 #include <string.h>
+#include <stdio.h>
+
+#define LOG_PREFIX "[VIA Graphics ACC] "
+bool enableProposeDebug = false;
 
 #define	T_POSITIVE_SYNC	(B_POSITIVE_HSYNC | B_POSITIVE_VSYNC)
 /* mode flags will be setup as status info by PROPOSEMODE! */
@@ -139,8 +142,7 @@ status_t PROPOSE_DISPLAY_MODE(display_mode *target, const display_mode *low, con
 		want_same_width = target->timing.h_display == target->virtual_width,
 		want_same_height = target->timing.v_display == target->virtual_height;
 
-	LOG(1, ("PROPOSEMODE: (ENTER) requested virtual_width %d, virtual_height %d\n",
-									target->virtual_width, target->virtual_height));
+	if (enableProposeDebug) debug_printf(LOG_PREFIX "PROPOSEMODE: (ENTER) requested virtual_width %d, virtual_height %d\n", target->virtual_width, target->virtual_height);
 
 	/*check valid list:
 		if (VALID_REQUIRED is set)
@@ -161,7 +163,7 @@ status_t PROPOSE_DISPLAY_MODE(display_mode *target, const display_mode *low, con
 		int closest_mode_ptr;
 		uint32 closest_mode_clock;
 
-		LOG(1, ("PROPOSEMODE: valid mode required!\n"));
+		if (enableProposeDebug) debug_printf(LOG_PREFIX "PROPOSEMODE: valid mode required!\n");
 
 		closest_mode_ptr = 0xbad;
 		closest_mode_clock = 0;
@@ -186,7 +188,7 @@ status_t PROPOSE_DISPLAY_MODE(display_mode *target, const display_mode *low, con
 
 		if (closest_mode_ptr==0xbad)/*if no modes of correct size*/
 		{
-			LOG(4, ("PROPOSEMODE: no valid mode found, aborted.\n"));
+			if (enableProposeDebug) debug_printf(LOG_PREFIX "PROPOSEMODE: no valid mode found, aborted.\n");
 			return B_ERROR;
 		}
 		else
@@ -206,7 +208,7 @@ status_t PROPOSE_DISPLAY_MODE(display_mode *target, const display_mode *low, con
 	);
 	if (result == B_ERROR)
 	{
-		LOG(4, ("PROPOSEMODE: could not validate timing, aborted.\n"));
+		if (enableProposeDebug) debug_printf(LOG_PREFIX "PROPOSEMODE: could not validate timing, aborted.\n");
 		return result;
 	}
 
@@ -220,14 +222,14 @@ status_t PROPOSE_DISPLAY_MODE(display_mode *target, const display_mode *low, con
 	case 0x01: /* digital panel on head 1, nothing on head 2 */
 		if (si->ps.panel1_aspect < (target_aspect - 0.10))
 		{
-			LOG(4, ("PROPOSEMODE: connected panel1 is not widescreen type, aborted.\n"));
+			if (enableProposeDebug) debug_printf(LOG_PREFIX "PROPOSEMODE: connected panel1 is not widescreen type, aborted.\n");
 			return B_ERROR;
 		}
 		break;
 	case 0x10: /* nothing on head 1, digital panel on head 2 */
 		if (si->ps.panel2_aspect < (target_aspect - 0.10))
 		{
-			LOG(4, ("PROPOSEMODE: connected panel2 is not widescreen type, aborted.\n"));
+			if (enableProposeDebug) debug_printf(LOG_PREFIX "PROPOSEMODE: connected panel2 is not widescreen type, aborted.\n");
 			return B_ERROR;
 		}
 		break;
@@ -235,7 +237,7 @@ status_t PROPOSE_DISPLAY_MODE(display_mode *target, const display_mode *low, con
 		if ((si->ps.panel1_aspect < (target_aspect - 0.10)) ||
 			(si->ps.panel2_aspect < (target_aspect - 0.10)))
 		{
-			LOG(4, ("PROPOSEMODE: not all connected panels are widescreen type, aborted.\n"));
+			if (enableProposeDebug) debug_printf(LOG_PREFIX "PROPOSEMODE: not all connected panels are widescreen type, aborted.\n");
 			return B_ERROR;
 		}
 		break;
@@ -267,7 +269,7 @@ status_t PROPOSE_DISPLAY_MODE(display_mode *target, const display_mode *low, con
 		}
 		if (panel_TV_stat != B_OK)
 		{
-			LOG(4, ("PROPOSEMODE: WS panel_TV mode requested but no such TV here, aborted.\n"));
+			if (enableProposeDebug) debug_printf(LOG_PREFIX "PROPOSEMODE: WS panel_TV mode requested but no such TV here, aborted.\n");
 			return B_ERROR;
 		}
 	}
@@ -278,7 +280,7 @@ status_t PROPOSE_DISPLAY_MODE(display_mode *target, const display_mode *low, con
 		if ((target->timing.h_display > si->ps.p1_timing.h_display) ||
 			(target->timing.v_display > si->ps.p1_timing.v_display))
 		{
-			LOG(4, ("PROPOSEMODE: panel1 can't display requested resolution, aborted.\n"));
+			if (enableProposeDebug) debug_printf(LOG_PREFIX "PROPOSEMODE: panel1 can't display requested resolution, aborted.\n");
 			return B_ERROR;
 		}
 	}
@@ -287,7 +289,7 @@ status_t PROPOSE_DISPLAY_MODE(display_mode *target, const display_mode *low, con
 		if ((target->timing.h_display > si->ps.p2_timing.h_display) ||
 			(target->timing.v_display > si->ps.p2_timing.v_display))
 		{
-			LOG(4, ("PROPOSEMODE: panel2 can't display requested resolution, aborted.\n"));
+			if (enableProposeDebug) debug_printf(LOG_PREFIX "PROPOSEMODE: panel2 can't display requested resolution, aborted.\n");
 			return B_ERROR;
 		}
 	}
@@ -302,16 +304,30 @@ status_t PROPOSE_DISPLAY_MODE(display_mode *target, const display_mode *low, con
 	result = eng_general_validate_pic_size (target, &row_bytes, &acc_mode);
 	if (result == B_ERROR)
 	{
-		LOG(4, ("PROPOSEMODE: could not validate virtual picture size, aborted.\n"));
+		if (enableProposeDebug) debug_printf(LOG_PREFIX "PROPOSEMODE: could not validate virtual picture size, aborted.\n");
 		return result;
 	}
+	
+	/* --- FIX ALLINEAMENTO PITCH PER VX900 --- */
+    if (si->ps.card_arch == VX900 || si->vendor_id == 0x1106) {
+        uint32 bpp_bytes = 4;
+        switch (target->space) {
+            case B_CMAP8: bpp_bytes = 1; break;
+            case B_RGB15_LITTLE:
+            case B_RGB16_LITTLE: bpp_bytes = 2; break;
+            case B_RGB24_LITTLE: bpp_bytes = 3; break;
+            case B_RGB32_LITTLE: default: bpp_bytes = 4; break;
+        }
+        row_bytes = (target->virtual_width * bpp_bytes + 63) & ~63;
+        si->fbc.bytes_per_row = row_bytes;
+    }
 
 	/*check if virtual_width is still within the requested limits*/
 	if ((target->virtual_width < low->virtual_width) ||
 		(target->virtual_width > high->virtual_width))
 	{
 		status = B_BAD_VALUE;
-		LOG(4, ("PROPOSEMODE: WARNING: virtual_width deviates too much\n"));
+		if (enableProposeDebug) debug_printf(LOG_PREFIX "PROPOSEMODE: WARNING: virtual_width deviates too much\n");
 	}
 
 	/*check if timing found is within the requested horizontal limits*/
@@ -330,7 +346,7 @@ status_t PROPOSE_DISPLAY_MODE(display_mode *target, const display_mode *low, con
 		{		
 			status = B_BAD_VALUE;
 		}
-		LOG(4, ("PROPOSEMODE: WARNING: horizontal timing deviates too much\n"));
+		if (enableProposeDebug) debug_printf(LOG_PREFIX "PROPOSEMODE: WARNING: horizontal timing deviates too much\n");
 	}
 
 	/*check if timing found is within the requested vertical limits*/
@@ -351,7 +367,7 @@ status_t PROPOSE_DISPLAY_MODE(display_mode *target, const display_mode *low, con
 		{		
 			status = B_BAD_VALUE;
 		}
-		LOG(4, ("PROPOSEMODE: WARNING: vertical timing deviates too much\n"));
+		if (enableProposeDebug) debug_printf(LOG_PREFIX "PROPOSEMODE: WARNING: vertical timing deviates too much\n");
 	}
 
 	/* adjust pixelclock for possible timing modifications done above */
@@ -360,9 +376,14 @@ status_t PROPOSE_DISPLAY_MODE(display_mode *target, const display_mode *low, con
 	/* Now find the nearest valid pixelclock we actually can setup for the target mode,
 	 * this also makes sure we don't generate more pixel bandwidth than the device can handle */
 	/* calculate settings, but do not actually test anything (that costs too much time!) */
+	/* --- FIX PROTEZIONE LOOP PLL INFINITO --- */
 	result = head1_pix_pll_find(*target,&pix_clock_found,&m,&n,&p,0);
-	/* update the target mode */
-	target->timing.pixel_clock = (pix_clock_found * 1000);	
+	if (result == B_OK) {
+		/* update the target mode */
+        target->timing.pixel_clock = (pix_clock_found * 1000);
+    } else {
+        if (enableProposeDebug) debug_printf(LOG_PREFIX "PROPOSEMODE: PLL calculation bypass for clk %" B_PRIu32 "\n", target->timing.pixel_clock);
+    }
 
 	/* note if we fell outside the limits */
 	if ((target->timing.pixel_clock < low->timing.pixel_clock) ||
@@ -375,7 +396,7 @@ status_t PROPOSE_DISPLAY_MODE(display_mode *target, const display_mode *low, con
 		{
 			status = B_BAD_VALUE;
 		}
-		LOG(4, ("PROPOSEMODE: WARNING: pixelclock deviates too much\n"));
+		if (enableProposeDebug) debug_printf(LOG_PREFIX "PROPOSEMODE: WARNING: pixelclock deviates too much\n");
 	}
 
 	/* checkout space needed for hardcursor (if any) */
@@ -390,21 +411,21 @@ status_t PROPOSE_DISPLAY_MODE(display_mode *target, const display_mode *low, con
 	}
 	if (target->virtual_height < target->timing.v_display) 
 	{
-		LOG(4,("PROPOSEMODE: not enough memory for current mode, aborted.\n"));
+		if (enableProposeDebug) debug_printf(LOG_PREFIX "PROPOSEMODE: not enough memory for current mode, aborted.\n");
 		return B_ERROR;
 	}
-	LOG(4,("PROPOSEMODE: validated virtual_width %d, virtual_height %d pixels\n",
-		target->virtual_width, target->virtual_height));
+	if (enableProposeDebug) debug_printf(LOG_PREFIX "PROPOSEMODE: validated virtual_width %d, virtual_height %d pixels\n",
+		target->virtual_width, target->virtual_height);
 
 	if ((target->virtual_height < low->virtual_height) ||
 		(target->virtual_height > high->virtual_height))
 	{
 		status = B_BAD_VALUE;
-		LOG(4, ("PROPOSEMODE: WARNING: virtual_height deviates too much\n"));
+		if (enableProposeDebug) debug_printf(LOG_PREFIX "PROPOSEMODE: WARNING: virtual_height deviates too much\n");
 	}
 
 	/* setup status flags */ 
-	LOG(1, ("PROPOSEMODE: initial modeflags: $%08x\n", target->flags));
+	if (enableProposeDebug) debug_printf(LOG_PREFIX "PROPOSEMODE: initial modeflags: $%08x\n", target->flags);
 	/* preset to singlehead card without TVout, no overlay support and no hardcursor.
 	 * also advice system that app_server and acc engine may touch the framebuffer
 	 * simultaneously (fixed). */
@@ -496,15 +517,18 @@ status_t PROPOSE_DISPLAY_MODE(display_mode *target, const display_mode *low, con
 	/* set SUPPORTS_OVERLAYS */
 	target->flags |= B_SUPPORTS_OVERLAYS;
 
-	LOG(1, ("PROPOSEMODE: validated status modeflags: $%08x\n", target->flags));
+	if (enableProposeDebug) debug_printf(LOG_PREFIX "PROPOSEMODE: validated status modeflags: $%08x\n", target->flags);
 
 	/* overrule timing command flags to be (fixed) blank_pedestal = 0.0IRE,
 	 * progressive scan (fixed), and sync_on_green not avaible. */
 	target->timing.flags &= ~(B_BLANK_PEDESTAL | B_TIMING_INTERLACED | B_SYNC_ON_GREEN);
 	/* The HSYNC and VSYNC command flags are actually executed by the driver. */
 
-	if (status == B_OK)	LOG(4, ("PROPOSEMODE: completed successfully.\n"));
-	else LOG(4, ("PROPOSEMODE: mode can be made, but outside given limits.\n"));
+	if (status == B_OK)	{
+		if (enableProposeDebug) debug_printf(LOG_PREFIX "PROPOSEMODE: completed successfully.\n");
+	} else {
+		if (enableProposeDebug) debug_printf(LOG_PREFIX "PROPOSEMODE: mode can be made, but outside given limits.\n");
+	}
 	return status;
 }
 
@@ -513,7 +537,7 @@ status_t PROPOSE_DISPLAY_MODE(display_mode *target, const display_mode *low, con
 */
 uint32 ACCELERANT_MODE_COUNT(void)
 {
-	LOG(1, ("ACCELERANT_MODE_COUNT: the modelist contains %d modes\n",si->mode_count));
+	if (enableProposeDebug) debug_printf(LOG_PREFIX "ACCELERANT_MODE_COUNT: the modelist contains %d modes\n",si->mode_count);
 
 	return si->mode_count;
 }
@@ -521,7 +545,7 @@ uint32 ACCELERANT_MODE_COUNT(void)
 /* Copy the list of guaranteed supported video modes to the location provided.*/
 status_t GET_MODE_LIST(display_mode *dm)
 {
-	LOG(1, ("GET_MODE_LIST: exporting the modelist created before.\n"));
+	if (enableProposeDebug) debug_printf(LOG_PREFIX "GET_MODE_LIST: exporting the modelist created before.\n");
 
 	memcpy(dm, my_mode_list, si->mode_count * sizeof(display_mode));
 	return B_OK;

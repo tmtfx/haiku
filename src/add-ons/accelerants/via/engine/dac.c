@@ -11,6 +11,9 @@
 */
 
 #define MODULE_BIT 0x00010000
+#include <stdbool.h>
+#define LOG_PREFIX "[VIA Graphics ACC] "
+bool enableDACDebug = true;
 
 #include "std.h"
 
@@ -265,21 +268,53 @@ status_t eng_dac_set_pix_pll(display_mode target)
 	{
 		/* UniChrome Pro & Chrome9 (including VX855 and VX900) - OpenChrome method */
 		uint32 packed = ViaComputeProDotClock(target.timing.pixel_clock);
+		if (enableDACDebug) {
+			debug_printf(LOG_PREFIX "DAC: card_arch=%d, requested pixclock=%" B_PRIu32 " kHz\n",
+				si->ps.card_arch, target.timing.pixel_clock);
+		}
 		if (packed != 0) {
 			int dtz = (packed >> 0) & 0x03;
 			int dr  = (packed >> 2) & 0x07;
 			int dn  = (packed >> 5) & 0x7f;
 			int dm  = (packed >> 12) & 0x3ff;
 
+			if (enableDACDebug) {
+				/* recompute the actual VCO output frequency for the divisors as found
+				 * (before the VX855/VX900 -2 offset below), to check PLL lock accuracy */
+				uint32 factual = 14318000U * dm;
+				factual /= dn << dr;
+				double target_hz = target.timing.pixel_clock * 1.e3;
+				debug_printf(LOG_PREFIX "  [PLL CALC] dtz=%d dr=%d dn=%d dm=%d -> actual=%" B_PRIu32 " Hz (target=%.0f Hz, err=%.3f%%)\n",
+					dtz, dr, dn, dm, factual, target_hz,
+					(((double)factual / target_hz) - 1.0) * 100.0);
+			}
+
 			if (si->ps.card_arch != VX855 && si->ps.card_arch != VX900) {
 				dm -= 2;
 				dn -= 2;
 			}
 
-			SEQW(PPLL_N_OTH, dm & 0xff);
-			SEQW(PPLL_P_OTH, ((dm >> 8) & 0x03) | (dr << 2) | ((dtz & 1) << 7));
-			SEQW(PPLL_M_OTH, (dn & 0x7f) | ((dtz & 2) << 6));
+			if (enableDACDebug) {
+				uint8 old_n = SEQR(PPLL_N_OTH), old_p = SEQR(PPLL_P_OTH), old_m = SEQR(PPLL_M_OTH);
+				SEQW(PPLL_N_OTH, dm & 0xff);
+				SEQW(PPLL_P_OTH, ((dm >> 8) & 0x03) | (dr << 2) | ((dtz & 1) << 7));
+				SEQW(PPLL_M_OTH, (dn & 0x7f) | ((dtz & 2) << 6));
+				debug_printf(LOG_PREFIX "  [REG WRITE] PPLL_N_OTH (SR44): PRIMA=0x%02x -> DOPO=0x%02x\n",
+					old_n, SEQR(PPLL_N_OTH));
+				debug_printf(LOG_PREFIX "  [REG WRITE] PPLL_P_OTH (SR45): PRIMA=0x%02x -> DOPO=0x%02x\n",
+					old_p, SEQR(PPLL_P_OTH));
+				debug_printf(LOG_PREFIX "  [REG WRITE] PPLL_M_OTH (SR46): PRIMA=0x%02x -> DOPO=0x%02x\n",
+					old_m, SEQR(PPLL_M_OTH));
+			} else {
+				SEQW(PPLL_N_OTH, dm & 0xff);
+				SEQW(PPLL_P_OTH, ((dm >> 8) & 0x03) | (dr << 2) | ((dtz & 1) << 7));
+				SEQW(PPLL_M_OTH, (dn & 0x7f) | ((dtz & 2) << 6));
+			}
 		} else {
+			if (enableDACDebug) {
+				debug_printf(LOG_PREFIX "  [PLL CALC] ViaComputeProDotClock FAILED (returned 0) for pixclock=%" B_PRIu32 " kHz!\n",
+					target.timing.pixel_clock);
+			}
 			SEQW(PPLL_N_OTH, (n & 0xff));
 			SEQW(PPLL_M_OTH, (m & 0x1f));
 			SEQW(PPLL_P_OTH, (p & 0x03) << 2);
@@ -293,7 +328,14 @@ status_t eng_dac_set_pix_pll(display_mode target)
 
 	/* now select pixelclock source D (the above custom VIA programmable PLL) */
 	snooze(1000);
-	ENG_REG8(RG8_MISCW) = 0xcf;
+	if (enableDACDebug) {
+		uint8 old_misc = ENG_REG8(RG8_MISCR);
+		ENG_REG8(RG8_MISCW) = 0xcf;
+		debug_printf(LOG_PREFIX "  [REG WRITE] MISC Register (DAC clock-select): PRIMA=0x%02x -> DOPO=0x%02x\n",
+			old_misc, ENG_REG8(RG8_MISCR));
+	} else {
+		ENG_REG8(RG8_MISCW) = 0xcf;
+	}
 
 	/* Wait for the PIXPLL frequency to lock until timeout occurs */
 //fixme: do VIA cards have a LOCK indication bit??
