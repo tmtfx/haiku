@@ -88,7 +88,7 @@ const uint32 MASTER_PASSWORD_SAVE   = 'MPSV';
 const uint32 kGoToMP2 = 'GTP2';
 const uint32 kGoToSave = 'GTBS';
 const uint32 BENCHMARK_DONE = 'BMDN';
-const uint32 2D_COMP_CHECKBOX_CHANGED = 'BMCB';
+const uint32 ACC_COMP_CHKBX_CHANGED = 'BMCB';
 
 class PasswordTC : public BTextControl {
 public:
@@ -465,10 +465,10 @@ InstallerWindow::InstallerWindow()
 
     fBench2DCheckbox = new BCheckBox("bench2D",
         B_TRANSLATE("Enable 2D hardware acceleration"),
-        new BMessage(2D_COMP_CHECKBOX_CHANGED));
+        new BMessage(ACC_COMP_CHKBX_CHANGED));
     fCompositCheckbox = new BCheckBox("Compositor2D",
         B_TRANSLATE("Enable 2D compositor"),
-        new BMessage(2D_COMP_CHECKBOX_CHANGED));
+        new BMessage(ACC_COMP_CHKBX_CHANGED));
 
     fBenchDoneButton = new BButton("benchDone",
         B_TRANSLATE("Continue"), new BMessage(BENCHMARK_DONE));
@@ -899,7 +899,7 @@ InstallerWindow::MessageReceived(BMessage *msg)
 			}
 			break;
 		}
-		case 2D_COMP_CHECKBOX_CHANGED:
+		case ACC_COMP_CHKBX_CHANGED:
 		{
 			bool enable2D = (fBench2DCheckbox != NULL
 				&& fBench2DCheckbox->Value() == B_CONTROL_ON);
