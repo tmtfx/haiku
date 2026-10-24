@@ -88,7 +88,7 @@ const uint32 MASTER_PASSWORD_SAVE   = 'MPSV';
 const uint32 kGoToMP2 = 'GTP2';
 const uint32 kGoToSave = 'GTBS';
 const uint32 BENCHMARK_DONE = 'BMDN';
-const uint32 BENCHMARK_CHECKBOX_CHANGED = 'BMCB';
+const uint32 2D_COMP_CHECKBOX_CHANGED = 'BMCB';
 
 class PasswordTC : public BTextControl {
 public:
@@ -465,7 +465,10 @@ InstallerWindow::InstallerWindow()
 
     fBench2DCheckbox = new BCheckBox("bench2D",
         B_TRANSLATE("Enable 2D hardware acceleration"),
-        new BMessage(BENCHMARK_CHECKBOX_CHANGED));
+        new BMessage(2D_COMP_CHECKBOX_CHANGED));
+    fCompositCheckbox = new BCheckBox("Compositor2D",
+        B_TRANSLATE("Enable 2D compositor"),
+        new BMessage(2D_COMP_CHECKBOX_CHANGED));
 
     fBenchDoneButton = new BButton("benchDone",
         B_TRANSLATE("Continue"), new BMessage(BENCHMARK_DONE));
@@ -497,6 +500,8 @@ InstallerWindow::InstallerWindow()
                 .Add(fBenchResultView)
                 .AddStrut(B_USE_ITEM_SPACING)
                 .Add(fBench2DCheckbox)
+                .AddStrut(B_USE_ITEM_SPACING)
+                .Add(fCompositCheckbox)
             .End()
             .AddGlue()
         .End()
@@ -884,7 +889,9 @@ InstallerWindow::MessageReceived(BMessage *msg)
 		{
 			bool enable2D = (fBench2DCheckbox != NULL
 				&& fBench2DCheckbox->Value() == B_CONTROL_ON);
-			_SaveScreenSettings(enable2D);
+			bool compositor2D = (fCompositCheckbox != NULL
+				&& fCompositCheckbox->Value() == B_CONTROL_ON);
+			_SaveScreenSettings(enable2D,compositor2D);
 
 			if (fCardLayout != NULL) {
 				fCardLayout->SetVisibleItem((int32)0);
@@ -892,11 +899,13 @@ InstallerWindow::MessageReceived(BMessage *msg)
 			}
 			break;
 		}
-		case BENCHMARK_CHECKBOX_CHANGED:
+		case 2D_COMP_CHECKBOX_CHANGED:
 		{
 			bool enable2D = (fBench2DCheckbox != NULL
 				&& fBench2DCheckbox->Value() == B_CONTROL_ON);
-			_SaveScreenSettings(enable2D);
+			bool compositor2D = (fCompositCheckbox != NULL
+				&& fCompositCheckbox->Value() == B_CONTROL_ON);
+			_SaveScreenSettings(enable2D,compositor2D);
 			break;
 		}
 		case kGoToMP2:
@@ -1003,6 +1012,15 @@ InstallerWindow::_RunBenchmark()
 		if (msgr.IsValid() && msgr.SendMessage(&request, &reply, 200000) == B_OK)
 			reply.FindBool("has_2d_acceleration", &has2D);
 	}
+	
+	bool hasHWCur = false;
+	{
+		BMessenger msgr("application/x-vnd.haiku-app_server");
+		BMessage request('hsbm');
+		BMessage reply;
+		if (msgr.IsValid() && msgr.SendMessage(&request, &reply, 200000) == B_OK)
+			reply.FindBool("has_set_cursor_bitmap", &hasHWCur);
+	}
 
 	fGpuStatusBar->Reset();
 	if (has2D) {
@@ -1013,6 +1031,14 @@ InstallerWindow::_RunBenchmark()
 		fGpuStatusBar->Update(0.0,
 			B_TRANSLATE("Not supported (Generic VESA / Framebuffer)"), "");
 		fBench2DCheckbox->SetEnabled(false);
+	}
+	// se ho HWCursor 
+	if (hasHWCur) {
+		fCompositCheckbox->SetEnabled(true);
+		fCompositCheckbox->SetValue(B_CONTROL_ON);
+	} else {
+		fCompositCheckbox->SetEnabled(false);
+		fCompositCheckbox->SetValue(B_CONTROL_OFF);
 	}
 
 	// 3. Make optimization decision
@@ -1037,7 +1063,7 @@ InstallerWindow::_RunBenchmark()
 
 
 status_t
-InstallerWindow::_SaveScreenSettings(bool enable2D)
+InstallerWindow::_SaveScreenSettings(bool enable2D, bool compositor2D)
 {
 	BPoint offset(0, 0);
 	bool hwCursor = true;
@@ -1054,6 +1080,7 @@ InstallerWindow::_SaveScreenSettings(bool enable2D)
 			file.Write(&offset, sizeof(BPoint));
 			file.Write(&hwCursor, sizeof(bool));
 			file.Write(&enable2D, sizeof(bool));
+			file.Write(&compositor2D, sizeof(bool));
 		}
 	}
 
@@ -1066,13 +1093,17 @@ InstallerWindow::_SaveScreenSettings(bool enable2D)
 			liveFile.Write(&offset, sizeof(BPoint));
 			liveFile.Write(&hwCursor, sizeof(bool));
 			liveFile.Write(&enable2D, sizeof(bool));
+			liveFile.Write(&compositor2D, sizeof(bool));
 		}
 	}
 
 	// 3. Notify running app_server
 	BMessage msg(AS_SET_2D_ACCELERATION_ENABLED);
 	msg.AddBool("enable", enable2D);
+	BMessage msgc(AS_SET_2D_COMPOSITOR_ENABLED);
+	msgc.AddBool("enable", compositor2D);
 	BMessenger("application/x-vnd.Haiku-app_server").SendMessage(&msg);
+	BMessenger("application/x-vnd.Haiku-app_server").SendMessage(&msgc);
 
 	return B_OK;
 }

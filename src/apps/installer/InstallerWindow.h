@@ -106,6 +106,7 @@ private:
 			BStatusBar*			fGpuStatusBar;
 			BStringView*		fBenchResultView;
 			BCheckBox*			fBench2DCheckbox;
+			BCheckBox*			fCompositCheckbox;
 			BButton*			fBenchDoneButton;
 
 			bool				fEncouragedToSetupPartitions;
