@@ -259,7 +259,7 @@ main(int argc, char **argv)
 			//aggiungiamo sempre una rimozione
 			BString *remtitle = new BString("Remove replicant");
 			BString *remaction = new BString("desklink --remove=");
-			remaction->Append(ref.name);
+			EscapeArgument(ref.name, *remaction);
 			titleList.AddItem(remtitle);
 			actionList.AddItem(remaction);
 		}
