@@ -466,31 +466,31 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 	// hardware cursor checkbox: check whether any display mode advertises hardware cursor support
 	bool supportsHardwareCursor = false;
 	for (int32 i = 0; i < fScreenMode.CountModes(); i++) {
-	const display_mode &dm = fScreenMode.DisplayModeAt(i);
-	if (dm.flags & B_HARDWARE_CURSOR) {
-		supportsHardwareCursor = true;
-		break;
-	}
+		const display_mode &dm = fScreenMode.DisplayModeAt(i);
+		if (dm.flags & B_HARDWARE_CURSOR) {
+			supportsHardwareCursor = true;
+			break;
+		}
 	}
 
 	// create the checkbox (value from saved settings; default true)
 	fHardwareCursorCheckbox = new BCheckBox("hardware_cursor",
-	B_TRANSLATE("Enable hardware cursor"), new BMessage(TOGGLE_HARDWARE_CURSOR_MSG));
-		// Ask app_server whether the driver exposes B_SET_CURSOR_BITMAP
-		bool hasSetCursorBitmap = false;
-		{
-	BMessenger msgr("application/x-vnd.haiku-app_server");
-	BMessage request('hsbm');
-	BMessage reply;
-	if (msgr.IsValid() && msgr.SendMessage(&request, &reply, 200000) == B_OK) {
-		reply.FindBool("has_set_cursor_bitmap", &hasSetCursorBitmap);
-	}
+	B_TRANSLATE("Enable hardware cursor bitmap"), new BMessage(TOGGLE_HARDWARE_CURSOR_MSG));
+	// Ask app_server whether the driver exposes B_SET_CURSOR_BITMAP
+	bool hasSetCursorBitmap = false;
+	{
+		BMessenger msgr("application/x-vnd.haiku-app_server");
+		BMessage request('hsbm');
+		BMessage reply;
+		if (msgr.IsValid() && msgr.SendMessage(&request, &reply, 200000) == B_OK) {
+			reply.FindBool("has_set_cursor_bitmap", &hasSetCursorBitmap);
 		}
-		fHardwareCursorCheckbox->SetEnabled(hasSetCursorBitmap);
-		if (fSettings->HardwareCursorEnabled())
-	fHardwareCursorCheckbox->SetValue(B_CONTROL_ON);
-		else
-	fHardwareCursorCheckbox->SetValue(B_CONTROL_OFF);
+	}
+	fHardwareCursorCheckbox->SetEnabled(hasSetCursorBitmap);
+	if (fSettings->HardwareCursorEnabled())
+		fHardwareCursorCheckbox->SetValue(B_CONTROL_ON);
+	else
+		fHardwareCursorCheckbox->SetValue(B_CONTROL_OFF);
 
 	f2DAccelerationCheckbox = new BCheckBox("2d_acceleration",
 		B_TRANSLATE("Enable 2D hardware acceleration"),
@@ -522,11 +522,11 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 		f2DDebugCheckbox->SetValue(B_CONTROL_OFF);
 
 	f2DCompositorCheckbox = new BCheckBox("2d_compositor",
-		B_TRANSLATE("Enable 2D compositor (requires hardware cursor)"),
+		B_TRANSLATE("Enable 2D compositor (requires hardware cursor bitmap)"),
 		new BMessage(TOGGLE_2D_COMPOSITOR_MSG));
 
 	bool canEnableCompositor = supportsHardwareCursor && (fHardwareCursorCheckbox->Value() == B_CONTROL_ON);
-	f2DCompositorCheckbox->SetEnabled(supportsHardwareCursor);
+	f2DCompositorCheckbox->SetEnabled(hasSetCursorBitmap);
 	if (canEnableCompositor && fSettings->Compositor2DEnabled())
 		f2DCompositorCheckbox->SetValue(B_CONTROL_ON);
 	else
