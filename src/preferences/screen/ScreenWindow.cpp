@@ -464,14 +464,14 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 		fRefreshField->Hide();
 
 	// hardware cursor checkbox: check whether any display mode advertises hardware cursor support
-	bool supportsHardwareCursor = false;
+	/*bool supportsHardwareCursor = false;
 	for (int32 i = 0; i < fScreenMode.CountModes(); i++) {
 		const display_mode &dm = fScreenMode.DisplayModeAt(i);
 		if (dm.flags & B_HARDWARE_CURSOR) {
 			supportsHardwareCursor = true;
 			break;
 		}
-	}
+	}*/
 
 	// create the checkbox (value from saved settings; default true)
 	fHardwareCursorCheckbox = new BCheckBox("hardware_cursor",
@@ -487,7 +487,7 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 		}
 	}
 	fHardwareCursorCheckbox->SetEnabled(hasSetCursorBitmap);
-	if (fSettings->HardwareCursorEnabled())
+	if (fSettings->HardwareCursorEnabled() && hasSetCursorBitmap)
 		fHardwareCursorCheckbox->SetValue(B_CONTROL_ON);
 	else
 		fHardwareCursorCheckbox->SetValue(B_CONTROL_OFF);
@@ -525,9 +525,9 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 		B_TRANSLATE("Enable 2D compositor (requires hardware cursor bitmap)"),
 		new BMessage(TOGGLE_2D_COMPOSITOR_MSG));
 
-	bool canEnableCompositor = supportsHardwareCursor && (fHardwareCursorCheckbox->Value() == B_CONTROL_ON);
-	f2DCompositorCheckbox->SetEnabled(hasSetCursorBitmap);
-	if (canEnableCompositor && fSettings->Compositor2DEnabled())
+	//bool canEnableCompositor = hasSetCursorBitmap && (fHardwareCursorCheckbox->Value() == B_CONTROL_ON);
+	f2DCompositorCheckbox->SetEnabled(hasSetCursorBitmap && fHardwareCursorCheckbox->Value() == B_CONTROL_ON);//supportsHardwareCursor
+	if (hasSetCursorBitmap && fSettings->Compositor2DEnabled())
 		f2DCompositorCheckbox->SetValue(B_CONTROL_ON);
 	else
 		f2DCompositorCheckbox->SetValue(B_CONTROL_OFF);
