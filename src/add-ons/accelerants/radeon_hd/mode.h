@@ -35,6 +35,7 @@ uint32 radeon_dpms_mode(void);
 void radeon_dpms_set(uint8 id, int mode);
 void radeon_dpms_set_hook(int mode);
 uint32 get_mode_bpp(display_mode* mode);
+bool radeon_boot_resolution_unchanged(uint8 crtcID);
 
 
 #endif /*RADEON_HD_MODE_H*/

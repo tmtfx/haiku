@@ -721,8 +721,10 @@ radeon_hd_init(radeon_info &info)
 		radeon_chip_name[info.chipsetID], info.pciID);
 
 
+	struct frame_buffer_boot_info *bi
+		= (struct frame_buffer_boot_info *)get_boot_item(FRAME_BUFFER_BOOT_INFO, NULL);
+
 #ifdef IS_PIRATI_BUILD
-	struct frame_buffer_boot_info *bi = (struct frame_buffer_boot_info *)get_boot_item(FRAME_BUFFER_BOOT_INFO, NULL);
 	bool enable_logo = true;
 	// Se il bootloader non ha passato informazioni o la modalità non è a 32-bit (RGBA), usciamo
 	if (bi == NULL) {
@@ -750,6 +752,15 @@ radeon_hd_init(radeon_info &info)
 
 	memset((void*)info.shared_info, 0, sizeof(radeon_shared_info));
 	sharedCreator.Detach();
+
+	// Remember the bootloader resolution so the accelerant can tell whether
+	// a later mode set (or a DPMS off/on cycle) actually changes resolution,
+	// and skip DP link retraining when it doesn't.
+	if (bi != NULL) {
+		info.shared_info->bootModeWidth = bi->width;
+		info.shared_info->bootModeHeight = bi->height;
+		info.shared_info->bootModeValid = true;
+	}
 
 	// *** Map Memory mapped IO
 	const uint32 pciBarMmio = radeon_hd_pci_bar_mmio(info.chipsetID);

@@ -40,6 +40,21 @@ extern "C" void _sPrintf(const char* format, ...);
 #define ERROR(x...) _sPrintf("radeon_hd: " x)
 
 
+bool
+radeon_boot_resolution_unchanged(uint8 crtcID)
+{
+	radeon_shared_info& info = *gInfo->shared_info;
+
+	if (!info.bootModeValid)
+		return false;
+
+	display_mode& mode = gDisplay[crtcID]->currentMode;
+
+	return mode.virtual_width == info.bootModeWidth
+		&& mode.virtual_height == info.bootModeHeight;
+}
+
+
 status_t
 create_mode_list(void)
 {
@@ -203,11 +218,15 @@ radeon_set_display_mode(display_mode* mode)
 	static bool sFirstCall = true;
 	if (sFirstCall) {
 		sFirstCall = false;
-		ERROR("%s: First call: inheriting bootloader mode and active DP link! Updating FB only.\n",
-				__func__);
-		display_crtc_fb_set(crtcID, mode);
-		gInfo->dpms_mode = B_DPMS_ON;
-		return B_OK;
+		if (radeon_boot_resolution_unchanged(crtcID)) {
+			ERROR("%s: First call: inheriting bootloader mode and active DP link! Updating FB only.\n",
+					__func__);
+			display_crtc_fb_set(crtcID, mode);
+			gInfo->dpms_mode = B_DPMS_ON;
+			return B_OK;
+		}
+		ERROR("%s: First call: requested mode differs from bootloader mode, "
+			"doing a full mode set.\n", __func__);
 	}
 
 	// Determine DP lanes if DP
