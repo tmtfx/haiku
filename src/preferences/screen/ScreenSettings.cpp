@@ -48,7 +48,7 @@ ScreenSettings::ScreenSettings()
 {
 	fWindowFrame.Set(0, 0, 450, 250);
 	BPoint offset;
-	fHardwareCursorEnabled = true; // default
+	fHardwareCursorEnabled = false; // default
 	fAcceleration2DEnabled = false; // default
 	fCompositor2DEnabled = false; // default
 	fVisual2DDebugEnabled = false; // default
