@@ -74,6 +74,26 @@ EscapeArgument(const char* arg, BString& outStr)
 		outStr << temp;
 	}
 }
+static void
+EscapeShellArgument(const char* arg, BString& outStr)
+{
+	if (arg == NULL) {
+		outStr = "";
+		return;
+	}
+
+	outStr = "";
+	for (int32 i = 0; arg[i] != '\0'; i++) {
+		char c = arg[i];
+		// Caratteri speciali che la shell o il parser interpretano e a cui serve il backslash
+		if (c == ' ' || c == '(' || c == ')' || c == '"' || c == '\'' 
+			|| c == '\\' || c == '$' || c == '`' || c == ';' || c == '&' 
+			|| c == '|' || c == '<' || c == '>' || c == '*' || c == '?') {
+			outStr << '\\';
+		}
+		outStr << c;
+	}
+}
 int
 main(int argc, char **argv)
 {
@@ -266,13 +286,16 @@ main(int argc, char **argv)
 		}*/
 		BString expectedRemove = "desklink --remove=";
         BString escapedName;
-        EscapeArgument(ref.name, escapedName);
+        EscapeShellArgument(ref.name, escapedName);
         expectedRemove << escapedName;
+        printf("expectedRemove = %s\n", expectedRemove.String());
 
         bool hasSelfRemove = false;
         for (int32 j = 0; j < actionList.CountItems(); j++) {
             BString *act = (BString*)actionList.ItemAt(j);
-            if (act != NULL && act->FindFirst(expectedRemove) != B_ERROR) {
+            printf("Analizzo elemento = %s\n", act->String());
+            if (act != NULL && act->FindFirst(expectedRemove)>-1) {
+                printf("trovato\n");
                 hasSelfRemove = true;
                 break;
             }
