@@ -148,6 +148,13 @@ radeon_get_edid_info(void* info, size_t size, uint32* edid_version)
 uint32
 radeon_dpms_capabilities(void)
 {
+	// The Aruba (Trinity/Richland, DCE 6.1) encoder dpms off/on path hangs
+	// the whole system (see 74e4871 and its revert). Until the real
+	// atombios/encoder cause is found, only advertise DPMS_ON support so
+	// nothing tries to power the display off on this chip family.
+	if (gInfo->shared_info->chipsetID == RADEON_ARUBA)
+		return B_DPMS_ON;
+
 	// These should be pretty universally supported on Radeon HD cards
 	return B_DPMS_ON | B_DPMS_STAND_BY | B_DPMS_SUSPEND | B_DPMS_OFF;
 }
@@ -182,9 +189,17 @@ radeon_dpms_set(uint8 id, int mode)
 void
 radeon_dpms_set_hook(int mode)
 {
-	// TODO: multi-monitor? 
+	// TODO: multi-monitor?
 
 	uint8 crtcID = 0;
+
+	// Refuse external dpms off/standby/suspend requests (screen blanker,
+	// power management, ...) on Aruba: cycling dpms off/on hangs the
+	// whole system on this chip family (see 74e4871 and its revert).
+	// Internal mode-set bracketing (radeon_set_display_mode) still calls
+	// radeon_dpms_set() directly and is unaffected by this.
+	if (gInfo->shared_info->chipsetID == RADEON_ARUBA && mode != B_DPMS_ON)
+		return;
 
 	if (gDisplay[crtcID]->attached)
 		radeon_dpms_set(crtcID, mode);
