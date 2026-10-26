@@ -5,7 +5,33 @@
 #include <Accelerant.h>
 #include <string.h>
 
+#undef TRACE_CURSOR
+#define TRACE_CURSOR
+#ifdef TRACE_CURSOR
+extern "C" void _sPrintf(const char* format, ...);
+#	define CTRACE(x...) _sPrintf("radeon_hd cursor: " x)
+#else
+#	define CTRACE(x...) ;
+#endif
+
 // Helper macros to read/write registers provided by accelerant.h
+
+// Il cursore hardware ha un solo "pending update" in coda: se ne lanciamo
+// un altro (nuova LOCK) mentre il precedente non e' ancora stato applicato
+// dall'hardware (es. il vblank non e' ancora passato), l'aggiornamento puo'
+// andare perso o essere applicato in modo incoerente - e' questo che causa
+// il comportamento "a volte funziona, a volte no". Aspettiamo che
+// EVERGREEN_CURSOR_UPDATE_PENDING si azzeri prima di iniziarne uno nuovo.
+static void
+wait_cursor_update_idle(void)
+{
+    for (int32 i = 0; i < 1000; i++) {
+        if ((Read32(OUT, EVERGREEN_CUR_UPDATE) & EVERGREEN_CURSOR_UPDATE_PENDING) == 0)
+            return;
+        snooze(100);
+    }
+    CTRACE("%s: timeout attendendo EVERGREEN_CURSOR_UPDATE_PENDING\n", __func__);
+}
 
 uint32 radeon_get_cursor_bits(void)
 {
@@ -50,14 +76,38 @@ status_t radeon_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint
 	// dei byte è dalla sorgente sbagliata! (copia dal framebuffer)
 	// memset(gInfo->cursor_vaddr, 0xFF, 64 * 64 * 4);
 
+    // L'HDP (Host Data Path) ha una propria cache di LETTURA lato GPU tra i
+    // motori video (incluso il piano cursore) e la VRAM. E' indipendente dai
+    // write-combining buffer della CPU: anche dopo che la CPU ha scritto e
+    // "svuotato" i suoi buffer, il motore video puo' continuare a servire
+    // dati gia' presenti in questa cache finche' non viene invalidata
+    // esplicitamente. Senza questo flush, il cursore resta agganciato alla
+    // prima bitmap caricata (la cache HDP viene popolata al primo fetch e
+    // non piu' invalidata).
+    Write32(OUT, EVERGREEN_HDP_MEM_COHERENCY_FLUSH_CNTL, 0);
+
     gInfo->cursor_width = width;
     gInfo->cursor_height = height;
     gInfo->cursor_hotx = hotX;
     gInfo->cursor_hoty = hotY;
 
+    CTRACE("%s: before update, CUR_CONTROL=0x%08" B_PRIx32 "\n", __func__,
+        Read32(OUT, EVERGREEN_CUR_CONTROL));
+
+    // Aspettiamo che un eventuale update precedente sia stato recepito
+    // dall'hardware prima di accodarne un altro (vedi wait_cursor_update_idle).
+    wait_cursor_update_idle();
+
+    // Disabilitiamo il cursore PRIMA del LOCK, non dopo: se lo scrivessimo
+    // a transazione gia' aperta, l'hardware potrebbe accodare EN=0 insieme
+    // al resto e farlo scattare solo all'UNLOCK insieme al valore finale
+    // (EN=1), senza mai generare un vero fronte 0->1 visibile. Qui invece
+    // e' una scrittura immediata e indipendente dalla transazione bloccata.
+    radeon_show_cursor(false);
+
     // LOCK UPDATE prima della scrittura dei registri geometrie
     Write32(OUT, EVERGREEN_CUR_UPDATE, EVERGREEN_CURSOR_UPDATE_LOCK);
-	
+
 	uint64 gpu_cursor_phys = (uint64)gInfo->cursor_fb_offset;
 
     Write32(OUT, EVERGREEN_CUR_SURFACE_ADDRESS, (uint32)(gpu_cursor_phys & 0xFFFFFFFF));
@@ -68,13 +118,21 @@ status_t radeon_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint
 	Write32(OUT, EVERGREEN_CUR_SIZE, ((uint32)gInfo->cursor_height << 16) | (uint32)gInfo->cursor_width);
     Write32(OUT, EVERGREEN_CUR_HOT_SPOT, ((uint32)gInfo->cursor_hoty << 16) | (uint32)gInfo->cursor_hotx);
 	// uint32 control = EVERGREEN_CURSOR_EN | EVERGREEN_CURSOR_24_8_UNPRE_MULT | EVERGREEN_CURSOR_FORCE_MC_ON; //mi genera quadrato con colori invertiti dello sfondo
-    uint32 control = EVERGREEN_CURSOR_EN 
+    uint32 control = EVERGREEN_CURSOR_EN
                    | EVERGREEN_CURSOR_MODE(2) // <- quadrato modalità 32bit colore
                    | EVERGREEN_CURSOR_FORCE_MC_ON;
     Write32(OUT, EVERGREEN_CUR_CONTROL, control);
 
     // UNLOCK UPDATE
     Write32(OUT, EVERGREEN_CUR_UPDATE, 0);
+
+    // Riabilitiamo esplicitamente tramite show_cursor, come richiesto:
+    // fronte 0->1 completo hide -> update -> show.
+    radeon_show_cursor(true);
+
+    CTRACE("%s: after update, CUR_CONTROL=0x%08" B_PRIx32
+        " surfaceAddr=0x%08" B_PRIx32 "\n", __func__, Read32(OUT, EVERGREEN_CUR_CONTROL),
+        Read32(OUT, EVERGREEN_CUR_SURFACE_ADDRESS));
 
     return B_OK;
 }
@@ -114,14 +172,31 @@ status_t radeon_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint1
         }
     }
 
+    // Vedi radeon_set_cursor_bitmap: invalida la cache di lettura HDP lato
+    // GPU prima di far ripartire il fetch della superficie, altrimenti il
+    // motore video continua a servire la prima bitmap caricata.
+    Write32(OUT, EVERGREEN_HDP_MEM_COHERENCY_FLUSH_CNTL, 0);
+
     gInfo->cursor_width = width;
     gInfo->cursor_height = height;
     gInfo->cursor_hotx = hotX;
     gInfo->cursor_hoty = hotY;
 
+    CTRACE("%s: before update, CUR_CONTROL=0x%08" B_PRIx32 "\n", __func__,
+        Read32(OUT, EVERGREEN_CUR_CONTROL));
+
+    // Aspettiamo che un eventuale update precedente sia stato recepito
+    // dall'hardware prima di accodarne un altro (vedi wait_cursor_update_idle).
+    wait_cursor_update_idle();
+
+    // Vedi radeon_set_cursor_bitmap: disabilitiamo PRIMA del LOCK, cosi'
+    // la scrittura di EN=0 e' immediata e non viene accodata nella stessa
+    // transazione bloccata del valore finale (EN=1).
+    radeon_show_cursor(false);
+
     // LOCK UPDATE prima della scrittura dei registri geometrie
     Write32(OUT, EVERGREEN_CUR_UPDATE, EVERGREEN_CURSOR_UPDATE_LOCK);
-	
+
 	uint64 gpu_cursor_phys = (uint64)gInfo->cursor_fb_offset;
 
     Write32(OUT, EVERGREEN_CUR_SURFACE_ADDRESS, (uint32)(gpu_cursor_phys & 0xFFFFFFFF));
@@ -132,13 +207,21 @@ status_t radeon_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint1
 	Write32(OUT, EVERGREEN_CUR_SIZE, ((uint32)gInfo->cursor_height << 16) | (uint32)gInfo->cursor_width);
     Write32(OUT, EVERGREEN_CUR_HOT_SPOT, ((uint32)gInfo->cursor_hoty << 16) | (uint32)gInfo->cursor_hotx);
 	// uint32 control = EVERGREEN_CURSOR_EN | EVERGREEN_CURSOR_24_8_UNPRE_MULT | EVERGREEN_CURSOR_FORCE_MC_ON; //mi genera quadrato con colori invertiti dello sfondo
-    uint32 control = EVERGREEN_CURSOR_EN 
+    uint32 control = EVERGREEN_CURSOR_EN
                    | EVERGREEN_CURSOR_MODE(2) // <- quadrato modalità 32bit colore
                    | EVERGREEN_CURSOR_FORCE_MC_ON;
     Write32(OUT, EVERGREEN_CUR_CONTROL, control);
 
     // UNLOCK UPDATE
     Write32(OUT, EVERGREEN_CUR_UPDATE, 0);
+
+    // Riabilitiamo esplicitamente tramite show_cursor, come richiesto:
+    // fronte 0->1 completo hide -> update -> show.
+    radeon_show_cursor(true);
+
+    CTRACE("%s: after update, CUR_CONTROL=0x%08" B_PRIx32
+        " surfaceAddr=0x%08" B_PRIx32 "\n", __func__, Read32(OUT, EVERGREEN_CUR_CONTROL),
+        Read32(OUT, EVERGREEN_CUR_SURFACE_ADDRESS));
 
     return B_OK;
 }
