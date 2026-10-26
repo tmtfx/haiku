@@ -70,20 +70,9 @@ init_hardware_cursor(accelerant_info* info)
     uint64 offset = fbSize - cursorSize;
     offset &= ~((uint64)(alignment - 1)); // Forziamo l'allineamento a pagina (4KB)
 
-    // Vecchio commento:
     // Sottraiamo la memoria isolandola: l'allocatore grafico non la toccherà
     // Nota: adatta il campo a seconda di come si chiama la struttura (es. info->fb.vramSize o simili)
-    // info->fb.vramSize = offset;
-    //
-    // NUOVA NOTA: questa area non viene esclusa da gInfo->fb.vramSize perché quel campo
-    // è la dimensione totale di VRAM usata per programmare l'aperture del Memory
-    // Controller (radeon_gpu_mc_init(), gpu.cpp) e viene ricalcolato incondizionatamente
-    // da frame_buffer_size ad ogni mode-set: ridurlo qui romperebbe l'aperture MC/HDP
-    // per l'intera VRAM, non solo "proteggerebbe" il cursore.
-    // Oggi non esiste un allocatore generico di VRAM per bitmap offscreen/overlay in
-    // questo accelerant, quindi questi ultimi cursorSize byte non collidono con nulla.
-    // Se in futuro viene aggiunto un allocatore del genere, dovrà escludere
-    // esplicitamente [offset, offset + cursorSize) dal proprio range disponibile.
+    // info->fb.vramSize = offset; 
 
     // Salviamo i puntatori logici e fisici definitivi all'interno di gInfo
     info->cursor_fb_offset = (uint32)offset;

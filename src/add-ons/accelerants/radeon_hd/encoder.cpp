@@ -2040,12 +2040,6 @@ encoder_dpms_set_dig(uint8 crtcID, int mode)
 				if (radeon_boot_resolution_unchanged(crtcID)) {
 					ERROR("%s: resolution unchanged from bootloader, "
 						"skipping destructive DP link retrain\n", __func__);
-					// Still wake the sink: on a DPMS off/on cycle the
-					// transmitter was physically disabled, so the sink
-					// needs the DP_SET_POWER D0 nudge that a full
-					// dp_link_train() would otherwise have sent as its
-					// first step.
-					dp_sink_set_power(connectorIndex, DP_SET_POWER_D0);
 				} else {
 					dp_link_train(crtcID);
 				}
@@ -2080,9 +2074,8 @@ encoder_dpms_set_dig(uint8 crtcID, int mode)
 					0, 0, ATOM_TRANSMITTER_ACTION_LCD_BLOFF);
 			}
 			if (connector_is_dp(connectorIndex) && !travisQuirk) {
-				// If not TRAVIS on < DCE 5, put the sink to sleep before
-				// the transmitter is physically disabled below.
-				dp_sink_set_power(connectorIndex, DP_SET_POWER_D3);
+				// If not TRAVIS on < DCE 5, set_rx_power_state D3
+				ERROR("%s: TODO: dpms off set_rx_power_state D3\n", __func__);
 			}
 			if (info.dceMajor >= 4) {
 				// Disable transmitter
@@ -2096,8 +2089,10 @@ encoder_dpms_set_dig(uint8 crtcID, int mode)
 			}
 
 			if (connector_is_dp(connectorIndex)) {
-				if (travisQuirk)
-					dp_sink_set_power(connectorIndex, DP_SET_POWER_D3);
+				if (travisQuirk) {
+					ERROR("%s: TODO: dpms off set_rx_power_state D3\n",
+						__func__);
+				}
 				if (connector->type == VIDEO_CONNECTOR_EDP) {
 					// TODO: ATOM_TRANSMITTER_ACTION_POWER_OFF
 					ERROR("%s: TODO, edp_panel_power!\n", __func__);

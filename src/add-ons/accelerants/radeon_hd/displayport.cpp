@@ -812,28 +812,6 @@ dp_link_train_ce(uint32 connectorIndex, bool tp3Support)
 }
 
 
-void
-dp_sink_set_power(uint32 connectorIndex, uint8 powerState)
-{
-	dp_info* dp = &gConnector[connectorIndex]->dpInfo;
-	if (dp->valid != true)
-		return;
-
-	// DP_SET_POWER is an optional DPCD 1.1+ register; sinks that
-	// predate it may not implement it, so re-check the revision
-	// here rather than relying on a (possibly stale/unset) cached one.
-	uint8 revision = dpcd_reg_read(connectorIndex, DP_DPCD_REV);
-	if (revision < DP_DPCD_REV_11)
-		return;
-
-	dpcd_reg_write(connectorIndex, DP_SET_POWER, powerState);
-
-	// Sink needs a moment to act on the power state change before the
-	// source does anything else on the link (DP spec: at least 1ms).
-	snooze(1000);
-}
-
-
 status_t
 dp_link_train(uint8 crtcID)
 {
