@@ -18,15 +18,15 @@ status_t radeon_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint
     if (width > 64 || height > 64 || hotX >= width || hotY >= height)
         return B_ERROR;
 
+    if (colorSpace != B_RGBA32 && colorSpace != B_RGB32)
+        return B_ERROR;
+
     // Sicurezza: Verifichiamo l'allocazione globale eseguita in init_common
     if (gInfo->cursor_vaddr == NULL)
         return B_NO_INIT;
 
     // Pulisci l'area del cursore
     memset(gInfo->cursor_vaddr, 0, 64 * 64 * 4);
-
-    if (colorSpace != B_RGBA32 && colorSpace != B_RGB32)
-        return B_ERROR;
 
     // Copia e conversione in ARGB8888
     for (int y = 0; y < height && y < 64; y++) {
@@ -49,6 +49,11 @@ status_t radeon_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint
 	// PER TEST, prova a vedere se il quadrato effettivamente viene letto (colore bianco) e quindi la copia
 	// dei byte è dalla sorgente sbagliata! (copia dal framebuffer)
 	// memset(gInfo->cursor_vaddr, 0xFF, 64 * 64 * 4);
+
+    // Il framebuffer è mappato B_WRITE_COMBINING_MEMORY: senza una fence qui gli
+    // store dei pixel possono restare nei WC buffer della CPU quando la GPU
+    // rilegge la VRAM, causando un cursore "congelato" sulla bitmap precedente.
+    __sync_synchronize();
 
     gInfo->cursor_width = width;
     gInfo->cursor_height = height;
@@ -114,6 +119,11 @@ status_t radeon_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint1
         }
     }
 
+    // Il framebuffer è mappato B_WRITE_COMBINING_MEMORY: senza una fence qui gli
+    // store dei pixel possono restare nei WC buffer della CPU quando la GPU
+    // rilegge la VRAM, causando un cursore "congelato" sulla bitmap precedente.
+    __sync_synchronize();
+
     gInfo->cursor_width = width;
     gInfo->cursor_height = height;
     gInfo->cursor_hotx = hotX;
@@ -121,7 +131,7 @@ status_t radeon_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint1
 
     // LOCK UPDATE prima della scrittura dei registri geometrie
     Write32(OUT, EVERGREEN_CUR_UPDATE, EVERGREEN_CURSOR_UPDATE_LOCK);
-	
+
 	uint64 gpu_cursor_phys = (uint64)gInfo->cursor_fb_offset;
 
     Write32(OUT, EVERGREEN_CUR_SURFACE_ADDRESS, (uint32)(gpu_cursor_phys & 0xFFFFFFFF));
