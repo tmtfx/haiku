@@ -288,14 +288,11 @@ main(int argc, char **argv)
         BString escapedName;
         EscapeShellArgument(ref.name, escapedName);
         expectedRemove << escapedName;
-        printf("expectedRemove = %s\n", expectedRemove.String());
 
         bool hasSelfRemove = false;
         for (int32 j = 0; j < actionList.CountItems(); j++) {
             BString *act = (BString*)actionList.ItemAt(j);
-            printf("Analizzo elemento = %s\n", act->String());
             if (act != NULL && act->FindFirst(expectedRemove)>-1) {
-                printf("trovato\n");
                 hasSelfRemove = true;
                 break;
             }
