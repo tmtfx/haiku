@@ -236,6 +236,20 @@ radeon_set_display_mode(display_mode* mode)
 		if (radeon_boot_resolution_unchanged(crtcID)) {
 			ERROR("%s: First call: inheriting bootloader mode and active DP link! Updating FB only.\n",
 					__func__);
+
+			// This shortcut skips the "Determine DP lanes if DP" block
+			// below, which would otherwise be the only place populating
+			// dpInfo->laneCount/linkRate. Compute them here too so they
+			// never get left at their zero-initialized default: other
+			// code (e.g. encoder_dig_setup()) reads them on every DPMS
+			// cycle regardless of whether a full mode-set or link
+			// retrain ever ran.
+			if (connector_is_dp(connectorIndex)) {
+				dp_info *dpInfo = &gConnector[connectorIndex]->dpInfo;
+				dpInfo->laneCount = dp_get_lane_count(connectorIndex, mode);
+				dpInfo->linkRate = dp_get_link_rate(connectorIndex, mode);
+			}
+
 			display_crtc_fb_set(crtcID, mode);
 			gInfo->dpms_mode = B_DPMS_ON;
 			return B_OK;
