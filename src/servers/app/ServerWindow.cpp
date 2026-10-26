@@ -2604,6 +2604,12 @@ ServerWindow::_DispatchViewDrawingMessage(int32 code,
 
 			fCurrentView->PenToScreenTransform().Apply(&rect);
 			drawingEngine->InvertRect(rect);
+			if (fWindow->HasBackingStore() && !fWindow->InUpdate()) {
+				BRegion dirty(rect);
+				dirty.IntersectWith(&fWindow->VisibleRegion());
+				if (dirty.CountRects() > 0)
+					fDesktop->CompositeDirtyRegion(dirty);
+			}
 			break;
 		}
 		case AS_STROKE_RECT:
@@ -3084,7 +3090,13 @@ ServerWindow::_DispatchViewDrawingMessage(int32 code,
 
 			fCurrentView->PenToScreenTransform().Apply(&region);
 			drawingEngine->FillRegion(region);
-
+			if (fWindow->HasBackingStore() && !fWindow->InUpdate()
+				&& fWindow->Feel() != kMenuWindowFeel) {
+				BRegion dirty(region);
+				dirty.IntersectWith(&fWindow->VisibleRegion());
+				if (dirty.CountRects() > 0)
+					fDesktop->CompositeDirtyRegion(dirty);
+			}
 			break;
 		}
 		case AS_FILL_REGION_GRADIENT:
