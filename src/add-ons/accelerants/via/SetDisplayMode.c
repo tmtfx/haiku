@@ -131,8 +131,16 @@ status_t SET_DISPLAY_MODE(display_mode *mode_to_set)
 
 	/* calculate and set new mode bytes_per_row */
 	eng_general_validate_pic_size (&target, &si->fbc.bytes_per_row, &si->acc_mode);
-	
+
+	debug_printf(LOG_PREFIX "SETMODE: after validate_pic_size: virtual_w %u space 0x%08x "
+		"bytes_per_row %" B_PRIu32 "\n",
+		target.virtual_width, (unsigned)target.space, si->fbc.bytes_per_row);
+
 	/* --- FIX ALLINEAMENTO STRIDE PER VX900 (64-byte alignment) --- */
+    debug_printf(LOG_PREFIX "SETMODE: VX900 fix condition: card_arch %u (VX900=%u) "
+		"vendor_id 0x%04x -> %s\n",
+		(unsigned)si->ps.card_arch, (unsigned)VX900, (unsigned)si->vendor_id,
+		(si->ps.card_arch == VX900 || si->vendor_id == 0x1106) ? "TAKEN" : "SKIPPED");
     if (si->ps.card_arch == VX900 || si->vendor_id == 0x1106) {
         uint32 bpp_bytes = 4;
         switch (target.space) {
@@ -143,8 +151,9 @@ status_t SET_DISPLAY_MODE(display_mode *mode_to_set)
             case B_RGB32_LITTLE: default: bpp_bytes = 4; break;
         }
         si->fbc.bytes_per_row = (target.virtual_width * bpp_bytes + 63) & ~63;
-        if (enableSetModeDebug)
-            debug_printf(LOG_PREFIX "SETMODE: VX900 Pitch aligned to %" B_PRIu32 " bytes/row\n", si->fbc.bytes_per_row);
+        debug_printf(LOG_PREFIX "SETMODE: VX900 Pitch aligned to %" B_PRIu32 " bytes/row "
+			"(virtual_w %u bpp_bytes %u)\n",
+			si->fbc.bytes_per_row, target.virtual_width, bpp_bytes);
     }
 
 	/*Perform the very long mode switch!*/
@@ -370,7 +379,7 @@ status_t SET_DISPLAY_MODE(display_mode *mode_to_set)
 //	if (target.flags & DUALHEAD_BITS) head2_dpms(display,h,v);
 
 	/* set up acceleration for this mode */
-//	eng_acc_init();
+	eng_acc_init();
 	/* set up overlay unit for this mode */
 	eng_bes_init();
 

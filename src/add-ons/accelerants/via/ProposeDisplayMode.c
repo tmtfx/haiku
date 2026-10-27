@@ -308,7 +308,16 @@ status_t PROPOSE_DISPLAY_MODE(display_mode *target, const display_mode *low, con
 		return result;
 	}
 	
-	/* --- FIX ALLINEAMENTO PITCH PER VX900 --- */
+	/* --- FIX ALLINEAMENTO PITCH PER VX900 ---
+	 * PROPOSE_DISPLAY_MODE is a pure validation call - it may be invoked for
+	 * any candidate mode (e.g. create_mode_list() walking the whole static
+	 * mode_list[] table) regardless of what's actually on screen, so it must
+	 * NEVER touch the live si->fbc of the currently active mode. row_bytes
+	 * stays local - it's still used below for the VRAM-fit checks - but the
+	 * previous "si->fbc.bytes_per_row = row_bytes;" here was clobbering the
+	 * real, active mode's pitch every time something merely proposed/listed
+	 * an unrelated mode. The authoritative write belongs only in
+	 * SET_DISPLAY_MODE, once a mode is actually being committed. */
     if (si->ps.card_arch == VX900 || si->vendor_id == 0x1106) {
         uint32 bpp_bytes = 4;
         switch (target->space) {
@@ -319,7 +328,6 @@ status_t PROPOSE_DISPLAY_MODE(display_mode *target, const display_mode *low, con
             case B_RGB32_LITTLE: default: bpp_bytes = 4; break;
         }
         row_bytes = (target->virtual_width * bpp_bytes + 63) & ~63;
-        si->fbc.bytes_per_row = row_bytes;
     }
 
 	/*check if virtual_width is still within the requested limits*/

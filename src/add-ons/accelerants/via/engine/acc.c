@@ -26,9 +26,26 @@ status_t eng_acc_wait_idle(void)
 {
 	/* Wait until 2D engine is completely idle */
 	int timeout = 100000;
-	while ((BLTR(VIA_REG_GECMD) & VIA_GEC_BLT) && --timeout)
+
+	if (is_h6())
 	{
-		snooze(10);
+		/* H6/M1 (VX800/VX855/VX900): real busy status lives in the engine
+		 * status register, accessed without the BLTBASE offset. Polling
+		 * GECMD_M1's BLT bit (as done below for H2) does not reflect real
+		 * hardware completion on this generation, which lets a new blit's
+		 * register writes race ahead of a still-running one. */
+		while ((BLTR_M1(VIA_REG_STATUS) & (VIA_CMD_RGTR_BUSY_H5 | VIA_2D_ENG_BUSY_H5))
+			&& --timeout)
+		{
+			snooze(10);
+		}
+	}
+	else
+	{
+		while ((BLTR(VIA_REG_GECMD) & VIA_GEC_BLT) && --timeout)
+		{
+			snooze(10);
+		}
 	}
 	return B_OK;
 }
@@ -56,7 +73,7 @@ status_t eng_acc_init(void)
 	eng_acc_wait_idle();
 
 	if (is_h6())
-		BLTW(VIA_REG_GEMODE_M1, s_gemode);
+		BLTW_M1(VIA_REG_GEMODE_M1, s_gemode);
 	else
 		BLTW(VIA_REG_GEMODE, s_gemode);
 
@@ -77,7 +94,9 @@ status_t eng_acc_blit(uint16 xs, uint16 ys, uint16 xd, uint16 yd, uint16 w, uint
 
 	eng_acc_wait_idle();
 
-	/* Handle overlap by setting decrement direction if copying forward */
+	/* w/h are already zero-based here (blit_params: 0 means 1 pixel), so
+	 * they double directly as the "last row/column" offset needed when
+	 * switching to decrement direction for an overlapping copy. */
 	if (yd > ys)
 	{
 		cmd |= VIA_GEC_DECY;
@@ -93,14 +112,26 @@ status_t eng_acc_blit(uint16 xs, uint16 ys, uint16 xd, uint16 yd, uint16 w, uint
 
 	if (is_h6())
 	{
-		BLTW(VIA_REG_GEMODE_M1, s_gemode);
-		BLTW(VIA_REG_PITCH_M1, ((pitch >> 3) << 16) | (pitch >> 3));
-		BLTW(VIA_REG_DIMENSION_M1, ((uint32)h << 16) | ((uint32)w & 0xFFFF));
-		BLTW(VIA_REG_DSTPOS_M1, ((uint32)yd << 16) | ((uint32)xd & 0xFFFF));
-		BLTW(VIA_REG_DSTBASE_M1, base_offset >> 3);
-		BLTW(VIA_REG_SRCPOS_M1, ((uint32)ys << 16) | ((uint32)xs & 0xFFFF));
-		BLTW(VIA_REG_SRCBASE_M1, base_offset >> 3);
-		BLTW(VIA_REG_GECMD_M1, cmd);
+		debug_printf("via ACC: blit M1 xs %u ys %u xd %u yd %u w %u h %u pitch %u "
+			"(reg>>3 %u, reg>>2 %u) base_offset %u (reg %u) cmd 0x%08x "
+			"bytes_per_row %u space 0x%08x virtual_w %u virtual_h %u "
+			"s_gemode 0x%08x\n",
+			xs, ys, xd, yd, w, h, pitch, (pitch >> 3), (pitch >> 2),
+			base_offset, (base_offset >> 3), cmd, si->fbc.bytes_per_row,
+			(unsigned)si->dm.space, si->dm.virtual_width, si->dm.virtual_height,
+			s_gemode);
+
+		/* Register write order matters on this engine - match OpenChrome's
+		 * viaExaCopy_H6 exactly: mode/bases/pitch first, DIMENSION last
+		 * (right before the GECMD_M1 write that triggers the operation). */
+		BLTW_M1(VIA_REG_GEMODE_M1, s_gemode);
+		BLTW_M1(VIA_REG_SRCBASE_M1, base_offset >> 3);
+		BLTW_M1(VIA_REG_DSTBASE_M1, base_offset >> 3);
+		BLTW_M1(VIA_REG_PITCH_M1, ((pitch >> 3) << 16) | (pitch >> 3));
+		BLTW_M1(VIA_REG_SRCPOS_M1, ((uint32)ys << 16) | ((uint32)xs & 0xFFFF));
+		BLTW_M1(VIA_REG_DSTPOS_M1, ((uint32)yd << 16) | ((uint32)xd & 0xFFFF));
+		BLTW_M1(VIA_REG_DIMENSION_M1, ((uint32)h << 16) | ((uint32)w & 0xFFFF));
+		BLTW_M1(VIA_REG_GECMD_M1, cmd);
 	}
 	else
 	{
@@ -136,13 +167,13 @@ status_t eng_acc_rectangle(uint32 xs, uint32 xe, uint32 ys, uint32 yl)
 
 	if (is_h6())
 	{
-		BLTW(VIA_REG_GEMODE_M1, s_gemode);
-		BLTW(VIA_REG_PITCH_M1, ((pitch >> 3) << 16));
-		BLTW(VIA_REG_DIMENSION_M1, (h << 16) | (w & 0xFFFF));
-		BLTW(VIA_REG_DSTPOS_M1, (ys << 16) | (xs & 0xFFFF));
-		BLTW(VIA_REG_DSTBASE_M1, base_offset >> 3);
-		BLTW(VIA_REG_MONOPATFGC_M1, s_fill_color);
-		BLTW(VIA_REG_GECMD_M1, cmd);
+		BLTW_M1(VIA_REG_GEMODE_M1, s_gemode);
+		BLTW_M1(VIA_REG_DSTBASE_M1, base_offset >> 3);
+		BLTW_M1(VIA_REG_PITCH_M1, ((pitch >> 3) << 16));
+		BLTW_M1(VIA_REG_DSTPOS_M1, (ys << 16) | (xs & 0xFFFF));
+		BLTW_M1(VIA_REG_DIMENSION_M1, (h << 16) | (w & 0xFFFF));
+		BLTW_M1(VIA_REG_MONOPATFGC_M1, s_fill_color);
+		BLTW_M1(VIA_REG_GECMD_M1, cmd);
 	}
 	else
 	{
@@ -176,12 +207,12 @@ status_t eng_acc_rectangle_invert(uint32 xs, uint32 xe, uint32 ys, uint32 yl)
 
 	if (is_h6())
 	{
-		BLTW(VIA_REG_GEMODE_M1, s_gemode);
-		BLTW(VIA_REG_PITCH_M1, ((pitch >> 3) << 16));
-		BLTW(VIA_REG_DIMENSION_M1, (h << 16) | (w & 0xFFFF));
-		BLTW(VIA_REG_DSTPOS_M1, (ys << 16) | (xs & 0xFFFF));
-		BLTW(VIA_REG_DSTBASE_M1, base_offset >> 3);
-		BLTW(VIA_REG_GECMD_M1, cmd);
+		BLTW_M1(VIA_REG_GEMODE_M1, s_gemode);
+		BLTW_M1(VIA_REG_DSTBASE_M1, base_offset >> 3);
+		BLTW_M1(VIA_REG_PITCH_M1, ((pitch >> 3) << 16));
+		BLTW_M1(VIA_REG_DSTPOS_M1, (ys << 16) | (xs & 0xFFFF));
+		BLTW_M1(VIA_REG_DIMENSION_M1, (h << 16) | (w & 0xFFFF));
+		BLTW_M1(VIA_REG_GECMD_M1, cmd);
 	}
 	else
 	{
