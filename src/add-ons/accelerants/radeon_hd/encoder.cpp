@@ -21,6 +21,7 @@
 #include "connector.h"
 #include "display.h"
 #include "displayport.h"
+#include "mode.h"
 #include "utility.h"
 
 
@@ -2036,7 +2037,12 @@ encoder_dpms_set_dig(uint8 crtcID, int mode)
 						ATOM_ENCODER_CMD_DP_VIDEO_OFF);
 				}
 				// dp link train
-				dp_link_train(crtcID);
+				if (radeon_boot_resolution_unchanged(crtcID)) {
+					ERROR("%s: resolution unchanged from bootloader, "
+						"skipping destructive DP link retrain\n", __func__);
+				} else {
+					dp_link_train(crtcID);
+				}
 				if (info.dceMajor >= 4) {
 					encoder_dig_setup(connectorIndex, pll->pixelClock,
 						ATOM_ENCODER_CMD_DP_VIDEO_ON);

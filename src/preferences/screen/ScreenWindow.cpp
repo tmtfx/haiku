@@ -464,33 +464,33 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 		fRefreshField->Hide();
 
 	// hardware cursor checkbox: check whether any display mode advertises hardware cursor support
-	bool supportsHardwareCursor = false;
+	/*bool supportsHardwareCursor = false;
 	for (int32 i = 0; i < fScreenMode.CountModes(); i++) {
-	const display_mode &dm = fScreenMode.DisplayModeAt(i);
-	if (dm.flags & B_HARDWARE_CURSOR) {
-		supportsHardwareCursor = true;
-		break;
-	}
-	}
+		const display_mode &dm = fScreenMode.DisplayModeAt(i);
+		if (dm.flags & B_HARDWARE_CURSOR) {
+			supportsHardwareCursor = true;
+			break;
+		}
+	}*/
 
 	// create the checkbox (value from saved settings; default true)
 	fHardwareCursorCheckbox = new BCheckBox("hardware_cursor",
-	B_TRANSLATE("Enable hardware cursor"), new BMessage(TOGGLE_HARDWARE_CURSOR_MSG));
-		// Ask app_server whether the driver exposes B_SET_CURSOR_BITMAP
-		bool hasSetCursorBitmap = false;
-		{
-	BMessenger msgr("application/x-vnd.haiku-app_server");
-	BMessage request('hsbm');
-	BMessage reply;
-	if (msgr.IsValid() && msgr.SendMessage(&request, &reply, 200000) == B_OK) {
-		reply.FindBool("has_set_cursor_bitmap", &hasSetCursorBitmap);
-	}
+	B_TRANSLATE("Enable hardware cursor bitmap"), new BMessage(TOGGLE_HARDWARE_CURSOR_MSG));
+	// Ask app_server whether the driver exposes B_SET_CURSOR_BITMAP
+	bool hasSetCursorBitmap = false;
+	{
+		BMessenger msgr("application/x-vnd.haiku-app_server");
+		BMessage request('hsbm');
+		BMessage reply;
+		if (msgr.IsValid() && msgr.SendMessage(&request, &reply, 200000) == B_OK) {
+			reply.FindBool("has_set_cursor_bitmap", &hasSetCursorBitmap);
 		}
-		fHardwareCursorCheckbox->SetEnabled(hasSetCursorBitmap);
-		if (fSettings->HardwareCursorEnabled())
-	fHardwareCursorCheckbox->SetValue(B_CONTROL_ON);
-		else
-	fHardwareCursorCheckbox->SetValue(B_CONTROL_OFF);
+	}
+	fHardwareCursorCheckbox->SetEnabled(hasSetCursorBitmap);
+	if (fSettings->HardwareCursorEnabled() && hasSetCursorBitmap)
+		fHardwareCursorCheckbox->SetValue(B_CONTROL_ON);
+	else
+		fHardwareCursorCheckbox->SetValue(B_CONTROL_OFF);
 
 	f2DAccelerationCheckbox = new BCheckBox("2d_acceleration",
 		B_TRANSLATE("Enable 2D hardware acceleration"),
@@ -505,28 +505,29 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 		}
 	}
 	f2DAccelerationCheckbox->SetEnabled(has2DAcceleration);
-	if (fSettings->Acceleration2DEnabled())
+	if (has2DAcceleration && fSettings->Acceleration2DEnabled())
 		f2DAccelerationCheckbox->SetValue(B_CONTROL_ON);
 	else
 		f2DAccelerationCheckbox->SetValue(B_CONTROL_OFF);
+	
+	f2DDebugCheckbox = new BCheckBox("2d_debug", 
+		B_TRANSLATE("Enable 2D debug indicator"),
+		new BMessage(TOGGLE_2D_DEBUG_MSG));
+	
+	bool canEnableDebug = has2DAcceleration && (f2DAccelerationCheckbox->Value() == B_CONTROL_ON);
+	f2DDebugCheckbox->SetEnabled(canEnableDebug);
+	if (canEnableDebug && fSettings->Visual2DDebugEnabled())
+		f2DDebugCheckbox->SetValue(B_CONTROL_ON);
+	else
+		f2DDebugCheckbox->SetValue(B_CONTROL_OFF);
 
 	f2DCompositorCheckbox = new BCheckBox("2d_compositor",
-		B_TRANSLATE("Enable 2D compositor (requires 4GB+ RAM)"),
+		B_TRANSLATE("Enable 2D compositor (requires hardware cursor bitmap)"),
 		new BMessage(TOGGLE_2D_COMPOSITOR_MSG));
 
-	bool hasEnoughRAM = false;
-	system_info sysInfo;
-	if (get_system_info(&sysInfo) == B_OK) {
-		uint64 totalRAM = (uint64)sysInfo.max_pages * B_PAGE_SIZE;
-		// Check for at least ~3.8 GB (accounting for reserved BIOS memory on 4GB systems)
-		if (totalRAM >= 3800ULL * 1024 * 1024)
-			hasEnoughRAM = true;
-	}
-
-	bool canEnableCompositor = has2DAcceleration && hasEnoughRAM
-		&& fSettings->Acceleration2DEnabled();
-	f2DCompositorCheckbox->SetEnabled(canEnableCompositor);
-	if (canEnableCompositor && fSettings->Compositor2DEnabled())
+	//bool canEnableCompositor = hasSetCursorBitmap && (fHardwareCursorCheckbox->Value() == B_CONTROL_ON);
+	f2DCompositorCheckbox->SetEnabled(hasSetCursorBitmap && fHardwareCursorCheckbox->Value() == B_CONTROL_ON);//supportsHardwareCursor
+	if (hasSetCursorBitmap && fSettings->Compositor2DEnabled())
 		f2DCompositorCheckbox->SetValue(B_CONTROL_ON);
 	else
 		f2DCompositorCheckbox->SetValue(B_CONTROL_OFF);
@@ -649,7 +650,13 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 
 	// add the checkboxes below the grid
 	outerControlsView->AddChild(fHardwareCursorCheckbox);
-	outerControlsView->AddChild(f2DAccelerationCheckbox);
+	//outerControlsView->AddChild(f2DAccelerationCheckbox);
+	outerControlsView->AddChild(BLayoutBuilder::Group<>(B_HORIZONTAL, B_USE_DEFAULT_SPACING)
+		.Add(f2DAccelerationCheckbox)
+		.Add(f2DDebugCheckbox)
+		.AddGlue()
+		.View()
+	);
 	outerControlsView->AddChild(f2DCompositorCheckbox);
 
 	// TODO: we don't support getting the screen's preferred settings
@@ -1314,6 +1321,14 @@ ScreenWindow::MessageReceived(BMessage* message)
 		{
 			bool enabled = fHardwareCursorCheckbox->Value() == B_CONTROL_ON;
 			fSettings->SetHardwareCursorEnabled(enabled);
+			
+			if (enabled)
+				f2DCompositorCheckbox->SetEnabled(true);
+			else {
+				f2DCompositorCheckbox->SetValue(B_CONTROL_OFF);
+				f2DCompositorCheckbox->SetEnabled(false);
+				fSettings->SetCompositor2DEnabled(false);
+			}
 			break;
 		}
 
@@ -1321,22 +1336,22 @@ ScreenWindow::MessageReceived(BMessage* message)
 		{
 			bool enabled = f2DAccelerationCheckbox->Value() == B_CONTROL_ON;
 			fSettings->SetAcceleration2DEnabled(enabled);
-
-			bool hasEnoughRAM = false;
-			system_info sysInfo;
-			if (get_system_info(&sysInfo) == B_OK) {
-				uint64 totalRAM = (uint64)sysInfo.max_pages * B_PAGE_SIZE;
-				if (totalRAM >= 3800ULL * 1024 * 1024)
-					hasEnoughRAM = true;
-			}
-
-			if (enabled && hasEnoughRAM) {
-				f2DCompositorCheckbox->SetEnabled(true);
+			
+			if (enabled) {
+				f2DDebugCheckbox->SetEnabled(true);
 			} else {
-				f2DCompositorCheckbox->SetValue(B_CONTROL_OFF);
-				f2DCompositorCheckbox->SetEnabled(false);
-				fSettings->SetCompositor2DEnabled(false);
+				f2DDebugCheckbox->SetValue(B_CONTROL_OFF);
+				f2DDebugCheckbox->SetEnabled(false);
+				fSettings->SetVisual2DDebugEnabled(false);
 			}
+
+			break;
+		}
+		
+		case TOGGLE_2D_DEBUG_MSG:
+		{
+			bool enabled = f2DDebugCheckbox->Value() == B_CONTROL_ON;
+			fSettings->SetVisual2DDebugEnabled(enabled);
 			break;
 		}
 

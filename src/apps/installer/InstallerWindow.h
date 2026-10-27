@@ -63,7 +63,7 @@ private:
 			// outSalt must point to a 16-byte buffer; caller zeros it after use.
 			status_t			_GetDestinationPath(BPath& destPath);
 			void				_RunBenchmark();
-			status_t			_SaveScreenSettings(bool enable2D);
+			status_t			_SaveScreenSettings(bool enable2D, bool compositor2D);
 			status_t			_WriteMasterPasswordShadow(uint8* outSalt);
 			status_t			_WriteKeystore(const uint8* salt);
 
@@ -106,6 +106,7 @@ private:
 			BStatusBar*			fGpuStatusBar;
 			BStringView*		fBenchResultView;
 			BCheckBox*			fBench2DCheckbox;
+			BCheckBox*			fCompositCheckbox;
 			BButton*			fBenchDoneButton;
 
 			bool				fEncouragedToSetupPartitions;

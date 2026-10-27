@@ -44,6 +44,7 @@
 #include <PathFinder.h>
 #include <PopUpMenu.h>
 #include <Resources.h>
+#include <Screen.h>
 #include <ScrollView.h>
 #include <String.h>
 #include <StringFormat.h>
@@ -313,6 +314,7 @@ private:
 			BString			_GetCPUCount(system_info*);
 			BString			_GetCPUInfo();
 			BString			_GetCPUFrequency();
+			BString			_GetGPUInfo(accelerant_device_info*);
 			BString			_GetRamSize(system_info*);
 			BString			_GetRamUsage(system_info*);
 			BString			_GetKernelDateTime(system_info*);
@@ -327,8 +329,11 @@ private:
 			BStringView*	fCPUInfoView;
 			BStringView*	fMemSizeView;
 			BStringView*	fMemUsageView;
+			BStringView*	fGPULabelView;
+			BStringView*	fGPUInfoView;
 			BStringView*	fKernelDateTimeView;
 			BTextView*		fUptimeView;
+			
 
 			BDragger*		fDragger;
 
@@ -338,7 +343,9 @@ private:
 			float			fCachedMinWidth;
 			float			fCachedBaseHeight;
 			float			fCachedMinHeight;
-
+			
+			BWindow*		fScreen;
+			
 	static const uint8		kLabelCount = 5;
 	static const uint8		kSubtextCount = 5;
 };
@@ -703,6 +710,8 @@ SysInfoView::SysInfoView()
 	fCPUInfoView(NULL),
 	fMemSizeView(NULL),
 	fMemUsageView(NULL),
+	fGPULabelView(NULL),
+	fGPUInfoView(NULL),
 	fKernelDateTimeView(NULL),
 	fUptimeView(NULL),
 	fDragger(NULL),
@@ -714,6 +723,8 @@ SysInfoView::SysInfoView()
 	// Begin construction of system information controls.
 	system_info sysInfo;
 	get_system_info(&sysInfo);
+	accelerant_device_info deviceInfo;
+	
 
 	// Create all the various labels for system infomation.
 
@@ -728,6 +739,10 @@ SysInfoView::SysInfoView()
 	// Memory size and usage
 	fMemSizeView = _CreateLabel("memlabel", _GetRamSize(&sysInfo));
 	fMemUsageView = _CreateSubtext("ramusagetext", _GetRamUsage(&sysInfo));
+	
+	// GPU info
+	fGPULabelView = _CreateLabel("gpulabel", B_TRANSLATE("Video card:"));
+	fGPUInfoView = _CreateSubtext("gpuinfotext", _GetGPUInfo(&deviceInfo));//_GetRamUsage(&sysInfo));
 
 	// Kernel build time/date
 	BStringView* kernelLabel = _CreateLabel("kernellabel", B_TRANSLATE("Kernel:"));
@@ -757,6 +772,10 @@ SysInfoView::SysInfoView()
 		// Memory:
 		.Add(fMemSizeView)
 		.Add(fMemUsageView)
+		.AddStrut(offset)
+		// GPU:
+		.Add(fGPULabelView)
+		.Add(fGPUInfoView)
 		.AddStrut(offset)
 		// Kernel:
 		.Add(kernelLabel)
@@ -1239,7 +1258,24 @@ SysInfoView::_GetRamUsage(system_info* sysInfo)
 
 	return ramUsage;
 }
-
+BString
+SysInfoView::_GetGPUInfo(accelerant_device_info* deviceInfo)
+{
+	BString deviceString;
+	BScreen screen(fScreen);
+	if (screen.GetDeviceInfo(deviceInfo) == B_OK) {
+		if (deviceInfo->name[0] && deviceInfo->chipset[0]) {
+			deviceString.SetToFormat("%s (%s)", deviceInfo->name,
+				deviceInfo->chipset);
+		} else if (deviceInfo->name[0] || deviceInfo->chipset[0]) {
+			deviceString
+				= deviceInfo->name[0] ? deviceInfo->name : deviceInfo->chipset;
+		}
+	} else {
+		deviceString.SetTo(B_TRANSLATE("Unknown"));
+	}
+	return deviceString;
+}
 
 BString
 SysInfoView::_GetKernelDateTime(system_info* sysInfo)
@@ -1998,7 +2034,8 @@ AboutView::_CreateCreditsView()
 	// Haiku license
 	BString haikuLicense = B_TRANSLATE_COMMENT("The code that is unique to "
 		"Haiku, especially the kernel and all code that applications may link "
-		"against, is distributed under the terms of the <MIT license>. "
+		"against, is distributed under a mixed terms of <MIT license> and "
+		"<GPL license>. "
 		"Some system libraries contain third party code distributed under the "
 		"<LGPL license>. You can find the copyrights to third party code below."
 		"\n\n", "<MIT license> and <LGPL license> aren't variables and can be "

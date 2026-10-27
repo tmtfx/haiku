@@ -14,152 +14,104 @@
 #include <cstring>
 
 #if defined(__x86_64__) || defined(__i386__)
+
+#define VIA_PADLOCK_MSR 0x1107
+#define VIA_RNG_ENABLE  (1 << 3) // Bit 3: RNG Enable
+#define VIA_ACE_ENABLE  (1 << 0) // Bit 0: ACE (Advanced Cryptography Engine) Enable
+
+
+static void
+enable_padlock_hardware(void)
+{
+    uint32 low, high;
+
+    asm volatile (
+        "rdmsr"
+        : "=a" (low), "=d" (high)
+        : "c" (VIA_PADLOCK_MSR)
+    );
+
+    uint64 msr = ((uint64)high << 32) | low;
+    uint64 required_flags = VIA_RNG_ENABLE | VIA_ACE_ENABLE;
+
+    if ((msr & required_flags) != required_flags) {
+        msr |= required_flags;
+        low = (uint32)(msr & 0xFFFFFFFF);
+        high = (uint32)(msr >> 32);
+
+        asm volatile (
+            "wrmsr"
+            :
+            : "c" (VIA_PADLOCK_MSR), "a" (low), "d" (high)
+        );
+
+        dprintf("PADLOCK: Hardware ACE & RNG abilitato globalmente via MSR 0x1107 (valore: 0x%lx)\n", msr);
+    }
+}
+
 static status_t
 padlock_rng_generate(uint8* buffer, size_t length)
 {
     size_t generated = 0;
 
     while (generated < length) {
-        alignas(16) uint32 value[4] = {0};
-        uint32 bytesGenerated = 0;
+        alignas(16) uint8 temp[16] = {0};
+        
+        size_t requestedBytes = (length - generated >= 8) ? 8 : (length - generated);
+        uint32 count = (uint32)requestedBytes;
+        uint32 control_edx = 0;
         uint32 statusFlag = 1;
+        uint8* ptr = temp;
 
-        int retryCount = 5000;
+        // Limitiamo rigidamente i tentativi per evitare il blocco totale della CPU al 100%
+        int retryCount = 1000;
+        bool success = false;
+
         while (retryCount-- > 0) {
-            uint32 result_eax = 0;
-            uint32 control_edx = 0; // 0 = qualità standard / nessun filtro extra
+            count = (uint32)requestedBytes;
+            ptr = temp;
 
             asm volatile (
-                // xstore scrive all'indirizzo in EDI (o RDI in 64-bit)
-                // EDX = Control word / input metrics
-                // EAX = restituirà lo stato/lunghezza scritti a seconda dell'hardware
-                ".byte 0x0f, 0xa7, 0xc0\n\t" 
-                "setc %b[err]\n\t"           // Setta il byte di errore se c'è Carry
-                : "=a" (result_eax),
-                  [err] "=q" (statusFlag)
-                : "D" (value),
-                  "d" (control_edx)
+                "rep\n\t"
+                ".byte 0x0f, 0xa7, 0xc0\n\t" // REP XSTORE
+                "setc %b[err]\n\t"
+                : [err] "=q" (statusFlag),
+                  "+c" (count),
+                  "+D" (ptr)
+                : [ctrl] "d" (control_edx)
                 : "memory", "cc"
             );
 
-            bytesGenerated = result_eax & 0xFFFF; // Estrae i byte generati effettivi
+            if (statusFlag == 0) {
+                success = true;
+                break;
+            }
 
-            if (statusFlag == 0 && bytesGenerated > 0)
-                break; 
-
-            #if defined(__x86_64__) || defined(__i386__)
+            // Pausa per lasciare respirare il bus e la CPU
             asm volatile("pause" ::: "memory");
-            #endif
         }
 
-        if (statusFlag != 0 || bytesGenerated == 0) {
-            snooze(50);
-            continue;
+        // Se dopo 1000 tentativi l'hardware non ha sputato dati, 
+        // tracciamo l'errore nel log del kernel ed usciamo dal driver (restituendo errore)
+        // anziché tenere la CPU incollata al 100% per sempre.
+        if (!success) {
+            dprintf("PADLOCK RNG ERROR: Nano X2 non rilascia entropia (status: %u, count rimasto: %u)\n", 
+                statusFlag, count);
+            return B_ERROR;
         }
 
-        size_t toCopy = (length - generated < bytesGenerated) 
-            ? (length - generated) : bytesGenerated;
-        
-        memcpy(buffer + generated, value, toCopy);
+        size_t bytesWritten = requestedBytes - count;
+        if (bytesWritten == 0) bytesWritten = requestedBytes;
+
+        size_t toCopy = (length - generated < bytesWritten) ? (length - generated) : bytesWritten;
+        if (toCopy == 0) toCopy = requestedBytes;
+
+        memcpy(buffer + generated, temp, toCopy);
         generated += toCopy;
     }
 
     return B_OK;
 }
-/* crasha
-static status_t
-padlock_rng_generate(uint8* buffer, size_t length)
-{
-    size_t generated = 0;
-
-    while (generated < length) {
-        // 1. Allineamento rigoroso a 16 byte per xstore
-        alignas(16) uint32 value[4] = {0};
-        uint32 statusFlag = 1;
-        uint32 bytesGenerated = 0;
-
-        // 2. Loop con tentativi limitati per evitare il freeze infinito
-        int retryCount = 5000;
-        while (retryCount-- > 0) {
-            asm volatile (
-                "xorl %%edx, %%edx\n\t"     // EDX = 0 (fattore di qualità/nessun filtro)
-                ".byte 0x0f, 0xa7, 0xc0\n\t" // Opcode esplicito per xstore (Compatibile con tutti i GCC)
-                "setc %%cl\n\t"              // CL = 1 se Carry (errore/dati non pronti)
-                "movzbl %%cl, %0\n\t"
-                "movl %%eax, %1\n\t"         // EAX restituisce i byte scritti
-                : "=r"(statusFlag), "=r"(bytesGenerated)
-                : "D"(value)                 // RDI/EDI punta al buffer allineato a 16 byte
-                : "eax", "edx", "ecx", "memory", "cc"
-            );
-
-            if (statusFlag == 0 && bytesGenerated > 0)
-                break; // Dati pronti ed estratti con successo
-
-            // Breve riposo per le pipeline della CPU
-            #if defined(__x86_64__) || defined(__i386__)
-            asm volatile("pause" ::: "memory");
-            #endif
-        }
-
-        // 3. Se l'hardware non risponde dopo i tentativi, cedi il controllo allo scheduler di Haiku
-        if (statusFlag != 0 || bytesGenerated == 0) {
-            snooze(50); // Cede il passo per 50 microsecondi
-            continue;
-        }
-
-        size_t toCopy = (length - generated < bytesGenerated) 
-            ? (length - generated) : bytesGenerated;
-        
-        memcpy(buffer + generated, value, toCopy);
-        generated += toCopy;
-    }
-
-    return B_OK;
-}*/
-/*
-static status_t
-padlock_rng_generate(uint8* buffer, size_t length)
-{
-    size_t generated = 0;
-    
-    while (generated < length) {
-        uint32 value[2]; // Usiamo 8 byte per sicurezza, xstore è avido
-        uint32 statusFlag;
-
-        //
-        // xstore (VIA PadLock RNG):
-        // EDI = puntatore alla destinazione
-        // EDX = 0 (qualità massima/nessun filtraggio hardware extra)
-        // Risultato:
-        // EAX = numero di byte generati (di solito 0 o 8)
-        // Carry Flag = 0 se successo, 1 se errore/dati non pronti
-        //
-        asm volatile (
-            "movl $0, %%edx\n\t"        // Qualità 0
-            "xstore\n\t"                // Scrive in (EDI)
-            "setc %%al\n\t"             // AL = 1 se Carry è settato (errore)
-            "movzbl %%al, %1\n\t"       // statusFlag = AL
-            : "=D"(value[0]), "=r"(statusFlag)
-            : "D"(&value[0])            // EDI punta al nostro buffer locale
-            : "eax", "edx", "memory", "cc"
-        );
-
-        if (statusFlag != 0) {
-            // Se il chip non è pronto, facciamo un brevissimo relax e riproviamo
-            // o ritorniamo errore se preferisci non bloccare
-            continue; 
-        }
-
-        // xstore scrive solitamente 8 byte, ma noi ne copiamo solo quelli necessari
-        size_t available = 8; 
-        size_t toCopy = (length - generated < available) ? (length - generated) : available;
-        
-        memcpy(buffer + generated, value, toCopy);
-        generated += toCopy;
-    }
-    
-    return B_OK;
-}*/
 
 static status_t
 padlock_rng_process(BCryptoRequest* request)
@@ -180,6 +132,8 @@ BInitPadLockRNG()
 {
     if (!(BGetStoredCryptoCapabilities() & B_CRYPTO_HW_PADLOCK_RNG))
         return B_UNSUPPORTED;
+    
+    enable_padlock_hardware();
 
     static BCryptoAlgorithm sPadLockRNG = {
         .algorithm = B_CRYPTO_RNG,

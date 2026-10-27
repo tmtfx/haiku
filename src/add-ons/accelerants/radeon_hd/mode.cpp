@@ -40,6 +40,21 @@ extern "C" void _sPrintf(const char* format, ...);
 #define ERROR(x...) _sPrintf("radeon_hd: " x)
 
 
+bool
+radeon_boot_resolution_unchanged(uint8 crtcID)
+{
+	radeon_shared_info& info = *gInfo->shared_info;
+
+	if (!info.bootModeValid)
+		return false;
+
+	display_mode& mode = gDisplay[crtcID]->currentMode;
+
+	return mode.virtual_width == info.bootModeWidth
+		&& mode.virtual_height == info.bootModeHeight;
+}
+
+
 status_t
 create_mode_list(void)
 {
@@ -133,6 +148,13 @@ radeon_get_edid_info(void* info, size_t size, uint32* edid_version)
 uint32
 radeon_dpms_capabilities(void)
 {
+	// The Aruba (Trinity/Richland, DCE 6.1) encoder dpms off/on path hangs
+	// the whole system (see 74e4871 and its revert). Until the real
+	// atombios/encoder cause is found, only advertise DPMS_ON support so
+	// nothing tries to power the display off on this chip family.
+	if (gInfo->shared_info->chipsetID == RADEON_ARUBA)
+		return B_DPMS_ON;
+
 	// These should be pretty universally supported on Radeon HD cards
 	return B_DPMS_ON | B_DPMS_STAND_BY | B_DPMS_SUSPEND | B_DPMS_OFF;
 }
@@ -167,9 +189,17 @@ radeon_dpms_set(uint8 id, int mode)
 void
 radeon_dpms_set_hook(int mode)
 {
-	// TODO: multi-monitor? 
+	// TODO: multi-monitor?
 
 	uint8 crtcID = 0;
+
+	// Refuse external dpms off/standby/suspend requests (screen blanker,
+	// power management, ...) on Aruba: cycling dpms off/on hangs the
+	// whole system on this chip family (see 74e4871 and its revert).
+	// Internal mode-set bracketing (radeon_set_display_mode) still calls
+	// radeon_dpms_set() directly and is unaffected by this.
+	if (gInfo->shared_info->chipsetID == RADEON_ARUBA && mode != B_DPMS_ON)
+		return;
 
 	if (gDisplay[crtcID]->attached)
 		radeon_dpms_set(crtcID, mode);
@@ -203,11 +233,29 @@ radeon_set_display_mode(display_mode* mode)
 	static bool sFirstCall = true;
 	if (sFirstCall) {
 		sFirstCall = false;
-		ERROR("%s: First call: inheriting bootloader mode and active DP link! Updating FB only.\n",
-				__func__);
-		display_crtc_fb_set(crtcID, mode);
-		gInfo->dpms_mode = B_DPMS_ON;
-		return B_OK;
+		if (radeon_boot_resolution_unchanged(crtcID)) {
+			ERROR("%s: First call: inheriting bootloader mode and active DP link! Updating FB only.\n",
+					__func__);
+
+			// This shortcut skips the "Determine DP lanes if DP" block
+			// below, which would otherwise be the only place populating
+			// dpInfo->laneCount/linkRate. Compute them here too so they
+			// never get left at their zero-initialized default: other
+			// code (e.g. encoder_dig_setup()) reads them on every DPMS
+			// cycle regardless of whether a full mode-set or link
+			// retrain ever ran.
+			if (connector_is_dp(connectorIndex)) {
+				dp_info *dpInfo = &gConnector[connectorIndex]->dpInfo;
+				dpInfo->laneCount = dp_get_lane_count(connectorIndex, mode);
+				dpInfo->linkRate = dp_get_link_rate(connectorIndex, mode);
+			}
+
+			display_crtc_fb_set(crtcID, mode);
+			gInfo->dpms_mode = B_DPMS_ON;
+			return B_OK;
+		}
+		ERROR("%s: First call: requested mode differs from bootloader mode, "
+			"doing a full mode set.\n", __func__);
 	}
 
 	// Determine DP lanes if DP

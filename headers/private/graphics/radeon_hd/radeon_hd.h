@@ -224,6 +224,14 @@ struct radeon_shared_info {
 	uint32			bits_per_pixel;
 	uint32			dpms_mode;
 
+	// Resolution inherited from the bootloader/VESA framebuffer. Used to
+	// detect when a mode is unchanged from boot so the accelerant can skip
+	// (destructive, on some cards) DisplayPort link retraining both on the
+	// very first SetDisplayMode call and across DPMS off/on cycles.
+	uint32			bootModeWidth;
+	uint32			bootModeHeight;
+	bool			bootModeValid;
+
 	area_id			registers_area;			// area of memory mapped registers
 	uint8*			status_page;
 	addr_t			physical_status_page;

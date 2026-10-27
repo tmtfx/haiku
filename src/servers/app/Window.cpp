@@ -41,6 +41,8 @@
 #include "Workspace.h"
 #include "WorkspacesView.h"
 
+#include <InterfaceDefs.h>
+
 
 // Toggle debug output
 //#define DEBUG_WINDOW
@@ -193,7 +195,7 @@ Window::FullFrame() const
 	return fFrame;
 }
 
-
+/*
 void
 Window::AllocateBackingStore()
 {
@@ -215,8 +217,118 @@ Window::AllocateBackingStore()
 		return;
 	}
 
-	memset(fBackingBitmap->Bits(), 0, fBackingBitmap->BitsLength());
+	//memset(fBackingBitmap->Bits(), 0, fBackingBitmap->BitsLength());
+	rgb_color color = ui_color(B_PANEL_BACKGROUND_COLOR);
 
+	// Converti rgb_color nel valore uint32 (in formato B_RGB32 / B_RGBA32 - 0xAARRGGBB)
+	uint32 panelColor = (color.alpha << 24) | (color.red << 16) 
+		| (color.green << 8) | color.blue;
+
+	uint32* bits = (uint32*)fBackingBitmap->Bits();
+	int32 pixelCount = fBackingBitmap->BitsLength() / 4;
+	for (int32 i = 0; i < pixelCount; i++)
+		bits[i] = panelColor;
+
+	fBackingHWInterface.SetTo(new (std::nothrow) BitmapHWInterface(fBackingBitmap.Get()));
+	if (!fBackingHWInterface.IsSet() || fBackingHWInterface->Initialize() != B_OK) {
+		FreeBackingStore();
+		return;
+	}
+
+	if (GetDrawingEngine() != NULL) {
+		GetDrawingEngine()->SetHWInterface(fBackingHWInterface.Get());
+		GetDrawingEngine()->SetWindowOrigin((int32)full.left, (int32)full.top);
+	}
+
+	fDirtyRegion.Include(FullFrame());
+	ServerWindow()->RequestRedraw();
+}*/
+void
+Window::AllocateBackingStore()
+{
+	if (IsOffscreenWindow() || (fFlags & kWindowScreenFlag) != 0 || fDesktop == NULL)
+		return;
+
+	BRect full = FullFrame();
+	int32 newWidth = (int32)ceilf(full.Width()) + 1;
+	int32 newHeight = (int32)ceilf(full.Height()) + 1;
+	if (newWidth <= 0 || newHeight <= 0)
+		return;
+
+	// Se il buffer ha già le stesse dimensioni, non facciamo nulla
+	if (fBackingBitmap.IsSet() 
+		&& fBackingBitmap->Bounds().IntegerWidth() + 1 == newWidth
+		&& fBackingBitmap->Bounds().IntegerHeight() + 1 == newHeight) {
+		return;
+	}
+
+	// 1. Salva il riferimento al vecchio bitmap
+	BReference<ServerBitmap> oldBitmap = fBackingBitmap.Detach();
+
+	// 2. Libera solo l'HWInterface sottostante, ma conservando il contenuto
+	if (fBackingHWInterface.IsSet()) {
+		fBackingHWInterface->LockExclusiveAccess();
+		fBackingHWInterface->Shutdown();
+		fBackingHWInterface->UnlockExclusiveAccess();
+		fBackingHWInterface.Unset();
+	}
+
+	// 3. Crea il nuovo bitmap
+	fBackingBitmap.SetTo(new (std::nothrow) UtilityBitmap(
+		BRect(0, 0, newWidth - 1, newHeight - 1), B_RGBA32, 0), true);
+	if (!fBackingBitmap.IsSet() || fBackingBitmap->Bits() == NULL) {
+		fBackingBitmap.Unset();
+		return;
+	}
+
+	// Preparazione colore di sfondo
+	rgb_color color = ui_color(B_PANEL_BACKGROUND_COLOR);
+	uint32 panelColor = (color.alpha << 24) | (color.red << 16) 
+		| (color.green << 8) | color.blue;
+
+	uint32* newBits = (uint32*)fBackingBitmap->Bits();
+	int32 newBPR = fBackingBitmap->BytesPerRow() / 4; // BPR espresso in uint32
+
+	// 4. Se avevamo un vecchio bitmap, preserviamo il contenuto
+	if (oldBitmap.IsSet() && oldBitmap->Bits() != NULL) {
+		uint32* oldBits = (uint32*)oldBitmap->Bits();
+		int32 oldBPR = oldBitmap->BytesPerRow() / 4;
+
+		int32 oldWidth = oldBitmap->Bounds().IntegerWidth() + 1;
+		int32 oldHeight = oldBitmap->Bounds().IntegerHeight() + 1;
+
+		int32 copyWidth = min_c(oldWidth, newWidth);
+		int32 copyHeight = min_c(oldHeight, newHeight);
+
+		// Copia riga per riga la parte condivisa e riempi i margini a destra se ingrandita
+		for (int32 y = 0; y < copyHeight; y++) {
+			uint32* srcRow = oldBits + (y * oldBPR);
+			uint32* dstRow = newBits + (y * newBPR);
+
+			// Copia l'immagine esistente
+			memcpy(dstRow, srcRow, copyWidth * sizeof(uint32));
+
+			// Se la nuova larghezza è maggiore, riempi il margine destro
+			for (int32 x = copyWidth; x < newWidth; x++) {
+				dstRow[x] = panelColor;
+			}
+		}
+
+		// Se la nuova altezza è maggiore, riempi le nuove righe in basso
+		for (int32 y = copyHeight; y < newHeight; y++) {
+			uint32* dstRow = newBits + (y * newBPR);
+			for (int32 x = 0; x < newWidth; x++) {
+				dstRow[x] = panelColor;
+			}
+		}
+	} else {
+		// Nessun vecchio buffer: riempiamo interamente con il colore di sfondo
+		int32 pixelCount = fBackingBitmap->BitsLength() / 4;
+		for (int32 i = 0; i < pixelCount; i++)
+			newBits[i] = panelColor;
+	}
+
+	// 5. Inizializza la nuova HWInterface
 	fBackingHWInterface.SetTo(new (std::nothrow) BitmapHWInterface(fBackingBitmap.Get()));
 	if (!fBackingHWInterface.IsSet() || fBackingHWInterface->Initialize() != B_OK) {
 		FreeBackingStore();

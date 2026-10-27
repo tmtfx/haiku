@@ -9,9 +9,9 @@
 #include <crypto/BCryptoDefs.h>
 
 struct PadLockAESContext {
-    uint8 key[32];       // max 256-bit key
+    alignas(16) uint8 key[32];       // max 256-bit key
+    alignas(16) uint8 iv[16];
     size_t keyLength;
-    uint8 iv[16];
 } __attribute__((aligned(16)));
 
 status_t BInitPadLockCrypto();
