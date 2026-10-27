@@ -112,15 +112,6 @@ status_t eng_acc_blit(uint16 xs, uint16 ys, uint16 xd, uint16 yd, uint16 w, uint
 
 	if (is_h6())
 	{
-		debug_printf("via ACC: blit M1 xs %u ys %u xd %u yd %u w %u h %u pitch %u "
-			"(reg>>3 %u, reg>>2 %u) base_offset %u (reg %u) cmd 0x%08x "
-			"bytes_per_row %u space 0x%08x virtual_w %u virtual_h %u "
-			"s_gemode 0x%08x\n",
-			xs, ys, xd, yd, w, h, pitch, (pitch >> 3), (pitch >> 2),
-			base_offset, (base_offset >> 3), cmd, si->fbc.bytes_per_row,
-			(unsigned)si->dm.space, si->dm.virtual_width, si->dm.virtual_height,
-			s_gemode);
-
 		/* Register write order matters on this engine - match OpenChrome's
 		 * viaExaCopy_H6 exactly: mode/bases/pitch first, DIMENSION last
 		 * (right before the GECMD_M1 write that triggers the operation). */
