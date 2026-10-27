@@ -8,13 +8,28 @@
 #undef TRACE_CURSOR
 #define TRACE_CURSOR
 #ifdef TRACE_CURSOR
-extern "C" void _sPrintf(const char* format, ...);
-#	define CTRACE(x...) _sPrintf("radeon_hd cursor: " x)
+	// debug_printf (OS.h) scrive direttamente su _kern_debug_output, senza
+	// passare dal flag _rtDebugFlag che filtra _sPrintf: piu' affidabile
+	// per essere certi che il log esca davvero.
+#	define CTRACE(x...) debug_printf("radeon_hd cursor: " x)
 #else
 #	define CTRACE(x...) ;
 #endif
 
 // Helper macros to read/write registers provided by accelerant.h
+
+// Tutto quello che segue (wait_cursor_update_idle, il flush HDP, il giro
+// disable/lock/unlock/enable, i log CTRACE) e' necessario SOLO sul chip APU
+// "Aruba" (Trinity/Richland, RADEON_ARUBA): e' l'unica scheda su cui il
+// cursore hardware resta agganciato alla bitmap precedente. Su tutte le
+// altre schede (es. Turks/HD6570) il codice originale funziona gia' bene
+// da solo, quindi resta intatto - incluso il fatto che non produce nessun
+// log - e le contromisure/i log scattano solo quando serve.
+static inline bool
+is_radeon_aruba(void)
+{
+    return gInfo->shared_info->chipsetID == RADEON_ARUBA;
+}
 
 // Il cursore hardware ha un solo "pending update" in coda: se ne lanciamo
 // un altro (nuova LOCK) mentre il precedente non e' ancora stato applicato
@@ -22,15 +37,18 @@ extern "C" void _sPrintf(const char* format, ...);
 // andare perso o essere applicato in modo incoerente - e' questo che causa
 // il comportamento "a volte funziona, a volte no". Aspettiamo che
 // EVERGREEN_CURSOR_UPDATE_PENDING si azzeri prima di iniziarne uno nuovo.
-static void
+// Ritorna il numero di iterazioni attese (0 = gia' libero, altrimenti quante
+// snooze(100) sono servite), o -1 se e' scattato il timeout.
+static int32
 wait_cursor_update_idle(void)
 {
     for (int32 i = 0; i < 1000; i++) {
         if ((Read32(OUT, EVERGREEN_CUR_UPDATE) & EVERGREEN_CURSOR_UPDATE_PENDING) == 0)
-            return;
+            return i;
         snooze(100);
     }
-    CTRACE("%s: timeout attendendo EVERGREEN_CURSOR_UPDATE_PENDING\n", __func__);
+    CTRACE("%s: TIMEOUT attendendo EVERGREEN_CURSOR_UPDATE_PENDING\n", __func__);
+    return -1;
 }
 
 uint32 radeon_get_cursor_bits(void)
@@ -76,34 +94,61 @@ status_t radeon_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint
 	// dei byte è dalla sorgente sbagliata! (copia dal framebuffer)
 	// memset(gInfo->cursor_vaddr, 0xFF, 64 * 64 * 4);
 
-    // L'HDP (Host Data Path) ha una propria cache di LETTURA lato GPU tra i
-    // motori video (incluso il piano cursore) e la VRAM. E' indipendente dai
-    // write-combining buffer della CPU: anche dopo che la CPU ha scritto e
-    // "svuotato" i suoi buffer, il motore video puo' continuare a servire
-    // dati gia' presenti in questa cache finche' non viene invalidata
-    // esplicitamente. Senza questo flush, il cursore resta agganciato alla
-    // prima bitmap caricata (la cache HDP viene popolata al primo fetch e
-    // non piu' invalidata).
-    Write32(OUT, EVERGREEN_HDP_MEM_COHERENCY_FLUSH_CNTL, 0);
+    bool isAruba = is_radeon_aruba();
+    bigtime_t arubaStart = 0;
+    bigtime_t arubaLapsed = 0;
+
+    if (isAruba) {
+        //arubaStart = system_time();
+
+        // Il buffer del cursore e' mappato write-combining: gli store della
+        // CPU possono restare nei WC buffer prima di diventare visibili in
+        // RAM. Svuotiamoli PRIMA di invalidare la cache HDP (sotto),
+        // altrimenti invalidiamo una cache che punta comunque ai byte
+        // vecchi, perche' quelli nuovi non sono ancora arrivati in memoria.
+        __sync_synchronize();
+
+        // L'HDP (Host Data Path) ha una propria cache di LETTURA lato GPU tra
+        // i motori video (incluso il piano cursore) e la VRAM. Senza questo
+        // flush, il cursore resta agganciato alla prima bitmap caricata.
+        Write32(OUT, EVERGREEN_HDP_MEM_COHERENCY_FLUSH_CNTL, 0);
+        //CTRACE("%s: SYNC + FLUSH completato in %" B_PRId64 " us\n", __func__, system_time() - arubaStart); <-- risultati tra 0 e 1 us
+    }
 
     gInfo->cursor_width = width;
     gInfo->cursor_height = height;
     gInfo->cursor_hotx = hotX;
     gInfo->cursor_hoty = hotY;
 
-    CTRACE("%s: before update, CUR_CONTROL=0x%08" B_PRIx32 "\n", __func__,
-        Read32(OUT, EVERGREEN_CUR_CONTROL));
+    if (isAruba) {
+    	arubaStart = system_time();
+        //CTRACE("%s: before update, CUR_CONTROL=0x%08" B_PRIx32
+        //    " vramStart=0x%08" B_PRIx64 " cursorOffset=0x%08" B_PRIx32
+        //    " chipsetFlags=0x%08" B_PRIx32 "\n", __func__,
+        //    Read32(OUT, EVERGREEN_CUR_CONTROL), gInfo->fb.vramStart,
+        //    gInfo->cursor_fb_offset, gInfo->shared_info->chipsetFlags);
 
-    // Aspettiamo che un eventuale update precedente sia stato recepito
-    // dall'hardware prima di accodarne un altro (vedi wait_cursor_update_idle).
-    wait_cursor_update_idle();
+        // Aspettiamo che un eventuale update precedente sia stato recepito
+        // dall'hardware prima di accodarne un altro.
+        //int32 waitTicks = wait_cursor_update_idle();
+        wait_cursor_update_idle();
+        //if (waitTicks != 0) {
+        //    CTRACE("%s: wait pre-update: %" B_PRId32 " tick(s) da 100us (0=subito libero, -1=timeout)\n",
+        //        __func__, waitTicks);
+        //}
 
-    // Disabilitiamo il cursore PRIMA del LOCK, non dopo: se lo scrivessimo
-    // a transazione gia' aperta, l'hardware potrebbe accodare EN=0 insieme
-    // al resto e farlo scattare solo all'UNLOCK insieme al valore finale
-    // (EN=1), senza mai generare un vero fronte 0->1 visibile. Qui invece
-    // e' una scrittura immediata e indipendente dalla transazione bloccata.
-    radeon_show_cursor(false);
+        // Disabilitiamo il cursore PRIMA del LOCK, non dopo: se lo
+        // scrivessimo a transazione gia' aperta, l'hardware potrebbe
+        // accodare EN=0 insieme al resto e farlo scattare solo all'UNLOCK
+        // insieme al valore finale (EN=1), senza mai generare un vero
+        // fronte 0->1 visibile.
+        radeon_show_cursor(false);
+        //CTRACE("%s: WAIT + HIDE completato in %" B_PRId64 " us\n", __func__, system_time() - arubaStart); <- tra i 460 e i 15505 us
+        arubaLapsed = system_time() - arubaStart;
+        if (arubaLapsed < 12000){
+        	snooze(12000-arubaLapsed);
+        }
+    }
 
     // LOCK UPDATE prima della scrittura dei registri geometrie
     Write32(OUT, EVERGREEN_CUR_UPDATE, EVERGREEN_CURSOR_UPDATE_LOCK);
@@ -123,16 +168,40 @@ status_t radeon_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint
                    | EVERGREEN_CURSOR_FORCE_MC_ON;
     Write32(OUT, EVERGREEN_CUR_CONTROL, control);
 
+    if (isAruba) {
+        Read32(OUT, EVERGREEN_CUR_CONTROL);
+            // forza il completamento della write (posted) prima di procedere
+    }
+
     // UNLOCK UPDATE
     Write32(OUT, EVERGREEN_CUR_UPDATE, 0);
 
-    // Riabilitiamo esplicitamente tramite show_cursor, come richiesto:
-    // fronte 0->1 completo hide -> update -> show.
-    radeon_show_cursor(true);
+    if (isAruba) {
+    	arubaStart = system_time();
+        // Confermiamo che QUESTO update sia stato recepito dall'hardware
+        // prima di ritornare, invece di fidarci che sia gia' avvenuto.
+        //int32 waitTicksPost = wait_cursor_update_idle();
+        wait_cursor_update_idle();
+        //if (waitTicksPost != 0) {
+        //    CTRACE("%s: wait post-update: %" B_PRId32 " tick(s) da 100us (0=subito libero, -1=timeout)\n",
+        //        __func__, waitTicksPost);
+        //}
 
-    CTRACE("%s: after update, CUR_CONTROL=0x%08" B_PRIx32
-        " surfaceAddr=0x%08" B_PRIx32 "\n", __func__, Read32(OUT, EVERGREEN_CUR_CONTROL),
-        Read32(OUT, EVERGREEN_CUR_SURFACE_ADDRESS));
+        // Riabilitiamo esplicitamente tramite show_cursor: fronte 0->1
+        // completo hide -> update -> show.
+        radeon_show_cursor(true);
+
+        //CTRACE("%s: after update, CUR_CONTROL=0x%08" B_PRIx32
+        //    " surfaceAddr=0x%08" B_PRIx32 "\n", __func__, Read32(OUT, EVERGREEN_CUR_CONTROL),
+        //    Read32(OUT, EVERGREEN_CUR_SURFACE_ADDRESS));
+
+        //CTRACE("%s: WAIT + SHOW completato in %" B_PRId64 " us\n",
+        //    __func__, system_time() - arubaStart);
+        arubaLapsed = system_time() - arubaStart;
+        if (arubaLapsed < 15000){
+        	snooze(15000-arubaLapsed);
+        }
+    }
 
     return B_OK;
 }
@@ -172,27 +241,43 @@ status_t radeon_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint1
         }
     }
 
-    // Vedi radeon_set_cursor_bitmap: invalida la cache di lettura HDP lato
-    // GPU prima di far ripartire il fetch della superficie, altrimenti il
-    // motore video continua a servire la prima bitmap caricata.
-    Write32(OUT, EVERGREEN_HDP_MEM_COHERENCY_FLUSH_CNTL, 0);
+    bool isAruba = is_radeon_aruba();
+    bigtime_t arubaStart = 0;
+
+    if (isAruba) {
+        arubaStart = system_time();
+
+        // Vedi radeon_set_cursor_bitmap: svuotiamo i WC buffer della CPU
+        // prima di invalidare la cache di lettura HDP lato GPU.
+        __sync_synchronize();
+        Write32(OUT, EVERGREEN_HDP_MEM_COHERENCY_FLUSH_CNTL, 0);
+    }
 
     gInfo->cursor_width = width;
     gInfo->cursor_height = height;
     gInfo->cursor_hotx = hotX;
     gInfo->cursor_hoty = hotY;
 
-    CTRACE("%s: before update, CUR_CONTROL=0x%08" B_PRIx32 "\n", __func__,
-        Read32(OUT, EVERGREEN_CUR_CONTROL));
+    if (isAruba) {
+        CTRACE("%s: before update, CUR_CONTROL=0x%08" B_PRIx32
+            " vramStart=0x%08" B_PRIx64 " cursorOffset=0x%08" B_PRIx32
+            " chipsetFlags=0x%08" B_PRIx32 "\n", __func__,
+            Read32(OUT, EVERGREEN_CUR_CONTROL), gInfo->fb.vramStart,
+            gInfo->cursor_fb_offset, gInfo->shared_info->chipsetFlags);
 
-    // Aspettiamo che un eventuale update precedente sia stato recepito
-    // dall'hardware prima di accodarne un altro (vedi wait_cursor_update_idle).
-    wait_cursor_update_idle();
+        // Aspettiamo che un eventuale update precedente sia stato recepito
+        // dall'hardware prima di accodarne un altro.
+        int32 waitTicks = wait_cursor_update_idle();
+        if (waitTicks != 0) {
+            CTRACE("%s: wait pre-update: %" B_PRId32 " tick(s) da 100us (0=subito libero, -1=timeout)\n",
+                __func__, waitTicks);
+        }
 
-    // Vedi radeon_set_cursor_bitmap: disabilitiamo PRIMA del LOCK, cosi'
-    // la scrittura di EN=0 e' immediata e non viene accodata nella stessa
-    // transazione bloccata del valore finale (EN=1).
-    radeon_show_cursor(false);
+        // Vedi radeon_set_cursor_bitmap: disabilitiamo PRIMA del LOCK, cosi'
+        // la scrittura di EN=0 e' immediata e non viene accodata nella
+        // stessa transazione bloccata del valore finale (EN=1).
+        radeon_show_cursor(false);
+    }
 
     // LOCK UPDATE prima della scrittura dei registri geometrie
     Write32(OUT, EVERGREEN_CUR_UPDATE, EVERGREEN_CURSOR_UPDATE_LOCK);
@@ -212,16 +297,34 @@ status_t radeon_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint1
                    | EVERGREEN_CURSOR_FORCE_MC_ON;
     Write32(OUT, EVERGREEN_CUR_CONTROL, control);
 
+    if (isAruba) {
+        Read32(OUT, EVERGREEN_CUR_CONTROL);
+            // forza il completamento della write (posted) prima di procedere
+    }
+
     // UNLOCK UPDATE
     Write32(OUT, EVERGREEN_CUR_UPDATE, 0);
 
-    // Riabilitiamo esplicitamente tramite show_cursor, come richiesto:
-    // fronte 0->1 completo hide -> update -> show.
-    radeon_show_cursor(true);
+    if (isAruba) {
+        // Confermiamo che QUESTO update sia stato recepito dall'hardware
+        // prima di ritornare, invece di fidarci che sia gia' avvenuto.
+        int32 waitTicksPost = wait_cursor_update_idle();
+        if (waitTicksPost != 0) {
+            CTRACE("%s: wait post-update: %" B_PRId32 " tick(s) da 100us (0=subito libero, -1=timeout)\n",
+                __func__, waitTicksPost);
+        }
 
-    CTRACE("%s: after update, CUR_CONTROL=0x%08" B_PRIx32
-        " surfaceAddr=0x%08" B_PRIx32 "\n", __func__, Read32(OUT, EVERGREEN_CUR_CONTROL),
-        Read32(OUT, EVERGREEN_CUR_SURFACE_ADDRESS));
+        // Riabilitiamo esplicitamente tramite show_cursor: fronte 0->1
+        // completo hide -> update -> show.
+        radeon_show_cursor(true);
+
+        CTRACE("%s: after update, CUR_CONTROL=0x%08" B_PRIx32
+            " surfaceAddr=0x%08" B_PRIx32 "\n", __func__, Read32(OUT, EVERGREEN_CUR_CONTROL),
+            Read32(OUT, EVERGREEN_CUR_SURFACE_ADDRESS));
+
+        CTRACE("%s: blocco isAruba completato in %" B_PRId64 " us\n",
+            __func__, system_time() - arubaStart);
+    }
 
     return B_OK;
 }
