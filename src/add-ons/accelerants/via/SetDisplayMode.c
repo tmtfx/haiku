@@ -12,7 +12,33 @@
 #define MODULE_BIT 0x00200000
 
 #include "acc_std.h"
+#include "macros.h"
+#define LOG_PREFIX "[VIA Graphics ACC] "
+bool enableSetModeDebug = false;
 
+static void dump_crtc_regs(const char *label)
+{
+    if (!enableSetModeDebug) return;
+
+    debug_printf(LOG_PREFIX "=== CRTC DUMP: %s ===\n", label);
+    
+    /* Registri di Pitch e Stride Offset */
+    debug_printf(LOG_PREFIX "  CR13 (Offset Low)     : 0x%02x\n", CRTCR(PITCHL));
+    debug_printf(LOG_PREFIX "  CR35 (Ext Offset)     : 0x%02x\n", CRTCR(VTIMEXT_PIT));
+    
+    /* Timing CRTC basici */
+    debug_printf(LOG_PREFIX "  CR00 (H Total)        : 0x%02x\n", CRTCR(HTOTAL));
+    debug_printf(LOG_PREFIX "  CR01 (H Display End)  : 0x%02x\n", CRTCR(HDISPE));
+    debug_printf(LOG_PREFIX "  CR06 (V Total)        : 0x%02x\n", CRTCR(VTOTAL));
+    debug_printf(LOG_PREFIX "  CR12 (V Display End)  : 0x%02x\n", CRTCR(VDISPE));
+    
+    /* Registri di Sequencer per Fetch / Color Depth */
+    debug_printf(LOG_PREFIX "  SR15 (Color Depth)    : 0x%02x\n", SEQR(COLDEPTH));
+    debug_printf(LOG_PREFIX "  SR1C (Fetch Cnt Lo)   : 0x%02x\n", SEQR(FETCHCNTLO));
+    debug_printf(LOG_PREFIX "  SR1D (Fetch Cnt Hi)   : 0x%02x\n", SEQR(FETCHCNTHI));
+
+    debug_printf(LOG_PREFIX "======================================\n");
+}
 /*
 	Enable/Disable interrupts.  Just a wrapper around the
 	ioctl() to the kernel driver.
@@ -26,6 +52,15 @@ static void interrupt_enable(bool flag) {
 	sbs.do_it = flag;
 	/* contact driver and get a pointer to the registers and shared data */
 	result = ioctl(fd, ENG_RUN_INTERRUPTS, &sbs, sizeof(sbs));
+	if (enableSetModeDebug) {
+        if (result != B_OK) {
+            debug_printf(LOG_PREFIX "interrupt_enable: ERROR - ENG_RUN_INTERRUPTS (%s) failed! Error = %" B_PRId32 "\n",
+                flag ? "ENABLE" : "DISABLE", result);
+        } else {
+            debug_printf(LOG_PREFIX "interrupt_enable: ENG_RUN_INTERRUPTS (%s) succeeded.\n",
+                flag ? "ENABLE" : "DISABLE");
+        }
+    }
 }
 
 /* First validate the mode, then call lots of bit banging stuff to set the mode(s)! */
@@ -57,10 +92,11 @@ status_t SET_DISPLAY_MODE(display_mode *mode_to_set)
 	/* Adjust mode to valid one and fail if invalid */
 	target /*= bounds*/ = *mode_to_set;
 	/* show the mode bits */
-	LOG(1, ("SETMODE: (ENTER) initial modeflags: $%08x\n", target.flags));
-	LOG(1, ("SETMODE: requested target pixelclock %dkHz\n",  target.timing.pixel_clock));
-	LOG(1, ("SETMODE: requested virtual_width %d, virtual_height %d\n",
-										target.virtual_width, target.virtual_height));
+	if (enableSetModeDebug) {
+		debug_printf(LOG_PREFIX "SETMODE: (ENTER) initial modeflags: $%08x\n", target.flags);
+		debug_printf(LOG_PREFIX "SETMODE: requested target pixelclock %dkHz\n",  target.timing.pixel_clock);
+		debug_printf(LOG_PREFIX "SETMODE: requested virtual_width %d, virtual_height %d\n", target.virtual_width, target.virtual_height);
+	}
 
 	/* See BOUNDS WARNING above... */
 	if (PROPOSE_DISPLAY_MODE(&target, &target, &target) == B_ERROR)	return B_ERROR;
@@ -75,7 +111,12 @@ status_t SET_DISPLAY_MODE(display_mode *mode_to_set)
 	{
 		target.flags &= ~TV_BITS;
 	}
-	LOG(1, ("SETMODE: (CONT.) validated command modeflags: $%08x\n", target.flags));
+	if (enableSetModeDebug) {
+		debug_printf(LOG_PREFIX "SETMODE: (CONT.) validated command modeflags: $%08x\n", target.flags);
+		dump_crtc_regs("PRIMA (Firmware / Bootloader)");
+	}
+	
+	
 
 	/* disable interrupts using the kernel driver */
 	interrupt_enable(false);
@@ -91,6 +132,21 @@ status_t SET_DISPLAY_MODE(display_mode *mode_to_set)
 	/* calculate and set new mode bytes_per_row */
 	eng_general_validate_pic_size (&target, &si->fbc.bytes_per_row, &si->acc_mode);
 
+	/* --- FIX ALLINEAMENTO STRIDE PER VX900 (64-byte alignment) --- */
+    if (si->ps.card_arch == VX900 || si->vendor_id == 0x1106) {
+        uint32 bpp_bytes = 4;
+        switch (target.space) {
+            case B_CMAP8: bpp_bytes = 1; break;
+            case B_RGB15_LITTLE:
+            case B_RGB16_LITTLE: bpp_bytes = 2; break;
+            case B_RGB24_LITTLE: bpp_bytes = 3; break;
+            case B_RGB32_LITTLE: default: bpp_bytes = 4; break;
+        }
+        si->fbc.bytes_per_row = (target.virtual_width * bpp_bytes + 63) & ~63;
+        if (enableSetModeDebug)
+            debug_printf(LOG_PREFIX "SETMODE: VX900 Pitch aligned to %" B_PRIu32 " bytes/row\n", si->fbc.bytes_per_row);
+    }
+
 	/*Perform the very long mode switch!*/
 	if (target.flags & DUALHEAD_BITS) /*if some dualhead mode*/
 	{
@@ -99,7 +155,7 @@ status_t SET_DISPLAY_MODE(display_mode *mode_to_set)
 		/* init display mode for secondary head */		
 		display_mode target2 = target;
 
-		LOG(1,("SETMODE: setting DUALHEAD mode\n"));
+		if (enableSetModeDebug) debug_printf(LOG_PREFIX "SETMODE: setting DUALHEAD mode\n");
 
 		/* validate flags for secondary TVout */
 //		if ((i2c_sec_tv_adapter() != B_OK) && (target2.flags & TV_BITS))
@@ -137,9 +193,10 @@ status_t SET_DISPLAY_MODE(display_mode *mode_to_set)
 //			eng_general_head_select(false);
 
 		/* set the pixel clock PLL(s) */
-		LOG(8,("SETMODE: target clock %dkHz\n",target.timing.pixel_clock));
-		if (head1_set_pix_pll(target) == B_ERROR)
-			LOG(8,("SETMODE: error setting pixel clock (internal DAC)\n"));
+		if (enableSetModeDebug) debug_printf(LOG_PREFIX "SETMODE: target clock %dkHz\n",target.timing.pixel_clock);
+		if (head1_set_pix_pll(target) == B_ERROR) {
+			if (enableSetModeDebug) debug_printf(LOG_PREFIX "SETMODE: error setting pixel clock (internal DAC)\n");
+		}
 
 		/* we do not need to set the pixelclock here for a head that's in TVout mode */
 //		if (!(target2.flags & TV_BITS))
@@ -273,7 +330,7 @@ status_t SET_DISPLAY_MODE(display_mode *mode_to_set)
 		case B_RGB16_LITTLE: colour_depth1 = 16; colour_mode = BPP16; break;
 		case B_RGB32_LITTLE: colour_depth1 = 32; colour_mode = BPP32; break;
 		default:
-			LOG(8,("SETMODE: Invalid singlehead colour depth 0x%08x\n", target.space));
+			if (enableSetModeDebug) debug_printf(LOG_PREFIX "SETMODE: Invalid singlehead colour depth 0x%08x\n", target.space);
 			return B_ERROR;
 		}
 
@@ -281,7 +338,7 @@ status_t SET_DISPLAY_MODE(display_mode *mode_to_set)
 		status = head1_set_pix_pll(target);
 
 		if (status==B_ERROR)
-			LOG(8,("CRTC: error setting pixel clock (internal DAC)\n"));
+			if (enableSetModeDebug) debug_printf(LOG_PREFIX "CRTC: error setting pixel clock (internal DAC)\n");
 
 		/* set the colour depth for CRTC1 and the DAC */
 		/* first set the colordepth */
@@ -303,6 +360,9 @@ status_t SET_DISPLAY_MODE(display_mode *mode_to_set)
 
 	/* update driver's mode store */
 	si->dm = target;
+	
+	/* 2. DUMP REGISTRI DOPO LA MODIFICA DELL'ACCELERANTE */
+    dump_crtc_regs("DOPO (Accelerante Haiku)");
 
 	/* turn screen one on */
 	head1_dpms(display, h, v);
@@ -310,11 +370,11 @@ status_t SET_DISPLAY_MODE(display_mode *mode_to_set)
 //	if (target.flags & DUALHEAD_BITS) head2_dpms(display,h,v);
 
 	/* set up acceleration for this mode */
-//	eng_acc_init();
+	eng_acc_init();
 	/* set up overlay unit for this mode */
 	eng_bes_init();
 
-	LOG(1,("SETMODE: booted since %f mS\n", system_time()/1000.0));
+	if (enableSetModeDebug) debug_printf(LOG_PREFIX "SETMODE: booted since %f mS\n", system_time()/1000.0);
 
 	/* enable interrupts using the kernel driver */
 	interrupt_enable(true);
@@ -337,7 +397,7 @@ status_t MOVE_DISPLAY(uint16 h_display_start, uint16 v_display_start) {
 	uint8 colour_depth;
 	uint32 startadd,startadd_right;
 
-	LOG(4,("MOVE_DISPLAY: h %d, v %d\n", h_display_start, v_display_start));
+	if (enableSetModeDebug) debug_printf(LOG_PREFIX "MOVE_DISPLAY: h %d, v %d\n", h_display_start, v_display_start);
 
 	/* VIA CRTC1 handles multiples of 8 for 8bit, 4 for 16bit, 2 for 32 bit 
 	   VIA CRTC2 is yet unknown...
@@ -358,7 +418,7 @@ status_t MOVE_DISPLAY(uint16 h_display_start, uint16 v_display_start) {
 			h_display_start &= ~0x0f;
 			break;
 		default:
-			LOG(8,("SET:Invalid DH colour depth 0x%08x, should never happen\n", si->dm.space));
+			if (enableSetModeDebug) debug_printf(LOG_PREFIX "SET:Invalid DH colour depth 0x%08x, should never happen\n", si->dm.space);
 			return B_ERROR;
 		}
 	}
@@ -460,7 +520,7 @@ void SET_INDEXED_COLORS(uint count, uint8 first, uint8 *color_data, uint32 flags
 status_t SET_DPMS_MODE(uint32 dpms_flags) {
 	interrupt_enable(false);
 
-	LOG(4,("SET_DPMS_MODE: 0x%08x\n", dpms_flags));
+	if (enableSetModeDebug) debug_printf(LOG_PREFIX "SET_DPMS_MODE: 0x%08x\n", dpms_flags);
 	
 #if 0
 	if (si->dm.flags & DUALHEAD_BITS) /*dualhead*/
@@ -506,7 +566,7 @@ status_t SET_DPMS_MODE(uint32 dpms_flags) {
 			head1_dpms(false, false, false);
 			break;
 		default:
-			LOG(8,("SET: Invalid DPMS settings (DH) 0x%08x\n", dpms_flags));
+			if (enableSetModeDebug) debug_printf(LOG_PREFIX "SET: Invalid DPMS settings (DH) 0x%08x\n", dpms_flags);
 			interrupt_enable(true);
 			return B_ERROR;
 		}

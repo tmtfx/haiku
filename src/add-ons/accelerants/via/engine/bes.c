@@ -1,5 +1,11 @@
-/* VIA Unichrome Back End Scaler functions */
-/* Written by Rudolf Cornelissen 05/2002-2/2016 */
+/* VIA Unichrome Back End Scaler functions
+ * Written by Rudolf Cornelissen 05/2002-2/2016
+ *
+ * Portions based on the OpenChrome Project (https://www.freedesktop.org/wiki/Openchrome):
+ * Copyright 1998-2008 VIA Technologies, Inc. All Rights Reserved.
+ * Copyright 2001-2003 S3 Graphics, Inc. All Rights Reserved.
+ * Authors: Kevin Brace, Thomas Hellström, James Simmons, Xavier Bachelot
+ */
 
 #define MODULE_BIT 0x00000200
 
@@ -46,7 +52,7 @@ bool eng_bes_chk_bandwidth()
 	LOG(8,("Overlay: Current mode's refreshrate is %.2fHz, bandwidth is %.0f\n",
 		refresh, bandwidth));
 
-	switch (((CRTCR(MEMCLK)) & 0x70) >> 4)
+	switch ((CRTCR(MEMCLK)) >> 4)
 	{
 	case 0: /* SDR  66 */
 		LOG(8,("Overlay: System memory is type SDR 66\n"));
@@ -57,15 +63,12 @@ bool eng_bes_chk_bandwidth()
 		return false;
 		break;
 	case 2: /* SDR 133 */
-		/* memory is too slow, sorry. */
 		LOG(8,("Overlay: System memory is type SDR 133\n"));
 		return false;
 		break;
 	case 3: /* DDR 100 (PC1600) */
-		/* DDR100's basic limit... */
 		LOG(8,("Overlay: System memory is type DDR 100\n"));
 		if (bandwidth > 921600000.0) return false;
-		/* ... but we have constraints at higher than 800x600 */
 		if (si->dm.timing.h_display > 800)
 		{
 			if (depth != 8) return false;
@@ -79,13 +82,29 @@ bool eng_bes_chk_bandwidth()
 		break;
 	case 5: /* DDR 166 (PC2700) */
 		LOG(8,("Overlay: System memory is type DDR 166\n"));
-		if (bandwidth > 5210000000.0) return false;//fixme: set more correct limit?
+		if (bandwidth > 5210000000.0) return false;
 		break;
-	case 6: /* DDR 200 (PC3200) */
-		LOG(8,("Overlay: System memory is type DDR 200\n"));
-		if (bandwidth > 6170000000.0) return false;//fixme: set more correct limit?
+	case 6: /* DDR 200 (PC3200 / DDR400) */
+		LOG(8,("Overlay: System memory is type DDR 200 (DDR400)\n"));
+		if (bandwidth > 6170000000.0) return false;
 		break;
-	default: /* not (yet?) used */
+	case 7: /* DDR2 533 */
+		LOG(8,("Overlay: System memory is type DDR2 533\n"));
+		break;
+	case 8: /* DDR2 667 */
+		LOG(8,("Overlay: System memory is type DDR2 667\n"));
+		break;
+	case 9: /* DDR2 800 */
+		LOG(8,("Overlay: System memory is type DDR2 800\n"));
+		break;
+	case 10: /* DDR3 1066 (VX900) */
+		LOG(8,("Overlay: System memory is type DDR3 1066\n"));
+		break;
+	default:
+		if (si->ps.card_arch >= K8M890) {
+			LOG(8,("Overlay: PCIe / Chrome9 chip, memory bandwidth is sufficient\n"));
+			break;
+		}
 		LOG(8,("Overlay: System memory is (yet) unknown type!\n"));
 		return false;
 		break;

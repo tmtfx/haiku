@@ -4,6 +4,16 @@
 </head>
 <body>
 <p><h2>Changes done for each driverversion:</h2></p>
+<p><h1>via_driver (0.20, Pirati Del Frico)</h1></p>
+<ul>
+	<li>Added support for missing VIA chipsets: VX900 (Chrome9 HD), VX855, VX800, P4M900, K8M890, P4M890, CN750, CX700, P4M800 Pro, PM800;
+	<li>Integrated code, registers, and algorithms from the OpenChrome project with full developer credits;
+	<li>Implemented VX900 framebuffer mapping using PCI BAR 2 with 64-bit address support;
+	<li>Implemented VRAM autodetection using Host Bridge / DRAM Controller PCI configuration registers (OpenChrome logic);
+	<li>Added UniChrome Pro and Chrome9 PLL dotclock calculations and sequencer programming;
+	<li>Extended CRTC registers support for VX900 (including 9-bit horizontal timing in CR45 and frame buffer starting address overflow in CR48);
+	<li>Added widescreen display mode definitions (1080p, 720p, 1600x900, 1360x768) and enabled widescreen support for analog displays.
+</ul>
 <p><h1>via_driver (Haiku repository 0.19, Rudolf)</h1></p>
 <ul>
 	<li>Initial setup based on nVidia driver 0.30;

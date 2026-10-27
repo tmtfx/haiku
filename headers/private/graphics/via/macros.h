@@ -1,6 +1,14 @@
 /* registers definitions and macros for access to them */
 
-/* documentation can be found at http://unichrome.sourceforge.net/ */
+/* documentation can be found at http://unichrome.sourceforge.net/
+   and OpenChrome project: https://www.freedesktop.org/wiki/Openchrome/
+   Credits and Copyright:
+   Copyright 1998-2003 VIA Technologies, Inc.
+   Copyright 2001-2003 S3 Graphics, Inc.
+   Copyright 2004-2005 The Unichrome Project
+   Copyright 2005-2016 The OpenChrome Project
+   Authors: Kevin Brace, James Simmons, Xavier Bachelot, Thomas Hellström, Luc Verhaegen
+*/
 
 /* PCI_config_space */
 #define ENCFG_DEVID		0x00
@@ -86,8 +94,6 @@
 #define ENACC_BBASE1		0x0040065c
 #define ENACC_BBASE2		0x00400660
 #define ENACC_BBASE3		0x00400664
-#define ENACC_NV10_BBASE4	0x00400668
-#define ENACC_NV10_BBASE5	0x0040066c
 #define ENACC_PITCH0		0x00400670
 #define ENACC_PITCH1		0x00400674
 #define ENACC_PITCH2		0x00400678
@@ -97,44 +103,19 @@
 #define ENACC_BLIMIT1		0x00400688
 #define ENACC_BLIMIT2		0x0040068c
 #define ENACC_BLIMIT3		0x00400690
-#define ENACC_NV10_BLIMIT4	0x00400694
-#define ENACC_NV10_BLIMIT5	0x00400698
 #define ENACC_BPIXEL		0x00400724
-#define ENACC_NV20_OFFSET0	0x00400820
-#define ENACC_NV20_OFFSET1	0x00400824
-#define ENACC_NV20_OFFSET2	0x00400828
-#define ENACC_NV20_OFFSET3	0x0040082c
 #define ENACC_STRD_FMT		0x00400830
-#define ENACC_NV20_PITCH0	0x00400850
-#define ENACC_NV20_PITCH1	0x00400854
-#define ENACC_NV20_PITCH2	0x00400858
-#define ENACC_NV20_PITCH3	0x0040085c
-#define ENACC_NV20_BLIMIT6	0x00400864
-#define ENACC_NV20_BLIMIT7	0x00400868
-#define ENACC_NV20_BLIMIT8	0x0040086c
-#define ENACC_NV20_BLIMIT9	0x00400870
-#define ENACC_NV30_WHAT		0x00400890
 
 /* specials */
 #define	ENACC_DEBUG0 		0x00400080
 #define	ENACC_DEBUG1 		0x00400084
 #define	ENACC_DEBUG2		0x00400088
 #define	ENACC_DEBUG3		0x0040008c
-#define	ENACC_NV10_DEBUG4 	0x00400090
 #define ENACC_ACC_INTS		0x00400100
 #define ENACC_ACC_INTE		0x00400140
-#define ENACC_NV10_CTX_CTRL	0x00400144
 #define ENACC_STATUS		0x00400700
-#define ENACC_NV04_SURF_TYP	0x0040070c
-#define ENACC_NV10_SURF_TYP	0x00400710
-#define ENACC_NV04_ACC_STAT	0x00400710
-#define ENACC_NV10_ACC_STAT	0x00400714
 #define ENACC_FIFO_EN		0x00400720
 #define ENACC_PAT_SHP		0x00400810
-#define ENACC_NV10_XFMOD0	0x00400f40
-#define ENACC_NV10_XFMOD1	0x00400f44
-#define ENACC_NV10_PIPEADR	0x00400f50
-#define ENACC_NV10_PIPEDAT	0x00400f54
 /* PGRAPH cache registers */
 #define	ENACC_CACHE1_1		0x00400160
 #define	ENACC_CACHE1_2		0x00400180
@@ -156,102 +137,24 @@
 #define	ENACC_CACHE4_3		0x004001ac
 #define	ENACC_CACHE4_4		0x004001cc
 #define	ENACC_CACHE4_5		0x004001ec
-#define	ENACC_NV10_CACHE5_1	0x00400170
-#define	ENACC_NV04_CTX_CTRL	0x00400170
 #define	ENACC_CACHE5_2		0x00400190
 #define	ENACC_CACHE5_3		0x004001b0
 #define	ENACC_CACHE5_4		0x004001d0
 #define	ENACC_CACHE5_5		0x004001f0
-#define	ENACC_NV10_CACHE6_1	0x00400174
 #define	ENACC_CACHE6_2		0x00400194
 #define	ENACC_CACHE6_3		0x004001b4
 #define	ENACC_CACHE6_4		0x004001d4
 #define	ENACC_CACHE6_5		0x004001f4
-#define	ENACC_NV10_CACHE7_1	0x00400178
 #define	ENACC_CACHE7_2		0x00400198
 #define	ENACC_CACHE7_3		0x004001b8
 #define	ENACC_CACHE7_4		0x004001d8
 #define	ENACC_CACHE7_5		0x004001f8
-#define	ENACC_NV10_CACHE8_1	0x0040017c
 #define	ENACC_CACHE8_2		0x0040019c
 #define	ENACC_CACHE8_3		0x004001bc
 #define	ENACC_CACHE8_4		0x004001dc
 #define	ENACC_CACHE8_5		0x004001fc
-#define	ENACC_NV10_CTX_SW1	0x0040014c
-#define	ENACC_NV10_CTX_SW2	0x00400150
-#define	ENACC_NV10_CTX_SW3	0x00400154
-#define	ENACC_NV10_CTX_SW4	0x00400158
-#define	ENACC_NV10_CTX_SW5	0x0040015c
 /* engine tile registers src */
-#define ENACC_NV20_FBWHAT0	0x00100200
-#define ENACC_NV20_FBWHAT1	0x00100204
-#define ENACC_NV10_FBTIL0AD	0x00100240
-#define ENACC_NV10_FBTIL0ED	0x00100244
-#define ENACC_NV10_FBTIL0PT	0x00100248
-#define ENACC_NV10_FBTIL0ST	0x0010024c
-#define ENACC_NV10_FBTIL1AD	0x00100250
-#define ENACC_NV10_FBTIL1ED	0x00100254
-#define ENACC_NV10_FBTIL1PT	0x00100258
-#define ENACC_NV10_FBTIL1ST	0x0010025c
-#define ENACC_NV10_FBTIL2AD	0x00100260
-#define ENACC_NV10_FBTIL2ED	0x00100264
-#define ENACC_NV10_FBTIL2PT	0x00100268
-#define ENACC_NV10_FBTIL2ST	0x0010026c
-#define ENACC_NV10_FBTIL3AD	0x00100270
-#define ENACC_NV10_FBTIL3ED	0x00100274
-#define ENACC_NV10_FBTIL3PT	0x00100278
-#define ENACC_NV10_FBTIL3ST	0x0010027c
-#define ENACC_NV10_FBTIL4AD	0x00100280
-#define ENACC_NV10_FBTIL4ED	0x00100284
-#define ENACC_NV10_FBTIL4PT	0x00100288
-#define ENACC_NV10_FBTIL4ST	0x0010028c
-#define ENACC_NV10_FBTIL5AD	0x00100290
-#define ENACC_NV10_FBTIL5ED	0x00100294
-#define ENACC_NV10_FBTIL5PT	0x00100298
-#define ENACC_NV10_FBTIL5ST	0x0010029c
-#define ENACC_NV10_FBTIL6AD	0x001002a0
-#define ENACC_NV10_FBTIL6ED	0x001002a4
-#define ENACC_NV10_FBTIL6PT	0x001002a8
-#define ENACC_NV10_FBTIL6ST	0x001002ac
-#define ENACC_NV10_FBTIL7AD	0x001002b0
-#define ENACC_NV10_FBTIL7ED	0x001002b4
-#define ENACC_NV10_FBTIL7PT	0x001002b8
-#define ENACC_NV10_FBTIL7ST	0x001002bc
 /* engine tile registers dst */
-#define ENACC_NV20_WHAT0	0x004009a4
-#define ENACC_NV20_WHAT1	0x004009a8
-#define ENACC_NV10_TIL0AD	0x00400b00
-#define ENACC_NV10_TIL0ED	0x00400b04
-#define ENACC_NV10_TIL0PT	0x00400b08
-#define ENACC_NV10_TIL0ST	0x00400b0c
-#define ENACC_NV10_TIL1AD	0x00400b10
-#define ENACC_NV10_TIL1ED	0x00400b14
-#define ENACC_NV10_TIL1PT	0x00400b18
-#define ENACC_NV10_TIL1ST	0x00400b1c
-#define ENACC_NV10_TIL2AD	0x00400b20
-#define ENACC_NV10_TIL2ED	0x00400b24
-#define ENACC_NV10_TIL2PT	0x00400b28
-#define ENACC_NV10_TIL2ST	0x00400b2c
-#define ENACC_NV10_TIL3AD	0x00400b30
-#define ENACC_NV10_TIL3ED	0x00400b34
-#define ENACC_NV10_TIL3PT	0x00400b38
-#define ENACC_NV10_TIL3ST	0x00400b3c
-#define ENACC_NV10_TIL4AD	0x00400b40
-#define ENACC_NV10_TIL4ED	0x00400b44
-#define ENACC_NV10_TIL4PT	0x00400b48
-#define ENACC_NV10_TIL4ST	0x00400b4c
-#define ENACC_NV10_TIL5AD	0x00400b50
-#define ENACC_NV10_TIL5ED	0x00400b54
-#define ENACC_NV10_TIL5PT	0x00400b58
-#define ENACC_NV10_TIL5ST	0x00400b5c
-#define ENACC_NV10_TIL6AD	0x00400b60
-#define ENACC_NV10_TIL6ED	0x00400b64
-#define ENACC_NV10_TIL6PT	0x00400b68
-#define ENACC_NV10_TIL6ST	0x00400b6c
-#define ENACC_NV10_TIL7AD	0x00400b70
-#define ENACC_NV10_TIL7ED	0x00400b74
-#define ENACC_NV10_TIL7PT	0x00400b78
-#define ENACC_NV10_TIL7ST	0x00400b7c
 /* cache setup registers */
 #define ENACC_PF_INTSTAT	0x00002100
 #define ENACC_PF_INTEN		0x00002140
@@ -416,13 +319,10 @@
 #define RG8_VSE2			0x000c03c3
 
 /* bootstrap info registers */
-#define RG32_NV4STRAPINFO	0x00100000
 #define RG32_PFB_CONFIG_0	0x00100200
 #define RG32_PFB_CONFIG_1	0x00100204
-#define RG32_NV10STRAPINFO	0x0010020c
 #define RG32_FB_MRS1		0x001002c0
 #define RG32_FB_MRS2		0x001002c8
-#define RG32_NVSTRAPINFO2	0x00101000
 
 /* registers needed for 'coldstart' */
 #define RG32_PFB_DEBUG_0	0x00100080
@@ -430,8 +330,6 @@
 #define RG32_COREPLL		0x00680500
 #define RG32_MEMPLL			0x00680504
 #define RG32_PLL_CTRL		0x00680510
-#define RG32_COREPLL2		0x00680570 /* NV31, NV36 only */
-#define RG32_MEMPLL2		0x00680574 /* NV31, NV36 only */
 #define RG32_CONFIG         0x00600804
 
 //new via
@@ -452,9 +350,7 @@
 #define RG8_CRTCDAT			0x000083d5
 #define RG8_INSTAT1			0x000083da
 //end via.
-#define RG32_NV10FBSTADD32	0x00600800
 #define RG32_RASTER			0x00600808
-#define RG32_NV10CURADD32	0x0060080c
 #define RG32_CURCONF		0x00600810
 #define RG32_PANEL_PWR		0x0060081c
 #define RG32_FUNCSEL		0x00600860
@@ -467,9 +363,7 @@
 #define RG16_CRTC2IND		0x006033d4
 #define RG8_CRTC2DAT		0x006033d5
 #define RG8_2INSTAT1		0x006033da//verify!!!
-#define RG32_NV10FB2STADD32	0x00602800
 #define RG32_RASTER2		0x00602808
-#define RG32_NV10CUR2ADD32	0x0060280c
 #define RG32_2CURCONF		0x00602810
 #define RG32_2PANEL_PWR		0x0060281c//verify!!!
 #define RG32_2FUNCSEL		0x00602860
@@ -584,8 +478,11 @@
 #define ENCRTCX_HTIMEXT2	0x36
 #define ENCRTCX_TVTYPE		0x3b //TVtype jumper: b1=1 = PAL, else NTSC
 #define ENCRTCX_MEMCLK		0x3d
+#define ENCRTCX_CR45		0x45
+#define ENCRTCX_CR47		0x47
+#define ENCRTCX_CR48		0x48
 //end via
-/* Nvidia specific registers: */
+/* Extended CRTC registers: */
 #define ENCRTCX_REPAINT0	0x19
 #define ENCRTCX_REPAINT1	0x1a
 #define ENCRTCX_FIFO		0x1b
@@ -653,6 +550,7 @@
 #define ENSEQX_MSIZE_CLE266	0x34
 #define ENSEQX_MSIZE_OTHER	0x39
 #define ENSEQX_PLL_RESET	0x40
+#define ENSEQX_CR5E			0x5e
 #define ENSEQX_PPLL2_MP_CLE	0x44
 #define ENSEQX_PPLL2_N_CLE	0x45
 #define ENSEQX_PPLL_N_OTH	0x44
@@ -800,7 +698,21 @@
 #define ENCRTC_CURSOR_FG	0x000002e0
 //end new.
 
-/* Macros for convenient accesses to the NV chips */
+/* Real "Hardware Icon" (HW cursor) registers for CX700/P4M890/P4M900/
+ * VX800/VX855/VX900 ("Chrome9"). The ENCRTC_CURSOR_* block above is a
+ * legacy ("Unichrome") register range that OpenChrome's own source never
+ * references for any supported chip - it is dead on this generation.
+ * Offsets taken from OpenChrome's via_eng_regs.h. */
+#define ENCRTC_V327_HI_INVTCOLOR	0x000002e4
+#define ENCRTC_PRIM_HI_FIFO		0x000002e8
+#define ENCRTC_PRIM_HI_TRANSCOLOR	0x000002ec
+#define ENCRTC_PRIM_HI_CTRL		0x000002f0
+#define ENCRTC_PRIM_HI_FBOFFSET	0x000002f4
+#define ENCRTC_PRIM_HI_POSSTART	0x000002f8
+#define ENCRTC_PRIM_HI_CENTEROFFSET	0x000002fc
+#define ENCRTC_PRIM_HI_INVTCOLOR	0x0000120c
+
+/* Macros for convenient accesses to VIA hardware */
 #define ENG_REG8(r_)  ((vuint8  *)regs)[(r_)]
 #define ENG_REG16(r_) ((vuint16 *)regs)[(r_) >> 1]
 #define ENG_REG32(r_) ((vuint32 *)regs)[(r_) >> 2]
@@ -867,3 +779,69 @@
 #define MAVW(A,B)   (i2c_maven_write(ENMAV_##A ,B))
 #define MAVRW(A)    (i2c_maven_read (ENMAV_##A )|(i2c_maven_read(ENMAV_##A +1)<<8))
 #define MAVWW(A,B)  (i2c_maven_write(ENMAV_##A ,B &0xFF),i2c_maven_write(ENMAV_##A +1,B >>8))
+
+/* VIA 2D Engine definitions */
+#define VIA_MMIO_BLTBASE        0x200000
+
+/* H2 Engine Registers */
+#define VIA_REG_GECMD           0x000
+#define VIA_REG_GEMODE          0x004
+#define VIA_REG_GESTATUS        0x004
+#define VIA_REG_SRCPOS          0x008
+#define VIA_REG_DSTPOS          0x00C
+#define VIA_REG_DIMENSION       0x010
+#define VIA_REG_FGCOLOR         0x018
+#define VIA_REG_BGCOLOR         0x01C
+#define VIA_REG_SRCBASE         0x030
+#define VIA_REG_DSTBASE         0x034
+#define VIA_REG_PITCH           0x038
+
+/* H6 / M1 Engine Registers (Chrome9: VX800, VX855, VX900) */
+#define VIA_REG_GECMD_M1        0x000
+#define VIA_REG_GEMODE_M1       0x004
+#define VIA_REG_GESTATUS_M1     0x004
+#define VIA_REG_PITCH_M1        0x008
+#define VIA_REG_DIMENSION_M1    0x00C
+#define VIA_REG_DSTPOS_M1       0x010
+#define VIA_REG_DSTBASE_M1      0x014
+#define VIA_REG_SRCPOS_M1       0x018
+#define VIA_REG_SRCBASE_M1      0x01C
+#define VIA_REG_MONOPATFGC_M1   0x058
+
+/* Engine status register, and H5/M1 (Chrome9: VX800, VX855, VX900) busy
+ * bits. Address is relative to the MMIO BAR base (NOT VIA_MMIO_BLTBASE) -
+ * see BLTR_M1/BLTW_M1 below. Taken from OpenChrome's via_regs.h. */
+#define VIA_REG_STATUS          0x400
+#define VIA_CMD_RGTR_BUSY_H5    0x00000010
+#define VIA_2D_ENG_BUSY_H5      0x00000002
+
+/* GEC Commands */
+#define VIA_GEC_NOOP            0x00000000
+#define VIA_GEC_BLT             0x00000001
+#define VIA_GEC_FIXCOLOR_PAT    0x00002000
+#define VIA_GEC_DECY            0x00004000
+#define VIA_GEC_DECX            0x00008000
+#define VIA_GEC_CLIP_ENABLE     0x00001000
+#define VIA_PITCH_ENABLE        0x80000000
+
+/* Raster Operations (ROP) */
+#define VIA_ROP_S               0xCC
+#define VIA_ROP_P               0xF0
+
+/* Color Depth (GEMODE) */
+#define VIA_GEM_8bpp            0x00000000
+#define VIA_GEM_16bpp           0x00000100
+#define VIA_GEM_32bpp           0x00000300
+
+/* Macro for accessing 2D Engine (H2 generation and older) */
+#define BLTR(A)   (ENG_REG32(VIA_MMIO_BLTBASE + (A)))
+#define BLTW(A,B) (ENG_REG32(VIA_MMIO_BLTBASE + (A)) = (B))
+
+/* Macro for accessing the H6/M1 2D Engine (Chrome9: VX800, VX855, VX900).
+ * Unlike the H2 engine above, the H6/M1 command registers live at the base
+ * of the MMIO BAR, NOT at VIA_MMIO_BLTBASE (+0x200000) - confirmed against
+ * OpenChrome's viaFlushPCI(), which writes H6/M1 registers via a plain
+ * VIASETREG(offset, value) on the base MMIO mapping; the separate BltBase
+ * mapping is never dereferenced by any EXA (2D) code path there. */
+#define BLTR_M1(A)   (ENG_REG32(A))
+#define BLTW_M1(A,B) (ENG_REG32(A) = (B))

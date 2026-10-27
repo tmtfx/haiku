@@ -6,6 +6,13 @@
 	Mark Watson;
 	Apsed;
 	Rudolf Cornelissen 10/2002-1/2016.
+
+	Portions based on the OpenChrome Project (https://www.freedesktop.org/wiki/Openchrome):
+	Copyright 2005-2016 The OpenChrome Project
+	Copyright 2004-2005 The Unichrome Project
+	Copyright 1998-2003 VIA Technologies, Inc.
+	Copyright 2001-2003 S3 Graphics, Inc.
+	Authors: Kevin Brace, James Simmons, Xavier Bachelot, Thomas Hellström, Luc Verhaegen
 */
 
 #ifndef DRIVERINTERFACE_H
@@ -32,7 +39,7 @@ typedef struct {
 	int32	ben;
 } benaphore;
 
-#define INIT_BEN(x)		x.sem = create_sem(0, "NV "#x" benaphore");  x.ben = 0;
+#define INIT_BEN(x)		x.sem = create_sem(0, "VIA "#x" benaphore");  x.ben = 0;
 #define AQUIRE_BEN(x)	if((atomic_add(&(x.ben), 1)) >= 1) acquire_sem(x.sem);
 #define RELEASE_BEN(x)	if((atomic_add(&(x.ben), -1)) > 1) release_sem(x.sem);
 #define	DELETE_BEN(x)	delete_sem(x.sem);
@@ -99,49 +106,41 @@ typedef struct settings {  // apsed, see comments in skel.settings
 
 /* card info - information gathered from PINS (and other sources) */
 enum
-{	// card_type in order of date of VIA chip design (fixme: check order)
-	VT3122 = 0,
-	VT3022,
-	VT7205,
-	VT3205,
-	VT3108,
-	VT3204NC,
-	NV04,
-	NV05,
-	NV05M64,
-	NV06,
-	NV10,
-	NV11,
-	NV11M,
-	NV15,
-	NV17,
-	NV17M,
-	NV18,
-	NV18M,
-	NV20,
-	NV25,
-	NV28,
-	NV30,
-	NV31,
-	NV34,
-	NV35,
-	NV36,
-	NV38,
-	NV40,
-	NV41,
-	NV43,
-	NV45
+{	// card_type in order of date of VIA chip design
+	/* UniChrome */
+	VT3022 = 0,	/* CLE266 (Ax) */
+	VT3122,		/* CLE266 (Cx) */
+	VT3205,		/* KM400 */
+	VT7205,		/* KM400A / KN400 / P4M800 */
+	/* UniChrome Pro */
+	VT3108,		/* K8M800 / K8N800 / K8N800A */
+	VT3118,		/* CN400 / PM800 / PN800 / PM880 / PN880 */
+	VT3314,		/* P4M800 Pro / VN800 / CN700 */
+	VT3157,		/* CX700 / VX700 */
+	VT3225,		/* CN750 */
+	/* Chrome9 / Chrome9 HC / HC3 / HCM / HD */
+	VT3327,		/* P4M890 / VN890 / CN800 */
+	VT3336,		/* K8M890 / K8N890 */
+	VT3364,		/* P4M900 / VN896 / CN896 */
+	VT3353,		/* VX800 / VX820 (Chrome9 HC3) */
+	VT3409,		/* VX855 / VX875 (Chrome9 HCM) */
+	VT3410		/* VX900 (Chrome9 HD) */
 };
 enum
 {	// card_arch in order of date of VIA chip design
 	CLE266 = 0,
 	KM400,
 	K8M800,
-	NV04A,
-	NV10A,
-	NV20A,
-	NV30A,
-	NV40A
+	PM800,
+	P4M800PRO,
+	CX700,
+	CN750,
+	P4M890,
+	K8M890,
+	P4M900,
+	VX800,
+	VX855,
+	VX900
 };
 enum
 {	// tvout_chip_type in order of capability (more or less)
@@ -159,8 +158,7 @@ enum
 	BT868,
 	BT869,
 	CX25870,
-	CX25871,
-	NVIDIA
+	CX25871
 };
 
 

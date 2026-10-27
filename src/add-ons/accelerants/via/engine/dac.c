@@ -1,9 +1,19 @@
 /* program the DAC */
 /* Author:
    Rudolf Cornelissen 12/2003-1/2016
+
+   Portions based on the OpenChrome Project (https://www.freedesktop.org/wiki/Openchrome):
+   Copyright 2005-2016 The OpenChrome Project
+   Copyright 2004-2005 The Unichrome Project
+   Copyright 1998-2003 VIA Technologies, Inc.
+   Copyright 2001-2003 S3 Graphics, Inc.
+   Authors: Kevin Brace, James Simmons, Xavier Bachelot, Thomas Hellström, Luc Verhaegen
 */
 
 #define MODULE_BIT 0x00010000
+#include <stdbool.h>
+#define LOG_PREFIX "[VIA Graphics ACC] "
+bool enableDACDebug = true;
 
 #include "std.h"
 
@@ -78,7 +88,7 @@ status_t eng_dac_mode(int mode,float brightness)
 
 	LOG(4,("DAC: Setting screen mode %d brightness %f\n", mode, brightness));
 	/* init the palette for brightness specified */
-	/* (Nvidia cards always use MSbits from screenbuffer as index for PAL) */
+	/* DAC palette programming */
 	for (i = 0; i < 256; i++)
 	{
 		ri = i * brightness;
@@ -142,6 +152,64 @@ if (0)
 }
 
 /*program the pixpll - frequency in kHz*/
+/* Compute dot clock PLL parameters for UniChrome Pro and Chrome9 (from OpenChrome) */
+static uint32 ViaComputeProDotClock(unsigned clock)
+{
+	double fvco, fout, err, minErr;
+	uint32 dr = 0, dn, dm, maxdm, maxdn;
+	uint32 factual;
+	union {
+		struct {
+			uint32 dtz : 2;
+			uint32 dr  : 3;
+			uint32 dn  : 7;
+			uint32 dm  : 10;
+		} params;
+		uint32 packed;
+	} bestClock;
+
+	fout = (double)clock * 1.e3;
+
+	factual = ~0;
+	maxdm = factual / 14318000U;
+	minErr = 1.e10;
+	bestClock.packed = 0U;
+
+	do {
+		fvco = fout * (1 << dr);
+	} while (fvco < 300.e6 && dr++ < 8);
+
+	if (dr == 8)
+		return 0;
+
+	if (clock < 30000)
+		maxdn = 8;
+	else if (clock < 45000)
+		maxdn = 7;
+	else if (clock < 170000)
+		maxdn = 6;
+	else
+		maxdn = 5;
+
+	for (dn = 2; dn < maxdn; ++dn) {
+		for (dm = 2; dm < maxdm; ++dm) {
+			factual = 14318000U * dm;
+			factual /= dn << dr;
+			if ((err = fabs((double)factual / fout - 1.)) < 0.005) {
+				if (err < minErr) {
+					minErr = err;
+					bestClock.params.dtz = 1;
+					bestClock.params.dr = dr;
+					bestClock.params.dn = dn;
+					bestClock.params.dm = dm;
+				}
+			}
+		}
+	}
+
+	return bestClock.packed;
+}
+
 status_t eng_dac_set_pix_pll(display_mode target)
 {
 	uint8 m=0,n=0,p=0;
@@ -187,19 +255,70 @@ status_t eng_dac_set_pix_pll(display_mode target)
 	snooze(1000);
 	SEQW(PLL_RESET, ((SEQR(PLL_RESET)) & ~0x02));
 
+
+
 	/* program new frequency */
-	if (si->ps.card_arch != K8M800)
+	if (si->ps.card_arch < K8M800)
 	{
-		/* fixme: b7 is a lock-indicator or a filter select: to be determined! */
+		/* CLE266 / KM400 */
 		SEQW(PPLL_N_CLE, (n & 0x7f));
 		SEQW(PPLL_MP_CLE, ((m & 0x3f) | ((p & 0x03) << 6)));
 	}
 	else
 	{
-		/* fixme: preliminary, still needs to be confirmed */
-		SEQW(PPLL_N_OTH, (n & 0xff));
-		SEQW(PPLL_M_OTH, (m & 0x1f));
-		SEQW(PPLL_P_OTH, (p & 0x03) << 2);
+		/* UniChrome Pro & Chrome9 (including VX855 and VX900) - OpenChrome method */
+		uint32 packed = ViaComputeProDotClock(target.timing.pixel_clock);
+		if (enableDACDebug) {
+			debug_printf(LOG_PREFIX "DAC: card_arch=%d, requested pixclock=%" B_PRIu32 " kHz\n",
+				si->ps.card_arch, target.timing.pixel_clock);
+		}
+		if (packed != 0) {
+			int dtz = (packed >> 0) & 0x03;
+			int dr  = (packed >> 2) & 0x07;
+			int dn  = (packed >> 5) & 0x7f;
+			int dm  = (packed >> 12) & 0x3ff;
+
+			if (enableDACDebug) {
+				/* recompute the actual VCO output frequency for the divisors as found
+				 * (before the VX855/VX900 -2 offset below), to check PLL lock accuracy */
+				uint32 factual = 14318000U * dm;
+				factual /= dn << dr;
+				double target_hz = target.timing.pixel_clock * 1.e3;
+				debug_printf(LOG_PREFIX "  [PLL CALC] dtz=%d dr=%d dn=%d dm=%d -> actual=%" B_PRIu32 " Hz (target=%.0f Hz, err=%.3f%%)\n",
+					dtz, dr, dn, dm, factual, target_hz,
+					(((double)factual / target_hz) - 1.0) * 100.0);
+			}
+
+			if (si->ps.card_arch != VX855 && si->ps.card_arch != VX900) {
+				dm -= 2;
+				dn -= 2;
+			}
+
+			if (enableDACDebug) {
+				uint8 old_n = SEQR(PPLL_N_OTH), old_p = SEQR(PPLL_P_OTH), old_m = SEQR(PPLL_M_OTH);
+				SEQW(PPLL_N_OTH, dm & 0xff);
+				SEQW(PPLL_P_OTH, ((dm >> 8) & 0x03) | (dr << 2) | ((dtz & 1) << 7));
+				SEQW(PPLL_M_OTH, (dn & 0x7f) | ((dtz & 2) << 6));
+				debug_printf(LOG_PREFIX "  [REG WRITE] PPLL_N_OTH (SR44): PRIMA=0x%02x -> DOPO=0x%02x\n",
+					old_n, SEQR(PPLL_N_OTH));
+				debug_printf(LOG_PREFIX "  [REG WRITE] PPLL_P_OTH (SR45): PRIMA=0x%02x -> DOPO=0x%02x\n",
+					old_p, SEQR(PPLL_P_OTH));
+				debug_printf(LOG_PREFIX "  [REG WRITE] PPLL_M_OTH (SR46): PRIMA=0x%02x -> DOPO=0x%02x\n",
+					old_m, SEQR(PPLL_M_OTH));
+			} else {
+				SEQW(PPLL_N_OTH, dm & 0xff);
+				SEQW(PPLL_P_OTH, ((dm >> 8) & 0x03) | (dr << 2) | ((dtz & 1) << 7));
+				SEQW(PPLL_M_OTH, (dn & 0x7f) | ((dtz & 2) << 6));
+			}
+		} else {
+			if (enableDACDebug) {
+				debug_printf(LOG_PREFIX "  [PLL CALC] ViaComputeProDotClock FAILED (returned 0) for pixclock=%" B_PRIu32 " kHz!\n",
+					target.timing.pixel_clock);
+			}
+			SEQW(PPLL_N_OTH, (n & 0xff));
+			SEQW(PPLL_M_OTH, (m & 0x1f));
+			SEQW(PPLL_P_OTH, (p & 0x03) << 2);
+		}
 	}
 
 	/* reset primary pixelPLL (playing it safe) */
@@ -209,7 +328,14 @@ status_t eng_dac_set_pix_pll(display_mode target)
 
 	/* now select pixelclock source D (the above custom VIA programmable PLL) */
 	snooze(1000);
-	ENG_REG8(RG8_MISCW) = 0xcf;
+	if (enableDACDebug) {
+		uint8 old_misc = ENG_REG8(RG8_MISCR);
+		ENG_REG8(RG8_MISCW) = 0xcf;
+		debug_printf(LOG_PREFIX "  [REG WRITE] MISC Register (DAC clock-select): PRIMA=0x%02x -> DOPO=0x%02x\n",
+			old_misc, ENG_REG8(RG8_MISCR));
+	} else {
+		ENG_REG8(RG8_MISCW) = 0xcf;
+	}
 
 	/* Wait for the PIXPLL frequency to lock until timeout occurs */
 //fixme: do VIA cards have a LOCK indication bit??
@@ -238,13 +364,10 @@ status_t eng_dac_set_pix_pll(display_mode target)
 status_t eng_dac_pix_pll_find
 	(display_mode target,float * calc_pclk,uint8 * m_result,uint8 * n_result,uint8 * p_result, uint8 test)
 {
-	//fixme: add K8M800 calcs if needed..
-	switch (si->ps.card_arch) {
-		case K8M800:
-			return k8m800_dac_pix_pll_find(target, calc_pclk, m_result, n_result, p_result, test);
-		default:
-			return cle266_km400_dac_pix_pll_find(target, calc_pclk, m_result, n_result, p_result, test);
-	}
+	if (si->ps.card_arch >= K8M800)
+		return k8m800_dac_pix_pll_find(target, calc_pclk, m_result, n_result, p_result, test);
+	else
+		return cle266_km400_dac_pix_pll_find(target, calc_pclk, m_result, n_result, p_result, test);
 	return B_ERROR;
 }
 
@@ -555,58 +678,10 @@ status_t eng_dac_sys_pll_find(
 
 	/* determine the max. reference-frequency postscaler setting for the 
 	 * current requested clock */
-	switch (si->ps.card_arch)
-	{
-	case NV04A:
-		LOG(4,("DAC: NV04 restrictions apply\n"));
-		/* set phase-discriminator frequency range (Mhz) (verified) */
-		discr_low = 1.0;
-		discr_high = 2.0;
-		/* set max. useable reference frequency postscaler divider factor */
-		m_max = 14;
-		/* set max. useable VCO output postscaler divider factor */
-		p_max = 16;
-		break;
-	default:
-		switch (si->ps.card_type)
-		{
-		case NV28:
-			//fixme: how about some other cards???
-			LOG(4,("DAC: NV28 restrictions apply\n"));
-			/* set max. useable reference frequency postscaler divider factor;
-			 * apparantly we would get distortions on high PLL output frequencies if
-			 * we use the phase-discriminator at low frequencies */
-			if (req_sclk > 340.0) m_max = 2;			/* Fpll > 340Mhz */
-			else if (req_sclk > 200.0) m_max = 4;		/* 200Mhz < Fpll <= 340Mhz */
-				else if (req_sclk > 150.0) m_max = 6;	/* 150Mhz < Fpll <= 200Mhz */
-					else m_max = 14;					/* Fpll < 150Mhz */
-
-			/* set max. useable VCO output postscaler divider factor */
-			p_max = 32;
-			/* set phase-discriminator frequency range (Mhz) (verified) */
-			discr_low = 1.0;
-			discr_high = 27.0;
-			break;
-		default:
-			LOG(4,("DAC: NV10/NV20/NV30 restrictions apply\n"));
-			/* set max. useable reference frequency postscaler divider factor;
-			 * apparantly we would get distortions on high PLL output frequencies if
-			 * we use the phase-discriminator at low frequencies */
-			if (req_sclk > 340.0) m_max = 2;		/* Fpll > 340Mhz */
-			else if (req_sclk > 250.0) m_max = 6;	/* 250Mhz < Fpll <= 340Mhz */
-				else m_max = 14;					/* Fpll < 250Mhz */
-
-			/* set max. useable VCO output postscaler divider factor */
-			p_max = 16;
-			/* set phase-discriminator frequency range (Mhz) (verified) */
-			if (si->ps.card_type == NV36) discr_low = 3.2;
-			else discr_low = 1.0;
-			/* (high discriminator spec is failsafe) */
-			discr_high = 14.0;
-			break;
-		}
-		break;
-	}
+	discr_low = 1.0;
+	discr_high = 14.0;
+	m_max = 14;
+	p_max = 16;
 
 	LOG(4,("DAC: PLL reference frequency postscaler divider range is 1 - %d\n", m_max));
 	LOG(4,("DAC: PLL VCO output postscaler divider range is 1 - %d\n", p_max));

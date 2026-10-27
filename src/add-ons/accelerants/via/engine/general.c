@@ -2,6 +2,13 @@
    Mark Watson 12/1999,
    Apsed,
    Rudolf Cornelissen 10/2002-2/2016
+
+   Portions based on the OpenChrome Project (https://www.freedesktop.org/wiki/Openchrome):
+   Copyright 2005-2016 The OpenChrome Project
+   Copyright 2004-2005 The Unichrome Project
+   Copyright 1998-2003 VIA Technologies, Inc.
+   Copyright 2001-2003 S3 Graphics, Inc.
+   Authors: Kevin Brace, James Simmons, Xavier Bachelot, Thomas Hellström, Luc Verhaegen
 */
 
 #define MODULE_BIT 0x00008000
@@ -90,7 +97,7 @@ status_t eng_general_powerup()
 {
 	status_t status;
 
-	LOG(1,("POWERUP: Haiku VIA Accelerant 0.19 running.\n"));
+	LOG(1,("POWERUP: Haiku VIA Accelerant 0.20 running.\n"));
 
 	/* preset no laptop */
 	si->ps.laptop = false;
@@ -127,6 +134,66 @@ status_t eng_general_powerup()
 		si->ps.card_type = VT7205;
 		si->ps.card_arch = KM400;
 		LOG(4,("POWERUP: Detected VIA KM400 Unichrome (VT7205)\n"));
+		status = engxx_general_powerup();
+		break;
+	case 0x31181106:
+		si->ps.card_type = VT3118;
+		si->ps.card_arch = PM800;
+		LOG(4,("POWERUP: Detected VIA PM800 / PN800 / PM880 (VT3118)\n"));
+		status = engxx_general_powerup();
+		break;
+	case 0x33441106:
+		si->ps.card_type = VT3314;
+		si->ps.card_arch = P4M800PRO;
+		LOG(4,("POWERUP: Detected VIA P4M800 Pro / VN800 / CN700 (VT3314)\n"));
+		status = engxx_general_powerup();
+		break;
+	case 0x31571106:
+		si->ps.card_type = VT3157;
+		si->ps.card_arch = CX700;
+		LOG(4,("POWERUP: Detected VIA CX700 / VX700 (VT3157)\n"));
+		status = engxx_general_powerup();
+		break;
+	case 0x32251106:
+		si->ps.card_type = VT3225;
+		si->ps.card_arch = CN750;
+		LOG(4,("POWERUP: Detected VIA CN750 (VT3225)\n"));
+		status = engxx_general_powerup();
+		break;
+	case 0x33431106:
+		si->ps.card_type = VT3327;
+		si->ps.card_arch = P4M890;
+		LOG(4,("POWERUP: Detected VIA P4M890 / VN890 / CN800 (VT3327)\n"));
+		status = engxx_general_powerup();
+		break;
+	case 0x32301106:
+		si->ps.card_type = VT3336;
+		si->ps.card_arch = K8M890;
+		LOG(4,("POWERUP: Detected VIA K8M890 / K8N890 (VT3336)\n"));
+		status = engxx_general_powerup();
+		break;
+	case 0x33711106:
+		si->ps.card_type = VT3364;
+		si->ps.card_arch = P4M900;
+		LOG(4,("POWERUP: Detected VIA P4M900 / VN896 / CN896 (VT3364)\n"));
+		status = engxx_general_powerup();
+		break;
+	case 0x11221106:
+		si->ps.card_type = VT3353;
+		si->ps.card_arch = VX800;
+		LOG(4,("POWERUP: Detected VIA VX800 / VX820 Chrome9 HC3 (VT3353)\n"));
+		status = engxx_general_powerup();
+		break;
+	case 0x51221106:
+		si->ps.card_type = VT3409;
+		si->ps.card_arch = VX855;
+		LOG(4,("POWERUP: Detected VIA VX855 / VX875 Chrome9 HCM (VT3409)\n"));
+		status = engxx_general_powerup();
+		break;
+	case 0x71221106:
+		si->ps.card_type = VT3410;
+		si->ps.card_arch = VX900;
+		LOG(4,("POWERUP: Detected VIA VX900 Chrome9 HD (VT3410)\n"));
 		status = engxx_general_powerup();
 		break;
 	default:
@@ -294,24 +361,12 @@ void set_crtc_owner(bool head)
 	{
 		if (!head)
 		{
-			/* note: 'OWNER' is a non-standard register in behaviour(!) on NV11's,
-			 * while non-NV11 cards behave normally.
-			 *
-			 * Double-write action needed on those strange NV11 cards: */
-			/* RESET: needed on NV11 */
-			CRTCW(OWNER, 0xff);
-			/* enable access to CRTC1, SEQ1, GRPH1, ATB1, ??? */
+			/* enable access to CRTC1, SEQ1, GRPH1, ATB1 */
 			CRTCW(OWNER, 0x00);
 		}
 		else
 		{
-			/* note: 'OWNER' is a non-standard register in behaviour(!) on NV11's,
-			 * while non-NV11 cards behave normally.
-			 *
-			 * Double-write action needed on those strange NV11 cards: */
-			/* RESET: needed on NV11 */
-			CRTC2W(OWNER, 0xff);
-			/* enable access to CRTC2, SEQ2, GRPH2, ATB2, ??? */
+			/* enable access to CRTC2, SEQ2, GRPH2, ATB2 */
 			CRTC2W(OWNER, 0x03);
 		}
 	}
@@ -370,34 +425,17 @@ status_t eng_general_output_select(bool cross)
 	/* make sure this call is warranted */
 	if (si->ps.secondary_head)
 	{
-		/* NV11 cards can't switch heads (confirmed) */
-		if (si->ps.card_type != NV11)
+		if (cross)
 		{
-			if (cross)
-			{
-				LOG(4,("INIT: switching analog outputs to be cross-connected\n"));
-
-				/* enable head 2 on connector 1 */
-				/* (b8 = select CRTC (head) for output,
-				 *  b4 = ??? (confirmed not to be a FP switch),
-				 *  b0 = enable CRT) */
-				DACW(OUTPUT, 0x00000101);
-				/* enable head 1 on connector 2 */
-				DAC2W(OUTPUT, 0x00000001);
-			}
-			else
-			{
-				LOG(4,("INIT: switching analog outputs to be straight-through\n"));
-
-				/* enable head 1 on connector 1 */
-				DACW(OUTPUT, 0x00000001);
-				/* enable head 2 on connector 2 */
-				DAC2W(OUTPUT, 0x00000101);
-			}
+			LOG(4,("INIT: switching analog outputs to be cross-connected\n"));
+			DACW(OUTPUT, 0x00000101);
+			DAC2W(OUTPUT, 0x00000001);
 		}
 		else
 		{
-			LOG(4,("INIT: NV11 analog outputs are hardwired to be straight-through\n"));
+			LOG(4,("INIT: switching analog outputs to be straight-through\n"));
+			DACW(OUTPUT, 0x00000001);
+			DAC2W(OUTPUT, 0x00000101);
 		}
 		return B_OK;
 	}
@@ -455,6 +493,22 @@ static status_t eng_general_bios_to_powergraphics()
 	SEQW(LOCK, 0x01);
 	CRTCW(VSYNCE ,(CRTCR(VSYNCE) & 0x7f));
 
+	/* enable MMIO based on architecture (OpenChrome logic) */
+	if (si->ps.card_arch >= CX700)
+		SEQW(MMIO_EN, (SEQR(MMIO_EN) | 0x08));
+	else
+		SEQW(MMIO_EN, (SEQR(MMIO_EN) | 0x68));
+
+	/* unprotect CRT timing registers: bit 4 for VX855/VX900, bit 0 for earlier */
+	if (si->ps.card_arch >= VX855)
+		CRTCW(CR47, (CRTCR(CR47) & ~0x10));
+	else
+		CRTCW(CR47, (CRTCR(CR47) & ~0x01));
+
+	/* ensure DAC is not shut down on CX700 and VX series */
+	if (si->ps.card_arch == CX700 || si->ps.card_arch >= VX800)
+		SEQW(CR5E, (SEQR(CR5E) & ~0x01));
+
 	/* turn off both displays and the hardcursors (also disables transfers) */
 	head1_dpms(false, false, false);
 	head1_cursor_hide();
@@ -468,12 +522,6 @@ static status_t eng_general_bios_to_powergraphics()
 	if (0)
 	{
 		/* switch overlay engine to CRTC1 */
-		/* bit 17: GPU FP port #1	(confirmed NV25, NV28, confirmed not on NV34),
-		 * bit 16: GPU FP port #2	(confirmed NV25, NV28, NV34),
-		 * bit 12: overlay engine	(all cards),
-		 * bit  9: TVout chip #2	(confirmed on NV18, NV25, NV28),
-		 * bit  8: TVout chip #1	(all cards),
-		 * bit  4: both I2C busses	(all cards) */
 		ENG_REG32(RG32_2FUNCSEL) &= ~0x00001000;
 		ENG_REG32(RG32_FUNCSEL) |= 0x00001000;
 	}
@@ -584,56 +632,16 @@ status_t eng_general_validate_pic_size (display_mode *target, uint32 *bytes_per_
 	}
 
 	/* set virtual_width limit for accelerated modes */
-//via fixme:
-	switch (si->ps.card_arch)
+	switch (target->space)
 	{
-	case NV04A:
-		/* confirmed for:
-		 * TNT1, TNT2, TNT2-M64 */
-		switch(target->space)
-		{
-			case B_CMAP8: max_acc_width = 8176; break;
-			case B_RGB15: max_acc_width = 4088; break;
-			case B_RGB16: max_acc_width = 4088; break;
-			case B_RGB24: max_acc_width = 2720; break;
-			case B_RGB32: max_acc_width = 2044; break;
-			default:
-				LOG(8,("INIT: unknown color space: 0x%08x\n", target->space));
-				return B_ERROR;
-		}
-		break;
-	default:
-		/* confirmed for:
-		 * GeForce2 MX400, GeForce4 MX440, GeForceFX 5200 */
-		switch(target->space)
-		{
-			case B_CMAP8: max_acc_width = 16368; break;
-			case B_RGB15: max_acc_width =  8184; break;
-			case B_RGB16: max_acc_width =  8184; break;
-			case B_RGB24: max_acc_width =  5456; break;
-			case B_RGB32: max_acc_width =  4092; break;
-			default:
-				LOG(8,("INIT: unknown color space: 0x%08x\n", target->space));
-				return B_ERROR;
-		}
-		/* NV31 (confirmed GeForceFX 5600) has NV20A granularity!
-		 * So let it fall through... */
-		if (si->ps.card_type != NV31) break;
-	case NV20A:
-		/* confirmed for:
-		 * GeForce4 Ti4200 */
-		switch(target->space)
-		{
-			case B_CMAP8: max_acc_width = 16320; break;
-			case B_RGB15: max_acc_width =  8160; break;
-			case B_RGB16: max_acc_width =  8160; break;
-			case B_RGB24: max_acc_width =  5440; break;
-			case B_RGB32: max_acc_width =  4080; break;
-			default:
-				LOG(8,("INIT: unknown color space: 0x%08x\n", target->space));
-				return B_ERROR;
-		}
-		break;
+		case B_CMAP8: max_acc_width = 16368; break;
+		case B_RGB15: max_acc_width =  8184; break;
+		case B_RGB16: max_acc_width =  8184; break;
+		case B_RGB24: max_acc_width =  5456; break;
+		case B_RGB32: max_acc_width =  4092; break;
+		default:
+			LOG(8,("INIT: unknown color space: 0x%08x\n", target->space));
+			return B_ERROR;
 	}
 
 //via ok:
@@ -658,16 +666,12 @@ status_t eng_general_validate_pic_size (display_mode *target, uint32 *bytes_per_
 	/* check for acc capability, and adjust mode to adhere to hardware constraints */
 	if (max_acc_width <= max_crtc_width)
 	{
-		/* check if we can setup this mode with acceleration */
-//		*acc_mode = true;
-//blocking acc totally:
-*acc_mode = false;
-		/* virtual_width */
-		if (target->virtual_width > max_acc_width) *acc_mode = false;
-		/* virtual_height */
-		/* (NV cards can even do more than this(?)...
-		 *  but 4096 is confirmed on all cards at max. accelerated width.) */
-		if (target->virtual_height > 4096) *acc_mode = false;
+		/* enable acceleration for valid VIA 2D engine dimensions (up to 2047x2047) */
+		*acc_mode = true;
+		/* virtual_width: Hardware limitation is 2047 for 2D Engine */
+		if (target->virtual_width > 2047) *acc_mode = false;
+		/* virtual_height: Hardware limitation is 2047 for 2D Engine */
+		if (target->virtual_height > 2047) *acc_mode = false;
 
 		/* now check virtual_size based on CRTC constraints */
 		if (target->virtual_width > max_crtc_width) target->virtual_width = max_crtc_width;
