@@ -243,10 +243,9 @@ status_t radeon_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint1
 
     bool isAruba = is_radeon_aruba();
     bigtime_t arubaStart = 0;
+    bigtime_t arubaLapsed = 0;
 
     if (isAruba) {
-        arubaStart = system_time();
-
         // Vedi radeon_set_cursor_bitmap: svuotiamo i WC buffer della CPU
         // prima di invalidare la cache di lettura HDP lato GPU.
         __sync_synchronize();
@@ -259,24 +258,24 @@ status_t radeon_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint1
     gInfo->cursor_hoty = hotY;
 
     if (isAruba) {
-        CTRACE("%s: before update, CUR_CONTROL=0x%08" B_PRIx32
-            " vramStart=0x%08" B_PRIx64 " cursorOffset=0x%08" B_PRIx32
-            " chipsetFlags=0x%08" B_PRIx32 "\n", __func__,
-            Read32(OUT, EVERGREEN_CUR_CONTROL), gInfo->fb.vramStart,
-            gInfo->cursor_fb_offset, gInfo->shared_info->chipsetFlags);
+        arubaStart = system_time();
 
         // Aspettiamo che un eventuale update precedente sia stato recepito
         // dall'hardware prima di accodarne un altro.
-        int32 waitTicks = wait_cursor_update_idle();
-        if (waitTicks != 0) {
-            CTRACE("%s: wait pre-update: %" B_PRId32 " tick(s) da 100us (0=subito libero, -1=timeout)\n",
-                __func__, waitTicks);
-        }
+        wait_cursor_update_idle();
 
         // Vedi radeon_set_cursor_bitmap: disabilitiamo PRIMA del LOCK, cosi'
         // la scrittura di EN=0 e' immediata e non viene accodata nella
         // stessa transazione bloccata del valore finale (EN=1).
         radeon_show_cursor(false);
+
+        // L'hardware ha bisogno di un margine reale (non solo ordinamento
+        // CPU) per "digerire" wait+hide: portiamo il tempo totale trascorso
+        // a un pavimento fisso, misurato empiricamente su questo chip.
+        arubaLapsed = system_time() - arubaStart;
+        if (arubaLapsed < 12000) {
+            snooze(12000 - arubaLapsed);
+        }
     }
 
     // LOCK UPDATE prima della scrittura dei registri geometrie
@@ -306,24 +305,22 @@ status_t radeon_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint1
     Write32(OUT, EVERGREEN_CUR_UPDATE, 0);
 
     if (isAruba) {
+        arubaStart = system_time();
+
         // Confermiamo che QUESTO update sia stato recepito dall'hardware
         // prima di ritornare, invece di fidarci che sia gia' avvenuto.
-        int32 waitTicksPost = wait_cursor_update_idle();
-        if (waitTicksPost != 0) {
-            CTRACE("%s: wait post-update: %" B_PRId32 " tick(s) da 100us (0=subito libero, -1=timeout)\n",
-                __func__, waitTicksPost);
-        }
+        wait_cursor_update_idle();
 
         // Riabilitiamo esplicitamente tramite show_cursor: fronte 0->1
         // completo hide -> update -> show.
         radeon_show_cursor(true);
 
-        CTRACE("%s: after update, CUR_CONTROL=0x%08" B_PRIx32
-            " surfaceAddr=0x%08" B_PRIx32 "\n", __func__, Read32(OUT, EVERGREEN_CUR_CONTROL),
-            Read32(OUT, EVERGREEN_CUR_SURFACE_ADDRESS));
-
-        CTRACE("%s: blocco isAruba completato in %" B_PRId64 " us\n",
-            __func__, system_time() - arubaStart);
+        // Vedi sopra: pavimento fisso sul tempo totale trascorso per
+        // wait+show.
+        arubaLapsed = system_time() - arubaStart;
+        if (arubaLapsed < 15000) {
+            snooze(15000 - arubaLapsed);
+        }
     }
 
     return B_OK;
