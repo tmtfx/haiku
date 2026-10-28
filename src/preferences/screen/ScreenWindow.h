@@ -98,6 +98,7 @@ private:
 			BMenuField*		fTVStandardField;
 
 			BSlider*		fBrightnessSlider;
+			BSlider*		fRotationSlider;
 			BCheckBox*		fHardwareCursorCheckbox;
 			BCheckBox*		f2DAccelerationCheckbox;
 			BCheckBox*		f2DDebugCheckbox;
@@ -117,6 +118,7 @@ private:
 			uint32			fOriginalWorkspacesColumns;
 			uint32			fOriginalWorkspacesRows;
 			float			fOriginalBrightness;
+			int32			fOriginalRotation;
 			bool			fModified;
 };
 

@@ -221,6 +221,9 @@ AccelerantHWInterface::AccelerantHWInterface()
 	fAccSetBrightness(NULL),
 	fAccGetBrightness(NULL),
 
+	// rotation hook
+	fAccGetDisplayRotationCapabilities(NULL),
+
 	// overlay hooks
 	fAccOverlayCount(NULL),
 	fAccOverlaySupportedSpaces(NULL),
@@ -546,6 +549,10 @@ AccelerantHWInterface::_SetupDefaultHooks()
 	// brightness
 	fAccGetBrightness = (get_brightness)fAccelerantHook(B_GET_BRIGHTNESS, NULL);
 	fAccSetBrightness = (set_brightness)fAccelerantHook(B_SET_BRIGHTNESS, NULL);
+
+	// rotation
+	fAccGetDisplayRotationCapabilities = (get_display_rotation_capabilities)fAccelerantHook(
+		B_GET_DISPLAY_ROTATION_CAPABILITIES, NULL);
 
 	return B_OK;
 }
@@ -1220,6 +1227,21 @@ AccelerantHWInterface::GetBrightness(float* brightness)
 		return B_UNSUPPORTED;
 
 	return fAccGetBrightness(brightness);
+}
+
+
+status_t
+AccelerantHWInterface::GetRotationCapabilities(uint32& outCapabilities) const
+{
+	AutoReadLocker _(this);
+
+	if (!fAccGetDisplayRotationCapabilities) {
+		outCapabilities = 0;
+		return B_OK;
+	}
+
+	outCapabilities = fAccGetDisplayRotationCapabilities();
+	return B_OK;
 }
 
 

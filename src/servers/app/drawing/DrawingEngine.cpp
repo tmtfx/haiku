@@ -1614,3 +1614,12 @@ DrawingEngine::_CopyRect(uint8* src, uint32 width, uint32 height,
 		}
 	}
 }
+
+
+int32
+DrawingEngine::DisplayRotation() const
+{
+	if (fGraphicsCard != NULL)
+		return fGraphicsCard->Rotation();
+	return 0;
+}

@@ -48,6 +48,7 @@
 
 #include <InterfacePrivate.h>
 #include <CheckBox.h>
+#include <private/shared/DisplayRotation.h>
 
 #include "AlertWindow.h"
 #include "Constants.h"
@@ -247,6 +248,18 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 		fBrightnessSlider->Hide();
 		fOriginalBrightness = -1;
 	}
+
+	// rotation slider
+	fRotationSlider = new BSlider("rotation", B_TRANSLATE("Rotation:"),
+		NULL, 0, 270, B_HORIZONTAL);
+	fRotationSlider->SetModificationMessage(new BMessage(SLIDER_ROTATION_MSG));
+	fRotationSlider->SetLimitLabels(B_TRANSLATE("0°"), B_TRANSLATE("270°"));
+	fRotationSlider->SetKeyIncrementValue(90);
+	groupView->AddChild(fRotationSlider);
+
+	// Read rotation setting
+	fOriginalRotation = BPrivate::get_display_rotation("display");
+	fRotationSlider->SetValue(fOriginalRotation);
 
 	// box on the left below the screen box with workspaces
 
@@ -1317,6 +1330,13 @@ ScreenWindow::MessageReceived(BMessage* message)
 			break;
 		}
 
+		case SLIDER_ROTATION_MSG:
+		{
+			// Rotation value will be applied in _Apply()
+			_CheckApplyEnabled();
+			break;
+		}
+
 		case TOGGLE_HARDWARE_CURSOR_MSG:
 		{
 			bool enabled = fHardwareCursorCheckbox->Value() == B_CONTROL_ON;
@@ -1575,6 +1595,11 @@ ScreenWindow::_Apply()
 		}
 
 		fActive = fSelected;
+
+		// Save rotation settings
+		int32 rotation = fRotationSlider->Value();
+		BPrivate::set_display_rotation(rotation);
+		fOriginalRotation = rotation;
 
 		// TODO: only show alert when this is an unknown mode
 		BAlert* window = new AlertWindow(this);

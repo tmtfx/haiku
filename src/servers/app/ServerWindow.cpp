@@ -4614,8 +4614,10 @@ ServerWindow::_EnableDirectWindowMode()
 		return B_ERROR;
 	}
 
-	if (fDesktop->HWInterface()->FrontBuffer() == NULL) {
+	if (fDesktop->HWInterface()->FrontBuffer() == NULL
+		|| fDesktop->HWInterface()->Rotation() != 0) {
 		// direct window mode not supported
+		// (rotated display would have sideways framebuffer)
 		return B_UNSUPPORTED;
 	}
 

@@ -214,6 +214,9 @@ public:
 								{ return BRect(r.left - fOriginX, r.top - fOriginY,
 									r.right - fOriginX, r.bottom - fOriginY); }
 
+	// display rotation
+			int32			DisplayRotation() const;
+
 private:
 	friend class DrawTransaction;
 

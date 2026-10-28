@@ -52,6 +52,7 @@ HWInterface::HWInterface()
 	fHardwareCursorEnabled(false),
 	fCursorLocation(0, 0),
 	fVGADevice(-1),
+	fDisplayRotation(0),
 	fListeners(20)
 {
 }
@@ -137,6 +138,33 @@ HWInterface::SetCursor(ServerCursor* cursor)
 
 	fFloatingOverlaysLock.Unlock();
 	UnlockParallelAccess();
+}
+
+
+status_t
+HWInterface::SetDisplayRotation(int32 degrees)
+{
+	// Validate rotation value
+	if (degrees != 0 && degrees != 90 && degrees != 180 && degrees != 270)
+		return B_BAD_VALUE;
+
+	WriteLock();
+	fDisplayRotation = degrees;
+	WriteUnlock();
+
+	// Disable features not compatible with rotation
+	if (degrees != 0) {
+		SetCursorVisible(false);
+	}
+
+	return B_OK;
+}
+
+
+int32
+HWInterface::Rotation() const
+{
+	return fDisplayRotation;
 }
 
 

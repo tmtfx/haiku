@@ -54,6 +54,7 @@ enum {
 	B_GET_EDID_INFO,					/* optional */
 	B_SET_BRIGHTNESS,                   /* optional */
 	B_GET_BRIGHTNESS,                   /* optional */
+	B_GET_DISPLAY_ROTATION_CAPABILITIES,	/* optional */
 
 	/* cursor managment */
 	B_MOVE_CURSOR = 0x200,				/* optional */
@@ -310,6 +311,7 @@ typedef status_t (*get_monitor_info)(monitor_info* info);
 typedef status_t (*get_edid_info)(void* info, uint32 size, uint32* _version);
 typedef status_t (*set_brightness)(float brightness);
 typedef status_t (*get_brightness)(float* brightness);
+typedef uint32 (*get_display_rotation_capabilities)(void);
 
 typedef sem_id (*accelerant_retrace_semaphore)(void);
 

@@ -25,6 +25,8 @@
 #include "MultiLocker.h"
 #include "ServerCursor.h"
 
+#include <private/shared/DisplayRotation.h>
+
 
 class BString;
 class DrawingEngine;
@@ -167,6 +169,12 @@ public:
 	virtual	RenderingBuffer*	BackBuffer() const = 0;
 	virtual	bool				IsDoubleBuffered() const = 0;
 
+	// Display rotation support
+	virtual	status_t			SetDisplayRotation(int32 degrees);
+	virtual	int32				Rotation() const;
+	virtual	status_t			GetRotationCapabilities(uint32& outCapabilities) const
+									{ outCapabilities = 0; return B_OK; }
+
 	// Invalidate is used for scheduling an area for updating
 	virtual	status_t			InvalidateRegion(const BRegion& region);
 	virtual	status_t			Invalidate(const BRect& frame);
@@ -268,6 +276,8 @@ protected:
 			BRect				fTrackingRect;
 
 			int					fVGADevice;
+
+			int32				fDisplayRotation;	// 0, 90, 180, or 270 degrees
 
 private:
 			BList				fListeners;

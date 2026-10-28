@@ -63,6 +63,8 @@ public:
 	virtual status_t			SetBrightness(float);
 	virtual status_t			GetBrightness(float*);
 
+	virtual status_t			GetRotationCapabilities(uint32& outCapabilities) const;
+
 	virtual status_t			GetAccelerantPath(BString& path);
 	virtual status_t			GetDriverPath(BString& path);
 
@@ -179,6 +181,9 @@ private:
 			// brightness hooks
 			set_brightness		fAccSetBrightness;
 			get_brightness		fAccGetBrightness;
+
+			// rotation hook
+			get_display_rotation_capabilities fAccGetDisplayRotationCapabilities;
 
 			// overlay hooks
 			overlay_count				fAccOverlayCount;

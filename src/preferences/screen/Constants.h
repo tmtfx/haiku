@@ -47,6 +47,7 @@ static const uint32 TOGGLE_HARDWARE_CURSOR_MSG = 'thcr';
 static const uint32 TOGGLE_2D_ACCELERATION_MSG = 't2da';
 static const uint32 TOGGLE_2D_DEBUG_MSG = 't2db';
 static const uint32 TOGGLE_2D_COMPOSITOR_MSG = 't2dc';
+static const uint32 SLIDER_ROTATION_MSG = 'srot';
 
 // Constants
 extern const char* kBackgroundsSignature;
