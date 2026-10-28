@@ -139,6 +139,15 @@
 #define XGI_REG_CURSOR_Y		0x8510
 #define XGI_CURSOR_ENABLE		(1U << 30)
 
+/* XGI's hardware cursor wants a (mask, source) pair, not BeOS' native
+ * (AND, XOR) planes (refcode/xgi_cursor.c:198-204:
+ * HARDWARE_CURSOR_INVERT_MASK | HARDWARE_CURSOR_AND_SOURCE_WITH_MASK |
+ * HARDWARE_CURSOR_SWAP_SOURCE_AND_MASK). The exact plane order isn't
+ * derivable from the refcode alone (depends on an Xorg core convention
+ * not present in this repository) - flip this if the first hardware test
+ * shows an empty/inverted cursor box instead of the arrow. */
+#define XGI_CURSOR_SWAP_PLANES	1
+
 /* Video Overlay Register Indices (accessed via RelIO + 0x02 index, RelIO + 0x03 data) */
 #define XGI_VI_INDEX_WIN_HOR_START_LOW		0x01
 #define XGI_VI_INDEX_WIN_HOR_END_LOW		0x02
@@ -243,6 +252,28 @@ xgi_in8(uint16 port)
 #define out8(value, port) xgi_out8((value), (port))
 #define in8(port)         xgi_in8((port))
 
+/* VGA-style indexed register accessors (SEQ/CRTC/GRC/ATTR/MISC), shared
+ * between DisplayModes.cpp (CRTC/timing programming) and Pll.cpp (VCLK).
+ * Implemented in DisplayModes.cpp. */
+void		out_seq(uint8 index, uint8 val);
+uint8		in_seq(uint8 index);
+void		out_crt(uint8 index, uint8 val);
+uint8		in_crt(uint8 index);
+void		out_gr(uint8 index, uint8 val);
+uint8		in_gr(uint8 index);
+void		out_att(uint8 index, uint8 val);
+void		out_misc(uint8 val);
+
+/* PLL (VCLK) divider calculation - Pll.cpp. Porting of compute_vclk()/
+ * XGICalcClock() from refcode/xgi_dac.c. */
+struct XgiPllParams {
+	uint8	sr2b;
+	uint8	sr2c;
+};
+
+bool		xgi_calc_pll(uint32 pixelClockKHz, XgiPllParams* out);
+void		xgi_program_vclk(const XgiPllParams& params);
+
 /* Prototypes - InitAccelerant.cpp */
 status_t	xgi_init_accelerant(int fd);
 void		xgi_uninit_accelerant(void);
@@ -271,6 +302,7 @@ status_t	xgi_set_dpms_mode(uint32 flags);
 status_t	xgi_get_preferred_mode(display_mode* preferredMode);
 status_t	xgi_get_edid_info(void* info, size_t size, uint32* version);
 status_t	xgi_create_mode_list(void);
+void		xgi_program_crt1(const display_mode& mode, uint32 pitchBytes);
 
 /* Prototypes - Cursor.cpp */
 status_t	xgi_set_cursor_shape(uint16 width, uint16 height, uint16 hotX,

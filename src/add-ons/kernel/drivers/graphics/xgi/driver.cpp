@@ -409,7 +409,9 @@ init_device(DeviceInfo& device)
 	device.sharedInfo->bus = device.pciInfo.bus;
 	device.sharedInfo->device = device.pciInfo.device;
 	device.sharedInfo->function = device.pciInfo.function;
-	device.sharedInfo->maxPixelClock = 350000;
+	/* Limit intrinsic to the PLL divider search (compute_vclk range,
+	 * refcode/xgi_dac.c:66-167); not chip-family dependent. */
+	device.sharedInfo->maxPixelClock = 250000;
 
 	device.sharedInfo->colorSpaceCount = 3;
 	device.sharedInfo->colorSpaces[0] = B_RGB32;

@@ -10,6 +10,7 @@ UsePrivateHeaders [ FDirName graphics common ] ;
 Addon xgi.accelerant :
 	InitAccelerant.cpp
 	DisplayModes.cpp
+	Pll.cpp
 	Cursor.cpp
 	Engine.cpp
 	Overlay.cpp
