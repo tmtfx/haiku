@@ -675,10 +675,135 @@ HWInterface::_DrawCursor(IntRect area) const
 }
 
 
+// Helper function for 90° clockwise rotation (RGB32/RGBA32 only)
+static inline void
+_RotatePixels90CW_RGB32(uint8* src, uint32 srcBPR, int32 srcWidth, int32 srcHeight,
+	uint8* dst, uint32 dstBPR)
+{
+	for (int32 srcY = 0; srcY < srcHeight; srcY++) {
+		uint32* srcRow = (uint32*)(src + srcY * srcBPR);
+		for (int32 srcX = 0; srcX < srcWidth; srcX++) {
+			uint32 pixel = srcRow[srcX];
+			// 90° CW: (srcX, srcY) → (srcHeight - 1 - srcY, srcX)
+			int32 dstX = srcHeight - 1 - srcY;
+			int32 dstY = srcX;
+			uint32* dstPixel = (uint32*)(dst + dstY * dstBPR + dstX * 4);
+			*dstPixel = pixel;
+		}
+	}
+}
+
+// Helper function for 180° rotation (RGB32/RGBA32 only)
+static inline void
+_RotatePixels180_RGB32(uint8* src, uint32 srcBPR, int32 srcWidth, int32 srcHeight,
+	uint8* dst, uint32 dstBPR)
+{
+	for (int32 srcY = 0; srcY < srcHeight; srcY++) {
+		uint32* srcRow = (uint32*)(src + srcY * srcBPR);
+		for (int32 srcX = 0; srcX < srcWidth; srcX++) {
+			uint32 pixel = srcRow[srcX];
+			// 180°: (srcX, srcY) → (srcWidth - 1 - srcX, srcHeight - 1 - srcY)
+			int32 dstX = srcWidth - 1 - srcX;
+			int32 dstY = srcHeight - 1 - srcY;
+			uint32* dstPixel = (uint32*)(dst + dstY * dstBPR + dstX * 4);
+			*dstPixel = pixel;
+		}
+	}
+}
+
+// Helper function for 270° clockwise rotation (=90° CCW) (RGB32/RGBA32 only)
+static inline void
+_RotatePixels270CW_RGB32(uint8* src, uint32 srcBPR, int32 srcWidth, int32 srcHeight,
+	uint8* dst, uint32 dstBPR)
+{
+	for (int32 srcY = 0; srcY < srcHeight; srcY++) {
+		uint32* srcRow = (uint32*)(src + srcY * srcBPR);
+		for (int32 srcX = 0; srcX < srcWidth; srcX++) {
+			uint32 pixel = srcRow[srcX];
+			// 270° CW: (srcX, srcY) → (srcY, srcWidth - 1 - srcX)
+			int32 dstX = srcY;
+			int32 dstY = srcWidth - 1 - srcX;
+			uint32* dstPixel = (uint32*)(dst + dstY * dstBPR + dstX * 4);
+			*dstPixel = pixel;
+		}
+	}
+}
+
+// Helper function for 90° clockwise rotation (RGB24 only)
+static inline void
+_RotatePixels90CW_RGB24(uint8* src, uint32 srcBPR, int32 srcWidth, int32 srcHeight,
+	uint8* dst, uint32 dstBPR)
+{
+	for (int32 srcY = 0; srcY < srcHeight; srcY++) {
+		uint8* srcRow = src + srcY * srcBPR;
+		for (int32 srcX = 0; srcX < srcWidth; srcX++) {
+			// Read 3-byte RGB pixel from src
+			uint8 r = srcRow[srcX * 3 + 0];
+			uint8 g = srcRow[srcX * 3 + 1];
+			uint8 b = srcRow[srcX * 3 + 2];
+			
+			// 90° CW: (srcX, srcY) → (srcHeight - 1 - srcY, srcX)
+			int32 dstX = srcHeight - 1 - srcY;
+			int32 dstY = srcX;
+			uint8* dstPixel = dst + dstY * dstBPR + dstX * 3;
+			dstPixel[0] = r;
+			dstPixel[1] = g;
+			dstPixel[2] = b;
+		}
+	}
+}
+
+// Helper function for 180° rotation (RGB24 only)
+static inline void
+_RotatePixels180_RGB24(uint8* src, uint32 srcBPR, int32 srcWidth, int32 srcHeight,
+	uint8* dst, uint32 dstBPR)
+{
+	for (int32 srcY = 0; srcY < srcHeight; srcY++) {
+		uint8* srcRow = src + srcY * srcBPR;
+		for (int32 srcX = 0; srcX < srcWidth; srcX++) {
+			uint8 r = srcRow[srcX * 3 + 0];
+			uint8 g = srcRow[srcX * 3 + 1];
+			uint8 b = srcRow[srcX * 3 + 2];
+			
+			// 180°: (srcX, srcY) → (srcWidth - 1 - srcX, srcHeight - 1 - srcY)
+			int32 dstX = srcWidth - 1 - srcX;
+			int32 dstY = srcHeight - 1 - srcY;
+			uint8* dstPixel = dst + dstY * dstBPR + dstX * 3;
+			dstPixel[0] = r;
+			dstPixel[1] = g;
+			dstPixel[2] = b;
+		}
+	}
+}
+
+// Helper function for 270° clockwise rotation (RGB24 only)
+static inline void
+_RotatePixels270CW_RGB24(uint8* src, uint32 srcBPR, int32 srcWidth, int32 srcHeight,
+	uint8* dst, uint32 dstBPR)
+{
+	for (int32 srcY = 0; srcY < srcHeight; srcY++) {
+		uint8* srcRow = src + srcY * srcBPR;
+		for (int32 srcX = 0; srcX < srcWidth; srcX++) {
+			uint8 r = srcRow[srcX * 3 + 0];
+			uint8 g = srcRow[srcX * 3 + 1];
+			uint8 b = srcRow[srcX * 3 + 2];
+			
+			// 270° CW: (srcX, srcY) → (srcY, srcWidth - 1 - srcX)
+			int32 dstX = srcY;
+			int32 dstY = srcWidth - 1 - srcX;
+			uint8* dstPixel = dst + dstY * dstBPR + dstX * 3;
+			dstPixel[0] = r;
+			dstPixel[1] = g;
+			dstPixel[2] = b;
+		}
+	}
+}
+
 /*!	- source is assumed to be already at the right offset
 	- source is assumed to be in B_RGBA32 format
 	- location in front buffer is calculated
 	- conversion from B_RGBA32 to format of front buffer is taken care of
+	- if display rotation is enabled, pixels are rotated 90°, 180°, or 270°
 */
 void
 HWInterface::_CopyToFront(uint8* src, uint32 srcBPR, int32 x, int32 y,
@@ -690,21 +815,65 @@ HWInterface::_CopyToFront(uint8* src, uint32 srcBPR, int32 x, int32 y,
 	uint32 dstBPR = frontBuffer->BytesPerRow();
 
 	// transfer, handle colorspace conversion
+	int32 rotation = Rotation();
+	
 	switch (frontBuffer->ColorSpace()) {
 		case B_RGB32:
 		case B_RGBA32:
 		{
-			int32 bytes = (right - x + 1) * 4;
+			// Handle rotation: for 90°/270° swap width/height
+			if (rotation != 0) {
+				int32 srcWidth = right - x + 1;
+				int32 srcHeight = bottom - y + 1;
+				
+				// For rotated output, destination buffer has swapped dimensions
+				// when rotation is 90° or 270°
+				int32 dstWidth = (rotation == 90 || rotation == 270) ? srcHeight : srcWidth;
+				int32 dstHeight = (rotation == 90 || rotation == 270) ? srcWidth : srcHeight;
+				
+				// Ensure destination coordinates are valid
+				if (dstWidth > 0 && dstHeight > 0) {
+					switch (rotation) {
+						case 90:
+							_RotatePixels90CW_RGB32(src, srcBPR, srcWidth, srcHeight,
+								dst, dstBPR);
+							break;
+						case 180:
+							_RotatePixels180_RGB32(src, srcBPR, srcWidth, srcHeight,
+								dst, dstBPR);
+							break;
+						case 270:
+							_RotatePixels270CW_RGB32(src, srcBPR, srcWidth, srcHeight,
+								dst, dstBPR);
+							break;
+						default:
+							// Invalid rotation, fall back to no rotation
+							int32 bytes = (right - x + 1) * 4;
+							if (bytes > 0) {
+								dst += y * dstBPR + x * 4;
+								for (; y <= bottom; y++) {
+									memcpy(dst, src, bytes);
+									dst += dstBPR;
+									src += srcBPR;
+								}
+							}
+							break;
+					}
+				}
+			} else {
+				// No rotation: use fast memcpy path
+				int32 bytes = (right - x + 1) * 4;
 
-			if (bytes > 0) {
-				// offset to left top pixel in dest buffer
-				dst += y * dstBPR + x * 4;
-				// copy
-				for (; y <= bottom; y++) {
-					// bytes is guaranteed to be multiple of 4
-					memcpy(dst, src, bytes);
-					dst += dstBPR;
-					src += srcBPR;
+				if (bytes > 0) {
+					// offset to left top pixel in dest buffer
+					dst += y * dstBPR + x * 4;
+					// copy
+					for (; y <= bottom; y++) {
+						// bytes is guaranteed to be multiple of 4
+						memcpy(dst, src, bytes);
+						dst += dstBPR;
+						src += srcBPR;
+					}
 				}
 			}
 			break;
@@ -733,22 +902,67 @@ HWInterface::_CopyToFront(uint8* src, uint32 srcBPR, int32 x, int32 y,
 
 		case B_RGB24:
 		{
-			// offset to left top pixel in dest buffer
-			dst += y * dstBPR + x * 3;
-			int32 left = x;
-			// copy
-			for (; y <= bottom; y++) {
-				uint8* srcHandle = src;
-				uint8* dstHandle = dst;
-				for (x = left; x <= right; x++) {
-					dstHandle[0] = srcHandle[0];
-					dstHandle[1] = srcHandle[1];
-					dstHandle[2] = srcHandle[2];
-					dstHandle += 3;
-					srcHandle += 4;
+			// Handle rotation
+			if (rotation != 0) {
+				int32 srcWidth = right - x + 1;
+				int32 srcHeight = bottom - y + 1;
+				
+				int32 dstWidth = (rotation == 90 || rotation == 270) ? srcHeight : srcWidth;
+				int32 dstHeight = (rotation == 90 || rotation == 270) ? srcWidth : srcHeight;
+				
+				if (dstWidth > 0 && dstHeight > 0) {
+					switch (rotation) {
+						case 90:
+							_RotatePixels90CW_RGB24(src, srcBPR, srcWidth, srcHeight,
+								dst, dstBPR);
+							break;
+						case 180:
+							_RotatePixels180_RGB24(src, srcBPR, srcWidth, srcHeight,
+								dst, dstBPR);
+							break;
+						case 270:
+							_RotatePixels270CW_RGB24(src, srcBPR, srcWidth, srcHeight,
+								dst, dstBPR);
+							break;
+						default:
+							// Fallback: no rotation
+							dst += y * dstBPR + x * 3;
+							int32 left = x;
+							for (; y <= bottom; y++) {
+								uint8* srcHandle = src;
+								uint8* dstHandle = dst;
+								for (x = left; x <= right; x++) {
+									dstHandle[0] = srcHandle[0];
+									dstHandle[1] = srcHandle[1];
+									dstHandle[2] = srcHandle[2];
+									dstHandle += 3;
+									srcHandle += 4;
+								}
+								dst += dstBPR;
+								src += srcBPR;
+							}
+							break;
+					}
 				}
-				dst += dstBPR;
-				src += srcBPR;
+			} else {
+				// No rotation: use direct copy
+				// offset to left top pixel in dest buffer
+				dst += y * dstBPR + x * 3;
+				int32 left = x;
+				// copy
+				for (; y <= bottom; y++) {
+					uint8* srcHandle = src;
+					uint8* dstHandle = dst;
+					for (x = left; x <= right; x++) {
+						dstHandle[0] = srcHandle[0];
+						dstHandle[1] = srcHandle[1];
+						dstHandle[2] = srcHandle[2];
+						dstHandle += 3;
+						srcHandle += 4;
+					}
+					dst += dstBPR;
+					src += srcBPR;
+				}
 			}
 			break;
 		}

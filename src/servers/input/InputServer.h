@@ -213,6 +213,10 @@ class InputServer : public BApplication {
 		status_t _AcquireInput(BMessage& message, BMessage& reply);
 		void _ReleaseInput(BMessage* message);
 
+		void _LoadDisplayRotation();
+		void _TransformMousePosition(BPoint& position);
+
+
 	private:
 		uint16			fKeyboardID;
 
@@ -252,6 +256,9 @@ class InputServer : public BApplication {
 		team_id			fAppServerTeam;
 		area_id			fCursorArea;
 		shared_cursor*	fCursorBuffer;
+
+		int32			fDisplayRotation;	// 0, 90, 180, 270
+		BRect			fScreenBounds;		// Current screen bounds
 };
 
 extern InputServer* gInputServer;

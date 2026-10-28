@@ -155,7 +155,8 @@ InputServer::InputServer()
 	fCursorSem(-1),
 	fAppServerPort(-1),
 	fAppServerTeam(-1),
-	fCursorArea(-1)
+	fCursorArea(-1),
+	fDisplayRotation(0)
 {
 	CALLED();
 	gInputServer = this;
@@ -166,6 +167,7 @@ InputServer::InputServer()
 	_StartEventLoop();
 
 	_InitKeyboardMouseStates();
+	_LoadDisplayRotation();
 
 	fAddOnManager = new(std::nothrow) ::AddOnManager();
 	if (fAddOnManager != NULL) {
@@ -1730,6 +1732,10 @@ InputServer::_SanitizeEvents(EventList& events)
 				where.x = roundf(where.x);
 				where.y = roundf(where.y);
 				where.ConstrainTo(fFrame);
+				
+				// Apply display rotation transformation if enabled
+				_TransformMousePosition(where);
+				
 				if (event->ReplacePoint("where", where) != B_OK)
 					event->AddPoint("where", where);
 
@@ -1985,6 +1991,86 @@ InputServer::_DispatchEvent(BMessage* event)
 	BMessage::Private messagePrivate(event);
 	return messagePrivate.SendMessage(fAppServerPort, fAppServerTeam, 0, 0,
 		false, reply);
+}
+
+
+void
+InputServer::_LoadDisplayRotation()
+{
+	// Read display rotation from Screen_data settings file
+	// This is synchronized with Screen preference preflet
+	BPath path;
+	if (find_directory(B_USER_SETTINGS_DIRECTORY, &path) == B_OK) {
+		path.Append("Screen_data");
+		BFile file(path.Path(), B_READ_ONLY);
+		if (file.InitCheck() == B_OK) {
+			// Skip over: BPoint offset (8 bytes), 4 bools (4 bytes)
+			// Then read: int32 displayRotation (4 bytes)
+			off_t offset = sizeof(BPoint) + (4 * sizeof(bool));
+			file.Seek(offset, SEEK_SET);
+			
+			int32 rotation = 0;
+			ssize_t bytesRead = file.Read(&rotation, sizeof(int32));
+			if (bytesRead == (ssize_t)sizeof(int32)) {
+				// Validate rotation value
+				if (rotation == 0 || rotation == 90 || rotation == 180 || rotation == 270) {
+					fDisplayRotation = rotation;
+					fScreenBounds = fScreen.Frame();
+					PRINT(("InputServer: Display rotation loaded from Screen_data: %d°\n", rotation));
+				}
+			}
+		}
+	}
+}
+
+
+void
+InputServer::_TransformMousePosition(BPoint& position)
+{
+	if (fDisplayRotation == 0 || fScreenBounds.IsValid() == false)
+		return;
+	
+	int32 width = (int32)(fScreenBounds.Width() + 1);
+	int32 height = (int32)(fScreenBounds.Height() + 1);
+	
+	BPoint transformed = position;
+	
+	// Transform coordinates from logical to physical space based on rotation
+	// We transform FROM physical (where mouse actually is) TO logical (where app expects it)
+	switch (fDisplayRotation) {
+		case 90:
+			// 90° CW: physical (x, y) -> logical (y, width - 1 - x)
+			transformed.x = position.y;
+			transformed.y = width - 1 - position.x;
+			break;
+			
+		case 180:
+			// 180°: physical (x, y) -> logical (width - 1 - x, height - 1 - y)
+			transformed.x = width - 1 - position.x;
+			transformed.y = height - 1 - position.y;
+			break;
+			
+		case 270:
+			// 270° CW: physical (x, y) -> logical (height - 1 - y, x)
+			transformed.x = height - 1 - position.y;
+			transformed.y = position.x;
+			break;
+			
+		default:
+			break;
+	}
+	
+	// Clamp to screen bounds
+	if (transformed.x < fScreenBounds.left)
+		transformed.x = fScreenBounds.left;
+	if (transformed.x > fScreenBounds.right)
+		transformed.x = fScreenBounds.right;
+	if (transformed.y < fScreenBounds.top)
+		transformed.y = fScreenBounds.top;
+	if (transformed.y > fScreenBounds.bottom)
+		transformed.y = fScreenBounds.bottom;
+	
+	position = transformed;
 }
 
 

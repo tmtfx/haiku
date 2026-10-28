@@ -39,12 +39,17 @@ class ScreenSettings {
         bool Visual2DDebugEnabled() const { return fVisual2DDebugEnabled; }
         void SetVisual2DDebugEnabled(bool enabled);
 
+		// display rotation preference
+		int32 DisplayRotation() const { return fDisplayRotation; }
+		void SetDisplayRotation(int32 degrees);
+
 	private:
 		BRect fWindowFrame;
 		bool fHardwareCursorEnabled;
 		bool fAcceleration2DEnabled;
 		bool fCompositor2DEnabled;
 		bool fVisual2DDebugEnabled;
+		int32 fDisplayRotation;
 };
 
 #endif	// SCREEN_SETTINGS_H
