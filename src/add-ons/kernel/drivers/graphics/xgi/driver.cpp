@@ -233,8 +233,13 @@ map_device(DeviceInfo& device)
 		" BAR1 regs=0x%" B_PRIxPHYSADDR " size=%" B_PRIu32 "\n",
 		fbBase, (uint32)vramSize, regsBase, (uint32)regsSize);
 
+	/* MMIO registers must be uncached: without B_UNCACHED_MEMORY this
+	 * defaults to the same cacheable (write-back) type as normal RAM,
+	 * so reads can return a stale CPU-cached snapshot instead of the
+	 * live register value (writes still eventually reach the device via
+	 * cache flush, which is why writes "worked" but reads never did). */
 	shared.regsArea = map_physical("xgi regs", regsBase, regsSize,
-		B_ANY_KERNEL_ADDRESS,
+		B_ANY_KERNEL_ADDRESS | B_UNCACHED_MEMORY,
 		B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA | B_CLONEABLE_AREA,
 		(void**)&device.regs);
 	if (shared.regsArea < B_OK)
@@ -332,17 +337,19 @@ static void draw_logo(DeviceInfo& di)
     if (!bi)
         return;
 
-    if (bi->depth != 32)
+    if (bi->depth != 32 && bi->depth != 16) {
+    	dprintf("XGI: draw_logo cannot draw as framebuffer color depth is %d\n",
+    		bi->depth);
         return;
+    }
 
     uint32 screenWidth = bi->width;
     uint32 screenHeight = bi->height;
-    
+    uint32 dstBytesPerPixel = bi->depth / 8;
+
     uint32 bytesPerRow = bi->bytes_per_row;
     if (bytesPerRow == 0)
-        bytesPerRow = screenWidth * 4;
-
-    uint32 fbPitch = bytesPerRow / 4;
+        bytesPerRow = screenWidth * dstBytesPerPixel;
 
     uint32 logoW = kBitmapWidth;   // 1024
     uint32 logoH = kBitmapHeight;  // 571
@@ -360,22 +367,44 @@ static void draw_logo(DeviceInfo& di)
     if (fb == NULL)
         return;
 
-    for (uint32 y = 0; y < logoH && (startY + y) < screenHeight; y++) {
-        // Offset di destinazione nel framebuffer (in byte)
-        uint32 fbOffset = ((startY + y) * fbPitch + startX) * sizeof(uint32);
-        
-        // Offset di origine nell'array dell'immagine (4 byte per pixel in RGBA32)
-        uint32 logoRowOffset = y * logoW * 4;
-        
-        uint32 remainingWidth = screenWidth - startX;
-        uint32 copyPixels = (logoW < remainingWidth) ? logoW : remainingWidth;
-        
-        // Dimensione totale del blocco da copiare in byte per la riga
-        uint32 copySize = copyPixels * 4; 
+    uint32 remainingWidth = screenWidth - startX;
+    uint32 copyPixels = (logoW < remainingWidth) ? logoW : remainingWidth;
 
-        // Copia sicura dalla memoria kernel allo spazio del framebuffer
-        // (Sostituisci kkyro_ship_pngBits con il nome esatto definito nel tuo header)
-        user_memcpy(fb + fbOffset, (void*)&kxgi_logo2_pngBits[logoRowOffset], copySize);
+    // Both fb (mapped via map_physical_memory) and kxgi_logo2_pngBits
+    // (linked into the driver image) are kernel addresses - user_memcpy
+    // is for copies to/from userspace and silently fails here without any
+    // error check, which is why nothing was ever drawn.
+    //
+    // A straight byte memcpy only works when the source pixel format
+    // matches the destination exactly (32bpp-to-32bpp). On a 16bpp boot
+    // framebuffer (as reported by fill_boot_mode on some monitors/EDIDs)
+    // it would scramble the image instead of just failing, so each pixel
+    // is converted explicitly here. Source bytes are (B,G,R,A) per pixel,
+    // matching kxgi_logo2_pngBits/B_RGBA32's layout (GraphicsDefs.h).
+    for (uint32 y = 0; y < logoH && (startY + y) < screenHeight; y++) {
+        uint32 logoRowOffset = y * logoW * 4;
+        const uint8* srcRow = &kxgi_logo2_pngBits[logoRowOffset];
+        uint8* dstRow = fb + (startY + y) * bytesPerRow
+            + startX * dstBytesPerPixel;
+
+        for (uint32 x = 0; x < copyPixels; x++) {
+            const uint8* srcPixel = srcRow + x * 4;
+            uint8 b = srcPixel[0];
+            uint8 g = srcPixel[1];
+            uint8 r = srcPixel[2];
+
+            if (bi->depth == 32) {
+                uint8* dstPixel = dstRow + x * 4;
+                dstPixel[0] = b;
+                dstPixel[1] = g;
+                dstPixel[2] = r;
+                dstPixel[3] = 0xFF;
+            } else {
+                uint16* dstPixel = (uint16*)(dstRow + x * 2);
+                *dstPixel = (uint16)(((r >> 3) << 11) | ((g >> 2) << 5)
+                    | (b >> 3));
+            }
+        }
     }
 }
 #endif
