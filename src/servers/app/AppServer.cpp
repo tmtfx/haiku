@@ -219,6 +219,24 @@ AppServer::MessageReceived(BMessage* message)
             break;
         }
 
+		case AS_SET_SCREEN_ROTATION:
+		{
+			int32 rotation;
+			if (message->FindInt32("rotation", &rotation) == B_OK) {
+				// Validate rotation value
+				if (rotation == 0 || rotation == 90 || rotation == 180 || rotation == 270) {
+					BAutolock locker(gScreenManager);
+					if (gScreenManager && gScreenManager->CountScreens() > 0) {
+						Screen* s = gScreenManager->ScreenAt(0);
+						if (s != NULL && s->HWInterface() != NULL) {
+							s->HWInterface()->SetDisplayRotation(rotation);
+						}
+					}
+				}
+			}
+			break;
+		}
+
 		case 'hsbm':
 		{
 			bool has = false;

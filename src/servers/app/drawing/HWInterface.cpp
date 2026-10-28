@@ -14,6 +14,9 @@
 #include <string.h>
 #include <unistd.h>
 
+#include <File.h>
+#include <FindDirectory.h>
+#include <Path.h>
 #include <vesa/vesa_info.h>
 
 #include "drawing_support.h"
@@ -66,6 +69,29 @@ HWInterface::~HWInterface()
 status_t
 HWInterface::Initialize()
 {
+	// Load display rotation from Screen_data settings file
+	// This is synchronized with Screen preference preflet
+	BPath path;
+	if (find_directory(B_USER_SETTINGS_DIRECTORY, &path) == B_OK) {
+		path.Append("Screen_data");
+		BFile file(path.Path(), B_READ_ONLY);
+		if (file.InitCheck() == B_OK) {
+			// Skip over: BPoint offset (8 bytes), 4 bools (4 bytes)
+			// Then read: int32 displayRotation (4 bytes)
+			off_t offset = sizeof(BPoint) + (4 * sizeof(bool));
+			file.Seek(offset, SEEK_SET);
+			
+			int32 rotation = 0;
+			ssize_t bytesRead = file.Read(&rotation, sizeof(int32));
+			if (bytesRead == (ssize_t)sizeof(int32)) {
+				// Validate rotation value
+				if (rotation == 0 || rotation == 90 || rotation == 180 || rotation == 270) {
+					fDisplayRotation = rotation;
+				}
+			}
+		}
+	}
+
 	return MultiLocker::InitCheck();
 }
 

@@ -48,7 +48,6 @@
 
 #include <InterfacePrivate.h>
 #include <CheckBox.h>
-#include <private/shared/DisplayRotation.h>
 
 #include "AlertWindow.h"
 #include "Constants.h"
@@ -249,17 +248,20 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 		fOriginalBrightness = -1;
 	}
 
-	// rotation slider
+	// rotation slider with 4 positions: 0°, 90°, 180°, 270°
 	fRotationSlider = new BSlider("rotation", B_TRANSLATE("Rotation:"),
-		NULL, 0, 270, B_HORIZONTAL);
+		NULL, 0, 3, B_HORIZONTAL);
 	fRotationSlider->SetModificationMessage(new BMessage(SLIDER_ROTATION_MSG));
 	fRotationSlider->SetLimitLabels(B_TRANSLATE("0°"), B_TRANSLATE("270°"));
-	fRotationSlider->SetKeyIncrementValue(90);
+	fRotationSlider->SetHashMarks(B_HASH_MARKS_BOTTOM);
+	fRotationSlider->SetHashMarkCount(4);
+	fRotationSlider->SetKeyIncrementValue(1);
 	groupView->AddChild(fRotationSlider);
 
-	// Read rotation setting
-	fOriginalRotation = BPrivate::get_display_rotation("display");
-	fRotationSlider->SetValue(fOriginalRotation);
+	// Read rotation setting from fSettings (Screen_data)
+	fOriginalRotation = fSettings->DisplayRotation();
+	// Convert degrees (0/90/180/270) to slider position (0/1/2/3)
+	fRotationSlider->SetValue(fOriginalRotation / 90);
 
 	// box on the left below the screen box with workspaces
 
@@ -1455,6 +1457,12 @@ ScreenWindow::_CheckApplyEnabled()
 		}
 	}
 
+	// Check if rotation has changed
+	// Convert slider position (0/1/2/3) back to degrees (0/90/180/270)
+	int32 currentRotation = (fRotationSlider->Value() * 90);
+	if (currentRotation != fOriginalRotation)
+		applyEnabled = true;
+
 	fApplyButton->SetEnabled(applyEnabled);
 
 	uint32 columns;
@@ -1468,7 +1476,8 @@ ScreenWindow::_CheckApplyEnabled()
 	fRevertButton->SetEnabled(columns != fOriginalWorkspacesColumns
 		|| rows != fOriginalWorkspacesRows
 		|| brightness != fOriginalBrightness
-		|| fSelected != fOriginal);
+		|| fSelected != fOriginal
+		|| currentRotation != fOriginalRotation);
 }
 
 
@@ -1596,9 +1605,10 @@ ScreenWindow::_Apply()
 
 		fActive = fSelected;
 
-		// Save rotation settings
-		int32 rotation = fRotationSlider->Value();
-		BPrivate::set_display_rotation(rotation);
+		// Apply rotation settings through ScreenSettings (writes to Screen_data)
+		// Convert slider position (0/1/2/3) to degrees (0/90/180/270)
+		int32 rotation = (fRotationSlider->Value() * 90);
+		fSettings->SetDisplayRotation(rotation);
 		fOriginalRotation = rotation;
 
 		// TODO: only show alert when this is an unknown mode
