@@ -1233,7 +1233,7 @@ AccelerantHWInterface::GetBrightness(float* brightness)
 status_t
 AccelerantHWInterface::GetRotationCapabilities(uint32& outCapabilities) const
 {
-	AutoReadLocker _(this);
+	AutoReadLocker _(const_cast<AccelerantHWInterface*>(this));
 
 	if (!fAccGetDisplayRotationCapabilities) {
 		outCapabilities = 0;
