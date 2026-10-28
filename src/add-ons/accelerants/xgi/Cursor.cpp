@@ -65,6 +65,56 @@
 
 #include <string.h>
 
+/*
+ * XGI's hardware cursor does not accept BeOS' native (AND, XOR) mono
+ * planes directly: the Xorg reference driver declares
+ * HARDWARE_CURSOR_INVERT_MASK | HARDWARE_CURSOR_AND_SOURCE_WITH_MASK |
+ * HARDWARE_CURSOR_SWAP_SOURCE_AND_MASK for this chip
+ * (refcode/xgi_cursor.c:198-204), which describe a transform relative to
+ * X11's own (source, mask) cursor convention - not BeOS' AND/XOR one.
+ * Traced against the actual transform code (Xorg xf86HWCurs.c,
+ * RealizeCursorInterleave0(), formerly xf86Cursor.c) to derive the
+ * equivalent directly from BeOS' andMask/xorMask:
+ *
+ *   hw mask   = andMask            (1 = invisible, matches BeOS "and=1
+ *                                    transparent" - no inversion needed:
+ *                                    the flag inverts X11's opposite
+ *                                    convention, which we never go
+ *                                    through here)
+ *   hw source = (~andMask) & (~xorMask)   (1 only at opaque+foreground
+ *                                           pixels; 0 elsewhere, zeroed
+ *                                           by the mask anywhere
+ *                                           invisible, like
+ *                                           AND_SOURCE_WITH_MASK asks)
+ *
+ * and SWAP_SOURCE_AND_MASK puts the mask plane first in each 16-byte row
+ * (bytes 0-7), source second (bytes 8-15).
+ */
+static void
+xgi_build_cursor_bitmap(uint16 width, uint16 height, const uint8* andMask,
+	const uint8* xorMask, uint8* dst /* 1024 bytes: 64 rows * 16 bytes */)
+{
+	uint32 byteWidth = (width + 7) / 8;
+	for (uint32 y = 0; y < 64; y++) {
+		uint8* row = dst + y * 16;
+		for (uint32 b = 0; b < 8; b++) {
+			uint8 andByte = (y < height && b < byteWidth)
+				? andMask[y * byteWidth + b] : 0xFF;
+			uint8 xorByte = (y < height && b < byteWidth)
+				? xorMask[y * byteWidth + b] : 0x00;
+			uint8 mask = andByte;
+			uint8 src = (uint8)(~andByte) & (uint8)(~xorByte);
+#if XGI_CURSOR_SWAP_PLANES
+			row[b] = mask;
+			row[8 + b] = src;
+#else
+			row[b] = src;
+			row[8 + b] = mask;
+#endif
+		}
+	}
+}
+
 status_t
 xgi_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 	uint8* andMask, uint8* xorMask)
@@ -87,25 +137,21 @@ xgi_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 	gInfo.sharedInfo->cursor.height = height;
 
 	/*
-	 * XGI 64x64 mono cursor image is 1024 bytes:
-	 * 64 lines of 16 bytes each.
-	 * First 8 bytes of each line: AND mask (64 pixels).
-	 * Next 8 bytes of each line: XOR mask (64 pixels).
-	 * Transparent pixel: AND=1, XOR=0.
+	 * XGI 64x64 cursor image is 1024 bytes: 64 lines of 16 bytes each,
+	 * as a (mask, source) pair per line - see xgi_build_cursor_bitmap().
 	 */
-	for (uint32 y = 0; y < 64; y++) {
-		uint8* row = cursorBuffer + y * 16;
-		memset(row, 0xFF, 8);		/* AND mask: transparent */
-		memset(row + 8, 0x00, 8);	/* XOR mask: 0 */
+	xgi_build_cursor_bitmap(width, height, andMask, xorMask, cursorBuffer);
 
-		if (y < height) {
-			uint32 byteWidth = (width + 7) / 8;
-			uint32 srcOffset = y * byteWidth;
-			for (uint32 b = 0; b < byteWidth && b < 8; b++) {
-				row[b] = andMask[srcOffset + b];
-				row[8 + b] = xorMask[srcOffset + b];
-			}
-		}
+	/* Dump the first few actual hardware-format rows as written to VRAM,
+	 * to compare real bytes between a working (direct shape) and a
+	 * failing (bitmap-derived) call instead of just opaque-pixel counts. */
+	for (uint32 row = 0; row < 3; row++) {
+		uint8* r = cursorBuffer + row * 16;
+		debug_printf("xgi.accelerant: cursorbuf row%" B_PRIu32
+			": mask=%02x%02x%02x%02x%02x%02x%02x%02x"
+			" src=%02x%02x%02x%02x%02x%02x%02x%02x\n", row,
+			r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7],
+			r[8], r[9], r[10], r[11], r[12], r[13], r[14], r[15]);
 	}
 
 	/* Program cursor address in MMIO 0x8500 */
@@ -120,6 +166,12 @@ xgi_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 
 	/* Update position with hot spot applied */
 	xgi_move_cursor(gInfo.sharedInfo->cursor.x, gInfo.sharedInfo->cursor.y);
+
+	debug_printf("xgi.accelerant: set_cursor_shape: done, %" B_PRIu16 "x%"
+		B_PRIu16 " hot=(%" B_PRIu16 ",%" B_PRIu16 ") cursorBase=0x%" B_PRIx32
+		" ctrl_after=0x%08" B_PRIx32 " visible=%d\n",
+		width, height, hotX, hotY, cursorBase, read32(XGI_REG_CURSOR_CTRL),
+		gInfo.sharedInfo->cursor.visible);
 
 	return B_OK;
 }
@@ -150,6 +202,12 @@ xgi_move_cursor(uint16 x, uint16 y)
 
 	write32(XGI_REG_CURSOR_X, ((uint32)posX & 0xFFFF) | ((uint32)presetX << 16));
 	write32(XGI_REG_CURSOR_Y, ((uint32)posY & 0xFFFF) | ((uint32)presetY << 16));
+
+	debug_printf("xgi.accelerant: move_cursor: xy=(%" B_PRIu16 ",%" B_PRIu16
+		") hot=(%" B_PRIu16 ",%" B_PRIu16 ") -> pos=(%" B_PRId32 ",%" B_PRId32
+		") preset=(%d,%d) ctrl=0x%08" B_PRIx32 "\n",
+		x, y, gInfo.sharedInfo->cursor.hotX, gInfo.sharedInfo->cursor.hotY,
+		posX, posY, presetX, presetY, read32(XGI_REG_CURSOR_CTRL));
 }
 
 void
@@ -158,7 +216,8 @@ xgi_show_cursor(bool isVisible)
 	if (!gInfo.sharedInfo->settings.hardcursor)
 		return;
 
-	uint32 ctrl = read32(XGI_REG_CURSOR_CTRL);
+	uint32 ctrlBefore = read32(XGI_REG_CURSOR_CTRL);
+	uint32 ctrl = ctrlBefore;
 	uint32 cursorBase = gInfo.sharedInfo->cursorOffset / 1024;
 
 	if (isVisible) {
@@ -172,6 +231,10 @@ xgi_show_cursor(bool isVisible)
 	}
 
 	gInfo.sharedInfo->cursor.visible = isVisible;
+
+	debug_printf("xgi.accelerant: show_cursor: isVisible=%d ctrl_before=0x%08"
+		B_PRIx32 " ctrl_after=0x%08" B_PRIx32 "\n", isVisible, ctrlBefore,
+		read32(XGI_REG_CURSOR_CTRL));
 }
 
 #ifdef IS_PIRATI_BUILD
@@ -182,10 +245,42 @@ xgi_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 	if (!gInfo.sharedInfo->settings.hardcursor)
 		return B_NOT_ALLOWED;
 
+	uint32 opaqueCount = 0, sampleAlpha = 0, sampleB = 0, sampleG = 0,
+		sampleR = 0;
+	if (bitmapData != NULL && width > 0 && height > 0) {
+		/* Sample the pixel at (width/2, height/2) for the log line below,
+		 * regardless of what the full conversion decides. */
+		const uint8* p = bitmapData + (height / 2) * bytesPerRow
+			+ (width / 2) * 4;
+		sampleB = p[0];
+		sampleG = p[1];
+		sampleR = p[2];
+		sampleAlpha = p[3];
+	}
+	debug_printf("xgi.accelerant: set_cursor_bitmap: %" B_PRIu16 "x%" B_PRIu16
+		" hot=(%" B_PRIu16 ",%" B_PRIu16 ") space=0x%" B_PRIx32
+		" bpr=%" B_PRIu16 " centerPixel(BGRA)=%" B_PRIu32 ",%" B_PRIu32
+		",%" B_PRIu32 ",%" B_PRIu32 "\n",
+		width, height, hotX, hotY, (uint32)space, bytesPerRow,
+		sampleB, sampleG, sampleR, sampleAlpha);
+
 	if (width > 64 || height > 64 || bitmapData == NULL)
 		return B_BAD_VALUE;
 
-	/* Convert RGBA32 / RGB16 to mono shape */
+	/* Only B_RGBA32/B_RGB32 (memory order BGRA, GraphicsDefs.h) are
+	 * converted below. Anything else must fail rather than silently hand
+	 * xgi_set_cursor_shape() an all-transparent mask (the previous
+	 * behaviour here: unhandled formats left andMask at its all-0xFF
+	 * default, making the cursor fully invisible) - returning B_BAD_VALUE
+	 * makes app_server fall back to its software cursor instead. */
+	if (space != B_RGBA32 && space != B_RGB32) {
+		debug_printf("xgi.accelerant: set_cursor_bitmap: unsupported"
+			" color_space 0x%" B_PRIx32 " (%" B_PRIu16 "x%" B_PRIu16
+			"), falling back to SW cursor\n",
+			(uint32)space, width, height);
+		return B_BAD_VALUE;
+	}
+
 	uint8 andMask[64 * 8];
 	uint8 xorMask[64 * 8];
 	memset(andMask, 0xFF, sizeof(andMask));
@@ -202,27 +297,32 @@ xgi_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 			uint8 byteIdx = x / 8;
 			uint8 bitMask = 0x80 >> (x % 8);
 
-			if (space == B_RGBA32 || space == B_RGB32) {
-				const uint8* p = srcRow + x * 4;
-				uint8 alpha = (space == B_RGBA32) ? p[3] : 0xFF;
-				if (alpha < 128) {
-					/* Transparent: AND=1, XOR=0 */
-					andRow[byteIdx] |= bitMask;
-					xorRow[byteIdx] &= ~bitMask;
-				} else {
-					/* Opaque: AND=0 */
-					andRow[byteIdx] &= ~bitMask;
-					/* Luminance */
-					uint32 luma = (uint32)p[0] * 299 + (uint32)p[1] * 587
-						+ (uint32)p[2] * 114;
-					if (luma > 128000)
-						xorRow[byteIdx] &= ~bitMask; /* White (BG) */
-					else
-						xorRow[byteIdx] |= bitMask;  /* Black (FG) */
-				}
+			/* B_RGBA32/B_RGB32 memory order is B,G,R,A (BGRA) - see
+			 * GraphicsDefs.h. p[0]=Blue, p[1]=Green, p[2]=Red, p[3]=Alpha. */
+			const uint8* p = srcRow + x * 4;
+			uint8 alpha = (space == B_RGBA32) ? p[3] : 0xFF;
+			if (alpha < 128) {
+				/* Transparent: AND=1, XOR=0 */
+				andRow[byteIdx] |= bitMask;
+				xorRow[byteIdx] &= ~bitMask;
+			} else {
+				/* Opaque: AND=0 */
+				opaqueCount++;
+				andRow[byteIdx] &= ~bitMask;
+				/* Luminance (Rec. 601, BGRA order: p[0]=B,p[1]=G,p[2]=R) */
+				uint32 luma = (uint32)p[2] * 299 + (uint32)p[1] * 587
+					+ (uint32)p[0] * 114;
+				if (luma > 128000)
+					xorRow[byteIdx] &= ~bitMask; /* White (BG) */
+				else
+					xorRow[byteIdx] |= bitMask;  /* Black (FG) */
 			}
 		}
 	}
+
+	debug_printf("xgi.accelerant: set_cursor_bitmap: %" B_PRIu32
+		" opaque px out of %" B_PRIu32 "\n", opaqueCount,
+		(uint32)width * height);
 
 	return xgi_set_cursor_shape(width, height, hotX, hotY, andMask, xorMask);
 }

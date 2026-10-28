@@ -140,12 +140,12 @@
 #define XGI_CURSOR_ENABLE		(1U << 30)
 
 /* XGI's hardware cursor wants a (mask, source) pair, not BeOS' native
- * (AND, XOR) planes (refcode/xgi_cursor.c:198-204:
- * HARDWARE_CURSOR_INVERT_MASK | HARDWARE_CURSOR_AND_SOURCE_WITH_MASK |
- * HARDWARE_CURSOR_SWAP_SOURCE_AND_MASK). The exact plane order isn't
- * derivable from the refcode alone (depends on an Xorg core convention
- * not present in this repository) - flip this if the first hardware test
- * shows an empty/inverted cursor box instead of the arrow. */
+ * (AND, XOR) planes - see Cursor.cpp:xgi_build_cursor_bitmap() for the
+ * derivation (traced against Xorg's xf86HWCurs.c, which implements the
+ * HARDWARE_CURSOR_* flags declared for this chip in
+ * refcode/xgi_cursor.c:198-204). Mask-plane-first is what that trace
+ * gives for XGI's flag combination; kept as a #define rather than
+ * hardcoded in case a detail doesn't hold on actual silicon. */
 #define XGI_CURSOR_SWAP_PLANES	1
 
 /* Video Overlay Register Indices (accessed via RelIO + 0x02 index, RelIO + 0x03 data) */
