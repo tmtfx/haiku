@@ -198,6 +198,7 @@ SYSTEM_ADD_ONS_ACCELERANTS += [ FFilterByBuildFeatures
 		sm750.accelerant
 		trident.accelerant
 		via.accelerant
+		xgi.accelerant
 	}@ # x86,x86_64
 	x86 @{
 		3dfx.accelerant
@@ -334,6 +335,7 @@ SYSTEM_ADD_ONS_DRIVERS_GRAPHICS += [ FFilterByBuildFeatures
 		sm750
 		trident
 		via
+		xgi
 	}@ # x86,x86_64
 	x86 @{
 		3dfx

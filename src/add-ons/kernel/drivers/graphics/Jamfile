@@ -22,3 +22,4 @@ SubInclude HAIKU_TOP src add-ons kernel drivers graphics trident ;
 SubInclude HAIKU_TOP src add-ons kernel drivers graphics vesa ;
 SubInclude HAIKU_TOP src add-ons kernel drivers graphics via ;
 SubInclude HAIKU_TOP src add-ons kernel drivers graphics virtio ;
+SubInclude HAIKU_TOP src add-ons kernel drivers graphics xgi ;
