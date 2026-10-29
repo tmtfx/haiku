@@ -1,7 +1,7 @@
 /*
  * YMF7XX Haiku Driver for Yamaha DS-XG (YMF-7xx) audio
  *
- * Copyright 2026, Haiku, Inc.
+ * Copyright 2026, Pirati Del Frico
  * Distributed under the terms of the MIT License.
  *
  * The hmulti_audio ioctl callbacks below follow the same structure as

@@ -1,13 +1,40 @@
 /*
  * YMF7XX Haiku Driver for Yamaha DS-XG (YMF-7xx) audio
  *
- * Copyright 2026, Haiku, Inc.
+ * Copyright 2026, Pirati Del Frico
  * Distributed under the terms of the MIT License.
  *
  * Register map and hardware bank layouts transcribed from the Yamaha
- * DS-1/DS-1E register map as documented in OpenSoundSystem v4.2 (BSD),
- * kernel/drv/oss_ymf7xx/ymf7xx.h (Copyright (C) 4Front Technologies
- * 1996-2008, released under the BSD license).
+ * DS-1/DS-1E register map as documented in OpenSoundSystem v4.2,
+ * kernel/drv/oss_ymf7xx/ymf7xx.h, which carries this notice:
+ *
+ *   Copyright (c) 1996-2008, 4Front Technologies
+ *   All rights reserved.
+ *
+ *   Redistribution and use in source and binary forms, with or without
+ *   modification, are permitted provided that the following conditions
+ *   are met:
+ *
+ *    1 Redistributions of source code must retain the above copyright
+ *      notice, this list of conditions and the following disclaimer.
+ *
+ *    2 Redistributions in binary form must reproduce the above
+ *      copyright notice, this list of conditions and the following
+ *      disclaimer in the documentation and/or other materials provided
+ *      with the distribution.
+ *
+ *   THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS''
+ *   AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ *   TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+ *   PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR
+ *   CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+ *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF
+ *   USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ *   ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+ *   OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
+ *   OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ *   SUCH DAMAGE.
  */
 #ifndef _YMF7XXREG_H_
 #define _YMF7XXREG_H_
