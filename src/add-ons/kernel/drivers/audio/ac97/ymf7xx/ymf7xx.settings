@@ -1,0 +1,9 @@
+# ymf7xx driver settings
+#
+# sample_rate: 48000 or 44100
+# buffer_frames: frames per fragment
+# buffer_count: number of fragments in the ring
+
+sample_rate 48000
+buffer_frames 512
+buffer_count 4

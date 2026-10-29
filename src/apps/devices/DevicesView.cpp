@@ -12,7 +12,9 @@
 #include <Application.h>
 #include <Button.h>
 #include <Catalog.h>
+#include <Entry.h>
 #include <File.h>
+#include <FilePanel.h>
 #include <FindDirectory.h>
 #include <LayoutBuilder.h>
 #include <Menu.h>
@@ -46,7 +48,8 @@ DevicesView::DevicesView(OrderByType OrderBy)
 	BView("DevicesView", B_WILL_DRAW | B_FRAME_EVENTS),
 	fOrderBy(OrderBy),
 	fHasShownDisableAlert(false),
-	fRebootNeeded(false)
+	fRebootNeeded(false),
+	fSaveFilePanel(NULL)
 {
 	CreateLayout();
 	RescanDevices();
@@ -56,6 +59,7 @@ DevicesView::DevicesView(OrderByType OrderBy)
 
 DevicesView::~DevicesView()
 {
+	delete fSaveFilePanel;
 	DeleteDevices();
 }
 
@@ -114,6 +118,10 @@ DevicesView::CreateLayout()
 	fBlockButton->SetEnabled(false);
 	fRebootNotice = new BStringView("rebootNotice", "");
 
+	fSaveButton = new BButton("saveButton", B_TRANSLATE("Save info" B_UTF8_ELLIPSIS),
+		new BMessage(kMsgSaveDeviceInfo));
+	fSaveButton->SetEnabled(false);
+
 	fActionMenuBar = new BMenuBar("Action Menu");
 	BMenu* rebootMenu = new BMenu(B_TRANSLATE("Reboot needed"));
 	rebootMenu->AddItem(new BMenuItem(B_TRANSLATE("Restart computer"), new BMessage(kMsgReboot)));
@@ -138,6 +146,7 @@ DevicesView::CreateLayout()
 					.Add(fBlockButton)
 					.Add(fRebootNotice)
 					.AddGlue()
+					.Add(fSaveButton)
 					.End()
 				.End();
 }
@@ -636,6 +645,52 @@ DevicesView::_UpdateBlockButton(Device* device)
 
 
 void
+DevicesView::_UpdateSaveButton(Device* device)
+{
+	fSaveButton->SetTarget(this);
+	fSaveButton->SetEnabled(device != NULL && !_IsCategoryItem(device));
+}
+
+
+bool
+DevicesView::_IsCategoryItem(Device* device) const
+{
+	CategoryMapIterator iter;
+	for (iter = fCategoryMap.begin(); iter != fCategoryMap.end(); iter++) {
+		if (iter->second == device)
+			return true;
+	}
+	return false;
+}
+
+
+BString
+DevicesView::_BuildDeviceReport(Device* device) const
+{
+	BString report(device->Text());
+	report << "\n\n\n";
+
+	Attributes attributes = device->GetAllAttributes();
+	for (unsigned int i = 0; i < attributes.size(); i++)
+		report << attributes[i].fName << ": " << attributes[i].fValue << "\n";
+
+	return report;
+}
+
+
+BString
+DevicesView::_SuggestedFileName(Device* device) const
+{
+	BString name(device->Text());
+	name.ReplaceAll("/", "-");
+	name.ReplaceAll("\\", "-");
+	name.ReplaceAll(":", "-");
+	name << ".txt";
+	return name;
+}
+
+
+void
 DevicesView::MessageReceived(BMessage *msg)
 {
 	switch (msg->what) {
@@ -662,6 +717,7 @@ DevicesView::MessageReceived(BMessage *msg)
 				fAttributesView->Invalidate();
 			}
 			_UpdateBlockButton(device);
+			_UpdateSaveButton(device);
 			break;
 		}
 
@@ -713,6 +769,54 @@ DevicesView::MessageReceived(BMessage *msg)
 			}
 			break;
 		}
+
+		case kMsgSaveDeviceInfo:
+		{
+			int32 selected = fDevicesOutline->CurrentSelection(0);
+			if (selected < 0)
+				break;
+
+			Device* device = (Device*)fDevicesOutline->ItemAt(selected);
+			if (device == NULL || _IsCategoryItem(device))
+				break;
+
+			fPendingSaveText = _BuildDeviceReport(device);
+
+			if (fSaveFilePanel == NULL) {
+				fSaveFilePanel = new BFilePanel(B_SAVE_PANEL, new BMessenger(this),
+					NULL, B_FILE_NODE, false, NULL, NULL, true);
+				fSaveFilePanel->Window()->SetTitle(B_TRANSLATE("Save device information"));
+			}
+
+			fSaveFilePanel->SetSaveText(_SuggestedFileName(device).String());
+			fSaveFilePanel->Show();
+			break;
+		}
+
+		case B_SAVE_REQUESTED:
+		{
+			entry_ref dirRef;
+			const char* name;
+			if (msg->FindRef("directory", &dirRef) == B_OK
+				&& msg->FindString("name", &name) == B_OK) {
+				BPath path(&dirRef);
+				path.Append(name);
+
+				BFile file(path.Path(), B_WRITE_ONLY | B_CREATE_FILE | B_ERASE_FILE);
+				status_t status = file.InitCheck();
+				if (status == B_OK) {
+					ssize_t written = file.Write(fPendingSaveText.String(),
+						fPendingSaveText.Length());
+					if (written < 0 || written != (ssize_t)fPendingSaveText.Length())
+						status = B_ERROR;
+				}
+
+				if (status != B_OK)
+					_ShowInfoAlert(B_TRANSLATE("Failed to save the device information."));
+			}
+			break;
+		}
+
 		default:
 			BView::MessageReceived(msg);
 			break;

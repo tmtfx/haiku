@@ -29,6 +29,7 @@
 class BButton;
 class BStringView;
 class BMenuBar;
+class BFilePanel;
 
 static const uint32 kMsgRefresh				= 'refr';
 static const uint32 kMsgReportCompatibility	= 'repo';
@@ -39,6 +40,7 @@ static const uint32 kMsgOrderCategory		= 'ocat';
 static const uint32 kMsgOrderConnection		= 'ocon';
 static const uint32 kMsgToggleDriver		= 'disd';
 static const uint32 kMsgReboot				= 'rebt';
+static const uint32 kMsgSaveDeviceInfo		= 'svdi';
 
 typedef enum {
 	ORDER_BY_BUS,
@@ -82,6 +84,10 @@ class DevicesView : public BView {
 		void				_SetOrderBy(OrderByType orderBy);
 
 		void				_UpdateBlockButton(Device* device);
+		void				_UpdateSaveButton(Device* device);
+		bool				_IsCategoryItem(Device* device) const;
+		BString				_BuildDeviceReport(Device* device) const;
+		BString				_SuggestedFileName(Device* device) const;
 
 		BOutlineListView*	fDevicesOutline;
 		PropertyList*		fAttributesView;
@@ -94,6 +100,9 @@ class DevicesView : public BView {
 		BMenuBar*			fActionMenuBar;
 		bool				fHasShownDisableAlert;
 		bool				fRebootNeeded;
+		BButton*			fSaveButton;
+		BFilePanel*			fSaveFilePanel;
+		BString				fPendingSaveText;
 };
 
 #endif /* DEVICESVIEW_H */
