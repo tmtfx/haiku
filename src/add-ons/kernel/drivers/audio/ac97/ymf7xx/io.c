@@ -5,9 +5,9 @@
  * Distributed under the terms of the MIT License.
  *
  * Register access is a single 32 KB memory-mapped BAR0 window (no I/O
- * port mode on this chipset); the AC'97 codec access protocol
- * (AC97_CMD_*/AC97_STATUS_* busy-wait) is ported from ac97_read()/
- * ac97_write() in OpenSoundSystem's oss_ymf7xx.c.
+ * port mode on this chipset); the AC'97 codec access protocol (the
+ * AC97_CMD and AC97_STATUS register busy-wait) is ported from
+ * ac97_read()/ac97_write() in OpenSoundSystem's oss_ymf7xx.c.
  */
 #include <KernelExport.h>
 #include <OS.h>

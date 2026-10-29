@@ -428,6 +428,14 @@ ymf7xx_stream_commit_parms(ymf7xx_stream *stream)
 	} else {
 		ymf7xx_setup_effect_slot(stream->card);
 		ymf7xx_setup_play_slot(stream);
+
+		/* ymf7xx_dsp_init() leaves the native-DAC output bus muted
+		 * (NATIVE_DAC = 0) as part of its startup sequence; it must be
+		 * unmuted here, matching ymf7xx_audio_prepare_for_output() in
+		 * oss_ymf7xx.c, or every voice plays silently through a
+		 * zero-gain bus. (AC3 passthrough, which keeps this bus muted
+		 * and routes through S/PDIF instead, is out of scope here.) */
+		ymf7xx_reg_write_32(&stream->card->config, YMF7XX_NATIVE_DAC, 0xFFFFFFFF);
 	}
 
 	return B_OK;

@@ -977,12 +977,19 @@ ymf7xx_free(void* cookie)
 	ymf7xx_stream *stream;
 	LOG(("free()\n"));
 
-	if (card->buffer_ready_sem > B_OK)
-		delete_sem(card->buffer_ready_sem);
-
+	/* Halt every stream (clearing YMF7XX_STATE_STARTED, which the ISR
+	 * checks) BEFORE deleting the semaphore. Unlike auich/es1370, this
+	 * chip's interrupt is a global timer tick that keeps firing for as
+	 * long as the DSP engine is running, regardless of any one stream's
+	 * state -- deleting the semaphore first leaves a window where a
+	 * tick can still call ymf7xx_play_inth()/record_inth(), which calls
+	 * release_sem_etc() on an already-deleted semaphore. */
 	LIST_FOREACH(stream, &card->streams, next) {
 		ymf7xx_stream_halt(stream);
 	}
+
+	if (card->buffer_ready_sem > B_OK)
+		delete_sem(card->buffer_ready_sem);
 
 	while (!LIST_EMPTY(&card->streams)) {
 		ymf7xx_stream_delete(LIST_FIRST(&card->streams));
