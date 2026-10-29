@@ -181,6 +181,15 @@ struct SharedInfo {
     vuint8*         regs;
     phys_addr_t     regsPCI;
     uint32          regsSize;
+    /* false if the BAR1 aperture does not respond at all (seen on some
+     * boards where the PCI BAR is enumerated correctly but every
+     * register reads back as 0xFFFFFFFF regardless of chip state - a
+     * hardware/BIOS limitation of that specific board, confirmed by
+     * reading the identical physical address under another OS). When
+     * false, the accelerant disables hardware cursor, 2D acceleration
+     * and overlay and falls back to the generic software paths; VGA
+     * I/O-port based modesetting (BAR2) is unaffected either way. */
+    bool            regsResponsive;
 
     /* BAR 0: Framebuffer (Video RAM) */
     area_id         frameBufferArea;
@@ -233,6 +242,23 @@ struct SharedInfo {
         Benaphore   lock;
         uint32      count;
     } engine;
+
+    /* 2D engine command queue (Volari_InitCmdQueue in refcode/xgi_accel.c).
+     * The Volari BitBlt engine does not accept direct MMIO pokes to its
+     * BR(x) registers - commands are submitted through a ring buffer in
+     * VRAM, with the engine told where that ring lives via MMIO 0x85C0.
+     * Without this init, the entire 0x85xx MMIO block (engine status,
+     * hardware read pointer, and seemingly the cursor control register
+     * right next to it) never responds to reads - confirmed even with a
+     * same-context kernel-side immediate write-then-read, which ruled
+     * out every caching/mapping explanation first. */
+    struct {
+        uint32      offset;    /* VRAM byte offset of the ring buffer */
+        uint32      size;      /* ring buffer size in bytes */
+        uint32      sizeMask;  /* size - 1, for index wraparound */
+        uint32      swWP;      /* software shadow of the write pointer
+                                 * last pushed to MMIO 0x85C4 */
+    } cmdQueue;
 
     /* Video Overlay */
     struct {

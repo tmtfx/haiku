@@ -210,6 +210,116 @@ unlock_and_detect_vram(DeviceInfo& device, uint32& frameBufferSize)
 		memConfig, frameBufferSize / (1024 * 1024));
 }
 
+#define VOLARI_CURSOR_SHAPE_SIZE	(64 * 64 * 4)	/* refcode/xgi.h:453 */
+
+/*
+ * Porting of Volari_InitCmdQueue (refcode/xgi_accel.c:106-257). The Volari
+ * BitBlt engine is fed through a ring buffer in VRAM, not direct MMIO
+ * register pokes - see the SharedInfo::cmdQueue comment in
+ * DriverInterface.h for why this turned out to matter for the cursor too.
+ *
+ * refcode distinguishes PCI_CHIP_XGIXG20 (64-bit/2-word queue entries) from
+ * every other chip (128-bit/4-word entries, with 2 GR_NIL_CMD padding
+ * words). The refcode table only lists XG20 and XG40 explicitly; XG21/XG27
+ * are newer revisions of the same "Z" lineage as XG20 and are assumed to
+ * share its entry format here, while XG40/41/42/47 ("V" lineage) use the
+ * 4-word format - this assumption is verified on real hardware for XG20
+ * only (18ca:0020).
+ */
+static void
+init_command_queue(DeviceInfo& device, uint32 vramSize)
+{
+	SharedInfo& shared = *device.sharedInfo;
+	uint16 relIO = device.pciInfo.u.h0.base_registers[2] & 0xFFFC;
+	uint16 srIndex = (relIO != 0) ? (relIO + 0x44) : 0x3C4;
+	uint16 srData = srIndex + 1;
+	uint16 crIndex = (relIO != 0) ? (relIO + 0x54) : 0x3D4;
+	uint16 crData = crIndex + 1;
+
+	bool is64BitEntry = (shared.chipType == XGI_XG20
+		|| shared.chipType == XGI_XG21 || shared.chipType == XGI_XG27);
+
+	/* refcode's switch(cmdQueueSize) only hits its "case 128*1024:
+	 * ulSR26=0x44" branch from a *second* call onward (cmdQueueSize
+	 * starts at 0, so the first call always falls to "default:", which
+	 * sets up 128KB/512KB but leaves ulSR26 at the literal 0x40 that
+	 * only happens to be correct for the 512KB/V-series case). Xorg
+	 * calls Volari_EnableAccelerator on every mode switch, so it never
+	 * runs on the "wrong" first-call value in practice; we only call
+	 * this once, so we use the size's real encoding directly instead of
+	 * reproducing that first-call quirk. */
+	uint32 queueSize = is64BitEntry ? (128 * 1024) : (512 * 1024);
+	uint8 sr26Value = is64BitEntry ? 0x44 : 0x40;
+	uint32 queueOffset = (vramSize > queueSize) ? (vramSize - queueSize) : 0;
+
+	/* CR55 is saved/masked around the reset, then restored - refcode
+	 * doesn't document what it gates here. */
+	out8(0x55, crIndex);
+	uint8 cr55 = in8(crData);
+	out8(0x55, crIndex);
+	out8(cr55 & 0x33, crData);
+
+	/* Reset the command queue (SR26 bit 0) before reconfiguring it. */
+	out8(0x26, srIndex);
+	uint8 sr26Cur = in8(srData);
+	out8(0x26, srIndex);
+	out8(sr26Cur | 0x01, srData);
+
+	/* Enable with size encoding. */
+	out8(0x26, srIndex);
+	out8(sr26Value, srData);
+
+	/* MMIO 0x85C8 (hardware read pointer) reads back as 0xFFFFFFFF here
+	 * too - same unreliable-read block as XGI_REG_CURSOR_CTRL. Seeding
+	 * the write pointer from that ("initial WP = RP", as refcode does)
+	 * produced swWP=0xFFFFFFFF & sizeMask = size-1, i.e. the *last*
+	 * byte of the ring - not a multiple of the entry size, so the very
+	 * first queued entry overran the ring (and the mapped framebuffer
+	 * right behind it) by a few bytes and crashed app_server. Seed both
+	 * sides at a known-good, aligned 0 instead of trusting that read. */
+	if (device.regs != NULL) {
+		*(vuint32*)(device.regs + 0x85C4) = 0;	/* initial WP = 0 */
+		*(vuint32*)(device.regs + 0x85C0) = queueOffset;	/* ring base */
+	}
+
+	out8(0x55, crIndex);
+	out8(cr55, crData);
+
+	shared.cmdQueue.offset = queueOffset;
+	shared.cmdQueue.size = queueSize;
+	shared.cmdQueue.sizeMask = queueSize - 1;
+	shared.cmdQueue.swWP = 0;
+
+	/* refcode (Volari_InitCmdQueue, xgi_accel.c:248-254) issues one more
+	 * command right after enabling the queue, but only for
+	 * PCI_CHIP_XGIXG40: clear MMIO 0x8240 bit 10 ("Disable Dual Pipe").
+	 * XG20/21/27/41/42/47 never get this from refcode either, so it's
+	 * intentionally limited to XG40 here too - without it the dual
+	 * rendering pipeline some V3XT/V5/V8 boards have stays active and
+	 * the engine can produce incorrect/corrupted output. */
+	if (shared.chipType == XGI_XG40 && shared.frameBuffer != NULL) {
+		const uint32 kGrSkpcHeader = 0x16800000u;
+		const uint32 kGrNilCmd = 0x168F0000u;
+		uint32 entrySize = is64BitEntry ? 8 : 16;	/* 2 or 4 words */
+		if (queueOffset + entrySize <= shared.frameBufferSize) {
+			uint8* slot = shared.frameBuffer + queueOffset;
+			*(vuint32*)(slot + 0) = kGrSkpcHeader + 0x8240;
+			*(vuint32*)(slot + 4) = (1u << 10);	/* D[10] = 1 */
+			if (!is64BitEntry) {
+				*(vuint32*)(slot + 8) = kGrNilCmd;
+				*(vuint32*)(slot + 12) = kGrNilCmd;
+			}
+			shared.cmdQueue.swWP = entrySize;
+			if (device.regs != NULL)
+				*(vuint32*)(device.regs + 0x85C4) = shared.cmdQueue.swWP;
+		}
+	}
+
+	XGI_TRACE("init_command_queue: offset=0x%" B_PRIx32 " size=%" B_PRIu32
+		" sr26=0x%02x entry64bit=%d\n", queueOffset, queueSize, sr26Value,
+		is64BitEntry);
+}
+
 static status_t
 map_device(DeviceInfo& device)
 {
@@ -239,7 +349,7 @@ map_device(DeviceInfo& device)
 	 * live register value (writes still eventually reach the device via
 	 * cache flush, which is why writes "worked" but reads never did). */
 	shared.regsArea = map_physical("xgi regs", regsBase, regsSize,
-		B_ANY_KERNEL_ADDRESS | B_UNCACHED_MEMORY,
+		B_ANY_KERNEL_ADDRESS,
 		B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA | B_CLONEABLE_AREA,
 		(void**)&device.regs);
 	if (shared.regsArea < B_OK)
@@ -247,6 +357,29 @@ map_device(DeviceInfo& device)
 
 	shared.regsPCI = regsBase;
 	shared.regsSize = regsSize;
+
+	/* On some boards (confirmed on an XG20 integrated into an OEM
+	 * motherboard) BAR1 is enumerated correctly by the PCI bus manager but
+	 * never actually responds - every register, across the whole
+	 * aperture, reads back 0xFFFFFFFF regardless of chip state (PCI
+	 * command/power-management state, SR1E engine-enable, writes
+	 * immediately read back) - verified independently under another OS
+	 * reading the identical physical address, so this is a hardware/BIOS
+	 * POST limitation of that specific board, not something fixable here.
+	 * XGI_REG_CURSOR_CTRL (0x8500) and the queue hardware read pointer
+	 * (0x85C8) are both registers the refcode expects to read back as
+	 * sane, bounded values on working hardware, never all-ones - so a
+	 * passive read (no write, so this can't disturb a working chip) of
+	 * both is enough to detect a dead aperture and gate hardware
+	 * cursor/2D/overlay off cleanly instead of leaving them silently
+	 * broken. */
+	shared.regsResponsive = (*(vuint32*)(device.regs + 0x8500) != 0xFFFFFFFF)
+		|| (*(vuint32*)(device.regs + 0x85C8) != 0xFFFFFFFF);
+	if (!shared.regsResponsive) {
+		XGI_TRACE("map_device: BAR1 MMIO aperture is not responding - "
+			"hardware cursor, 2D acceleration and overlay will be "
+			"disabled\n");
+	}
 
 	shared.frameBufferArea = map_physical("xgi framebuffer", fbBase,
 		vramSize, B_ANY_KERNEL_BLOCK_ADDRESS | B_WRITE_COMBINING_MEMORY,
@@ -270,10 +403,14 @@ map_device(DeviceInfo& device)
 	shared.ioBase = pciInfo.u.h0.base_registers[2] & 0xFFFC;
 	shared.ioSize = pciInfo.u.h0.base_register_sizes[2];
 
-	/* Place hardware cursor at top 16KB of VRAM */
-	shared.cursorBufferSize = 16384;
-	shared.cursorOffset = (vramSize > shared.cursorBufferSize)
-		? (vramSize - shared.cursorBufferSize) : 0;
+	init_command_queue(device, vramSize);
+
+	/* refcode places the cursor shape buffer directly below the command
+	 * queue (CursorOffset = cmdQueueOffset - VOLARI_CURSOR_SHAPE_SIZE,
+	 * xgi_accel.c:218), not just "top of VRAM" on its own. */
+	shared.cursorBufferSize = VOLARI_CURSOR_SHAPE_SIZE;
+	shared.cursorOffset = (shared.cmdQueue.offset > shared.cursorBufferSize)
+		? (shared.cmdQueue.offset - shared.cursorBufferSize) : 0;
 
 	XGI_TRACE("map_device done: fbArea=%" B_PRId32 " regsArea=%" B_PRId32
 		" cursorOffset=0x%" B_PRIx32 "\n",

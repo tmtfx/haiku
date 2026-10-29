@@ -131,6 +131,17 @@
 #define XGI_REG_STATUS			0x85CC
 #define XGI_STATUS_2D_IDLE		0x80000000
 
+/* 2D engine command queue (ring buffer in VRAM) control registers -
+ * refcode/xgi_accel.h. The BitBlt registers (XGI_BR_*) are never poked
+ * directly; each "register write" is a (header, value) pair pushed into
+ * the ring at SharedInfo::cmdQueue.swWP, see Engine.cpp:xgi_queue_push(). */
+#define XGI_REG_CMDQUEUE_BASE	0x85C0	/* ring buffer VRAM offset (set once at init) */
+#define XGI_REG_CMDQUEUE_WP		0x85C4	/* software write pointer, pushed here */
+#define XGI_REG_CMDQUEUE_RP		0x85C8	/* hardware read pointer (what the GPU consumed) */
+#define GR_SKPC_HEADER			0x16800000u
+#define GR_NIL_CMD				0x168F0000u
+#define XGI_CMDQUEUE_BAND_SIZE	0x10
+
 /* Hardware Cursor registers (CRT1) */
 #define XGI_REG_CURSOR_CTRL		0x8500
 #define XGI_REG_CURSOR_BG		0x8504

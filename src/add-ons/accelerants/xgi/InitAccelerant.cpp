@@ -270,6 +270,16 @@ get_accelerant_hook(uint32 feature, void* data)
 {
 	(void)data;
 
+	/* On some boards BAR1 (the MMIO aperture behind hardware cursor, the
+	 * 2D engine and overlay) is enumerated correctly but never actually
+	 * responds - see the SharedInfo::regsResponsive comment in
+	 * DriverInterface.h. When that happens these hooks are left
+	 * unimplemented (NULL) rather than handed out broken, so app_server
+	 * falls back to its generic software cursor/blit paths instead of
+	 * silently doing nothing. Modesetting is unaffected: it goes through
+	 * BAR2 I/O ports, not this aperture. */
+	bool mmioOk = gInfo.sharedInfo != NULL && gInfo.sharedInfo->regsResponsive;
+
 	switch (feature) {
 		/* Accelerant Initialization */
 		case B_INIT_ACCELERANT:
@@ -321,59 +331,59 @@ get_accelerant_hook(uint32 feature, void* data)
 
 		/* Hardware Cursor */
 		case B_MOVE_CURSOR:
-			return (void*)xgi_move_cursor;
+			return mmioOk ? (void*)xgi_move_cursor : NULL;
 		case B_SET_CURSOR_SHAPE:
-			return (void*)xgi_set_cursor_shape;
+			return mmioOk ? (void*)xgi_set_cursor_shape : NULL;
 		case B_SHOW_CURSOR:
-			return (void*)xgi_show_cursor;
+			return mmioOk ? (void*)xgi_show_cursor : NULL;
 #ifdef IS_PIRATI_BUILD
 		case B_SET_CURSOR_BITMAP:
-			return (void*)xgi_set_cursor_bitmap;
+			return mmioOk ? (void*)xgi_set_cursor_bitmap : NULL;
 		case B_GET_CURSOR_BITS:
-			return (void*)xgi_get_cursor_bits;
+			return mmioOk ? (void*)xgi_get_cursor_bits : NULL;
 #endif
 
 		/* 2D Acceleration Engine */
 		case B_ACCELERANT_ENGINE_COUNT:
-			return (void*)xgi_accelerant_engine_count;
+			return mmioOk ? (void*)xgi_accelerant_engine_count : NULL;
 		case B_ACQUIRE_ENGINE:
-			return (void*)xgi_acquire_engine;
+			return mmioOk ? (void*)xgi_acquire_engine : NULL;
 		case B_RELEASE_ENGINE:
-			return (void*)xgi_release_engine;
+			return mmioOk ? (void*)xgi_release_engine : NULL;
 		case B_WAIT_ENGINE_IDLE:
-			return (void*)xgi_wait_engine_idle;
+			return mmioOk ? (void*)xgi_wait_engine_idle : NULL;
 		case B_GET_SYNC_TOKEN:
-			return (void*)xgi_get_sync_token;
+			return mmioOk ? (void*)xgi_get_sync_token : NULL;
 		case B_SYNC_TO_TOKEN:
-			return (void*)xgi_sync_to_token;
+			return mmioOk ? (void*)xgi_sync_to_token : NULL;
 		case B_SCREEN_TO_SCREEN_BLIT:
-			return (void*)xgi_screen_to_screen_blit;
+			return mmioOk ? (void*)xgi_screen_to_screen_blit : NULL;
 		case B_FILL_RECTANGLE:
-			return (void*)xgi_fill_rectangle;
+			return mmioOk ? (void*)xgi_fill_rectangle : NULL;
 		case B_INVERT_RECTANGLE:
-			return (void*)xgi_invert_rectangle;
+			return mmioOk ? (void*)xgi_invert_rectangle : NULL;
 		case B_FILL_SPAN:
-			return (void*)xgi_fill_span;
+			return mmioOk ? (void*)xgi_fill_span : NULL;
 
 		/* Video Overlay */
 		case B_OVERLAY_COUNT:
-			return (void*)xgi_overlay_count;
+			return mmioOk ? (void*)xgi_overlay_count : NULL;
 		case B_OVERLAY_SUPPORTED_SPACES:
-			return (void*)xgi_overlay_supported_spaces;
+			return mmioOk ? (void*)xgi_overlay_supported_spaces : NULL;
 		case B_OVERLAY_SUPPORTED_FEATURES:
-			return (void*)xgi_overlay_supported_features;
+			return mmioOk ? (void*)xgi_overlay_supported_features : NULL;
 		case B_ALLOCATE_OVERLAY_BUFFER:
-			return (void*)xgi_allocate_overlay_buffer;
+			return mmioOk ? (void*)xgi_allocate_overlay_buffer : NULL;
 		case B_RELEASE_OVERLAY_BUFFER:
-			return (void*)xgi_release_overlay_buffer;
+			return mmioOk ? (void*)xgi_release_overlay_buffer : NULL;
 		case B_GET_OVERLAY_CONSTRAINTS:
-			return (void*)xgi_get_overlay_constraints;
+			return mmioOk ? (void*)xgi_get_overlay_constraints : NULL;
 		case B_ALLOCATE_OVERLAY:
-			return (void*)xgi_allocate_overlay;
+			return mmioOk ? (void*)xgi_allocate_overlay : NULL;
 		case B_RELEASE_OVERLAY:
-			return (void*)xgi_release_overlay;
+			return mmioOk ? (void*)xgi_release_overlay : NULL;
 		case B_CONFIGURE_OVERLAY:
-			return (void*)xgi_configure_overlay;
+			return mmioOk ? (void*)xgi_configure_overlay : NULL;
 
 		default:
 			return NULL;

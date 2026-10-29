@@ -66,6 +66,35 @@
 #include <string.h>
 
 /*
+ * Porting of vWaitCRT1VerticalRetrace() (refcode/xgi_dac.c:633-657): wait
+ * for a full retrace cycle (not yet in retrace -> enters retrace -> exits
+ * retrace) via the standard VGA Input Status 1 register, bit 3
+ * (IS_BIT_VERT_ACTIVE). Same I/O port as out_att()'s flip-flop reset
+ * (relIO+0x5A / 0x3DA), already proven correct by the working CRTC/PLL
+ * code in DisplayModes.cpp.
+ *
+ * The refcode calls this from Volari_ShowCursor()/Volari_HideCursor()
+ * (not from LoadCursorImage) - i.e. right after flipping the cursor
+ * enable bit, matching xgi_show_cursor() here. If the hardware only
+ * latches the enable/address bits at the next vblank, writing them
+ * without ever waiting for one (as this code did before) could explain
+ * why the cursor only shows up intermittently.
+ */
+static void
+xgi_wait_vertical_retrace(void)
+{
+	uint16 relIO = gInfo.sharedInfo->ioBase;
+	uint16 pStat = (relIO != 0) ? (relIO + 0x5A) : 0x3DA;
+	int32 count = 0x10000;
+
+	while (--count > 0 && !(in8(pStat) & 0x08))
+		;
+	count = 0x10000;
+	while (--count > 0 && (in8(pStat) & 0x08))
+		;
+}
+
+/*
  * XGI's hardware cursor does not accept BeOS' native (AND, XOR) mono
  * planes directly: the Xorg reference driver declares
  * HARDWARE_CURSOR_INVERT_MASK | HARDWARE_CURSOR_AND_SOURCE_WITH_MASK |
@@ -119,14 +148,24 @@ status_t
 xgi_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 	uint8* andMask, uint8* xorMask)
 {
-	if (!gInfo.sharedInfo->settings.hardcursor)
+	if (!gInfo.sharedInfo->settings.hardcursor) {
+		debug_printf("xgi.accelerant: set_cursor_shape: REFUSED,"
+			" hardcursor setting is off\n");
 		return B_NOT_ALLOWED;
+	}
 
-	if (width > 64 || height > 64 || andMask == NULL || xorMask == NULL)
+	if (width > 64 || height > 64 || andMask == NULL || xorMask == NULL) {
+		debug_printf("xgi.accelerant: set_cursor_shape: REFUSED, bad args"
+			" %" B_PRIu16 "x%" B_PRIu16 " andMask=%p xorMask=%p\n",
+			width, height, andMask, xorMask);
 		return B_BAD_VALUE;
+	}
 
-	if (gInfo.frameBuffer == NULL)
+	if (gInfo.frameBuffer == NULL) {
+		debug_printf("xgi.accelerant: set_cursor_shape: REFUSED,"
+			" frameBuffer is NULL\n");
 		return B_NO_INIT;
+	}
 
 	uint8* cursorBuffer = gInfo.frameBuffer + gInfo.sharedInfo->cursorOffset;
 	uint32 cursorBase = gInfo.sharedInfo->cursorOffset / 1024;
@@ -136,16 +175,28 @@ xgi_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 	gInfo.sharedInfo->cursor.width = width;
 	gInfo.sharedInfo->cursor.height = height;
 
+	/* Local copy, so a concurrent caller touching the original andMask/
+	 * xorMask buffer (e.g. app_server reusing/freeing it from another
+	 * thread) can't change what we convert mid-read. */
+	uint8 localAnd[64 * 8];
+	uint8 localXor[64 * 8];
+	uint32 maskBytes = ((uint32)width + 7) / 8 * height;
+	if (maskBytes > sizeof(localAnd))
+		maskBytes = sizeof(localAnd);
+	memcpy(localAnd, andMask, maskBytes);
+	memcpy(localXor, xorMask, maskBytes);
+
 	/*
 	 * XGI 64x64 cursor image is 1024 bytes: 64 lines of 16 bytes each,
 	 * as a (mask, source) pair per line - see xgi_build_cursor_bitmap().
 	 */
-	xgi_build_cursor_bitmap(width, height, andMask, xorMask, cursorBuffer);
+	xgi_build_cursor_bitmap(width, height, localAnd, localXor, cursorBuffer);
 
-	/* Dump the first few actual hardware-format rows as written to VRAM,
-	 * to compare real bytes between a working (direct shape) and a
-	 * failing (bitmap-derived) call instead of just opaque-pixel counts. */
-	for (uint32 row = 0; row < 3; row++) {
+	/* Dump every real row (up to height) as written to VRAM, to compare
+	 * full bitmaps between a working and a failing cursor instead of
+	 * just the first few rows / opaque-pixel counts. */
+	uint32 dumpRows = (height < 64) ? height : 64;
+	for (uint32 row = 0; row < dumpRows; row++) {
 		uint8* r = cursorBuffer + row * 16;
 		debug_printf("xgi.accelerant: cursorbuf row%" B_PRIu32
 			": mask=%02x%02x%02x%02x%02x%02x%02x%02x"
@@ -170,8 +221,8 @@ xgi_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 	debug_printf("xgi.accelerant: set_cursor_shape: done, %" B_PRIu16 "x%"
 		B_PRIu16 " hot=(%" B_PRIu16 ",%" B_PRIu16 ") cursorBase=0x%" B_PRIx32
 		" ctrl_after=0x%08" B_PRIx32 " visible=%d\n",
-		width, height, hotX, hotY, cursorBase, read32(XGI_REG_CURSOR_CTRL),
-		gInfo.sharedInfo->cursor.visible);
+		width, height, hotX, hotY, cursorBase,
+		read32(XGI_REG_CURSOR_CTRL), gInfo.sharedInfo->cursor.visible);
 
 	return B_OK;
 }
@@ -179,8 +230,11 @@ xgi_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 void
 xgi_move_cursor(uint16 x, uint16 y)
 {
-	if (!gInfo.sharedInfo->settings.hardcursor)
+	if (!gInfo.sharedInfo->settings.hardcursor) {
+		debug_printf("xgi.accelerant: move_cursor: REFUSED,"
+			" hardcursor setting is off\n");
 		return;
+	}
 
 	gInfo.sharedInfo->cursor.x = x;
 	gInfo.sharedInfo->cursor.y = y;
@@ -202,19 +256,16 @@ xgi_move_cursor(uint16 x, uint16 y)
 
 	write32(XGI_REG_CURSOR_X, ((uint32)posX & 0xFFFF) | ((uint32)presetX << 16));
 	write32(XGI_REG_CURSOR_Y, ((uint32)posY & 0xFFFF) | ((uint32)presetY << 16));
-
-	debug_printf("xgi.accelerant: move_cursor: xy=(%" B_PRIu16 ",%" B_PRIu16
-		") hot=(%" B_PRIu16 ",%" B_PRIu16 ") -> pos=(%" B_PRId32 ",%" B_PRId32
-		") preset=(%d,%d) ctrl=0x%08" B_PRIx32 "\n",
-		x, y, gInfo.sharedInfo->cursor.hotX, gInfo.sharedInfo->cursor.hotY,
-		posX, posY, presetX, presetY, read32(XGI_REG_CURSOR_CTRL));
 }
 
 void
 xgi_show_cursor(bool isVisible)
 {
-	if (!gInfo.sharedInfo->settings.hardcursor)
+	if (!gInfo.sharedInfo->settings.hardcursor) {
+		debug_printf("xgi.accelerant: show_cursor: REFUSED,"
+			" hardcursor setting is off (isVisible=%d)\n", isVisible);
 		return;
+	}
 
 	uint32 ctrlBefore = read32(XGI_REG_CURSOR_CTRL);
 	uint32 ctrl = ctrlBefore;
@@ -232,6 +283,10 @@ xgi_show_cursor(bool isVisible)
 
 	gInfo.sharedInfo->cursor.visible = isVisible;
 
+	/* refcode/xgi_cursor.c:68,82 - Volari_ShowCursor/HideCursor both wait
+	 * for a full retrace cycle right after flipping the enable bit. */
+	xgi_wait_vertical_retrace();
+
 	debug_printf("xgi.accelerant: show_cursor: isVisible=%d ctrl_before=0x%08"
 		B_PRIx32 " ctrl_after=0x%08" B_PRIx32 "\n", isVisible, ctrlBefore,
 		read32(XGI_REG_CURSOR_CTRL));
@@ -242,8 +297,11 @@ status_t
 xgi_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 	color_space space, uint16 bytesPerRow, const uint8* bitmapData)
 {
-	if (!gInfo.sharedInfo->settings.hardcursor)
+	if (!gInfo.sharedInfo->settings.hardcursor) {
+		debug_printf("xgi.accelerant: set_cursor_bitmap: REFUSED,"
+			" hardcursor setting is off\n");
 		return B_NOT_ALLOWED;
+	}
 
 	uint32 opaqueCount = 0, sampleAlpha = 0, sampleB = 0, sampleG = 0,
 		sampleR = 0;
@@ -264,8 +322,12 @@ xgi_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 		width, height, hotX, hotY, (uint32)space, bytesPerRow,
 		sampleB, sampleG, sampleR, sampleAlpha);
 
-	if (width > 64 || height > 64 || bitmapData == NULL)
+	if (width > 64 || height > 64 || bitmapData == NULL) {
+		debug_printf("xgi.accelerant: set_cursor_bitmap: REFUSED, bad args"
+			" %" B_PRIu16 "x%" B_PRIu16 " bitmapData=%p\n",
+			width, height, bitmapData);
 		return B_BAD_VALUE;
+	}
 
 	/* Only B_RGBA32/B_RGB32 (memory order BGRA, GraphicsDefs.h) are
 	 * converted below. Anything else must fail rather than silently hand
