@@ -1,0 +1,226 @@
+#!/bin/bash
+#
+# configure-live: Mostra il configure con una barra di progresso live
+# che viene aggiornata man mano che il processo avanza
+#
+# Uso: ../configure-live [opzioni di configure]
+
+set -e
+
+# Colori e formattazione
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+MAGENTA='\033[0;35m'
+NC='\033[0m' # No Color
+BOLD='\033[1m'
+
+# Variabili globali
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CONFIGURE_SCRIPT="$SCRIPT_DIR/configure"
+START_TIME=$(date +%s)
+LOG_FILE="/tmp/haiku_configure_$$.log"
+PHASES_LOG="/tmp/haiku_phases_$$.log"
+
+# Funzione per formattare il tempo
+format_time() {
+	local seconds=$1
+	local hours=$((seconds / 3600))
+	local minutes=$(((seconds % 3600) / 60))
+	local secs=$((seconds % 60))
+	
+	if [ $hours -gt 0 ]; then
+		printf "%dh %dm %ds" $hours $minutes $secs
+	elif [ $minutes -gt 0 ]; then
+		printf "%dm %ds" $minutes $secs
+	else
+		printf "%ds" $secs
+	fi
+}
+
+# Funzione per estrarre il nome della fase dal log
+extract_phase_from_log() {
+	local log_file=$1
+	
+	# Controlla vari pattern nel log per determinare la fase
+	if grep -q "build_cross_tools_gcc4" "$log_file" 2>/dev/null; then
+		# Estrai l'architettura
+		local arch=$(grep -oE "build_cross_tools_gcc4.*" "$log_file" | head -1 | sed 's/.*cross-tools_gcc4 \([^ ]*\).*/\1/' | sed 's/-..haiku.*//')
+		echo "Building cross-tools (GCC 4) - $arch"
+		return 0
+	fi
+	
+	if grep -q "Configuring binutils" "$log_file" 2>/dev/null; then
+		echo "Building cross-tools (binutils)"
+		return 0
+	fi
+	
+	if grep -q "Building cross" "$log_file" 2>/dev/null; then
+		local arch=$(grep -oE "cross-tools-[a-z0-9_]+" "$log_file" | sed 's/cross-tools-//' | tail -1)
+		echo "Building cross-tools${arch:+ ($arch)}"
+		return 0
+	fi
+	
+	if grep -q "Configuring gcc" "$log_file" 2>/dev/null; then
+		echo "Building cross-tools (GCC)"
+		return 0
+	fi
+	
+	if grep -q "Generating BuildConfig" "$log_file" 2>/dev/null; then
+		echo "Generating BuildConfig and Jamfile"
+		return 0
+	fi
+	
+	if grep -q "Configured successfully" "$log_file" 2>/dev/null; then
+		echo "Finalizing"
+		return 0
+	fi
+	
+	if tail -1 "$log_file" 2>/dev/null | grep -q "checking\|verifying\|configure"; then
+		tail -1 "$log_file" | head -c 60
+		return 0
+	fi
+	
+	echo "Processing..."
+}
+
+# Funzione per mostrare la barra di progresso
+show_live_progress() {
+	local elapsed=$1
+	local bar_length=35
+	local dots=$((elapsed / 3))  # Aumenta di un punto ogni 3 secondi
+	dots=$((dots % (bar_length + 1)))
+	
+	local filled=$((dots))
+	local empty=$((bar_length - filled))
+	
+	# Costruisci la barra animata
+	local bar="["
+	for ((i=0; i<filled; i++)); do
+		bar+="▓"
+	done
+	for ((i=0; i<empty; i++)); do
+		bar+="░"
+	done
+	bar+="]"
+	
+	echo "$bar"
+}
+
+# Funzione per mostrare il conteggio delle linee di log
+show_log_lines() {
+	local log_file=$1
+	local count=$(wc -l < "$log_file" 2>/dev/null || echo 0)
+	echo "$count"
+}
+
+# Intestazione
+echo -e "${BOLD}${BLUE}╔════════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${BLUE}║${NC}  Haiku Configure - Monitoraggio Live"
+echo -e "${BLUE}║${NC}  $(date '+%Y-%m-%d %H:%M:%S')"
+echo -e "${BOLD}${BLUE}╚════════════════════════════════════════════════════════════════╝${NC}"
+echo ""
+echo -e "${CYAN}Parametri:${NC} $@"
+echo -e "${CYAN}Log:${NC} $LOG_FILE"
+echo ""
+
+# Avvia il configure
+"$CONFIGURE_SCRIPT" "$@" > "$LOG_FILE" 2>&1 &
+configure_pid=$!
+
+# Mostra il numero iniziale di parametri
+arch_count=$(echo "$@" | grep -o "\-\-build\-cross\-tools" | wc -l)
+if [ $arch_count -eq 0 ]; then
+	arch_count=1
+fi
+
+echo -e "${CYAN}Architetture da compilare:${NC} $arch_count"
+echo ""
+echo -e "${YELLOW}Progresso:${NC}"
+echo ""
+
+# Variabili per il monitoraggio
+last_phase=""
+last_log_lines=0
+last_output_time=0
+
+# Monitora il processo
+while kill -0 $configure_pid 2>/dev/null; do
+	current_time=$(date +%s)
+	elapsed=$((current_time - START_TIME))
+	
+	# Ottieni informazioni attuali
+	current_phase=$(extract_phase_from_log "$LOG_FILE")
+	log_lines=$(show_log_lines "$LOG_FILE")
+	
+	# Aggiorna solo se qualcosa è cambiato
+	if [ "$current_phase" != "$last_phase" ] || [ $((log_lines % 10)) -eq 0 ]; then
+		# Pulisci le ultime 3 righe
+		printf "\033[3A\033[K"
+		
+		# Mostra la barra animata
+		bar=$(show_live_progress $elapsed)
+		printf "\r${MAGENTA}${bar}${NC} ${BOLD}$(format_time $elapsed)${NC}\n"
+		printf "\r${CYAN}Fase:${NC} %s\n" "$current_phase"
+		printf "\r${CYAN}Righe log:${NC} %d\n" "$log_lines"
+		
+		last_phase="$current_phase"
+		last_log_lines=$log_lines
+		last_output_time=$current_time
+	fi
+	
+	sleep 1
+done
+
+# Aspetta la terminazione
+wait $configure_pid
+exit_code=$?
+
+echo ""
+echo ""
+
+# Controlla il risultato
+if [ $exit_code -eq 0 ]; then
+	total_time=$(($(date +%s) - START_TIME))
+	
+	echo -e "${GREEN}${BOLD}✓ Configurazione completata con successo!${NC}"
+	echo -e "${GREEN}Tempo totale: $(format_time $total_time)${NC}"
+	echo ""
+	
+	# Estrai informazioni utili dal log
+	if grep -q "Configured successfully!" "$LOG_FILE"; then
+		echo -e "${CYAN}Prossimi passi:${NC}"
+		
+		# Determina l'architettura
+		if echo "$@" | grep -q "x86_64"; then
+			echo -e "  ${BOLD}cd generated.x86_64${NC}"
+		elif echo "$@" | grep -q "x86_gcc2"; then
+			echo -e "  ${BOLD}cd generated.x86_gcc2${NC}"
+		else
+			echo -e "  ${BOLD}cd generated.*${NC}"
+		fi
+		
+		echo -e "  ${BOLD}jam -q${NC}"
+	fi
+	
+	echo ""
+	echo -e "${CYAN}Log completo disponibile in:${NC} $LOG_FILE"
+	rm -f "$PHASES_LOG"
+	exit 0
+else
+	total_time=$(($(date +%s) - START_TIME))
+	
+	echo -e "${RED}${BOLD}✗ Configurazione fallita!${NC}"
+	echo -e "${RED}Exit code: $exit_code${NC}"
+	echo -e "${RED}Tempo trascorso: $(format_time $total_time)${NC}"
+	echo ""
+	echo -e "${YELLOW}Ultimi 50 righe del log:${NC}"
+	echo "─────────────────────────────────────────────────────────────"
+	tail -50 "$LOG_FILE"
+	echo "─────────────────────────────────────────────────────────────"
+	echo ""
+	echo -e "${YELLOW}Log completo in:${NC} $LOG_FILE"
+	exit $exit_code
+fi
