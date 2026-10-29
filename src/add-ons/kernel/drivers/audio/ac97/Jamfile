@@ -5,3 +5,4 @@ SubInclude HAIKU_TOP src add-ons kernel drivers audio ac97 auvia ;
 SubInclude HAIKU_TOP src add-ons kernel drivers audio ac97 es1370 ;
 SubInclude HAIKU_TOP src add-ons kernel drivers audio ac97 geode ;
 SubInclude HAIKU_TOP src add-ons kernel drivers audio ac97 sis7018 ;
+SubInclude HAIKU_TOP src add-ons kernel drivers audio ac97 ymf7xx ;
