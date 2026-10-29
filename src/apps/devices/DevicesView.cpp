@@ -120,7 +120,6 @@ DevicesView::CreateLayout()
 
 	fSaveButton = new BButton("saveButton", B_TRANSLATE("Save info" B_UTF8_ELLIPSIS),
 		new BMessage(kMsgSaveDeviceInfo));
-	fSaveButton->SetTarget(this);
 	fSaveButton->SetEnabled(false);
 
 	fActionMenuBar = new BMenuBar("Action Menu");
@@ -648,6 +647,7 @@ DevicesView::_UpdateBlockButton(Device* device)
 void
 DevicesView::_UpdateSaveButton(Device* device)
 {
+	fSaveButton->SetTarget(this);
 	fSaveButton->SetEnabled(device != NULL && !_IsCategoryItem(device));
 }
 
