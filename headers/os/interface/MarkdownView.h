@@ -254,6 +254,8 @@ private:
 	void                    _ApplyCurrentStyle(int32 startPos, RenderState& state);
 	void                    _AppendFormattedText(RenderState* state, const char* text, MD_SIZE size);
 	void                    _DrawFormattedSegment(FormattedSegment* seg, BPoint& drawPt, float lineMaxAscent);
+	int32                   _DrawFormattedSegmentWrapped(FormattedSegment* seg, BPoint drawPt, 
+		float maxWidth, float lineHeight, float lineMaxAscent);
 
 	static int              _EnterBlockCb(MD_BLOCKTYPE type, void* detail, void* userdata);
 	static int              _LeaveBlockCb(MD_BLOCKTYPE type, void* detail, void* userdata);
