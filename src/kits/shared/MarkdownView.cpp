@@ -300,102 +300,6 @@ BMarkdownView::_DrawFormattedSegment(FormattedSegment* seg, BPoint& drawPt, floa
 	DrawString(seg->text.String(), BPoint(drawPt.x, drawPt.y + lineMaxAscent));
 	drawPt.x += font.StringWidth(seg->text.String());
 }
-
-int32
-BMarkdownView::_DrawFormattedSegmentWrapped(FormattedSegment* seg, BPoint drawPt, 
-	float maxWidth, float lineHeight, float lineMaxAscent)
-{
-	if (seg == NULL || seg->text.IsEmpty())
-		return 1;
-
-	BFont font(be_plain_font);
-	rgb_color color = ui_color(B_DOCUMENT_TEXT_COLOR);
-
-	uint16 face = font.Face();
-	if (seg->isBold)
-		face |= B_BOLD_FACE;
-	if (seg->isItalic)
-		face |= B_ITALIC_FACE;
-	if (seg->isLink)
-		face |= B_UNDERSCORE_FACE;
-
-	font.SetFace(face);
-
-	if (seg->isCode) {
-		font = *be_fixed_font;
-		color = (rgb_color){ 200, 40, 40, 255 };
-	} else if (seg->isLink) {
-		color = ui_color(B_LINK_TEXT_COLOR);
-	}
-
-	SetFont(&font);
-	SetHighColor(color);
-
-	const char* text = seg->text.String();
-	float cellPadding = 16.0f;
-	float availableWidth = maxWidth - cellPadding;
-	
-	if (availableWidth <= 0)
-		return 1;
-
-	float currentY = drawPt.y;
-	int32 lineCount = 1;
-	
-	const char* lineStart = text;
-	const char* lineEnd = text;
-	const char* lastSpace = NULL;
-	float lineWidth = 0.0f;
-	
-	while (*lineEnd != '\0') {
-		float charWidth = font.StringWidth(lineEnd, 1);
-		
-		if (lineWidth + charWidth > availableWidth && lineStart != lineEnd) {
-			// La linea supera la larghezza disponibile
-			// Cerca l'ultimo spazio per fare word-break
-			if (lastSpace != NULL && lastSpace > lineStart) {
-				// Disegna fino allo spazio
-				BString lineToDraw(lineStart, lastSpace - lineStart);
-				DrawString(lineToDraw.String(), BPoint(drawPt.x + 8.0f, currentY + lineMaxAscent));
-				
-				// Passa alla riga successiva
-				currentY += lineHeight;
-				lineCount++;
-				
-				lineStart = lastSpace + 1;
-				lineWidth = 0.0f;
-				lineEnd = lineStart - 1; // Sarà incrementato nel prossimo ciclo
-				lastSpace = NULL;
-			} else {
-				// Nessuno spazio, forza il line-break a metà parola
-				BString lineToDraw(lineStart, lineEnd - lineStart);
-				DrawString(lineToDraw.String(), BPoint(drawPt.x + 8.0f, currentY + lineMaxAscent));
-				
-				currentY += lineHeight;
-				lineCount++;
-				
-				lineStart = lineEnd;
-				lineWidth = 0.0f;
-				lastSpace = NULL;
-			}
-		} else {
-			lineWidth += charWidth;
-		}
-		
-		if (*lineEnd == ' ' || *lineEnd == '\t') {
-			lastSpace = lineEnd;
-		}
-		
-		lineEnd++;
-	}
-	
-	// Disegna il testo rimanente
-	if (lineStart < lineEnd) {
-		BString lineToDraw(lineStart, lineEnd - lineStart);
-		DrawString(lineToDraw.String(), BPoint(drawPt.x + 8.0f, currentY + lineMaxAscent));
-	}
-	
-	return lineCount;
-}
 void
 BMarkdownView::Draw(BRect updateRect)
 {
@@ -492,118 +396,21 @@ BMarkdownView::Draw(BRect updateRect)
 			if (!outerRect.Intersects(updateRect))
 				continue;
 
-			// Calcola le altezze delle righe considerando il word-wrapping
-			BObjectList<float, false> rowHeights(rowCount);
-			int32 maxCols = 0;
-			float colWidth = 0.0f;
-
-			// Determina il numero massimo di colonne
-			for (int32 r = 0; r < rowCount; r++) {
-				TableRowRegion* row = table->rows.ItemAt(r);
-				if (row != NULL && row->cells.CountItems() > maxCols)
-					maxCols = row->cells.CountItems();
-			}
-			colWidth = (maxCols > 0) ? (totalTableRect.Width() / (float)maxCols) : totalTableRect.Width();
-
-			// Calcola l'altezza di ogni riga
-			for (int32 r = 0; r < rowCount; r++) {
-				TableRowRegion* row = table->rows.ItemAt(r);
-				if (row == NULL) {
-					rowHeights.AddItem(new float(fontLineHeight + 8.0f));
-					continue;
-				}
-
-				int32 maxLinesInRow = 1;
-				int32 cellCount = row->cells.CountItems();
-				
-				// Calcola il numero massimo di linee necessarie in questa riga
-				for (int32 c = 0; c < cellCount; c++) {
-					TableCellRegion* cell = row->cells.ItemAt(c);
-					if (cell == NULL || cell->segments.IsEmpty())
-						continue;
-
-					int32 totalLinesForCell = 0;
-					
-					int32 segCount = cell->segments.CountItems();
-					for (int32 s = 0; s < segCount; s++) {
-						FormattedSegment* seg = cell->segments.ItemAt(s);
-						if (seg == NULL || seg->text.IsEmpty())
-							continue;
-
-						// Calcola quante linee servono per questo segmento
-						BFont font(be_plain_font);
-						uint16 face = font.Face();
-						if (seg->isBold)
-							face |= B_BOLD_FACE;
-						if (seg->isItalic)
-							face |= B_ITALIC_FACE;
-						if (seg->isCode)
-							font = *be_fixed_font;
-						
-						font.SetFace(face);
-						
-						const char* text = seg->text.String();
-						float cellPadding = 16.0f;
-						float availableWidth = colWidth - cellPadding;
-						
-						if (availableWidth <= 0) {
-							totalLinesForCell += 1;
-							continue;
-						}
-
-						float lineWidth = 0.0f;
-						int32 lineCount = 1;
-						const char* lineStart = text;
-						
-						while (*text != '\0') {
-							float charWidth = font.StringWidth(text, 1);
-							
-							if (lineWidth + charWidth > availableWidth && text != lineStart) {
-								// Cerca l'ultimo spazio
-								const char* space = text - 1;
-								while (space > lineStart && *space != ' ' && *space != '\t')
-									space--;
-								
-								if (space > lineStart) {
-									text = space + 1;
-								} else {
-									text++;
-								}
-								
-								lineWidth = 0.0f;
-								lineCount++;
-								lineStart = text;
-							} else {
-								lineWidth += charWidth;
-								text++;
-							}
-						}
-						
-						totalLinesForCell += lineCount;
-					}
-					
-					// Aggiorna il massimo per questa riga
-					if (totalLinesForCell > maxLinesInRow)
-						maxLinesInRow = totalLinesForCell;
-				}
-				
-				float rHeight = fontLineHeight * maxLinesInRow + 8.0f;
-				rowHeights.AddItem(new float(rHeight));
-			}
-
 			// 2. ZEBRA STRIPING DELLE RIGHE (Sfondo e linee orizzontali)
 			for (int32 r = 0; r < rowCount; r++) {
 				TableRowRegion* row = table->rows.ItemAt(r);
 				BPoint rStartPt = PointAt(row->startPos);
-				
-				float* pRHeight = rowHeights.ItemAt(r);
-				float rHeight = (pRHeight != NULL) ? *pRHeight : fontLineHeight + 8.0f;
+				int32 rEndAdjusted = std::max(row->startPos, row->endPos - 1);
+
+				float rHeight = LineHeight(rEndAdjusted);
+				if (rHeight < fontLineHeight)
+					rHeight = fontLineHeight;
 
 				BRect rowRect;
 				rowRect.left = totalTableRect.left;
 				rowRect.right = totalTableRect.right;
 				rowRect.top = rStartPt.y - 2.0f;
-				rowRect.bottom = rowRect.top + rHeight;
+				rowRect.bottom = rowRect.top + rHeight + 4.0f;
 
 				rgb_color rowBg;
 				if (row->isHeader)
@@ -623,17 +430,18 @@ BMarkdownView::Draw(BRect updateRect)
 			}
 
 			// 3. LINEE VERTICALI DIVISORIE TRA LE COLONNE
-			int32 maxColsForLines = 0;
+			int32 maxCols = 0;
 			for (int32 r = 0; r < rowCount; r++) {
 				TableRowRegion* row = table->rows.ItemAt(r);
-				if (row != NULL && row->cells.CountItems() > maxColsForLines)
-					maxColsForLines = row->cells.CountItems();
+				if (row != NULL && row->cells.CountItems() > maxCols)
+					maxCols = row->cells.CountItems();
 			}
 
-			if (maxColsForLines > 1) {
+			if (maxCols > 1) {
+				float colWidth = totalTableRect.Width() / (float)maxCols;
 				SetHighColor(tableBorderColor);
 
-				for (int32 c = 1; c < maxColsForLines; c++) {
+				for (int32 c = 1; c < maxCols; c++) {
 					float xLine = totalTableRect.left + (c * colWidth);
 					StrokeLine(
 						BPoint(xLine, totalTableRect.top),
@@ -663,14 +471,102 @@ BMarkdownView::Draw(BRect updateRect)
 
 			DrawString(copyTableStr, BPoint(table->copyRect.left + 2.0f, totalTableRect.top - 5.0f));
 
-			// 6. RIDISEGNO PRECISO DEL TESTO DELLE CELLE CON WORD-WRAPPING
-			// Ora disegniamo le celle con le altezze corrette
+			// 6. RIDISEGNO PRECISO DEL TESTO DELLE CELLE ALLINEATO AL CENTRO VERTICALE
+			float colWidth = (maxCols > 0) ? (totalTableRect.Width() / (float)maxCols) : totalTableRect.Width();
+
+			// Calcola il numero massimo di linee di wrapping per ogni riga
+			BObjectList<int32, false> maxLinesPerRow(rowCount);
+			for (int32 r = 0; r < rowCount; r++) {
+				TableRowRegion* row = table->rows.ItemAt(r);
+				if (row == NULL) {
+					maxLinesPerRow.AddItem(new int32(1));
+					continue;
+				}
+
+				int32 maxLines = 1;
+				int32 cellCount = row->cells.CountItems();
+				
+				// Per ogni cella nella riga, calcola quante linee di wrapping occorrono
+				for (int32 c = 0; c < cellCount; c++) {
+					TableCellRegion* cell = row->cells.ItemAt(c);
+					if (cell == NULL || cell->segments.IsEmpty())
+						continue;
+
+					int32 cellLines = 1;
+					float cellPadding = 16.0f;
+					float availableWidth = colWidth - cellPadding;
+					
+					if (availableWidth <= 0) {
+						cellLines = 1;
+					} else {
+						// Conta le linee di wrapping per questa cella
+						int32 segCount = cell->segments.CountItems();
+						for (int32 s = 0; s < segCount; s++) {
+							FormattedSegment* seg = cell->segments.ItemAt(s);
+							if (seg == NULL || seg->text.IsEmpty())
+								continue;
+
+							BFont font(be_plain_font);
+							uint16 face = font.Face();
+							if (seg->isBold)
+								face |= B_BOLD_FACE;
+							if (seg->isItalic)
+								face |= B_ITALIC_FACE;
+							if (seg->isCode)
+								font = *be_fixed_font;
+							font.SetFace(face);
+
+							const char* text = seg->text.String();
+							float lineWidth = 0.0f;
+							int32 lineCount = 1;
+							const char* lineStart = text;
+							
+							while (*text != '\0') {
+								float charWidth = font.StringWidth(text, 1);
+								
+								if (lineWidth + charWidth > availableWidth && text != lineStart) {
+									// Cerca l'ultimo spazio
+									const char* space = text - 1;
+									while (space > lineStart && *space != ' ' && *space != '\t')
+										space--;
+									
+									if (space > lineStart) {
+										text = space + 1;
+									} else {
+										text++;
+									}
+									
+									lineWidth = 0.0f;
+									lineCount++;
+									lineStart = text;
+								} else {
+									lineWidth += charWidth;
+									text++;
+								}
+							}
+							
+							cellLines = lineCount;
+						}
+					}
+					
+					if (cellLines > maxLines)
+						maxLines = cellLines;
+				}
+				
+				maxLinesPerRow.AddItem(new int32(maxLines));
+			}
+
+			// Disegna il testo delle celle con altezze uniformi
 			for (int32 r = 0; r < rowCount; r++) {
 				TableRowRegion* row = table->rows.ItemAt(r);
 				if (row == NULL) continue;
 
 				BPoint rStartPt = PointAt(row->startPos);
-				
+				int32 rEndAdjusted = std::max(row->startPos, row->endPos - 1);
+				float rHeight = LineHeight(rEndAdjusted);
+				if (rHeight < fontLineHeight)
+					rHeight = fontLineHeight;
+
 				// Baseline calcolata per la prima linea
 				float textY = rStartPt.y + 4.0f;
 
@@ -680,20 +576,20 @@ BMarkdownView::Draw(BRect updateRect)
 					if (cell == NULL || cell->segments.IsEmpty())
 						continue;
 
-					float cellX = totalTableRect.left + (c * colWidth);
-					BPoint drawPt(cellX + 8.0f, textY);
+					float cellX = totalTableRect.left + (c * colWidth) + 8.0f;
+					BPoint drawPt(cellX, textY);
 
 					int32 segCount = cell->segments.CountItems();
 					for (int32 s = 0; s < segCount; s++) {
 						FormattedSegment* seg = cell->segments.ItemAt(s);
-						_DrawFormattedSegmentWrapped(seg, drawPt, colWidth, fontLineHeight, fh.ascent);
+						_DrawFormattedSegment(seg, drawPt, fh.ascent);
 					}
 				}
 			}
 			
-			// Pulizia della memoria per rowHeights
-			for (int32 i = 0; i < rowHeights.CountItems(); i++) {
-				delete rowHeights.ItemAt(i);
+			// Pulizia memoria
+			for (int32 i = 0; i < maxLinesPerRow.CountItems(); i++) {
+				delete maxLinesPerRow.ItemAt(i);
 			}
 		}
 	}
@@ -1293,8 +1189,7 @@ BMarkdownView::_LeaveBlockCb(MD_BLOCKTYPE type, void* detail, void* userdata)
 			if (state->currentTable != NULL && state->currentTable->rows.CountItems() > 0) {
 				TableRowRegion* row = state->currentTable->rows.LastItem();
 				row->endPos = state->view->TextLength();
-				// Aggiungi 2 newline per dare spazio al word-wrapping
-				state->view->Insert("\n\n");
+				state->view->Insert("\n");
 			}
 			break;
 		}
