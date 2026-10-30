@@ -665,15 +665,15 @@ BMarkdownView::Draw(BRect updateRect)
 
 			// 6. RIDISEGNO PRECISO DEL TESTO DELLE CELLE CON WORD-WRAPPING
 			// Traccia il massimo Y raggiunto durante il disegno di ogni riga
-			float currentRowY = table->rows.ItemAt(0) != NULL ? PointAt(table->rows.ItemAt(0)->startPos).y + 4.0f : 0.0f;
-
 			for (int32 r = 0; r < rowCount; r++) {
 				TableRowRegion* row = table->rows.ItemAt(r);
 				if (row == NULL) continue;
 
-				// La riga inizia dove la precedente ha finito
-				float textY = currentRowY;
-				float maxYReached = textY;  // Traccia il massimo Y raggiunto in questa riga
+				BPoint rStartPt = PointAt(row->startPos);
+				
+				// Baseline calcolata per la prima linea
+				float textY = rStartPt.y + 4.0f;
+				float maxYReached = textY;  // Traccia il massimo Y raggiunto
 
 				int32 cellCount = row->cells.CountItems();
 				for (int32 c = 0; c < cellCount; c++) {
@@ -695,8 +695,10 @@ BMarkdownView::Draw(BRect updateRect)
 						maxYReached = drawPt.y;
 				}
 				
-				// La prossima riga inizia dove questa ha finito
-				currentRowY = maxYReached + 4.0f;
+				// Aggiorna rowHeights con il valore effettivamente disegnato
+				float* pRowHeight = rowHeights.ItemAt(r);
+				if (pRowHeight != NULL)
+					*pRowHeight = maxYReached - rStartPt.y;
 			}
 			
 			// Pulizia della memoria per rowHeights
