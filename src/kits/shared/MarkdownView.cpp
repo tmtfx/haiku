@@ -664,7 +664,7 @@ BMarkdownView::Draw(BRect updateRect)
 			DrawString(copyTableStr, BPoint(table->copyRect.left + 2.0f, totalTableRect.top - 5.0f));
 
 			// 6. RIDISEGNO PRECISO DEL TESTO DELLE CELLE CON WORD-WRAPPING
-			// Ora disegniamo le celle con le altezze corrette
+			// Traccia il massimo Y raggiunto durante il disegno di ogni riga
 			for (int32 r = 0; r < rowCount; r++) {
 				TableRowRegion* row = table->rows.ItemAt(r);
 				if (row == NULL) continue;
@@ -673,6 +673,7 @@ BMarkdownView::Draw(BRect updateRect)
 				
 				// Baseline calcolata per la prima linea
 				float textY = rStartPt.y + 4.0f;
+				float maxYReached = textY;  // Traccia il massimo Y raggiunto
 
 				int32 cellCount = row->cells.CountItems();
 				for (int32 c = 0; c < cellCount; c++) {
@@ -688,7 +689,16 @@ BMarkdownView::Draw(BRect updateRect)
 						FormattedSegment* seg = cell->segments.ItemAt(s);
 						_DrawFormattedSegmentWrapped(seg, drawPt, colWidth, fontLineHeight, fh.ascent);
 					}
+					
+					// Traccia il massimo Y raggiunto da questa cella
+					if (drawPt.y > maxYReached)
+						maxYReached = drawPt.y;
 				}
+				
+				// Aggiorna rowHeights con il valore effettivamente disegnato
+				float* pRowHeight = rowHeights.ItemAt(r);
+				if (pRowHeight != NULL)
+					*pRowHeight = maxYReached - rStartPt.y;
 			}
 			
 			// Pulizia della memoria per rowHeights
