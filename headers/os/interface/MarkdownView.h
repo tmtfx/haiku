@@ -86,12 +86,14 @@ struct TableRowRegion {
 	int32 startPos;
 	int32 endPos;
 	bool  isHeader;
+	int32 wrappedLineCount;
 	BObjectList<TableCellRegion, true> cells;
 
 	TableRowRegion()
 		: startPos(-1),
 		  endPos(-1),
 		  isHeader(false),
+		  wrappedLineCount(1),
 		  cells(10)
 	{}
 };
