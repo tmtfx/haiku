@@ -681,7 +681,7 @@ BMarkdownView::Draw(BRect updateRect)
 						continue;
 
 					float cellX = totalTableRect.left + (c * colWidth);
-					BPoint drawPt(cellX + 8.0f, textY);
+					BPoint drawPt(cellX, textY);
 
 					int32 segCount = cell->segments.CountItems();
 					for (int32 s = 0; s < segCount; s++) {
@@ -1293,8 +1293,7 @@ BMarkdownView::_LeaveBlockCb(MD_BLOCKTYPE type, void* detail, void* userdata)
 			if (state->currentTable != NULL && state->currentTable->rows.CountItems() > 0) {
 				TableRowRegion* row = state->currentTable->rows.LastItem();
 				row->endPos = state->view->TextLength();
-				// Aggiungi 2 newline per dare spazio al word-wrapping
-				state->view->Insert("\n\n");
+				state->view->Insert("\n");
 			}
 			break;
 		}
