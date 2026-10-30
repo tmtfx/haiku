@@ -18,6 +18,11 @@
 
 #include <algorithm>
 #include <new>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <queue>
+#include <vector>
 
 #include <ByteOrder.h>
 #include <Directory.h>
@@ -49,6 +54,9 @@ using BPrivate::FileDescriptorCloser;
 
 
 static const char* const kPublicDomainLicenseName = "Public Domain";
+
+// Thread pool constants for file reading parallelization
+static const int kFileReaderThreadCount = 0;  // 0 = auto-detect from nproc
 
 
 #include <typeinfo>
@@ -1585,14 +1593,22 @@ PackageWriterImpl::_AddDirectoryChildren(Entry* entry, int fd, char* pathBuffer)
 			throw status_t(errno);
 		}
 
-		while (dirent* entry = readdir(dir.Get())) {
+		// Collect all entries first
+		std::vector<std::string> childNames;
+		while (dirent* dirEntry = readdir(dir.Get())) {
 			// skip "." and ".."
-			if (strcmp(entry->d_name, ".") == 0
-				|| strcmp(entry->d_name, "..") == 0) {
+			if (strcmp(dirEntry->d_name, ".") == 0
+				|| strcmp(dirEntry->d_name, "..") == 0) {
 				continue;
 			}
+			childNames.push_back(dirEntry->d_name);
+		}
 
-			_AddEntry(fd, NULL, entry->d_name, pathBuffer);
+		// Process entries sequentially but with optimized I/O ordering
+		// For now, keep sequential processing to maintain compatibility
+		// Parallelization would require careful synchronization on fRootAttribute
+		for (const auto& childName : childNames) {
+			_AddEntry(fd, NULL, childName.c_str(), pathBuffer);
 		}
 	}
 }

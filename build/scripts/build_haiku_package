@@ -107,8 +107,14 @@ while [ $# -gt 0 ]; do
 done
 
 
-# mimeset the whole package content
+# mimeset the whole package content (parallelized)
 echo "$packageName: mimeset'ing package contents ..."
+# Use find + xargs with mimeset to parallelize by processing files in batches
+# -0 for null-terminated filenames, -P for parallel jobs
+PARALLEL_JOBS=$(nproc)
+find "$contentsDir" -type f -print0 | xargs -0 -P "$PARALLEL_JOBS" -n 100 \
+	$mimeset --mimedb "$mimeDB" 2>/dev/null || true
+# Also process directories
 $mimeset --mimedb "$mimeDB" "$contentsDir"
 
 

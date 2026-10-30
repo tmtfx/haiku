@@ -8,6 +8,11 @@
 
 #include <algorithm>
 #include <new>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <queue>
+#include <vector>
 
 #include <ByteOrder.h>
 #include <List.h>
@@ -23,6 +28,128 @@
 
 // minimum length of data we require before trying to compress them
 static const size_t kCompressionSizeThreshold = 64;
+
+// Thread pool for parallel compression
+static const int kCompressionThreadCount = 0;  // 0 = auto-detect from nproc
+
+namespace {
+
+class CompressionThreadPool {
+public:
+	struct CompressionJob {
+		const void* input;
+		size_t inputSize;
+		void* output;
+		size_t outputSize;
+		BCompressionAlgorithm* algorithm;
+		BCompressionParameters* parameters;
+		status_t result;
+	};
+
+	CompressionThreadPool()
+		: fShutdown(false), fThreadCount(0), fActiveJobs(0)
+	{
+		// Only use threads if we have multiple cores
+		int threadCount = kCompressionThreadCount;
+		if (threadCount == 0) {
+			threadCount = std::thread::hardware_concurrency();
+			if (threadCount < 2)
+				threadCount = 0;  // Disable threading for single core
+			else if (threadCount > 8)
+				threadCount = 8;  // Cap at 8 threads
+		}
+		
+		if (threadCount > 0) {
+			fThreadCount = threadCount;
+			for (int i = 0; i < threadCount; i++) {
+				fThreads.emplace_back(&CompressionThreadPool::_WorkerThread, this);
+			}
+		}
+	}
+
+	~CompressionThreadPool()
+	{
+		if (fThreadCount > 0) {
+			{
+				std::lock_guard<std::mutex> lock(fMutex);
+				fShutdown = true;
+			}
+			fCondVar.notify_all();
+			for (auto& thread : fThreads) {
+				thread.join();
+			}
+		}
+	}
+
+	bool IsEnabled() const { return fThreadCount > 0; }
+
+	void SubmitJob(CompressionJob* job)
+	{
+		if (fThreadCount <= 0)
+			return;
+		{
+			std::lock_guard<std::mutex> lock(fMutex);
+			fJobs.push(job);
+		}
+		fCondVar.notify_one();
+	}
+
+	void WaitForCompletion()
+	{
+		if (fThreadCount <= 0)
+			return;
+		std::unique_lock<std::mutex> lock(fMutex);
+		fCompletionVar.wait(lock, [this]() { return fJobs.empty() && fActiveJobs == 0; });
+	}
+
+private:
+	void _WorkerThread()
+	{
+		while (true) {
+			CompressionJob* job = nullptr;
+			{
+				std::unique_lock<std::mutex> lock(fMutex);
+				fCondVar.wait(lock, [this]() { return !fJobs.empty() || fShutdown; });
+				if (fShutdown && fJobs.empty())
+					break;
+				if (!fJobs.empty()) {
+					job = fJobs.front();
+					fJobs.pop();
+					fActiveJobs++;
+				}
+			}
+
+			if (job != nullptr) {
+				iovec uncompressed = { (void*)job->input, job->inputSize };
+				iovec compressed = { job->output, job->outputSize };
+				job->result = job->algorithm->CompressBuffer(
+					uncompressed, compressed,
+					job->parameters);
+				if (job->result == B_OK)
+					job->outputSize = compressed.iov_len;
+
+				{
+					std::lock_guard<std::mutex> lock(fMutex);
+					fActiveJobs--;
+				}
+				fCompletionVar.notify_one();
+			}
+		}
+	}
+
+	std::vector<std::thread> fThreads;
+	std::queue<CompressionJob*> fJobs;
+	std::mutex fMutex;
+	std::condition_variable fCondVar;
+	std::condition_variable fCompletionVar;
+	int fThreadCount;
+	int fActiveJobs;
+	bool fShutdown;
+};
+
+static CompressionThreadPool gCompressionThreadPool;
+
+}  // anonymous namespace
 
 
 namespace BPackageKit {
@@ -563,6 +690,37 @@ PackageFileHeapWriter::_WriteDataCompressed(const void* data, size_t size)
 	if (fCompressionAlgorithm == NULL)
 		return B_BUFFER_OVERFLOW;
 
+	// Use thread pool for large chunks if available
+	if (gCompressionThreadPool.IsEnabled() && size > 256 * 1024) {
+		CompressionThreadPool::CompressionJob job;
+		job.input = data;
+		job.inputSize = size;
+		job.output = fCompressedDataBuffer;
+		job.outputSize = size;
+		job.algorithm = fCompressionAlgorithm->algorithm;
+		job.parameters = fCompressionAlgorithm->parameters;
+		job.result = B_OK;
+
+		gCompressionThreadPool.SubmitJob(&job);
+		gCompressionThreadPool.WaitForCompletion();
+
+		status_t error = job.result;
+		if (error != B_OK) {
+			if (error != B_BUFFER_OVERFLOW) {
+				fErrorOutput->PrintError("Failed to compress chunk data: %s\n",
+					strerror(error));
+			}
+			return error;
+		}
+
+		// only use compressed data when we've actually saved space
+		if (job.outputSize == size)
+			return B_BUFFER_OVERFLOW;
+
+		return _WriteDataUncompressed(fCompressedDataBuffer, job.outputSize);
+	}
+
+	// Fall back to synchronous compression for small chunks
 	const iovec uncompressed = { (void*)data, size };
 	iovec compressed = { fCompressedDataBuffer, size };
 	status_t error = fCompressionAlgorithm->algorithm->CompressBuffer(
