@@ -86,12 +86,14 @@ struct TableRowRegion {
 	int32 startPos;
 	int32 endPos;
 	bool  isHeader;
+	int32 lineCount;
 	BObjectList<TableCellRegion, true> cells;
 
 	TableRowRegion()
 		: startPos(-1),
 		  endPos(-1),
 		  isHeader(false),
+		  lineCount(1),
 		  cells(10)
 	{}
 };
@@ -254,8 +256,9 @@ private:
 	void                    _ApplyCurrentStyle(int32 startPos, RenderState& state);
 	void                    _AppendFormattedText(RenderState* state, const char* text, MD_SIZE size);
 	void                    _DrawFormattedSegment(FormattedSegment* seg, BPoint& drawPt, float lineMaxAscent);
-	int32                   _DrawFormattedSegmentWrapped(FormattedSegment* seg, BPoint drawPt, 
-		float maxWidth, float lineHeight, float lineMaxAscent);
+	float                   _TableColumnWidth(int32 columnCount) const;
+	int32                   _LayoutTableCell(TableCellRegion* cell, BPoint origin,
+		float colWidth, bool draw);
 
 	static int              _EnterBlockCb(MD_BLOCKTYPE type, void* detail, void* userdata);
 	static int              _LeaveBlockCb(MD_BLOCKTYPE type, void* detail, void* userdata);
