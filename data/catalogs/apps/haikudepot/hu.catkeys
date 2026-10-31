@@ -1,4 +1,4 @@
-1	hungarian	x-vnd.Haiku-HaikuDepot	4230673291
+1	hungarian	x-vnd.Haiku-HaikuDepot	2645976830
 Usage conditions download problem	ToLatestUserUsageConditionsWindow		Probléma lépett fel a felhasználási feltételek letöltésekor
 User ratings loading…	PackageInfoView		Felhasználói értékelések betöltése…
 Available packages	MainWindow		Elérhető csomagok
@@ -15,6 +15,7 @@ It was not possible to extract necessary captcha information from the data sent 
 Install %PackageTitle%	PackageAction		%PackageTitle% telepítése
 An error occurred while obtaining the package list: %message%	LocalPkgDataLoadProcess		Nem sikerült a csomaglista betöltése: %message%.
 Update usage conditions	ToLatestUserUsageConditionsWindow		Felhasználási feltételek frissítése
+Details: %Details%	PackageKitUtils		Résztelek: %Details%
 No usage conditions	UserUsageConditions		Nincsenek felhasználási feltételek
 Active	PackageListView		Aktív
 Login or Create account	MainWindow		Belépés vagy fiók létrehozása
@@ -31,6 +32,7 @@ An unexpected error '%Message%' has arisen with property '%Property%'	UserLoginW
 A requested object or an object involved in the request was not found on the server.	ServerHelper		A kért objektum vagy a kérésben szereplő objektum nem található a kiszolgálón.
 Logout	ToLatestUserUsageConditionsWindow		Kilépés
 Password requirements	UserLoginWindow		Jelszókövetelmények
+Transaction Result: %TxnResultFullErrorMessage%	PackageKitUtils		Átvitel eredménye: %TxnResultFullErrorMessage%
 The following additional package changes have to be made:	PackageResult		Az alábbi módosítások elvégzése szükséges a csomagon:
 %Appname% communicates with a server component called HaikuDepotServer. These are the usage conditions that the user '%Nickname%' agreed to at %AgreedToTimestamp% in relation to the use of the HaikuDepotServer service.	UserUsageConditions		A %Appname% a HaikuDepotServer komponensel kommunikál. Ezek a felhasználási feltételek, amit a HaikuDepotServer szolgáltatással kapcsolatban elfogadott '%Nickname%' felhasználó (%AgreedToTimestamp%).
 No changelog available.	PackageInfoView		Nincs módosítás-előzmény
@@ -43,9 +45,11 @@ Available	PackageListView		Elérhető
 Click a package to view information	PackageInfoView		Válassz egy csomagot az információk megtekintéséhez
 Cancel	UserLoginWindow		Mégse
 Rating not possible	MainWindow		Nem értékelhető
+Install failure	InstallPackageProcess		Telepítési hiba
 Package update error	MainWindow		Csomag frissítési hiba
 Click here	FeaturedPackagesView	Appears in the sentence 'Click here to search all packages.'	Kattints ide
 No screenshot available.	PackageInfoView		Képernyőkép nem érhető el.
+Try installing anyway	MainWindow		Mindenképp próbálja meg telepíteni
 %FIRST_PROCESS_DESCRIPTION% +{0, plural, one{# process} other{# processes}}	ProcessCoordinator		%FIRST_PROCESS_DESCRIPTION% +{0, plural, one{# folyamat} other{# folyamat}}
 Fetching user ratings for package	PopulatePkgUserRatingsFromServerProcess		Felhasználói értékelések lekérése a csomaghoz
 Reboot required	PackageManager		Újraindítás szükséges
@@ -76,6 +80,7 @@ All categories	FilterView		Minden kategória
 Your rating was updated.	RatePackageWindow		Az értékelés módosítása sikerült.
 ignore problem for now	PackageProblem		most hagyja figyelmen kívül
 n/a	PackageInfoView		nincs értékelve
+Error: %Errstr% (%Errno%)	PackageKitUtils		Hiba: %Errstr% (%Errno%)
 Checking user details	UserDetailVerifierProcess		Felhasználó ellenőrzése
 Cancel	MainWindow		Mégse
 Refresh repositories	MainWindow		Tárolók frissítése
@@ -127,17 +132,15 @@ User Created	UserLoginWindow		Felhasználó létrehozva
 Check for updates…	MainWindow		Frissítések keresése…
 Uninstalled	PackageListView		Eltávolítva
 I agree to the usage conditions	ToLatestUserUsageConditionsWindow		Egyetértek a felhasználási feltételekkel
-Installing \"%PackageName%\"	InstallPackageProcess		\"%PackageName%\" telepítése
 Uninstall %PackageTitle%	PackageAction		%PackageTitle% eltávolítása
 OK	App		Rendben
-Fatal error	UninstallPackageAction		Végzetes hiba
 Develop packages	MainWindow		Fejlesztői csomagok
 Starting the package daemon failed:\n\n%Error%	App		A csomag démon indítása sikertelen:\n\n%Error%
 No user ratings available.	PackageInfoView		Felhasználói értékelés nem áll rendelkezésre.
 <no info>	PackageInfoView		<nincs információ>
 Usage conditions download problem	UserUsageConditions		Hiba történt a felhasználási feltételek letöltésekor
-An error has arisen downloading the password requirements required to create a new user. Check the log for details and try again. \nInformation about how to view the logs is available in the HaikuDepot section of the Haiku User Guide.	UserLoginWindow		Hiba történt az új felhasználó létrehozásához szükséges jelszókövetelmények letöltése során. Ellenőrizd a naplót a részletekért, majd próbálkozz újra.\nA naplók megtekintésével kapcsolatos információk a Haiku Felhasználói kézikönyv Raktár részében találhatók.
 Fetching screenshot	CacheScreenshotProcess		Képernyőkép lekérése
+An error has arisen downloading the password requirements required to create a new user. Check the log for details and try again. \nInformation about how to view the logs is available in the HaikuDepot section of the Haiku User Guide.	UserLoginWindow		Hiba történt az új felhasználó létrehozásához szükséges jelszókövetelmények letöltése során. Ellenőrizd a naplót a részletekért, majd próbálkozz újra.\nA naplók megtekintésével kapcsolatos információk a Haiku Felhasználói kézikönyv Raktár részében találhatók.
 A network transport error has arisen communicating with the server system: %s	ServerHelper		Hálózati hiba lépett fel a szerverrel való kommunikáció során: %s
 Rating	PackageListView		Értékelés
 Synchronizing icons	ServerIconExportUpdateProcess		Ikonok szinkronizálása
@@ -197,6 +200,7 @@ Login issue	MainWindow		Belépési hiba
 Your rating:	RatePackageWindow		Saját értékelés:
 The user %Nickname% has been successfully created in the HaikuDepotServer system. You can administer your user details by using the web interface. You are now logged-in as this new user.	UserLoginWindow		A %Nickname% felhasználó sikeresen létrejött a HaikuDepot kiszolgáló rendszerében. Felhasználói adataid a webes felületen kezelheted. Most ezen új felhasználóként vagy bejelentkezve.
 Repositories	MainWindow		Tárolók
+Uninstall failure	UninstallPackageAction		Eltávolítási hiba
 While updating package data, a problem has arisen that may cause data to be outdated or missing from the application's display. Additional details regarding this problem may be able to be obtained from the application logs.\nInformation about how to view the logs is available in the HaikuDepot section of the Haiku User Guide.	MainWindow		A csomagadatok frissítése közben felmerült egy probléma, amely az adatok elavulását vagy hiányát okozhatják az alkalmazásban. A problémával kapcsolatos további információkat az alkalmazásnaplókban tekintheted meg.\nA naplók megtekintésével kapcsolatos információk a Haiku felhasználói kézikönyv HaikuDepot szakaszában találhatók.
 This rating is visible to other users	RatePackageWindow		Ez az értékelés más felhasználók számára is látható
 An error has arisen downloading the usage conditions. Check the log for details and try again. \nInformation about how to view the logs is available in the HaikuDepot section of the Haiku User Guide.	UserUsageConditions		Hiba történt a használati feltételek letöltése során. Nézd meg a naplót a részletekért, és próbáld újra. \nA naplók megtekintésével kapcsolatos információk a Haiku felhasználói kézikönyv HaikuDepot részében találhatók.
@@ -213,10 +217,10 @@ Comment language:	RatePackageWindow		Hozzászólás nyelve:
 The password has been incorrectly repeated.	UserLoginWindow		A megismételt jelszó téves.
 The password previously supplied for the user [%Nickname%] is not currently valid. The user will be logged-out of this application and you should login again with your updated password.	MainWindow		A felhasználó [%Nickname%] előzőleg megadott jelszava évrénytelen. A felhasználó ki lesz léptetve az alkalmazásból majd újra be kell jelentkezni az érvényes jelszóval.
 View the usage conditions	ToLatestUserUsageConditionsWindow		Felhasználási feltételek megtekintése
+To install package %PackageName% requires %PackageBytesDescription% of free disk space, but only %FreeBytesDescription% is available. The installation may fail.	MainWindow		%PackageName% csomag telepítéséhez %PackageBytesDescription% szabad terület szükséges, de csak %FreeBytesDescription% áll rendelkezésre. A telepítés valószínűleg sikertelen lesz.
 OK	ServerHelper		Rendben
 Reading repository data	LocalPkgDataLoadProcess		Tároló olvasása
 Native desktop packages only	MainWindow		Csak natív aszali csomagok
-Fatal error	InstallPackageProcess		Végzetes hiba
 A validation error has occurred	ServerHelper		Hitelesítési hiba
 %Appname% communicates with a server component called HaikuDepotServer. These are the latest usage conditions for use of the HaikuDepotServer service.	UserUsageConditions		A %Appname% a HaikuDepotServer komponensel kommunikál. Ezek a HaikuDepotServer szolgáltatás legújabb felhasználási feltételei.
 The nickname is required.	UserLoginWindow		Felhasználói név szükséges.
@@ -242,5 +246,6 @@ No results? 	FeaturedPackagesView		Nincs találat?
 User creation error	UserLoginWindow		Felhasználó létrehozási hiba
 You need to be logged into an account before you can rate packages.	MainWindow		Csomag értékelése előtt be kell jelentkezni egy felhasználói fiókba.
 Cleaning up…	ShuttingDownWindow		Rendrakás…
+Insufficient storage capacity	MainWindow		Nincs elegendő lemez-kapacitás
 %appname% is stopping or completing running operations before quitting.	ShuttingDownWindow		A %appname% éppen leáll vagy befejezi a folyamatban lévő munkákat kilépés előtt.
 Repeat password:	UserLoginWindow		Jelszó ismétlése:
