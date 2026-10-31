@@ -47,7 +47,7 @@ public:
 	};
 
 	CompressionThreadPool()
-		: fShutdown(false), fThreadCount(0), fActiveJobs(0)
+		: fThreadCount(0), fActiveJobs(0), fShutdown(false)
 	{
 		// Only use threads if we have multiple cores
 		int threadCount = kCompressionThreadCount;
