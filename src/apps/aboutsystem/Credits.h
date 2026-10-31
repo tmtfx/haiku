@@ -528,6 +528,7 @@ static const Translation kTranslations[] = {
 	"René Gollent\n" \
 	"Jessica Hamilton\n" \
 	"Fredrik Holmqvist\n" \
+	"Philippe Houdoin\n" \
 	"David Karoly\n" \
 	"Kacper Kasper\n" \
 	"Ryan Leavengood\n" \
@@ -543,6 +544,7 @@ static const Translation kTranslations[] = {
 	"Gerasim Troeglazov\n" \
 	"Fabio Tomat\n" \
 	"I Pirati Del Frico\n" \
+	"Zardshard\n" \
 	"\n"
 
 #define kPastMaintainers \
@@ -564,7 +566,6 @@ static const Translation kTranslations[] = {
 	"Julian Harnath\n" \
 	"Karsten Heimrich\n" \
 	"Brian Hill\n" \
-	"Philippe Houdoin\n" \
 	"Erik Jaesler\n" \
 	"Maurice Kalinowski\n" \
 	"Euan Kirkhope\n" \
@@ -610,15 +611,19 @@ static const Translation kTranslations[] = {
 	"\n"
 
 #define kContributors \
+	"Ayush Agrawal\n" \
 	"Andrea Anzani\n" \
+	"Mohammed R. Attia\n" \
 	"Sean Bartell\n" \
 	"Sambuddha Basu\n" \
 	"Shubham Bhagat\n" \
 	"Hannah Boneß\n" \
+	"Sean Brady\n" \
 	"Andre Braga\n" \
 	"Michael Bulash\n" \
 	"Bruce Cameron\n" \
 	"Jean-Loïc Charroud\n" \
+	"Hy Che\n" \
 	"Ilya Chugin (X512)\n" \
 	"Greg Crain\n" \
 	"Michael Davidson\n" \
@@ -642,6 +647,7 @@ static const Translation kTranslations[] = {
 	"Rajagopalan Gangadharan\n" \
 	"Deyan Genovski\n" \
 	"Pete Goodeve\n" \
+	"Saloni Goyal\n" \
 	"Lucian Adrian Grijincu\n" \
 	"Sean Healy\n" \
 	"Andreas Henriksson\n" \
@@ -650,6 +656,7 @@ static const Translation kTranslations[] = {
 	"Mathew Hounsell\n" \
 	"Morgan Howe\n" \
 	"Christophe Huriaux\n" \
+	"Krishnan Iyer\n" \
 	"Jian Jiang\n" \
 	"Ma Jie\n" \
 	"Carwyn Jones\n" \
@@ -665,6 +672,7 @@ static const Translation kTranslations[] = {
 	"Elad Lahav\n" \
 	"Anthony Lee\n" \
 	"Santiago Lema\n" \
+	"Leorize\n" \
 	"Raynald Lesieur\n" \
 	"Oscar Lesta\n" \
 	"Jerome Leveque\n" \
@@ -672,7 +680,10 @@ static const Translation kTranslations[] = {
 	"Brian Luft\n" \
 	"Christof Lutteroth\n" \
 	"Graham MacDonald\n" \
+	"Daniel Martin\n" \
+	"Dominic Martinez\n" \
 	"Jan Matějek\n" \
+	"Calisto Abel Mathias\n" \
 	"Brian Matzon\n" \
 	"Christopher ML Zumwalt May\n" \
 	"Andrew McCall\n" \
@@ -685,6 +696,7 @@ static const Translation kTranslations[] = {
 	"Takashi Murai\n" \
 	"Alan Murta\n" \
 	"Raghuram Nagireddy\n" \
+	"Trung Nguyen\n" \
 	"Kazuho Okui\n" \
 	"Jeroen Oortwijn (idefix)\n" \
 	"Pahtz\n" \
@@ -696,6 +708,7 @@ static const Translation kTranslations[] = {
 	"Peter Poláčik\n" \
 	"Niklas Poslovski\n" \
 	"David Powell\n" \
+	"Arvind S. Raj\n" \
 	"Jeremy Rand\n" \
 	"Hartmut Reh\n" \
 	"Daniel Reinhold\n" \
@@ -703,8 +716,13 @@ static const Translation kTranslations[] = {
 	"Samuel Rodríguez Pérez\n" \
 	"Thomas Roell\n" \
 	"Rafael Romo\n" \
+	"Leo Rouleau\n" \
+	"Diego Roux\n" \
+	"Vighnesh Sawant\n" \
 	"Ralf Schülke\n" \
 	"Zousar Shaker\n" \
+	"Harshit Sharma\n" \
+	"Raghav Sharma\n" \
 	"Caitlin Shaw\n" \
 	"Geoffry Song\n" \
 	"Daniel Switkin\n" \
