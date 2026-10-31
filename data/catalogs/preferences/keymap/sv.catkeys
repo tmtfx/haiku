@@ -1,4 +1,4 @@
-1	swedish	x-vnd.Haiku-Keymap	83366860
+1	swedish	x-vnd.Haiku-Keymap	2110477243
 Key	Modifier keys window	As in a computer keyboard key	Tangent
 Japanese	KeymapNames		Japanska
 US	KeymapNames		US
@@ -8,6 +8,7 @@ Brazilian	KeymapNames		Brasilianska
 ThinkPad (US)	KeyboardLayoutNames		ThinkPad (US)
 Right Option	Keyboard Layout View		Höger Alternativ
 X-Bows Nature	KeyboardLayoutNames		X-Bows Natur
+Apple Magic Extended International	KeyboardLayoutNames		Apple Magic Keyboard med numerisk del (internationell)
 Dvorak	KeymapNames		Dvorak
 Option:	Modifier keys window	Option key role name	Alternativ:
 Cancel	Modifier keys window		Avbryt
@@ -24,6 +25,7 @@ Serbian (Cyrillic)	KeymapNames		Serbiska (Kyrilliska)
 Belgian (point)	KeymapNames		Belgiska (punkt)
 Finnish	KeymapNames		Finska
 Switch shortcut keys to Windows/Linux mode	Keymap window		Byt snabbtangentsknapp till Windows/Linux-standard
+Apple Magic (US)	KeyboardLayoutNames		Apple Magic (USA)
 Spanish (Dvorak)	KeymapNames		Spanska (Dvorak)
 Option	Keyboard Layout View	Option key	Alternativ
 US-International	KeymapNames		US-Internationell
@@ -41,13 +43,11 @@ Belarusian (Mac)	KeymapNames		Vitryska (Mac)
 Croatian	KeymapNames		Kroatiska
 PAGE ↑	Keyboard Layout View		SIDA
 Set modifier keys	Modifier keys window		Set modifierings tangent
-Apple Aluminium International	KeyboardLayoutNames		Apple Aluminium Internationellt
 Right Command	Keyboard Layout View		Höger kommando
 Win/Cmd key	Modifier keys window	Label of the \"Windows\" key (PC)/Command key (Mac)	Win/Cmd tangent
 PG ↓	Keyboard Layout View	Very short for 'page down'	SN
 ThinkPad X1 (US)	KeyboardLayoutNames		ThinkPad X1 (US)
 Spanish	KeymapNames		Spanska
-Apple Aluminum	KeyboardLayoutNames		Apple Aluminium
 HOME	Keyboard Layout View		HEM
 COMMAND	Keyboard Layout View		KOMMANDO
 Ukrainian (Mac)	KeymapNames		Ukrainska (Mac)
@@ -59,7 +59,6 @@ Acute trigger	Keymap window		Acute trigger
 ThinkPad T400s International	KeyboardLayoutNames		ThinkPad T400s Internationellt
 Italian	KeymapNames		Italienska
 Kinesis Ergo Elan International	KeyboardLayoutNames		Kinesis Ergo Elan Internationellt
-Apple Aluminum (US)	KeyboardLayoutNames		Apple Aluminium (US)
 French (NF Z71-300)	KeymapNames		Fransk (NF Z71-300)
 Modifier keys	Modifier keys window		Modifierings tangenter
 ThinkPad X1 International	KeyboardLayoutNames		ThinkPad X1 Internationellt
@@ -68,6 +67,7 @@ Left Option	Keyboard Layout View		Vänster Alternativ
 Save as…	Keymap window		Spara som…
 Lithuanian (Standard)	KeymapNames		Litauiska (Standard)
 Error: duplicate keys	Modifier keys window		Fel: Upprepad tangenter
+Apple Magic	KeyboardLayoutNames		Apple Magic
 NUM	Keyboard Layout View	Very short for 'num lock'	NUM
 Bulgarian (Phonetic)	KeymapNames		Bulgariska (Fonetisk)
 Kinesis Advantage	KeyboardLayoutNames		Kinesis Advantage
@@ -127,7 +127,6 @@ Quit	Keymap window		Avsluta
 Polish (Typewriter)	KeymapNames		Polska (Skrivmaskin)
 French (Mac)	KeymapNames		Franska (Mac)
 User:	Keymap window		Användare:
-Apple Aluminium Extended International	KeyboardLayoutNames		Apple Aluminium Extended Internationellt
 Alt/Opt key	Modifier keys window	Label of Alt key (PC)/Option key (Mac)	Alt/Opt tangent
 SHIFT	Keyboard Layout View		SHIFT
 Estonian	KeymapNames		Estländska
@@ -146,7 +145,6 @@ Defaults	Keymap window		Standardvärde
 ISO-9995	KeymapNames		ISO-9995
 System:	Keymap window		System:
 ThinkPad International	KeyboardLayoutNames		ThinkPad Internationellt
-Apple Aluminum Extended (US)	KeyboardLayoutNames		Apple Aluminium Extended (US)
 Switch shortcut keys	Keymap window		Switch shortcut keys
 NUM LOCK	Keyboard Layout View		NUM LOCK
 MENU	Keyboard Layout View		MENU
@@ -155,6 +153,8 @@ Norwegian	KeymapNames		Norska
 Font	Keymap window		Typsnitt
 Danish	KeymapNames		Danska
 Generic 104-key	KeyboardLayoutNames		Generiskt 104-tangenters
+Apple Magic Extended (US)	KeyboardLayoutNames		Apple Magic Extended (USA)
+Apple Magic International	KeyboardLayoutNames		Apple Magic International
 Shift key	Modifier keys window	Label of key above Ctrl, usually Shift	Skifttangent
 Russian	KeymapNames		Ryska
 PAUSE	Keyboard Layout View		PAUSE

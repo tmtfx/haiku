@@ -1,4 +1,4 @@
-1	catalan; valencian	x-vnd.Haiku-Keymap	83366860
+1	catalan; valencian	x-vnd.Haiku-Keymap	2110477243
 Key	Modifier keys window	As in a computer keyboard key	Tecla
 Japanese	KeymapNames		Japonès
 US	KeymapNames		EUA
@@ -8,6 +8,7 @@ Brazilian	KeymapNames		Brasiler
 ThinkPad (US)	KeyboardLayoutNames		ThinkPad (EUA)
 Right Option	Keyboard Layout View		Opció de la dreta
 X-Bows Nature	KeyboardLayoutNames		X-Bows Natura
+Apple Magic Extended International	KeyboardLayoutNames		Apple Magic ampliat internacional
 Dvorak	KeymapNames		Dvorak
 Option:	Modifier keys window	Option key role name	Opció:
 Cancel	Modifier keys window		Cancel·la
@@ -24,6 +25,7 @@ Serbian (Cyrillic)	KeymapNames		Sèrbi (Cyrillic)
 Belgian (point)	KeymapNames		Belga (punt)
 Finnish	KeymapNames		Acaba
 Switch shortcut keys to Windows/Linux mode	Keymap window		Canvia les tecles de drecera al mode de Windows / Linux
+Apple Magic (US)	KeyboardLayoutNames		Apple Magic (US)
 Spanish (Dvorak)	KeymapNames		Espanyol (Dvorak)
 Option	Keyboard Layout View	Option key	Opció
 US-International	KeymapNames		US-Internacional
@@ -41,13 +43,11 @@ Belarusian (Mac)	KeymapNames		Bielorús (Mac)
 Croatian	KeymapNames		Croat
 PAGE ↑	Keyboard Layout View		PÀGINA ↑
 Set modifier keys	Modifier keys window		Configura les tecles modificadores
-Apple Aluminium International	KeyboardLayoutNames		Apple Alumini Internacional
 Right Command	Keyboard Layout View		Botó d'ordre de la dreta
 Win/Cmd key	Modifier keys window	Label of the \"Windows\" key (PC)/Command key (Mac)	Tecla Win/Cmd
 PG ↓	Keyboard Layout View	Very short for 'page down'	PÀG ↓
 ThinkPad X1 (US)	KeyboardLayoutNames		ThinkPad X1 (US)
 Spanish	KeymapNames		Espanyol
-Apple Aluminum	KeyboardLayoutNames		Apple d'alumini
 HOME	Keyboard Layout View		INICI
 COMMAND	Keyboard Layout View		ORDRE
 Ukrainian (Mac)	KeymapNames		Ucraïnès (Mac)
@@ -59,7 +59,6 @@ Acute trigger	Keymap window		Accent agut
 ThinkPad T400s International	KeyboardLayoutNames		ThinkPad T400s Internacional
 Italian	KeymapNames		Italià
 Kinesis Ergo Elan International	KeyboardLayoutNames		Kinesis Ergo Elan Internacional
-Apple Aluminum (US)	KeyboardLayoutNames		Apple d'alumini (US)
 French (NF Z71-300)	KeymapNames		Francès (NF Z71-300)
 Modifier keys	Modifier keys window		Tecles modificadores
 ThinkPad X1 International	KeyboardLayoutNames		ThinkPad X1 Internacional
@@ -68,6 +67,7 @@ Left Option	Keyboard Layout View		Opció de l'esquerra
 Save as…	Keymap window		Desa com a...
 Lithuanian (Standard)	KeymapNames		Lituà (estàndard)
 Error: duplicate keys	Modifier keys window		Error: tecles duplicades
+Apple Magic	KeyboardLayoutNames		Apple Magic
 NUM	Keyboard Layout View	Very short for 'num lock'	NÚM
 Bulgarian (Phonetic)	KeymapNames		Búlgar (fonètic)
 Kinesis Advantage	KeyboardLayoutNames		Avantatge de kinesi
@@ -127,7 +127,6 @@ Quit	Keymap window		Surt
 Polish (Typewriter)	KeymapNames		Polonès (màquina d'escriure)
 French (Mac)	KeymapNames		Francès (Mac)
 User:	Keymap window		Usuari:
-Apple Aluminium Extended International	KeyboardLayoutNames		Apple Aluminium Extended Internacional
 Alt/Opt key	Modifier keys window	Label of Alt key (PC)/Option key (Mac)	Tecla Alt/Opció
 SHIFT	Keyboard Layout View		MAJÚSCULES
 Estonian	KeymapNames		Estonià
@@ -146,7 +145,6 @@ Defaults	Keymap window		Valors predeterminats
 ISO-9995	KeymapNames		ISO-9995
 System:	Keymap window		Sistema:
 ThinkPad International	KeyboardLayoutNames		ThinkPad Internacional
-Apple Aluminum Extended (US)	KeyboardLayoutNames		Apple Aluminum Extended (US)
 Switch shortcut keys	Keymap window		Canvia les tecles de drecera
 NUM LOCK	Keyboard Layout View		BLOCATGE NÚM.
 MENU	Keyboard Layout View		MENÚ
@@ -155,6 +153,8 @@ Norwegian	KeymapNames		Noruec
 Font	Keymap window		Tipus de lletra
 Danish	KeymapNames		Danès
 Generic 104-key	KeyboardLayoutNames		Genèric de 104 tecles
+Apple Magic Extended (US)	KeyboardLayoutNames		Apple Magic ampliat (US)
+Apple Magic International	KeyboardLayoutNames		Apple Magic internacional
 Shift key	Modifier keys window	Label of key above Ctrl, usually Shift	Tecla de majúscules
 Russian	KeymapNames		Rus
 PAUSE	Keyboard Layout View		PAUSA
