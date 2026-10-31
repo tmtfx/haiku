@@ -357,8 +357,6 @@ EHCI::EHCI(pci_info *info, pci_device_module_info* pci, pci_device* device, Stac
 		fIRQ(0),
 		fUseMSI(false)
 {
-	B_INITIALIZE_SPINLOCK(&fInterruptLock);
-
 	// Create a lock for the isochronous transfer list
 	mutex_init(&fIsochronousLock, "EHCI isochronous lock");
 
@@ -1569,7 +1567,8 @@ EHCI::InterruptHandler(void *data)
 int32
 EHCI::Interrupt()
 {
-	acquire_spinlock(&fInterruptLock);
+	static spinlock lock = B_SPINLOCK_INITIALIZER;
+	acquire_spinlock(&lock);
 
 	// check if any interrupt was generated
 	uint32 status = ReadOpReg(EHCI_USBSTS) & EHCI_USBSTS_INTMASK;
@@ -1580,7 +1579,7 @@ EHCI::Interrupt()
 			WriteOpReg(EHCI_USBSTS, status);
 		}
 
-		release_spinlock(&fInterruptLock);
+		release_spinlock(&lock);
 		return B_UNHANDLED_INTERRUPT;
 	}
 
@@ -1616,7 +1615,7 @@ EHCI::Interrupt()
 		TRACE_ERROR("host system error!\n");
 
 	WriteOpReg(EHCI_USBSTS, status);
-	release_spinlock(&fInterruptLock);
+	release_spinlock(&lock);
 
 	if (asyncAdvance)
 		release_sem_etc(fAsyncAdvanceSem, 1, B_DO_NOT_RESCHEDULE);
