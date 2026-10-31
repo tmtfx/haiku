@@ -216,9 +216,7 @@ os_preempt_disabled()
 extern "C" bool
 os_return_needed()
 {
-	Thread* thread = thread_get_current_thread();
-	return thread->cpu->invoke_scheduler
-		|| (thread->flags & THREAD_FLAGS_SIGNALS_PENDING) != 0;
+	return thread_get_current_thread()->cpu->invoke_scheduler;
 }
 
 
