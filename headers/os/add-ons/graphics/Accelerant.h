@@ -313,6 +313,14 @@ typedef status_t (*set_brightness)(float brightness);
 typedef status_t (*get_brightness)(float* brightness);
 typedef uint32 (*get_display_rotation_capabilities)(void);
 
+/* bits returned by get_display_rotation_capabilities(), one per degree
+   of rotation the accelerant can perform in hardware */
+enum {
+	B_DISPLAY_ROTATE_90		= 0x01,
+	B_DISPLAY_ROTATE_180	= 0x02,
+	B_DISPLAY_ROTATE_270	= 0x04,
+};
+
 typedef sem_id (*accelerant_retrace_semaphore)(void);
 
 typedef status_t (*set_cursor_shape)(uint16 width, uint16 height,

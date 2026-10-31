@@ -113,10 +113,11 @@ InputServerStream::SendQuit()
 
 
 void
-InputServerStream::UpdateScreenBounds(BRect bounds)
+InputServerStream::UpdateScreenBounds(BRect bounds, int32 rotation)
 {
 	BMessage update(IS_SCREEN_BOUNDS_UPDATED);
 	update.AddRect("screen_bounds", bounds);
+	update.AddInt32("rotation", rotation);
 
 	fInputServer.SendMessage(&update);
 }

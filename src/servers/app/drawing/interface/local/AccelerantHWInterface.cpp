@@ -726,15 +726,21 @@ AccelerantHWInterface::SetMode(const display_mode& mode)
 	// maybe it needs to roll back changes in case of an
 	// error.
 
+	// The incoming mode is logical (rotated); the accelerant/driver only
+	// ever sees physical (unrotated) modes.
+	display_mode physicalMode = mode;
+	if (Rotation() == 90 || Rotation() == 270)
+		BPrivate::swap_mode_axes(physicalMode);
+
 	// prevent from doing the unnecessary
-	if (fModeCount > 0 && fFrontBuffer.IsSet() && fDisplayMode == mode) {
+	if (fModeCount > 0 && fFrontBuffer.IsSet() && fDisplayMode == physicalMode) {
 		// TODO: better comparison of display modes
 		return B_OK;
 	}
 
 	// some safety checks
 	// TODO: more of those!
-	if (!_IsValidMode(mode))
+	if (!_IsValidMode(physicalMode))
 		return B_BAD_VALUE;
 
 	if (!fFrontBuffer.IsSet())
@@ -743,7 +749,7 @@ AccelerantHWInterface::SetMode(const display_mode& mode)
 	// just try to set the mode - we let the graphics driver
 	// approve or deny the request, as it should know best
 
-	display_mode newMode = mode;
+	display_mode newMode = physicalMode;
 
 	status_t status = B_ERROR;
 	if (!use_fail_safe_video_mode() || !fInitialModeSwitch)
@@ -808,29 +814,9 @@ AccelerantHWInterface::SetMode(const display_mode& mode)
 
 	_UpdateHooksAfterModeChange();
 
-	// update backbuffer if neccessary
-	if (!fBackBuffer.IsSet()
-		|| fBackBuffer->Width() != fFrontBuffer->Width()
-		|| fBackBuffer->Height() != fFrontBuffer->Height()
-		|| (fFrontBuffer->ColorSpace() == B_RGB32 && fBackBuffer.IsSet())) {
-		// NOTE: backbuffer is always B_RGBA32, this simplifies the
-		// drawing backend implementation tremendously for the time
-		// being. The color space conversion is handled in CopyBackToFront()
-
-		fBackBuffer.Unset();
-
-		fBackBuffer.SetTo(new(nothrow) MallocBuffer(
-			fFrontBuffer->Width(), fFrontBuffer->Height()));
-
-		status = fBackBuffer.IsSet()
-			? fBackBuffer->InitCheck() : B_NO_MEMORY;
-		if (status < B_OK) {
-			fBackBuffer.Unset();
-			return status;
-		}
-		// clear out backbuffer, alpha is 255 this way
-		memset(fBackBuffer->Bits(), 255, fBackBuffer->BitsLength());
-	}
+	status_t backStatus = _UpdateBackBuffer();
+	if (backStatus != B_OK)
+		return backStatus;
 
 	// update color palette configuration if necessary
 	if (fDisplayMode.space == B_CMAP8)
@@ -845,11 +831,80 @@ AccelerantHWInterface::SetMode(const display_mode& mode)
 }
 
 
+/*!	Caller must already hold the write lock (as SetMode() and
+	_RotationChanged() both do).
+
+	The back buffer is sized in logical space: for a 90/270 rotation it is
+	the physical front buffer's dimensions with width and height swapped,
+	so normal rendering/compositing happens oblivious to the physical
+	panel orientation. Only the final HWInterface::_CopyToFront() blit
+	deals with physical space. This must be re-evaluated not only when the
+	physical mode changes (SetMode()) but also when the rotation alone
+	changes without a mode change (_RotationChanged()) - otherwise the
+	back buffer keeps its old, un-swapped dimensions while the rotated
+	blit assumes the new ones, writing past the end of the front buffer.
+*/
+status_t
+AccelerantHWInterface::_UpdateBackBuffer()
+{
+	if (!fFrontBuffer.IsSet())
+		return B_NO_INIT;
+
+	int32 backWidth = fFrontBuffer->Width();
+	int32 backHeight = fFrontBuffer->Height();
+	if (Rotation() == 90 || Rotation() == 270) {
+		int32 t = backWidth;
+		backWidth = backHeight;
+		backHeight = t;
+	}
+
+	if (!fBackBuffer.IsSet()
+		|| (int32)fBackBuffer->Width() != backWidth
+		|| (int32)fBackBuffer->Height() != backHeight
+		|| (fFrontBuffer->ColorSpace() == B_RGB32 && fBackBuffer.IsSet())) {
+		// NOTE: backbuffer is always B_RGBA32, this simplifies the
+		// drawing backend implementation tremendously for the time
+		// being. The color space conversion is handled in CopyBackToFront()
+
+		fBackBuffer.Unset();
+
+		fBackBuffer.SetTo(new(nothrow) MallocBuffer(backWidth, backHeight));
+
+		status_t status = fBackBuffer.IsSet()
+			? fBackBuffer->InitCheck() : B_NO_MEMORY;
+		if (status < B_OK) {
+			fBackBuffer.Unset();
+			return status;
+		}
+		// clear out backbuffer, alpha is 255 this way
+		memset(fBackBuffer->Bits(), 255, fBackBuffer->BitsLength());
+	}
+
+	return B_OK;
+}
+
+
+void
+AccelerantHWInterface::_RotationChanged()
+{
+	AutoWriteLocker _(this);
+	if (_UpdateBackBuffer() == B_OK) {
+		// _UpdateBackBuffer() may have freed and reallocated fBackBuffer
+		// (a different object/address) - every DrawingEngine/Painter must
+		// re-attach to it before drawing again, exactly as SetMode() does,
+		// or they keep writing into the just-freed old buffer.
+		_NotifyFrameBufferChanged();
+	}
+}
+
+
 void
 AccelerantHWInterface::GetMode(display_mode* mode)
 {
 	if (mode && LockParallelAccess()) {
 		*mode = fDisplayMode;
+		if (Rotation() == 90 || Rotation() == 270)
+			BPrivate::swap_mode_axes(*mode);
 		UnlockParallelAccess();
 	}
 }
@@ -931,6 +986,10 @@ AccelerantHWInterface::GetModeList(display_mode** _modes, uint32* _count)
 		if (*_modes) {
 			*_count = fModeCount;
 			memcpy(*_modes, fModeList, sizeof(display_mode) * fModeCount);
+			if (Rotation() == 90 || Rotation() == 270) {
+				for (int i = 0; i < fModeCount; i++)
+					BPrivate::swap_mode_axes((*_modes)[i]);
+			}
 		} else {
 			*_count = 0;
 			status = B_NO_MEMORY;
@@ -961,10 +1020,14 @@ AccelerantHWInterface::GetTimingConstraints(
 
 	AutoReadLocker _(this);
 
-	if (fAccGetTimingConstraints)
-		return fAccGetTimingConstraints(constraints);
+	if (fAccGetTimingConstraints == NULL)
+		return B_UNSUPPORTED;
 
-	return B_UNSUPPORTED;
+	status_t status = fAccGetTimingConstraints(constraints);
+	if (status == B_OK && (Rotation() == 90 || Rotation() == 270))
+		BPrivate::swap_timing_constraints_axes(*constraints);
+
+	return status;
 }
 
 
@@ -985,12 +1048,34 @@ AccelerantHWInterface::ProposeMode(display_mode* candidate,
 	high = *_high;
 	low = *_low;
 
-	return fAccProposeDisplayMode(candidate, &low, &high);
+	bool rotated = Rotation() == 90 || Rotation() == 270;
+	if (rotated) {
+		BPrivate::swap_mode_axes(*candidate);
+		BPrivate::swap_mode_axes(low);
+		BPrivate::swap_mode_axes(high);
+	}
+
+	status_t status = fAccProposeDisplayMode(candidate, &low, &high);
+
+	if (rotated)
+		BPrivate::swap_mode_axes(*candidate);
+
+	return status;
 }
 
 
 status_t
 AccelerantHWInterface::GetPreferredMode(display_mode* preferredMode)
+{
+	status_t status = _GetPreferredPhysicalMode(preferredMode);
+	if (status == B_OK && (Rotation() == 90 || Rotation() == 270))
+		BPrivate::swap_mode_axes(*preferredMode);
+	return status;
+}
+
+
+status_t
+AccelerantHWInterface::_GetPreferredPhysicalMode(display_mode* preferredMode)
 {
 	status_t status = B_NOT_SUPPORTED;
 

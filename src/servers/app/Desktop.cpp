@@ -870,6 +870,40 @@ Desktop::SetScreenMode(int32 workspace, int32 id, const display_mode& mode,
 
 
 status_t
+Desktop::SetScreenRotation(int32 id, int32 degrees)
+{
+	AutoWriteLocker _(fWindowLock);
+
+	Screen* screen = fVirtualScreen.ScreenByID(id);
+	if (screen == NULL || screen->HWInterface() == NULL)
+		return B_NAME_NOT_FOUND;
+
+	::HWInterface* hwInterface = screen->HWInterface();
+	if (hwInterface->Rotation() == degrees)
+		return B_OK;
+
+	// Prefer hardware rotation if the accelerant supports it; no accelerant
+	// implements this today, so this is always a no-op and the software
+	// path below is what actually runs.
+	uint32 capabilities = 0;
+	hwInterface->GetRotationCapabilities(capabilities);
+	uint32 requiredBit = degrees == 90 ? B_DISPLAY_ROTATE_90
+		: degrees == 180 ? B_DISPLAY_ROTATE_180
+		: degrees == 270 ? B_DISPLAY_ROTATE_270 : 0;
+	if (degrees != 0 && (capabilities & requiredBit) != 0) {
+		// TODO: hardware rotation path - unimplemented, nothing to call yet.
+	}
+
+	status_t status = hwInterface->SetDisplayRotation(degrees);
+	if (status != B_OK)
+		return status;
+
+	_ScreenChanged(screen);
+	return B_OK;
+}
+
+
+status_t
 Desktop::GetScreenMode(int32 workspace, int32 id, display_mode& mode)
 {
 	AutoReadLocker _(fScreenLock);
@@ -4166,7 +4200,7 @@ Desktop::_ScreenChanged(Screen* screen)
 
 	// update our cached screen region
 	fScreenRegion.Set(screen->Frame());
-	gInputManager->UpdateScreenBounds(screen->Frame());
+	gInputManager->UpdateScreenBounds(screen->Frame(), screen->HWInterface()->Rotation());
 
 	BRegion background;
 	_RebuildClippingForAllWindows(background);

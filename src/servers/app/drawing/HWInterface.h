@@ -211,6 +211,13 @@ protected:
 	// implement this in derived classes
 	virtual	void				_DrawCursor(IntRect area) const;
 
+	// called from SetDisplayRotation(), after fDisplayRotation has been
+	// updated but before any repaint is triggered, so a derived class can
+	// resize buffers that depend on the logical/physical split (e.g. the
+	// back buffer in AccelerantHWInterface) - this must happen even when
+	// rotation changes without a mode change, since SetMode() won't run.
+	virtual	void				_RotationChanged() {}
+
 	// does the actual transfer and handles color space conversion
 			void				_CopyToFront(uint8* src, uint32 srcBPR, int32 x,
 									int32 y, int32 right, int32 bottom) const;

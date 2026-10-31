@@ -178,9 +178,25 @@ HWInterface::SetDisplayRotation(int32 degrees)
 	fDisplayRotation = degrees;
 	WriteUnlock();
 
-	// Disable features not compatible with rotation
-	if (degrees != 0) {
+	// Let a derived class (e.g. AccelerantHWInterface) resize buffers that
+	// depend on the logical/physical split before anything repaints below -
+	// this is the only place that happens when rotation changes without a
+	// mode change, since SetMode() won't run in that case.
+	_RotationChanged();
+
+	// Disable features not compatible with rotation; restore them when
+	// returning to the unrotated (0 degree) orientation.
+	if (degrees != 0)
 		SetCursorVisible(false);
+	else
+		SetCursorVisible(true);
+
+	// Make the screen actually repaint in the new orientation now, rather
+	// than waiting for some unrelated redraw to happen to occur.
+	if (LockParallelAccess()) {
+		if (BackBuffer() != NULL)
+			Invalidate(BackBuffer()->Bounds());
+		UnlockParallelAccess();
 	}
 
 	return B_OK;
@@ -376,6 +392,13 @@ HWInterface::DrawingBuffer() const
 status_t
 HWInterface::InvalidateRegion(const BRegion& region)
 {
+	if (Rotation() != 0 && BackBuffer() != NULL) {
+		// CopyBackToFront() already re-blits the whole screen for any
+		// rotated repaint, so looping per rect here would just repeat that
+		// full-screen copy once per rect in the region.
+		return Invalidate(BackBuffer()->Bounds());
+	}
+
 	int32 count = region.CountRects();
 	for (int32 i = 0; i < count; i++) {
 		status_t result = Invalidate(region.RectAt(i));
@@ -413,6 +436,14 @@ HWInterface::CopyBackToFront(const BRect& frame)
 	// we need to mess with the area, but it is const
 	IntRect area(frame);
 	IntRect bufferClip(backBuffer->Bounds());
+
+	if (Rotation() != 0) {
+		// Anchoring a partial dirty rect into the rotated physical buffer
+		// requires knowing the full screen dimensions, not just the dirty
+		// rect's own - rather than risk getting that transform wrong, always
+		// treat a rotated repaint as covering the whole screen.
+		area = bufferClip;
+	}
 
 	if (area.IsValid() && area.Intersects(bufferClip)) {
 

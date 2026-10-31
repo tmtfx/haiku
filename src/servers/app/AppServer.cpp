@@ -225,12 +225,11 @@ AppServer::MessageReceived(BMessage* message)
 			if (message->FindInt32("rotation", &rotation) == B_OK) {
 				// Validate rotation value
 				if (rotation == 0 || rotation == 90 || rotation == 180 || rotation == 270) {
-					BAutolock locker(gScreenManager);
-					if (gScreenManager && gScreenManager->CountScreens() > 0) {
-						Screen* s = gScreenManager->ScreenAt(0);
-						if (s != NULL && s->HWInterface() != NULL) {
-							s->HWInterface()->SetDisplayRotation(rotation);
-						}
+					BAutolock locker(fDesktopLock);
+					for (int32 i = 0; i < fDesktops.CountItems(); i++) {
+						Desktop* desktop = fDesktops.ItemAt(i);
+						if (desktop != NULL)
+							desktop->SetScreenRotation(0, rotation);
 					}
 				}
 			}

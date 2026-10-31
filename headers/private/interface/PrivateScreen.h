@@ -85,6 +85,8 @@ public:
 			status_t			GetBrightness(float*);
 			status_t			SetBrightness(float);
 
+			int32				Rotation();
+
 private:
 	friend class BObjectList<BPrivateScreen, true>;
 

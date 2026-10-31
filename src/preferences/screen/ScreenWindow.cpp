@@ -1581,40 +1581,42 @@ ScreenWindow::_Apply()
 	// make checkpoint, so we can undo these changes
 	fUndoScreenMode.UpdateOriginalModes();
 
+	bool modeChanged = !(fSelected == fActive);
+
+	// Convert slider position (0/1/2/3) to degrees (0/90/180/270)
+	int32 rotation = (fRotationSlider->Value() * 90);
+	bool rotationChanged = (rotation != fOriginalRotation);
+
 	status_t status = fScreenMode.Set(fSelected);
 	if (status == B_OK) {
-		// use the mode that has eventually been set and
-		// thus we know to be working; it can differ from
-		// the mode selected by user due to hardware limitation
-		display_mode newMode;
-		BScreen screen(this);
-		screen.GetMode(&newMode);
+		if (modeChanged) {
+			// use the mode that has eventually been set and
+			// thus we know to be working; it can differ from
+			// the mode selected by user due to hardware limitation
+			display_mode newMode;
+			BScreen screen(this);
+			screen.GetMode(&newMode);
 
-		if (fAllWorkspacesItem->IsMarked()) {
-			int32 originatingWorkspace = current_workspace();
-			const int32 workspaceCount = count_workspaces();
-			for (int32 i = 0; i < workspaceCount; i++) {
-				if (i != originatingWorkspace)
-					screen.SetMode(i, &newMode, true);
-			}
-			fBootWorkspaceApplied = true;
-		} else {
-			if (current_workspace() == 0)
+			if (fAllWorkspacesItem->IsMarked()) {
+				int32 originatingWorkspace = current_workspace();
+				const int32 workspaceCount = count_workspaces();
+				for (int32 i = 0; i < workspaceCount; i++) {
+					if (i != originatingWorkspace)
+						screen.SetMode(i, &newMode, true);
+				}
 				fBootWorkspaceApplied = true;
+			} else {
+				if (current_workspace() == 0)
+					fBootWorkspaceApplied = true;
+			}
+
+			fActive = fSelected;
+
+			// TODO: only show alert when this is an unknown mode
+			BAlert* window = new AlertWindow(this);
+			window->Go(NULL);
 		}
-
-		fActive = fSelected;
-
-		// Apply rotation settings through ScreenSettings (writes to Screen_data)
-		// Convert slider position (0/1/2/3) to degrees (0/90/180/270)
-		int32 rotation = (fRotationSlider->Value() * 90);
-		fSettings->SetDisplayRotation(rotation);
-		fOriginalRotation = rotation;
-
-		// TODO: only show alert when this is an unknown mode
-		BAlert* window = new AlertWindow(this);
-		window->Go(NULL);
-	} else {
+	} else if (modeChanged) {
 		char message[256];
 		snprintf(message, sizeof(message),
 			B_TRANSLATE("The screen mode could not be set:\n\t%s\n"),
@@ -1624,5 +1626,13 @@ ScreenWindow::_Apply()
 			B_WIDTH_AS_USUAL, B_WARNING_ALERT);
 		alert->SetFlags(alert->Flags() | B_CLOSE_ON_ESCAPE);
 		alert->Go();
+	}
+
+	if (rotationChanged) {
+		// Apply rotation settings through ScreenSettings (writes to
+		// Screen_data), independent of whether the resolution mode-set
+		// above ran, succeeded, or was even needed.
+		fSettings->SetDisplayRotation(rotation);
+		fOriginalRotation = rotation;
 	}
 }

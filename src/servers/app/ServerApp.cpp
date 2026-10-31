@@ -3382,6 +3382,20 @@ ServerApp::_DispatchMessage(int32 code, BPrivate::LinkReceiver& link)
 			break;
 		}
 
+		case AS_SCREEN_GET_ROTATION:
+		{
+			STRACE(("ServerApp %s: AS_SCREEN_GET_ROTATION\n", Signature()));
+			int32 id;
+			link.Read<int32>(&id);
+
+			int32 rotation = fDesktop->HWInterface() != NULL
+				? fDesktop->HWInterface()->Rotation() : 0;
+			fLink.StartMessage(B_OK);
+			fLink.Attach<int32>(rotation);
+			fLink.Flush();
+			break;
+		}
+
 		case AS_READ_BITMAP:
 		{
 			STRACE(("ServerApp %s: AS_READ_BITMAP\n", Signature()));

@@ -693,6 +693,22 @@ BPrivateScreen::SetBrightness(float brightness)
 }
 
 
+int32
+BPrivateScreen::Rotation()
+{
+	BPrivate::AppServerLink link;
+	link.StartMessage(AS_SCREEN_GET_ROTATION);
+	link.Attach<int32>(ID());
+
+	int32 rotation = 0;
+	status_t status;
+	if (link.FlushWithReply(status) == B_OK && status == B_OK)
+		link.Read<int32>(&rotation);
+
+	return rotation;
+}
+
+
 // #pragma mark - private methods
 
 

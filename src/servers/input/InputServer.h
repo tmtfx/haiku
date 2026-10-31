@@ -258,7 +258,6 @@ class InputServer : public BApplication {
 		shared_cursor*	fCursorBuffer;
 
 		int32			fDisplayRotation;	// 0, 90, 180, 270
-		BRect			fScreenBounds;		// Current screen bounds
 };
 
 extern InputServer* gInputServer;

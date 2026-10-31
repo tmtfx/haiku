@@ -351,6 +351,15 @@ BScreen::SetBrightness(float brightness)
 }
 
 
+int32
+BScreen::Rotation()
+{
+	if (fScreen != NULL)
+		return fScreen->Rotation();
+	return 0;
+}
+
+
 //	#pragma mark - Deprecated methods
 
 

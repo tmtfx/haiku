@@ -115,6 +115,8 @@ protected:
 
 	virtual	void				_DrawCursor(IntRect area) const;
 
+	virtual	void				_RotationChanged();
+
 private:
 			int					_OpenGraphicsDevice(int deviceNumber);
 			bool				_RecursiveScan(const char* directory, int deviceNumber,
@@ -134,6 +136,8 @@ private:
 									display_mode& modeFound,
 									int32 *_diff = NULL) const;
 			status_t			_SetFallbackMode(display_mode& mode) const;
+			status_t			_GetPreferredPhysicalMode(display_mode* mode);
+			status_t			_UpdateBackBuffer();
 			void				_SetSystemPalette();
 			void				_SetGrayscalePalette();
 			void				_UpdateHardwareCursor(bool wasHardwareCursorEnabled);

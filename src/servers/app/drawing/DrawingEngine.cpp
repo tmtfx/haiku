@@ -1475,7 +1475,10 @@ DrawingEngine::ReadBitmap(ServerBitmap* bitmap, bool drawCursor, BRect bounds)
 {
 	ASSERT_EXCLUSIVE_LOCKED();
 
-	RenderingBuffer* buffer = fGraphicsCard->FrontBuffer();
+	// While rotated, the front buffer is physically sideways; read from the
+	// logical (right-side-up) back buffer instead.
+	RenderingBuffer* buffer = fGraphicsCard->Rotation() != 0
+		? fGraphicsCard->DrawingBuffer() : fGraphicsCard->FrontBuffer();
 	if (buffer == NULL)
 		return B_ERROR;
 

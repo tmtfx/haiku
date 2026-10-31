@@ -85,6 +85,8 @@ public:
 			status_t			GetBrightness(float* brightness);
 			status_t			SetBrightness(float brightness);
 
+			int32				Rotation();
+
 private:
 	// Forbidden and deprecated methods
 								BScreen(const BScreen& other);

@@ -39,6 +39,7 @@
 	// this is an automatically generated file
 
 #include <ServerProtocol.h>
+#include <private/shared/DisplayRotation.h>
 
 using std::nothrow;
 
@@ -543,11 +544,30 @@ InputServer::MessageReceived(BMessage* message)
 			if (message->FindRect("screen_bounds", &frame) != B_OK)
 				frame = fScreen.Frame();
 
-			if (frame == fFrame)
+			int32 rotation = 0;
+			message->FindInt32("rotation", &rotation);
+			bool rotationChanged = (rotation != fDisplayRotation);
+
+			if (frame == fFrame && !rotationChanged)
 				break;
 
-			BPoint pos(fMousePos.x * frame.Width() / fFrame.Width(),
-				fMousePos.y * frame.Height() / fFrame.Height());
+			BPoint pos;
+			if (rotationChanged) {
+				// Re-anchor the cursor to the same physical screen location
+				// under the new rotation, rather than linearly rescaling a
+				// logical position that assumed the old rotation.
+				BRect oldBounds(0, 0, fFrame.Width(), fFrame.Height());
+				BPoint physical = BPrivate::logical_to_physical_point(
+					fMousePos, oldBounds, fDisplayRotation);
+				BRect newBounds(0, 0, frame.Width(), frame.Height());
+				pos = BPrivate::physical_to_logical_point(physical,
+					newBounds, rotation);
+			} else {
+				pos.x = fMousePos.x * frame.Width() / fFrame.Width();
+				pos.y = fMousePos.y * frame.Height() / fFrame.Height();
+			}
+
+			fDisplayRotation = rotation;
 			fFrame = frame;
 
 			BMessage set;
@@ -1701,8 +1721,16 @@ InputServer::_SanitizeEvents(EventList& events)
 
 				if (event->FindInt32("x", &x) == B_OK
 					&& event->FindInt32("y", &y) == B_OK) {
-					where.x = fMousePos.x + x;
-					where.y = fMousePos.y - y;
+					// fMousePos is logical (post-rotation); the raw device
+					// delta (x, y) is physical. Re-derive the physical
+					// position before adding the delta, then let the
+					// _TransformMousePosition() call below convert the
+					// result back to logical, same as the other branches.
+					BRect bounds(0, 0, fFrame.Width(), fFrame.Height());
+					BPoint physicalPos = BPrivate::logical_to_physical_point(
+						fMousePos, bounds, fDisplayRotation);
+					where.x = physicalPos.x + x;
+					where.y = physicalPos.y - y;
 
 					event->RemoveName("x");
 					event->RemoveName("y");
@@ -1997,29 +2025,15 @@ InputServer::_DispatchEvent(BMessage* event)
 void
 InputServer::_LoadDisplayRotation()
 {
-	// Read display rotation from Screen_data settings file
-	// This is synchronized with Screen preference preflet
-	BPath path;
-	if (find_directory(B_USER_SETTINGS_DIRECTORY, &path) == B_OK) {
-		path.Append("Screen_data");
-		BFile file(path.Path(), B_READ_ONLY);
-		if (file.InitCheck() == B_OK) {
-			// Skip over: BPoint offset (8 bytes), 4 bools (4 bytes)
-			// Then read: int32 displayRotation (4 bytes)
-			off_t offset = sizeof(BPoint) + (4 * sizeof(bool));
-			file.Seek(offset, SEEK_SET);
-			
-			int32 rotation = 0;
-			ssize_t bytesRead = file.Read(&rotation, sizeof(int32));
-			if (bytesRead == (ssize_t)sizeof(int32)) {
-				// Validate rotation value
-				if (rotation == 0 || rotation == 90 || rotation == 180 || rotation == 270) {
-					fDisplayRotation = rotation;
-					fScreenBounds = fScreen.Frame();
-					PRINT(("InputServer: Display rotation loaded from Screen_data: %d°\n", rotation));
-				}
-			}
-		}
+	// Ask app_server for the rotation it already loaded from Screen_data
+	// at its own startup, rather than re-parsing that settings file here
+	// too - a single source of truth instead of two independent, fragile
+	// copies of the same binary-offset parsing.
+	int32 rotation = fScreen.Rotation();
+	if (rotation == 0 || rotation == 90 || rotation == 180 || rotation == 270) {
+		fDisplayRotation = rotation;
+		PRINT(("InputServer: Display rotation loaded from app_server: %d°\n",
+			rotation));
 	}
 }
 
@@ -2027,49 +2041,26 @@ InputServer::_LoadDisplayRotation()
 void
 InputServer::_TransformMousePosition(BPoint& position)
 {
-	if (fDisplayRotation == 0 || fScreenBounds.IsValid() == false)
+	if (fDisplayRotation == 0 || fFrame.IsValid() == false)
 		return;
-	
-	int32 width = (int32)(fScreenBounds.Width() + 1);
-	int32 height = (int32)(fScreenBounds.Height() + 1);
-	
-	BPoint transformed = position;
-	
-	// Transform coordinates from logical to physical space based on rotation
-	// We transform FROM physical (where mouse actually is) TO logical (where app expects it)
-	switch (fDisplayRotation) {
-		case 90:
-			// 90° CW: physical (x, y) -> logical (y, width - 1 - x)
-			transformed.x = position.y;
-			transformed.y = width - 1 - position.x;
-			break;
-			
-		case 180:
-			// 180°: physical (x, y) -> logical (width - 1 - x, height - 1 - y)
-			transformed.x = width - 1 - position.x;
-			transformed.y = height - 1 - position.y;
-			break;
-			
-		case 270:
-			// 270° CW: physical (x, y) -> logical (height - 1 - y, x)
-			transformed.x = height - 1 - position.y;
-			transformed.y = position.x;
-			break;
-			
-		default:
-			break;
-	}
-	
+
+	// Transform FROM physical (where the mouse actually is) TO logical
+	// (where the app expects it), reusing the one shared, already-correct
+	// helper also used by app_server instead of a second, ad hoc formula.
+	BRect bounds(0, 0, fFrame.Width(), fFrame.Height());
+	BPoint transformed = BPrivate::physical_to_logical_point(position, bounds,
+		fDisplayRotation);
+
 	// Clamp to screen bounds
-	if (transformed.x < fScreenBounds.left)
-		transformed.x = fScreenBounds.left;
-	if (transformed.x > fScreenBounds.right)
-		transformed.x = fScreenBounds.right;
-	if (transformed.y < fScreenBounds.top)
-		transformed.y = fScreenBounds.top;
-	if (transformed.y > fScreenBounds.bottom)
-		transformed.y = fScreenBounds.bottom;
-	
+	if (transformed.x < fFrame.left)
+		transformed.x = fFrame.left;
+	if (transformed.x > fFrame.right)
+		transformed.x = fFrame.right;
+	if (transformed.y < fFrame.top)
+		transformed.y = fFrame.top;
+	if (transformed.y > fFrame.bottom)
+		transformed.y = fFrame.bottom;
+
 	position = transformed;
 }
 

@@ -2,133 +2,19 @@
  * Copyright 2026, Haiku, Inc. All rights reserved.
  * Distributed under the terms of the MIT License.
  *
- * Display rotation utilities for software and hardware rotation support.
- *
- * Settings file: ~/config/settings/display_rotation
- *
- *    display 0        # or "normal", "right_side_up"
- *    display 90        # or "right", "left_side_up", "cw"
- *    display 180        # or "inverted", "upside_down", "bottom_up"
- *    display 270        # or "left", "ccw"
- *    touch 90        # optional, defaults to display value for input conversion
- *
- * Values:
- *    0/90/180/270 or normal/right/inverted/left - degrees clockwise
- *    right_side_up, left_side_up, bottom_up, upside_down - Linux/DRM panel mount names
+ * Geometry and display_mode transform helpers shared between HWInterface,
+ * AccelerantHWInterface, and InputServer to convert between physical
+ * (actual panel) and logical (rotated) coordinates and modes.
  */
 #ifndef _DISPLAY_ROTATION_H
 #define _DISPLAY_ROTATION_H
 
-#include <FindDirectory.h>
+#include <Accelerant.h>
 #include <Rect.h>
 #include <Region.h>
-#include <ctype.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <strings.h>
 
 
 namespace BPrivate {
-
-
-static inline int32
-parse_display_rotation(const char* value)
-{
-    if (value == NULL)
-        return 0;
-
-    if (strcasecmp(value, "right") == 0 || strcmp(value, "90") == 0
-        || strcasecmp(value, "cw") == 0
-        || strcasecmp(value, "left_side_up") == 0)
-        return 90;
-    if (strcasecmp(value, "inverted") == 0 || strcmp(value, "180") == 0
-        || strcasecmp(value, "upside_down") == 0
-        || strcasecmp(value, "bottom_up") == 0)
-        return 180;
-    if (strcasecmp(value, "left") == 0 || strcmp(value, "270") == 0
-        || strcasecmp(value, "ccw") == 0
-        || strcasecmp(value, "right_side_up") == 0)
-        return 270;
-    if (strcasecmp(value, "normal") == 0 || strcmp(value, "0") == 0
-        || strcasecmp(value, "0_degrees") == 0)
-        return 0;
-    return 0;
-}
-
-
-/*!    Reads the rotation for \a key ("display" or "touch"), in clockwise
-    degrees (0, 90, 180 or 270). A missing "touch" entry falls back to
-    "display"; a missing file means no rotation.
-*/
-static inline int32
-get_display_rotation(const char* key = "display")
-{
-    char path[B_PATH_NAME_LENGTH];
-    if (find_directory(B_USER_SETTINGS_DIRECTORY, -1, false, path,
-            sizeof(path)) != B_OK) {
-        return 0;
-    }
-    strlcat(path, "/display_rotation", sizeof(path));
-
-    FILE* file = fopen(path, "r");
-    if (file == NULL)
-        return 0;
-
-    int32 display = 0;
-    int32 touch = -1;
-    char line[128];
-    while (fgets(line, sizeof(line), file) != NULL) {
-        char* hash = strchr(line, '#');
-        if (hash != NULL)
-            *hash = '\0';
-
-        char name[32];
-        char value[32];
-        int count = sscanf(line, "%31s %31s", name, value);
-        if (count == 1) {
-            // bare value means display rotation
-            display = parse_display_rotation(name);
-        } else if (count == 2) {
-            if (strcasecmp(name, "display") == 0)
-                display = parse_display_rotation(value);
-            else if (strcasecmp(name, "touch") == 0)
-                touch = parse_display_rotation(value);
-        }
-    }
-    fclose(file);
-
-    if (strcmp(key, "touch") == 0 && touch >= 0)
-        return touch;
-    return display;
-}
-
-
-/*!    Write rotation settings to ~/config/settings/display_rotation.
-    Both display and touch keys are written if provided.
-    Pass -1 to skip writing that key.
-*/
-static inline status_t
-set_display_rotation(int32 displayRotation, int32 touchRotation = -1)
-{
-    char path[B_PATH_NAME_LENGTH];
-    if (find_directory(B_USER_SETTINGS_DIRECTORY, -1, true, path,
-            sizeof(path)) != B_OK) {
-        return B_ERROR;
-    }
-    strlcat(path, "/display_rotation", sizeof(path));
-
-    FILE* file = fopen(path, "w");
-    if (file == NULL)
-        return B_ERROR;
-
-    fprintf(file, "display %d\n", displayRotation);
-    if (touchRotation >= 0)
-        fprintf(file, "touch %d\n", touchRotation);
-
-    fclose(file);
-    return B_OK;
-}
 
 
 /*!    Convert logical point to physical screen coordinates when rotated.
@@ -297,6 +183,57 @@ logical_to_physical_region(const BRegion& logicalRegion, BRect logicalBounds,
         physicalRegion.Include(physicalRect);
     }
     return physicalRegion;
+}
+
+
+/*!    Swap the axis-specific fields of a display_mode in place (self-inverse).
+    Used at the AccelerantHWInterface boundary to convert between the
+    physical display_mode the accelerant/driver works with and the logical
+    (rotated) display_mode everything above HWInterface works with.
+*/
+static inline void
+swap_mode_axes(display_mode& mode)
+{
+    uint16 t;
+    t = mode.timing.h_display;
+    mode.timing.h_display = mode.timing.v_display;
+    mode.timing.v_display = t;
+
+    t = mode.timing.h_sync_start;
+    mode.timing.h_sync_start = mode.timing.v_sync_start;
+    mode.timing.v_sync_start = t;
+
+    t = mode.timing.h_sync_end;
+    mode.timing.h_sync_end = mode.timing.v_sync_end;
+    mode.timing.v_sync_end = t;
+
+    t = mode.timing.h_total;
+    mode.timing.h_total = mode.timing.v_total;
+    mode.timing.v_total = t;
+
+    t = mode.virtual_width;
+    mode.virtual_width = mode.virtual_height;
+    mode.virtual_height = t;
+
+    t = mode.h_display_start;
+    mode.h_display_start = mode.v_display_start;
+    mode.v_display_start = t;
+}
+
+
+/*!    Swap the axis-specific fields of a display_timing_constraints in place
+    (self-inverse). The pixel clock limits (a clock rate, not an axis) are
+    a separate, unrelated accelerant call and must NOT be swapped.
+*/
+static inline void
+swap_timing_constraints_axes(display_timing_constraints& constraints)
+{
+    uint16 t;
+    t = constraints.h_res; constraints.h_res = constraints.v_res; constraints.v_res = t;
+    t = constraints.h_sync_min; constraints.h_sync_min = constraints.v_sync_min; constraints.v_sync_min = t;
+    t = constraints.h_sync_max; constraints.h_sync_max = constraints.v_sync_max; constraints.v_sync_max = t;
+    t = constraints.h_blank_min; constraints.h_blank_min = constraints.v_blank_min; constraints.v_blank_min = t;
+    t = constraints.h_blank_max; constraints.h_blank_max = constraints.v_blank_max; constraints.v_blank_max = t;
 }
 
 
