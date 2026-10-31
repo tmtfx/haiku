@@ -1,4 +1,4 @@
-1	swedish	x-vnd.Haiku-HaikuDepot	4230673291
+1	swedish	x-vnd.Haiku-HaikuDepot	2645976830
 Usage conditions download problem	ToLatestUserUsageConditionsWindow		Nedladdningsproblem för användningsvillkor
 User ratings loading…	PackageInfoView		Användarbetyg laddas...
 Available packages	MainWindow		Tillgängliga paket
@@ -15,6 +15,7 @@ It was not possible to extract necessary captcha information from the data sent 
 Install %PackageTitle%	PackageAction		Installera %PackageTitle%
 An error occurred while obtaining the package list: %message%	LocalPkgDataLoadProcess		Ett fel inträffade vid hämtning av paketlistan: %message%
 Update usage conditions	ToLatestUserUsageConditionsWindow		Uppdatera användningsvillkor
+Details: %Details%	PackageKitUtils		Detaljer: %Details%
 No usage conditions	UserUsageConditions		Inga användningsvillkor
 Active	PackageListView		Aktiv
 Login or Create account	MainWindow		Logga in eller skapa konto
@@ -31,6 +32,7 @@ An unexpected error '%Message%' has arisen with property '%Property%'	UserLoginW
 A requested object or an object involved in the request was not found on the server.	ServerHelper		Ett begärt objekt eller ett objekt involverat i begäran hittades inte på servern.
 Logout	ToLatestUserUsageConditionsWindow		Logga ut
 Password requirements	UserLoginWindow		Lösenordskrav
+Transaction Result: %TxnResultFullErrorMessage%	PackageKitUtils		Transaktionsresultat: %TxnResultFullErrorMessage%
 The following additional package changes have to be made:	PackageResult		Följande ytterligare paketändringar måste göras:
 %Appname% communicates with a server component called HaikuDepotServer. These are the usage conditions that the user '%Nickname%' agreed to at %AgreedToTimestamp% in relation to the use of the HaikuDepotServer service.	UserUsageConditions		%Appname% kommunicerar med en serverkomponent som heter HaikuDepotServer. Dessa är de användningsvillkor som användaren '%Nickname%' godkände vid %AgreedToTimestamp% i relation till användningen av HaikuDepotServer-tjänsten.
 No changelog available.	PackageInfoView		Ingen ändringslogg finns.
@@ -43,9 +45,11 @@ Available	PackageListView		Tillgänglig
 Click a package to view information	PackageInfoView		Klicka på ett paket för att se information
 Cancel	UserLoginWindow		Avbryt
 Rating not possible	MainWindow		Betyg ej möjligt
+Install failure	InstallPackageProcess		Installationen misslyckades
 Package update error	MainWindow		Paketuppdateringsfel
 Click here	FeaturedPackagesView	Appears in the sentence 'Click here to search all packages.'	Klicka här
 No screenshot available.	PackageInfoView		Ingen skärmdump tillgänglig.
+Try installing anyway	MainWindow		Prova att installera ändå
 %FIRST_PROCESS_DESCRIPTION% +{0, plural, one{# process} other{# processes}}	ProcessCoordinator		%FIRST_PROCESS_DESCRIPTION% +{0, plural, one{# process} other{# processer}}
 Fetching user ratings for package	PopulatePkgUserRatingsFromServerProcess		Hämta användarbetyg för paket
 Reboot required	PackageManager		Omstart krävs
@@ -76,6 +80,7 @@ All categories	FilterView		Alla kategorier
 Your rating was updated.	RatePackageWindow		Ditt betyg ändrades.
 ignore problem for now	PackageProblem		ignorera problemet för tillfället
 n/a	PackageInfoView		oviktigt
+Error: %Errstr% (%Errno%)	PackageKitUtils		Fel: %Errstr% (%Errno%)
 Checking user details	UserDetailVerifierProcess		Kontrollerar användarinformation
 Cancel	MainWindow		Avbryt
 Refresh repositories	MainWindow		Ladda om repositorier
@@ -127,17 +132,15 @@ User Created	UserLoginWindow		Användare skapad
 Check for updates…	MainWindow		Leta efter uppdateringar…
 Uninstalled	PackageListView		Avinstallera
 I agree to the usage conditions	ToLatestUserUsageConditionsWindow		Jag godkänner användningsvillkoren
-Installing \"%PackageName%\"	InstallPackageProcess		Installerar \"%PackageName%\"
 Uninstall %PackageTitle%	PackageAction		Avinstallera %PackageTitle%
 OK	App		OK
-Fatal error	UninstallPackageAction		Allvarligt fel
 Develop packages	MainWindow		Utvecklingspaket
 Starting the package daemon failed:\n\n%Error%	App		Starta package daemon misslyckades:\n\n%Error%
 No user ratings available.	PackageInfoView		Ingen betygsättnings tillgänglig.
 <no info>	PackageInfoView		<Ingen information>
 Usage conditions download problem	UserUsageConditions		Nedladdningsproblem för användningsvillkor
-An error has arisen downloading the password requirements required to create a new user. Check the log for details and try again. \nInformation about how to view the logs is available in the HaikuDepot section of the Haiku User Guide.	UserLoginWindow		Ett fel har uppstått vid nedladdning av lösenordskraven som krävs för att skapa en ny användare. Kontrollera loggen för detaljer och försök igen. \nInformation om hur man visar loggarna finns i HaikuDepot-delen av Haiku User Guide.
 Fetching screenshot	CacheScreenshotProcess		Hämtar skärmdump
+An error has arisen downloading the password requirements required to create a new user. Check the log for details and try again. \nInformation about how to view the logs is available in the HaikuDepot section of the Haiku User Guide.	UserLoginWindow		Ett fel har uppstått vid nedladdning av lösenordskraven som krävs för att skapa en ny användare. Kontrollera loggen för detaljer och försök igen. \nInformation om hur man visar loggarna finns i HaikuDepot-delen av Haiku User Guide.
 A network transport error has arisen communicating with the server system: %s	ServerHelper		Ett nättransportfel har uppstått vid kommunikation med serversystemet: %s
 Rating	PackageListView		Betyg
 Synchronizing icons	ServerIconExportUpdateProcess		Synkroniserar ikoner
@@ -197,6 +200,7 @@ Login issue	MainWindow		Inloggnings problem
 Your rating:	RatePackageWindow		Dina betyg:
 The user %Nickname% has been successfully created in the HaikuDepotServer system. You can administer your user details by using the web interface. You are now logged-in as this new user.	UserLoginWindow		Användaren %Nickname% har framgångsrikt skapats i HaikuDepotServer-systemet. Du kan administrera dina användarinformation genom att använda webbgränssnittet. Du är nu inloggad som den här nya användaren.
 Repositories	MainWindow		Repositorier
+Uninstall failure	UninstallPackageAction		Misslyckad avinstallation
 While updating package data, a problem has arisen that may cause data to be outdated or missing from the application's display. Additional details regarding this problem may be able to be obtained from the application logs.\nInformation about how to view the logs is available in the HaikuDepot section of the Haiku User Guide.	MainWindow		Under uppdateringen av paketdata har ett problem uppstått som kan leda till att data är föråldrade eller saknas från programmets skärm. Ytterligare information om detta problem kan hämtas från applikationsloggarna.\nInformation om hur du ser loggarna finns i avsnittet HaikuDepot i Haiku användarhandbok.
 This rating is visible to other users	RatePackageWindow		Detta betyg är synligt för andra användare
 An error has arisen downloading the usage conditions. Check the log for details and try again. \nInformation about how to view the logs is available in the HaikuDepot section of the Haiku User Guide.	UserUsageConditions		Ett fel har uppstått vid nedladdning av användningsvillkoren. Kontrollera loggen för detaljer och försök igen. \nInformation om hur man visar loggarna finns i HaikuDepot-delen av Haiku User Guide.
@@ -213,10 +217,10 @@ Comment language:	RatePackageWindow		Kommentarspråk:
 The password has been incorrectly repeated.	UserLoginWindow		Lösenordet upprepades felaktigt.
 The password previously supplied for the user [%Nickname%] is not currently valid. The user will be logged-out of this application and you should login again with your updated password.	MainWindow		Lösenordet som du tidigare skrev för användaren [%Nickname%] är för närvarande inte giltigt. Användaren kommer att loggas ut från den här applikationen och du bör logga in igen med ditt uppdaterade lösenord.
 View the usage conditions	ToLatestUserUsageConditionsWindow		Se användningsvillkoren
+To install package %PackageName% requires %PackageBytesDescription% of free disk space, but only %FreeBytesDescription% is available. The installation may fail.	MainWindow		Installation av paketet %PackageName% kräver %PackageBytesDescription% ledigt diskutrymme, men endast %FreeBytesDescription% finns tillgängligt. Installationen kan misslyckas.
 OK	ServerHelper		OK
 Reading repository data	LocalPkgDataLoadProcess		Läser repositoriedata
 Native desktop packages only	MainWindow		Endast inbyggda skrivbordspaket
-Fatal error	InstallPackageProcess		Allvarligt fel
 A validation error has occurred	ServerHelper		Ett valideringsfel har inträffat
 %Appname% communicates with a server component called HaikuDepotServer. These are the latest usage conditions for use of the HaikuDepotServer service.	UserUsageConditions		%Appname% kommunicerar med en serverkomponent som heter HaikuDepotServer. Dessa är de senaste användningsvillkoren för användning av HaikuDepotServer-tjänsten.
 The nickname is required.	UserLoginWindow		Ett användarnamn krävs.
@@ -242,5 +246,6 @@ No results? 	FeaturedPackagesView		Inga resultat?
 User creation error	UserLoginWindow		Användarskapande-fel
 You need to be logged into an account before you can rate packages.	MainWindow		Du måste logga in för att kunna betygsätta paket.
 Cleaning up…	ShuttingDownWindow		Städar upp…
+Insufficient storage capacity	MainWindow		Otillräcklig lagringskapacitet
 %appname% is stopping or completing running operations before quitting.	ShuttingDownWindow		%appname% stoppar eller slutför pågående åtgärder innan de avslutas.
 Repeat password:	UserLoginWindow		Repetera lösenord:
