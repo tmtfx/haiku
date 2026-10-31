@@ -1,7 +1,9 @@
-1	turkish	x-vnd.Haiku-Expander	2735024965
+1	turkish	x-vnd.Haiku-Expander	676459718
+Cancel	PasswordAlert		Vazgeç
 Destination	ExpanderWindow		Hedef
 Other	ExpanderPreferences		Diğer
 Automatically show contents listing	ExpanderPreferences		İçerik listesini kendiliğinden göster
+Ignore all	ExpanderWindow		Tümünü yok say
 Expander	System name		Paketaçar
 Set source…	ExpanderMenu		Kaynak belirle…
 OK	ExpanderWindow		Tamam
@@ -14,6 +16,7 @@ Create	ExpanderWindow		Oluştur
 Creating listing for '%s'…	ExpanderWindow		“%s” için listeleme oluşturuluyor…
 Show contents	ExpanderMenu		İçeriği göster
 %appname% settings	ExpanderPreferences		%appname% ayarları
+Ignore	ExpanderWindow		Yok say
 Are you sure you want to stop expanding this archive? The expanded items may not be complete.	ExpanderWindow		Bu arşivi genişletmeyi durdurmak istediğinizden emin misiniz? Tüm ögeler çıkarılamamış olabilir.
 Settings	ExpanderMenu		Ayarlar
 Expand	ExpanderWindow		Genişlet
@@ -38,6 +41,7 @@ Expansion	ExpanderPreferences		Genişletme
 Set destination…	ExpanderMenu		Hedef belirle…
 Continue	ExpanderWindow		Sürdür
  is not supported	ExpanderWindow		 desteklenmiyor
+OK	PasswordAlert		Tamam
 Cancel	ExpanderPreferences		Vazgeç
 Use:	ExpanderPreferences		Şunu kullan:
 Destination folder	ExpanderPreferences		Hedef klasör

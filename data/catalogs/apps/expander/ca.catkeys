@@ -1,7 +1,9 @@
-1	catalan; valencian	x-vnd.Haiku-Expander	2735024965
+1	catalan; valencian	x-vnd.Haiku-Expander	676459718
+Cancel	PasswordAlert		Cancel·la
 Destination	ExpanderWindow		Destinació
 Other	ExpanderPreferences		Altres
 Automatically show contents listing	ExpanderPreferences		Mostra automàticament la llista de continguts
+Ignore all	ExpanderWindow		Ignora-ho tot
 Expander	System name		Expandidora
 Set source…	ExpanderMenu		Estableix la font...
 OK	ExpanderWindow		D'acord
@@ -14,6 +16,7 @@ Create	ExpanderWindow		Crea
 Creating listing for '%s'…	ExpanderWindow		Es crea la llista per a %s…
 Show contents	ExpanderMenu		Mostra el contingut
 %appname% settings	ExpanderPreferences		Paràmetres per a %appname%
+Ignore	ExpanderWindow		Ignora
 Are you sure you want to stop expanding this archive? The expanded items may not be complete.	ExpanderWindow		Segur que voleu interrompre l'expansió d'aquest arxiu? Pot ser que els elements expandits no siguin complets.
 Settings	ExpanderMenu		Paràmetres
 Expand	ExpanderWindow		Expandeix
@@ -38,6 +41,7 @@ Expansion	ExpanderPreferences		Descompressió
 Set destination…	ExpanderMenu		Establiu-ne la destinació...
 Continue	ExpanderWindow		Segueix
  is not supported	ExpanderWindow		 no s'admet.
+OK	PasswordAlert		D'acord
 Cancel	ExpanderPreferences		Cancel·la
 Use:	ExpanderPreferences		Usa:
 Destination folder	ExpanderPreferences		Carpeta de destinació
