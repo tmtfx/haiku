@@ -101,13 +101,11 @@ usb_raw_device_removed(void *cookie)
 	// in syscalls.
 	const usb_configuration_info *configurationInfo =
 		gUSBModule->get_configuration(device->device);
-	if (configurationInfo != NULL && configurationInfo->interface_count > 0) {
+	if (configurationInfo != NULL) {
 		struct usb_interface_info* interface
 			= configurationInfo->interface->active;
-		if (interface != NULL) {
-			for (unsigned int i = 0; i < interface->endpoint_count; i++)
-				gUSBModule->cancel_queued_transfers(interface->endpoint[i].handle);
-		}
+		for (unsigned int i = 0; i < interface->endpoint_count; i++)
+			gUSBModule->cancel_queued_transfers(interface->endpoint[i].handle);
 	}
 
 	mutex_lock(&gDeviceListLock);
