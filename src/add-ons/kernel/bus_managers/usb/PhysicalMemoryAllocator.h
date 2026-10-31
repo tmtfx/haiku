@@ -57,6 +57,7 @@ private:
 		uint8						**fArray;
 
 		ConditionVariable			fNoMemoryCondition;
+		uint32						fMemoryWaitersCount;
 
 		uint32						fDebugBase;
 		uint32						fDebugChunkSize;
