@@ -193,7 +193,6 @@ extern "C" void
 os_preempt_disable()
 {
 	thread_get_current_thread()->cpu->reschedule_disabled++;
-	memory_full_barrier();
 }
 
 
@@ -201,10 +200,8 @@ extern "C" void
 os_preempt_enable()
 {
 	ASSERT(os_preempt_disabled());
-
-	Thread* thread = thread_get_current_thread();
-	thread->cpu->reschedule_disabled--;
-	if (thread->cpu->invoke_scheduler)
+	thread_get_current_thread()->cpu->reschedule_disabled--;
+	if (os_return_needed())
 		scheduler_reschedule_if_necessary();
 }
 
