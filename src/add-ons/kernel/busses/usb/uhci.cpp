@@ -535,8 +535,6 @@ UHCI::UHCI(pci_info *info, pci_device_module_info* pci, pci_device* device, Stac
 		fIRQ(0),
 		fUseMSI(false)
 {
-	B_INITIALIZE_SPINLOCK(&fInterruptLock);
-
 	// Create a lock for the isochronous transfer list
 	mutex_init(&fIsochronousLock, "UHCI isochronous lock");
 
@@ -2011,7 +2009,8 @@ UHCI::InterruptHandler(void *data)
 int32
 UHCI::Interrupt()
 {
-	acquire_spinlock(&fInterruptLock);
+	static spinlock lock = B_SPINLOCK_INITIALIZER;
+	acquire_spinlock(&lock);
 
 	// Check if we really had an interrupt
 	uint16 status = ReadReg16(UHCI_USBSTS);
@@ -2021,7 +2020,7 @@ UHCI::Interrupt()
 			WriteReg16(UHCI_USBSTS, status);
 		}
 
-		release_spinlock(&fInterruptLock);
+		release_spinlock(&lock);
 		return B_UNHANDLED_INTERRUPT;
 	}
 
@@ -2070,7 +2069,7 @@ UHCI::Interrupt()
 	if (acknowledge)
 		WriteReg16(UHCI_USBSTS, acknowledge);
 
-	release_spinlock(&fInterruptLock);
+	release_spinlock(&lock);
 
 	if (finishTransfers)
 		release_sem_etc(fFinishTransfersSem, 1, B_DO_NOT_RESCHEDULE);
