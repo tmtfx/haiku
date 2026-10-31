@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <new>
+#include <string>
 #include <thread>
 #include <mutex>
 #include <condition_variable>
