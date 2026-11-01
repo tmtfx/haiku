@@ -42,38 +42,38 @@ Echo "Starting build of type $(HAIKU_BUILD_TYPE) ..." ;
 rule DefineDefaultBuildProfiles
 {
 	# release profiles
-	DefineBuildProfile release-raw : image : "haiku-release.image" ;
-	DefineBuildProfile release-vmware : vmware-image : "haiku-release.vmdk" ;
-	DefineBuildProfile release-cd : cd-image : "haiku-release.iso" ;
+	DefineBuildProfile release-raw : image : "PDF-release.image" ;
+	DefineBuildProfile release-vmware : vmware-image : "PDF-release.vmdk" ;
+	DefineBuildProfile release-cd : cd-image : "PDF-release.iso" ;
 	DefineBuildProfile release-anyboot : anyboot-image
-		: "haiku-release-anyboot.iso" ;
+		: "PDF-release-anyboot.iso" ;
 
 	# nightly profiles
-	DefineBuildProfile nightly-raw : image : "haiku-nightly.image" ;
-	DefineBuildProfile nightly-mmc : haiku-mmc-image : "haiku-nightly.mmc" ;
-	DefineBuildProfile nightly-vmware : vmware-image : "haiku-nightly.vmdk" ;
-	DefineBuildProfile nightly-cd : cd-image : "haiku-nightly.iso" ;
+	DefineBuildProfile nightly-raw : image : "PDF-nightly.image" ;
+	DefineBuildProfile nightly-mmc : haiku-mmc-image : "PDF-nightly.mmc" ;
+	DefineBuildProfile nightly-vmware : vmware-image : "PDF-nightly.vmdk" ;
+	DefineBuildProfile nightly-cd : cd-image : "PDF-nightly.iso" ;
 	DefineBuildProfile nightly-anyboot : anyboot-image
-		: "haiku-nightly-anyboot.iso" ;
+		: "PDF-nightly-anyboot.iso" ;
 
 	# bootstrap profiles
-	DefineBuildProfile bootstrap-raw : image : "haiku-bootstrap.image" ;
-	DefineBuildProfile bootstrap-mmc : haiku-mmc-image : "haiku-bootstrap.mmc" ;
+	DefineBuildProfile bootstrap-raw : image : "PDF-bootstrap.image" ;
+	DefineBuildProfile bootstrap-mmc : haiku-mmc-image : "PDF-bootstrap.mmc" ;
 	DefineBuildProfile bootstrap-vmware : vmware-image
-		: "haiku-bootstrap.vmdk" ;
+		: "PDF-bootstrap.vmdk" ;
 	DefineBuildProfile bootstrap-anyboot : anyboot-image
-		: "haiku-bootstrap-anyboot.iso" ;
+		: "PDF-bootstrap-anyboot.iso" ;
 
 	# minimum profiles
-	DefineBuildProfile minimum-raw : image : "haiku-minimum.image" ;
-	DefineBuildProfile minimum-mmc : haiku-mmc-image : "haiku-minimum.mmc" ;
-	DefineBuildProfile minimum-vmware : vmware-image : "haiku-minimum.vmdk" ;
-	DefineBuildProfile minimum-cd : cd-image : "haiku-minimum.iso" ;
+	DefineBuildProfile minimum-raw : image : "PDF-minimum.image" ;
+	DefineBuildProfile minimum-mmc : haiku-mmc-image : "PDF-minimum.mmc" ;
+	DefineBuildProfile minimum-vmware : vmware-image : "PDF-minimum.vmdk" ;
+	DefineBuildProfile minimum-cd : cd-image : "PDF-minimum.iso" ;
 	DefineBuildProfile minimum-anyboot : anyboot-image
-		: "haiku-minimum-anyboot.iso" ;
+		: "PDF-minimum-anyboot.iso" ;
 
 	# test profiles
-	DefineBuildProfile test-raw : image : "haiku-test.image" ;
+	DefineBuildProfile test-raw : image : "PDF-test.image" ;
 
 	switch $(HAIKU_BUILD_PROFILE) {
 		case "release-*" : {
