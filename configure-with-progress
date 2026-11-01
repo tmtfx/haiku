@@ -15,8 +15,23 @@ NC='\033[0m' # No Color
 BOLD='\033[1m'
 
 # Variabili globali
+# Directory in cui si trova fisicamente questo script wrapper
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONFIGURE_SCRIPT="$SCRIPT_DIR/configure"
+
+# Trova dinamicamente la root di Haiku:
+# Se lo script è nella root, HAIKU_ROOT è SCRIPT_DIR. Se è altrove, risaliamo finché troviamo lo script 'configure'
+if [ -f "$SCRIPT_DIR/configure" ]; then
+    HAIKU_ROOT="$SCRIPT_DIR"
+elif [ -f "$SCRIPT_DIR/../configure" ]; then
+    HAIKU_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+elif [ -f "$SCRIPT_DIR/../../configure" ]; then
+    HAIKU_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+else
+    # Fallback basato sulla posizione tipica rispetto a generated.*
+    HAIKU_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+fi
+
+CONFIGURE_SCRIPT="$HAIKU_ROOT/configure"
 START_TIME=$(date +%s)
 CURRENT_PHASE=""
 TOTAL_PHASES=0
