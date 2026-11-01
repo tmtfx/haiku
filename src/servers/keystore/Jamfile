@@ -13,6 +13,14 @@ SEARCH on $(opensslLibs) = /boot/system/develop/lib ;
 UseBuildFeatureHeaders openssl ;
 SubDirSysHdrs /boot/system/develop/headers ;
 
+if $(TARGET_PACKAGING_ARCH) = x86_gcc2 {
+	# OpenSSL's headers use a GCC attribute syntax that the legacy gcc2
+	# compiler does not fully understand, turning into a harmless
+	# "attribute directive ignored" warning that -Werror then treats
+	# as fatal.
+	ObjectC++Flags KeyStoreServer.cpp : -Wno-error ;
+}
+
 Application keystore_server :
     AppAccessRequestWindow.cpp
     KeyRequestWindow.cpp

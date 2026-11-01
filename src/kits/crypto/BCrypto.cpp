@@ -204,7 +204,7 @@ BCrypto::Encrypt(uint8* key, size_t keyLen, uint8* iv, size_t ivLen,
     if (outSize < requiredSize) return B_BAD_VALUE;
 
     uint8* dataToProcess = (uint8*)in;
-    uint8* tempBuffer = nullptr;
+    uint8* tempBuffer = NULL;
     size_t processLen = inLen;
 
     // Se il padding è attivo e necessario (o se PKCS7 richiede sempre un blocco extra)
@@ -915,7 +915,7 @@ BCrypto::Digest(BCryptoAlgorithmID algo, const void* data, size_t len, void* out
 
     BCryptoUserRequest req;
     _FillRequest(req, B_CRYPTO_DIGEST, algo, B_CRYPTO_MODE_ANY,
-                 nullptr, 0, nullptr, 0, &src, &dst, 1);
+                 NULL, 0, NULL, 0, &src, &dst, 1);
 
     // Deleghiamo tutto a Process che ora gestisce Init, Update (chunked) e Final
     status_t err = Process(req);
@@ -943,7 +943,7 @@ BCrypto::Digest(BCryptoAlgorithmID algo, BDataIO* source, void* outHash)
         iovec src = { buffer, (size_t)bytesRead };
         BCryptoUserRequest req;
         _FillRequest(req, B_CRYPTO_DIGEST, algo, B_CRYPTO_MODE_ANY,
-                     nullptr, 0, nullptr, 0, &src, nullptr, 1);
+                     NULL, 0, NULL, 0, &src, NULL, 1);
         
         if (ioctl(fFd, B_CRYPTO_IOCTL_HASH_UPDATE, &req) < 0) {
             err = errno; // <--- CATTURA L'ERRORE QUI
@@ -957,7 +957,7 @@ BCrypto::Digest(BCryptoAlgorithmID algo, BDataIO* source, void* outHash)
         iovec dst = { tempHash, sizeof(tempHash) };
         BCryptoUserRequest req;
         _FillRequest(req, B_CRYPTO_DIGEST, algo, B_CRYPTO_MODE_ANY,
-                     nullptr, 0, nullptr, 0, nullptr, &dst, 1);
+                     NULL, 0, NULL, 0, NULL, &dst, 1);
                      
         //err = ioctl(fFd, B_CRYPTO_IOCTL_HASH_FINAL, &req);
         if (ioctl(fFd, B_CRYPTO_IOCTL_HASH_FINAL, &req) < 0)

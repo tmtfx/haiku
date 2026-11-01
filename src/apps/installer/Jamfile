@@ -19,6 +19,14 @@ UseBuildFeatureHeaders openssl ;
 SubDirSysHdrs /boot/system/develop/headers ;
 #}
 
+if $(TARGET_PACKAGING_ARCH) = x86_gcc2 {
+	# OpenSSL's headers use a GCC attribute syntax that the legacy gcc2
+	# compiler does not fully understand, turning into a harmless
+	# "attribute directive ignored" warning that -Werror then treats
+	# as fatal.
+	ObjectC++Flags InstallerWindow.cpp : -Wno-error ;
+}
+
 #local opensslLibs ;
 #if [ FIsBuildFeatureEnabled openssl ] {
 #	opensslLibs = libssl.so libcrypto.so ;

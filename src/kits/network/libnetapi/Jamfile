@@ -34,6 +34,15 @@ for architectureObject in [ MultiArchSubDirSetup ] {
 		#	SetupFeatureObjectsDir no-ssl ;
 		}
 
+		if $(architecture) = x86_gcc2 {
+			# OpenSSL's headers use a GCC attribute syntax that the
+			# legacy gcc2 compiler does not fully understand, turning
+			# into a harmless "attribute directive ignored" warning
+			# that -Werror then treats as fatal.
+			ObjectC++Flags SecureSocket.cpp HttpAuthentication.cpp
+				Certificate.cpp : -Wno-error ;
+		}
+
 		SharedLibrary [ MultiArchDefaultGristFiles libbnetapi.so ] :
 			DynamicBuffer.cpp
 			NetEndpoint.cpp

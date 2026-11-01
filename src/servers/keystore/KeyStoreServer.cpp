@@ -1080,9 +1080,9 @@ KeyStoreServer::_GetOrAskSessionPassword()
 	status_t result = window->RequestPassword(password);
 	if (result != B_OK) {
 		if (EnableLogDebug)
-			LogDebug("[DEBUG] RequestPassword canceled or failed with code: %d\n", result);
+			LogDebug("[DEBUG] RequestPassword canceled or failed with code: %d\n", (int)result);
 		else
-			debug_printf("Keystore Server: RequestPassword canceled or failed with code: %d\n", result);
+			debug_printf("Keystore Server: RequestPassword canceled or failed with code: %d\n", (int)result);
 		return result;
 	}
 

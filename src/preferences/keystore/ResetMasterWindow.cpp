@@ -61,10 +61,10 @@ ResetMasterWindow::ResetMasterWindow(BWindow* parent)
     rgb_color textColor = ui_color(B_PANEL_TEXT_COLOR);
     warningView->SetFontAndColor(be_plain_font, B_FONT_ALL, &textColor);
 
-    fPasswordControl = new BTextControl("new_pass", B_TRANSLATE("New Master Password:"), "", nullptr);
+    fPasswordControl = new BTextControl("new_pass", B_TRANSLATE("New Master Password:"), "", NULL);
     fPasswordControl->TextView()->HideTyping(true);
 
-    fConfirmControl = new BTextControl("confirm_pass", B_TRANSLATE("Confirm Password:"), "", nullptr);
+    fConfirmControl = new BTextControl("confirm_pass", B_TRANSLATE("Confirm Password:"), "", NULL);
     fConfirmControl->TextView()->HideTyping(true);
 
     fResetButton = new BButton("reset", B_TRANSLATE("Reset"), new BMessage(MSG_RESET_PASSWORD));

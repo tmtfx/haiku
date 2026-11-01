@@ -12,7 +12,7 @@ public:
     {
     }
 
-    virtual void ReadyToRun() override
+    virtual void ReadyToRun()
     {
         KeyStoreWindow* window = new KeyStoreWindow();
         window->Show();

@@ -432,7 +432,7 @@ void KeyStoreWindow::_RemoveSelectedKey()
 
     BAlert* alert = new BAlert(B_TRANSLATE("Confirm Delete"),
         B_TRANSLATE("Are you sure you want to permanently delete this key?"),
-        B_TRANSLATE("Cancel"), B_TRANSLATE("Delete"), nullptr, B_WIDTH_AS_USUAL, B_WARNING_ALERT);
+        B_TRANSLATE("Cancel"), B_TRANSLATE("Delete"), NULL, B_WIDTH_AS_USUAL, B_WARNING_ALERT);
     
     if (alert->Go() == 1) {
         BKeyStore store;

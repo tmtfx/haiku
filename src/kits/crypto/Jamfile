@@ -4,8 +4,13 @@ SubDir HAIKU_TOP src kits crypto ;
 
 UsePublicHeaders crypto support ;
 
-SharedLibrary libcrypto_api.so :
-	BCrypto.cpp
-	:
-	be # Linka la libreria base di Haiku
-;
+local architectureObject ;
+for architectureObject in [ MultiArchSubDirSetup ] {
+	on $(architectureObject) {
+		SharedLibrary [ MultiArchDefaultGristFiles libcrypto_api.so ] :
+			BCrypto.cpp
+			:
+			be # Linka la libreria base di Haiku
+			;
+	}
+}
