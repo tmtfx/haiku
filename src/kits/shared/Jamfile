@@ -24,6 +24,16 @@ for architectureObject in [ MultiArchSubDirSetup ] {
 		# for BKeymap
 		UsePrivateHeaders interface ;
 
+		local markdownSources ;
+		if $(architecture) != x86_gcc2 {
+			# BMarkdownView/BMarkdownScrollView and the vendored md4c
+			# CommonMark parser use C++11 `override` and a C99 flexible
+			# array member, neither supported by the legacy gcc2
+			# compiler, so skip them on that architecture.
+			markdownSources = MarkdownView.cpp MarkdownScrollView.cpp
+				md4c.c ;
+		}
+
 		StaticLibrary <$(architecture)>libshared.a :
 			AboutMenuItem.cpp
 			ArgumentVector.cpp
@@ -51,9 +61,7 @@ for architectureObject in [ MultiArchSubDirSetup ] {
 			Json.cpp
 			Keymap.cpp
 			LongAndDragTrackingFilter.cpp
-			MarkdownView.cpp
-			MarkdownScrollView.cpp
-			md4c.c
+			$(markdownSources)
 			md5.cpp
 			MemoryRingIO.cpp
 			MessageBuilder.cpp

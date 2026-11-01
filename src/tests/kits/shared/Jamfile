@@ -22,9 +22,19 @@ UnitTestLib libsharedtest.so :
 	: be shared bnetapi [ TargetLibstdc++ ] [ TargetLibsupc++ ]
 ;
 
-SimpleTest MarkdownText :
-	TestMarkdownView.cpp
-	: be shared translation [ TargetLibsupc++ ]
-	;
+local architectureObject ;
+for architectureObject in [ MultiArchSubDirSetup ] {
+	on $(architectureObject) {
+		if $(TARGET_PACKAGING_ARCH) != x86_gcc2 {
+			# BMarkdownView/BMarkdownScrollView are not built for the
+			# legacy gcc2 architecture (see src/kits/shared/Jamfile), so
+			# only build this test for the other configured archs.
+			SimpleTest [ MultiArchDefaultGristFiles MarkdownText ] :
+				TestMarkdownView.cpp
+				: be shared translation [ TargetLibsupc++ ]
+				;
+		}
+	}
+}
 
 SubInclude HAIKU_TOP src tests kits shared shake_filter ;

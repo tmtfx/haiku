@@ -1,14 +1,24 @@
 SubDir HAIKU_TOP src apps hmcp ;
 UseHeaders [ FDirName $(HAIKU_TOP) headers os ai ] : true ;
 
-Application HaikuMCPClient :
-    hmcp.cpp
-    MainWindow.cpp
-    :
-    be
-    shared
-    translation
-    localestub
-    libai_api.so
-    [ TargetLibsupc++ ]
-;
+local architectureObject ;
+for architectureObject in [ MultiArchSubDirSetup ] {
+	on $(architectureObject) {
+		if $(TARGET_PACKAGING_ARCH) != x86_gcc2 {
+			# MainWindow.cpp uses BMarkdownView, not built for the legacy
+			# gcc2 architecture (see src/kits/shared/Jamfile), so only
+			# build this app for the other configured archs.
+			Application [ MultiArchDefaultGristFiles HaikuMCPClient ] :
+				hmcp.cpp
+				MainWindow.cpp
+				:
+				be
+				shared
+				translation
+				localestub
+				libai_api.so
+				[ TargetLibsupc++ ]
+			;
+		}
+	}
+}
