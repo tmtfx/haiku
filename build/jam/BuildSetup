@@ -364,8 +364,14 @@ if $(HOST_PLATFORM_HAIKU_COMPATIBLE) {
 	HOST_LIBSTDC++ = stdc++ ;
 	HOST_LIBSUPC++ = supc++ ;
 
-	HOST_ADD_BUILD_COMPATIBILITY_LIB_DIR
-		= "LIBRARY_PATH=\"$LIBRARY_PATH:$(HOST_BUILD_COMPATIBILITY_LIB_DIR)\"" ;
+	# Not exporting LIBRARY_PATH here: the host tools already get
+	# -Wl,-rpath,$(HOST_BUILD_COMPATIBILITY_LIB_DIR) (see above), which is
+	# enough to find their own compatibility libs. Explicitly setting
+	# LIBRARY_PATH in the action environment instead makes this kernel's
+	# runtime_loader stop searching the normal system library paths
+	# altogether, so unrelated libraries (libbsd.so, libroot.so, libicu*,
+	# ...) needed by rc/package/settype/etc. can no longer be found.
+	HOST_ADD_BUILD_COMPATIBILITY_LIB_DIR = ;
 	HOST_PTHREAD_LINKFLAGS = ;
 	HOST_LINKFLAGS += -lbsd ;
 	HOST_LIBRARY_NAME_MAP_input_server = /system/servers/input_server ;
