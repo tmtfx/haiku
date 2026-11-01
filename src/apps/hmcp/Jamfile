@@ -16,7 +16,7 @@ for architectureObject in [ MultiArchSubDirSetup ] {
 				shared
 				translation
 				localestub
-				libai_api.so
+				[ MultiArchDefaultGristFiles libai_api.so ]
 				[ TargetLibsupc++ ]
 			;
 		}

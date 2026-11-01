@@ -39,7 +39,7 @@ status_t AIGetAvailablePlugins(const char* engineType, BMessage& outPlugins)
 
     BMessage reply;
     BMessage m(MSG_LIST);
-    const char* reqType = (engineType != nullptr && engineType[0] != '\0') ? engineType : "all";
+    const char* reqType = (engineType != NULL && engineType[0] != '\0') ? engineType : "all";
     m.AddString("requested_type", reqType);
 
     err = server.SendMessage(&m, &reply, 5000000); // 5s timeout
@@ -78,7 +78,7 @@ status_t AIGetPluginModels(const char* pluginName, BString& outJsonModels)
     err = server.SendMessage(&m, &reply, 8000000); // 8s timeout (può richiedere rete)
     if (err != B_OK) return err;
 
-    const char* json = nullptr; //TODO: non sarebbe il caso di passare ai BMessage invece di gestire i json fuori dal plugin?
+    const char* json = NULL; //TODO: non sarebbe il caso di passare ai BMessage invece di gestire i json fuori dal plugin?
     if (reply.FindString("plugin_models", &json) == B_OK) {
         outJsonModels.SetTo(json);
         return B_OK;
@@ -104,7 +104,7 @@ status_t AIGetPluginModels(const char* pluginName, const char* apiKey, const cha
     err = server.SendMessage(&m, &reply, 8000000); // 8s timeout (può richiedere rete)
     if (err != B_OK) return err;
 
-    const char* json = nullptr; //TODO: non sarebbe il caso di passare ai BMessage invece di gestire i json fuori dal plugin?
+    const char* json = NULL; //TODO: non sarebbe il caso di passare ai BMessage invece di gestire i json fuori dal plugin?
     if (reply.FindString("plugin_models", &json) == B_OK) {
         outJsonModels.SetTo(json);
         return B_OK;
@@ -175,7 +175,7 @@ static bool _StoreAPIKeyToKeyStore(const char* engine, const char* apiKey)
 
     // Ensure keyring exists (ignore error if already exists)
     r = keyStore.AddKeyring(kAIKeyring);
-    fprintf(stderr,"Aggiunta keyring (probabilmente esistente) ritorna %d\n", r);
+    fprintf(stderr,"Aggiunta keyring (probabilmente esistente) ritorna %d\n", (int)r);
 
     // Use BPasswordKey with purpose GENERIC to avoid implying web-only usage
     BPasswordKey pw;

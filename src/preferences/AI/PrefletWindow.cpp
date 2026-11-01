@@ -64,7 +64,7 @@ static const uint32 MSG_TOGGLE_LOVENSE = 'TGLV';
 static void parse_models_json(const char* json, BPopUpMenu* menu) {
     if (!json || !menu) return;
     const char* p = json;
-    while ((p = strchr(p, '"')) != nullptr) {
+    while ((p = strchr(p, '"')) != NULL) {
         p++; // skip quote
         const char* q = strchr(p, '"');
         if (!q) break;
@@ -187,9 +187,9 @@ public:
     {
     }
 
-    virtual void DrawItem(BView* owner, BRect frame, bool complete = false) override
+    virtual void DrawItem(BView* owner, BRect frame, bool complete = false)
     {
-        if (Text() == nullptr) return;
+        if (Text() == NULL) return;
 
         // Comportamento standard per lo sfondo (selezione o focus)
         owner->PushState();
@@ -264,22 +264,22 @@ PrefletWindow::PrefletWindow()
     fModelMenuField = new BMenuField("model", B_TRANSLATE("Model:"), fModelMenu);
     fRefreshModelsButton = new BButton("rmodels", B_TRANSLATE("Refresh"), new BMessage(MSG_REFRESH_THIS));
     
-    fApiKeyControl = new BTextControl("api", B_TRANSLATE("API Key:"), "", nullptr);
+    fApiKeyControl = new BTextControl("api", B_TRANSLATE("API Key:"), "", NULL);
     fApiKeyControl->Mask(true);
     fToggleApiKeyButton = new BButton("toggle", B_TRANSLATE("Show"), new BMessage(MSG_TOGGLE_KEY));
     fClearApiKeyButton = new BButton("clear", B_TRANSLATE("Clear"), new BMessage(MSG_CLEAR_KEY));
     fRemoteContextCheckBox = new BCheckBox("remote_ctx", B_TRANSLATE("Use Remote Context"), new BMessage(MSG_TOGGLE_REM_CTX));
 
-    fBaseUrlControl = new BTextControl("base_url", B_TRANSLATE("Base URL:"), "", nullptr);
+    fBaseUrlControl = new BTextControl("base_url", B_TRANSLATE("Base URL:"), "", NULL);
 
     fBaseUrlOverrideCheckBox = new BCheckBox("base_url_override", B_TRANSLATE("Override Base URL"), new BMessage(MSG_BASE_URL_OVERRIDE));
 
-    fSystemInfoCheckBox = new BCheckBox("perm_sys_info", B_TRANSLATE("Allow System Info Tool"), nullptr);
-    fRunCommandsCheckBox = new BCheckBox("perm_run_cmds", B_TRANSLATE("Allow Run Terminal Commands Tool"), nullptr);
+    fSystemInfoCheckBox = new BCheckBox("perm_sys_info", B_TRANSLATE("Allow System Info Tool"), NULL);
+    fRunCommandsCheckBox = new BCheckBox("perm_run_cmds", B_TRANSLATE("Allow Run Terminal Commands Tool"), NULL);
 #ifdef LOVE_IS_IN_THE_AIR
     fLovenseCheckBox = new BCheckBox("perm_lovense", B_TRANSLATE("Allow Lovense Toys Control"), new BMessage(MSG_TOGGLE_LOVENSE));
-    fLovenseHostControl = new BTextControl("lovense_host", B_TRANSLATE("Host:"), "127.0.0.1", nullptr);
-    fLovensePortControl = new BTextControl("lovense_port", B_TRANSLATE("Port:"), "20010", nullptr);
+    fLovenseHostControl = new BTextControl("lovense_host", B_TRANSLATE("Host:"), "127.0.0.1", NULL);
+    fLovensePortControl = new BTextControl("lovense_port", B_TRANSLATE("Port:"), "20010", NULL);
     fLovensePortControl->SetExplicitMaxSize(BSize(120, B_SIZE_UNSET));
 #endif
 
@@ -422,11 +422,11 @@ PrefletWindow::PrefletWindow()
     root->SetViewColor(ui_color(B_PANEL_BACKGROUND_COLOR));
     
     
-    int minHeight = 20 +  // Inset top
+    int minHeight = (int)(20 +  // Inset top
              fEngineMenuField->Frame().Height() + 10 +
              contextBox->Bounds().Height() + 5 +
              sessionBox->Bounds().Height() + 10 +
-             30; // Spazio per bottoni + margini
+             30); // Spazio per bottoni + margini
 
     root->SetExplicitMinSize(BSize(Bounds().Width(), minHeight));
     
@@ -584,7 +584,7 @@ void PrefletWindow::MessageReceived(BMessage* msg)
 
                 // Ora il server fornisce una lista di messaggi plugin { "plugin_name", "plugin_type" }
                 while (plugins.FindMessage("plugin", i, &pluginMsg) == B_OK) {
-                    const char* pName = nullptr;
+                    const char* pName = NULL;
                     const char* pType = "local";
                     pluginMsg.FindString("plugin_name", &pName);
                     pluginMsg.FindString("plugin_type", &pType);
@@ -628,14 +628,14 @@ void PrefletWindow::MessageReceived(BMessage* msg)
             //}
             fModelMenu->RemoveItems(0, fModelMenu->CountItems(), true);
             
-            const char* jsonModels = nullptr;
+            const char* jsonModels = NULL;
             if (msg->FindString("plugin_models", &jsonModels) == B_OK) {
                 parse_models_json(jsonModels, fModelMenu);
             }
 
             if (fModelMenu->CountItems() == 0) {
                 fModelMenuField->SetEnabled(false);
-                BMenuItem* noModelsItem = new BMenuItem("<No models available>", nullptr);
+                BMenuItem* noModelsItem = new BMenuItem("<No models available>", NULL);
                 noModelsItem->SetEnabled(false);
                 fModelMenu->AddItem(noModelsItem);
             } else {
@@ -971,7 +971,7 @@ void PrefletWindow::_UpdateVolatileModels()
     threadArgs->AddString("plugin_name", pluginName.String());
     BString baseUrl = fBaseUrlControl->Text();
     BString APIKey = fApiKeyControl->Text();
-    fprintf(stderr,"Checkbox is %d",fBaseUrlOverrideCheckBox->Value());
+    fprintf(stderr,"Checkbox is %d",(int)fBaseUrlOverrideCheckBox->Value());
     if ((fBaseUrlOverrideCheckBox->Value()==1) && !baseUrl.IsEmpty()) threadArgs->AddString("base_url", baseUrl.String());
     if (!APIKey.IsEmpty()) threadArgs->AddString("apiKey", APIKey.String());
     thread_id fetchThread = spawn_thread(FetchModelsThread, "AI Models Fetcher", B_NORMAL_PRIORITY, threadArgs);
@@ -1320,7 +1320,7 @@ PrefletWindow::_UpdateClearButton()
     }
 
     PluginListItem* item = static_cast<PluginListItem*>(fPluginListView->ItemAt(selection));
-    if (item && item->Text() != nullptr && fApiKeyControl->TextLength() > 0) {
+    if (item && item->Text() != NULL && fApiKeyControl->TextLength() > 0) {
         fClearApiKeyButton->SetEnabled(true);
     } else {
         fClearApiKeyButton->SetEnabled(false);

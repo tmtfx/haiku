@@ -15,7 +15,7 @@ for architectureObject in [ MultiArchSubDirSetup ] {
         UsePrivateSystemHeaders ;
         UsePublicHeaders ai support ;
 
-        SharedLibrary libai_api.so :
+        SharedLibrary [ MultiArchDefaultGristFiles libai_api.so ] :
             AIConfig.cpp
             AICommands.cpp
             AIPlugin.cpp
@@ -23,7 +23,7 @@ for architectureObject in [ MultiArchSubDirSetup ] {
             be
             shared
         ;
-        
+
         #HaikuInstall libai_api.so : /boot/system/lib ;
     }
 }

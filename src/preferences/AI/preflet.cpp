@@ -8,7 +8,7 @@
 class PrefletApp : public BApplication {
 public:
     PrefletApp() : BApplication("application/x-vnd.Haiku-AI") {}
-    void ReadyToRun() override {
+    void ReadyToRun() {
     	SetPulseRate(5000000);
         PrefletWindow* w = new PrefletWindow();
         w->Show();
@@ -18,7 +18,7 @@ public:
             w->Unlock();
         }
     }
-    void Pulse() override {
+    void Pulse() {
     	be_app->WindowAt(0)->PostMessage(MSG_CHECK_SESSIONS);
     }
 };

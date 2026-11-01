@@ -30,7 +30,7 @@ AIEngine::AIEngine()
     
     if (_TalkToServer(&msg, reply) == B_OK) {
         reply.FindInt32("session_id", &fSessionID);
-        const char* serverCtx = nullptr;
+        const char* serverCtx = NULL;
         if (reply.FindString("context_id", &serverCtx) == B_OK) {
             fContextID = serverCtx;
         }
@@ -58,7 +58,7 @@ AIEngine::AIEngine(const char* contextID)
     BMessage reply;
     if (_TalkToServer(&msg, reply) == B_OK) {
         reply.FindInt32("session_id", &fSessionID);
-        const char* serverCtx = nullptr;
+        const char* serverCtx = NULL;
         if (reply.FindString("context_id", &serverCtx) == B_OK) {
             fContextID = serverCtx;
         }
@@ -94,7 +94,7 @@ AIEngine::AIEngine(const char* pluginName, const char* modelName, const char* ap
     BMessage reply;
     if (_TalkToServer(&msg, reply) == B_OK) {
         reply.FindInt32("session_id", &fSessionID);
-        const char* serverCtx = nullptr;
+        const char* serverCtx = NULL;
         if (reply.FindString("context_id", &serverCtx) == B_OK) {
             fContextID = serverCtx;
         }
@@ -131,7 +131,7 @@ AIEngine::AIEngine(const char* contextID, const char* pluginName, const char* mo
     BMessage reply;
     if (_TalkToServer(&msg, reply) == B_OK) {
         reply.FindInt32("session_id", &fSessionID);
-        const char* serverCtx = nullptr;
+        const char* serverCtx = NULL;
         if (reply.FindString("context_id", &serverCtx) == B_OK) {
             fContextID = serverCtx;
         }
@@ -177,7 +177,7 @@ AIEngine::GetRemoteContextId(BString& outRemoteId) const
     status_t err = const_cast<AIEngine*>(this)->_TalkToServer(&msg, reply);
     if (err != B_OK) return err;
 
-    const char* remoteId = nullptr;
+    const char* remoteId = NULL;
     if (reply.FindString("remote_id", &remoteId) == B_OK && remoteId) {
         outRemoteId = remoteId;
         return B_OK;
@@ -258,13 +258,13 @@ AIEngine::Generate(const char* prompt, BString& outResponse)
     if (res != B_OK)
         return res;
 
-    const char* responseText = nullptr;
+    const char* responseText = NULL;
     if (reply.FindString("response", &responseText) == B_OK) {
         outResponse.SetTo(responseText);
         return B_OK;
     }
 
-    const char* errorText = nullptr;
+    const char* errorText = NULL;
     if (reply.FindString("error", &errorText) == B_OK) {
         outResponse.SetTo(errorText);
         return B_ERROR;
@@ -292,7 +292,7 @@ AIEngine::GenerateAsync(const char* prompt, BMessenger target)
     if (err != B_OK)
         return err;
 
-    const char* status = nullptr;
+    const char* status = NULL;
     if (ack.FindString("status", &status) == B_OK && strcmp(status, "ok") == 0) {
         return B_OK;
     }
@@ -311,7 +311,7 @@ AIEngine::Abort()
     if (err != B_OK)
         return err;
 
-    const char* status = nullptr;
+    const char* status = NULL;
     if (ack.FindString("status", &status) == B_OK && strcmp(status, "ok") == 0) {
         return B_OK;
     }
@@ -329,7 +329,7 @@ AIEngine::GetStatus(BString& outStatus)
     if (res != B_OK)
         return res;
 
-    const char* statusText = nullptr;
+    const char* statusText = NULL;
     if (reply.FindString("status", &statusText) == B_OK) {
         outStatus.SetTo(statusText);
         return B_OK;
@@ -390,7 +390,7 @@ AIEngine::GetSystemPrompt(BString& outSystemPrompt) const
     BMessage reply;
     status_t rc = const_cast<AIEngine*>(this)->_TalkToServer(&msg, reply);
     if (rc == B_OK) {
-        const char* systemPrompt = nullptr;
+        const char* systemPrompt = NULL;
         if (reply.FindString("system_prompt", &systemPrompt) == B_OK) {
             outSystemPrompt.SetTo(systemPrompt);
             return B_OK;
@@ -402,7 +402,7 @@ AIEngine::GetSystemPrompt(BString& outSystemPrompt) const
 /*static*/ uint32
 AIEngine::GetPluginCapabilities(const char* pluginName)
 {
-    if (pluginName == nullptr || strlen(pluginName) == 0)
+    if (pluginName == NULL || strlen(pluginName) == 0)
         return 0;
 
     AIEngine tmpEngine; // Usa un'istanza temporanea per garantire l'avvio e la connessione via _TalkToServer

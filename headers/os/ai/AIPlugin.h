@@ -25,12 +25,13 @@ enum capabilities {
 };
 
 struct AIPluginHandle {
-    AIPluginHandle() = default;
-    virtual ~AIPluginHandle() = default;
+    AIPluginHandle() {}
+    virtual ~AIPluginHandle() {}
 
+private:
     // Disabilita la copia per evitare 'slicing' o gestione errata della memoria
-    AIPluginHandle(const AIPluginHandle&) = delete;
-    AIPluginHandle& operator=(const AIPluginHandle&) = delete;
+    AIPluginHandle(const AIPluginHandle&);
+    AIPluginHandle& operator=(const AIPluginHandle&);
 };
 
 struct AsyncArgs {
@@ -42,11 +43,11 @@ struct AsyncArgs {
     BMessenger server_messenger;
 
     AsyncArgs()
-        : api_key(nullptr),
-          model(nullptr),
-          notify_path(nullptr),
-          base_url(nullptr),
-          context_copy(nullptr),
+        : api_key(NULL),
+          model(NULL),
+          notify_path(NULL),
+          base_url(NULL),
+          context_copy(NULL),
           server_messenger() {}
 
     virtual ~AsyncArgs() { // Un distruttore virtuale è sempre una buona pratica
