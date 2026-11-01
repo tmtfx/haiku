@@ -1356,7 +1356,7 @@ AboutView::AboutView()
     
     fCardLayout->AddView(creditsContainer);
     fCardLayout->AddView(fVideoView);
-    fCardLayout->SetVisibleItem(0);
+    fCardLayout->SetVisibleItem((int32)0);
 
 	SetLayout(new BGroupLayout(B_HORIZONTAL, 0));
 	BLayoutBuilder::Group<>((BGroupLayout*)GetLayout())

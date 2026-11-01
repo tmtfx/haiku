@@ -786,7 +786,7 @@ get_bar_info(const pci_info& info, int32 index, pci_bar_info& bar)
 
 	bar.flags = info.u.h0.base_register_flags[index];
 	bar.size = info.u.h0.base_register_sizes[index];
-	dprintf("DEBUG: BAR %d - Flags: 0x%X, Size: 0x%lX\n", index, bar.flags, bar.size);
+	dprintf("DEBUG: BAR %d - Flags: 0x%X, Size: 0x%llX\n", index, bar.flags, bar.size);
 	 
 	if ((bar.flags & PCI_address_space) != 0 || bar.size == 0) {
 		dprintf("DEBUG: BAR %d skipped - Invalid flags (not addressable) or Size=0\n", index);
@@ -794,19 +794,19 @@ get_bar_info(const pci_info& info, int32 index, pci_bar_info& bar)
 	}
 
 	bar.base = info.u.h0.base_registers[index];
-	dprintf("DEBUG: BAR %d - Base Address (Low): 0x%lX\n", index, bar.base);
+	dprintf("DEBUG: BAR %d - Base Address (Low): 0x%llX\n", index, bar.base);
 
 	if ((bar.flags & PCI_address_type) == PCI_address_type_64 && index < 5) {
 		dprintf("DEBUG: BAR %d - Using 64-bit addressing (combining registers %d and %d)\n", index, index, index + 1);
 		
 		bar.base |= (uint64)info.u.h0.base_registers[index + 1] << 32;
 		dprintf("DEBUG: BAR %d - Base Address (High): 0x%X\n", index, info.u.h0.base_registers[index + 1]);
-		dprintf("DEBUG: BAR %d - Combined Base Address: 0x%lX\n",
+		dprintf("DEBUG: BAR %d - Combined Base Address: 0x%llX\n",
 				index, bar.base);
 		
 		bar.size |= (uint64)info.u.h0.base_register_sizes[index + 1] << 32;
 		dprintf("DEBUG: BAR %d - Size (High): 0x%X\n", index, info.u.h0.base_register_sizes[index + 1]);
-		dprintf("DEBUG: BAR %d - Combined Size: 0x%lX\n", index, bar.size);
+		dprintf("DEBUG: BAR %d - Combined Size: 0x%llX\n", index, bar.size);
 		bar.consumed = 2;
 	}
 
@@ -817,7 +817,7 @@ get_bar_info(const pci_info& info, int32 index, pci_bar_info& bar)
     }
 
     dprintf("DEBUG: get_bar_info() completed for BAR %d - Success!\n", index);
-    dprintf("DEBUG: Final BAR Info - Index:%d, Flags:0x%X, Base:0x%lX, Size:0x%lX\n",
+    dprintf("DEBUG: Final BAR Info - Index:%d, Flags:0x%X, Base:0x%llX, Size:0x%llX\n",
             bar.index,
             bar.flags,
             bar.base,

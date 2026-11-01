@@ -49,7 +49,7 @@ enable_padlock_hardware(void)
             : "c" (VIA_PADLOCK_MSR), "a" (low), "d" (high)
         );
 
-        dprintf("PADLOCK: Hardware ACE & RNG abilitato globalmente via MSR 0x1107 (valore: 0x%lx)\n", msr);
+        dprintf("PADLOCK: Hardware ACE & RNG abilitato globalmente via MSR 0x1107 (valore: 0x%llx)\n", msr);
     }
 }
 /*
@@ -95,8 +95,8 @@ padlock_aes_process_block(bool encrypt, PadLockAESContext* ctx,
     // Esecuzione diretta di xcryptcbc senza overhead di copia dei dati
     // ESI = src, EDI = dst, EAX = iv, EBX = key_ptr, EDX = cw_ptr, ECX = blocks
     asm volatile(
-        "pushfq\n\t"
-        "popfq\n\t"
+        "pushf\n\t"
+        "popf\n\t"
         ".byte 0x0f, 0xa7, 0xe8\n\t" // xcryptcbc
         : "+S" (src),
           "+D" (dst),
@@ -147,8 +147,8 @@ padlock_aes_process_block(bool encrypt, PadLockAESContext* ctx,
 
     // Esecuzione diretta e sicura al 100% con Zero-Copy su buffer nativamente allineati
     asm volatile(
-        "pushfq\n\t"
-        "popfq\n\t"
+        "pushf\n\t"
+        "popf\n\t"
         ".byte 0x0f, 0xa7, 0xe8\n\t" // xcryptcbc
         : "+S" (src),
           "+D" (dst),
@@ -206,8 +206,8 @@ padlock_aes_process_block(bool encrypt, PadLockAESContext* ctx,
         uint8* iv_ptr = current_iv;
 
         asm volatile(
-            "pushfq\n\t"
-            "popfq\n\t"
+            "pushf\n\t"
+            "popf\n\t"
             ".byte 0x0f, 0xa7, 0xe8\n\t" // xcryptcbc
             : "+S" (src),
               "+D" (dst),
@@ -265,8 +265,8 @@ padlock_aes_process_block(bool encrypt, PadLockAESContext* ctx,
         uint8* iv_ptr = current_iv;
 
         asm volatile(
-            "pushfq\n\t"
-            "popfq\n\t"
+            "pushf\n\t"
+            "popf\n\t"
             "rep xcryptcbc\n\t"
             : "+S" (src),
               "+D" (dst),

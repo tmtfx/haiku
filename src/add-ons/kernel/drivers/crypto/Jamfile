@@ -16,6 +16,11 @@ if $(TARGET_ARCH) = x86_64 || $(TARGET_ARCH) = x86 {
     CXXFLAGS += $(archFlags) ;
 }
 
+# Subdir-wide CCFLAGS/CXXFLAGS additions above do not reliably reach the
+# kernel-space compile command for this hybrid x86_gcc2+x86 build, so set
+# the SSE/SSSE3 flags hybrid_sha_opt.cpp needs directly on that object.
+ObjectC++Flags hybrid_sha_opt.cpp : -msse4.1 -mssse3 -mavx -mavx2 -msha ;
+
 KernelAddon crypto :
     CryptoDevice.cpp
     BCryptoDevice.cpp

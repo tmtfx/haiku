@@ -36,14 +36,14 @@ public:
 
     bool CertificateVerificationFailed(BUrlRequest* request, 
                                        BCertificate& certificate, 
-                                       const char* message) override {
+                                       const char* message) {
         return false; 
     }
 };
 
 BString SendLovenseHttpRequest(const char* host, int32 port, const char* jsonPayload)
 {
-    if (host == nullptr || host[0] == '\0') host = "127.0.0.1";
+    if (host == NULL || host[0] == '\0') host = "127.0.0.1";
     if (port <= 0) port = 20010;
 
     BString targetUrl;
@@ -55,7 +55,7 @@ BString SendLovenseHttpRequest(const char* host, int32 port, const char* jsonPay
     BUrlContext context;
 
     BUrlRequest* req = BUrlProtocolRoster::MakeRequest(url, outBuffer, &listener, &context);
-    if (req == nullptr) {
+    if (req == NULL) {
         delete outBuffer;
         return "{\"error\":\"Failed to create HTTP request for Lovense\"}";
     }
@@ -63,10 +63,10 @@ BString SendLovenseHttpRequest(const char* host, int32 port, const char* jsonPay
     req->SetTimeout(5000000); // 5s timeout
 
     BHttpRequest* http = dynamic_cast<BHttpRequest*>(req);
-    if (http != nullptr) {
+    if (http != NULL) {
         http->SetMethod(B_HTTP_POST);
 
-        if (jsonPayload != nullptr && strlen(jsonPayload) > 0) {
+        if (jsonPayload != NULL && strlen(jsonPayload) > 0) {
             BMallocIO* inBuffer = new BMallocIO();
             inBuffer->WriteExactly(jsonPayload, strlen(jsonPayload));
             http->AdoptInputData(inBuffer, strlen(jsonPayload));
@@ -89,7 +89,7 @@ BString SendLovenseHttpRequest(const char* host, int32 port, const char* jsonPay
     size_t len = outBuffer->BufferLength();
     BString response;
 
-    if (rawBuf != nullptr && len > 0) {
+    if (rawBuf != NULL && len > 0) {
         response.SetTo((const char*)rawBuf, len);
     } else {
         response = "{\"error\":\"Empty response from Lovense Connect or device unreachable.\"}";
@@ -110,14 +110,14 @@ static int32 ExtractIntArg(const BMessage& args, const char* name, int32 default
     double vald;
     if (args.FindDouble(name, &vald) == B_OK) return (int32)vald;
     const char* str = args.FindString(name);
-    if (str != nullptr && strlen(str) > 0) return atoi(str);
+    if (str != NULL && strlen(str) > 0) return atoi(str);
     return defaultVal;
 }
 
 static BString ExtractStrArg(const BMessage& args, const char* name, const char* defaultVal = "")
 {
     const char* str = args.FindString(name);
-    if (str != nullptr) return BString(str);
+    if (str != NULL) return BString(str);
     return BString(defaultVal);
 }
 #endif // LOVE_IS_IN_THE_AIR
@@ -148,7 +148,7 @@ BString ExtractExecutable(const char* fullCmd) {
 }
 BString JsonEscape(const char* data, ssize_t length)
 {
-    if (data == nullptr || length <= 0)
+    if (data == NULL || length <= 0)
         return "\"\"";
 
     BString output("\""); // Apre con le virgolette JSON
@@ -246,7 +246,7 @@ BString RunSystemCommand(const char* command) {
 
 status_t RemoveEntryRecursive(BEntry* entry) 
 {
-    if (entry == nullptr || !entry->Exists())
+    if (entry == NULL || !entry->Exists())
         return B_ENTRY_NOT_FOUND;
 
     if (!entry->IsDirectory()) {
@@ -280,7 +280,7 @@ static bool ConfirmActionWithUser(const char* actionDescription, const char* tar
                         actionDescription, targetPath ? targetPath : "N/D");
 
     BAlert* alert = new BAlert("Permesso MCP", message.String(), 
-                               "Nega", "Autorizza", nullptr, 
+                               "Nega", "Autorizza", NULL, 
                                B_WIDTH_AS_USUAL, B_WARNING_ALERT);
     alert->SetShortcut(0, B_ESCAPE);
     
@@ -331,7 +331,7 @@ BString EscapeShellArg(const BString& input) {
 }
 
 BString ExecuteLocalTool(ClientSession* session, const char* tool_name, const BMessage& arguments) {
-	if (session == nullptr) {
+	if (session == NULL) {
         return "Error: Invalid session.";
     }
     BString name(tool_name);
@@ -406,10 +406,10 @@ BString ExecuteLocalTool(ClientSession* session, const char* tool_name, const BM
             }
 
             std::vector<char> buffer(size);
-            ssize_t bytesRead = file.Read(buffer.data(), size);
+            ssize_t bytesRead = file.Read(&buffer[0], size);
             if (bytesRead >= 0) {
                 // JsonEscape gestisce sia i dati, sia la lunghezza, sia le virgolette JSON di contenimento
-                BString escapedContent = JsonEscape(buffer.data(), bytesRead);
+                BString escapedContent = JsonEscape(&buffer[0], bytesRead);
                 
                 // NOTA: escapedContent include già le virgolette racchiudenti!
                 result.SetToFormat("{\"path\":\"%s\",\"bytes\":%ld,\"content\":%s}",
@@ -568,10 +568,10 @@ BString ExecuteLocalTool(ClientSession* session, const char* tool_name, const BM
                 result.SetToFormat("{\"error\":\"Attribute %s not found\"}", attrName.String());
             } else {
                 std::vector<char> buffer(info.size + 1);
-                ssize_t bytesRead = node.ReadAttr(attrName.String(), info.type, 0, buffer.data(), info.size);
+                ssize_t bytesRead = node.ReadAttr(attrName.String(), info.type, 0, &buffer[0], info.size);
                 if (bytesRead >= 0) {
                     buffer[bytesRead] = '\0';
-                    result = buffer.data();
+                    result = &buffer[0];
                 } else {
                     result.SetToFormat("{\"error\":\"Failed to read attribute: %s\"}", strerror(bytesRead));
                 }
@@ -745,7 +745,7 @@ BString ExecuteLocalTool(ClientSession* session, const char* tool_name, const BM
     return result;
 }
 
-static BMessage* CreateToolMessage(const char* name, const char* desc, BMessage* properties, const char* requiredField = nullptr) {
+static BMessage* CreateToolMessage(const char* name, const char* desc, BMessage* properties, const char* requiredField = NULL) {
     BMessage* tool = new BMessage();
     tool->AddString("name", name);
     tool->AddString("description", desc);
@@ -779,7 +779,7 @@ void PopulateMcpTools(BList& mpcManager, uint32 permissions) {
     // 1. Area Info Sistema (AI_PERM_SYSTEM_INFO)
     if (permissions & AI_PERM_SYSTEM_INFO) {
         mpcManager.AddItem(CreateToolMessage("get_system_stats", 
-            "Get real-time CPU statistics, memory statistics, disk space, and system uptime.", nullptr));
+            "Get real-time CPU statistics, memory statistics, disk space, and system uptime.", NULL));
 
         BMessage properties;
         BMessage textProp;

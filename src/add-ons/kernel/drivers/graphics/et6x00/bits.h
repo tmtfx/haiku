@@ -48,8 +48,7 @@ static inline void ioSet8(short port, char mask, char val)
             "movw %1, %%dx\n\t"
             "outb %%al, %%dx"
             : /* no output */
-            : "r"(val), "r"(port)
-            : "%eax", "%edx"
+            : "a"(val), "d"(port)
         );
     }
     else {
@@ -57,9 +56,8 @@ static inline void ioSet8(short port, char mask, char val)
             "movw %1, %%dx;"
             "inb %%dx, %%al;"
             "movb %%al, %0"
-            : "=r"(current)
-            : "r"(port)
-            : "%eax", "%edx"
+            : "=a"(current)
+            : "d"(port)
         );
         current = (current & mask) | (val & ~mask);
         __asm__ __volatile__ (
@@ -67,8 +65,7 @@ static inline void ioSet8(short port, char mask, char val)
             "movw %1, %%dx;"
             "outb %%al, %%dx"
             : /* no output */
-            : "r"(current), "r"(port)
-            : "%eax", "%edx"
+            : "a"(current), "d"(port)
         );
     }
 }
@@ -81,9 +78,8 @@ static inline char ioGet8(short port)
         "movw %1, %%dx;"
         "inb %%dx, %%al;"
         "movb %%al, %0"
-        : "=r"(current)
-        : "r"(port)
-        : "%eax", "%edx"
+        : "=a"(current)
+        : "d"(port)
     );
     return current;
 }

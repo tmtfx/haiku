@@ -2,14 +2,25 @@ SubDir HAIKU_TOP src apps spielbar ;
 
 UsePrivateHeaders storage app ;
 
-Application SpielBar : 
-	App.cpp
-	: be localestub [ TargetLibsupc++ ]
-	: App.rdef
-	;
+local architectureObject ;
+for architectureObject in [ MultiArchSubDirSetup ] {
+	on $(architectureObject) {
+		local architecture = $(TARGET_PACKAGING_ARCH) ;
+		if $(architecture) != x86_gcc2 {
+			# App.cpp uses <atomic> (C++11), not available in the legacy
+			# gcc2 compiler's libstdc++, so only build it for the other
+			# configured archs.
+			Application [ MultiArchDefaultGristFiles SpielBar ] :
+				App.cpp
+				: be localestub [ TargetLibsupc++ ]
+				: App.rdef
+				;
 
-DoCatalogs SpielBar :
-	x-vnd.SpielBar
-	:
-	App.cpp
-;
+			DoCatalogs SpielBar :
+				x-vnd.SpielBar
+				:
+				App.cpp
+			;
+		}
+	}
+}

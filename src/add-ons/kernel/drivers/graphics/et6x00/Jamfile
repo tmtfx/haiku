@@ -5,4 +5,3 @@ UsePrivateHeaders [ FDirName graphics et6x00 ] ;
 KernelAddon et6x00.driver :
 	driver.c setmode.c bits.c acl.c
 ;
-

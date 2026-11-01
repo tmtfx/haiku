@@ -171,7 +171,8 @@ FricoVideoView::_InitMediaPlayback()
 
     // Se abbiamo una traccia video (o la copertina dell'MP3), la configuriamo
     if (fVideoTrack != NULL) {
-        media_format decodedFormat = {};
+        media_format decodedFormat;
+        memset(&decodedFormat, 0, sizeof(decodedFormat));
         decodedFormat.type = B_MEDIA_RAW_VIDEO;
         decodedFormat.u.raw_video = media_raw_video_format::wildcard;
 
@@ -225,7 +226,8 @@ FricoVideoView::_InitMediaPlayback()
 
     // 3. Riproduzione audio
     if (fAudioTrack != NULL) {
-        media_format audioFormat = {};
+        media_format audioFormat;
+        memset(&audioFormat, 0, sizeof(audioFormat));
         audioFormat.type = B_MEDIA_RAW_AUDIO;
         audioFormat.u.raw_audio = media_raw_audio_format::wildcard;
         if (fAudioTrack->DecodedFormat(&audioFormat) == B_OK) {
@@ -242,7 +244,8 @@ FricoVideoView::_InitMediaPlayback()
     }
 
     if (fVideoTrack != NULL) {
-        media_format decodedFormat = {};
+        media_format decodedFormat;
+        memset(&decodedFormat, 0, sizeof(decodedFormat));
         decodedFormat.type = B_MEDIA_RAW_VIDEO;
         fVideoTrack->DecodedFormat(&decodedFormat);
         

@@ -3,6 +3,23 @@
 # import everything from the minimum image
 include [ FDirName $(HAIKU_BUILD_RULES_DIR) images definitions minimum ] ;
 
+# Alcuni componenti (SpielBar, HaikuMCPClient, ai_server) sono esclusi
+# dalla compilazione gcc2 (ABI legacy BeOS) perche' usano funzionalita'
+# C++ non supportate da quel compilatore. Calcoliamo qui la prima
+# architettura configurata diversa da x86_gcc2: su una build hybrid
+# x86_gcc2+x86 sara' "x86" (architettura secondaria); su una build a
+# singola architettura (es. x86_64 puro) sara' quella stessa
+# architettura primaria, nel qual caso MultiArchDefaultGristFiles non
+# aggiunge alcun grist (nome semplice), esattamente come ci si aspetta.
+local nonGcc2Archs ;
+local packagingArch ;
+for packagingArch in $(HAIKU_PACKAGING_ARCHS) {
+	if $(packagingArch) != x86_gcc2 {
+		nonGcc2Archs += $(packagingArch) ;
+	}
+}
+HAIKU_GCC2_EXCLUDED_APPS_ARCH = $(nonGcc2Archs[1]) ;
+
 SEARCH on [ FGristFiles userguide quicktour welcome ]
 	= [ FDirName $(HAIKU_TOP) data bin ] ;
 SYSTEM_BIN += userguide quicktour welcome ;
@@ -52,7 +69,7 @@ SYSTEM_APPS += [ FFilterByBuildFeatures
 	SerialConnect
 	SoftwareUpdater
 	SoundRecorder
-	SpielBar
+	[ MultiArchDefaultGristFiles SpielBar : : $(HAIKU_GCC2_EXCLUDED_APPS_ARCH) ]
 ] ;
 
 DESKBAR_APPLICATIONS +=
@@ -98,7 +115,7 @@ SYSTEM_DEMOS += [ FFilterByBuildFeatures
 	FontDemo
 	GLTeapot@mesa
 	$(HAIKU_INCLUDE_TRADEMARKS)Haiku3d@mesa
-	HaikuMCPClient
+	[ MultiArchDefaultGristFiles HaikuMCPClient : : $(HAIKU_GCC2_EXCLUDED_APPS_ARCH) ]
 	Mandelbrot
 	OverlayImage
 	Pairs
@@ -157,7 +174,7 @@ rule HaikuImageGetPrivateSystemLibs
 
 
 SYSTEM_SERVERS += [ FFilterByBuildFeatures
-	ai_server
+	[ MultiArchDefaultGristFiles ai_server : : $(HAIKU_GCC2_EXCLUDED_APPS_ARCH) ]
 	mail_daemon
 	media_addon_server
 	media_server

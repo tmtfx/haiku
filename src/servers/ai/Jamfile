@@ -3,20 +3,39 @@ SubDir HAIKU_TOP src servers ai ;
 UseHeaders [ FDirName $(HAIKU_TOP) src kits ai ] : true ;
 UsePublicHeaders ai ;
 
-AddResources ai_server : ai_server.rdef ;
+local architectureObject ;
+for architectureObject in [ MultiArchSubDirSetup ] {
+	on $(architectureObject) {
+		local architecture = $(TARGET_PACKAGING_ARCH) ;
+		if $(architecture) != x86_gcc2 {
+			# ai_server.cpp uses auto/range-for (C++11) extensively, not
+			# supported by the legacy gcc2 compiler, so only build it for
+			# the other configured archs. libai_api.so clients on any
+			# architecture can still reach it via BMessenger/BMessage,
+			# which works across architectures on a hybrid build.
+			local target = [ MultiArchDefaultGristFiles ai_server ] ;
 
-Application ai_server : 
-    ai_server.cpp
-    mcp_manager.cpp
-    :
-    localestub
-;
+			AddResources $(target) : ai_server.rdef ;
 
-if $(LOVE_IS_IN_THE_AIR) {
-    SubDirC++Flags -DLOVE_IS_IN_THE_AIR ;
-    UsePrivateHeaders network netservices shared ;
-    LinkAgainst ai_server : be [ TargetLibstdc++ ] libai_api.so libbnetapi.so libnetservices.a <$(TARGET_PACKAGING_ARCH)>libshared.a $(TARGET_NETWORK_LIBS) ;
-} else {
-    LinkAgainst ai_server : be [ TargetLibstdc++ ] libai_api.so ;
+			Application $(target) :
+				ai_server.cpp
+				mcp_manager.cpp
+				:
+				localestub
+			;
+
+			if $(LOVE_IS_IN_THE_AIR) {
+				SubDirC++Flags -DLOVE_IS_IN_THE_AIR ;
+				UsePrivateHeaders network netservices shared ;
+				LinkAgainst $(target) : be [ TargetLibstdc++ ]
+					[ MultiArchDefaultGristFiles libai_api.so ]
+					[ MultiArchDefaultGristFiles libbnetapi.so ]
+					libnetservices.a <$(architecture)>libshared.a
+					$(TARGET_NETWORK_LIBS) ;
+			} else {
+				LinkAgainst $(target) : be [ TargetLibstdc++ ]
+					[ MultiArchDefaultGristFiles libai_api.so ] ;
+			}
+		}
+	}
 }
-

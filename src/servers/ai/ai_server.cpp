@@ -14,7 +14,6 @@
 #include <dlfcn.h>
 #include <dirent.h>
 #include <unistd.h>
-#include <thread>
 #include <map>
 
 #include <Looper.h>
@@ -142,7 +141,7 @@ static void load_plugins(const char* dirpath)
 		}
 
 		uint32 caps = 0;
-		if (get_cap != nullptr) {
+		if (get_cap != NULL) {
 			caps = get_cap();
 		}
 
@@ -165,7 +164,7 @@ static void load_plugins(const char* dirpath)
 		e.list_models = list_models;
 		//e.set_model = set_model;
 
-		if (get_name != nullptr) {
+		if (get_name != NULL) {
 			e.name = get_name();
 		} else {
 			e.name = path.Leaf();
@@ -205,7 +204,7 @@ static void load_plugins(const char* dirpath)
 
 static PluginEntry* default_plugin()
 {
-	if (gPlugins.empty()) return nullptr;
+	if (gPlugins.empty()) return NULL;
 	return &gPlugins[0];
 }
 
@@ -261,9 +260,9 @@ status_t save_chat_context(const char* contextID, BMessage* context) {
 		}
 	}
 	
-	const char* remoteId = nullptr;
+	const char* remoteId = NULL;
 	bool hasRemoteId = (context->FindString("remote_id", &remoteId) == B_OK 
-						&& remoteId != nullptr && remoteId[0] != '\0');
+						&& remoteId != NULL && remoteId[0] != '\0');
 
 	if (!hasMessages && !hasRemoteId) {
 		// Contesto ancora vuoto, non inquiniamo il disco
@@ -330,13 +329,162 @@ static bool check_update_context_title(BMessage* chatContext){
 	return tosave;
 }
 
+// Dati passati al thread di monitoraggio dello stream (sostituisce la
+// lambda C++11/14 catturata da std::thread, non disponibile con il
+// compilatore legacy gcc2; usiamo lo spawn_thread nativo di Haiku).
+struct AsyncStreamWatcherArgs {
+	BMessenger target;
+	std::string tmpPath;
+	BString contextID;
+	BMessage* chatContext;
+	bool useRemoteCtxAsync;
+};
+
+static status_t
+AsyncStreamWatcherThread(void* cookie)
+{
+	AsyncStreamWatcherArgs* args = (AsyncStreamWatcherArgs*)cookie;
+	BMessenger target = args->target;
+	std::string tmpPath = args->tmpPath;
+	BString contextID = args->contextID;
+	BMessage* chatContext = args->chatContext;
+	bool useRemoteCtxAsync = args->useRemoteCtxAsync;
+	delete args;
+
+	FILE* f = NULL;
+	size_t lastSize = 0;
+	bool done = false;
+	BString fullResponseAccumulator("");
+	int32 sentLength = 0;
+	int emptyReads = 0;
+	const int maxEmptyReads = 1200; // ~60s timeout
+
+	const char* endToken   = "<<STREAM_END>>";
+	const char* abortToken = "<<STREAM_ABORT>>";
+	const int32 maxTokenLen = (int32)strlen(abortToken); // 16 byte (il più lungo tra i due)
+
+	while (!done) {
+		if (!f) f = fopen(tmpPath.c_str(), "r");
+		if (f) {
+			fseek(f, 0, SEEK_END);
+			size_t sz = (size_t)ftell(f);
+			if (sz > lastSize) {
+				fseek(f, (long)lastSize, SEEK_SET);
+				size_t toRead = sz - lastSize;
+				std::vector<char> buf(toRead + 1);
+				size_t r = fread(&buf[0], 1, toRead, f);
+				buf[r] = '\0';
+				lastSize += r;
+				emptyReads = 0;
+
+				fullResponseAccumulator << &buf[0];
+
+				int32 posAbort = fullResponseAccumulator.FindFirst(abortToken);
+				int32 posEnd   = fullResponseAccumulator.FindFirst(endToken);
+
+				// CASO 1: STREAM ABORT
+				if (posAbort != B_ERROR) {
+					BMessage err(MSG_AI_ERROR);
+					err.AddString("error", "stream aborted by provider/plugin");
+					target.SendMessage(&err);
+
+					// Non salviamo la risposta nel contesto poiché incompleta/fallita
+					done = true;
+					break;
+				}
+
+				// CASO 2: STREAM END (COMPLETATO CON SUCCESSO)
+				if (posEnd != B_ERROR) {
+					// Invia l'eventuale pezzetto di testo valido rimasto nel buffer
+					if (posEnd > sentLength) {
+						BString remainingChunk;
+						fullResponseAccumulator.CopyInto(remainingChunk, sentLength, posEnd - sentLength);
+
+						BMessage out(MSG_AI_RESPONSE);
+						out.AddString("partial", remainingChunk.String());
+						out.AddBool("complete", false);
+						target.SendMessage(&out);
+					}
+
+					// Testo pulito complessivo
+					BString finalCleanText;
+					fullResponseAccumulator.CopyInto(finalCleanText, 0, posEnd);
+
+					// Notifica di fine stream
+					BMessage fin(MSG_AI_RESPONSE);
+					fin.AddString("response", finalCleanText.String());
+					fin.AddBool("complete", true);
+					fin.AddInt32("status", 0);
+					target.SendMessage(&fin);
+
+					// Pulizia e salvataggio
+					chatContext->RemoveName("api_key");
+					chatContext->AddString("api_key", "");
+					chatContext->RemoveName("notify_path");
+					chatContext->RemoveName("use_remote_context");
+
+					if (useRemoteCtxAsync) {
+						const char* updatedId = NULL;
+						if (chatContext->FindString("remote_id", &updatedId) == B_OK
+							&& updatedId && updatedId[0] != '\0') {
+							save_chat_context(contextID.String(), chatContext);
+						}
+					} else {
+						if (check_update_context_title(chatContext)) {
+							BMessage notify(MSG_AI_TITLE_CHANGED);
+							notify.AddString("title", chatContext->FindString("title"));
+							notify.AddMessenger("messenger",target);
+							const BMessenger& me = be_app_messenger;
+							me.SendMessage(&notify);
+						}
+						append_message_to_context(chatContext, "assistant", finalCleanText.String());
+						save_chat_context(contextID.String(), chatContext);
+					}
+
+					done = true;
+					break;
+				}
+
+				// CASO 3: STREAM IN CORSO
+				// Tratteniamo gli ultimi byte per evitare di emettere frammenti dei token a schermo
+				int32 safeLength = fullResponseAccumulator.Length() - (maxTokenLen - 1);
+				if (safeLength > sentLength) {
+					BString chunkToSend;
+					fullResponseAccumulator.CopyInto(chunkToSend, sentLength, safeLength - sentLength);
+					sentLength = safeLength;
+
+					BMessage out(MSG_AI_RESPONSE);
+					out.AddString("partial", chunkToSend.String());
+					out.AddBool("complete", false);
+					target.SendMessage(&out);
+				}
+			} else {
+				emptyReads++;
+				if (emptyReads > maxEmptyReads) {
+					BMessage err(MSG_AI_ERROR);
+					err.AddString("error", "stream timeout reached");
+					target.SendMessage(&err);
+					done = true;
+					break;
+				}
+			}
+		}
+		snooze(50000); // 50ms
+	}
+
+	if (f) fclose(f);
+	remove(tmpPath.c_str());
+	delete chatContext;
+	return B_OK;
+}
+
 class AIServerApp : public BApplication {
 public:
 	AIServerApp() : BApplication(kServerSignature) {
 		fprintf(stderr, "ai_server: BApplication constructor executed.\n");
 	}
 	
-	void ReadyToRun() override
+	void ReadyToRun()
 	{
 		fprintf(stderr, "ai_server: ReadyToRun() - Avvio scansione dei plugin...\n");
 		BPath pth;
@@ -360,7 +508,7 @@ public:
 		fprintf(stderr, "ai_server: Scansione completata. %zu plugin caricati in memoria.\n", gPlugins.size());
 	}
 
-	void MessageReceived(BMessage* msg) override
+	void MessageReceived(BMessage* msg)
 	{
 		// Debug generico per ogni messaggio in ingresso
 		char whatChars[5] = {
@@ -373,7 +521,7 @@ public:
 		// Sanatizzazione caratteri non stampabili nel 'what'
 		for(int i=0; i<4; i++) { if(whatChars[i] < 32 || whatChars[i] > 126) whatChars[i] = '?'; }
 
-		fprintf(stderr, "ai_server: [IPC] Ricevuto messaggio 'what': %s (0x%x)\n", whatChars, msg->what);
+		fprintf(stderr, "ai_server: [IPC] Ricevuto messaggio 'what': %s (0x%x)\n", whatChars, (unsigned int)msg->what);
 		
 		switch (msg->what) {
 			case MSG_OPEN_SESSION: {
@@ -382,7 +530,7 @@ public:
 
 				if (contextID.IsEmpty()) {
 					bigtime_t time = real_time_clock();
-					contextID.SetToFormat("ctx_%ld", time);
+					contextID.SetToFormat("ctx_%lld", (long long)time);
 				}
 				int32 newSessionID = gNextSessionID++;
 				ClientSession& session = gSessions[newSessionID];
@@ -442,7 +590,7 @@ public:
 					}
 
 					// 2. Se c'è un remote_id valido, forzare true indipendentemente
-					const char* remoteIdCheck = nullptr;
+					const char* remoteIdCheck = NULL;
 					if (savedCtx.FindString("remote_id", &remoteIdCheck) == B_OK
 							&& remoteIdCheck && remoteIdCheck[0] != '\0') {
 						session.useRemoteContext = true;
@@ -471,7 +619,7 @@ public:
 				session.mcp_permissions = mcpPermissions;
 
 				// Recuperiamo le capabilities del plugin per attivare MCP se supportato
-				PluginEntry* p = nullptr;
+				PluginEntry* p = NULL;
 				for (auto& pe : gPlugins) {
 					if (pe.name == session.plugin_name) {
 						p = &pe;
@@ -480,7 +628,7 @@ public:
 				}
 
 				uint32 caps = 0;
-				if (p && p->get_capabilities != nullptr) {
+				if (p && p->get_capabilities != NULL) {
 					caps = p->get_capabilities();
 				}
 
@@ -513,7 +661,7 @@ public:
 						it->second.mpcManager.MakeEmpty();
 						gSessions.erase(it);
 					}
-					fprintf(stderr, "ai_server: Chiusa e liberata sessione %d\n", id);
+					fprintf(stderr, "ai_server: Chiusa e liberata sessione %d\n", (int)id);
 				}
 				BMessage reply(B_REPLY);
 				reply.AddInt32("status", B_OK);
@@ -531,7 +679,7 @@ public:
 				const char* reqContextID = msg->FindString("context_id");
 				
 				bool foundInSession = false;
-				ClientSession* activeSession = nullptr;
+				ClientSession* activeSession = NULL;
 				
 				
 				if (sessionID != -1 && gSessions.count(sessionID) > 0) {
@@ -650,7 +798,7 @@ public:
 			}
 			/*
 			case MSG_GEN_ASYNC: {
-				const char* prompt = nullptr;
+				const char* prompt = NULL;
 				if (msg->FindString("prompt", &prompt) != B_OK) {
 					BMessage r(MSG_AI_ERROR);
 					r.AddString("error", "missing prompt");
@@ -673,7 +821,7 @@ public:
 					gSessions[sessionID].client_target = target;
 				}
 
-				PluginEntry* p = nullptr;
+				PluginEntry* p = NULL;
 				BString pluginName;
 				BString modelName;
 				BString apiKey;
@@ -887,7 +1035,7 @@ public:
 
 									// Salvataggio finale integrato su disco
 									if (useRemoteCtxAsync) {
-										const char* updatedId = nullptr;
+										const char* updatedId = NULL;
 										if (chatContext->FindString("remote_id", &updatedId) == B_OK
 											&& updatedId && updatedId[0] != '\0') {
 											save_chat_context(contextID.String(), chatContext);
@@ -932,7 +1080,7 @@ public:
 				break;
 			}*/
 			case MSG_GEN_ASYNC: {
-				const char* prompt = nullptr;
+				const char* prompt = NULL;
 				if (msg->FindString("prompt", &prompt) != B_OK) {
 					BMessage r(MSG_AI_ERROR);
 					r.AddString("error", "missing prompt");
@@ -957,7 +1105,7 @@ public:
 					gSessions[sessionID].abort_requested = false;
 				}
 
-				PluginEntry* p = nullptr;
+				PluginEntry* p = NULL;
 				BString pluginName;
 				BString modelName;
 				BString apiKey;
@@ -1113,139 +1261,23 @@ public:
 				}
 
 				// --- 6. LAUNCH WATCHER THREAD ---
-				std::thread watcher([target, tmpPath = std::string(tmpPath), contextID, chatContext, useRemoteCtxAsync]() mutable {
-					FILE* f = NULL;
-					size_t lastSize = 0;
-					bool done = false;
-					BString fullResponseAccumulator("");
-					int32 sentLength = 0;
-					int emptyReads = 0;
-					const int maxEmptyReads = 1200; // ~60s timeout
+				AsyncStreamWatcherArgs* watcherArgs = new AsyncStreamWatcherArgs();
+				watcherArgs->target = target;
+				watcherArgs->tmpPath = std::string(tmpPath);
+				watcherArgs->contextID = contextID;
+				watcherArgs->chatContext = chatContext;
+				watcherArgs->useRemoteCtxAsync = useRemoteCtxAsync;
 
-					const char* endToken   = "<<STREAM_END>>";
-					const char* abortToken = "<<STREAM_ABORT>>";
-					const int32 maxTokenLen = (int32)strlen(abortToken); // 16 byte (il più lungo tra i due)
+				thread_id watcherThread = spawn_thread(AsyncStreamWatcherThread,
+					"ai_stream_watcher", B_NORMAL_PRIORITY, watcherArgs);
+				if (watcherThread >= 0)
+					resume_thread(watcherThread);
 
-					while (!done) {
-						if (!f) f = fopen(tmpPath.c_str(), "r");
-						if (f) {
-							fseek(f, 0, SEEK_END);
-							size_t sz = (size_t)ftell(f);
-							if (sz > lastSize) {
-								fseek(f, (long)lastSize, SEEK_SET);
-								size_t toRead = sz - lastSize;
-								std::vector<char> buf(toRead + 1);
-								size_t r = fread(buf.data(), 1, toRead, f);
-								buf[r] = '\0';
-								lastSize += r;
-								emptyReads = 0;
-
-								fullResponseAccumulator << buf.data();
-
-								int32 posAbort = fullResponseAccumulator.FindFirst(abortToken);
-								int32 posEnd   = fullResponseAccumulator.FindFirst(endToken);
-
-								// CASO 1: STREAM ABORT
-								if (posAbort != B_ERROR) {
-									BMessage err(MSG_AI_ERROR);
-									err.AddString("error", "stream aborted by provider/plugin");
-									target.SendMessage(&err);
-
-									// Non salviamo la risposta nel contesto poiché incompleta/fallita
-									done = true;
-									break;
-								}
-
-								// CASO 2: STREAM END (COMPLETATO CON SUCCESSO)
-								if (posEnd != B_ERROR) {
-									// Invia l'eventuale pezzetto di testo valido rimasto nel buffer
-									if (posEnd > sentLength) {
-										BString remainingChunk;
-										fullResponseAccumulator.CopyInto(remainingChunk, sentLength, posEnd - sentLength);
-										
-										BMessage out(MSG_AI_RESPONSE);
-										out.AddString("partial", remainingChunk.String());
-										out.AddBool("complete", false);
-										target.SendMessage(&out);
-									}
-
-									// Testo pulito complessivo
-									BString finalCleanText;
-									fullResponseAccumulator.CopyInto(finalCleanText, 0, posEnd);
-
-									// Notifica di fine stream
-									BMessage fin(MSG_AI_RESPONSE);
-									fin.AddString("response", finalCleanText.String());
-									fin.AddBool("complete", true);
-									fin.AddInt32("status", 0);
-									target.SendMessage(&fin);
-
-									// Pulizia e salvataggio
-									chatContext->RemoveName("api_key");
-									chatContext->AddString("api_key", "");
-									chatContext->RemoveName("notify_path");
-									chatContext->RemoveName("use_remote_context");
-
-									if (useRemoteCtxAsync) {
-										const char* updatedId = nullptr;
-										if (chatContext->FindString("remote_id", &updatedId) == B_OK
-											&& updatedId && updatedId[0] != '\0') {
-											save_chat_context(contextID.String(), chatContext);
-										}
-									} else {
-										if (check_update_context_title(chatContext)) {
-											BMessage notify(MSG_AI_TITLE_CHANGED);
-											notify.AddString("title", chatContext->FindString("title"));
-											notify.AddMessenger("messenger",target);
-											const BMessenger& me = be_app_messenger;
-											me.SendMessage(&notify);
-										}
-										append_message_to_context(chatContext, "assistant", finalCleanText.String());
-										save_chat_context(contextID.String(), chatContext);
-									}
-
-									done = true;
-									break;
-								} 
-								
-								// CASO 3: STREAM IN CORSO
-								// Tratteniamo gli ultimi byte per evitare di emettere frammenti dei token a schermo
-								int32 safeLength = fullResponseAccumulator.Length() - (maxTokenLen - 1);
-								if (safeLength > sentLength) {
-									BString chunkToSend;
-									fullResponseAccumulator.CopyInto(chunkToSend, sentLength, safeLength - sentLength);
-									sentLength = safeLength;
-
-									BMessage out(MSG_AI_RESPONSE);
-									out.AddString("partial", chunkToSend.String());
-									out.AddBool("complete", false);
-									target.SendMessage(&out);
-								}
-							} else {
-								emptyReads++;
-								if (emptyReads > maxEmptyReads) {
-									BMessage err(MSG_AI_ERROR);
-									err.AddString("error", "stream timeout reached");
-									target.SendMessage(&err);
-									done = true;
-									break;
-								}
-							}
-						}
-						snooze(50000); // 50ms
-					}
-
-					if (f) fclose(f);
-					remove(tmpPath.c_str());
-					delete chatContext;
-				});
-
-				watcher.detach();
 				break;
 			}
 
 			case MSG_GEN_SYNC: {
-				const char* prompt = nullptr;
+				const char* prompt = NULL;
 				if (msg->FindString("prompt", &prompt) != B_OK) {
 					fprintf(stderr, "ai_server: [ERRORE] MSG_GEN_SYNC ricevuto senza prompt!\n");
 					BMessage r(MSG_AI_ERROR);
@@ -1255,7 +1287,7 @@ public:
 				}
 
 				int32 sessionID = -1;
-				PluginEntry* p = nullptr;
+				PluginEntry* p = NULL;
 				BString pluginName;
 				BString modelName;
 				BString apiKey;
@@ -1397,7 +1429,7 @@ public:
 
 					if (useRemoteCtx) {
 						// 6a. Contesto remoto: Il plugin ha generato/aggiornato il remote_id in chatContext
-						const char* updatedRemoteId = nullptr;
+						const char* updatedRemoteId = NULL;
 						if (chatContext.FindString("remote_id", &updatedRemoteId) == B_OK
 							&& updatedRemoteId && updatedRemoteId[0] != '\0') {
 							save_chat_context(contextID.String(), &chatContext);
@@ -1452,14 +1484,14 @@ public:
 						if (pair.second.id == id) {
 							pair.second.abort_requested = true; // Attiviamo il Kill Switch!
 							interruptus = true;
-							fprintf(stderr, "[AI_SERVER] [KILL SWITCH] Richiesta di interruzione ricevuta per la sessione: %d\n", id);
+							fprintf(stderr, "[AI_SERVER] [KILL SWITCH] Richiesta di interruzione ricevuta per la sessione: %d\n", (int)id);
 
 							BMessage reply(B_REPLY);
 							reply.AddInt32("status", B_OK);
 							msg->SendReply(&reply);
 							break;
 						} else {
-							fprintf(stderr, "[AI_SERVER] [KILL SWITCH] Sessione in lista %d non corrisponde alla sessione richiesta %d\n", pair.second.id, id);
+							fprintf(stderr, "[AI_SERVER] [KILL SWITCH] Sessione in lista %d non corrisponde alla sessione richiesta %d\n", (int)pair.second.id, (int)id);
 						}
 					}
 				}
@@ -1510,7 +1542,7 @@ public:
 				BString resultOutput;
 
 				// 1. Recupero della sessione attiva
-				ClientSession* session = nullptr;
+				ClientSession* session = NULL;
 				for (auto& pair : gSessions) { 
 					if (pair.second.context_id == contextId) {
 						session = &pair.second;
@@ -1518,7 +1550,7 @@ public:
 					}
 				}
 
-				if (session == nullptr) {
+				if (session == NULL) {
 					reply.AddInt32("status", B_ENTRY_NOT_FOUND);
 					reply.AddString("result", "{\"error\":\"Sessione non trovata\"}");
 					msg->SendReply(&reply);
@@ -1544,7 +1576,7 @@ public:
 				// =========================================================================
 
 				// 2. CONTROLLO DI SICUREZZA: Il tool è registrato (quindi autorizzato dalla Preflet)?
-				BMessage* foundTool = nullptr;
+				BMessage* foundTool = NULL;
 				int32 toolCount = session->mpcManager.CountItems();
 				for (int32 i = 0; i < toolCount; i++) {
 					BMessage* tool = (BMessage*)session->mpcManager.ItemAt(i);
@@ -1554,7 +1586,7 @@ public:
 					}
 				}
 
-				if (foundTool == nullptr) {
+				if (foundTool == NULL) {
 					reply.AddInt32("status", B_NAME_NOT_FOUND);
 					reply.AddString("result", "{\"error\":\"Tool non consentito dalle impostazioni di sicurezza (Preflet)\"}");
 					msg->SendReply(&reply);
@@ -1723,7 +1755,7 @@ public:
 				BMessage reply(B_REPLY);
 				
 				// 1. Cerchiamo la ClientSession corretta nel server
-				ClientSession* session = nullptr;
+				ClientSession* session = NULL;
 				for (auto& pair : gSessions) {
 					if (pair.second.context_id == contextId) {
 						session = &pair.second;
@@ -1732,14 +1764,14 @@ public:
 				}
 				
 				// 2. Se la sessione esiste, leggiamo i tool dalla sua mpcManager (BList)
-				if (session != nullptr) {
+				if (session != NULL) {
 					int32 toolCount = session->mpcManager.CountItems();
 					fprintf(stderr, "[AI_SERVER] Trovata sessione. Recupero %" B_PRId32 " tool da mpcManager.\n", toolCount);
 					
 					for (int32 i = 0; i < toolCount; i++) {
 						// Recuperiamo il puntatore generico dalla BList e facciamo il cast a BMessage*
 						BMessage* tool = (BMessage*)session->mpcManager.ItemAt(i);
-						if (tool != nullptr) {
+						if (tool != NULL) {
 							// Aggiungiamo il tool alla risposta radice con la chiave "tool"
 							// AddMessage fa una copia profonda del messaggio, ottima per l'IPC
 							reply.AddMessage("tool", tool);
@@ -1782,7 +1814,7 @@ public:
 					session.mpcManager.MakeEmpty();
 
 					// Ripopoliamo se il plugin supporta MCP
-					PluginEntry* p = nullptr;
+					PluginEntry* p = NULL;
 					for (auto& pe : gPlugins) {
 						if (pe.name == session.plugin_name) {
 							p = &pe;
@@ -1791,7 +1823,7 @@ public:
 					}
 
 					uint32 caps = 0;
-					if (p && p->get_capabilities != nullptr) {
+					if (p && p->get_capabilities != NULL) {
 						caps = p->get_capabilities();
 					}
 
@@ -1828,7 +1860,7 @@ public:
 			case MSG_SET_MODEL: {
 				// Questo case ora serve solo se l'applicazione vuole sovrascrivere dinamicamente 
 				// il modello memorizzato nella *Sessione* del server, senza toccare lo stato del plugin.
-				const char* model = nullptr;
+				const char* model = NULL;
 				int32 sessionID = -1;
 				
 				if (msg->FindString("model", &model) != B_OK) {
@@ -1844,7 +1876,7 @@ public:
 				if (gSessions.count(sessionID) > 0) {
 					gSessions[sessionID].model_name = model;
 					r.AddInt32("status", 0);
-					fprintf(stderr, "ai_server: Modificato modello in sessione %d in: %s\n", sessionID, model);
+					fprintf(stderr, "ai_server: Modificato modello in sessione %d in: %s\n", (int)sessionID, model);
 				} else {
 					r.AddInt32("status", -1);
 				}
@@ -2000,7 +2032,7 @@ public:
 						if (plugin.name == pluginName) {
 							found = true;
 							// Se il plugin espone la funzione, la chiamiamo, altrimenti lasciamo 0
-							if (plugin.get_capabilities != nullptr) {
+							if (plugin.get_capabilities != NULL) {
 								caps = plugin.get_capabilities();
 								fprintf(stderr, "ai_server: Capabilities per '%s' recuperate: %" B_PRIu32 "\n", 
 										pluginName.String(), caps);
@@ -2034,7 +2066,7 @@ public:
 				if (!contextID.IsEmpty()) {
 					BMessage ctx;
 					if (load_or_create_chat_context(contextID.String(), &ctx, "", "") == B_OK) {
-						const char* remoteIdCheck = nullptr;
+						const char* remoteIdCheck = NULL;
 						if (ctx.FindString("remote_id", &remoteIdCheck) == B_OK && remoteIdCheck) {
 							foundRemoteId = remoteIdCheck;
 						}
@@ -2129,7 +2161,7 @@ public:
 				if (!contextID.IsEmpty()) {
 					BMessage ctx;
 					if (load_or_create_chat_context(contextID.String(), &ctx) == B_OK) {
-						const char* sys = nullptr;
+						const char* sys = NULL;
 						if (ctx.FindString("system_prompt", &sys) == B_OK && sys) {
 							systemPrompt = sys;
 						}
@@ -2172,14 +2204,14 @@ public:
 									  errMsg ? errMsg : "Errore sconosciuto",
 									  httpCode);
 
-				BAlert* alert = new BAlert("Modelli AI", alertText.String(), "OK", nullptr, nullptr,
+				BAlert* alert = new BAlert("Modelli AI", alertText.String(), "OK", NULL, NULL,
 										   B_WIDTH_AS_USUAL, B_STOP_ALERT);
-				alert->Go(nullptr); // Asincrono, non blocca il server
+				alert->Go(NULL); // Asincrono, non blocca il server
 				break;
 			}
 			case MSG_AI_TITLE_CHANGED: // Update Title
 			{
-				const char* title = nullptr;
+				const char* title = NULL;
 				if (msg->FindString("title", &title) != B_OK || !title)
 					break;
 				

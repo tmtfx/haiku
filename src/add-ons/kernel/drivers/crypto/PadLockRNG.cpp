@@ -45,7 +45,7 @@ enable_padlock_hardware(void)
             : "c" (VIA_PADLOCK_MSR), "a" (low), "d" (high)
         );
 
-        dprintf("PADLOCK: Hardware ACE & RNG abilitato globalmente via MSR 0x1107 (valore: 0x%lx)\n", msr);
+        dprintf("PADLOCK: Hardware ACE & RNG abilitato globalmente via MSR 0x1107 (valore: 0x%llx)\n", msr);
     }
 }
 

@@ -30,6 +30,8 @@ struct ChatContext {
 };
 
 struct ClientSession {
+    ClientSession() : abort_requested(false) {}
+
     int32 id;
     BString plugin_name;
     BString model_name;
@@ -38,11 +40,11 @@ struct ClientSession {
     bool useRemoteContext;   // true = usa OpenAI Assistants API per questo contesto
     BString context_id;
     uint32 mcp_permissions;
-    
+
     BList mpcManager;	// lista di messaggi che contengono le operazioni che può fare l'mpc
-    volatile bool abort_requested = false;
+    volatile bool abort_requested;
     BMessenger client_target; // Messenger del client per notifiche in tempo reale (ad es. esecuzione tool)
-    
+
     BString base_url;
     std::set<BString> allowed_executables; // --- WHITELIST COMANDI APPROVATI PER SESSIONE ---
 };

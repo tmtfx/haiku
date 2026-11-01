@@ -507,8 +507,9 @@ for linkTarget in $(DESKBAR_PREFERENCES) {
 AddDirectoryToPackage data deskbar menu Demos
 	: deskbar-demos.rdef ;
 for linkTarget in $(SYSTEM_DEMOS) {
+	local linkName = $(linkTarget:G=) ;
 	AddSymlinkToPackage data deskbar menu Demos
-		: ../../../../demos/$(linkTarget) : $(linkTarget) ;
+		: ../../../../demos/$(linkName) : $(linkName) ;
 }
 
 # Deskbar menu entries file

@@ -1114,7 +1114,7 @@ private:
 		view->SetHighColor(76, 76, 76, 192);
 		view->StrokeRect(rect);
 
-		int32 percent = std::max(0, std::min(100, fPercent));
+		int32 percent = std::max((int32)0, std::min((int32)100, fPercent));
 		int32 barPos = int32(barHeight * percent / 100.0);
 
 		rect.InsetBy(1,1);
