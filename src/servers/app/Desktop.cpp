@@ -2411,9 +2411,9 @@ BlendSpanRGB32(uint32* dst, const uint32* src, int32 count)
 			continue;
 
 		uint32 alpha = (s >> 24) & 0xff;
-		if (alpha == 255 || alpha == 0) {
+		if (alpha == 255) {
 			dst[i] = s | 0xff000000;
-		} else {
+		} else if (alpha > 0) {
 			uint32 invAlpha = 255 - alpha;
 			uint8* d = (uint8*)&dst[i];
 			const uint8* sc = (const uint8*)&s;
@@ -2422,6 +2422,7 @@ BlendSpanRGB32(uint32* dst, const uint32* src, int32 count)
 			d[2] = (uint8)(((uint32)sc[2] * alpha + (uint32)d[2] * invAlpha + 127) / 255);
 			d[3] = 255;
 		}
+		// alpha == 0: fully transparent, leave dst untouched.
 	}
 }
 
@@ -2435,12 +2436,12 @@ BlendSpanRGB16(uint16* dst, const uint32* src, int32 count)
 			continue;
 
 		uint32 alpha = (s >> 24) & 0xff;
-		if (alpha == 255 || alpha == 0) {
+		if (alpha == 255) {
 			uint8 b = s & 0xff;
 			uint8 g = (s >> 8) & 0xff;
 			uint8 r = (s >> 16) & 0xff;
 			dst[i] = (uint16)(((r & 0xf8) << 8) | ((g & 0xfc) << 3) | (b >> 3));
-		} else {
+		} else if (alpha > 0) {
 			uint8 s_b = s & 0xff;
 			uint8 s_g = (s >> 8) & 0xff;
 			uint8 s_r = (s >> 16) & 0xff;
@@ -2457,6 +2458,7 @@ BlendSpanRGB16(uint16* dst, const uint32* src, int32 count)
 
 			dst[i] = (uint16)(((r & 0xf8) << 8) | ((g & 0xfc) << 3) | (b >> 3));
 		}
+		// alpha == 0: fully transparent, leave dst untouched.
 	}
 }
 
@@ -2470,12 +2472,12 @@ BlendSpanRGB15(uint16* dst, const uint32* src, int32 count)
 			continue;
 
 		uint32 alpha = (s >> 24) & 0xff;
-		if (alpha == 255 || alpha == 0) {
+		if (alpha == 255) {
 			uint8 b = s & 0xff;
 			uint8 g = (s >> 8) & 0xff;
 			uint8 r = (s >> 16) & 0xff;
 			dst[i] = (uint16)(((r & 0xf8) << 7) | ((g & 0xf8) << 2) | (b >> 3));
-		} else {
+		} else if (alpha > 0) {
 			uint8 s_b = s & 0xff;
 			uint8 s_g = (s >> 8) & 0xff;
 			uint8 s_r = (s >> 16) & 0xff;
@@ -2492,6 +2494,7 @@ BlendSpanRGB15(uint16* dst, const uint32* src, int32 count)
 
 			dst[i] = (uint16)(((r & 0xf8) << 7) | ((g & 0xf8) << 2) | (b >> 3));
 		}
+		// alpha == 0: fully transparent, leave dst untouched.
 	}
 }
 
@@ -2539,6 +2542,17 @@ Desktop::CompositeDirtyRegion(BRegion& dirtyRegion)
 		int32 cTop = (int32)contentFrame.top;
 		int32 cRight = (int32)contentFrame.right;
 		int32 cBottom = (int32)contentFrame.bottom;
+
+		// Ordinary windows always get the full-overwrite "hasContent"
+		// fast path below: Haiku's renderer forces alpha=255 for all
+		// normal drawing, and an incremental/partial redraw can leave
+		// stale or zero-alpha bytes in untouched backing store regions
+		// that must be stamped over, not blended, or old content and
+		// window-move/resize trails never get erased. Only a window
+		// that explicitly opts in (kWindowAlphaCompositingFlag) wants
+		// its content area truly alpha-blended against what's beneath.
+		bool wantsAlphaCompositing =
+			(window->Flags() & kWindowAlphaCompositingFlag) != 0;
 
 		int32 rectCount = windowDirty.CountRects();
 		for (int32 i = 0; i < rectCount; i++) {
@@ -2599,7 +2613,9 @@ Desktop::CompositeDirtyRegion(BRegion& dirtyRegion)
 					case B_RGBA32_BIG:
 					{
 						uint32* d = (uint32*)(dstBits + (screenY * dstBytesPerRow) + (r.left * 4));
-						if (!hasContent) {
+						if (wantsAlphaCompositing) {
+							BlendSpanRGB32(d, s, copyWidth);
+						} else if (!hasContent) {
 							BlendSpanRGB32(d, s, copyWidth);
 						} else {
 							int32 cStartIdx = segContentStart - r.left;
@@ -2639,7 +2655,9 @@ Desktop::CompositeDirtyRegion(BRegion& dirtyRegion)
 					case B_RGB16_BIG:
 					{
 						uint16* d = (uint16*)(dstBits + (screenY * dstBytesPerRow) + (r.left * 2));
-						if (!hasContent) {
+						if (wantsAlphaCompositing) {
+							BlendSpanRGB16(d, s, copyWidth);
+						} else if (!hasContent) {
 							BlendSpanRGB16(d, s, copyWidth);
 						} else {
 							int32 cStartIdx = segContentStart - r.left;
@@ -2670,7 +2688,9 @@ Desktop::CompositeDirtyRegion(BRegion& dirtyRegion)
 					case B_RGBA15_BIG:
 					{
 						uint16* d = (uint16*)(dstBits + (screenY * dstBytesPerRow) + (r.left * 2));
-						if (!hasContent) {
+						if (wantsAlphaCompositing) {
+							BlendSpanRGB15(d, s, copyWidth);
+						} else if (!hasContent) {
 							BlendSpanRGB15(d, s, copyWidth);
 						} else {
 							int32 cStartIdx = segContentStart - r.left;

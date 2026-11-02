@@ -647,7 +647,12 @@ Window::ScrollViewBy(View* view, int32 dx, int32 dy)
 //snooze(20000);
 
 	if (!IsOffscreenWindow() && IsVisible() && view->IsVisible()) {
-		dirty->IntersectWith(&VisibleContentRegion());
+		if (HasBackingStore()) {
+			BRegion content;
+			GetContentRegion(&content);
+			dirty->IntersectWith(&content);
+		} else
+			dirty->IntersectWith(&VisibleContentRegion());
 		_TriggerContentRedraw(*dirty);
 	}
 
@@ -665,15 +670,25 @@ Window::CopyContents(BRegion* region, int32 xOffset, int32 yOffset)
 
 	BRegion* newDirty = fRegionPool.GetRegion(*region);
 
-	// clip the region to the visible contents at the
-	// source and destination location (note that VisibleContentRegion()
-	// is used once to make sure it is valid, then fVisibleContentRegion
-	// is used directly)
-	region->IntersectWith(&VisibleContentRegion());
+	// clip the region to the visible contents at the source and
+	// destination location -- unless this window has a backing store
+	// (desktop compositor active), in which case its content is kept
+	// complete regardless of on-screen occlusion, so use the unclipped
+	// content region instead (same pattern as GetEffectiveDrawingRegion,
+	// MarkContentDirty, RedrawDirtyRegion, etc.)
+	BRegion contentRegion;
+	const BRegion* contentRegionPtr;
+	if (HasBackingStore()) {
+		GetContentRegion(&contentRegion);
+		contentRegionPtr = &contentRegion;
+	} else
+		contentRegionPtr = &VisibleContentRegion();
+
+	region->IntersectWith(contentRegionPtr);
 	if (region->CountRects() > 0) {
 		// Constrain to content region at destination
 		region->OffsetBy(xOffset, yOffset);
-		region->IntersectWith(&fVisibleContentRegion);
+		region->IntersectWith(contentRegionPtr);
 		if (region->CountRects() > 0) {
 			// if the region still contains any rects
 			// offset to source location again
@@ -739,7 +754,7 @@ Window::CopyContents(BRegion* region, int32 xOffset, int32 yOffset)
 	// since these parts will now be in newDirty anyways
 	// (with the right offset)
 	newDirty->OffsetBy(xOffset, yOffset);
-	newDirty->IntersectWith(&fVisibleContentRegion);
+	newDirty->IntersectWith(contentRegionPtr);
 	if (newDirty->CountRects() > 0)
 		ProcessDirtyRegion(*newDirty);
 
@@ -1964,7 +1979,8 @@ Window::ValidWindowFlags()
 		| B_CLOSE_ON_ESCAPE
 		| B_NO_SERVER_SIDE_WINDOW_MODIFIERS
 		| kWindowScreenFlag
-		| kAcceptKeyboardFocusFlag;
+		| kAcceptKeyboardFocusFlag
+		| kWindowAlphaCompositingFlag;
 }
 
 
