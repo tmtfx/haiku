@@ -338,30 +338,7 @@ query: "name:*.hpkg AND user.hpkg.verified:CORRUPT"
 
 ---
 
-### Phase 6: Hybrid Mode Testing ⏳ PENDING
-
-**Objective:** Verify checksum computation consistency in hybrid rendering mode
-
-**Deliverables:**
-- Test report: `docs/HPKG_INTEGRITY_HYBRID_TEST.md`
-
-**Test Procedure:**
-1. Build test HPKG in normal mode, compute SHA256
-2. Build same HPKG in hybrid mode, compute SHA256
-3. Compare → must match exactly
-4. Repeat with various HPKG sizes
-
-**Tasks:**
-- [ ] Set up test harness with GeneralFileChecksumAccessor
-- [ ] Run on both rendering modes
-- [ ] Document findings
-- [ ] Publish results
-
-**Estimated Duration:** 2-3 hours (can be done in parallel)
-
----
-
-### Phase 7: Documentation ⏳ PENDING
+### Phase 6: Documentation ⏳ PENDING
 
 **Objective:** Complete documentation for users and developers
 
@@ -808,10 +785,9 @@ sha256sum haiku*.hpkg
 | 3 | fsck.hpkgs Tool | 4-5h | Phase 1-2 | Pending |
 | 4 | BFS Indexing | 2-3h | Phase 3 | Optional |
 | 5 | Auto-Recovery | 2-3h | Phase 3 | Optional |
-| 6 | Hybrid Testing | 2-3h | Phase 2-3 | Parallel |
-| 7 | Documentation | 2-3h | All phases | Final |
+| 6 | Documentation | 2-3h | All phases | Final |
 
-**Total Estimated Time:** 18-27 hours (core phases 1-3: 8-11 hours)
+**Total Estimated Time:** 15-22 hours (core phases 1-3: 8-11 hours)
 
 **Realistic Schedule:** 1-2 weeks of part-time development
 
@@ -822,8 +798,8 @@ sha256sum haiku*.hpkg
 1. ✅ **Complete Phase 1:** Create `HPKGIntegrityConstants.h`
 2. → **Phase 2:** Integrate with package daemon
 3. → **Phase 3:** Build fsck.hpkgs tool
-4. → **Testing:** Manual verification on test system
-5. → **Documentation:** User and developer guides
+4. → **Phase 4-5:** Optional features (indexing, recovery)
+5. → **Phase 6:** Documentation and user guides
 6. → **Commit:** Merge hpkg_chk → main with release notes
 
 ---
