@@ -9,6 +9,7 @@ SEARCH_SOURCE += [ FDirName $(HAIKU_TOP) src apps networkstatus ]
 Application Network :
 	Network.cpp
 	NetworkWindow.cpp
+	qrcodegen.cpp
 	NetworkProfile.cpp
 	NetworkSettingsAddOn.cpp
 	InterfaceListItem.cpp

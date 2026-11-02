@@ -50,6 +50,7 @@ private:
 
 			BButton*			fToggleButton;
 			BButton*			fRenegotiateButton;
+			BButton*			fShowQRButton;
 };
 
 

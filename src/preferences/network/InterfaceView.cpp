@@ -6,6 +6,7 @@
  *		Axel Dörfler, <axeld@pinc-software.de>
  *		Alexander von Gluck, kallisti5@unixzen.com
  *		John Scipione, jscipione@gmail.com
+ *		Fabio Tomat, f.t.public@gmail.com
  */
 
 
@@ -15,6 +16,7 @@
 
 #include <net/if_media.h>
 
+#include <Alert.h>
 #include <AutoDeleter.h>
 #include <Button.h>
 #include <Catalog.h>
@@ -27,11 +29,14 @@
 
 #include "MediaTypes.h"
 #include "WirelessNetworkMenuItem.h"
+#include "QRCodeWindow.h"
+#include <KeyStore.h>
 
 
 static const uint32 kMsgInterfaceToggle = 'onof';
 static const uint32 kMsgInterfaceRenegotiate = 'redo';
 static const uint32 kMsgJoinNetwork = 'join';
+static const uint32 kMsgShowQRCode = 'qrcd';
 
 
 #undef B_TRANSLATION_CONTEXT
@@ -84,27 +89,39 @@ InterfaceView::InterfaceView()
 	fRenegotiateButton = new BButton("heal", B_TRANSLATE("Renegotiate"),
 		new BMessage(kMsgInterfaceRenegotiate));
 	fRenegotiateButton->SetEnabled(false);
-
+	
+	fShowQRButton = new BButton("show_qr", "📤",
+		new BMessage(kMsgShowQRCode));
+	fShowQRButton->SetEnabled(false);
+	fShowQRButton->SetToolTip(B_TRANSLATE("Share passkey"));
+	
+	BGroupView* statusGroup = new BGroupView(B_HORIZONTAL, B_USE_DEFAULT_SPACING);
+    BLayoutBuilder::Group<>(statusGroup)
+        .Add(fStatusField)
+        .AddGlue()
+        .AddGlue()
+        .Add(fShowQRButton);
+	
 	BLayoutBuilder::Group<>(this)
-		.AddGrid()
-			.Add(statusLabel, 0, 0)
-			.Add(fStatusField, 1, 0)
-			.AddMenuField(fNetworkMenuField, 0, 1, B_ALIGN_RIGHT, 1, 2)
-			.Add(macAddressLabel, 0, 2)
-			.Add(fMacAddressField, 1, 2)
-			.Add(linkSpeedLabel, 0, 3)
-			.Add(fLinkSpeedField, 1, 3)
-			.Add(linkTxLabel, 0, 4)
-			.Add(fLinkTxField, 1, 4)
-			.Add(linkRxLabel, 0, 5)
-			.Add(fLinkRxField, 1, 5)
-		.End()
-		.AddGlue()
-		.AddGroup(B_HORIZONTAL)
-			.AddGlue()
-			.Add(fToggleButton)
-			.Add(fRenegotiateButton)
-		.End();
+        .AddGrid()
+            .Add(statusLabel, 0, 0)
+            .Add(statusGroup, 1, 0)
+            .AddMenuField(fNetworkMenuField, 0, 1, B_ALIGN_RIGHT, 1, 2)
+            .Add(macAddressLabel, 0, 2)
+            .Add(fMacAddressField, 1, 2)
+            .Add(linkSpeedLabel, 0, 3)
+            .Add(fLinkSpeedField, 1, 3)
+            .Add(linkTxLabel, 0, 4)
+            .Add(fLinkTxField, 1, 4)
+            .Add(linkRxLabel, 0, 5)
+            .Add(fLinkRxField, 1, 5)
+        .End()
+        .AddGlue()
+        .AddGroup(B_HORIZONTAL)
+            .AddGlue()
+            .Add(fToggleButton)
+            .Add(fRenegotiateButton)
+        .End();
 }
 
 
@@ -125,7 +142,7 @@ InterfaceView::AttachedToWindow()
 {
 	_Update();
 		// Populate the fields
-
+	fShowQRButton->SetTarget(this);
 	fToggleButton->SetTarget(this);
 	fRenegotiateButton->SetTarget(this);
 }
@@ -169,6 +186,41 @@ InterfaceView::MessageReceived(BMessage* message)
 		{
 			// TODO: renegotiate addresses
 			break;
+		}
+		case kMsgShowQRCode:
+		{
+			// 1. Recupera la rete selezionata/connessa
+			BMenu* menu = fNetworkMenuField->Menu();
+			WirelessNetworkMenuItem* markedItem = NULL;
+			if (menu != NULL) {
+				markedItem = dynamic_cast<WirelessNetworkMenuItem*>(menu->FindMarked());
+			}
+	
+			if (markedItem != NULL) {
+		const char* ssid = markedItem->Network().name;
+
+		BKeyStore keyStore;
+		BPasswordKey key;
+
+		// Dichiarazione esplicita di status
+		status_t status = keyStore.GetKey("wpa_supplicant", B_KEY_TYPE_PASSWORD,
+			ssid, key);
+
+		if (status == B_OK) {
+			QRCodeWindow* win = new QRCodeWindow(ssid, key.Password(), "WPA");
+			win->Show();
+		} else {
+			BString errorMsg;
+			errorMsg.SetToFormat(
+				B_TRANSLATE("Impossibile recuperare la password per la rete '%s': %s"),
+				ssid, strerror(status));
+			
+			BAlert* alert = new BAlert(B_TRANSLATE("Errore KeyStore"),
+				errorMsg.String(), B_TRANSLATE("OK"));
+			alert->Go();
+		}
+	}
+	break;
 		}
 
 		default:
@@ -381,6 +433,15 @@ InterfaceView::_Update(bool updateWirelessNetworks)
 
 		menu->SetTargetForItems(this);
 	}
+	//share network btn
+	bool isConnected = (flags & IFF_UP) == IFF_UP;
+	
+	BMenuItem* markedItem = NULL;
+	if (isWireless && fNetworkMenuField->Menu() != NULL)
+		markedItem = fNetworkMenuField->Menu()->FindMarked();
+
+	// Abilita se connessi e c'è un elemento della rete spuntato
+	fShowQRButton->SetEnabled(isConnected && markedItem != NULL);
 
 	//fRenegotiateButton->SetEnabled(!disabled);
 	fToggleButton->SetLabel(disabled
