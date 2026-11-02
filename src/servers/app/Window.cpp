@@ -394,6 +394,21 @@ Window::SetClipping(BRegion* stillAvailableOnScreen)
 
 
 void
+Window::SetCompositingClipping(BRegion* stillAvailableForCompositing)
+{
+	// this function is only called from the Desktop thread, right after
+	// SetClipping(), as part of the same clipping rebuild -- see
+	// Desktop::_RebuildClippingForAllWindows() /
+	// Desktop::RebuildAndRedrawAfterWindowChange(). Unlike fVisibleRegion,
+	// windows with kWindowAlphaCompositingFlag are not excluded from
+	// stillAvailableForCompositing by the caller, so a window beneath one
+	// still contributes to Desktop::CompositeDirtyRegion()'s blend there.
+	GetFullRegion(&fCompositingVisibleRegion);
+	fCompositingVisibleRegion.IntersectWith(stillAvailableForCompositing);
+}
+
+
+void
 Window::GetFullRegion(BRegion* region)
 {
 	// TODO: if someone needs to call this from

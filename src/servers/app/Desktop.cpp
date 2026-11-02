@@ -1577,28 +1577,39 @@ Desktop::MoveWindowBy(Window* window, float x, float y, int32 workspace)
 	BRegion background;
 	_RebuildClippingForAllWindows(background);
 
-	// construct the region that is possible to be blitted
-	// to move the contents of the window
-	BRegion copyRegion(window->VisibleRegion());
-	copyRegion.OffsetBy((int32)-x, (int32)-y);
-	copyRegion.IntersectWith(&newDirtyRegion);
-		// newDirtyRegion == the windows old visible region
+	if ((window->Flags() & kWindowAlphaCompositingFlag) == 0) {
+		// construct the region that is possible to be blitted
+		// to move the contents of the window
+		BRegion copyRegion(window->VisibleRegion());
+		copyRegion.OffsetBy((int32)-x, (int32)-y);
+		copyRegion.IntersectWith(&newDirtyRegion);
+			// newDirtyRegion == the windows old visible region
 
-	// include the the new visible region of the window being
-	// moved into the dirty region (for now)
-	newDirtyRegion.Include(&window->VisibleRegion());
+		// include the the new visible region of the window being
+		// moved into the dirty region (for now)
+		newDirtyRegion.Include(&window->VisibleRegion());
 
-	// NOTE: Having all windows locked should prevent any
-	// problems with locking the drawing engine here.
-	if (GetDrawingEngine()->LockParallelAccess()) {
-		GetDrawingEngine()->CopyRegion(&copyRegion, (int32)x, (int32)y);
-		GetDrawingEngine()->UnlockParallelAccess();
+		// NOTE: Having all windows locked should prevent any
+		// problems with locking the drawing engine here.
+		if (GetDrawingEngine()->LockParallelAccess()) {
+			GetDrawingEngine()->CopyRegion(&copyRegion, (int32)x, (int32)y);
+			GetDrawingEngine()->UnlockParallelAccess();
+		}
+
+		// in the dirty region, exclude the parts that we
+		// could move by blitting
+		copyRegion.OffsetBy((int32)x, (int32)y);
+		newDirtyRegion.Exclude(&copyRegion);
+	} else {
+		// A window with real alpha compositing can't be moved by
+		// blitting: the pixels already on screen are a blend against
+		// whatever was beneath its OLD position, not valid content to
+		// just slide over to the new one. Recomposite its whole old+new
+		// footprint instead, so the move correctly re-blends it against
+		// what's really beneath the new position (see
+		// Window::CompositingVisibleRegion()).
+		newDirtyRegion.Include(&window->VisibleRegion());
 	}
-
-	// in the dirty region, exclude the parts that we
-	// could move by blitting
-	copyRegion.OffsetBy((int32)x, (int32)y);
-	newDirtyRegion.Exclude(&copyRegion);
 
 	if (fCompositor2DEnabled) {
 		CompositeDirtyRegion(newDirtyRegion);
@@ -2524,7 +2535,7 @@ Desktop::CompositeDirtyRegion(BRegion& dirtyRegion)
 			continue;
 
 		BRegion windowDirty(dirtyRegion);
-		windowDirty.IntersectWith(&window->VisibleRegion());
+		windowDirty.IntersectWith(&window->CompositingVisibleRegion());
 		if (windowDirty.CountRects() == 0)
 			continue;
 
@@ -4019,11 +4030,21 @@ Desktop::_RebuildClippingForAllWindows(BRegion& stillAvailableOnScreen)
 	// figure out what the entire screen area is
 	stillAvailableOnScreen = fScreenRegion;
 
+	// Parallel accumulator for CompositingVisibleRegion(): same idea as
+	// stillAvailableOnScreen, except a window carrying
+	// kWindowAlphaCompositingFlag does not exclude the area it covers --
+	// so whatever is beneath it still contributes to
+	// Desktop::CompositeDirtyRegion()'s blend there. Windows without the
+	// flag exclude exactly as for stillAvailableOnScreen, so when no
+	// alpha-compositing window is present the two stay identical.
+	BRegion stillAvailableForCompositing(fScreenRegion);
+
 	// set clipping of each window
 	for (Window* window = CurrentWindows().LastWindow(); window != NULL;
 			window = window->PreviousWindow(fCurrentWorkspace)) {
 		if (!window->IsHidden()) {
 			window->SetClipping(&stillAvailableOnScreen);
+			window->SetCompositingClipping(&stillAvailableForCompositing);
 			window->SetScreen(_DetermineScreenFor(window->Frame()));
 
 			if (window->ServerWindow()->IsDirectlyAccessing()) {
@@ -4033,6 +4054,8 @@ Desktop::_RebuildClippingForAllWindows(BRegion& stillAvailableOnScreen)
 
 			// that windows region is not available on screen anymore
 			stillAvailableOnScreen.Exclude(&window->VisibleRegion());
+			if ((window->Flags() & kWindowAlphaCompositingFlag) == 0)
+				stillAvailableForCompositing.Exclude(&window->VisibleRegion());
 		}
 	}
 }
@@ -4092,6 +4115,9 @@ Desktop::RebuildAndRedrawAfterWindowChange(Window* changedWindow,
 	// figure out what the entire screen area is
 	BRegion stillAvailableOnScreen(fScreenRegion);
 
+	// see _RebuildClippingForAllWindows() for what this is
+	BRegion stillAvailableForCompositing(fScreenRegion);
+
 	// set clipping of each window
 	for (Window* window = CurrentWindows().LastWindow(); window != NULL;
 			window = window->PreviousWindow(fCurrentWorkspace)) {
@@ -4100,6 +4126,7 @@ Desktop::RebuildAndRedrawAfterWindowChange(Window* changedWindow,
 				dirty.IntersectWith(&stillAvailableOnScreen);
 
 			window->SetClipping(&stillAvailableOnScreen);
+			window->SetCompositingClipping(&stillAvailableForCompositing);
 			window->SetScreen(_DetermineScreenFor(window->Frame()));
 
 			if (window->ServerWindow()->IsDirectlyAccessing()) {
@@ -4109,6 +4136,8 @@ Desktop::RebuildAndRedrawAfterWindowChange(Window* changedWindow,
 
 			// that windows region is not available on screen anymore
 			stillAvailableOnScreen.Exclude(&window->VisibleRegion());
+			if ((window->Flags() & kWindowAlphaCompositingFlag) == 0)
+				stillAvailableForCompositing.Exclude(&window->VisibleRegion());
 		}
 	}
 

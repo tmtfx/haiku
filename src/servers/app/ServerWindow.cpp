@@ -2605,8 +2605,15 @@ ServerWindow::_DispatchViewDrawingMessage(int32 code,
 			fCurrentView->PenToScreenTransform().Apply(&rect);
 			drawingEngine->InvertRect(rect);
 			if (fWindow->HasBackingStore() && !fWindow->InUpdate()) {
+				// Intersect with the window's unclipped content region,
+				// not VisibleRegion(): this window's content may be
+				// beneath an alpha-compositing window above it, which
+				// still needs this change recomposited there (see
+				// Window::CompositingVisibleRegion()).
 				BRegion dirty(rect);
-				dirty.IntersectWith(&fWindow->VisibleRegion());
+				BRegion content;
+				fWindow->GetContentRegion(&content);
+				dirty.IntersectWith(&content);
 				if (dirty.CountRects() > 0)
 					fDesktop->CompositeDirtyRegion(dirty);
 			}
@@ -2643,7 +2650,9 @@ ServerWindow::_DispatchViewDrawingMessage(int32 code,
 			if (fWindow->HasBackingStore() && !fWindow->InUpdate()
 				&& fWindow->Feel() != kMenuWindowFeel) {
 				BRegion dirty(rect);
-				dirty.IntersectWith(&fWindow->VisibleRegion());
+				BRegion content;
+				fWindow->GetContentRegion(&content);
+				dirty.IntersectWith(&content);
 				if (dirty.CountRects() > 0)
 					fDesktop->CompositeDirtyRegion(dirty);
 			}
@@ -2727,7 +2736,9 @@ ServerWindow::_DispatchViewDrawingMessage(int32 code,
 				if (fWindow->HasBackingStore() && !fWindow->InUpdate()
 					&& fWindow->Feel() != kMenuWindowFeel) {
 					BRegion dirty(info.viewRect);
-					dirty.IntersectWith(&fWindow->VisibleRegion());
+					BRegion content;
+					fWindow->GetContentRegion(&content);
+					dirty.IntersectWith(&content);
 					if (dirty.CountRects() > 0)
 						fDesktop->CompositeDirtyRegion(dirty);
 				}
@@ -3093,7 +3104,9 @@ ServerWindow::_DispatchViewDrawingMessage(int32 code,
 			if (fWindow->HasBackingStore() && !fWindow->InUpdate()
 				&& fWindow->Feel() != kMenuWindowFeel) {
 				BRegion dirty(region);
-				dirty.IntersectWith(&fWindow->VisibleRegion());
+				BRegion content;
+				fWindow->GetContentRegion(&content);
+				dirty.IntersectWith(&content);
 				if (dirty.CountRects() > 0)
 					fDesktop->CompositeDirtyRegion(dirty);
 			}

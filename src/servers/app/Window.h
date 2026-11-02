@@ -116,9 +116,21 @@ public:
 			// setting and getting the "hard" clipping, you need to have
 			// WriteLock()ed the clipping!
 			void				SetClipping(BRegion* stillAvailableOnScreen);
+			void				SetCompositingClipping(
+									BRegion* stillAvailableForCompositing);
 			// you need to have ReadLock()ed the clipping!
 	inline	BRegion&			VisibleRegion() { return fVisibleRegion; }
 			BRegion&			VisibleContentRegion();
+				// Same as VisibleRegion(), except windows carrying
+				// kWindowAlphaCompositingFlag don't count as occluders
+				// when this is computed -- used only by
+				// Desktop::CompositeDirtyRegion() so a window beneath an
+				// alpha-compositing window still contributes to the
+				// blend there. VisibleRegion() itself (used for actual
+				// client drawing clip, decorator redraw, etc.) is
+				// unaffected.
+	inline	BRegion&			CompositingVisibleRegion()
+									{ return fCompositingVisibleRegion; }
 
 			// TODO: not protected by a lock, but no one should need this anyways
 			// make private? when used inside Window, it has the ReadLock()
@@ -363,6 +375,7 @@ protected:
 
 			BRegion				fVisibleRegion;
 			BRegion				fVisibleContentRegion;
+			BRegion				fCompositingVisibleRegion;
 
 			// Our part of the "global" dirty region (what needs to be redrawn).
 			// It is calculated from the desktop thread, but we can write to it when we read locked
