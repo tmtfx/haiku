@@ -314,20 +314,25 @@ bt878_clamp_int32(int32 value, int32 min, int32 max)
 static inline uint8
 bt878_read8(const bt878_device* device, uint32 offset)
 {
-	return *((volatile uint8*)(device->regs + offset));
+	volatile uint8 value = *((volatile uint8*)(device->regs + offset));
+	read_mem_barrier();
+	return value;
 }
 
 
 static inline uint32
 bt878_read32(const bt878_device* device, uint32 offset)
 {
-	return *((volatile uint32*)(device->regs + offset));
+	volatile uint32 value = *((volatile uint32*)(device->regs + offset));
+	read_mem_barrier();
+	return value;
 }
 
 
 static inline void
 bt878_write8(const bt878_device* device, uint32 offset, uint8 value)
 {
+	write_mem_barrier();
 	*((volatile uint8*)(device->regs + offset)) = value;
 }
 
@@ -335,6 +340,7 @@ bt878_write8(const bt878_device* device, uint32 offset, uint8 value)
 static inline void
 bt878_write32(const bt878_device* device, uint32 offset, uint32 value)
 {
+	write_mem_barrier();
 	*((volatile uint32*)(device->regs + offset)) = value;
 }
 
@@ -518,6 +524,13 @@ bt878_compute_geometry(const bt878_device* device, bt878_geometry* geometry)
 
 	memset(geometry, 0, sizeof(*geometry));
 
+	// Validate dimensions to prevent division by zero
+	if (device->width == 0 || device->height == 0) {
+		bttv_klog("[KERNEL] bt878_compute_geometry: ERROR - invalid width=%u or height=%u\n",
+			device->width, device->height);
+		return;
+	}
+
 	if (device->video_standard == BTV_STD_PAL) {
 		sourceWidth = 924;
 		sourceHeight = 576;
@@ -540,12 +553,20 @@ bt878_compute_geometry(const bt878_device* device, bt878_geometry* geometry)
 
 	geometry->width = device->width;
 	geometry->height = device->height;
+
+	// Calculate horizontal scale: hscale = (width_in * 4096) / width_out - 4096
 	geometry->hscale = (uint16)((sourceWidth * 4096U + (device->width >> 1))
 		/ device->width - 4096);
-	geometry->vscale = (uint16)((0x10000UL
-		- ((sourceHeight * 512U + (device->height >> 1)) / device->height - 512))
-		& 0x1fff);
+
+	// Calculate vertical scale: vscale = 0x10000 - ((height_in * 512) / height_out - 512)
+	uint32 vscaleCalc = (sourceHeight * 512U + (device->height >> 1)) / device->height;
+	if (vscaleCalc > 512)
+		geometry->vscale = (uint16)((0x10000UL - (vscaleCalc - 512)) & 0x1fff);
+	else
+		geometry->vscale = 0;
 	geometry->vscale |= BT848_VSCALE_INT << 8;
+
+	// Encode crop register (combines width, hdelay, height, vdelay)
 	geometry->crop = (uint8)(((geometry->width >> 8) & 0x03)
 		| ((geometry->hdelay >> 6) & 0x0c)
 		| ((geometry->height >> 4) & 0x30)
@@ -601,7 +622,7 @@ bt878_build_risc_program(bt878_device* device)
 		if (interlaced) {
 			// Field 1 (Even field): wait for VRE, write lines 0, 2, 4, ...
 			*program++ = B_HOST_TO_LENDIAN_INT32(
-				BT848_RISC_SYNC | BT848_RISC_RESYNC | BT848_FIFO_STATUS_FM1);
+				BT848_RISC_SYNC | BT848_RISC_RESYNC | BT848_FIFO_STATUS_VRE);
 			*program++ = 0;
 
 			for (uint32 line = 0; line < linesPerField; line++) {
@@ -615,7 +636,7 @@ bt878_build_risc_program(bt878_device* device)
 
 			// Field 2 (Odd field): wait for VRO, write lines 1, 3, 5, ...
 			*program++ = B_HOST_TO_LENDIAN_INT32(
-				BT848_RISC_SYNC | BT848_RISC_RESYNC | BT848_FIFO_STATUS_FM1);
+				BT848_RISC_SYNC | BT848_RISC_RESYNC | BT848_FIFO_STATUS_VRO);
 			*program++ = 0;
 
 			for (uint32 line = 0; line < linesPerField; line++) {
@@ -632,7 +653,7 @@ bt878_build_risc_program(bt878_device* device)
 		} else {
 			// Progressive (half vertical resolution): wait for VRE, write single field
 			*program++ = B_HOST_TO_LENDIAN_INT32(
-				BT848_RISC_SYNC | BT848_RISC_RESYNC | BT848_FIFO_STATUS_FM1);
+				BT848_RISC_SYNC | BT848_RISC_RESYNC | BT848_FIFO_STATUS_VRE);
 			*program++ = 0;
 
 			for (uint32 line = 0; line < format.height; line++) {
@@ -698,11 +719,11 @@ bt878_set_pll(bt878_device* device)
 	bt878_write8(device, BT848_PLL_XCI, fi | BT848_PLL_X);
 
 	// Wait up to 100ms for PLL to lock
+	// PLOCK = 0 means locked, PLOCK = 1 means NOT locked
 	for (int i = 0; i < 10; i++) {
 		snooze(10000);
-		if ((bt878_read8(device, BT848_DSTATUS) & BT848_DSTATUS_PLOCK) != 0) {
-			bt878_write8(device, BT848_DSTATUS, 0x00);
-		} else {
+		if ((bt878_read8(device, BT848_DSTATUS) & BT848_DSTATUS_PLOCK) == 0) {
+			// PLL is locked!
 			bttv_klog("[KERNEL] bt878_set_pll: PLL locked successfully (TGCTRL=0x08)\n");
 			bt878_write8(device, BT848_TGCTRL, 0x08);
 			return B_OK;
@@ -788,6 +809,8 @@ bt878_reset(bt878_device* device)
 		| BT848_GPIO_DMA_CTL_PLTP23_16);
 	bt878_write8(device, BT848_CAP_CTL, 0);
 	bt878_write8(device, BT848_SRESET, 0);
+	// Wait for soft reset to complete
+	snooze(50000);
 	bt878_write32(device, BT848_INT_STAT, 0xffffffff);
 }
 
@@ -837,10 +860,10 @@ bt878_start_capture_locked(bt878_device* device)
 	}
 	bttv_klog("[KERNEL] bt878_start_capture_locked: interrupt handler installed\n");
 
-	// Enable only frame completion IRQ (RISCI), synchronization errors, and PCI burst fix.
+	// Enable RISC, sync errors, overflow errors, and frame completion interrupt
 	bttv_klog("[KERNEL] bt878_start_capture_locked: setting INT_MASK...\n");
 	bt878_write32(device, BT848_INT_MASK,
-		BT848_INT_RISCI | BT848_INT_SCERR | BT848_INT_OCERR | BT848_INT_ETBF);
+		BT848_INT_RISCI | BT848_INT_SCERR | BT848_INT_OCERR | BT848_INT_OFLOW | BT848_INT_ETBF);
 
 	bttv_klog("[KERNEL] bt878_start_capture_locked: writing RISC_STRT_ADD (0x%" B_PRIx32 ")...\n",
 		(uint32)device->risc_buffer.phys);
@@ -992,16 +1015,45 @@ bt878_interrupt(void* data)
 		// Clear only the asserted interrupt status bits (Write 1 to clear)
 		bt878_write32(device, BT848_INT_STAT, astat);
 
+		// Handle frame completion (RISCI)
 		if ((astat & BT848_INT_RISCI) != 0) {
 			device->last_completed_buffer = device->next_buffer;
 			device->next_buffer = (device->next_buffer + 1) % NUM_FRAME_BUFFERS;
 			device->frame_ready = true;
 
-			int32 semCount;
-			if (get_sem_count(device->frame_sem, &semCount) == B_OK && semCount < 1)
-				release_sem_etc(device->frame_sem, 1, B_DO_NOT_RESCHEDULE);
-
+			// Atomically release semaphore if count is negative (threads waiting)
+			release_sem_etc(device->frame_sem, 1, B_DO_NOT_RESCHEDULE);
 			handled = B_INVOKE_SCHEDULER;
+		}
+
+		// Handle synchronization errors (loss of sync)
+		if ((astat & BT848_INT_SCERR) != 0) {
+			bttv_klog("[KERNEL] bt878_interrupt: SCERR (synchronization error)\n");
+		}
+
+		// Handle overflow errors (buffer overflow)
+		if ((astat & BT848_INT_OCERR) != 0) {
+			bttv_klog("[KERNEL] bt878_interrupt: OCERR (overflow error)\n");
+		}
+
+		// Handle FIFO overflow
+		if ((astat & BT848_INT_OFLOW) != 0) {
+			bttv_klog("[KERNEL] bt878_interrupt: OFLOW (FIFO overflow)\n");
+		}
+
+		// Handle PCI errors
+		if ((astat & BT848_INT_PABORT) != 0) {
+			bttv_klog("[KERNEL] bt878_interrupt: PABORT (PCI bus abort)\n");
+		}
+
+		// Handle RISC errors
+		if ((astat & BT848_INT_RIPERR) != 0) {
+			bttv_klog("[KERNEL] bt878_interrupt: RIPERR (RISC parity error)\n");
+		}
+
+		// Handle parity errors
+		if ((astat & BT848_INT_PPERR) != 0) {
+			bttv_klog("[KERNEL] bt878_interrupt: PPERR (parity error)\n");
 		}
 	}
 
