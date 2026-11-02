@@ -27,32 +27,40 @@
 static status_t program_old_matrox_cursor(uint16 width, uint16 height, uint16 bytesPerRow, const uint8* bitmapData)
 {
 	uint8 temp_buf[1024];
+	const uint8* src;
+	int y;
+	uint8 cur_ctrl;
+	int i;
 
 	memset(temp_buf, 0x00, 1024);
 
-	const uint8* src = (const uint8*)bitmapData;
+	src = (const uint8*)bitmapData;
 
 	// Pixel conversion from B_RGBA32 to 1-bit AND/XOR
-	for (int y = 0; y < height && y < 64; y++) {
+	for (y = 0; y < height && y < 64; y++) {
 		const uint8* srcRow = src + (y * bytesPerRow);
 		uint8* andRowPtr = temp_buf + (y * 8);
 		uint8* xorRowPtr = temp_buf + 512 + (y * 8);
+		int x;
 
-		for (int x = 0; x < width && x < 64; x++) {
+		for (x = 0; x < width && x < 64; x++) {
 			const uint8* pixel = srcRow + (x * 4);
 			uint8 b = pixel[0];
 			uint8 g = pixel[1];
 			uint8 r = pixel[2];
 			uint8 a = pixel[3];
+			int byteOffset;
+			int bitShift;
+			uint32 luma;
 
 			if (a < 100)
 				continue; // keep transparent
 
-			int byteOffset = x / 8;
-			int bitShift = 7 - (x % 8);
+			byteOffset = x / 8;
+			bitShift = 7 - (x % 8);
 
 			// White/Black selection via via Luma
-			uint32 luma = (r + g + b) / 3;
+			luma = (r + g + b) / 3;
 			if (luma > 128) {
 				// WHITE
 				andRowPtr[byteOffset] |= (1 << bitShift); // solid
@@ -70,12 +78,12 @@ static status_t program_old_matrox_cursor(uint16 width, uint16 height, uint16 by
 	DACW(TVP_CUROVRWTADD, 0x00);
 
 	// Send 1024 bytes in the cursor's data port
-	for (int i = 0; i < 1024; i++) {
+	for (i = 0; i < 1024; i++) {
 		DACW(TVP_CURRAMDATA, temp_buf[i]);
 	}
 
 	// Activate cursor at the RAMDAC level if visible
-	uint8 cur_ctrl = DACR(TVP_DIRCURCTRL);
+	cur_ctrl = DACR(TVP_DIRCURCTRL);
 	cur_ctrl &= ~0x0C; // Clear old interleaved modes
 	cur_ctrl |= 0x03;  // Enable cursor in standard dual-plane mode (AND/XOR)
 	DACW(TVP_DIRCURCTRL, cur_ctrl);
@@ -85,42 +93,50 @@ static status_t program_old_matrox_cursor(uint16 width, uint16 height, uint16 by
 
 static status_t matrox_set_cursor_bitmap_gseries(uint16 width, uint16 height, uint16 bytesPerRow, const uint8* bitmapData)
 {
-	if (width > 64 || height > 64)
-		return B_ERROR;
-
 	// Hardware cursor virtual address starts at the beginning of the VRAM
 	vuint8 * dest;
     int i;
+	uint8 curctrl;
+	const uint8* src;
+	uint32 y;
+
+	if (width > 64 || height > 64)
+		return B_ERROR;
 
     dest = (vuint8*) si->framebuffer;
 	if (dest == NULL) return B_NO_INIT;
 
 	// Avoid flickering
-	uint8 curctrl = DXIR(CURCTRL);
-	DXIW(CURCTRL, curctrl & ~0x01); 
+	curctrl = DXIR(CURCTRL);
+	DXIW(CURCTRL, curctrl & ~0x01);
 
-	
+
 	// Reset HC to 0 for transparency
     // AND=0 and XOR=0 means transparency
     for (i = 0; i < 1024 ; i++) {
-        dest[i] = 0x00; 
+        dest[i] = 0x00;
     }
 
-	const uint8* src = (const uint8*)bitmapData;
+	src = (const uint8*)bitmapData;
 
 	// COLOR CONVERSION RGBA32 TO 3 COLORS + TRANSPARENCY
-    for (uint32 y = 0; y < height && y < 64; y++) {
+    for (y = 0; y < height && y < 64; y++) {
 
         vuint32* word32_row = (vuint32*)(&dest[y * 16]);
+        uint32 x;
 
-        for (uint32 x = 0; x < width && x < 64; x++) {
+        for (x = 0; x < width && x < 64; x++) {
             const uint8* pixel = src + (y * bytesPerRow) + (x * 4);
             uint8 b = pixel[0];
             uint8 g = pixel[1];
             uint8 r = pixel[2];
             uint8 a = pixel[3];
-
             uint8 val = 0; // Default: 00 (Transparent)
+            uint8 bit0;
+            uint8 bit1;
+            uint32 bloc32_x;
+            uint32 bloc32_pos;
+            uint8 bitShift;
 
             if (a >= 100) { // Not transparent
                 uint32 luma = (r + g + b) / 3;
@@ -130,20 +146,20 @@ static status_t matrox_set_cursor_bitmap_gseries(uint16 width, uint16 height, ui
                     val = (luma > 128) ? 1 : 2; // 01 (white) o 10 (black)
                 }
             }
-            
-            uint8 bit0 = val & 0x01;
-            uint8 bit1 = (val >> 1) & 0x01;
 
-            uint32 bloc32_x = x / 32;       
+            bit0 = val & 0x01;
+            bit1 = (val >> 1) & 0x01;
+
+            bloc32_x = x / 32;
 
             // Reassembling... correct orientation:
             // geometric byte-swap.
-            uint32 bloc32_pos = bloc32_x ^ 1; 
+            bloc32_pos = bloc32_x ^ 1;
 
 
             // Matrox wants MSB at left.
 
-            uint8 bitShift = 31 - (x % 32); 
+            bitShift = 31 - (x % 32);
 
             word32_row[bloc32_pos] &= ~(1 << bitShift);
             word32_row[bloc32_pos] |= (bit0 << bitShift);

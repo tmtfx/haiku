@@ -270,7 +270,7 @@ status_t eng_dac_set_pix_pll(display_mode target)
 		uint32 packed = ViaComputeProDotClock(target.timing.pixel_clock);
 		if (enableDACDebug) {
 			debug_printf(LOG_PREFIX "DAC: card_arch=%d, requested pixclock=%" B_PRIu32 " kHz\n",
-				si->ps.card_arch, target.timing.pixel_clock);
+				(int)si->ps.card_arch, target.timing.pixel_clock);
 		}
 		if (packed != 0) {
 			int dtz = (packed >> 0) & 0x03;
@@ -282,8 +282,9 @@ status_t eng_dac_set_pix_pll(display_mode target)
 				/* recompute the actual VCO output frequency for the divisors as found
 				 * (before the VX855/VX900 -2 offset below), to check PLL lock accuracy */
 				uint32 factual = 14318000U * dm;
+				double target_hz;
 				factual /= dn << dr;
-				double target_hz = target.timing.pixel_clock * 1.e3;
+				target_hz = target.timing.pixel_clock * 1.e3;
 				debug_printf(LOG_PREFIX "  [PLL CALC] dtz=%d dr=%d dn=%d dm=%d -> actual=%" B_PRIu32 " Hz (target=%.0f Hz, err=%.3f%%)\n",
 					dtz, dr, dn, dm, factual, target_hz,
 					(((double)factual / target_hz) - 1.0) * 100.0);

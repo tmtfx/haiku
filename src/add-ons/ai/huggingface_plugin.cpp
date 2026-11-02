@@ -30,14 +30,14 @@ public:
 		if (fFile) fclose(fFile);
 	}
 
-	ssize_t Write(const void* buffer, size_t size) override {
+	ssize_t Write(const void* buffer, size_t size) {
 		if (!fFile) return -1;
 		size_t w = fwrite(buffer, 1, size, fFile);
 		fflush(fFile);
 		return (ssize_t)w;
 	}
 
-	void RequestCompleted(BUrlRequest* /*caller*/, bool /*success*/) override {
+	void RequestCompleted(BUrlRequest* /*caller*/, bool /*success*/) {
 		if (!fFile) return;
 		fprintf(fFile, "\n<<STREAM_END>>\n"); fflush(fFile); fclose(fFile); fFile = NULL;
 	}
@@ -81,7 +81,7 @@ extern "C" status_t ai_plugin_list_models(const BMessage* settingsMsg, char* out
         return B_OK;
     }
     struct dirent* e;
-    while ((e = readdir(d)) != nullptr) {
+    while ((e = readdir(d)) != NULL) {
         if (e->d_name[0] == '.') continue;
         models.push_back(e->d_name);
     }
@@ -120,9 +120,9 @@ extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
     if (!handle || !prompt || !response_buf || !contextMsg) return B_BAD_VALUE;
     HFHandle* h = (HFHandle*)handle;
     
-    const char* apiKey = nullptr;
-    const char* modelName = nullptr;
-    const char* baseUrl = nullptr;
+    const char* apiKey = NULL;
+    const char* modelName = NULL;
+    const char* baseUrl = NULL;
     contextMsg->FindString("api_key", &apiKey);
     contextMsg->FindString("model_name", &modelName);
     contextMsg->FindString("base_url", &baseUrl);
@@ -146,11 +146,11 @@ extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
     std::string url = baseUrl;
     std::string model = modelName ? modelName : (h->model.empty() ? "gpt2" : h->model);
     
-    if (url.back() != '/') url += "/";
+    if (url[url.length() - 1] != '/') url += "/";
     url += "models/" + model;
 
     BString finalPrompt;
-    const char* systemPrompt = nullptr;
+    const char* systemPrompt = NULL;
     if (contextMsg && contextMsg->FindString("system_prompt", &systemPrompt) == B_OK && systemPrompt && systemPrompt[0] != '\0') {
         finalPrompt << systemPrompt << "\n\n" << prompt;
     } else {
@@ -209,10 +209,10 @@ extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle,
     HFHandle* h = (HFHandle*)handle;
     if (h->mode != "remote") return B_ERROR;
 
-    const char* apiKey = nullptr;
-    const char* modelName = nullptr;
-    const char* baseUrl = nullptr;
-    const char* notifyPath = nullptr;
+    const char* apiKey = NULL;
+    const char* modelName = NULL;
+    const char* baseUrl = NULL;
+    const char* notifyPath = NULL;
     contextMsg->FindString("api_key", &apiKey);
     contextMsg->FindString("model_name", &modelName);
     contextMsg->FindString("base_url", &baseUrl);
@@ -226,11 +226,11 @@ extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle,
 
     std::string url = baseUrl;
     std::string model = modelName ? modelName : (h->model.empty() ? "gpt2" : h->model);
-    if (url.back() != '/') url += "/";
+    if (url[url.length() - 1] != '/') url += "/";
     url += "models/" + model;
 
     BString finalPrompt2;
-    const char* systemPrompt2 = nullptr;
+    const char* systemPrompt2 = NULL;
     if (contextMsg && contextMsg->FindString("system_prompt", &systemPrompt2) == B_OK && systemPrompt2 && systemPrompt2[0] != '\0') {
         finalPrompt2 << systemPrompt2 << "\n\n" << prompt;
     } else {

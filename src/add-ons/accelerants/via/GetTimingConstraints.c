@@ -56,7 +56,7 @@ status_t GET_TIMING_CONSTRAINTS(display_timing_constraints *dtc)
 
     if (enableGTCDebug) {
         debug_printf(LOG_PREFIX "GET_TIMING_CONSTRAINTS: card_type=%d, h_blank_max=%" B_PRIu16 ", v_blank_max=%" B_PRIu16 "\n",
-            si->ps.card_type, dtc->h_blank_max, dtc->v_blank_max);
+            (int)si->ps.card_type, dtc->h_blank_max, dtc->v_blank_max);
     }
 
     return B_OK;

@@ -403,7 +403,7 @@ xgi_configure_overlay(overlay_token token, const overlay_buffer* buffer,
 	gInfo.sharedInfo->overlay.active = true;
 
 	XGI_ACCEL_TRACE("configure_overlay: src=%ux%u dst=%ux%u PSY=0x%" B_PRIx32 "\n",
-		srcW, srcH, dstW, dstH, PSY);
+		(unsigned int)srcW, (unsigned int)srcH, (unsigned int)dstW, (unsigned int)dstH, PSY);
 
 	return B_OK;
 }

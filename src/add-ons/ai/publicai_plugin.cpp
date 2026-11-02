@@ -29,8 +29,8 @@ using namespace BPrivate::Network;
 #define DEFAULT_PUBLICAI_MODEL    "swiss-ai/apertus-8b-instruct"
 
 struct PublicAIHandle : public AIPluginHandle {
-    PublicAIHandle() = default;
-    virtual ~PublicAIHandle() = default;
+    PublicAIHandle() {}
+    virtual ~PublicAIHandle() {}
 };
 
 // --- Serializzazione JSON e gestione BMessage ---
@@ -67,7 +67,7 @@ static void SerializeBMessageToJson(const BMessage* msg, BString& outJson) {
     outJson << "{";
     bool first = true;
 
-    char* field_name = nullptr;
+    char* field_name = NULL;
     uint32 field_code = 0;
     int32 field_count = 0;
 
@@ -111,7 +111,7 @@ static void SerializeBMessageToJson(const BMessage* msg, BString& outJson) {
 }
 
 static char* dupstr_or_null(const char* s) {
-    if (!s) return nullptr;
+    if (!s) return NULL;
     size_t n = strlen(s) + 1;
     char* p = (char*)malloc(n);
     if (p) memcpy(p, s, n);
@@ -122,9 +122,9 @@ static void BuildPublicAIPayload(const BMessage* chatContext,
                                  const char* explicitPrompt, 
                                  BString& outPayload, 
                                  bool stream = false,
-                                 const BString* toolsJson = nullptr)
+                                 const BString* toolsJson = NULL)
 {
-    const char* model = nullptr;
+    const char* model = NULL;
     if (chatContext) chatContext->FindString("model_name", &model);
     if (!model || model[0] == '\0') model = DEFAULT_PUBLICAI_MODEL;
 
@@ -140,7 +140,7 @@ static void BuildPublicAIPayload(const BMessage* chatContext,
     outPayload.Append("  \"messages\": [\n");
 
     bool first = true;
-    const char* systemPrompt = nullptr;
+    const char* systemPrompt = NULL;
     if (chatContext) {
         chatContext->FindString("system_prompt", &systemPrompt);
     }
@@ -160,7 +160,7 @@ static void BuildPublicAIPayload(const BMessage* chatContext,
         BMessage msgTurn;
         while (historyMsg.FindMessage("msg", msgIndex++, &msgTurn) == B_OK) {
             lastMsgTurn = msgTurn;
-            const char* type = nullptr;
+            const char* type = NULL;
             msgTurn.FindString("type", &type);
 
             if (type && strcmp(type, "functionCall") == 0) {
@@ -213,8 +213,8 @@ static void BuildPublicAIPayload(const BMessage* chatContext,
                 first = false;
                 */
             } else {
-                const char* role = nullptr;
-                const char* content = nullptr;
+                const char* role = NULL;
+                const char* content = NULL;
                 msgTurn.FindString("role", &role);
                 if (msgTurn.FindString("content", &content) != B_OK) {
                     msgTurn.FindString("text", &content);
@@ -234,8 +234,8 @@ static void BuildPublicAIPayload(const BMessage* chatContext,
         bool alreadyAppended = false;
 
         if (hasHistory && msgIndex > 1) {
-            const char* lastRole = nullptr;
-            const char* lastContent = nullptr;
+            const char* lastRole = NULL;
+            const char* lastContent = NULL;
             lastMsgTurn.FindString("role", &lastRole);
             if (lastMsgTurn.FindString("content", &lastContent) != B_OK) {
                 lastMsgTurn.FindString("text", &lastContent);
@@ -272,7 +272,7 @@ public:
         fRawResponse.SetTo("");
     }
 
-    virtual ssize_t Write(const void* buffer, size_t size) override {
+    virtual ssize_t Write(const void* buffer, size_t size) {
         if (size == 0) return 0;
 
         fRawResponse.Append((const char*)buffer, size);
@@ -302,7 +302,7 @@ public:
             BMessage parsedJson;
             if (BJson::Parse(line.String(), parsedJson) == B_OK) {
                 BMessage choices, choiceZero, delta;
-                const char* contentText = nullptr;
+                const char* contentText = NULL;
 
                 if (parsedJson.FindMessage("choices", &choices) == B_OK) {
                     if (choices.FindMessage("0", &choiceZero) == B_OK || 
@@ -314,7 +314,7 @@ public:
                     }
                 }
 
-                if (contentText != nullptr && contentText[0] != '\0') {
+                if (contentText != NULL && contentText[0] != '\0') {
                     fFile.Write(contentText, strlen(contentText));
                     fFile.Flush();
                 }
@@ -343,7 +343,7 @@ private:
 extern "C" ai_plugin_t ai_plugin_init()
 {
     PublicAIHandle* h = new(std::nothrow) PublicAIHandle();
-    if (!h) return nullptr;
+    if (!h) return NULL;
     return (ai_plugin_t)h;
 }
 
@@ -363,7 +363,7 @@ ai_plugin_generate_text_sync(ai_plugin_t handle,
     if (!config || !response_buf || response_len == 0)
         return B_ERROR;
 
-    const char* apiKeyRaw = nullptr;
+    const char* apiKeyRaw = NULL;
     config->FindString("api_key", &apiKeyRaw);
     if (!apiKeyRaw || apiKeyRaw[0] == '\0') {
         snprintf(response_buf, response_len, "[publicai_plugin] error: no API key provided");
@@ -372,14 +372,14 @@ ai_plugin_generate_text_sync(ai_plugin_t handle,
     BString apiKey(apiKeyRaw);
 
     BString baseUrl;
-    const char* baseUrlRaw = nullptr;
-    if (config->FindString("base_url", &baseUrlRaw) == B_OK && baseUrlRaw != nullptr && baseUrlRaw[0] != '\0') {
+    const char* baseUrlRaw = NULL;
+    if (config->FindString("base_url", &baseUrlRaw) == B_OK && baseUrlRaw != NULL && baseUrlRaw[0] != '\0') {
         baseUrl = baseUrlRaw;
     } else {
         baseUrl = DEFAULT_PUBLICAI_BASE_URL;
     }
 
-    const char* ctxId = nullptr;
+    const char* ctxId = NULL;
     config->FindString("context_id", &ctxId);
 
     int32 sessionID = -1;
@@ -395,7 +395,7 @@ ai_plugin_generate_text_sync(ai_plugin_t handle,
         targetUrl << "/v1/chat/completions";
 
     BString payload;
-    BuildPublicAIPayload(config, prompt, payload, false, nullptr);
+    BuildPublicAIPayload(config, prompt, payload, false, NULL);
 
     BMallocIO* out = new BMallocIO();
     SyncListener syncListener;
@@ -444,7 +444,7 @@ ai_plugin_generate_text_sync(ai_plugin_t handle,
     int32 statusCode = 0;
     if (http) {
         const BHttpResult* httpResult = dynamic_cast<const BHttpResult*>(&(http->Result()));
-        if (httpResult != nullptr) {
+        if (httpResult != NULL) {
             statusCode = httpResult->StatusCode();
         }
     }
@@ -456,12 +456,12 @@ ai_plugin_generate_text_sync(ai_plugin_t handle,
 
     if (statusCode == 200 && parseSuccess) {
         BMessage choices, choiceZero, message;
-        const char* extractedText = nullptr;
+        const char* extractedText = NULL;
 
         bool found = (parsedJson.FindMessage("choices", &choices) == B_OK)
             && (choices.FindMessage("0", &choiceZero) == B_OK || choices.FindMessage("msg", 0, &choiceZero) == B_OK)
             && (choiceZero.FindMessage("message", &message) == B_OK)
-            && (message.FindString("content", &extractedText) == B_OK && extractedText != nullptr);
+            && (message.FindString("content", &extractedText) == B_OK && extractedText != NULL);
 
         if (found) {
             size_t textLen = strlen(extractedText);
@@ -508,7 +508,7 @@ publicai_stream_thread_func(void* data)
     AsyncArgs* args = (AsyncArgs*)data;
     if (!args) return B_BAD_VALUE;
     
-    const char* ctxId = nullptr;
+    const char* ctxId = NULL;
     int32 sessionID = -1;
     
     if (args->context_copy) {
@@ -536,7 +536,7 @@ publicai_stream_thread_func(void* data)
     }
 
     BString payload;
-    BuildPublicAIPayload(args->context_copy, nullptr, payload, true, nullptr);
+    BuildPublicAIPayload(args->context_copy, NULL, payload, true, NULL);
 
     {
         StreamTarget streamTarget(args->notify_path);
@@ -565,7 +565,7 @@ publicai_stream_thread_func(void* data)
 
             if (http) {
                 const BHttpResult* result = dynamic_cast<const BHttpResult*>(&http->Result());
-                if (result != nullptr && result->StatusCode() != 200) {
+                if (result != NULL && result->StatusCode() != 200) {
                     DispatchError(args->server_messenger, result->StatusCode(), sessionID, ctxId, streamTarget.RawResponse());
                 }
             }
@@ -589,10 +589,10 @@ extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle, const char
 {
     if (!config) return B_ERROR;
     
-    const char* apiKey = nullptr;
-    const char* modelName = nullptr;
-    const char* notifyPath = nullptr;
-    const char* configBaseUrl = nullptr;
+    const char* apiKey = NULL;
+    const char* modelName = NULL;
+    const char* notifyPath = NULL;
+    const char* configBaseUrl = NULL;
     
     config->FindString("api_key", &apiKey);
     config->FindString("model_name", &modelName);
@@ -672,10 +672,10 @@ extern "C" status_t ai_plugin_list_models(const BMessage* config, char* out_buf,
     int32 sessionID = -1;
     config->FindInt32("session_id", &sessionID);
 
-    const char* ctxId = nullptr;
+    const char* ctxId = NULL;
     config->FindString("context_id", &ctxId);
 
-    const char* apiKey = nullptr;
+    const char* apiKey = NULL;
     config->FindString("api_key", &apiKey);
     
     BString baseUrl;
@@ -729,9 +729,9 @@ extern "C" status_t ai_plugin_list_models(const BMessage* config, char* out_buf,
         rc = thread;
     }
     
-    if (rc == B_OK && http != nullptr) {
+    if (rc == B_OK && http != NULL) {
         const BHttpResult* httpResult = dynamic_cast<const BHttpResult*>(&(http->Result()));
-        if (httpResult != nullptr) {
+        if (httpResult != NULL) {
             statusCode = httpResult->StatusCode();
         }
     }

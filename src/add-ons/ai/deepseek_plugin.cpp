@@ -31,7 +31,7 @@ using namespace BPrivate::Network;
 static char* dupstr_or_null(const char* s)
 {
     if (!s)
-        return nullptr;
+        return NULL;
     size_t n = strlen(s) + 1;
     char* p = (char*)malloc(n);
     if (p)
@@ -86,7 +86,7 @@ void SerializeBMessageToJson(const BMessage* msg, BString& outJson) {
     outJson << "{";
     bool first = true;
     
-    char* field_name = nullptr;
+    char* field_name = NULL;
     uint32 field_code = 0;
     int32 field_count = 0;
     
@@ -157,8 +157,8 @@ void ConvertBMessageToOpenAIToolsJson(const BMessage* toolsMsg, BString& outJson
         if (!params.IsEmpty()) {
             BMessage requiredMsg;
             BString reqFieldStr = "";
-            const char* fStr = nullptr;
-            if (params.FindString("required", &fStr) == B_OK && fStr != nullptr) {
+            const char* fStr = NULL;
+            if (params.FindString("required", &fStr) == B_OK && fStr != NULL) {
                 reqFieldStr = fStr;
             } else if (params.FindMessage("required", &requiredMsg) == B_OK) {
                 const char* f = requiredMsg.FindString("0");
@@ -238,7 +238,7 @@ static void
 BuildPayloadFromContext(const BMessage* config, const char* currentPrompt,
     BString& outPayload, bool stream)
 {
-    const char* model = nullptr;
+    const char* model = NULL;
     if (config)
         config->FindString("model_name", &model);
     if (!model || model[0] == '\0')
@@ -255,10 +255,10 @@ BuildPayloadFromContext(const BMessage* config, const char* currentPrompt,
     // Supporto System Prompt unificato
     BString systemPrompt;
     if (config) {
-        const char* sys = nullptr;
-        if (config->FindString("system_prompt", &sys) == B_OK && sys != nullptr) {
+        const char* sys = NULL;
+        if (config->FindString("system_prompt", &sys) == B_OK && sys != NULL) {
             systemPrompt = sys;
-        } else if (config->FindString("instructions", &sys) == B_OK && sys != nullptr) {
+        } else if (config->FindString("instructions", &sys) == B_OK && sys != NULL) {
             systemPrompt = sys;
         }
     }
@@ -277,7 +277,7 @@ BuildPayloadFromContext(const BMessage* config, const char* currentPrompt,
         while (messagesMsg.FindMessage("msg", i++, &msgTurn) == B_OK
             || messagesMsg.FindMessage(BString().SetToFormat("%ld", (long)(i-1)).String(), &msgTurn) == B_OK) {
             
-            const char* type = nullptr;
+            const char* type = NULL;
             msgTurn.FindString("type", &type);
 
             if (type && strcmp(type, "functionCall") == 0) {
@@ -336,8 +336,8 @@ BuildPayloadFromContext(const BMessage* config, const char* currentPrompt,
                 first = false;
             }
             else {
-                const char* role = nullptr;
-                const char* content = nullptr;
+                const char* role = NULL;
+                const char* content = NULL;
                 msgTurn.FindString("role", &role);
                 if (msgTurn.FindString("content", &content) != B_OK) {
                     msgTurn.FindString("text", &content);
@@ -411,7 +411,7 @@ public:
     
     const BString& RawResponse() const { return fRawResponse; }
 
-    virtual ssize_t Write(const void* buffer, size_t size) override
+    virtual ssize_t Write(const void* buffer, size_t size) 
     {
         if (size == 0)
             return 0;
@@ -508,9 +508,9 @@ extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
         return B_BAD_VALUE;
     response_buf[0] = '\0';
 
-    const char* apiKey = nullptr;
+    const char* apiKey = NULL;
     int32 sessionID = -1;
-    const char* ctxId = nullptr;
+    const char* ctxId = NULL;
     BMessenger serverMessenger;
 
     if (contextMsg != NULL) {
@@ -526,7 +526,7 @@ extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
         return B_BAD_VALUE;
     }
 
-    const char* baseUrlRaw = nullptr;
+    const char* baseUrlRaw = NULL;
     if (contextMsg)
         contextMsg->FindString("base_url", &baseUrlRaw);
     if (!baseUrlRaw || baseUrlRaw[0] == '\0') {
@@ -594,11 +594,11 @@ extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
         BMessage parsedJson;
         //if (BJson::Parse(rawResponse.String(), parsedJson) == B_OK) {
         BMessage choices, choiceZero, message;
-        const char* content = nullptr;
+        const char* content = NULL;
         bool found = (parsedJson.FindMessage("choices", &choices) == B_OK)
         	&& (choices.FindMessage("0", &choiceZero) == B_OK)
             && (choiceZero.FindMessage("message", &message) == B_OK)
-            && (message.FindString("content", &content) == B_OK && content != nullptr);
+            && (message.FindString("content", &content) == B_OK && content != NULL);
             
         if (found){
           	CopyToBuffer(content, response_buf, response_len);
@@ -640,10 +640,10 @@ static int32 deepseek_stream_thread_func(void* data)
     bool mcpActive = false;
     bool executionLoop = true;
 
-    const char* ctxId = nullptr;
+    const char* ctxId = NULL;
     int32 sessionID = -1;
 
-    if (args->context_copy != nullptr) {
+    if (args->context_copy != NULL) {
         args->context_copy->FindString("context_id", &ctxId);
         args->context_copy->FindInt32("session_id", &sessionID);
     }
@@ -699,7 +699,7 @@ static int32 deepseek_stream_thread_func(void* data)
         }
 
         BString payload;
-        BuildPayloadFromContext(args->context_copy, nullptr, payload, false);
+        BuildPayloadFromContext(args->context_copy, NULL, payload, false);
 
         if (mcpActive) {
             BString openAiToolsJson;
@@ -748,7 +748,7 @@ static int32 deepseek_stream_thread_func(void* data)
 
         if (http) {
             const BHttpResult* result = dynamic_cast<const BHttpResult*>(&http->Result());
-            if (result != nullptr) httpStatusCode = result->StatusCode();
+            if (result != NULL) httpStatusCode = result->StatusCode();
         }
         delete req;
 
@@ -763,7 +763,7 @@ static int32 deepseek_stream_thread_func(void* data)
         
         BMessage errorObj;
         if (parsedJson.FindMessage("error", &errorObj) == B_OK) {
-            const char* errMsg = nullptr;
+            const char* errMsg = NULL;
             errorObj.FindString("message", &errMsg);
             if (errMsg && (BString(errMsg).FindFirst("tool choice") != B_ERROR || 
                            BString(errMsg).FindFirst("tools") != B_ERROR)) {
@@ -777,10 +777,10 @@ static int32 deepseek_stream_thread_func(void* data)
         }
 
         BMessage choices, choiceZero, message, toolCalls, toolCallZero, functionObj;
-        const char* toolName = nullptr;
-        const char* toolCallId = nullptr;
-        const char* argumentsStr = nullptr;
-        const char* textContent = nullptr;
+        const char* toolName = NULL;
+        const char* toolCallId = NULL;
+        const char* argumentsStr = NULL;
+        const char* textContent = NULL;
 
         if (parsedJson.FindMessage("choices", &choices) == B_OK
             && choices.FindMessage("0", &choiceZero) == B_OK
@@ -828,7 +828,7 @@ static int32 deepseek_stream_thread_func(void* data)
                 AppendToolCallToContext(args->context_copy, toolName, &argsMsg, toolCallId);
                 AppendToolResponseToContext(args->context_copy, toolName, toolResultBuf.String(), toolCallId);
             } 
-            else if (message.FindString("content", &textContent) == B_OK && textContent != nullptr) {
+            else if (message.FindString("content", &textContent) == B_OK && textContent != NULL) {
                 BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
                 if (streamFile.InitCheck() == B_OK) {
                     streamFile.Write(textContent, strlen(textContent));
@@ -845,7 +845,7 @@ static int32 deepseek_stream_thread_func(void* data)
 fallback_to_standard:
 {
     BString payload;
-    BuildPayloadFromContext(args->context_copy, nullptr, payload, true);
+    BuildPayloadFromContext(args->context_copy, NULL, payload, true);
 
     DeepSeekStreamTarget streamTarget(args->notify_path);
     CompletionListener listener(args->notify_path);
@@ -918,10 +918,10 @@ extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle,
     if (!contextMsg)
         return B_BAD_VALUE;
 
-    const char* apiKey = nullptr;
-    const char* model = nullptr;
-    const char* notifyPath = nullptr;
-    const char* configBaseUrl = nullptr;
+    const char* apiKey = NULL;
+    const char* model = NULL;
+    const char* notifyPath = NULL;
+    const char* configBaseUrl = NULL;
     
     contextMsg->FindString("api_key", &apiKey);
     contextMsg->FindString("model_name", &model);

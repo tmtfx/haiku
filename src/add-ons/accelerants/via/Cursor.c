@@ -41,9 +41,11 @@ status_t SET_CURSOR_SHAPE(uint16 width, uint16 height, uint16 hot_x, uint16 hot_
 		if (si->ps.card_arch >= CX700) {
 			/* Convert 16x16 mono masks to ARGB32 for Chrome9 / modern chips */
 			uint32* dst = (uint32*)si->framebuffer;
+			uint32 y;
 			memset(dst, 0, 64 * 64 * 4);
-			for (uint32 y = 0; y < 16; y++) {
-				for (uint32 x = 0; x < 16; x++) {
+			for (y = 0; y < 16; y++) {
+				uint32 x;
+				for (x = 0; x < 16; x++) {
 					int byteOffset = y * 2 + (x / 8);
 					int bit = 7 - (x % 8);
 					bool andBit = (andMask[byteOffset] >> bit) & 1;
@@ -283,15 +285,17 @@ status_t SET_CURSOR_BITMAP(uint16 width, uint16 height, uint16 hotX, uint16 hotY
 	if (si->ps.card_arch >= CX700) {
 		/* TrueColor ARGB32 cursor (up to 64x64x4) */
 		uint32* dst = (uint32*)si->framebuffer;
+		uint32 y;
 		memset(dst, 0, 64 * 64 * 4);
 
 		if (colorSpace != B_RGBA32 && colorSpace != B_RGB32)
 			return B_ERROR;
 
-		for (uint32 y = 0; y < height && y < 64; y++) {
+		for (y = 0; y < height && y < 64; y++) {
 			const uint8* srcRow = bitmapData + (y * bytesPerRow);
 			uint32* dstRow = dst + (y * 64);
-			for (uint32 x = 0; x < width && x < 64; x++) {
+			uint32 x;
+			for (x = 0; x < width && x < 64; x++) {
 				const uint8* pixel = srcRow + (x * 4);
 				uint8 b = pixel[0];
 				uint8 g = pixel[1];
@@ -311,28 +315,30 @@ status_t SET_CURSOR_BITMAP(uint16 width, uint16 height, uint16 hotX, uint16 hotY
 		/* 1-bit Mono cursor (AND / XOR planes converted from 32-bit bitmap) */
 		uint8 andMask[128];
 		uint8 xorMask[128];
+		uint32 y;
 
 		memset(andMask, 0xFF, sizeof(andMask));
 		memset(xorMask, 0x00, sizeof(xorMask));
 
-		for (uint32 y = 0; y < height && y < 16; y++) {
+		for (y = 0; y < height && y < 16; y++) {
 			const uint8* srcRow = bitmapData + (y * bytesPerRow);
-			for (uint32 x = 0; x < width && x < 16; x++) {
+			uint32 x;
+			for (x = 0; x < width && x < 16; x++) {
 				const uint8* pixel = srcRow + (x * 4);
 				uint8 b = pixel[0];
 				uint8 g = pixel[1];
 				uint8 r = pixel[2];
 				uint8 a = (colorSpace == B_RGBA32) ? pixel[3] : 0xFF;
+				int byteOffset = y * 2 + (x / 8);
+				int bit = 7 - (x % 8);
+				uint32 luma;
 
 				if (a < 128)
 					continue; /* transparent */
 
-				int byteOffset = y * 2 + (x / 8);
-				int bit = 7 - (x % 8);
-
 				andMask[byteOffset] &= ~(1 << bit);
 
-				uint32 luma = (r + g + b) / 3;
+				luma = (r + g + b) / 3;
 				if (luma > 128)
 					xorMask[byteOffset] |= (1 << bit); /* white */
 			}

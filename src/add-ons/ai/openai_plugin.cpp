@@ -28,8 +28,8 @@ using namespace BPrivate::Network;
 #define DEFAULT_OPENAI_BASE_URL "https://api.openai.com"
 
 struct OpenAIHandle : public AIPluginHandle {
-    OpenAIHandle() = default;
-    virtual ~OpenAIHandle() = default;
+    OpenAIHandle() {}
+    virtual ~OpenAIHandle() {}
 };
 
 static bool json_extract_quoted_string(const BString& json, int32 start, BString& out)
@@ -71,10 +71,10 @@ static bool json_extract_quoted_string(const BString& json, int32 start, BString
 
 static void copy_to_buffer(const char* text, char* outBuf, size_t outLen)
 {
-    if (outBuf == nullptr || outLen == 0)
+    if (outBuf == NULL || outLen == 0)
         return;
 
-    if (text == nullptr)
+    if (text == NULL)
         text = "";
 
     size_t length = strlen(text);
@@ -85,27 +85,27 @@ static void copy_to_buffer(const char* text, char* outBuf, size_t outLen)
 
 static BString extract_assistant_instructions(const BMessage* chatContext)
 {
-    const char* instructions = nullptr;
-    if (chatContext != nullptr) {
-        if (chatContext->FindString("instructions", &instructions) == B_OK && instructions != nullptr)
+    const char* instructions = NULL;
+    if (chatContext != NULL) {
+        if (chatContext->FindString("instructions", &instructions) == B_OK && instructions != NULL)
             return BString(instructions);
-        if (chatContext->FindString("system_prompt", &instructions) == B_OK && instructions != nullptr)
+        if (chatContext->FindString("system_prompt", &instructions) == B_OK && instructions != NULL)
             return BString(instructions);
     }
 
     BString combined;
     BMessage historyMsg;
-    if (chatContext == nullptr || chatContext->FindMessage("messages", &historyMsg) != B_OK)
+    if (chatContext == NULL || chatContext->FindMessage("messages", &historyMsg) != B_OK)
         return combined;
 
     int32 i = 0;
     BMessage msgTurn;
     while (historyMsg.FindMessage("msg", i++, &msgTurn) == B_OK) {
-        const char* role = nullptr;
-        const char* content = nullptr;
+        const char* role = NULL;
+        const char* content = NULL;
         msgTurn.FindString("role", &role);
         msgTurn.FindString("content", &content);
-        if (role == nullptr || content == nullptr || strcmp(role, "system") != 0)
+        if (role == NULL || content == NULL || strcmp(role, "system") != 0)
             continue;
 
         if (combined.Length() > 0)
@@ -120,7 +120,7 @@ static BString extract_assistant_instructions(const BMessage* chatContext)
 static BString json_escape(const char* s)
 {
     BString escaped;
-    if (s == nullptr)
+    if (s == NULL)
         return escaped;
 
     for (const char* p = s; *p; ++p) {
@@ -143,7 +143,7 @@ static BString json_escape(const char* s)
 static BString json_get_string(const BString& json, const char* key)
 {
     BString quotedKey;
-    quotedKey.SetToFormat("\"%s\"", key != nullptr ? key : "");
+    quotedKey.SetToFormat("\"%s\"", key != NULL ? key : "");
 
     int32 keyPos = json.FindFirst(quotedKey.String());
     if (keyPos == B_ERROR)
@@ -177,28 +177,28 @@ static int32 openai_http_request(const char* method, const char* url,
     BMallocIO* out = new BMallocIO();
     SyncListener listener;
     BUrlRequest* req = BUrlProtocolRoster::MakeRequest(BUrl(url, true), out, &listener, NULL);
-    if (req == nullptr) {
+    if (req == NULL) {
         delete out;
         return -1;
     }
 
     BHttpRequest* http = dynamic_cast<BHttpRequest*>(req);
-    if (http == nullptr) {
+    if (http == NULL) {
         delete req;
         delete out;
         return -1;
     }
 
-    BString httpMethod(method != nullptr ? method : "GET");
+    BString httpMethod(method != NULL ? method : "GET");
     httpMethod.ToUpper();
     http->SetMethod(httpMethod.String());
 
     BHttpHeaders headers;
-    if (bodyJson != nullptr && bodyJson[0] != '\0' && httpMethod != "GET") {
+    if (bodyJson != NULL && bodyJson[0] != '\0' && httpMethod != "GET") {
         headers.AddHeader("Content-Type", "application/json");
     }
 
-    if (apiKey != nullptr && apiKey[0] != '\0') {
+    if (apiKey != NULL && apiKey[0] != '\0') {
         BString authHeader;
         authHeader.SetToFormat("Bearer %s", apiKey);
         headers.AddHeader("Authorization", authHeader.String());
@@ -211,7 +211,7 @@ static int32 openai_http_request(const char* method, const char* url,
 
     http->SetHeaders(headers);
 
-    if (bodyJson != nullptr && bodyJson[0] != '\0' && httpMethod != "GET") {
+    if (bodyJson != NULL && bodyJson[0] != '\0' && httpMethod != "GET") {
         size_t bodyLen = strlen(bodyJson);
         BMallocIO* input = new BMallocIO();
         input->WriteExactly(bodyJson, bodyLen);
@@ -230,11 +230,11 @@ static int32 openai_http_request(const char* method, const char* url,
 
     if (rc == B_OK) {
         const BHttpResult* httpResult = dynamic_cast<const BHttpResult*>(&(http->Result()));
-        if (httpResult != nullptr) {
+        if (httpResult != NULL) {
             statusCode = httpResult->StatusCode();
         }
 
-        if (out->Buffer() != nullptr && out->BufferLength() > 0) {
+        if (out->Buffer() != NULL && out->BufferLength() > 0) {
             outResponse.SetTo((const char*)out->Buffer(), out->BufferLength());
         }
     } else {
@@ -249,14 +249,14 @@ static int32 openai_http_request(const char* method, const char* url,
 // Build OpenAI/Compatible API URL: base + path
 static BString openai_url(const char* baseUrl, const char* path)
 {
-    BString base = (baseUrl != nullptr && baseUrl[0] != '\0') ? baseUrl : "https://api.openai.com";
+    BString base = (baseUrl != NULL && baseUrl[0] != '\0') ? baseUrl : "https://api.openai.com";
 
     // Rimuoviamo eventuali slash finali per normalizzare
     while (base.Length() > 0 && base.String()[base.Length() - 1] == '/')
         base.Truncate(base.Length() - 1);
 
     BString full(base);
-    if (path != nullptr && path[0] != '\0') {
+    if (path != NULL && path[0] != '\0') {
         if (path[0] != '/')
             full.Append("/");
         full.Append(path);
@@ -270,8 +270,8 @@ static bool openai_create_assistant(const char* apiKey, const char* baseUrl,
     const char* model, const char* instructions, BString& outId)
 {
     BString body;
-    body << "{\"model\":\"" << json_escape(model != nullptr ? model : "gpt-4o-mini")
-         << "\",\"instructions\":\"" << json_escape(instructions != nullptr ? instructions : "")
+    body << "{\"model\":\"" << json_escape(model != NULL ? model : "gpt-4o-mini")
+         << "\",\"instructions\":\"" << json_escape(instructions != NULL ? instructions : "")
          << "\"}";
 
     BString response;
@@ -302,7 +302,7 @@ static bool openai_add_message(const char* apiKey, const char* baseUrl,
          << "  \"content\": [\n"
          << "    {\n"
          << "      \"type\": \"text\",\n"
-         << "      \"text\": \"" << json_escape(content != nullptr ? content : "") << "\"\n"
+         << "      \"text\": \"" << json_escape(content != NULL ? content : "") << "\"\n"
          << "    }\n"
          << "  ]\n"
          << "}";
@@ -319,7 +319,7 @@ static bool openai_create_run(const char* apiKey, const char* baseUrl,
     url << "/" << threadId << "/runs";
 
     BString body;
-    body << "{\"assistant_id\":\"" << json_escape(assistantId != nullptr ? assistantId : "")
+    body << "{\"assistant_id\":\"" << json_escape(assistantId != NULL ? assistantId : "")
          << "\"}";
 
     BString response;
@@ -336,7 +336,7 @@ static bool openai_poll_run(const char* apiKey, const char* baseUrl,
 
     for (int i = 0; i < maxSeconds; ++i) {
         BString response;
-        int32 status = openai_http_request("GET", url.String(), apiKey, nullptr, response);
+        int32 status = openai_http_request("GET", url.String(), apiKey, NULL, response);
         if (status < 200 || status >= 300)
             return false;
 
@@ -357,14 +357,14 @@ static bool openai_poll_run(const char* apiKey, const char* baseUrl,
 static bool openai_get_latest_message(const char* apiKey, const char* baseUrl,
     const char* threadId, char* outBuf, size_t outLen)
 {
-    if (outBuf == nullptr || outLen == 0)
+    if (outBuf == NULL || outLen == 0)
         return false;
 
     BString url = openai_url(baseUrl, "/v1/threads");
     url << "/" << threadId << "/messages?limit=1&order=desc";
 
     BString response;
-    int32 status = openai_http_request("GET", url.String(), apiKey, nullptr, response);
+    int32 status = openai_http_request("GET", url.String(), apiKey, NULL, response);
     if (status < 200 || status >= 300)
         return false;
 
@@ -406,7 +406,7 @@ public:
         fRawResponse.SetTo("");
     }
 
-    virtual ssize_t Write(const void* buffer, size_t size) override {
+    virtual ssize_t Write(const void* buffer, size_t size) {
         if (size == 0) return 0;
 
         // Salvataggio raw per eventuale parsing d'errore HTTP
@@ -440,7 +440,7 @@ public:
             BMessage parsedJson;
             if (BJson::Parse(line.String(), parsedJson) == B_OK) {
                 BMessage choices, choiceZero, delta;
-                const char* contentText = nullptr;
+                const char* contentText = NULL;
 
                 if (parsedJson.FindMessage("choices", &choices) == B_OK) {
                     // Gestisce sia l'indice "0" che "msg" nell'array choices
@@ -454,7 +454,7 @@ public:
                 }
 
                 // Se abbiamo estratto del testo valido, lo scriviamo sul file
-                if (contentText != nullptr && contentText[0] != '\0') {
+                if (contentText != NULL && contentText[0] != '\0') {
                     fFile.Write(contentText, strlen(contentText));
                     fFile.Flush(); // Assicura che la GUI veda subito i token
                 }
@@ -513,7 +513,7 @@ void SerializeBMessageToJson(const BMessage* msg, BString& outJson) {
     outJson << "{";
     bool first = true;
 
-    char* field_name = nullptr;
+    char* field_name = NULL;
     uint32 field_code = 0;
     int32 field_count = 0;
 
@@ -595,8 +595,8 @@ void ConvertBMessageToOpenAIToolsJson(const BMessage* toolsMsg, BString& outJson
             //    if (f) reqFieldStr = f;
             //    params.RemoveName("required");
             //}
-            const char* fStr = nullptr;
-            if (params.FindString("required", &fStr) == B_OK && fStr != nullptr) {
+            const char* fStr = NULL;
+            if (params.FindString("required", &fStr) == B_OK && fStr != NULL) {
                 reqFieldStr = fStr;
             } else if (params.FindMessage("required", &requiredMsg) == B_OK) {
                 const char* f = requiredMsg.FindString("0");
@@ -680,7 +680,7 @@ void AppendToolResponseToContext(BMessage* context, const char* name, const char
 }
 
 static char* dupstr_or_null(const char* s) {
-    if (!s) return nullptr;
+    if (!s) return NULL;
     size_t n = strlen(s) + 1;
     char* p = (char*)malloc(n);
     if (p) memcpy(p, s, n);
@@ -691,7 +691,7 @@ static char* dupstr_or_null(const char* s) {
 // Construction helper per Chat Completions Payload
 static void BuildOpenAIPayload(const BMessage* chatContext, const char* explicitPrompt, BString& outPayload, bool stream = false)
 {
-    const char* model = nullptr;
+    const char* model = NULL;
     if (chatContext) chatContext->FindString("model_name", &model);
     if (!model || model[0] == '\0') model = "gpt-4o-mini";
 
@@ -706,7 +706,7 @@ static void BuildOpenAIPayload(const BMessage* chatContext, const char* explicit
     outPayload.Append("  \"messages\": [\n");
 
     bool first = true;
-    const char* systemPrompt = nullptr;
+    const char* systemPrompt = NULL;
     if (chatContext) {
         chatContext->FindString("system_prompt", &systemPrompt);
     }
@@ -721,7 +721,7 @@ static void BuildOpenAIPayload(const BMessage* chatContext, const char* explicit
         int32 i = 0;
         BMessage msgTurn;
         while (historyMsg.FindMessage("msg", i++, &msgTurn) == B_OK) {
-            const char* type = nullptr;
+            const char* type = NULL;
             msgTurn.FindString("type", &type);
 
             if (type && strcmp(type, "functionCall") == 0) {
@@ -780,8 +780,8 @@ static void BuildOpenAIPayload(const BMessage* chatContext, const char* explicit
                 first = false;
             }
             else {
-                const char* role = nullptr;
-                const char* content = nullptr;
+                const char* role = NULL;
+                const char* content = NULL;
                 msgTurn.FindString("role", &role);
                 if (msgTurn.FindString("content", &content) != B_OK) {
                     msgTurn.FindString("text", &content);
@@ -809,9 +809,9 @@ static void BuildOpenAIPayload(const BMessage* chatContext,
                                const char* explicitPrompt, 
                                BString& outPayload, 
                                bool stream = false,
-                               const BString* openAiToolsJson = nullptr)
+                               const BString* openAiToolsJson = NULL)
 {
-    const char* model = nullptr;
+    const char* model = NULL;
     if (chatContext) chatContext->FindString("model_name", &model);
     if (!model || model[0] == '\0') model = "gpt-4o-mini";
 
@@ -827,7 +827,7 @@ static void BuildOpenAIPayload(const BMessage* chatContext,
     outPayload.Append("  \"messages\": [\n");
 
     bool first = true;
-    const char* systemPrompt = nullptr;
+    const char* systemPrompt = NULL;
     if (chatContext) {
         chatContext->FindString("system_prompt", &systemPrompt);
     }
@@ -847,7 +847,7 @@ static void BuildOpenAIPayload(const BMessage* chatContext,
         BMessage msgTurn;
         while (historyMsg.FindMessage("msg", msgIndex++, &msgTurn) == B_OK) {
             lastMsgTurn = msgTurn; // Salviamo l'ultimo messaggio letto
-            const char* type = nullptr;
+            const char* type = NULL;
             msgTurn.FindString("type", &type);
 
             if (type && strcmp(type, "functionCall") == 0) {
@@ -897,8 +897,8 @@ static void BuildOpenAIPayload(const BMessage* chatContext,
                 first = false;
             }
             else {
-                const char* role = nullptr;
-                const char* content = nullptr;
+                const char* role = NULL;
+                const char* content = NULL;
                 msgTurn.FindString("role", &role);
                 if (msgTurn.FindString("content", &content) != B_OK) {
                     msgTurn.FindString("text", &content);
@@ -919,8 +919,8 @@ static void BuildOpenAIPayload(const BMessage* chatContext,
 
         // Se la storia conteneva messaggi, verifichiamo se l'ultimo era già 'user' identico a explicitPrompt
         if (hasHistory && msgIndex > 1) {
-            const char* lastRole = nullptr;
-            const char* lastContent = nullptr;
+            const char* lastRole = NULL;
+            const char* lastContent = NULL;
             lastMsgTurn.FindString("role", &lastRole);
             if (lastMsgTurn.FindString("content", &lastContent) != B_OK) {
                 lastMsgTurn.FindString("text", &lastContent);
@@ -997,7 +997,7 @@ static void DispatchOpenAIError(const BMessenger& messenger, int32 httpCode,
 extern "C" ai_plugin_t ai_plugin_init()
 {
     OpenAIHandle* h = new(std::nothrow) OpenAIHandle();
-    if (!h) return nullptr;
+    if (!h) return NULL;
     return (ai_plugin_t)h;
 }
 
@@ -1020,7 +1020,7 @@ ai_plugin_generate_text_sync(ai_plugin_t handle,
         return B_ERROR;
     }
 
-    const char* apiKeyRaw = nullptr;
+    const char* apiKeyRaw = NULL;
     config->FindString("api_key", &apiKeyRaw);
     if (!apiKeyRaw || apiKeyRaw[0] == '\0') {
         snprintf(response_buf, response_len, "[openai_plugin] error: no API key provided");
@@ -1031,14 +1031,14 @@ ai_plugin_generate_text_sync(ai_plugin_t handle,
     BString apiKey(apiKeyRaw);
 
     BString baseUrl;
-    const char* baseUrlRaw = nullptr;
-    if (config->FindString("base_url", &baseUrlRaw) == B_OK && baseUrlRaw != nullptr && baseUrlRaw[0] != '\0') {
+    const char* baseUrlRaw = NULL;
+    if (config->FindString("base_url", &baseUrlRaw) == B_OK && baseUrlRaw != NULL && baseUrlRaw[0] != '\0') {
         baseUrl = baseUrlRaw;
     } else {
         baseUrl = DEFAULT_OPENAI_BASE_URL;
     }
 
-    const char* ctxId = nullptr;
+    const char* ctxId = NULL;
     config->FindString("context_id", &ctxId);
 
     int32 sessionID = -1;
@@ -1055,16 +1055,16 @@ ai_plugin_generate_text_sync(ai_plugin_t handle,
     // =========================================================================
     if (useRemoteContext) {
     	fprintf(stderr, ">>> DEBUG: ENTRATO IN versione remota x Assistants API");
-        const char* model = nullptr;
+        const char* model = NULL;
         config->FindString("model_name", &model);
         if (!model || model[0] == '\0')
             model = "gpt-4o-mini";
 
         BString assistantId;
         BString threadId;
-        const char* remoteIdRaw = nullptr;
+        const char* remoteIdRaw = NULL;
 
-        if (config->FindString("remote_id", &remoteIdRaw) == B_OK && remoteIdRaw != nullptr && remoteIdRaw[0] != '\0') {
+        if (config->FindString("remote_id", &remoteIdRaw) == B_OK && remoteIdRaw != NULL && remoteIdRaw[0] != '\0') {
             BString remoteId(remoteIdRaw);
             int32 separator = remoteId.FindFirst("::");
             if (separator != B_ERROR) {
@@ -1093,7 +1093,7 @@ ai_plugin_generate_text_sync(ai_plugin_t handle,
             config->AddString("remote_id", remoteId.String());
         }
 
-        if (!openai_add_message(apiKey.String(), baseUrl.String(), threadId.String(), prompt != nullptr ? prompt : "")) {
+        if (!openai_add_message(apiKey.String(), baseUrl.String(), threadId.String(), prompt != NULL ? prompt : "")) {
             snprintf(response_buf, response_len, "[openai_plugin] error: add message failed");
             return B_ERROR;
         }
@@ -1128,7 +1128,7 @@ ai_plugin_generate_text_sync(ai_plugin_t handle,
 
     // Compiliamo il payload iniettando lo storico memorizzato nel BMessage
     BString payload;
-    BuildOpenAIPayload(config, prompt, payload, false, nullptr);
+    BuildOpenAIPayload(config, prompt, payload, false, NULL);
     //fprintf(stderr, "[OPENAI PLUGIN] Payload JSON generato:\n%s\n", payload.String());
 
     BMallocIO* out = new BMallocIO();
@@ -1186,7 +1186,7 @@ ai_plugin_generate_text_sync(ai_plugin_t handle,
     int32 statusCode = 0;
     if (http) {
         const BHttpResult* httpResult = dynamic_cast<const BHttpResult*>(&(http->Result()));
-        if (httpResult != nullptr) {
+        if (httpResult != NULL) {
             statusCode = httpResult->StatusCode();
         }
     }
@@ -1199,12 +1199,12 @@ ai_plugin_generate_text_sync(ai_plugin_t handle,
 
     if (statusCode == 200 && parseSuccess) {
         BMessage choices, choiceZero, message;
-        const char* extractedText = nullptr;
+        const char* extractedText = NULL;
 
         bool found = (parsedJson.FindMessage("choices", &choices) == B_OK)
             && (choices.FindMessage("0", &choiceZero) == B_OK || choices.FindMessage("msg", 0, &choiceZero) == B_OK)
             && (choiceZero.FindMessage("message", &message) == B_OK)
-            && (message.FindString("content", &extractedText) == B_OK && extractedText != nullptr);
+            && (message.FindString("content", &extractedText) == B_OK && extractedText != NULL);
 
         if (found) {
             size_t textLen = strlen(extractedText);
@@ -1261,7 +1261,7 @@ openai_stream_thread_func(void* data)
     bool mcpActive = false;
     bool executionLoop = true;
     
-    const char* ctxId = nullptr;
+    const char* ctxId = NULL;
     int32 sessionID = -1;
     
     if (args->context_copy) {
@@ -1308,7 +1308,7 @@ openai_stream_thread_func(void* data)
     // === CONTROLLO CAPABILITY VIA MESSENGER ===
     if (args->server_messenger.IsValid()) {
         BMessage reqTools(MSG_MCP_GET_TOOLS); 
-        const char* ctxId = nullptr;
+        const char* ctxId = NULL;
         if (args->context_copy) {
             args->context_copy->FindString("context_id", &ctxId);
         }
@@ -1335,7 +1335,7 @@ openai_stream_thread_func(void* data)
     }
 
     if (useRemoteContext) {
-        const char* model = nullptr;
+        const char* model = NULL;
         if (args->context_copy) args->context_copy->FindString("model_name", &model);
         if (!model || model[0] == '\0') model = (args->model && args->model[0]) ? args->model : "gpt-4o-mini";
 
@@ -1346,7 +1346,7 @@ openai_stream_thread_func(void* data)
         }
 
         BString assistantId, threadId;
-        const char* remoteIdRaw = nullptr;
+        const char* remoteIdRaw = NULL;
         if (args->context_copy && args->context_copy->FindString("remote_id", &remoteIdRaw) == B_OK && remoteIdRaw) {
             BString remoteId(remoteIdRaw);
             int32 sep = remoteId.FindFirst("::");
@@ -1396,7 +1396,7 @@ openai_stream_thread_func(void* data)
     while (executionLoop) {
         if (args->server_messenger.IsValid()) {
             BMessage checkAbortMsg('CHAB'); // MSG_CHECK_ABORT
-            const char* ctxId = nullptr;
+            const char* ctxId = NULL;
             if (args->context_copy) {
                 args->context_copy->FindString("context_id", &ctxId);
             }
@@ -1423,7 +1423,7 @@ openai_stream_thread_func(void* data)
         }
 /* funziona con openai
         BString payload;
-        BuildOpenAIPayload(args->context_copy, nullptr, payload, false);
+        BuildOpenAIPayload(args->context_copy, NULL, payload, false);
 
         if (mcpActive) {
             BString openAiToolsJson;
@@ -1445,8 +1445,8 @@ openai_stream_thread_func(void* data)
         }
 
         // Genera l'intero JSON correttamente strutturato in un solo passaggio
-        BuildOpenAIPayload(args->context_copy, nullptr, payload, false, 
-                   (mcpActive && openAiToolsJson.Length() > 0) ? &openAiToolsJson : nullptr);
+        BuildOpenAIPayload(args->context_copy, NULL, payload, false, 
+                   (mcpActive && openAiToolsJson.Length() > 0) ? &openAiToolsJson : NULL);
 
         // LOG PAYLOAD MCP
         //fprintf(stderr, "[OPENAI MCP DEBUG] Payload inviato:\n%s\n", payload.String());
@@ -1486,7 +1486,7 @@ openai_stream_thread_func(void* data)
 
         if (http) {
             const BHttpResult* result = dynamic_cast<const BHttpResult*>(&http->Result());
-            if (result != nullptr) {
+            if (result != NULL) {
             	httpStatusCode=result->StatusCode();
                 fprintf(stderr, "[OPENAI MCP DEBUG] HTTP Status Code: %d\n", httpStatusCode);
             }
@@ -1518,7 +1518,7 @@ openai_stream_thread_func(void* data)
         
         BMessage errorObj;
         if (parsedJson.FindMessage("error", &errorObj) == B_OK) {
-            const char* errMsg = nullptr;
+            const char* errMsg = NULL;
             errorObj.FindString("message", &errMsg);
             
             if (errMsg && (BString(errMsg).FindFirst("tool choice") != B_ERROR || 
@@ -1534,10 +1534,10 @@ openai_stream_thread_func(void* data)
         }
 
         BMessage choices, choiceZero, message, toolCalls, toolCallZero, functionObj;
-        const char* toolName = nullptr;
-        const char* toolCallId = nullptr;
-        const char* argumentsStr = nullptr;
-        const char* textContent = nullptr;
+        const char* toolName = NULL;
+        const char* toolCallId = NULL;
+        const char* argumentsStr = NULL;
+        const char* textContent = NULL;
 
         bool hasChoices = (parsedJson.FindMessage("choices", &choices) == B_OK) 
             && (choices.FindMessage("msg", 0, &choiceZero) == B_OK || choices.FindMessage("0", &choiceZero) == B_OK)
@@ -1567,7 +1567,7 @@ openai_stream_thread_func(void* data)
                 reqExec.AddString("name", toolName);
                 reqExec.AddMessage("arguments", &argsMsg);
                 
-                const char* ctxId = nullptr;
+                const char* ctxId = NULL;
                 if (args->context_copy) {
                     args->context_copy->FindString("context_id", &ctxId);
                 }
@@ -1600,7 +1600,7 @@ openai_stream_thread_func(void* data)
                 AppendToolCallToContext(args->context_copy, toolName, &argsMsg, toolCallId);
                 AppendToolResponseToContext(args->context_copy, toolName, toolResultBuf.String(), toolCallId);
             } 
-            else if (message.FindString("content", &textContent) == B_OK && textContent != nullptr) {
+            else if (message.FindString("content", &textContent) == B_OK && textContent != NULL) {
                 BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
                 if (streamFile.InitCheck() == B_OK) {
                     streamFile.Write(textContent, strlen(textContent));
@@ -1627,7 +1627,7 @@ fallback_to_standard:
     fprintf(stderr, "[OPENAI STREAM WORKER] Modalità Standard: Avvio Streaming Diretto.\n");
     
     BString payload;
-    BuildOpenAIPayload(args->context_copy, nullptr, payload, true);
+    BuildOpenAIPayload(args->context_copy, NULL, payload, true);
 
     // LOG DIAGNOSTICO MODALITA STANDARD
     {
@@ -1660,7 +1660,7 @@ fallback_to_standard:
 
             if (http) {
                 const BHttpResult* result = dynamic_cast<const BHttpResult*>(&http->Result());
-                if (result != nullptr && result->StatusCode() != 200) {
+                if (result != NULL && result->StatusCode() != 200) {
                     fprintf(stderr, "[OPENAI STREAM ERRORE] Status HTTP non valido in streaming: %d\n", result->StatusCode());
                     DispatchError(args->server_messenger, result->StatusCode(), sessionID, ctxId, streamTarget.RawResponse());
                 }
@@ -1700,10 +1700,10 @@ extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle, const char
     //OpenAIHandle* h = static_cast<OpenAIHandle*>(handle);
     if (!config) return B_ERROR;
     
-    const char* apiKey = nullptr;
-    const char* modelName = nullptr;
-    const char* notifyPath = nullptr;
-    const char* configBaseUrl = nullptr;
+    const char* apiKey = NULL;
+    const char* modelName = NULL;
+    const char* notifyPath = NULL;
+    const char* configBaseUrl = NULL;
     
     config->FindString("api_key", &apiKey);
     config->FindString("model_name", &modelName);
@@ -1786,10 +1786,10 @@ extern "C" status_t ai_plugin_list_models(const BMessage* config, char* out_buf,
     int32 sessionID = -1;
     config->FindInt32("session_id", &sessionID);
 
-    const char* ctxId = nullptr;
+    const char* ctxId = NULL;
     config->FindString("context_id", &ctxId);
 
-    const char* apiKey = nullptr;
+    const char* apiKey = NULL;
     config->FindString("api_key", &apiKey);
     
     BString baseUrl;
@@ -1844,9 +1844,9 @@ extern "C" status_t ai_plugin_list_models(const BMessage* config, char* out_buf,
         rc = thread;
     }
     
-    if (rc == B_OK && http != nullptr) {
+    if (rc == B_OK && http != NULL) {
         const BHttpResult* httpResult = dynamic_cast<const BHttpResult*>(&(http->Result()));
-        if (httpResult != nullptr) {
+        if (httpResult != NULL) {
             statusCode = httpResult->StatusCode();
         }
     }

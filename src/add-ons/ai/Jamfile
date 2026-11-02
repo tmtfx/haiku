@@ -69,6 +69,11 @@ AddPluginTypeAttribute DeepSeekPlugin : remote ;
 # ----------------------------------------------------
 # PLUGIN MICROGPT (Con sorgenti bundled incorporati)
 # ----------------------------------------------------
+# NOTA: src/third_party/microgpt-c manca dal checkout attuale (sorgente
+# vendorizzato non presente, non un problema di compilazione). Il target
+# e' temporaneamente escluso finche' l'albero third_party non viene
+# ripristinato.
+if [ Glob [ FDirName $(HAIKU_TOP) src third_party microgpt-c src ] : microgpt.c ] {
 
 # Definiamo la lista dei sorgenti di microgpt estratti in modo pulito
 local microgptSources =
@@ -87,13 +92,15 @@ local microgptSources =
     [ FDirName $(HAIKU_TOP) src third_party microgpt-c src microgpt_turboquant.c ]
 ;
 
-Addon MicrogptPlugin : 
-    microgpt_plugin.cpp 
-    $(microgptSources) 
-    : 
-    be ai_api stdc++ 
+Addon MicrogptPlugin :
+    microgpt_plugin.cpp
+    $(microgptSources)
+    :
+    be ai_api stdc++
 ;
 # Essendo un LLM integrato/embedded che gira localmente sulla CPU:
 AddPluginTypeAttribute MicrogptPlugin : local ;
+
+}
 
 # If a resource file is needed, AddResources can be used.

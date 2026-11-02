@@ -128,8 +128,8 @@ sm750_set_pitch(uint32 pitch, bool is_panel)
     SM750_WREG32(reg_offset, reg_val);
     
     if (EnableLogs) {
-    	debug_printf("SM750_ACC: Pitch Bytes %u -> Valore Allineato 0x%X\n", pitch, aligned_val);
-    	debug_printf("SM750_ACC: Scrittura Registro 0x80208: 0x%08X\n", reg_val);
+    	debug_printf("SM750_ACC: Pitch Bytes %u -> Valore Allineato 0x%X\n", (unsigned int)pitch, (unsigned int)aligned_val);
+    	debug_printf("SM750_ACC: Scrittura Registro 0x80208: 0x%08X\n", (unsigned int)reg_val);
     }
 }
 
@@ -146,7 +146,7 @@ sm750_set_fb_addr(uint32 offset, bool is_panel)
         
     // 1. Controllo allineamento (128-bit / 16 byte)
     if (offset & 0xF) {
-        if (EnableLogs) debug_printf("SM750_ACC: ERROR - FB Address 0x%08x is not 128-bit aligned!\n", offset);
+        if (EnableLogs) debug_printf("SM750_ACC: ERROR - FB Address 0x%08x is not 128-bit aligned!\n", (unsigned int)offset);
         offset &= ~0xF; // Forza l'allineamento arrotondando per difetto
     }
     
@@ -154,7 +154,7 @@ sm750_set_fb_addr(uint32 offset, bool is_panel)
 
     // 2. Controllo Limiti (Safe Guard per 16MB)
     if (offset >= ramSize) {
-        if (EnableLogs) debug_printf("SM750_ACC: ERROR - FB Address 0x%08x beyond graphics memory size of %d!\n", offset, ramSize);
+        if (EnableLogs) debug_printf("SM750_ACC: ERROR - FB Address 0x%08x beyond graphics memory size of %d!\n", (unsigned int)offset, (int)ramSize);
         return B_BAD_VALUE;
     }
 
@@ -171,7 +171,7 @@ sm750_set_fb_addr(uint32 offset, bool is_panel)
     uint32 reg_offset = is_panel ? SM750_DISP_PANEL_FB_ADDR : SM750_DISP_CRT_FB_ADDR ;
     SM750_WREG32(reg_offset, reg_val);
     
-    if (EnableLogs) debug_printf("SM750_ACC: %s FB Address impostato a: 0x%08x (Reg: 0x%08x)\n", is_panel ? "PANEL": "CRT" ,offset, reg_val);
+    if (EnableLogs) debug_printf("SM750_ACC: %s FB Address impostato a: 0x%08x (Reg: 0x%08x)\n", is_panel ? "PANEL": "CRT" ,(unsigned int)offset, (unsigned int)reg_val);
     return B_OK;
 }
 static void sm750_set_h_timing(uint32 total, uint32 active, bool is_panel)
@@ -388,10 +388,10 @@ sm750_set_display_mode(display_mode *mode)
     si->dm = *mode;
     sm750_init_2d_engine(&(si->dm));
     if (EnableLogs) {
-    	debug_printf("SM750_DEBUG: SPACE=0x%x, BPP=%d\n", mode->space, bpp);
+    	debug_printf("SM750_DEBUG: SPACE=0x%x, BPP=%d\n", (unsigned int)mode->space, (int)bpp);
     	debug_printf("SM750_DEBUG: H_DISPLAY=%d, V_DISPLAY=%d\n", mode->timing.h_display, mode->timing.v_display);
     	debug_printf("SM750_DEBUG: VIRT_W=%d, VIRT_H=%d\n", mode->virtual_width, mode->virtual_height);
-    	debug_printf("SM750_DEBUG: CALC_PITCH=%d, SI_FBC_PITCH=%d\n", pitch, (int)si->fbc.bytes_per_row);
+    	debug_printf("SM750_DEBUG: CALC_PITCH=%d, SI_FBC_PITCH=%d\n", (int)pitch, (int)si->fbc.bytes_per_row);
     }
     return B_OK;
 }
@@ -494,7 +494,7 @@ sm750_propose_display_mode(display_mode *target, const display_mode *low, const 
         case B_RGB16: bytesPerPixel = 2; break;
         case B_CMAP8: bytesPerPixel = 1; break;
         default: 
-            if (EnableLogs) debug_printf("SM750: colorspace 0x%x not recognized!\n", target->space);
+            if (EnableLogs) debug_printf("SM750: colorspace 0x%x not recognized!\n", (unsigned int)target->space);
             return B_BAD_VALUE;
     }
     
@@ -503,8 +503,8 @@ sm750_propose_display_mode(display_mode *target, const display_mode *low, const 
     // Usiamo 12MB come limite invalicabile per il frame buffer primario
 
     if (memNeeded > gInfo->si->card_info.max_desktop_mem) {
-        if (EnableLogs) debug_printf("SM750: Mode rejected - you need %u bytes, desktop limit is %u\n", 
-                  memNeeded, gInfo->si->card_info.max_desktop_mem);
+        if (EnableLogs) debug_printf("SM750: Mode rejected - you need %u bytes, desktop limit is %u\n",
+                  (unsigned int)memNeeded, (unsigned int)gInfo->si->card_info.max_desktop_mem);
         return B_BAD_VALUE;
     }
 

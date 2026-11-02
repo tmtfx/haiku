@@ -22,7 +22,7 @@ public:
     
     bool CertificateVerificationFailed(BUrlRequest* request, 
                                        BCertificate& certificate, 
-                                       const char* message) override {
+                                       const char* message) {
         return false; 
     }
 };
@@ -32,7 +32,7 @@ class CompletionListener : public SyncListener {
 public:
     CompletionListener(const char* notifyPath) : fPath(notifyPath) {}
 
-    virtual void RequestCompleted(BUrlRequest* caller, bool success) override {
+    virtual void RequestCompleted(BUrlRequest* caller, bool success) {
         BFile file(fPath.String(), B_WRITE_ONLY | B_OPEN_AT_END);
         if (file.InitCheck() == B_OK) {
             BString endMarker = "<<STREAM_END>>";

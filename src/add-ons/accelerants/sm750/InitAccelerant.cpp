@@ -20,13 +20,12 @@
 #define CALLED() debug_printf("SM750_ACC: %s\n", __FUNCTION__)
 
 /* global gInfo for accelerant */
-accelerant_info g_info = {
-    .shared_info_area = -1,
-    .regs_area = -1,
-    .fb_area = -1,
-    .mode_list_area = -1,
-    .vblank_thread = -1
-};
+// NOTA: niente inizializzatori designati (.campo = ...), non supportati
+// dal vecchio compilatore gcc2: il global e' zero-inizializzato dal
+// linguaggio (garantito per gli oggetti di durata statica) e i 5 campi
+// che devono partire a -1 vengono impostati esplicitamente in
+// sm750_init_accelerant(), prima che vengano usati.
+accelerant_info g_info;
 accelerant_info *gInfo = &g_info;
 
 
@@ -37,7 +36,7 @@ static status_t init_vram_manager(shared_info* si)
     uint32 heapStart = desktopReserve; //soon after desktop reserve
     uint32 heapSize = si->card_info.mem_size - desktopReserve;
 
-    debug_printf("SM750_ACC: Heap VRAM allocated to 0x%x (Size: %u KB)\n", heapStart, heapSize / 1024);
+    debug_printf("SM750_ACC: Heap VRAM allocated to 0x%x (Size: %u KB)\n", (unsigned int)heapStart, (unsigned int)(heapSize / 1024));
 
     // using local_mem_mgr on stack to avoid smap with si->mem_mgr
     void* local_mem_mgr = (void*)mem_init("sm750_vram_heap", heapStart, heapSize, 8, 128);
@@ -226,10 +225,10 @@ create_mode_list()
             }
             validCount++;
         } else {
-            debug_printf("SM750_ACC: %dx%d mode removed (requires: %u MB, limit: %u MB)\n", 
-                dm->timing.h_display, dm->timing.v_display, 
-                memNeeded / (1024*1024), 
-                gInfo->si->card_info.max_desktop_mem / (1024*1024));
+            debug_printf("SM750_ACC: %dx%d mode removed (requires: %u MB, limit: %u MB)\n",
+                dm->timing.h_display, dm->timing.v_display,
+                (unsigned int)(memNeeded / (1024*1024)),
+                (unsigned int)(gInfo->si->card_info.max_desktop_mem / (1024*1024)));
         }
     }
     count = validCount;
@@ -350,6 +349,11 @@ static status_t init_common(int fd,bool isClone) {
 }
 
 status_t sm750_init_accelerant(int fd) {
+    gInfo->shared_info_area = -1;
+    gInfo->regs_area = -1;
+    gInfo->fb_area = -1;
+    gInfo->mode_list_area = -1;
+    gInfo->vblank_thread = -1;
     gInfo->is_clone = false;
     status_t result = init_common(fd,false);
     

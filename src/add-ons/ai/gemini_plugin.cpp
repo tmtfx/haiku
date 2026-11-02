@@ -44,7 +44,7 @@ public:
         fRawResponse.SetTo("");
     }
 
-    virtual ssize_t Write(const void* buffer, size_t size) override {
+    virtual ssize_t Write(const void* buffer, size_t size) {
         if (size == 0) return 0;
         
         fRawResponse.Append((const char*)buffer, size);
@@ -115,7 +115,7 @@ void SerializeBMessageToJson(const BMessage* msg, BString& outJson) {
     outJson << "{";
     bool first = true;
     
-    char* field_name = nullptr;
+    char* field_name = NULL;
     uint32 field_code = 0;
     int32 field_count = 0;
     
@@ -218,7 +218,7 @@ BString ExtractArgsJson(const BString& json, int32 functionCallPos) {
 
 
 static char* dupstr_or_null(const char* s) {
-    if (!s) return nullptr;
+    if (!s) return NULL;
     size_t n = strlen(s) + 1;
     char* p = (char*)malloc(n);
     if (p) memcpy(p, s, n);
@@ -240,7 +240,7 @@ fa:
   { "thoughtSignature": "EpUECpIE..." },
   { "functionCall": { "name": "get_system_stats", "args": {} } }
 ]
-void AppendToolCallToContext(BMessage* context, const char* name, const BMessage* argsMsg, const char* thoughtSignature = nullptr) {
+void AppendToolCallToContext(BMessage* context, const char* name, const BMessage* argsMsg, const char* thoughtSignature = NULL) {
     BMessage messagesMsg;
     if (context->FindMessage("messages", &messagesMsg) != B_OK) {
         context->AddMessage("messages", &messagesMsg);
@@ -264,7 +264,7 @@ void AppendToolCallToContext(BMessage* context, const char* name, const BMessage
     context->RemoveName("messages");
     context->AddMessage("messages", &messagesMsg);
 }*/
-void AppendToolCallToContext(BMessage* context, const char* name, const BMessage* argsMsg, const char* thoughtSignature = nullptr) {
+void AppendToolCallToContext(BMessage* context, const char* name, const BMessage* argsMsg, const char* thoughtSignature = NULL) {
     BMessage messagesMsg;
     if (context->FindMessage("messages", &messagesMsg) != B_OK) {
         // Inizializza se non esiste ancora
@@ -403,7 +403,7 @@ static BString EscapeStringForJson(const char* input) {
 }*/
 
 // Funzione helper per iniettare l'intero storico dei messaggi salvato nel BMessage nel JSON di Gemini
-void BuildPayloadFromContext(const BMessage* config, const char* currentPrompt, BString& outPayload, const BString* geminiToolsJson = nullptr){
+void BuildPayloadFromContext(const BMessage* config, const char* currentPrompt, BString& outPayload, const BString* geminiToolsJson = NULL){
     outPayload.SetTo("{\"contents\":[");
     bool first = true;
 
@@ -421,13 +421,13 @@ void BuildPayloadFromContext(const BMessage* config, const char* currentPrompt, 
             
             lastMsgItem = msgItem; // Salviamo l'ultimo messaggio processato
 
-            const char* type = nullptr;
+            const char* type = NULL;
             msgItem.FindString("type", &type);
 
             if (type && strcmp(type, "functionCall") == 0) {
                 // Storico di una chiamata a un tool fatta dall'LLM
                 const char* name = msgItem.FindString("name");
-                const char* thoughtSig = nullptr;
+                const char* thoughtSig = NULL;
                 msgItem.FindString("thought_signature", &thoughtSig);
                 
                 if (!first) outPayload.Append(",");
@@ -483,8 +483,8 @@ void BuildPayloadFromContext(const BMessage* config, const char* currentPrompt, 
 
             } else {
                 // Messaggio standard di testo (User o Assistant)
-                const char* role = nullptr;
-                const char* content = nullptr;
+                const char* role = NULL;
+                const char* content = NULL;
                 msgItem.FindString("role", &role);
                 
                 if (msgItem.FindString("content", &content) != B_OK) {
@@ -514,8 +514,8 @@ void BuildPayloadFromContext(const BMessage* config, const char* currentPrompt, 
         bool alreadyAppended = false;
 
         if (hasHistory) {
-            const char* lastRole = nullptr;
-            const char* lastContent = nullptr;
+            const char* lastRole = NULL;
+            const char* lastContent = NULL;
             lastMsgItem.FindString("role", &lastRole);
             if (lastMsgItem.FindString("content", &lastContent) != B_OK) {
                 lastMsgItem.FindString("text", &lastContent);
@@ -541,8 +541,8 @@ void BuildPayloadFromContext(const BMessage* config, const char* currentPrompt, 
     
     BString systemPrompt;
     if (config) {
-        const char* sys = nullptr;
-        if (config->FindString("system_prompt", &sys) == B_OK && sys != nullptr) {
+        const char* sys = NULL;
+        if (config->FindString("system_prompt", &sys) == B_OK && sys != NULL) {
             systemPrompt = sys;
         }
     }
@@ -629,7 +629,7 @@ ai_plugin_generate_text_sync(ai_plugin_t handle,
     }
     if (!response_buf || response_len == 0) return B_ERROR;
     
-    const char* apiKeyRaw = nullptr;
+    const char* apiKeyRaw = NULL;
     config->FindString("api_key", &apiKeyRaw);
     if (!apiKeyRaw || apiKeyRaw[0] == '\0') {
         fprintf(stderr, "[GEMINI PLUGIN] ERRORE CRITICO: api_key non trovata o vuota nel BMessage!\n");
@@ -638,17 +638,17 @@ ai_plugin_generate_text_sync(ai_plugin_t handle,
     }
     BString apiKey(apiKeyRaw);
     
-    const char* baseUrlRaw = nullptr;
+    const char* baseUrlRaw = NULL;
     config->FindString("base_url", &baseUrlRaw);
     BString baseUrl = (baseUrlRaw && baseUrlRaw[0] != '\0') ? baseUrlRaw : DEFAULT_GEMINI_BASE_URL;
     if (baseUrl.EndsWith("/")) baseUrl.Truncate(baseUrl.Length() - 1);
 
-    const char* modelName = nullptr;
+    const char* modelName = NULL;
     config->FindString("model_name", &modelName);
     if (!modelName || modelName[0] == '\0')
         modelName = DEFAULT_GEMINI_MODEL;
 
-    const char* ctxId = nullptr;
+    const char* ctxId = NULL;
     config->FindString("context_id", &ctxId);
 
     int32 sessionID = -1;
@@ -717,7 +717,7 @@ ai_plugin_generate_text_sync(ai_plugin_t handle,
     int32 statusCode = 0;
     if (http) {
         const BHttpResult* httpResult = dynamic_cast<const BHttpResult*>(&(http->Result()));
-        if (httpResult != nullptr) {
+        if (httpResult != NULL) {
             statusCode = httpResult->StatusCode();
         }
     }
@@ -729,14 +729,14 @@ ai_plugin_generate_text_sync(ai_plugin_t handle,
 
     if (statusCode == 200 && parseSuccess) {
         BMessage candidates, candidateZero, content, parts, partZero;
-        const char* extractedText = nullptr;
+        const char* extractedText = NULL;
 
         bool found = (parsedJson.FindMessage("candidates", &candidates) == B_OK)
             && (candidates.FindMessage("0", &candidateZero) == B_OK || candidates.FindMessage("msg", 0, &candidateZero) == B_OK)
             && (candidateZero.FindMessage("content", &content) == B_OK)
             && (content.FindMessage("parts", &parts) == B_OK)
             && (parts.FindMessage("0", &partZero) == B_OK || parts.FindMessage("msg", 0, &partZero) == B_OK)
-            && (partZero.FindString("text", &extractedText) == B_OK && extractedText != nullptr);
+            && (partZero.FindString("text", &extractedText) == B_OK && extractedText != NULL);
 
         if (found) {
             size_t textLen = strlen(extractedText);
@@ -848,8 +848,8 @@ void ConvertBMessageToGeminiToolsJson(const BMessage* toolsMsg, BString& outJson
         if (!params.IsEmpty()) {
             BMessage requiredMsg;
             BString reqFieldStr = "";
-            const char* fStr = nullptr;
-            if (params.FindString("required", &fStr) == B_OK && fStr != nullptr) {
+            const char* fStr = NULL;
+            if (params.FindString("required", &fStr) == B_OK && fStr != NULL) {
                 reqFieldStr = fStr;
             } else if (params.FindMessage("required", &requiredMsg) == B_OK) {
                 const char* f = requiredMsg.FindString("0");
@@ -888,7 +888,7 @@ gemini_stream_thread_func(void* data)
     BString targetUrl;
     BString tempUrl;
 
-    const char* ctxId = nullptr;
+    const char* ctxId = NULL;
     int32 sessionID = -1;
     if (args->context_copy) {
         args->context_copy->FindString("context_id", &ctxId);
@@ -967,7 +967,7 @@ gemini_stream_thread_func(void* data)
             ConvertBMessageToGeminiToolsJson(&replyTools, toolsJson);
 
             BString payload;
-            BuildPayloadFromContext(args->context_copy, nullptr, payload, &toolsJson);
+            BuildPayloadFromContext(args->context_copy, NULL, payload, &toolsJson);
 
             BMallocIO outNetworkData;
             SyncListener syncListener;
@@ -1001,7 +1001,7 @@ gemini_stream_thread_func(void* data)
             uint32 httpStatusCode = 0;
             if (http) {
                 const BHttpResult* result = dynamic_cast<const BHttpResult*>(&http->Result());
-                if (result != nullptr)
+                if (result != NULL)
                     httpStatusCode = result->StatusCode();
             }
 
@@ -1028,7 +1028,7 @@ gemini_stream_thread_func(void* data)
                 if (streamFile.InitCheck() == B_OK) {
                     BString guiError;
                     BMessage errorDetails;
-                    const char* apiErrorText = nullptr;
+                    const char* apiErrorText = NULL;
                     if (parseOk && parsedJson.FindMessage("error", &errorDetails) == B_OK) {
                         errorDetails.FindString("message", &apiErrorText);
                     }
@@ -1054,9 +1054,9 @@ gemini_stream_thread_func(void* data)
 
             if (hasCandidates) {
                 BMessage functionCallObj;
-                const char* toolName = nullptr;
-                const char* textContent = nullptr;
-                const char* thoughtSig = nullptr;
+                const char* toolName = NULL;
+                const char* textContent = NULL;
+                const char* thoughtSig = NULL;
                 bool hasFunctionCall = false;
 
                 BMessage partItem;
@@ -1065,7 +1065,7 @@ gemini_stream_thread_func(void* data)
                         partsMsg.FindMessage("msg", partIndex, &partItem) == B_OK) {
                     
                     // 1. Estrazione firma del pensiero (senza sovrascrivere variabili)
-                    if (thoughtSig == nullptr) {
+                    if (thoughtSig == NULL) {
                         if (partItem.FindString("thoughtSignature", &thoughtSig) != B_OK) {
                             partItem.FindString("thought_signature", &thoughtSig);
                         }
@@ -1084,19 +1084,19 @@ gemini_stream_thread_func(void* data)
                     }
 
                     // 3. Estrazione testo
-                    if (textContent == nullptr) {
+                    if (textContent == NULL) {
                         partItem.FindString("text", &textContent);
                     }
 
                     partIndex++;
                 }
 
-                if (hasFunctionCall && toolName != nullptr) {
+                if (hasFunctionCall && toolName != NULL) {
                     fprintf(stderr, "\n[GEMINI MCP] Richiesta esecuzione Tool: %s\n", toolName);
                     BMessage argsMsg;
                     functionCallObj.FindMessage("args", &argsMsg);     
                     
-                    if (thoughtSig == nullptr) {
+                    if (thoughtSig == NULL) {
                         if (functionCallObj.FindString("thoughtSignature", &thoughtSig) != B_OK) {
                             functionCallObj.FindString("thought_signature", &thoughtSig);
                         }
@@ -1129,7 +1129,7 @@ gemini_stream_thread_func(void* data)
                     // executionLoop rimane true: il ciclo prosegue inviando l'output del tool a Gemini
                 } else {
                     // CASO TESTO / RISPOSTA FINALE: Nessuna chiamata a funzione richiesta
-                    if (textContent != nullptr && strlen(textContent) > 0) {
+                    if (textContent != NULL && strlen(textContent) > 0) {
                         BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
                         if (streamFile.InitCheck() == B_OK) {
                             streamFile.Write(textContent, strlen(textContent));
@@ -1156,7 +1156,7 @@ fallback_to_standard:
                           baseUrl.String(), modelName, args->api_key ? args->api_key : "");
 
     BString payload;
-    BuildPayloadFromContext(args->context_copy, nullptr, payload, nullptr);
+    BuildPayloadFromContext(args->context_copy, NULL, payload, NULL);
 
     StreamTarget streamTarget(args->notify_path);
     CompletionListener listener(args->notify_path);
@@ -1182,7 +1182,7 @@ fallback_to_standard:
 
         if (http) {
             const BHttpResult* result = dynamic_cast<const BHttpResult*>(&http->Result());
-            if (result != nullptr && result->StatusCode() != 200) {
+            if (result != NULL && result->StatusCode() != 200) {
                 fprintf(stderr, "[GEMINI STREAM ERRORE] Status HTTP non valido in streaming: %d\n", result->StatusCode());
                 DispatchError(args->server_messenger, result->StatusCode(), sessionID, ctxId, streamTarget.RawResponse());
             }
@@ -1213,10 +1213,10 @@ extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle,
     //AIPluginHandle* h = (AIPluginHandle*)handle;
     if (!config) return B_ERROR;
     
-    const char* apiKey = nullptr;
-    const char* modelName = nullptr;
-    const char* notifyPath = nullptr;
-    const char* configBaseUrl = nullptr;
+    const char* apiKey = NULL;
+    const char* modelName = NULL;
+    const char* notifyPath = NULL;
+    const char* configBaseUrl = NULL;
     
     config->FindString("api_key", &apiKey);
     config->FindString("model_name", &modelName);
@@ -1302,11 +1302,11 @@ extern "C" status_t ai_plugin_list_models(const BMessage* config, char* out_buf,
     int32 sessionID = -1;
     config->FindInt32("session_id", &sessionID);
 
-    const char* ctxId = nullptr;
+    const char* ctxId = NULL;
     config->FindString("context_id", &ctxId);
 
     
-    const char* apiKey = nullptr;
+    const char* apiKey = NULL;
     config->FindString("api_key", &apiKey);
     
     BString baseUrl;
@@ -1343,9 +1343,9 @@ extern "C" status_t ai_plugin_list_models(const BMessage* config, char* out_buf,
         rc = thread;
     }
     
-    if (rc == B_OK && http != nullptr) {
+    if (rc == B_OK && http != NULL) {
         const BHttpResult* httpResult = dynamic_cast<const BHttpResult*>(&(http->Result()));
-        if (httpResult != nullptr) {
+        if (httpResult != NULL) {
             statusCode = httpResult->StatusCode();
         }
     }

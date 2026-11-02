@@ -475,7 +475,8 @@ intel_arc_get_accelerant_device_info(accelerant_device_info* info)
 	snprintf(info->chipset, sizeof(info->chipset), "%s",
 		gInfo->shared_info->device_identifier);
 	snprintf(info->serial_no, sizeof(info->serial_no), "%04x:%04x",
-		gInfo->shared_info->vendor_id, gInfo->shared_info->device_id);
+		gInfo->shared_info->vendor_id,
+		(unsigned int)gInfo->shared_info->device_id);
 	info->memory = gInfo->shared_info->frame_buffer_size > 0xffffffffULL
 		? 0xffffffffU : (uint32)gInfo->shared_info->frame_buffer_size;
 	info->dac_speed = 0;

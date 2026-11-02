@@ -28,7 +28,7 @@ static std::vector<std::string> scan_models(const char* dir) {
     DIR* d = opendir(dir);
     if (!d) return out;
     struct dirent* e;
-    while ((e = readdir(d)) != nullptr) {
+    while ((e = readdir(d)) != NULL) {
         if (e->d_name[0] == '.') continue;
         // Only include regular files (likely checkpoints) and directories
         std::string p = std::string(dir) + "/" + e->d_name;

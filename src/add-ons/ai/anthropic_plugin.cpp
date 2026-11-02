@@ -211,7 +211,7 @@ static void SerializeBMessageToJson(const BMessage* msg, BString& outJson) {
     outJson << "{";
     bool first = true;
     
-    char* field_name = nullptr;
+    char* field_name = NULL;
     uint32 field_code = 0;
     int32 field_count = 0;
     
@@ -286,8 +286,8 @@ static void ConvertBMessageToAnthropicToolsJson(const BMessage* toolsMsg, BStrin
         if (!params.IsEmpty()) {
             BMessage requiredMsg;
             BString reqFieldStr = "";
-            const char* fStr = nullptr;
-            if (params.FindString("required", &fStr) == B_OK && fStr != nullptr) {
+            const char* fStr = NULL;
+            if (params.FindString("required", &fStr) == B_OK && fStr != NULL) {
                 reqFieldStr = fStr;
             } else if (params.FindMessage("required", &requiredMsg) == B_OK) {
                 const char* f = requiredMsg.FindString("0");
@@ -371,7 +371,7 @@ static void AppendToolResponseToContext(BMessage* context, const char* name, con
 
 static void BuildAnthropicPayload(const BMessage* chatContext, const char* explicitPrompt, BString& outPayload, bool stream = false)
 {
-    const char* model = nullptr;
+    const char* model = NULL;
     if (chatContext) chatContext->FindString("model_name", &model);
     if (!model || model[0] == '\0') model = DEFAULT_ANTHROPIC_MODEL;
 
@@ -396,7 +396,7 @@ static void BuildAnthropicPayload(const BMessage* chatContext, const char* expli
         while (historyMsg.FindMessage("msg", i++, &msgToolTurn) == B_OK
             || historyMsg.FindMessage(BString().SetToFormat("%ld", (long)(i-1)).String(), &msgToolTurn) == B_OK) {
             
-            const char* type = nullptr;
+            const char* type = NULL;
             msgToolTurn.FindString("type", &type);
 
             if (type && strcmp(type, "functionCall") == 0) {
@@ -451,8 +451,8 @@ static void BuildAnthropicPayload(const BMessage* chatContext, const char* expli
             }
             else {
                 // Messaggio standard di testo
-                const char* role = nullptr;
-                const char* content = nullptr;
+                const char* role = NULL;
+                const char* content = NULL;
                 msgToolTurn.FindString("role", &role);
                 if (msgToolTurn.FindString("content", &content) != B_OK) {
                     msgToolTurn.FindString("text", &content);
@@ -533,10 +533,10 @@ static void BuildAnthropicPayload(const BMessage* chatContext, const char* expli
     // Gestione System Prompt Top-Level
     BString systemPrompt;
     if (chatContext) {
-        const char* sys = nullptr;
-        if (chatContext->FindString("system_prompt", &sys) == B_OK && sys != nullptr) {
+        const char* sys = NULL;
+        if (chatContext->FindString("system_prompt", &sys) == B_OK && sys != NULL) {
             systemPrompt = sys;
-        } else if (chatContext->FindString("instructions", &sys) == B_OK && sys != nullptr) {
+        } else if (chatContext->FindString("instructions", &sys) == B_OK && sys != NULL) {
             systemPrompt = sys;
         }
     }
@@ -621,10 +621,10 @@ anthropic_stream_thread_func(void* data)
     bool mcpActive = false;
     bool executionLoop = true;
 
-    const char* ctxId = nullptr;
+    const char* ctxId = NULL;
     int32 sessionID = -1;
 
-    if (args->context_copy != nullptr) {
+    if (args->context_copy != NULL) {
         args->context_copy->FindString("context_id", &ctxId);
         args->context_copy->FindInt32("session_id", &sessionID);
     }
@@ -746,7 +746,7 @@ anthropic_stream_thread_func(void* data)
 
         if (http) {
             const BHttpResult* result = dynamic_cast<const BHttpResult*>(&http->Result());
-            if (result != nullptr) {
+            if (result != NULL) {
                 httpStatusCode = result->StatusCode();
             }
         }
@@ -1005,7 +1005,7 @@ ai_plugin_generate_text_sync(ai_plugin_t handle, const char* prompt,
 
     const char* apiKey = NULL;
     int32 sessionID = -1;
-    const char* ctxId = nullptr;
+    const char* ctxId = NULL;
     BMessenger serverMessenger;
 
     if (contextMsg != NULL) {
@@ -1022,7 +1022,7 @@ ai_plugin_generate_text_sync(ai_plugin_t handle, const char* prompt,
         return B_BAD_VALUE;
     }
 
-    const char* baseUrlRaw = nullptr;
+    const char* baseUrlRaw = NULL;
     if (contextMsg != NULL)
         contextMsg->FindString("base_url", &baseUrlRaw);
     if (!baseUrlRaw || baseUrlRaw[0] == '\0') {
@@ -1142,7 +1142,7 @@ ai_plugin_generate_text_async(ai_plugin_t handle, const char* prompt,
 	const char* apiKey = NULL;
 	const char* model = NULL;
 	const char* notifyPath = NULL;
-	const char* configBaseUrl = nullptr;
+	const char* configBaseUrl = NULL;
 	contextMsg->FindString("api_key", &apiKey);
 	contextMsg->FindString("model_name", &model);
 	contextMsg->FindString("notify_path", &notifyPath);

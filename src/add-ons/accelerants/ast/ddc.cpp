@@ -288,7 +288,7 @@ ast_log_edid(const uint8 buffer[128])
 	TRACE("EDID dump:\n");
 	for (uint32 row = 0; row < kEdidSize; row += 16) {
 		TRACE("  %02x: %02x %02x %02x %02x %02x %02x %02x %02x  "
-			"%02x %02x %02x %02x %02x %02x %02x %02x\n", row,
+			"%02x %02x %02x %02x %02x %02x %02x %02x\n", (unsigned int)row,
 			buffer[row+0], buffer[row+1], buffer[row+2], buffer[row+3],
 			buffer[row+4], buffer[row+5], buffer[row+6], buffer[row+7],
 			buffer[row+8], buffer[row+9], buffer[row+10], buffer[row+11],
@@ -317,5 +317,6 @@ ast_log_edid(const uint8 buffer[128])
 	uint32 vActive
 		= (((uint32)(buffer[61] & 0xf0)) << 4) | buffer[59];
 	TRACE("  preferred timing: %u x %u @ %u kHz pixel clock\n",
-		hActive, vActive, pixelClock10kHz * 10);
+		(unsigned int)hActive, (unsigned int)vActive,
+		(unsigned int)(pixelClock10kHz * 10));
 }

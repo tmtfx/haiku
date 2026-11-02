@@ -438,7 +438,7 @@ ast_set_display_mode(display_mode* mode)
 	if (needed > gInfo->sharedInfo->framebufferSize) {
 		TRACE("set_display_mode: %u x %u (%u bytes) exceeds framebuffer"
 			" (%" B_PRIu32 " bytes)\n",
-			mode->virtual_width, mode->virtual_height, needed,
+			mode->virtual_width, mode->virtual_height, (unsigned int)needed,
 			gInfo->sharedInfo->framebufferSize);
 		return B_NO_MEMORY;
 	}

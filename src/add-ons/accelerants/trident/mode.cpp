@@ -205,7 +205,7 @@ ProposeDisplayMode(display_mode *target, const display_mode *low,
 	if (enable_log)
 		debug_printf("ProposeDisplayMode() %dx%d, pixel clock: %d kHz, space: 0x%X\n",
 			target->timing.h_display, target->timing.v_display,
-			target->timing.pixel_clock, target->space);
+			(int)target->timing.pixel_clock, (unsigned int)target->space);
 
 	SharedInfo& si = *(gInfo.sharedInfo);
 
@@ -346,7 +346,7 @@ SetDisplayMode(display_mode* pMode)
 	if (enable_log)
 		debug_printf("Trident_ACC: SetDisplayMode starting for %dx%d, virtual %dx%d, %d bpp, bytesPerRow %d\n",
 			mode.timing.h_display, mode.timing.v_display,
-			mode.virtual_width, mode.virtual_height, mode.bpp, mode.bytesPerRow);
+			mode.virtual_width, mode.virtual_height, (int)mode.bpp, (int)mode.bytesPerRow);
 
 	// Enable MMIO at the very start of SetDisplayMode so we can read the original registers correctly
 	ioctl(gInfo.deviceFileDesc, TRIDENT_ENABLE_MMIO);
@@ -637,8 +637,8 @@ SetDisplayMode(display_mode* pMode)
 	uint8 old_clk_low = read_seq_reg(ClockLow);
 	uint8 old_clk_high = read_seq_reg(ClockHigh);
 
-	OUTW(0x3C4, (tridentReg->tridentRegsClock[0x01]) << 8 | ClockLow);
-	OUTW(0x3C4, (tridentReg->tridentRegsClock[0x02]) << 8 | ClockHigh);
+	OUTW(0x3C4, (uint32)(((tridentReg->tridentRegsClock[0x01]) << 8) | ClockLow));
+	OUTW(0x3C4, (uint32)(((tridentReg->tridentRegsClock[0x02]) << 8) | ClockHigh));
 
 	uint8 new_clk_low = read_seq_reg(ClockLow);
 	uint8 new_clk_high = read_seq_reg(ClockHigh);
@@ -665,7 +665,7 @@ SetDisplayMode(display_mode* pMode)
 	OUTB(0x3C5, tridentReg->tridentRegs3C4[Protection]);
 
 	//OUTW(0x3C4, (0x80 << 8) | NewMode1);
-	OUTW(0x3C4, ((tridentReg->tridentRegs3C4[NewMode1] ^ 0x02) << 8) | NewMode1);
+	OUTW(0x3C4, (uint32)(((tridentReg->tridentRegs3C4[NewMode1] ^ 0x02) << 8) | NewMode1));
 
 	si.displayMode = mode;
 
@@ -675,7 +675,7 @@ SetDisplayMode(display_mode* pMode)
 
 	if (enable_log)
 		debug_printf("Trident_ACC: SetDisplayMode completed successfully. Cursor offset: %u\n",
-			si.cursorOffset);
+			(unsigned int)si.cursorOffset);
 
 	return B_OK;
 }

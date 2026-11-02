@@ -20,9 +20,11 @@ bool enableCRTCDebug = false;
 /* Helper macro per eseguire e loggare la modifica di un registro a 8-bit (CRTC/SEQ) */
 #define LOG_CRTC_WRITE8(name, read_expr, write_stmt) do { \
     if (enableCRTCDebug) { \
-        uint8 __old_val = (read_expr); \
+        uint8 __old_val; \
+        uint8 __new_val; \
+        __old_val = (read_expr); \
         write_stmt; \
-        uint8 __new_val = (read_expr); \
+        __new_val = (read_expr); \
         debug_printf(LOG_PREFIX "  [REG WRITE] %s: PRIMA=0x%02x -> DOPO=0x%02x\n", (name), __old_val, __new_val); \
     } else { \
         write_stmt; \
@@ -32,9 +34,11 @@ bool enableCRTCDebug = false;
 /* Helper macro per registri a 32-bit MMIO (DACR / CRTCDR) */
 #define LOG_REG32_WRITE(name, reg_id, value) do { \
     if (enableCRTCDebug) { \
-        uint32 __old_val = CRTCDR(reg_id); \
+        uint32 __old_val; \
+        uint32 __new_val; \
+        __old_val = CRTCDR(reg_id); \
         CRTCDW(reg_id, (value)); \
-        uint32 __new_val = CRTCDR(reg_id); \
+        __new_val = CRTCDR(reg_id); \
         debug_printf(LOG_PREFIX "  [REG32 WRITE] %s: PRIMA=0x%08" B_PRIx32 " -> DOPO=0x%08" B_PRIx32 "\n", (name), __old_val, __new_val); \
     } else { \
         CRTCDW(reg_id, (value)); \
@@ -154,9 +158,11 @@ status_t eng_crtc_set_timing(display_mode target)
 
     if (enableCRTCDebug) {
         debug_printf(LOG_PREFIX "CRTC Timings Calc:\n\tHTOT:%x HDISPEND:%x HBLNKS:%x HBLNKE:%x HSYNCS:%x HSYNCE:%x\n",
-            htotal, hdisp_e, hblnk_s, hblnk_e, hsync_s, hsync_e);
+            (unsigned int)htotal, (unsigned int)hdisp_e, (unsigned int)hblnk_s,
+            (unsigned int)hblnk_e, (unsigned int)hsync_s, (unsigned int)hsync_e);
         debug_printf(LOG_PREFIX "\tVTOT:%x VDISPEND:%x VBLNKS:%x VBLNKE:%x VSYNCS:%x VSYNCE:%x\n",
-            vtotal, vdisp_e, vblnk_s, vblnk_e, vsync_s, vsync_e);
+            (unsigned int)vtotal, (unsigned int)vdisp_e, (unsigned int)vblnk_s,
+            (unsigned int)vblnk_e, (unsigned int)vsync_s, (unsigned int)vsync_e);
     }
 
     /* Unlock CRTC registers at index 0-7 */
@@ -221,6 +227,7 @@ status_t eng_crtc_set_timing(display_mode target)
     /* Set horizontal display fetch count (SR1C & SR1D) */
     {
         uint8 bpp = 1;
+        uint32 fetch;
         switch (target.space) {
             case B_RGB15_LITTLE:
             case B_RGB16_LITTLE: bpp = 2; break;
@@ -228,7 +235,7 @@ status_t eng_crtc_set_timing(display_mode target)
             case B_RGB32_LITTLE: bpp = 4; break;
             default: bpp = 1; break;
         }
-        uint32 fetch = (target.timing.h_display * bpp) >> 4;
+        fetch = (target.timing.h_display * bpp) >> 4;
         LOG_CRTC_WRITE8("SEQ FETCHCNTLO (SR1C)", SEQR(FETCHCNTLO), SEQW(FETCHCNTLO, fetch & 0xff));
         LOG_CRTC_WRITE8("SEQ FETCHCNTHI (SR1D)", SEQR(FETCHCNTHI), SEQW(FETCHCNTHI, (SEQR(FETCHCNTHI) & ~0x03) | ((fetch >> 8) & 0x03)));
     }
@@ -319,9 +326,11 @@ status_t eng_crtc_set_timing(display_mode target)
         temp |= 0x80;
 
     if (enableCRTCDebug) {
-        uint8 old_misc = ENG_REG8(RG8_MISCR);
+        uint8 old_misc;
+        uint8 new_misc;
+        old_misc = ENG_REG8(RG8_MISCR);
         ENG_REG8(RG8_MISCW) = temp;
-        uint8 new_misc = ENG_REG8(RG8_MISCR);
+        new_misc = ENG_REG8(RG8_MISCR);
         debug_printf(LOG_PREFIX "  [REG WRITE] MISC Register: PRIMA=0x%02x -> DOPO=0x%02x\n", old_misc, new_misc);
     } else {
         ENG_REG8(RG8_MISCW) = temp;

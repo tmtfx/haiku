@@ -259,7 +259,7 @@ uint32
 GetCursorBits(void)
 {
 	CALLED();
-	debug_printf("intel_arc GET_CURSOR_BITS ritorna %d\n", gInfo->shared_info->settings.cursorbits);
+	debug_printf("intel_arc GET_CURSOR_BITS ritorna %d\n", (int)gInfo->shared_info->settings.cursorbits);
     return gInfo->shared_info->settings.cursorbits;
 }
 

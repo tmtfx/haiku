@@ -631,7 +631,8 @@ ast_program_mode(const ast_mode_info* mode)
 		return B_BAD_VALUE;
 
 	TRACE("program_mode: %ux%u@%uHz 32bpp on AST chip gen %d\n",
-		mode->hActive, mode->vActive, mode->refreshRate,
+		(unsigned int)mode->hActive, (unsigned int)mode->vActive,
+		(unsigned int)mode->refreshRate,
 		(int)gInfo->sharedInfo->chipGeneration);
 
 	dump_color_regs("BEFORE");

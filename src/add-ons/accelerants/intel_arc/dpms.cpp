@@ -244,11 +244,11 @@ intel_arc_dpms_mode(void)
 status_t
 intel_arc_set_dpms_mode(uint32 mode)
 {
-	debug_printf("intel_arc.accelerant: intel_arc_set_dpms_mode(mode=%u)\n", mode);
+	debug_printf("intel_arc.accelerant: intel_arc_set_dpms_mode(mode=%u)\n", (unsigned int)mode);
 	(void)handle_hotplug_event();
 	if (gInfo->shared_info->dpms_mode == mode) {
 		debug_printf("intel_arc.accelerant: DPMS already in requested state %u, skipping\n",
-			mode);
+			(unsigned int)mode);
 		return B_OK;
 	}
 	switch (mode) {

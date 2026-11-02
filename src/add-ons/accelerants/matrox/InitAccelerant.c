@@ -138,7 +138,7 @@ status_t INIT_ACCELERANT(int the_fd)
 	result = gx00_general_powerup();
 	
 	debug_printf("matrox_acc: Card Type enum=%d, Memory Size=%d MB, Secondary Head=%s\n",
-				si->ps.card_type, si->ps.memory_size, si->ps.secondary_head ? "SI" : "NO");
+				(int)si->ps.card_type, (int)si->ps.memory_size, si->ps.secondary_head ? "SI" : "NO");
 
 
 	/* bail out if it failed */

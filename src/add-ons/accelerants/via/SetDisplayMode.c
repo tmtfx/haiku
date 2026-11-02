@@ -93,8 +93,8 @@ status_t SET_DISPLAY_MODE(display_mode *mode_to_set)
 	target /*= bounds*/ = *mode_to_set;
 	/* show the mode bits */
 	if (enableSetModeDebug) {
-		debug_printf(LOG_PREFIX "SETMODE: (ENTER) initial modeflags: $%08x\n", target.flags);
-		debug_printf(LOG_PREFIX "SETMODE: requested target pixelclock %dkHz\n",  target.timing.pixel_clock);
+		debug_printf(LOG_PREFIX "SETMODE: (ENTER) initial modeflags: $%08x\n", (unsigned int)target.flags);
+		debug_printf(LOG_PREFIX "SETMODE: requested target pixelclock %dkHz\n",  (int)target.timing.pixel_clock);
 		debug_printf(LOG_PREFIX "SETMODE: requested virtual_width %d, virtual_height %d\n", target.virtual_width, target.virtual_height);
 	}
 
@@ -112,7 +112,7 @@ status_t SET_DISPLAY_MODE(display_mode *mode_to_set)
 		target.flags &= ~TV_BITS;
 	}
 	if (enableSetModeDebug) {
-		debug_printf(LOG_PREFIX "SETMODE: (CONT.) validated command modeflags: $%08x\n", target.flags);
+		debug_printf(LOG_PREFIX "SETMODE: (CONT.) validated command modeflags: $%08x\n", (unsigned int)target.flags);
 		dump_crtc_regs("PRIMA (Firmware / Bootloader)");
 	}
 	
@@ -193,7 +193,7 @@ status_t SET_DISPLAY_MODE(display_mode *mode_to_set)
 //			eng_general_head_select(false);
 
 		/* set the pixel clock PLL(s) */
-		if (enableSetModeDebug) debug_printf(LOG_PREFIX "SETMODE: target clock %dkHz\n",target.timing.pixel_clock);
+		if (enableSetModeDebug) debug_printf(LOG_PREFIX "SETMODE: target clock %dkHz\n",(int)target.timing.pixel_clock);
 		if (head1_set_pix_pll(target) == B_ERROR) {
 			if (enableSetModeDebug) debug_printf(LOG_PREFIX "SETMODE: error setting pixel clock (internal DAC)\n");
 		}
@@ -330,7 +330,7 @@ status_t SET_DISPLAY_MODE(display_mode *mode_to_set)
 		case B_RGB16_LITTLE: colour_depth1 = 16; colour_mode = BPP16; break;
 		case B_RGB32_LITTLE: colour_depth1 = 32; colour_mode = BPP32; break;
 		default:
-			if (enableSetModeDebug) debug_printf(LOG_PREFIX "SETMODE: Invalid singlehead colour depth 0x%08x\n", target.space);
+			if (enableSetModeDebug) debug_printf(LOG_PREFIX "SETMODE: Invalid singlehead colour depth 0x%08x\n", (unsigned int)target.space);
 			return B_ERROR;
 		}
 
@@ -418,7 +418,7 @@ status_t MOVE_DISPLAY(uint16 h_display_start, uint16 v_display_start) {
 			h_display_start &= ~0x0f;
 			break;
 		default:
-			if (enableSetModeDebug) debug_printf(LOG_PREFIX "SET:Invalid DH colour depth 0x%08x, should never happen\n", si->dm.space);
+			if (enableSetModeDebug) debug_printf(LOG_PREFIX "SET:Invalid DH colour depth 0x%08x, should never happen\n", (unsigned int)si->dm.space);
 			return B_ERROR;
 		}
 	}
@@ -520,7 +520,7 @@ void SET_INDEXED_COLORS(uint count, uint8 first, uint8 *color_data, uint32 flags
 status_t SET_DPMS_MODE(uint32 dpms_flags) {
 	interrupt_enable(false);
 
-	if (enableSetModeDebug) debug_printf(LOG_PREFIX "SET_DPMS_MODE: 0x%08x\n", dpms_flags);
+	if (enableSetModeDebug) debug_printf(LOG_PREFIX "SET_DPMS_MODE: 0x%08x\n", (unsigned int)dpms_flags);
 	
 #if 0
 	if (si->dm.flags & DUALHEAD_BITS) /*dualhead*/
@@ -566,7 +566,7 @@ status_t SET_DPMS_MODE(uint32 dpms_flags) {
 			head1_dpms(false, false, false);
 			break;
 		default:
-			if (enableSetModeDebug) debug_printf(LOG_PREFIX "SET: Invalid DPMS settings (DH) 0x%08x\n", dpms_flags);
+			if (enableSetModeDebug) debug_printf(LOG_PREFIX "SET: Invalid DPMS settings (DH) 0x%08x\n", (unsigned int)dpms_flags);
 			interrupt_enable(true);
 			return B_ERROR;
 		}

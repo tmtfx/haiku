@@ -48,7 +48,7 @@ status_t wait_for_clear(uint32 offset, uint32 mask, bigtime_t timeout)
 			return B_OK;
 		snooze(100);
 	}
-	debug_printf("intel_arc.accelerant ERROR: wait_for_clear timed out on reg 0x%08X (mask 0x%08X)\n", offset, mask);
+	debug_printf("intel_arc.accelerant ERROR: wait_for_clear timed out on reg 0x%08X (mask 0x%08X)\n", (unsigned int)offset, (unsigned int)mask);
 	return B_TIMED_OUT;
 }
 
@@ -64,7 +64,7 @@ status_t wait_for_set(uint32 offset, uint32 mask, bigtime_t timeout)
 			return B_OK;
 		snooze(100);
 	}
-	debug_printf("intel_arc.accelerant ERROR: wait_for_set timed out on reg 0x%08X (mask 0x%08X)\n", offset, mask);
+	debug_printf("intel_arc.accelerant ERROR: wait_for_set timed out on reg 0x%08X (mask 0x%08X)\n", (unsigned int)offset, (unsigned int)mask);
 	return B_TIMED_OUT;
 }
 

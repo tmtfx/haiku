@@ -433,7 +433,7 @@ status_t PROPOSE_DISPLAY_MODE(display_mode *target, const display_mode *low, con
 	}
 
 	/* setup status flags */ 
-	if (enableProposeDebug) debug_printf(LOG_PREFIX "PROPOSEMODE: initial modeflags: $%08x\n", target->flags);
+	if (enableProposeDebug) debug_printf(LOG_PREFIX "PROPOSEMODE: initial modeflags: $%08x\n", (unsigned int)target->flags);
 	/* preset to singlehead card without TVout, no overlay support and no hardcursor.
 	 * also advice system that app_server and acc engine may touch the framebuffer
 	 * simultaneously (fixed). */
@@ -525,7 +525,7 @@ status_t PROPOSE_DISPLAY_MODE(display_mode *target, const display_mode *low, con
 	/* set SUPPORTS_OVERLAYS */
 	target->flags |= B_SUPPORTS_OVERLAYS;
 
-	if (enableProposeDebug) debug_printf(LOG_PREFIX "PROPOSEMODE: validated status modeflags: $%08x\n", target->flags);
+	if (enableProposeDebug) debug_printf(LOG_PREFIX "PROPOSEMODE: validated status modeflags: $%08x\n", (unsigned int)target->flags);
 
 	/* overrule timing command flags to be (fixed) blank_pedestal = 0.0IRE,
 	 * progressive scan (fixed), and sync_on_green not avaible. */
@@ -545,7 +545,7 @@ status_t PROPOSE_DISPLAY_MODE(display_mode *target, const display_mode *low, con
 */
 uint32 ACCELERANT_MODE_COUNT(void)
 {
-	if (enableProposeDebug) debug_printf(LOG_PREFIX "ACCELERANT_MODE_COUNT: the modelist contains %d modes\n",si->mode_count);
+	if (enableProposeDebug) debug_printf(LOG_PREFIX "ACCELERANT_MODE_COUNT: the modelist contains %d modes\n",(int)si->mode_count);
 
 	return si->mode_count;
 }

@@ -106,7 +106,7 @@ status_t radeon_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint
         // RAM. Svuotiamoli PRIMA di invalidare la cache HDP (sotto),
         // altrimenti invalidiamo una cache che punta comunque ai byte
         // vecchi, perche' quelli nuovi non sono ancora arrivati in memoria.
-        __sync_synchronize();
+        asm volatile("mfence" ::: "memory");
 
         // L'HDP (Host Data Path) ha una propria cache di LETTURA lato GPU tra
         // i motori video (incluso il piano cursore) e la VRAM. Senza questo
@@ -248,7 +248,7 @@ status_t radeon_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint1
     if (isAruba) {
         // Vedi radeon_set_cursor_bitmap: svuotiamo i WC buffer della CPU
         // prima di invalidare la cache di lettura HDP lato GPU.
-        __sync_synchronize();
+        asm volatile("mfence" ::: "memory");
         Write32(OUT, EVERGREEN_HDP_MEM_COHERENCY_FLUSH_CNTL, 0);
     }
 

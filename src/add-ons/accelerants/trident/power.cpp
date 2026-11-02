@@ -63,7 +63,7 @@ trident_set_dpms_mode(uint32 mode)
 	if (si.dpmsMode == mode)
 		return B_OK;
 
-	debug_printf("Trident_PWR: trident_set_dpms_mode started. Mode=%d\n", mode);
+	debug_printf("Trident_PWR: trident_set_dpms_mode started. Mode=%d\n", (int)mode);
 
 	// Re-enable MMIO decoder via kernel ioctl (since standard VGA writes may have disabled it)
 	ioctl(gInfo.deviceFileDesc, TRIDENT_ENABLE_MMIO);

@@ -36,7 +36,7 @@ public:
         fFile.SetTo(notifyPath, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
     }
 
-    virtual ssize_t Write(const void* buffer, size_t size) override
+    virtual ssize_t Write(const void* buffer, size_t size) 
     {
         if (fFile.InitCheck() != B_OK || size == 0)
             return size;
@@ -103,7 +103,7 @@ private:
 static char* dupstr_or_null(const char* s)
 {
     if (!s)
-        return nullptr;
+        return NULL;
     size_t n = strlen(s) + 1;
     char* p = (char*)malloc(n);
     if (p)
@@ -134,7 +134,7 @@ void SerializeBMessageToJson(const BMessage* msg, BString& outJson) {
     outJson << "{";
     bool first = true;
     
-    char* field_name = nullptr;
+    char* field_name = NULL;
     uint32 field_code = 0;
     int32 field_count = 0;
     
@@ -215,8 +215,8 @@ void ConvertBMessageToOpenAIToolsJson(const BMessage* toolsMsg, BString& outJson
         if (!params.IsEmpty()) {
             BMessage requiredMsg;
             BString reqFieldStr = "";
-            const char* fStr = nullptr;
-            if (params.FindString("required", &fStr) == B_OK && fStr != nullptr) {
+            const char* fStr = NULL;
+            if (params.FindString("required", &fStr) == B_OK && fStr != NULL) {
                 reqFieldStr = fStr;
             } else if (params.FindMessage("required", &requiredMsg) == B_OK) {
                 const char* f = requiredMsg.FindString("0");
@@ -301,7 +301,7 @@ static void
 BuildPayloadFromContext(const BMessage* config, const char* currentPrompt,
     BString& outPayload, bool stream)
 {
-    const char* model = nullptr;
+    const char* model = NULL;
     if (config)
         config->FindString("model_name", &model);
     if (!model || model[0] == '\0')
@@ -317,7 +317,7 @@ BuildPayloadFromContext(const BMessage* config, const char* currentPrompt,
 
     outPayload.Append("  \"messages\": [\n");
     bool first = true;
-    const char* systemPrompt = nullptr;
+    const char* systemPrompt = NULL;
     if (config) {
         config->FindString("system_prompt", &systemPrompt);
     }
@@ -332,7 +332,7 @@ BuildPayloadFromContext(const BMessage* config, const char* currentPrompt,
         int32 i = 0;
         BMessage msgTurn;
         while (messagesMsg.FindMessage("msg", i++, &msgTurn) == B_OK) {
-            const char* type = nullptr;
+            const char* type = NULL;
             msgTurn.FindString("type", &type);
 
             if (type && strcmp(type, "functionCall") == 0) {
@@ -394,8 +394,8 @@ BuildPayloadFromContext(const BMessage* config, const char* currentPrompt,
                 first = false;
             }
             else {
-                const char* role = nullptr;
-                const char* content = nullptr;
+                const char* role = NULL;
+                const char* content = NULL;
                 msgTurn.FindString("role", &role);
                 if (msgTurn.FindString("content", &content) != B_OK) {
                     msgTurn.FindString("text", &content);
@@ -432,9 +432,9 @@ extern "C" ai_plugin_t ai_plugin_init(void)
 {
     /*AIPluginHandle* handle = (AIPluginHandle*)malloc(sizeof(MistralHandle));
     if (!handle)
-        return nullptr;
+        return NULL;
 
-    handle->base_url = nullptr;
+    handle->base_url = NULL;
     return (ai_plugin_t)handle;*/
     AIPluginHandle* h = new(std::nothrow) AIPluginHandle();
     return (ai_plugin_t)h;
@@ -475,7 +475,7 @@ extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
         return B_BAD_VALUE;
     }
 
-    const char* apiKey = nullptr;
+    const char* apiKey = NULL;
     contextMsg->FindString("api_key", &apiKey);
     if (!apiKey || apiKey[0] == '\0') {
         fprintf(stderr, "[MISTRAL PLUGIN] missing api_key\n");
@@ -484,7 +484,7 @@ extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
     }
 
     //AIPluginHandle* mistral = (AIPluginHandle*)handle;
-    const char* baseUrlRaw = nullptr;
+    const char* baseUrlRaw = NULL;
     contextMsg->FindString("base_url", &baseUrlRaw);
     if (!baseUrlRaw || baseUrlRaw[0] == '\0') {
         baseUrlRaw = DEFAULT_MISTRAL_URL;
@@ -558,7 +558,7 @@ extern "C" status_t ai_plugin_generate_text_sync(ai_plugin_t handle,
         BMessage choices;
         BMessage choiceZero;
         BMessage message;
-        const char* content = nullptr;
+        const char* content = NULL;
         if (parsedJson.FindMessage("choices", &choices) == B_OK
             && choices.FindMessage("0", &choiceZero) == B_OK
             && choiceZero.FindMessage("message", &message) == B_OK
@@ -628,7 +628,7 @@ static int32 mistral_stream_thread_func(void* data)
 
 	if (args->server_messenger.IsValid()) {
 		BMessage reqTools(MSG_MCP_GET_TOOLS); 
-		const char* ctxId = nullptr;
+		const char* ctxId = NULL;
 		if (args->context_copy) {
 			args->context_copy->FindString("context_id", &ctxId);
 		}
@@ -653,7 +653,7 @@ static int32 mistral_stream_thread_func(void* data)
 	while (executionLoop) {
 		if (args->server_messenger.IsValid()) {
 			BMessage checkAbortMsg('CHAB');
-			const char* ctxId = nullptr;
+			const char* ctxId = NULL;
 			if (args->context_copy) {
 				args->context_copy->FindString("context_id", &ctxId);
 			}
@@ -676,7 +676,7 @@ static int32 mistral_stream_thread_func(void* data)
 		
 
 		BString payload;
-		BuildPayloadFromContext(args->context_copy, nullptr, payload, false);
+		BuildPayloadFromContext(args->context_copy, NULL, payload, false);
 
 		if (mcpActive) {
 			BString openAiToolsJson;
@@ -734,7 +734,7 @@ static int32 mistral_stream_thread_func(void* data)
 		
 		BMessage errorObj;
 		if (parsedJson.FindMessage("error", &errorObj) == B_OK) {
-			const char* errMsg = nullptr;
+			const char* errMsg = NULL;
 			errorObj.FindString("message", &errMsg);
 			
 			if (errMsg && (BString(errMsg).FindFirst("tool choice") != B_ERROR || 
@@ -748,10 +748,10 @@ static int32 mistral_stream_thread_func(void* data)
 		}
 
 		BMessage choices, choiceZero, message, toolCalls, toolCallZero, functionObj;
-		const char* toolName = nullptr;
-		const char* toolCallId = nullptr;
-		const char* argumentsStr = nullptr;
-		const char* textContent = nullptr;
+		const char* toolName = NULL;
+		const char* toolCallId = NULL;
+		const char* argumentsStr = NULL;
+		const char* textContent = NULL;
 
 		if (parsedJson.FindMessage("choices", &choices) == B_OK
 			&& choices.FindMessage("0", &choiceZero) == B_OK
@@ -779,7 +779,7 @@ static int32 mistral_stream_thread_func(void* data)
 				reqExec.AddString("name", toolName);
 				reqExec.AddMessage("arguments", &argsMsg);
 				
-				const char* ctxId = nullptr;
+				const char* ctxId = NULL;
 				if (args->context_copy) {
 					args->context_copy->FindString("context_id", &ctxId);
 				}
@@ -811,7 +811,7 @@ static int32 mistral_stream_thread_func(void* data)
 				AppendToolCallToContext(args->context_copy, toolName, &argsMsg, toolCallId);
 				AppendToolResponseToContext(args->context_copy, toolName, toolResultBuf.String(), toolCallId);
 			} 
-			else if (message.FindString("content", &textContent) == B_OK && textContent != nullptr) {
+			else if (message.FindString("content", &textContent) == B_OK && textContent != NULL) {
 				fprintf(stderr, "[MISTRAL MCP] Risposta testuale finale ricevuta.\n");
 				BFile streamFile(args->notify_path, B_WRITE_ONLY | B_CREATE_FILE | B_OPEN_AT_END);
 				if (streamFile.InitCheck() == B_OK) {
@@ -836,7 +836,7 @@ fallback_to_standard:
 	//url.Append("chat/completions");
 
 	BString payload;
-	BuildPayloadFromContext(args->context_copy, nullptr, payload, true);
+	BuildPayloadFromContext(args->context_copy, NULL, payload, true);
 
 	{
 		StreamTarget streamTarget(args->notify_path);
@@ -891,10 +891,10 @@ extern "C" status_t ai_plugin_generate_text_async(ai_plugin_t handle,
     if (!contextMsg)
         return B_BAD_VALUE;
 
-    const char* apiKey = nullptr;
-    const char* model = nullptr;
-    const char* notifyPath = nullptr;
-	const char* configBaseUrl = nullptr;
+    const char* apiKey = NULL;
+    const char* model = NULL;
+    const char* notifyPath = NULL;
+	const char* configBaseUrl = NULL;
     contextMsg->FindString("api_key", &apiKey);
     contextMsg->FindString("model_name", &model);
     contextMsg->FindString("notify_path", &notifyPath);
@@ -973,8 +973,8 @@ extern "C" status_t ai_plugin_list_models(const BMessage* settingsMsg,
         return B_OK;
     }
 
-    const char* apiKey = nullptr;
-    //const char* baseUrl = nullptr;
+    const char* apiKey = NULL;
+    //const char* baseUrl = NULL;
     settingsMsg->FindString("api_key", &apiKey);
     //settingsMsg->FindString("base_url", &baseUrl);
 	BString baseUrl;

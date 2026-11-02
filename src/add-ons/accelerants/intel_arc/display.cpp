@@ -201,16 +201,20 @@ get_c10_dp_mpllb_state(uint32 linkRateKhz, intel_c10_dp_pll_state* state)
 {
     switch (linkRateKhz) {
         case 162000: // RBR 1.62 Gbps
-            *state = { .tx0 = 0x9A, .tx1 = 0x00, .pll0 = 0xC4, .pll1 = 0x21, .cmn0 = 0x05 };
+            state->tx0 = 0x9A; state->tx1 = 0x00;
+            state->pll0 = 0xC4; state->pll1 = 0x21; state->cmn0 = 0x05;
             return true;
         case 270000: // HBR 2.70 Gbps
-            *state = { .tx0 = 0x9A, .tx1 = 0x00, .pll0 = 0x48, .pll1 = 0x21, .cmn0 = 0x05 };
+            state->tx0 = 0x9A; state->tx1 = 0x00;
+            state->pll0 = 0x48; state->pll1 = 0x21; state->cmn0 = 0x05;
             return true;
         case 540000: // HBR2 5.40 Gbps
-            *state = { .tx0 = 0x9A, .tx1 = 0x00, .pll0 = 0x48, .pll1 = 0x21, .cmn0 = 0x05 };
+            state->tx0 = 0x9A; state->tx1 = 0x00;
+            state->pll0 = 0x48; state->pll1 = 0x21; state->cmn0 = 0x05;
             return true;
         case 810000: // HBR3 8.10 Gbps
-            *state = { .tx0 = 0x9A, .tx1 = 0x00, .pll0 = 0x48, .pll1 = 0x21, .cmn0 = 0x05 };
+            state->tx0 = 0x9A; state->tx1 = 0x00;
+            state->pll0 = 0x48; state->pll1 = 0x21; state->cmn0 = 0x05;
             return true;
         default:
             return false;
@@ -442,22 +446,22 @@ create_mode_list(void)
 		debug_printf("intel_arc.accelerant: >>> PREVIOUS MODE: <<<\n");
 		debug_printf("  - Virtual Size : %u x %u\n", mode.virtual_width, mode.virtual_height);
 		debug_printf("  - Display Start: (%u, %u)\n", mode.h_display_start, mode.v_display_start);
-		debug_printf("  - Color Space  : 0x%08X\n", mode.space);
-		debug_printf("  - Flags        : 0x%08X\n", mode.flags);
+		debug_printf("  - Color Space  : 0x%08X\n", (unsigned int)mode.space);
+		debug_printf("  - Flags        : 0x%08X\n", (unsigned int)mode.flags);
 		debug_printf("  --- Timing Details ---\n");
-		debug_printf("  - Pixel Clock  : %u kHz\n", mode.timing.pixel_clock);
+		debug_printf("  - Pixel Clock  : %u kHz\n", (unsigned int)mode.timing.pixel_clock);
 		debug_printf("  - Horizontal   : Display=%u, SyncStart=%u, SyncEnd=%u, Total=%u\n",
 			mode.timing.h_display, mode.timing.h_sync_start,
 			mode.timing.h_sync_end, mode.timing.h_total);
 		debug_printf("  - Vertical     : Display=%u, SyncStart=%u, SyncEnd=%u, Total=%u\n",
 			mode.timing.v_display, mode.timing.v_sync_start,
 			mode.timing.v_sync_end, mode.timing.v_total);
-		debug_printf("  - Sync Flags   : 0x%08X\n", mode.timing.flags);
+		debug_printf("  - Sync Flags   : 0x%08X\n", (unsigned int)mode.timing.flags);
 		debug_printf("==================================================\n");
 	}
-	
 
-	
+
+
     const color_space kSupportedSpaces[] = {
         B_RGB32, B_RGB16, B_CMAP8
     };
@@ -523,24 +527,24 @@ create_mode_list(void)
 		gInfo->shared_info->bytes_per_row  = (mode.virtual_width * bytesPerPixel + 63) & ~63;
 	}
 	
-	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: Bytes Per Row: %u\n",gInfo->shared_info->bytes_per_row);
+	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: Bytes Per Row: %u\n",(unsigned int)gInfo->shared_info->bytes_per_row);
 	gInfo->shared_info->current_mode = mode;
 	if (enableAllDebugLogs) {
 		debug_printf("intel_arc.accelerant: >>> CREATE MODE LIST <<<\n");
 		debug_printf("intel_arc.accelerant: >>> NEW MODE: <<<\n");
 		debug_printf("  - Virtual Size : %u x %u\n", mode.virtual_width, mode.virtual_height);
 		debug_printf("  - Display Start: (%u, %u)\n", mode.h_display_start, mode.v_display_start);
-		debug_printf("  - Color Space  : 0x%08X\n", mode.space);
-		debug_printf("  - Flags        : 0x%08X\n", mode.flags);
+		debug_printf("  - Color Space  : 0x%08X\n", (unsigned int)mode.space);
+		debug_printf("  - Flags        : 0x%08X\n", (unsigned int)mode.flags);
 		debug_printf("  --- Timing Details ---\n");
-		debug_printf("  - Pixel Clock  : %u kHz\n", mode.timing.pixel_clock);
+		debug_printf("  - Pixel Clock  : %u kHz\n", (unsigned int)mode.timing.pixel_clock);
 		debug_printf("  - Horizontal   : Display=%u, SyncStart=%u, SyncEnd=%u, Total=%u\n",
 			mode.timing.h_display, mode.timing.h_sync_start,
 			mode.timing.h_sync_end, mode.timing.h_total);
 		debug_printf("  - Vertical     : Display=%u, SyncStart=%u, SyncEnd=%u, Total=%u\n",
 			mode.timing.v_display, mode.timing.v_sync_start,
 			mode.timing.v_sync_end, mode.timing.v_total);
-		debug_printf("  - Sync Flags   : 0x%08X\n", mode.timing.flags);
+		debug_printf("  - Sync Flags   : 0x%08X\n", (unsigned int)mode.timing.flags);
 		debug_printf("==================================================\n");
 	}
 
@@ -575,7 +579,7 @@ create_mode_list(void)
     }
 
     gInfo->shared_info->mode_list_area = gInfo->mode_list_area;
-    if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: Created %u display modes successfully\n", gInfo->shared_info->mode_count);
+    if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: Created %u display modes successfully\n", (unsigned int)gInfo->shared_info->mode_count);
 
     return B_OK;
 }
@@ -669,10 +673,10 @@ intel_arc_get_preferred_mode(display_mode* mode)
         for (uint32 i = 0; i < gInfo->shared_info->mode_count; i++) {
             if (gInfo->mode_list[i].virtual_width == targetWidth
                 && gInfo->mode_list[i].virtual_height == targetHeight
-                && gInfo->mode_list[i].space == targetSpace) {
-                
+                && gInfo->mode_list[i].space == (uint32)targetSpace) {
+
                 *mode = gInfo->mode_list[i];
-                if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: Preferred mode matched boot resolution: %ux%u (index %u)\n", targetWidth, targetHeight, i);
+                if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: Preferred mode matched boot resolution: %ux%u (index %u)\n", (unsigned int)targetWidth, (unsigned int)targetHeight, (unsigned int)i);
                 return B_OK;
             }
         }
@@ -683,7 +687,7 @@ intel_arc_get_preferred_mode(display_mode* mode)
                 && gInfo->mode_list[i].virtual_height == targetHeight) {
                 
                 *mode = gInfo->mode_list[i];
-                if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: Preferred mode matched boot size: %ux%u\n", targetWidth, targetHeight);
+                if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: Preferred mode matched boot size: %ux%u\n", (unsigned int)targetWidth, (unsigned int)targetHeight);
                 return B_OK;
             }
         }
@@ -738,7 +742,7 @@ program_battlemage_cx0_dpll(uint8 ddiPort, uint32 linkRateKhz)
 {
     intel_c10_dp_pll_state state = {};
     if (!get_c10_dp_mpllb_state(linkRateKhz, &state)) {
-        debug_printf("intel_arc.accelerant ERROR: BMG Unsupported DP link rate %u kHz\n", linkRateKhz);
+        debug_printf("intel_arc.accelerant ERROR: BMG Unsupported DP link rate %u kHz\n", (unsigned int)linkRateKhz);
         return B_BAD_VALUE;
     }
 
@@ -827,7 +831,7 @@ compute_snps_dp_mpllb(uint32 linkRateKhz, snps_mpllb_state* state)
             return true;
 
         default:
-            debug_printf("intel_arc.accelerant: Unsupported DP link rate %u kHz\n", linkRateKhz);
+            debug_printf("intel_arc.accelerant: Unsupported DP link rate %u kHz\n", (unsigned int)linkRateKhz);
             return false;
     }
 }
@@ -850,7 +854,7 @@ snps_phy_enable_reg_for_ddi_port(uint8 ddiPort)
 static status_t
 program_port_dpll(uint8 ddiPort, uint32 linkRateKhz)
 {
-    if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: program_port_dpll(ddiPort=%u, linkRate=%u kHz)\n", ddiPort, linkRateKhz);
+    if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: program_port_dpll(ddiPort=%u, linkRate=%u kHz)\n", ddiPort, (unsigned int)linkRateKhz);
 
     // --- 1. ARCHITETTURA ALCHEMIST (DG2 - SNPS PHY) ---
     if (gInfo->shared_info->family == INTEL_ARC_FAMILY_ALCHEMIST) {
@@ -859,7 +863,7 @@ program_port_dpll(uint8 ddiPort, uint32 linkRateKhz)
 
         snps_mpllb_state state = {};
         if (!compute_snps_dp_mpllb(linkRateKhz, &state)) {
-            debug_printf("intel_arc.accelerant ERROR: Invalid DP link rate %u kHz\n", linkRateKhz);
+            debug_printf("intel_arc.accelerant ERROR: Invalid DP link rate %u kHz\n", (unsigned int)linkRateKhz);
             return B_BAD_VALUE;
         }
 
@@ -997,7 +1001,7 @@ static status_t
 apply_snps_phy_levels(uint8 ddiPort, const uint8* laneSettings, uint32 lanes,
 	bool uhbr)
 {
-	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: apply_snps_phy_levels(ddiPort=%u, lanes=%u, uhbr=%d)\n", ddiPort, lanes, uhbr);
+	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: apply_snps_phy_levels(ddiPort=%u, lanes=%u, uhbr=%d)\n", ddiPort, (unsigned int)lanes, uhbr);
 	const arc_mit_buf_trans_entry* table = uhbr ? kDg2SnpsUhbrTrans : kDg2SnpsDp14Trans;
 	const size_t tableCount = uhbr ? B_COUNT_OF(kDg2SnpsUhbrTrans) : B_COUNT_OF(kDg2SnpsDp14Trans);
 
@@ -1294,7 +1298,7 @@ static status_t
 perform_dp_link_training(uint32 linkRate, uint32 lanes, bool enhancedFraming)
 {
     if (enableAllDebugLogs)
-        debug_printf("intel_arc.accelerant: perform_dp_link_training(linkRate=%u, lanes=%u) start\n", linkRate, lanes);
+        debug_printf("intel_arc.accelerant: perform_dp_link_training(linkRate=%u, lanes=%u) start\n", (unsigned int)linkRate, (unsigned int)lanes);
 
     uint8 laneSettings[4] = {0, 0, 0, 0};
     uint8 status[DP_LINK_STATUS_SIZE];
@@ -1838,7 +1842,7 @@ fast_modeset_dp(const display_mode& targetMode, uint8 bpp)
 
     if (enableAllDebugLogs) {
         debug_printf("intel_arc: Fast Modeset -> %dx%d@%dkHz | DATA_M = 0x%" B_PRIx32 "\n",
-            targetMode.timing.h_display, targetMode.timing.v_display, pixelClockKhz, dataM_reg);
+            targetMode.timing.h_display, targetMode.timing.v_display, (int)pixelClockKhz, dataM_reg);
     }
 
     // 3. Disabilita temporaneamente il solo Plane (NON il Transcoder/DDI!)
@@ -1875,7 +1879,7 @@ configure_dp_link(display_mode* mode)
 {
     if (enableAllDebugLogs) {
         debug_printf("intel_arc.accelerant: configure_dp_link() entering for mode %ux%u@%uHz\n",
-            mode->virtual_width, mode->virtual_height, mode->timing.pixel_clock);
+            mode->virtual_width, mode->virtual_height, (unsigned int)mode->timing.pixel_clock);
     }
 
     const int8 pipe = gInfo->shared_info->active_pipe;
@@ -1972,7 +1976,7 @@ configure_dp_link(display_mode* mode)
 
     if (enableAllDebugLogs) {
         debug_printf("intel_arc.accelerant: Selected DP Link Bandwidth: %u kHz, Lanes: %u (bps required: %u)\n",
-            linkBandwidth, lanes, bps);
+            (unsigned int)linkBandwidth, (unsigned int)lanes, (unsigned int)bps);
     }
 
     // Calcolo Registri DP M/N
@@ -3024,7 +3028,7 @@ intel_arc_set_display_mode(display_mode* mode)
 		return B_BAD_VALUE;
 
 	debug_printf("intel_arc.accelerant: >>> SET_DISPLAY_MODE requested: %ux%u, pixel_clock=%u kHz <<<\n",
-		mode->virtual_width, mode->virtual_height, mode->timing.pixel_clock);
+		mode->virtual_width, mode->virtual_height, (unsigned int)mode->timing.pixel_clock);
 
 	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: Timing: HTotal=%u, HDisplay=%u, HSyncStart=%u, HSyncEnd=%u\n",
 		mode->timing.h_total, mode->timing.h_display, mode->timing.h_sync_start, mode->timing.h_sync_end);
@@ -3064,22 +3068,22 @@ intel_arc_set_display_mode(display_mode* mode)
 	// Regilations Pipe Timings
 	gInfo->shared_info->pipe_h_total[pipe]
 		= ((uint32)(target.timing.h_total - 1) << 16) | ((uint32)target.timing.h_display - 1);
-	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: H_TOTAL impostato a 0x%X\n", gInfo->shared_info->pipe_h_total[pipe]);
+	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: H_TOTAL impostato a 0x%X\n", (unsigned int)gInfo->shared_info->pipe_h_total[pipe]);
 	gInfo->shared_info->pipe_h_blank[pipe]
 		= ((uint32)(target.timing.h_total - 1) << 16) | ((uint32)target.timing.h_display - 1);
-	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: H_BLANK impostato a 0x%X\n", gInfo->shared_info->pipe_h_blank[pipe]);
+	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: H_BLANK impostato a 0x%X\n", (unsigned int)gInfo->shared_info->pipe_h_blank[pipe]);
 	gInfo->shared_info->pipe_h_sync[pipe]
 		= ((uint32)(target.timing.h_sync_end - 1) << 16) | ((uint32)target.timing.h_sync_start - 1);
-	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: H_SYNC impostato a 0x%X\n", gInfo->shared_info->pipe_h_sync[pipe]);
+	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: H_SYNC impostato a 0x%X\n", (unsigned int)gInfo->shared_info->pipe_h_sync[pipe]);
 	gInfo->shared_info->pipe_v_total[pipe]
 		= ((uint32)(target.timing.v_total - 1) << 16) | ((uint32)target.timing.v_display - 1);
-	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: V_TOTAL impostato a 0x%X\n", gInfo->shared_info->pipe_v_total[pipe]);
+	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: V_TOTAL impostato a 0x%X\n", (unsigned int)gInfo->shared_info->pipe_v_total[pipe]);
 	gInfo->shared_info->pipe_v_blank[pipe]
 		= ((uint32)(target.timing.v_total - 1) << 16) | ((uint32)target.timing.v_display - 1);
-	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: V_BLANK impostato a 0x%X\n", gInfo->shared_info->pipe_v_blank[pipe]);
+	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: V_BLANK impostato a 0x%X\n", (unsigned int)gInfo->shared_info->pipe_v_blank[pipe]);
 	gInfo->shared_info->pipe_v_sync[pipe]
 		= ((uint32)(target.timing.v_sync_end - 1) << 16) | ((uint32)target.timing.v_sync_start - 1);
-	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: V_SYNC impostato a 0x%X\n", gInfo->shared_info->pipe_v_sync[pipe]);
+	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: V_SYNC impostato a 0x%X\n", (unsigned int)gInfo->shared_info->pipe_v_sync[pipe]);
 
 	const uint32 bytesPerRow = (target.virtual_width * bytesPerPixel + 63) & ~63;
 	gInfo->shared_info->bytes_per_row = bytesPerRow;
@@ -3088,10 +3092,10 @@ intel_arc_set_display_mode(display_mode* mode)
 	
 	gInfo->shared_info->plane_pos[pipe] = 0;
 
-	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: PLANE_CONTROL prima di modificare i parametri: 0x%X\n",gInfo->shared_info->plane_control[pipe]);
+	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: PLANE_CONTROL prima di modificare i parametri: 0x%X\n",(unsigned int)gInfo->shared_info->plane_control[pipe]);
     gInfo->shared_info->plane_control[pipe] &= ~INTEL_ARC_PLANE_TILED_MASK;
 	gInfo->shared_info->plane_control[pipe] |= INTEL_ARC_PLANE_LINEAR;
-	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: PLANE_CONTROL dopo modifica parametri TILED_MASK e LINEAR: 0x%X\n",gInfo->shared_info->plane_control[pipe]);
+	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: PLANE_CONTROL dopo modifica parametri TILED_MASK e LINEAR: 0x%X\n",(unsigned int)gInfo->shared_info->plane_control[pipe]);
     //-------------------
 	gInfo->shared_info->plane_control[pipe]
 		= (gInfo->shared_info->plane_control[pipe]
@@ -3110,9 +3114,9 @@ intel_arc_set_display_mode(display_mode* mode)
 
 	// La Pipe e il Piano devono avere LA STESSA dimensione fisica
 	gInfo->shared_info->pipe_size[pipe] = nativeSizeforPipe;
-	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: PIPE_SIZE impostato a 0x%X\n", gInfo->shared_info->pipe_size[pipe]);
+	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: PIPE_SIZE impostato a 0x%X\n", (unsigned int)gInfo->shared_info->pipe_size[pipe]);
 	gInfo->shared_info->plane_image_size[pipe] = nativeSize;
-	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: PLANE_IMAGE_SIZE impostato a 0x%X\n", gInfo->shared_info->plane_image_size[pipe]);
+	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: PLANE_IMAGE_SIZE impostato a 0x%X\n", (unsigned int)gInfo->shared_info->plane_image_size[pipe]);
 	log_pipe_plane_state("intel_arc_set_display_mode before MMIO writes", pipe);
 	
 	// B. Scrivi i Timing della Pipe (1280x1024 VESA)
@@ -3184,10 +3188,10 @@ intel_arc_set_display_mode(display_mode* mode)
     //-------------------
 
 	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: Configuring link for Active Pipe %d (FuncCtl: 0x%08X)\n",
-		pipe, gInfo->shared_info->pipe_ddi_func_ctl[pipe]);
+		pipe, (unsigned int)gInfo->shared_info->pipe_ddi_func_ctl[pipe]);
 	
 	uint32 modeSel = (gInfo->shared_info->pipe_ddi_func_ctl[pipe] & INTEL_ARC_PIPE_DDI_MODESEL_MASK) >> 24;
-	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: Detected DDI ModeSel: %u\n", modeSel);
+	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: Detected DDI ModeSel: %u\n", (unsigned int)modeSel);
 
 	if (modeSel == INTEL_ARC_PIPE_DDI_MODE_DP_SST || modeSel == INTEL_ARC_PIPE_DDI_MODE_DP_MST) {
 		if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: Mode is DP, calling configure_dp_link()\n");
@@ -3445,7 +3449,6 @@ read_edid_from_hardware(void)
 
     // 1. Aggiungiamo la porta attiva se rientra nel range valido 0..3 (0 = DDI A)
     if (gInfo->shared_info->active_pipe >= 0
-        && gInfo->shared_info->active_ddi_port >= 0
         && gInfo->shared_info->active_ddi_port < 4) {
         candidates[candidateCount++] = (uint8)gInfo->shared_info->active_ddi_port;
         if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: Active DDI Port %u added to candidates\n", 
@@ -3497,7 +3500,7 @@ read_edid_from_hardware(void)
         gInfo->has_edid = true;
 
         if (!gInfo->shared_info->has_dpcd) {
-            uint8 targetPort = (gInfo->shared_info->active_ddi_port >= 0 && gInfo->shared_info->active_ddi_port < 4)
+            uint8 targetPort = (gInfo->shared_info->active_ddi_port < 4)
                 ? (uint8)gInfo->shared_info->active_ddi_port : 0;
             debug_printf("intel_arc.accelerant: Retrying DPCD read on target DDI Port %u for boot fallback\n", targetPort);
             read_dpcd_caps_from_port(targetPort);
@@ -3584,7 +3587,7 @@ handle_hotplug_event(void)
 	if (gInfo->last_hotplug_event_count == gInfo->shared_info->hotplug_event_count)
 		return B_OK;
 
-	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: Hotplug event detected (count=%u)\n", gInfo->shared_info->hotplug_event_count);
+	if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: Hotplug event detected (count=%u)\n", (unsigned int)gInfo->shared_info->hotplug_event_count);
 	gInfo->last_hotplug_event_count = gInfo->shared_info->hotplug_event_count;
 
 	if (gInfo->shared_info->active_pipe < 0)

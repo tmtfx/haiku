@@ -265,7 +265,7 @@ sm750_allocate_overlay_buffer(color_space cs, uint16 width, uint16 height)
     uint32 available_vram = mem_get_free_memory((mem_info*)si->mem_mgr);
 
     if (size > available_vram) {
-        if (enableLogs) debug_printf("SM750_ACC: Overlay too big! Free RAM heap: %u, Needed: %u\n", available_vram, size);
+        if (enableLogs) debug_printf("SM750_ACC: Overlay too big! Free RAM heap: %u, Needed: %u\n", (unsigned int)available_vram, (unsigned int)size);
         return NULL;
     }
     
@@ -420,7 +420,7 @@ sm750_configure_overlay(const overlay_window *window, const overlay_buffer *buff
         case B_YCbCr422: format = 3; break; // YUYV
         case B_RGB16:    format = 1; break; // 16bpp 5:6:5
         default:
-            if (enableLogs) debug_printf("SM750_ACC: Format %d not supported by hardware! Force YUV.\n", buffer->space);
+            if (enableLogs) debug_printf("SM750_ACC: Format %d not supported by hardware! Force YUV.\n", (int)buffer->space);
             format = 3; 
             break;
     }
