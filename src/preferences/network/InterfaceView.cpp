@@ -197,30 +197,30 @@ InterfaceView::MessageReceived(BMessage* message)
 			}
 	
 			if (markedItem != NULL) {
-		const char* ssid = markedItem->Network().name;
+				const char* ssid = markedItem->Network().name;
 
-		BKeyStore keyStore;
-		BPasswordKey key;
+				BKeyStore keyStore;
+				BPasswordKey key;
 
-		// Dichiarazione esplicita di status
-		status_t status = keyStore.GetKey("wpa_supplicant", B_KEY_TYPE_PASSWORD,
-			ssid, key);
+				// Dichiarazione esplicita di status
+				status_t status = keyStore.GetKey("wpa_supplicant", B_KEY_TYPE_PASSWORD,
+					ssid, key);
 
-		if (status == B_OK) {
-			QRCodeWindow* win = new QRCodeWindow(ssid, key.Password(), "WPA");
-			win->Show();
-		} else {
-			BString errorMsg;
-			errorMsg.SetToFormat(
-				B_TRANSLATE("Impossibile recuperare la password per la rete '%s': %s"),
-				ssid, strerror(status));
+				if (status == B_OK) {
+					QRCodeWindow* win = new QRCodeWindow(ssid, key.Password(), "WPA");
+					win->Show();
+				} else {
+					BString errorMsg;
+					errorMsg.SetToFormat(
+						B_TRANSLATE("Impossibile recuperare la password per la rete '%s': %s"),
+						ssid, strerror(status));
 			
-			BAlert* alert = new BAlert(B_TRANSLATE("Errore KeyStore"),
-				errorMsg.String(), B_TRANSLATE("OK"));
-			alert->Go();
-		}
-	}
-	break;
+					BAlert* alert = new BAlert(B_TRANSLATE("Errore KeyStore"),
+						errorMsg.String(), B_TRANSLATE("OK"));
+					alert->Go();
+				}
+			}
+			break;
 		}
 
 		default:
