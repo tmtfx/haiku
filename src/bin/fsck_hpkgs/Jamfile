@@ -4,10 +4,14 @@ SetSubDirSupportedPlatformsBegin ;
 	AddSubDirSupportedPlatforms haiku ;
 SetSubDirSupportedPlatformsEnd ;
 
-UsePrivateHeaders package storage ;
+UsePrivateHeaders package storage crypto ;
 
 # Add search path for HPKGIntegrityConstants.h
 SEARCH_SOURCE += [ FDirName $(HAIKU_TOP) src kits package hpkg ] ;
+
+# BCrypto library - Haiku's cryptography API
+local cryptoLib = libcrypto_api.so ;
+SEARCH on $(cryptoLib) = /boot/system/lib ;
 
 local sources =
 	fsck_hpkgs.cpp
@@ -15,9 +19,15 @@ local sources =
 	ConsoleReporter.cpp
 	;
 
+local extraObjects =
+	[ FGristFiles HPKGIntegrityConstants.o : objects(haiku:x86_64:release:kits:package) ]
+	;
+
 SimpleTest fsck_hpkgs :
 	$(sources)
-	: be
+	$(extraObjects)
+	: be shared
+	$(cryptoLib)
 	[ TargetLibsupc++ ]
 	;
 

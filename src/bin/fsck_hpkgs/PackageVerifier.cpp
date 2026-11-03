@@ -21,6 +21,7 @@
 #include <Path.h>
 #include <TypeConstants.h>
 #include <fs_attr.h>
+#include <crypto/BCrypto.h>
 
 #include "HPKGIntegrityConstants.h"
 
@@ -131,11 +132,28 @@ status_t
 PackageVerifier::_CalculateChecksum(const char* filePath,
 	BString& outChecksum)
 {
-	// For now, return a placeholder
-	// TODO: Integrate BCrypto or SHA256 calculation
-	// This will compute SHA256 of the HPKG file contents
+	BFile file(filePath, B_READ_ONLY);
+	status_t status = file.InitCheck();
+	if (status != B_OK)
+		return status;
+
+	// Use BCrypto for SHA256 calculation in streaming mode
+	BCrypto crypto;
+	uint8 digest[32];
+	memset(digest, 0, sizeof(digest));
+
+	// Calculate SHA256 using streaming API (efficient for large files)
+	status = crypto.Digest(B_CRYPTO_SHA256, &file, digest);
+	if (status != B_OK) {
+		fprintf(stderr, "PackageVerifier: Failed to calculate SHA256: %s\n",
+			strerror(status));
+		return status;
+	}
+
+	// Convert binary digest to hex string
+	char hexBuffer[65];
+	_HPKGDigestToHex(digest, sizeof(digest), hexBuffer);
+	outChecksum = hexBuffer;
 	
-	fprintf(stderr, "TODO: Implement SHA256 calculation for %s\n", filePath);
-	outChecksum = "0000000000000000000000000000000000000000000000000000000000000000";
 	return B_OK;
 }
