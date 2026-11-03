@@ -1407,15 +1407,15 @@ ScanThread parses JSON output and posts results to window. Provides:
 | 3 | fsck.hpkgs Tool | 4-5h | Phase 1-2 | ✅ **COMPLETE** |
 | 4 | BCrypto Integration | 2-3h | Phase 3 | ✅ **COMPLETE** |
 | 5 | Query API & Indexing | 2-3h | Phase 3-4 | ✅ **COMPLETE** |
-| 6 | Auto-Recovery Framework | 2-3h | Phase 5 | ⏳ **NEXT** |
-| 7 | GUI Application | 4-5h | Phase 6 | ⏳ **NEXT** |
+| 6 | Auto-Recovery Framework | 2-3h | Phase 5 | ✅ **COMPLETE** |
+| 7 | GUI Application | 4-5h | Phase 6 | ✅ **COMPLETE** |
 | 8 | Quick Launcher | 1h | Phase 7 | ⏳ **NEXT** |
 | 9 | Documentation | 2-3h | All phases | ⏳ **FINAL** |
 
 **Total Estimated Time:** 
 - **Core (Phases 1-5):** 13-17 hours ✅ **COMPLETE**
-- **Recovery & GUI (Phases 6-7):** 6-8 hours ⏳ **NEXT**
-- **Launcher & Documentation (Phases 8-9):** 3-4 hours ⏳ **FINAL**
+- **Recovery & GUI (Phases 6-7):** 6-8 hours ✅ **COMPLETE**
+- **Launcher & Documentation (Phases 8-9):** 3-4 hours ⏳ **NEXT**
 - **Grand Total:** 22-29 hours
 
 **Realistic Schedule:** 1-2 weeks of focused development (completed core in ~4 sessions)
@@ -1425,34 +1425,36 @@ ScanThread parses JSON output and posts results to window. Provides:
 ## Next Steps
 
 ### Completed (✅ Production-Ready)
-1. ✅ **Phase 1-5:** Core system complete and compiled
+1. ✅ **Phases 1-5:** Core system complete and compiled
    - Attributes, daemon integration, CLI tool, query API
    - fsck_hpkgs: 38KB executable with all features
    - Ready for testing on native Haiku
 
+2. ✅ **Phase 6:** Auto-Recovery Framework (RecoveryStrategy interface)
+   - src/servers/package/RecoveryStrategy.h/cpp
+   - src/servers/package/RepositoryRecovery.h/cpp
+   - src/servers/package/ManualRecovery.h/cpp
+   - Hybrid recovery with 4 source types
+   - fsck_hpkgs: --repair, --dry-run, repair command
+
+3. ✅ **Phase 7:** GUI Application (IntegrityChecker.app)
+   - src/apps/integrity_checker/: Full application
+   - 3 tabs: Scan Results, Query Builder, Settings
+   - ScanThread for background scanning
+   - Color-coded status indicators
+   - Preferences panel
+
 ### In Progress / Next
-2. → **Phase 6:** Auto-Recovery Framework (RecoveryStrategy interface)
-   - Start: src/servers/package/RecoveryStrategy.h/cpp
-   - Features: repository connector, --repair flag
-   - Duration: 2-3 hours
-   - Depends on: Phases 1-5 (complete)
-
-3. → **Phase 7:** GUI Application (IntegrityChecker.app)
-   - Start: src/apps/integrity_checker/
-   - Features: progress bar, results list, query builder
-   - Duration: 4-5 hours
-   - Depends on: Phases 1-6 (complete)
-
-4. → **Phase 8:** Quick Launcher Tool
-   - Start: src/bin/integrity_launcher/
+4. → **Phase 8:** Quick Launcher Tool (1 hour)
+   - src/bin/integrity_launcher/
    - Simple wrapper for fsck_hpkgs with dialog
-   - Duration: 1 hour
-   - Depends on: Phase 7
+   - Depends on: Phase 7 (complete)
 
-5. → **Phase 9:** Complete Documentation
-   - User guide, developer reference, security model
-   - Duration: 2-3 hours
-   - Depends on: Phases 1-8
+5. → **Phase 9:** Complete Documentation (2-3 hours)
+   - User guide with screenshots
+   - Developer API reference
+   - Security model documentation
+   - Depends on: Phases 1-8 (complete)
 
 ### Final Steps
 5. **Integration Testing:** Test on native Haiku
