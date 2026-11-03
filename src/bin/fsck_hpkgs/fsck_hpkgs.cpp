@@ -134,16 +134,37 @@ _BuildCorruptionInfo(const PackageVerificationResult& result)
 }
 
 
+// Ask the user on the terminal before touching anything. Returns true
+// only for an explicit "y"/"yes" - anything else (including just
+// pressing enter, or EOF) is treated as "no".
+static bool
+_ConfirmRepair(const char* packageName)
+{
+	fprintf(stdout, "Repair %s now? This overwrites the package's content "
+		"in place; a reboot will be required afterwards. [y/N] ",
+		packageName);
+	fflush(stdout);
+
+	char line[16];
+	if (fgets(line, sizeof(line), stdin) == NULL)
+		return false;
+
+	return line[0] == 'y' || line[0] == 'Y';
+}
+
+
 // Attempt to recover one package. If replacementFile is given, it is
-// handed directly to ManualRecovery, which has pkgman install it.
-// Otherwise, the normal RecoveryCoordinator dispatch is used
-// (RepositoryRecovery first - pkgman uninstall + reinstall from the
-// repository - falling through to ManualRecovery, which with no file
-// provided correctly reports that user intervention is needed rather
-// than pretending to fix it).
+// handed directly to ManualRecovery. Otherwise, the normal
+// RecoveryCoordinator dispatch is used (RepositoryRecovery first -
+// pkgman download + verify + in-place overwrite - falling through to
+// ManualRecovery, which with no file provided correctly reports that
+// user intervention is needed rather than pretending to fix it).
+// autoConfirm skips the interactive per-package confirmation (-y/--yes);
+// without it, nothing is actually touched unless the user explicitly
+// says yes to this specific package.
 static void
 _AttemptRepair(const PackageVerificationResult& result,
-	const char* replacementFile, bool dryRun,
+	const char* replacementFile, bool dryRun, bool autoConfirm,
 	RecoveryLogger* logger, RecoveryNotifier* notifier)
 {
 	PackageCorruptionInfo info = _BuildCorruptionInfo(result);
@@ -152,6 +173,12 @@ _AttemptRepair(const PackageVerificationResult& result,
 		fprintf(stdout, "  Would attempt recovery for %s (source: %s)\n",
 			info.packageName.String(),
 			HPKGRecoverySourceToString(info.sourceType));
+		return;
+	}
+
+	if (!autoConfirm && !_ConfirmRepair(info.packageName.String())) {
+		fprintf(stdout, "  %s: skipped (not confirmed)\n",
+			info.packageName.String());
 		return;
 	}
 
@@ -188,8 +215,11 @@ _PrintUsage(const char* programName)
 	fprintf(stdout, "  -v, --verbose     Show detailed information\n");
 	fprintf(stdout, "  -q, --quiet       Minimal output\n");
 	fprintf(stdout, "  --path <dir>      Custom packages directory (default: /boot/system/packages)\n");
-	fprintf(stdout, "  --repair          Auto-repair corrupted packages (safe for repository packages)\n");
+	fprintf(stdout, "  --repair          Repair corrupted packages (asks for confirmation per\n");
+	fprintf(stdout, "                    package unless -y is given - see below)\n");
 	fprintf(stdout, "  --dry-run         Show what would be repaired (requires --repair)\n");
+	fprintf(stdout, "  -y, --yes         Don't ask for confirmation before repairing each\n");
+	fprintf(stdout, "                    package (for unattended/scripted use)\n");
 	fprintf(stdout, "\nOPTIONS (query):\n");
 	fprintf(stdout, "  --status <status> Filter by status: ok, corrupted, unverified\n");
 	fprintf(stdout, "  --since <time>    Filter verified after timestamp (ISO 8601)\n");
@@ -200,6 +230,7 @@ _PrintUsage(const char* programName)
 	fprintf(stdout, "                    (required - there is no automatic network download;\n");
 	fprintf(stdout, "                    --package must match exactly one file when used)\n");
 	fprintf(stdout, "  --dry-run         Show what would be repaired without making changes\n");
+	fprintf(stdout, "  -y, --yes         Don't ask for confirmation before repairing\n");
 	fprintf(stdout, "  --path <dir>      Custom packages directory\n");
 	fprintf(stdout, "\nEXAMPLES:\n");
 	fprintf(stdout, "  %s scan                              # Scan all packages\n", programName);
@@ -224,6 +255,7 @@ main(int argc, char* argv[])
 	bool quiet = false;
 	bool repair = false;
 	bool dryRun = false;
+	bool autoConfirm = false;
 	
 	// Parse arguments
 	for (int i = 1; i < argc; i++) {
@@ -244,6 +276,8 @@ main(int argc, char* argv[])
 			repair = true;
 		} else if (strcmp(argv[i], "--dry-run") == 0) {
 			dryRun = true;
+		} else if (strcmp(argv[i], "-y") == 0 || strcmp(argv[i], "--yes") == 0) {
+			autoConfirm = true;
 		} else if (strcmp(argv[i], "--path") == 0) {
 			if (i + 1 < argc) {
 				packagesPath = argv[++i];
@@ -328,7 +362,7 @@ main(int argc, char* argv[])
 				}
 				for (int32 i = 0; i < failedPackages.CountItems(); i++) {
 					_AttemptRepair(*failedPackages.ItemAt(i), NULL, true,
-						NULL, NULL);
+						autoConfirm, NULL, NULL);
 				}
 			} else {
 				if (!quiet) {
@@ -341,7 +375,7 @@ main(int argc, char* argv[])
 				SilentRecoveryNotifier notifier;
 				for (int32 i = 0; i < failedPackages.CountItems(); i++) {
 					_AttemptRepair(*failedPackages.ItemAt(i), NULL, false,
-						&logger, &notifier);
+						autoConfirm, &logger, &notifier);
 				}
 			}
 		}
@@ -457,7 +491,7 @@ main(int argc, char* argv[])
 				continue;
 			}
 
-			_AttemptRepair(result, repairFile, dryRun,
+			_AttemptRepair(result, repairFile, dryRun, autoConfirm,
 				dryRun ? NULL : &logger, dryRun ? NULL : &notifier);
 		}
 

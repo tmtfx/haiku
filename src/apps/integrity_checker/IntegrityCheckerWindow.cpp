@@ -3,7 +3,9 @@
 #include "QueryBuilderView.h"
 #include "SettingsView.h"
 #include "ScanThread.h"
+#include "RepairThread.h"
 
+#include <Alert.h>
 #include <Application.h>
 #include <Box.h>
 #include <Button.h>
@@ -34,7 +36,8 @@ IntegrityCheckerWindow::IntegrityCheckerWindow()
 	  fSettingsView(NULL),
 	  fSaveSettingsButton(NULL),
 	  fScanThread(NULL),
-	  fScanInProgress(false)
+	  fScanInProgress(false),
+	  fRepairThread(NULL)
 {
 	_CreateUI();
 	CenterOnScreen();
@@ -46,6 +49,8 @@ IntegrityCheckerWindow::~IntegrityCheckerWindow()
 		fScanThread->SetWindow(NULL);
 		fScanThread->RequestQuit();
 	}
+	if (fRepairThread)
+		fRepairThread->SetWindow(NULL);
 }
 
 void
@@ -206,14 +211,13 @@ IntegrityCheckerWindow::MessageReceived(BMessage* message)
 			break;
 		
 		case MSG_PACKAGE_REPAIR:
-		{
-			BString packageName;
-			if (message->FindString("package", &packageName) == B_OK) {
-				_HandlePackageRepair(packageName.String());
-			}
+			_HandlePackageRepair();
 			break;
-		}
-		
+
+		case MSG_REPAIR_COMPLETE:
+			_RepairComplete(message);
+			break;
+
 		case MSG_PACKAGE_LOCATE:
 		{
 			BString packageName;
@@ -222,7 +226,7 @@ IntegrityCheckerWindow::MessageReceived(BMessage* message)
 			}
 			break;
 		}
-		
+
 		default:
 			BWindow::MessageReceived(message);
 			break;
@@ -278,9 +282,34 @@ IntegrityCheckerWindow::_ScanComplete(BMessage* results)
 	fScanInProgress = false;
 	fScanButton->SetEnabled(true);
 	fProgressBar->SetText("Scan complete!");
-	
-	// Populate results in ResultsListView
-	// TODO: Parse results message and add items to list view
+
+	fResultsView->MakeEmpty();
+
+	BMessage packageList;
+	results->FindMessage("results", &packageList);
+
+	int32 needsAttention = 0;
+
+	for (int32 i = 0; ; i++) {
+		BMessage packageMessage;
+		if (packageList.FindMessage("package", i, &packageMessage) != B_OK)
+			break;
+
+		ResultsListView::PackageInfo info;
+		packageMessage.FindString("name", &info.name);
+		packageMessage.FindString("path", &info.packagePath);
+		packageMessage.FindString("status", &info.status);
+		packageMessage.FindString("checksum_expected", &info.checksum);
+		packageMessage.FindString("checksum_actual", &info.actualChecksum);
+		packageMessage.FindString("source", &info.source);
+
+		fResultsView->AddPackageResult(info);
+
+		if (info.status != "ok")
+			needsAttention++;
+	}
+
+	fRepairButton->SetEnabled(needsAttention > 0);
 }
 
 void
@@ -296,10 +325,70 @@ IntegrityCheckerWindow::_SaveSettings()
 }
 
 void
-IntegrityCheckerWindow::_HandlePackageRepair(const char* packageName)
+IntegrityCheckerWindow::_HandlePackageRepair()
 {
-	// TODO: Trigger recovery coordinator for package
-	printf("Repairing: %s\n", packageName);
+	ResultsListView::PackageInfo info;
+	if (!fResultsView->GetSelectedPackageInfo(info)) {
+		(new BAlert("No selection",
+			"Select a package in the list first.", "OK"))->Go();
+		return;
+	}
+
+	if (info.status == "ok") {
+		BString message;
+		message.SetToFormat("%s is already OK - nothing to repair.",
+			info.name.String());
+		(new BAlert("Nothing to repair", message.String(), "OK"))->Go();
+		return;
+	}
+
+	if (fRepairThread != NULL) {
+		(new BAlert("Repair in progress",
+			"A repair is already running - wait for it to finish first.",
+			"OK"))->Go();
+		return;
+	}
+
+	// This never happens without the user explicitly saying yes here -
+	// no auto-repair runs on its own.
+	BString prompt;
+	prompt.SetToFormat(
+		"Repair %s now?\n\n"
+		"This downloads (or uses the file you provide) a verified copy "
+		"and overwrites this package's content in place. A REBOOT is "
+		"required afterwards for the fix to take effect.",
+		info.name.String());
+
+	BAlert* alert = new BAlert("Confirm repair", prompt.String(),
+		"Cancel", "Repair", NULL, B_WIDTH_AS_USUAL, B_WARNING_ALERT);
+	alert->SetShortcut(0, B_ESCAPE);
+	int32 choice = alert->Go();
+	if (choice != 1)
+		return;
+
+	fRepairButton->SetEnabled(false);
+	fRepairThread = new RepairThread(this, info);
+	fRepairThread->Run();
+}
+
+void
+IntegrityCheckerWindow::_RepairComplete(BMessage* message)
+{
+	fRepairThread = NULL;
+	fRepairButton->SetEnabled(true);
+
+	bool success = false;
+	message->FindBool("success", &success);
+
+	BString statusMessage;
+	message->FindString("message", &statusMessage);
+
+	(new BAlert(success ? "Repair complete" : "Repair failed",
+		statusMessage.String(), "OK", NULL, NULL, B_WIDTH_AS_USUAL,
+		success ? B_INFO_ALERT : B_WARNING_ALERT))->Go();
+
+	// Re-scan so the list reflects the (pre-reboot) repaired state.
+	_StartScan();
 }
 
 void

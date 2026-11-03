@@ -1,10 +1,16 @@
 SubDir HAIKU_TOP src apps integrity_checker ;
 
 UsePrivateSystemHeaders ;
-UsePrivateHeaders app interface shared storage ;
+UsePrivateHeaders app interface shared storage crypto ;
 
-# Add path to recovery strategy headers
+# Add path to recovery strategy sources/headers
 SEARCH_SOURCE += [ FDirName $(HAIKU_TOP) src servers package ] ;
+
+# Add path to PackageVerifier (real scanning) and its headers - the
+# implementations of the HPKGIntegrityConstants.h helpers it calls come
+# from libpackage.so (linked below), same as fsck_hpkgs.
+SEARCH_SOURCE += [ FDirName $(HAIKU_TOP) src bin fsck_hpkgs ] ;
+SEARCH_SOURCE += [ FDirName $(HAIKU_TOP) src kits package hpkg ] ;
 
 Application IntegrityChecker
 	:
@@ -14,7 +20,13 @@ Application IntegrityChecker
 	QueryBuilderView.cpp
 	SettingsView.cpp
 	ScanThread.cpp
+	RepairThread.cpp
+	PackageVerifier.cpp
+	RecoveryStrategy.cpp
+	RepositoryRecovery.cpp
+	ManualRecovery.cpp
 	:
-	be localestub
+	be localestub package
+	libcrypto_api.so
 	[ TargetLibstdc++ ]
 ;

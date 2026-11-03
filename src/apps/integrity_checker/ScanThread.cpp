@@ -1,13 +1,22 @@
 #include "ScanThread.h"
 #include "IntegrityCheckerWindow.h"
+#include "../../bin/fsck_hpkgs/PackageVerifier.h"
 
+#include <Directory.h>
+#include <Entry.h>
 #include <Message.h>
 #include <Messenger.h>
 #include <OS.h>
+#include <Path.h>
+#include <String.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <dirent.h>
+
+using namespace BPackageKit::BPrivate;
+
+static const char* kPackagesPath = "/boot/system/packages";
 
 ScanThread::ScanThread(IntegrityCheckerWindow* window)
 	: fWindow(window),
@@ -74,55 +83,70 @@ ScanThread::_RunScan(BMessage* outResults)
 status_t
 ScanThread::_ExecuteFsckHpkgs(BMessage* outResults)
 {
-	// TODO: Execute fsck_hpkgs scan command and capture output
-	// For now, simulate a scan
-	
-	const char* packages[] = {
-		"haiku-1.0.hpkg",
-		"curl-7.85.0-2.hpkg",
-		"openssl-1.1.1-8.hpkg",
-		"zlib-1.2.11-3.hpkg",
-		"gcc-11.2.0-1.hpkg"
-	};
-	
-	int total = sizeof(packages) / sizeof(packages[0]);
-	
-	for (int i = 0; i < total; i++) {
+	BDirectory directory(kPackagesPath);
+	status_t status = directory.InitCheck();
+	if (status != B_OK)
+		return status;
+
+	// Count .hpkg entries first, just so the progress bar has a real
+	// total instead of growing unboundedly.
+	int32 total = 0;
+	entry_ref ref;
+	while (directory.GetNextRef(&ref) == B_OK) {
+		BString name(ref.name);
+		if (name.EndsWith(".hpkg"))
+			total++;
+	}
+	directory.Rewind();
+
+	PackageVerifier verifier;
+	int32 current = 0;
+	int32 okCount = 0;
+	int32 corruptedCount = 0;
+	int32 unverifiedCount = 0;
+
+	while (directory.GetNextRef(&ref) == B_OK) {
 		if (fQuitRequested)
 			return B_INTERRUPTED;
-		
-		_SendProgress(i + 1, total);
-		
-		// Simulate processing time
-		snooze(100000);  // 100ms per package
-		
-		// Add package result to message
+
+		BString name(ref.name);
+		if (!name.EndsWith(".hpkg"))
+			continue;
+
+		current++;
+		_SendProgress(current, total);
+
+		BPath path(&ref);
+
+		PackageVerificationResult result;
+		verifier.VerifyPackage(path.Path(), &result);
+
 		BMessage packageInfo;
-		packageInfo.AddString("name", packages[i]);
-		
-		// Simulate status: mostly ok, one corrupted, one unverified
-		if (i == 1) {
-			packageInfo.AddString("status", "corrupted");
-			packageInfo.AddString("checksum_expected", "abc123def456...");
-			packageInfo.AddString("checksum_actual", "xyz789uvw012...");
-			packageInfo.AddString("source", "repository");
-		} else if (i == 3) {
+		packageInfo.AddString("name", result.filename);
+		packageInfo.AddString("path", result.filePath);
+		packageInfo.AddString("checksum_expected", result.attributedChecksum);
+		packageInfo.AddString("checksum_actual", result.calculatedChecksum);
+		packageInfo.AddString("source", result.attributedSource);
+
+		if (!result.attributeExists) {
 			packageInfo.AddString("status", "unverified");
-			packageInfo.AddString("reason", "Missing attribute");
+			unverifiedCount++;
+		} else if (!result.isValid) {
+			packageInfo.AddString("status", "corrupted");
+			corruptedCount++;
 		} else {
 			packageInfo.AddString("status", "ok");
-			packageInfo.AddString("checksum", "abc123def456...");
-			packageInfo.AddString("verified_time", "2026-11-03T06:30:00 UTC");
+			okCount++;
 		}
-		
+
 		outResults->AddMessage("package", &packageInfo);
 	}
-	
-	outResults->AddInt32("total", total);
-	outResults->AddInt32("ok", total - 2);
-	outResults->AddInt32("corrupted", 1);
-	outResults->AddInt32("unverified", 1);
-	
+
+	outResults->AddInt32("total", current);
+	outResults->AddInt32("ok", okCount);
+	outResults->AddInt32("corrupted", corruptedCount);
+	outResults->AddInt32("unverified", unverifiedCount);
+
 	return B_OK;
 }
 

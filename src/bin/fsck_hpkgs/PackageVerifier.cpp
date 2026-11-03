@@ -54,7 +54,11 @@ PackageVerifier::VerifyPackage(const char* filePath,
 	if (filePath == NULL || outResult == NULL)
 		return B_BAD_VALUE;
 	
-	memset(outResult, 0, sizeof(PackageVerificationResult));
+	// Reset via assignment, not memset: BString's copy-assignment is
+	// non-trivial (it manages a reference-counted buffer), so zeroing
+	// the struct's raw memory would corrupt any BString field that was
+	// already properly constructed.
+	*outResult = PackageVerificationResult();
 	outResult->filePath = filePath;
 	
 	// Extract filename from path

@@ -40,6 +40,9 @@ struct PackageVerificationResult {
 	// Verification result
 	bool isValid;                     // true if attributed == calculated
 	BString statusMessage;            // Human-readable status
+
+	PackageVerificationResult()
+		: attributeExists(false), calculationStatus(B_OK), isValid(false) {}
 };
 
 

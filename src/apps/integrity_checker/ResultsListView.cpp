@@ -6,7 +6,8 @@
 #include <stdio.h>
 
 ResultsListView::ResultsListView(const char* name, list_view_type type)
-	: BListView(name, type)
+	: BListView(name, type),
+	  fPackageInfos(10)
 {
 	// Set up list view styling
 }
@@ -39,14 +40,14 @@ ResultsListView::_GetStatusIcon(const char* status)
 {
 	if (!status)
 		return "? ";
-	
+
 	if (strcmp(status, "ok") == 0)
 		return "✓ ";
 	if (strcmp(status, "corrupted") == 0)
 		return "✗ ";
 	if (strcmp(status, "unverified") == 0)
 		return "⚠ ";
-	
+
 	return "? ";
 }
 
@@ -55,7 +56,7 @@ ResultsListView::_GetSourceIcon(const char* source)
 {
 	if (!source)
 		return "";
-	
+
 	if (strcmp(source, "repository") == 0)
 		return "[repo]";
 	if (strcmp(source, "local") == 0)
@@ -64,44 +65,36 @@ ResultsListView::_GetSourceIcon(const char* source)
 		return "[net]";
 	if (strcmp(source, "unknown") == 0)
 		return "[?]";
-	
+
 	return "";
 }
 
 BString
-ResultsListView::_FormatDisplayString(
-	const char* name,
-	const char* status,
-	const char* source)
+ResultsListView::_FormatDisplayString(const PackageInfo& info)
 {
 	BString display;
 	display.SetToFormat("%s %s - %s %s",
-		_GetStatusIcon(status),
-		name ? name : "unknown",
-		status ? status : "unknown",
-		_GetSourceIcon(source));
-	
+		_GetStatusIcon(info.status.String()),
+		info.name.IsEmpty() ? "unknown" : info.name.String(),
+		info.status.IsEmpty() ? "unknown" : info.status.String(),
+		_GetSourceIcon(info.source.String()));
+
 	return display;
 }
 
 void
-ResultsListView::AddPackageResult(
-	const char* name,
-	const char* status,
-	const char* checksum,
-	const char* source)
+ResultsListView::AddPackageResult(const PackageInfo& info)
 {
-	if (!name || !status)
+	if (info.name.IsEmpty() || info.status.IsEmpty())
 		return;
-	
-	// Create display string with status icon
-	BString display = _FormatDisplayString(name, status, source);
-	
-	// Create list item (status is already conveyed by the icon in
-	// the display string; BStringItem has no per-item text color API)
+
+	// Create display string with status icon (status is already conveyed
+	// by the icon; BStringItem has no per-item text color API)
+	BString display = _FormatDisplayString(info);
 	BStringItem* item = new BStringItem(display.String());
 
 	AddItem(item);
+	fPackageInfos.AddItem(new PackageInfo(info));
 }
 
 void
@@ -112,38 +105,21 @@ ResultsListView::MakeEmpty()
 		BListItem* item = RemoveItem(i);
 		delete item;
 	}
+
+	fPackageInfos.MakeEmpty();
 }
 
 bool
-ResultsListView::GetSelectedPackage(BString& outName, BString& outStatus)
+ResultsListView::GetSelectedPackageInfo(PackageInfo& outInfo) const
 {
 	int32 selected = CurrentSelection();
-	if (selected < 0)
+	if (selected < 0 || selected >= fPackageInfos.CountItems())
 		return false;
-	
-	BStringItem* item = (BStringItem*)ItemAt(selected);
-	if (!item)
+
+	const PackageInfo* info = fPackageInfos.ItemAt(selected);
+	if (!info)
 		return false;
-	
-	// Parse the display string to extract name and status
-	BString text(item->Text());
-	
-	// Format is: "✓ name - status [source]"
-	// Extract name (between "✓ " and " - ")
-	int32 dashPos = text.FindFirst(" - ");
-	if (dashPos < 0)
-		return false;
-	
-	outName = text;
-	outName.Remove(0, 2);  // Remove status icon
-	outName.Truncate(dashPos - 2);
-	
-	// Extract status (between " - " and space before "[")
-	outStatus = text;
-	outStatus.Remove(0, dashPos + 3);
-	int32 bracketPos = outStatus.FindFirst(" [");
-	if (bracketPos > 0)
-		outStatus.Truncate(bracketPos);
-	
+
+	outInfo = *info;
 	return true;
 }
