@@ -191,29 +191,59 @@ private:
 HPKGRecoverySource HPKGParseRecoverySource(const char* sourceStr);
 const char* HPKGRecoverySourceToString(HPKGRecoverySource source);
 
-// Shared real activation primitives used by every RecoveryStrategy.
+// Shared real recovery primitives used by every RecoveryStrategy.
 //
-// Earlier revisions of this moved the .hpkg file directly in/out of the
-// packages directory (packagefs's node monitor does react to that, see
-// Volume.cpp). That turned out to be the wrong call: that path is a
-// *daemon-side* mechanism with no dependency checking at all - the
-// daemon blindly applies whatever activate/deactivate set it is given,
-// whether that came from a real pkgman transaction or a file appearing/
-// disappearing on its own. pkgman's `install`/`uninstall` commands go
-// through BPackageManager, which calls BSolver::VerifyInstallation()
-// and handles any problems *before* touching the packages directory
-// (see src/kits/package/manager/PackageManager.cpp, and
-// src/bin/pkgman/command_install.cpp / command_uninstall.cpp) - that is
-// the real, safe, dependency-checked path, and it is also the only
-// thing in this tree that can actually fetch a package from its
-// repository, so it replaces the download step too.
+// Earlier revisions of this either moved the .hpkg file directly in/out
+// of the packages directory, or called `pkgman uninstall`+`install` to
+// force a reinstall. Both turned out to be the wrong call for a pure
+// content-corruption repair (same package, same version, just bad bytes
+// on disk):
+//   - Moving the file in/out of the watched packages directory bypasses
+//     dependency checking entirely - the daemon-side node-monitor path
+//     (CommitTransactionHandler.cpp) applies whatever activate/
+//     deactivate set it is given with no BSolver involved at all; the
+//     dependency check only exists client-side, in whatever submits a
+//     transaction.
+//   - `pkgman uninstall` *does* go through BSolver::VerifyInstallation()
+//     (PackageManager.cpp), but for an uninstall that also means
+//     computing the "inverse base package closure" and proposing to
+//     remove every *healthy* package that depends on the one being
+//     repaired - a dependency check that actively wants to do too much,
+//     not too little. `pkgman install <name>` also doesn't help on its
+//     own: the solver sees the same name/version as already installed
+//     and does nothing (BNothingToDoException, see command_install.cpp).
 //
-// Run `pkgman <command> -y <argument>` and wait for it. Returns B_OK
-// only if pkgman exited 0; a dependency problem or a missing/unreachable
-// repository makes it fail (and -y makes pkgman fail rather than
-// prompt), which is exactly what should happen instead of silently
-// going ahead.
-status_t HPKGPkgmanUninstall(const char* packageName);
-status_t HPKGPkgmanInstall(const char* packageNameOrPath);
+// The actual fix needed is simpler than either of those: fetch a
+// verified-correct copy of the exact same version, and overwrite the
+// existing file's *content* in place - same directory entry, same
+// inode, no create/remove/rename at all. That means packagefs's node
+// monitor never fires, so there is no activation change and therefore
+// no dependency check to get wrong either way; the corrected content
+// only takes effect on the next reboot/remount, exactly like this
+// fork's own core "haiku" packages already behave today (changes to
+// those are explicitly deferred to next boot - see
+// CommitTransactionHandler.cpp's _IsSystemPackage() handling).
+//
+// `pkgman download` (src/bin/pkgman/command_download.cpp) is the piece
+// that makes the first half possible without writing a network client
+// here: it resolves <packageName> through the same solver/repository
+// configuration as every other pkgman command and fetches+verifies the
+// file via BPackageManager::DownloadPackage(), but - unlike install/
+// uninstall - never touches installed state, so no dependency logic is
+// ever invoked.
+
+// Run `pkgman download <packageName> -o <outputPath>` and parse the
+// "sha256: <hex>" line it prints on success into outChecksum. The
+// caller must still compare outChecksum against whatever checksum it
+// was expecting: the repository may have moved on to a different
+// version of the same name since this package was installed, and that
+// is not something pkgman download has any way to know about.
+status_t HPKGPkgmanDownload(const char* packageName,
+	const char* outputPath, BString& outChecksum);
+
+// Replace packagePath's content with sourcePath's, byte for byte,
+// without creating/removing/renaming the directory entry.
+status_t HPKGOverwritePackageContent(const char* packagePath,
+	const char* sourcePath);
 
 #endif // _RECOVERY_STRATEGY_H

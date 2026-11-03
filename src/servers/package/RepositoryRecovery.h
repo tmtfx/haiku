@@ -38,6 +38,13 @@ private:
 		const char* packagePath,
 		BString& outName,
 		BString& outVersion);
+
+	// Independently verify a downloaded file's SHA256 against the
+	// checksum we expected - don't just trust pkgman's own internal
+	// check blindly.
+	status_t _VerifyChecksum(
+		const char* filePath,
+		const BString& expectedChecksum);
 };
 
 #endif // _REPOSITORY_RECOVERY_H

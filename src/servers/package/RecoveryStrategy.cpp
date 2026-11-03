@@ -312,21 +312,44 @@ HPKGRecoverySourceToString(HPKGRecoverySource source)
 	}
 }
 
-// ========== pkgman invocation ==========
+// ========== pkgman download / in-place repair ==========
 
+// Run `pkgman <argv...>`, capturing its stdout into outStdout, and wait
+// for it. Returns B_OK only if pkgman exited 0.
 static status_t
-_RunPkgmanCommand(const char* argv[])
+_RunPkgmanCapture(const char* argv[], BString& outStdout)
 {
-	pid_t pid = fork();
-	if (pid < 0)
+	int pipeFds[2];
+	if (pipe(pipeFds) != 0)
 		return errno;
 
+	pid_t pid = fork();
+	if (pid < 0) {
+		close(pipeFds[0]);
+		close(pipeFds[1]);
+		return errno;
+	}
+
 	if (pid == 0) {
-		// Child: replace with pkgman. Haiku's PATH includes the system
-		// bin directory where it lives, so the bare name resolves.
+		// Child: send stdout into the pipe, then exec. Haiku's PATH
+		// includes the system bin directory where pkgman lives, so the
+		// bare name resolves.
+		close(pipeFds[0]);
+		dup2(pipeFds[1], STDOUT_FILENO);
+		close(pipeFds[1]);
 		execvp("pkgman", (char* const*)argv);
 		_exit(127);
 	}
+
+	close(pipeFds[1]);
+
+	char buffer[4096];
+	ssize_t bytesRead;
+	while ((bytesRead = read(pipeFds[0], buffer, sizeof(buffer) - 1)) > 0) {
+		buffer[bytesRead] = '\0';
+		outStdout << buffer;
+	}
+	close(pipeFds[0]);
 
 	int exitStatus = 0;
 	if (waitpid(pid, &exitStatus, 0) < 0)
@@ -339,27 +362,75 @@ _RunPkgmanCommand(const char* argv[])
 }
 
 status_t
-HPKGPkgmanUninstall(const char* packageName)
+HPKGPkgmanDownload(const char* packageName, const char* outputPath,
+	BString& outChecksum)
 {
-	if (!packageName)
+	if (!packageName || !outputPath)
 		return B_BAD_VALUE;
 
-	fprintf(stderr, "HPKGPkgmanUninstall: pkgman uninstall -y %s\n",
-		packageName);
+	fprintf(stderr, "HPKGPkgmanDownload: pkgman download %s -o %s\n",
+		packageName, outputPath);
 
-	const char* argv[] = { "pkgman", "uninstall", "-y", packageName, NULL };
-	return _RunPkgmanCommand(argv);
+	const char* argv[] = { "pkgman", "download", packageName, "-o",
+		outputPath, NULL };
+
+	BString stdoutText;
+	status_t status = _RunPkgmanCapture(argv, stdoutText);
+	if (status != B_OK)
+		return status;
+
+	int32 pos = stdoutText.FindFirst("sha256: ");
+	if (pos < 0)
+		return B_ERROR;
+
+	BString rest;
+	stdoutText.CopyInto(rest, pos + 8, stdoutText.Length() - (pos + 8));
+	int32 newline = rest.FindFirst('\n');
+	if (newline >= 0)
+		rest.Truncate(newline);
+	rest.Trim();
+
+	if (rest.IsEmpty())
+		return B_ERROR;
+
+	outChecksum = rest;
+	return B_OK;
 }
 
 status_t
-HPKGPkgmanInstall(const char* packageNameOrPath)
+HPKGOverwritePackageContent(const char* packagePath, const char* sourcePath)
 {
-	if (!packageNameOrPath)
+	if (!packagePath || !sourcePath)
 		return B_BAD_VALUE;
 
-	fprintf(stderr, "HPKGPkgmanInstall: pkgman install -y %s\n",
-		packageNameOrPath);
+	BFile source(sourcePath, B_READ_ONLY);
+	status_t status = source.InitCheck();
+	if (status != B_OK)
+		return status;
 
-	const char* argv[] = { "pkgman", "install", "-y", packageNameOrPath, NULL };
-	return _RunPkgmanCommand(argv);
+	// Deliberately not a move/rename: overwriting the existing entry's
+	// content in place leaves it mapped into packagefs exactly as before
+	// until the next reboot remounts everything fresh - no live
+	// activation change, so no dependency check to get wrong either way.
+	BFile dest(packagePath, B_WRITE_ONLY | B_ERASE_FILE);
+	status = dest.InitCheck();
+	if (status != B_OK)
+		return status;
+
+	char buffer[64 * 1024];
+	ssize_t bytesRead;
+	while ((bytesRead = source.Read(buffer, sizeof(buffer))) > 0) {
+		ssize_t bytesWritten = dest.Write(buffer, bytesRead);
+		if (bytesWritten != bytesRead)
+			return B_IO_ERROR;
+	}
+
+	if (bytesRead < 0)
+		return (status_t)bytesRead;
+
+	fprintf(stderr, "HPKGOverwritePackageContent: replaced the content of "
+		"%s - a reboot is required for the fix to take effect\n",
+		packagePath);
+
+	return B_OK;
 }

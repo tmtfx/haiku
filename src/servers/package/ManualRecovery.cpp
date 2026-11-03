@@ -233,17 +233,18 @@ ManualRecovery::RecoverWithFile(
 		return status;
 	}
 	
-	// Step 3: Let pkgman install it. This goes through the real,
-	// dependency-checked BPackageManager::Install() path (it calls
-	// BSolver::VerifyInstallation() before touching anything - see
-	// PackageManager.cpp) and replaces the corrupted active package with
-	// this one, exactly like a normal version update would - no manual
-	// file juggling needed, and no risk of silently deactivating
-	// something depended on by another package.
-	status = HPKGPkgmanInstall(replacementFilePath);
+	// Step 3: Overwrite the corrupted package's content in place. This
+	// is a deliberate choice over any install/activate path: replacing
+	// file content under an unchanged directory entry never touches
+	// packagefs's live mount, so there is no dependency check to get
+	// wrong either way (unlike `pkgman uninstall`, which would propose
+	// removing every *healthy* package depending on this one too). The
+	// fix takes effect on the next reboot.
+	status = HPKGOverwritePackageContent(
+		corruption.packagePath.String(), replacementFilePath);
 	if (status != B_OK) {
 		outResult.status = RECOVERY_STATUS_FAILED;
-		outResult.statusMessage = "pkgman install failed";
+		outResult.statusMessage = "Failed to write the repaired content";
 		outResult.errorCode = status;
 
 		if (fLogger)
@@ -254,18 +255,19 @@ ManualRecovery::RecoverWithFile(
 
 	// Success!
 	outResult.status = RECOVERY_STATUS_SUCCESS;
-	outResult.statusMessage = "Package recovered and re-activated successfully";
+	outResult.statusMessage = "Content repaired from the selected file - "
+		"a REBOOT is required for the fix to take effect";
 	outResult.recoveredFilePath = corruption.packagePath;
 	outResult.recoveryCompleteTime = time(NULL);
-	
+
 	if (fLogger)
 		fLogger->LogRecoveryComplete(outResult);
-	
+
 	if (fNotifier) {
 		fNotifier->NotifyAutoRecoverySuccess(
 			corruption.packageName.String(),
-			"User-selected file activated");
+			"Content repaired from user-selected file; reboot required");
 	}
-	
+
 	return B_OK;
 }
