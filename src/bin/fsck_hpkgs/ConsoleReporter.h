@@ -14,6 +14,7 @@
 
 #include <SupportDefs.h>
 #include "PackageVerifier.h"
+#include "IntegrityQuery.h"
 
 namespace BPackageKit {
 namespace BPrivate {
@@ -30,6 +31,9 @@ public:
 	
 	// Report a single package verification result
 	void					ReportPackage(const PackageVerificationResult& result);
+	
+	// Report query results (from IntegrityQuery)
+	void					ReportQueryResults(const IntegrityQuery& query);
 	
 	// Statistics accessors
 	uint32					GetTotalFiles() const;

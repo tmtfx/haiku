@@ -81,3 +81,47 @@ ConsoleReporter::GetMissingAttributeFiles() const
 {
 	return fMissingAttributeFiles;
 }
+
+
+void
+ConsoleReporter::ReportQueryResults(const IntegrityQuery& query)
+{
+	int32 count = query.CountResults();
+	
+	if (count == 0) {
+		fprintf(stdout, "No packages matching query.\n");
+		return;
+	}
+	
+	fprintf(stdout, "Query Results (%d packages)\n", count);
+	fprintf(stdout, "────────────────────────────────────────────────────────\n");
+	
+	for (int32 i = 0; i < count; i++) {
+		PackageQueryResult result;
+		if (query.GetResult(i, result) != B_OK)
+			continue;
+		
+		const char* statusIcon = "?";
+		if (result.status == "ok") {
+			statusIcon = "✓";
+		} else if (result.status == "corrupted") {
+			statusIcon = "✗";
+		} else if (result.status == "unverified") {
+			statusIcon = "⚠";
+		}
+		
+		fprintf(stdout, "%s %-40s [%s]\n", 
+			statusIcon,
+			result.filename.String(),
+			result.status.String());
+		
+		if (!result.verified.IsEmpty()) {
+			fprintf(stdout, "  verified: %s\n", result.verified.String());
+		}
+		if (!result.checksum.IsEmpty()) {
+			fprintf(stdout, "  checksum: %s\n", result.checksum.String());
+		}
+	}
+	
+	fprintf(stdout, "────────────────────────────────────────────────────────\n");
+}

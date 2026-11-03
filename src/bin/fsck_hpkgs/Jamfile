@@ -17,6 +17,7 @@ local sources =
 	fsck_hpkgs.cpp
 	PackageVerifier.cpp
 	ConsoleReporter.cpp
+	IntegrityQuery.cpp
 	;
 
 # TODO: On Haiku build system, link directly to libpackage.so instead of

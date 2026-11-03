@@ -320,7 +320,54 @@ query: "name:*.hpkg AND integrity.hpkg.verified:CORRUPT"
 
 ---
 
-### Phase 5: Auto-Recovery Framework (Optional) ⏳ PENDING
+### Phase 5: BFS Attribute Indexing & Query API ⏳ PENDING
+
+**Objective:** Enable fast O(1) queries for package integrity state using BFS indices
+
+**Rationale:**
+Without indexing: Every query requires scanning all packages O(n)  
+With indexing: Query results are instant O(1), while scan runs once in background
+
+**Deliverables:**
+- IntegrityQuery.h/cpp - Query builder API
+- fsck.hpkgs --query flags for state queries
+- BFS query documentation in plan
+
+**Architecture:**
+```
+Scan Phase (background, can run hourly):
+  fsck.hpkgs --scan → verifies all packages → updates integrity.hpkg.* attributes
+
+Query Phase (interactive, instant):
+  fsck.hpkgs --query status=corrupted  → BFS index lookup → list corrupted packages
+  fsck.hpkgs --query status=unverified → list packages without checksums
+```
+
+**Query Types:**
+- `--query status=corrupted` - Packages with checksum mismatch (integrity.hpkg.sha256 ≠ calculated)
+- `--query status=unverified` - Packages missing checksum attribute
+- `--query status=ok` - Packages with valid checksums
+- `--query since=<timestamp>` - Packages verified since date
+
+**Tasks:**
+- [ ] Create IntegrityQuery class with BFS query builder
+- [ ] Implement query status predicates (corrupted/unverified/ok)
+- [ ] Add --query flag to fsck.hpkgs main
+- [ ] Extend ConsoleReporter for query results
+- [ ] Test query performance vs scan performance
+- [ ] Document BFS query setup (indices, performance)
+
+**Estimated Duration:** 2-3 hours
+
+**Implementation Notes:**
+- Use BFS native query API: `fs_open_query()`, `fs_read_dir()` from `<fs_query.h>`
+- Query predicates stored in attribute values (hex string format)
+- Queries are read-only; they don't modify state
+- Performance: Assuming BFS indices exist, O(1) lookup; without indices, still O(n) but on-demand
+
+---
+
+### Phase 6: Auto-Recovery Framework (Optional) ⏳ PENDING
 
 **Objective:** Framework for automatic package re-download and repair
 
@@ -334,11 +381,11 @@ query: "name:*.hpkg AND integrity.hpkg.verified:CORRUPT"
 - [ ] Add `--repair` flag to fsck.hpkgs (logs intention only)
 - [ ] Test re-download flow
 
-**Estimated Duration:** 2-3 hours (defer until Phase 3 complete)
+**Estimated Duration:** 2-3 hours (defer until Phase 5 complete)
 
 ---
 
-### Phase 6: Documentation ⏳ PENDING
+### Phase 7: Documentation ⏳ PENDING
 
 **Objective:** Complete documentation for users and developers
 
