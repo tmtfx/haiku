@@ -4,6 +4,8 @@
 #include <Path.h>
 #include <Directory.h>
 #include <Entry.h>
+#include <SupportDefs.h>
+#include <Errors.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -122,7 +124,7 @@ ManualRecovery::_VerifyChecksum(
 	fprintf(stderr, "INFO: Would verify checksum of %s\n", filePath);
 	fprintf(stderr, "INFO: Expected: %s\n", expectedChecksum.String());
 	
-	return B_NOT_IMPLEMENTED;
+	return B_NOT_SUPPORTED;
 }
 
 status_t
@@ -165,8 +167,8 @@ ManualRecovery::_ReactivatePackage(
 	
 	// TODO: Use package daemon to activate package
 	fprintf(stderr, "INFO: Would re-activate package: %s\n", packagePath);
-	
-	return B_NOT_IMPLEMENTED;
+
+	return B_NOT_SUPPORTED;
 }
 
 status_t

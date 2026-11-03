@@ -1,17 +1,9 @@
 SubDir HAIKU_TOP src bin fsck_hpkgs ;
 
-SetSubDirSupportedPlatformsBegin ;
-	AddSubDirSupportedPlatforms haiku ;
-SetSubDirSupportedPlatformsEnd ;
-
 UsePrivateHeaders package storage crypto ;
 
 # Add search path for HPKGIntegrityConstants.h
 SEARCH_SOURCE += [ FDirName $(HAIKU_TOP) src kits package hpkg ] ;
-
-# BCrypto library - Haiku's cryptography API
-local cryptoLib = libcrypto_api.so ;
-SEARCH on $(cryptoLib) = /boot/system/lib ;
 
 local sources =
 	fsck_hpkgs.cpp
@@ -20,24 +12,14 @@ local sources =
 	IntegrityQuery.cpp
 	;
 
-# TODO: On Haiku build system, link directly to libpackage.so instead of
-# linking HPKGIntegrityConstants.o manually. This is a workaround for cross-compilation
-# on Fedora where Certificate.cpp OpenSSL error blocks libpackage build.
-# When building on native Haiku:
-#   : be shared package $(cryptoLib) [ TargetLibsupc++ ]
-local extraObjects =
-	[ FGristFiles HPKGIntegrityConstants.o : objects(haiku:x86_64:release:kits:package) ]
-	;
-
+# Use SimpleTest (no SetType processing) 
 SimpleTest fsck_hpkgs :
 	$(sources)
-	$(extraObjects)
 	: be shared
-	$(cryptoLib)
+	package
+	libcrypto_api.so
 	[ TargetLibsupc++ ]
 	;
 
-Package haiku :
-	fsck_hpkgs
-	: bin
-	;
+# Install to /bin
+InstallBin $(HAIKU_APP_BIN_DIR)/fsck_hpkgs ;

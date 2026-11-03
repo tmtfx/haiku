@@ -5,13 +5,16 @@
 #include <Path.h>
 #include <Directory.h>
 #include <Entry.h>
+#include <SupportDefs.h>
+#include <Errors.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <errno.h>
 
 // For BCrypto SHA256
-#include <crypto/SHA256.h>
+#include <crypto/BCrypto.h>
 
 RepositoryRecovery::RepositoryRecovery(
 	RecoveryLogger* logger,
@@ -148,7 +151,7 @@ RepositoryRecovery::_DownloadFromRepository(
 	fprintf(stderr, "INFO: Expected checksum: %s\n", expectedChecksum.String());
 	
 	// For now, return an error (real implementation would download)
-	return B_NOT_IMPLEMENTED;
+	return B_NOT_SUPPORTED;
 }
 
 status_t
@@ -166,7 +169,7 @@ RepositoryRecovery::_VerifyChecksum(
 	fprintf(stderr, "INFO: Expected: %s\n", expectedChecksum.String());
 	
 	// Stub implementation
-	return B_NOT_IMPLEMENTED;
+	return B_NOT_SUPPORTED;
 }
 
 status_t
@@ -192,7 +195,7 @@ RepositoryRecovery::_DeactivateCorruptedPackage(
 	outBackupPath = backupPath;
 	
 	// Stub - real implementation would use package daemon
-	return B_NOT_IMPLEMENTED;
+	return B_NOT_SUPPORTED;
 }
 
 status_t
@@ -209,7 +212,7 @@ RepositoryRecovery::_ReactivatePackage(
 	fprintf(stderr, "INFO: Would re-activate package: %s\n", packagePath);
 	
 	// Stub - real implementation would use package daemon IPC
-	return B_NOT_IMPLEMENTED;
+	return B_NOT_SUPPORTED;
 }
 
 status_t

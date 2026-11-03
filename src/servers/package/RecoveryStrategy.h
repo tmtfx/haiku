@@ -3,6 +3,7 @@
 
 #include <SupportDefs.h>
 #include <String.h>
+#include <List.h>
 #include <time.h>
 
 // Recovery source type constants
