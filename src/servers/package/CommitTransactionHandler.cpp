@@ -27,6 +27,7 @@
 #include "Constants.h"
 #include "DebugSupport.h"
 #include "Exception.h"
+#include "HPKGIntegrityWriter.h"
 #include "PackageFileManager.h"
 #include "VolumeState.h"
 
@@ -1814,6 +1815,26 @@ CommitTransactionHandler::_ChangePackageActivation(
 	// Update our state, i.e. remove deactivated packages and mark activated
 	// packages accordingly.
 	fVolumeState->ActivationChanged(packagesToActivate, packagesToDeactivate);
+
+	// Write integrity checksums to activated packages (non-blocking)
+	for (PackageSet::const_iterator it = packagesToActivate.begin();
+			it != packagesToActivate.end(); ++it) {
+		Package* package = *it;
+		const BString& checksum = package->Info().Checksum();
+
+		// Only write if checksum was provided by repository
+		if (!checksum.IsEmpty()) {
+			entry_ref packageEntry = package->EntryRef();
+			status_t status = HPKGIntegrityWriter::WriteChecksum(
+				packageEntry, checksum);
+
+			// Non-blocking: log errors but don't fail the transaction
+			if (status != B_OK) {
+				WARN("Failed to write integrity checksum for %s: %s\n",
+					package->FileName().String(), strerror(status));
+			}
+		}
+	}
 }
 
 

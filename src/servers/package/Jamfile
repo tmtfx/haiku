@@ -3,6 +3,9 @@ SubDir HAIKU_TOP src servers package ;
 UsePrivateSystemHeaders ;
 UsePrivateHeaders app interface shared storage ;
 
+# Add path to HPKG kit headers for integrity checking
+SEARCH_SOURCE += [ FDirName $(HAIKU_TOP) src kits package hpkg ] ;
+
 Application package_daemon
 	:
 	CommitTransactionHandler.cpp
@@ -11,6 +14,7 @@ Application package_daemon
 	Exception.cpp
 	FSTransaction.cpp
 	FSUtils.cpp
+	HPKGIntegrityWriter.cpp
 	Job.cpp
 	JobQueue.cpp
 	Package.cpp
