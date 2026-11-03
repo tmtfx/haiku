@@ -239,6 +239,7 @@ HaikuInstall install-test-apps : $(HAIKU_APP_TEST_DIR) : run.sh
 
 } # if $(TARGET_PLATFORM) = libbe_test
 
+SubInclude HAIKU_TOP src tests servers app alpha_compositing ;
 SubInclude HAIKU_TOP src tests servers app archived_view ;
 SubInclude HAIKU_TOP src tests servers app async_drawing ;
 SubInclude HAIKU_TOP src tests servers app avoid_focus ;
