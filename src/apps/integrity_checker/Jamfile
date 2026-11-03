@@ -1,0 +1,20 @@
+SubDir HAIKU_TOP src apps integrity_checker ;
+
+UsePrivateSystemHeaders ;
+UsePrivateHeaders app interface shared storage ;
+
+# Add path to recovery strategy headers
+SEARCH_SOURCE += [ FDirName $(HAIKU_TOP) src servers package ] ;
+
+Application IntegrityChecker
+	:
+	IntegrityCheckerApp.cpp
+	IntegrityCheckerWindow.cpp
+	ResultsListView.cpp
+	QueryBuilderView.cpp
+	SettingsView.cpp
+	ScanThread.cpp
+	:
+	be localestub
+	[ TargetLibstdc++ ]
+;
