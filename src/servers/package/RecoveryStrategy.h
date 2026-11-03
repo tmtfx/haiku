@@ -192,18 +192,28 @@ HPKGRecoverySource HPKGParseRecoverySource(const char* sourceStr);
 const char* HPKGRecoverySourceToString(HPKGRecoverySource source);
 
 // Shared real activation primitives used by every RecoveryStrategy.
-// On this fork's packagefs, the packages directory is watched with
-// B_WATCH_DIRECTORY (see src/servers/package/Volume.cpp), so simply
-// moving a .hpkg file out of / back into that directory is what
-// actually deactivates/reactivates it - no package_daemon IPC call
-// exists or is needed for this.
-
-// Atomically move packagePath into a sibling ".hpkg_integrity_quarantine"
-// directory. Returns the quarantined file's new path in outBackupPath.
-status_t HPKGQuarantinePackage(const char* packagePath, BString& outBackupPath);
-
-// Confirm a package file is present at packagePath after being moved/
-// renamed into place (the move itself is what re-activates it).
-status_t HPKGConfirmPackageInPlace(const char* packagePath);
+//
+// Earlier revisions of this moved the .hpkg file directly in/out of the
+// packages directory (packagefs's node monitor does react to that, see
+// Volume.cpp). That turned out to be the wrong call: that path is a
+// *daemon-side* mechanism with no dependency checking at all - the
+// daemon blindly applies whatever activate/deactivate set it is given,
+// whether that came from a real pkgman transaction or a file appearing/
+// disappearing on its own. pkgman's `install`/`uninstall` commands go
+// through BPackageManager, which calls BSolver::VerifyInstallation()
+// and handles any problems *before* touching the packages directory
+// (see src/kits/package/manager/PackageManager.cpp, and
+// src/bin/pkgman/command_install.cpp / command_uninstall.cpp) - that is
+// the real, safe, dependency-checked path, and it is also the only
+// thing in this tree that can actually fetch a package from its
+// repository, so it replaces the download step too.
+//
+// Run `pkgman <command> -y <argument>` and wait for it. Returns B_OK
+// only if pkgman exited 0; a dependency problem or a missing/unreachable
+// repository makes it fail (and -y makes pkgman fail rather than
+// prompt), which is exactly what should happen instead of silently
+// going ahead.
+status_t HPKGPkgmanUninstall(const char* packageName);
+status_t HPKGPkgmanInstall(const char* packageNameOrPath);
 
 #endif // _RECOVERY_STRATEGY_H

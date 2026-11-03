@@ -2,17 +2,12 @@
 #include "HPKGIntegrityConstants.h"
 
 #include <File.h>
-#include <Path.h>
-#include <Directory.h>
-#include <Entry.h>
 #include <SupportDefs.h>
 #include <Errors.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <sys/stat.h>
-#include <errno.h>
 
 // For BCrypto SHA256
 #include <crypto/BCrypto.h>
@@ -150,52 +145,6 @@ ManualRecovery::_VerifyChecksum(
 }
 
 status_t
-ManualRecovery::_DeactivateCorruptedPackage(
-	const char* packagePath,
-	BString& outBackupPath)
-{
-	return HPKGQuarantinePackage(packagePath, outBackupPath);
-}
-
-status_t
-ManualRecovery::_CopyReplacementFile(
-	const char* sourcePath,
-	const char* destinationPath)
-{
-	if (!sourcePath || !destinationPath)
-		return B_BAD_VALUE;
-	
-	// Open source file
-	BFile source(sourcePath, B_READ_ONLY);
-	if (source.InitCheck() != B_OK)
-		return source.InitCheck();
-	
-	// Create destination file
-	BFile dest(destinationPath, B_WRITE_ONLY | B_CREATE_FILE | B_ERASE_FILE);
-	if (dest.InitCheck() != B_OK)
-		return dest.InitCheck();
-	
-	// Copy in chunks
-	char buffer[64 * 1024];  // 64KB chunks
-	ssize_t bytesRead;
-	
-	while ((bytesRead = source.Read(buffer, sizeof(buffer))) > 0) {
-		ssize_t bytesWritten = dest.Write(buffer, bytesRead);
-		if (bytesWritten != bytesRead)
-			return B_IO_ERROR;
-	}
-	
-	return B_OK;
-}
-
-status_t
-ManualRecovery::_ReactivatePackage(
-	const char* packagePath)
-{
-	return HPKGConfirmPackageInPlace(packagePath);
-}
-
-status_t
 ManualRecovery::Recover(
 	const PackageCorruptionInfo& corruption,
 	RecoveryResult& outResult)
@@ -284,64 +233,17 @@ ManualRecovery::RecoverWithFile(
 		return status;
 	}
 	
-	// Step 3: Stage the verified replacement next to the target, under a
-	// temporary name. Never overwrite the live package file in place:
-	// packagefs's node monitor reacts to the directory entry being
-	// created/removed/moved, not to a file's content changing underneath
-	// an unchanged entry, so an in-place rewrite would silently leave the
-	// corrupted package mounted.
-	BString stagedPath(corruption.packagePath);
-	stagedPath << ".recovered";
-
-	status = _CopyReplacementFile(replacementFilePath, stagedPath.String());
+	// Step 3: Let pkgman install it. This goes through the real,
+	// dependency-checked BPackageManager::Install() path (it calls
+	// BSolver::VerifyInstallation() before touching anything - see
+	// PackageManager.cpp) and replaces the corrupted active package with
+	// this one, exactly like a normal version update would - no manual
+	// file juggling needed, and no risk of silently deactivating
+	// something depended on by another package.
+	status = HPKGPkgmanInstall(replacementFilePath);
 	if (status != B_OK) {
 		outResult.status = RECOVERY_STATUS_FAILED;
-		outResult.statusMessage = "Failed to stage replacement file";
-		outResult.errorCode = status;
-
-		if (fLogger)
-			fLogger->LogRecoveryComplete(outResult);
-
-		remove(stagedPath.String());
-		return status;
-	}
-
-	// Step 4: Deactivate the corrupted package - moving it out of the
-	// packages directory is what actually unmounts it.
-	BString backupPath;
-	status = _DeactivateCorruptedPackage(
-		corruption.packagePath.String(), backupPath);
-	if (status != B_OK) {
-		outResult.status = RECOVERY_STATUS_FAILED;
-		outResult.statusMessage = "Failed to deactivate corrupted package";
-		outResult.errorCode = status;
-
-		if (fLogger)
-			fLogger->LogRecoveryComplete(outResult);
-
-		remove(stagedPath.String());
-		return status;
-	}
-
-	// Step 5: Move the verified replacement into the original path -
-	// this is what actually re-activates it.
-	if (rename(stagedPath.String(), corruption.packagePath.String()) != 0) {
-		outResult.status = RECOVERY_STATUS_FAILED;
-		outResult.statusMessage = "Failed to install recovered package";
-		outResult.errorCode = errno;
-
-		if (fLogger)
-			fLogger->LogRecoveryComplete(outResult);
-
-		remove(stagedPath.String());
-		return B_IO_ERROR;
-	}
-
-	// Step 6: Confirm re-activation
-	status = _ReactivatePackage(corruption.packagePath.String());
-	if (status != B_OK) {
-		outResult.status = RECOVERY_STATUS_FAILED;
-		outResult.statusMessage = "Failed to re-activate recovered package";
+		outResult.statusMessage = "pkgman install failed";
 		outResult.errorCode = status;
 
 		if (fLogger)

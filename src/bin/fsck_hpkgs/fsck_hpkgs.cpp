@@ -135,12 +135,12 @@ _BuildCorruptionInfo(const PackageVerificationResult& result)
 
 
 // Attempt to recover one package. If replacementFile is given, it is
-// handed directly to ManualRecovery (this is the only strategy that can
-// actually succeed without a real network client - see
-// RepositoryRecovery::_DownloadFromRepository). Otherwise, the normal
-// RecoveryCoordinator dispatch is used (repository strategy first, falls
-// through to manual, which - with no file provided - correctly reports
-// that user intervention is needed rather than pretending to fix it).
+// handed directly to ManualRecovery, which has pkgman install it.
+// Otherwise, the normal RecoveryCoordinator dispatch is used
+// (RepositoryRecovery first - pkgman uninstall + reinstall from the
+// repository - falling through to ManualRecovery, which with no file
+// provided correctly reports that user intervention is needed rather
+// than pretending to fix it).
 static void
 _AttemptRepair(const PackageVerificationResult& result,
 	const char* replacementFile, bool dryRun,

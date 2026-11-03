@@ -6,8 +6,10 @@
 #include <stdlib.h>
 #include <time.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#include <errno.h>
 #include <Directory.h>
-#include <Entry.h>
 #include <Path.h>
 
 // ========== RecoveryCoordinator ==========
@@ -310,76 +312,54 @@ HPKGRecoverySourceToString(HPKGRecoverySource source)
 	}
 }
 
-// ========== Shared activation primitives ==========
+// ========== pkgman invocation ==========
 
-status_t
-HPKGQuarantinePackage(const char* packagePath, BString& outBackupPath)
+static status_t
+_RunPkgmanCommand(const char* argv[])
 {
-	if (!packagePath)
-		return B_BAD_VALUE;
+	pid_t pid = fork();
+	if (pid < 0)
+		return errno;
 
-	BEntry entry(packagePath);
-	status_t status = entry.InitCheck();
-	if (status != B_OK)
-		return status;
+	if (pid == 0) {
+		// Child: replace with pkgman. Haiku's PATH includes the system
+		// bin directory where it lives, so the bare name resolves.
+		execvp("pkgman", (char* const*)argv);
+		_exit(127);
+	}
 
-	BPath packagePathObj(packagePath);
-	BPath packageDirPath;
-	status = packagePathObj.GetParent(&packageDirPath);
-	if (status != B_OK)
-		return status;
+	int exitStatus = 0;
+	if (waitpid(pid, &exitStatus, 0) < 0)
+		return errno;
 
-	BPath quarantineDirPath(packageDirPath.Path());
-	quarantineDirPath.Append(".hpkg_integrity_quarantine");
-
-	status = create_directory(quarantineDirPath.Path(), 0755);
-	if (status != B_OK)
-		return status;
-
-	BDirectory quarantineDir(quarantineDirPath.Path());
-	status = quarantineDir.InitCheck();
-	if (status != B_OK)
-		return status;
-
-	char suffix[32];
-	snprintf(suffix, sizeof(suffix), ".corrupted-%lld",
-		(long long)time(NULL));
-	BString backupName(packagePathObj.Leaf());
-	backupName << suffix;
-
-	// Moving the entry out of the watched packages directory is what
-	// actually deactivates it - packagefs's node monitor sees the
-	// resulting B_ENTRY_REMOVED/B_ENTRY_MOVED and unmounts the package.
-	status = entry.MoveTo(&quarantineDir, backupName.String(), true);
-	if (status != B_OK)
-		return status;
-
-	BPath backupPath(quarantineDirPath.Path());
-	backupPath.Append(backupName.String());
-	outBackupPath = backupPath.Path();
-
-	fprintf(stderr, "HPKGQuarantinePackage: moved %s to %s\n",
-		packagePath, outBackupPath.String());
+	if (!WIFEXITED(exitStatus) || WEXITSTATUS(exitStatus) != 0)
+		return B_ERROR;
 
 	return B_OK;
 }
 
 status_t
-HPKGConfirmPackageInPlace(const char* packagePath)
+HPKGPkgmanUninstall(const char* packageName)
 {
-	if (!packagePath)
+	if (!packageName)
 		return B_BAD_VALUE;
 
-	BEntry entry(packagePath);
-	status_t status = entry.InitCheck();
-	if (status != B_OK)
-		return status;
+	fprintf(stderr, "HPKGPkgmanUninstall: pkgman uninstall -y %s\n",
+		packageName);
 
-	if (!entry.Exists())
-		return B_ENTRY_NOT_FOUND;
+	const char* argv[] = { "pkgman", "uninstall", "-y", packageName, NULL };
+	return _RunPkgmanCommand(argv);
+}
 
-	fprintf(stderr, "HPKGConfirmPackageInPlace: %s is in place; "
-		"packagefs will auto-activate it\n", packagePath);
+status_t
+HPKGPkgmanInstall(const char* packageNameOrPath)
+{
+	if (!packageNameOrPath)
+		return B_BAD_VALUE;
 
-	return B_OK;
+	fprintf(stderr, "HPKGPkgmanInstall: pkgman install -y %s\n",
+		packageNameOrPath);
+
+	const char* argv[] = { "pkgman", "install", "-y", packageNameOrPath, NULL };
+	return _RunPkgmanCommand(argv);
 }

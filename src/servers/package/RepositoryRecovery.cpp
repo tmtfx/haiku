@@ -1,22 +1,8 @@
 #include "RepositoryRecovery.h"
-#include "HPKGIntegrityConstants.h"
 
-#include <File.h>
-#include <Path.h>
-#include <Directory.h>
-#include <Entry.h>
-#include <SupportDefs.h>
-#include <Errors.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <errno.h>
-
-// For BCrypto SHA256
-#include <crypto/BCrypto.h>
-
-using namespace BPackageKit::BPrivate;
 
 RepositoryRecovery::RepositoryRecovery(
 	RecoveryLogger* logger,
@@ -41,7 +27,7 @@ RepositoryRecovery::DescribeRecovery(const PackageCorruptionInfo& corruption)
 {
 	BString description;
 	description.SetToFormat(
-		"Auto-recover from repository: Re-download %s and re-activate",
+		"Auto-recover from repository: pkgman uninstall + reinstall %s",
 		corruption.packageName.String());
 	return description;
 }
@@ -54,19 +40,19 @@ RepositoryRecovery::_ExtractPackageInfo(
 {
 	if (!packagePath)
 		return B_BAD_VALUE;
-	
+
 	// Extract filename from path
 	const char* filename = strrchr(packagePath, '/');
 	if (filename)
 		filename++;
 	else
 		filename = packagePath;
-	
+
 	// Remove .hpkg extension
 	BString cleanName(filename);
 	if (cleanName.EndsWith(".hpkg"))
 		cleanName.Truncate(cleanName.Length() - 5);
-	
+
 	// Try to split on last dash to separate name from version
 	// Format: name-version.hpkg
 	int32 lastDash = cleanName.FindLast('-');
@@ -79,131 +65,8 @@ RepositoryRecovery::_ExtractPackageInfo(
 		outName = cleanName;
 		outVersion = "unknown";
 	}
-	
-	return B_OK;
-}
-
-status_t
-RepositoryRecovery::_ExtractVersionFromFilename(
-	const char* filename,
-	BString& outVersion)
-{
-	if (!filename)
-		return B_BAD_VALUE;
-	
-	// Find .hpkg extension
-	const char* ext = strrchr(filename, '.');
-	if (!ext || strcmp(ext, ".hpkg") != 0)
-		return B_BAD_VALUE;
-	
-	// Find last dash before extension
-	BString temp(filename);
-	temp.Truncate(ext - filename);
-	
-	int32 lastDash = temp.FindLast('-');
-	if (lastDash > 0) {
-		outVersion = temp;
-		outVersion.Remove(0, lastDash + 1);
-		return B_OK;
-	}
-	
-	return B_ERROR;
-}
-
-status_t
-RepositoryRecovery::_FindPackageInRepository(
-	const char* packageName,
-	const char* packageVersion,
-	BString& outRepositoryPath)
-{
-	// TODO: This is a stub for the real integration with package manager
-	// In production, this would:
-	// 1. Connect to pkgman daemon via BMessenger
-	// 2. Query available repositories
-	// 3. Search for package name in repository index
-	// 4. Return download URL/path
-	
-	// For now, we'll log and return a placeholder
-	fprintf(stderr, "INFO: Would query repository for %s (version %s)\n",
-		packageName, packageVersion);
-	
-	// Placeholder: construct a repository URL
-	// Real implementation would get this from pkgman
-	outRepositoryPath.SetToFormat("repository://%s-%s.hpkg",
-		packageName, packageVersion);
-	
-	return B_OK;
-}
-
-status_t
-RepositoryRecovery::_DownloadFromRepository(
-	const char* repositoryPath,
-	const BString& expectedChecksum,
-	BString& outDownloadedPath)
-{
-	// There is no local cache of already-downloaded .hpkg content to
-	// recover from here: BPackageRoster's repository cache only holds
-	// repository metadata/indices (see PackageRoster.cpp), not package
-	// payloads, and DownloadFileRequest writes straight to the final
-	// destination with no persistent copy kept afterwards. A real
-	// network re-download would additionally need a Network Kit HTTP
-	// client plus the repository's actual base URL, which
-	// integrity.hpkg.source does not currently persist (only the
-	// literal string "repository"). Rather than fake a download, fail
-	// honestly so the caller falls back to manual recovery.
-	fprintf(stderr, "RepositoryRecovery: no local source available to "
-		"recover from %s (expected checksum %s) - automatic repository "
-		"re-download is not implemented; manual recovery is required\n",
-		repositoryPath, expectedChecksum.String());
-
-	return B_NOT_SUPPORTED;
-}
-
-status_t
-RepositoryRecovery::_VerifyChecksum(
-	const char* filePath,
-	const BString& expectedChecksum)
-{
-	if (!filePath)
-		return B_BAD_VALUE;
-
-	BFile file(filePath, B_READ_ONLY);
-	status_t status = file.InitCheck();
-	if (status != B_OK)
-		return status;
-
-	BCrypto crypto;
-	uint8 digest[HPKG_CHECKSUM_LENGTH_BYTES];
-	status = crypto.Digest(B_CRYPTO_SHA256, &file, digest);
-	if (status != B_OK)
-		return status;
-
-	char hexBuffer[HPKG_CHECKSUM_BUFFER_SIZE];
-	_HPKGDigestToHex(digest, sizeof(digest), hexBuffer);
-
-	if (expectedChecksum != hexBuffer) {
-		fprintf(stderr, "RepositoryRecovery: checksum mismatch for %s "
-			"(expected %s, got %s)\n", filePath,
-			expectedChecksum.String(), hexBuffer);
-		return B_BAD_DATA;
-	}
 
 	return B_OK;
-}
-
-status_t
-RepositoryRecovery::_DeactivateCorruptedPackage(
-	const char* packagePath,
-	BString& outBackupPath)
-{
-	return HPKGQuarantinePackage(packagePath, outBackupPath);
-}
-
-status_t
-RepositoryRecovery::_ReactivatePackage(
-	const char* packagePath)
-{
-	return HPKGConfirmPackageInPlace(packagePath);
 }
 
 status_t
@@ -211,25 +74,19 @@ RepositoryRecovery::Recover(
 	const PackageCorruptionInfo& corruption,
 	RecoveryResult& outResult)
 {
-	// Initialize result
 	outResult.status = RECOVERY_STATUS_IN_PROGRESS;
 	outResult.recoveryAttemptTime = time(NULL);
 	outResult.wasAutomatic = true;
-	
-	if (fNotifier) {
+
+	if (fNotifier)
 		fNotifier->NotifyAutoRecoveryStarted(corruption.packageName.String());
-	}
-	
-	if (fLogger) {
+	if (fLogger)
 		fLogger->LogRecoveryStart(corruption, StrategyName());
-	}
-	
-	// Step 1: Extract package name and version
+
 	BString packageName, packageVersion;
 	status_t status = _ExtractPackageInfo(
-		corruption.packagePath.String(),
-		packageName, packageVersion);
-	
+		corruption.packagePath.String(), packageName, packageVersion);
+
 	if (status != B_OK) {
 		outResult.status = RECOVERY_STATUS_FAILED;
 		outResult.statusMessage = "Failed to extract package info";
@@ -238,126 +95,66 @@ RepositoryRecovery::Recover(
 			fLogger->LogRecoveryComplete(outResult);
 		return status;
 	}
-	
-	// Step 2: Find package in repository
-	BString repositoryPath;
-	status = _FindPackageInRepository(
-		packageName.String(),
-		packageVersion.String(),
-		repositoryPath);
-	
+
+	// pkgman's own installed-package check would otherwise treat the
+	// corrupted package as "already installed, nothing to do" (same
+	// name/version is still recorded even though the file content is
+	// bad - see command_install.cpp's BNothingToDoException handling),
+	// so it has to be uninstalled first. Both uninstall and install go
+	// through BSolver::VerifyInstallation() before touching anything
+	// (PackageManager.cpp) - this is the real, dependency-checked path,
+	// unlike moving the .hpkg file directly.
+	status = HPKGPkgmanUninstall(packageName.String());
 	if (status != B_OK) {
 		outResult.status = RECOVERY_STATUS_FAILED;
-		outResult.statusMessage = "Package not found in repository";
+		outResult.statusMessage =
+			"pkgman uninstall failed - likely blocked by a dependency "
+			"check (something still needs this package)";
 		outResult.errorCode = status;
 		if (fLogger)
 			fLogger->LogRecoveryComplete(outResult);
 		if (fNotifier) {
 			fNotifier->NotifyAutoRecoveryFailed(
 				corruption.packageName.String(),
-				"Package not found in any repository");
+				"Could not safely remove the corrupted package");
 		}
 		return status;
 	}
-	
-	// Step 3: Download from repository
-	BString downloadedPath;
-	status = _DownloadFromRepository(
-		repositoryPath.String(),
-		corruption.expectedChecksum,
-		downloadedPath);
-	
+
+	status = HPKGPkgmanInstall(packageName.String());
 	if (status != B_OK) {
 		outResult.status = RECOVERY_STATUS_FAILED;
-		outResult.statusMessage = "Failed to download from repository";
+		outResult.statusMessage = "pkgman install failed (repository "
+			"unreachable, or the package is no longer available there)";
 		outResult.errorCode = status;
 		if (fLogger)
 			fLogger->LogRecoveryComplete(outResult);
 		if (fNotifier) {
 			fNotifier->NotifyAutoRecoveryFailed(
 				corruption.packageName.String(),
-				"Repository download failed");
+				"Re-download via pkgman failed - the package was left "
+				"uninstalled, manual recovery is required");
 		}
 		return status;
 	}
-	
-	// Step 4: Verify checksum
-	status = _VerifyChecksum(
-		downloadedPath.String(),
-		corruption.expectedChecksum);
-	
-	if (status != B_OK) {
-		outResult.status = RECOVERY_STATUS_FAILED;
-		outResult.statusMessage = "Downloaded file checksum mismatch";
-		outResult.errorCode = status;
-		if (fLogger)
-			fLogger->LogRecoveryComplete(outResult);
-		if (fNotifier) {
-			fNotifier->NotifyAutoRecoveryFailed(
-				corruption.packageName.String(),
-				"Checksum verification failed");
-		}
-		// Clean up downloaded file
-		remove(downloadedPath.String());
-		return status;
-	}
-	
-	// Step 5: Deactivate corrupted package
-	BString backupPath;
-	status = _DeactivateCorruptedPackage(
-		corruption.packagePath.String(),
-		backupPath);
-	
-	if (status != B_OK) {
-		outResult.status = RECOVERY_STATUS_FAILED;
-		outResult.statusMessage = "Failed to deactivate corrupted package";
-		outResult.errorCode = status;
-		if (fLogger)
-			fLogger->LogRecoveryComplete(outResult);
-		remove(downloadedPath.String());
-		return status;
-	}
-	
-	// Step 6: Move recovered package to original location
-	status = rename(downloadedPath.String(), corruption.packagePath.String());
-	if (status != 0) {
-		outResult.status = RECOVERY_STATUS_FAILED;
-		outResult.statusMessage = "Failed to install recovered package";
-		outResult.errorCode = errno;
-		if (fLogger)
-			fLogger->LogRecoveryComplete(outResult);
-		remove(downloadedPath.String());
-		return B_IO_ERROR;
-	}
-	
-	// Step 7: Re-activate package
-	status = _ReactivatePackage(corruption.packagePath.String());
-	if (status != B_OK) {
-		outResult.status = RECOVERY_STATUS_FAILED;
-		outResult.statusMessage = "Failed to re-activate recovered package";
-		outResult.errorCode = status;
-		if (fLogger)
-			fLogger->LogRecoveryComplete(outResult);
-		return status;
-	}
-	
-	// Success!
+
 	outResult.status = RECOVERY_STATUS_SUCCESS;
-	outResult.statusMessage = "Package recovered and re-activated successfully";
+	outResult.statusMessage =
+		"Package uninstalled and reinstalled from the repository via "
+		"pkgman";
 	outResult.recoveredFilePath = corruption.packagePath;
 	outResult.recoveryCompleteTime = time(NULL);
-	
+
 	if (fLogger)
 		fLogger->LogRecoveryComplete(outResult);
-	
+
 	if (fNotifier) {
 		BString detail;
 		detail.SetToFormat("Version: %s, Source: repository",
 			packageVersion.String());
 		fNotifier->NotifyAutoRecoverySuccess(
-			corruption.packageName.String(),
-			detail.String());
+			corruption.packageName.String(), detail.String());
 	}
-	
+
 	return B_OK;
 }
