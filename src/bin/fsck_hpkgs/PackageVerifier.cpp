@@ -7,6 +7,10 @@
  *		tmtfx
  *
  * Package verification implementation
+ *
+ * NOTE: When building on native Haiku, HPKGIntegrityConstants will be linked
+ * from libpackage.so automatically. The manual object file linking in Jamfile
+ * is a workaround for cross-compilation on non-Haiku systems.
  */
 
 #include "PackageVerifier.h"

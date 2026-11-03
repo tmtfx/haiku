@@ -19,6 +19,11 @@ local sources =
 	ConsoleReporter.cpp
 	;
 
+# TODO: On Haiku build system, link directly to libpackage.so instead of
+# linking HPKGIntegrityConstants.o manually. This is a workaround for cross-compilation
+# on Fedora where Certificate.cpp OpenSSL error blocks libpackage build.
+# When building on native Haiku:
+#   : be shared package $(cryptoLib) [ TargetLibsupc++ ]
 local extraObjects =
 	[ FGristFiles HPKGIntegrityConstants.o : objects(haiku:x86_64:release:kits:package) ]
 	;
