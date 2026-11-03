@@ -7,6 +7,7 @@
 #include <time.h>
 #include <sys/stat.h>
 #include <Directory.h>
+#include <Entry.h>
 #include <Path.h>
 
 // ========== RecoveryCoordinator ==========
@@ -307,4 +308,78 @@ HPKGRecoverySourceToString(HPKGRecoverySource source)
 		default:
 			return "unknown_type";
 	}
+}
+
+// ========== Shared activation primitives ==========
+
+status_t
+HPKGQuarantinePackage(const char* packagePath, BString& outBackupPath)
+{
+	if (!packagePath)
+		return B_BAD_VALUE;
+
+	BEntry entry(packagePath);
+	status_t status = entry.InitCheck();
+	if (status != B_OK)
+		return status;
+
+	BPath packagePathObj(packagePath);
+	BPath packageDirPath;
+	status = packagePathObj.GetParent(&packageDirPath);
+	if (status != B_OK)
+		return status;
+
+	BPath quarantineDirPath(packageDirPath.Path());
+	quarantineDirPath.Append(".hpkg_integrity_quarantine");
+
+	status = create_directory(quarantineDirPath.Path(), 0755);
+	if (status != B_OK)
+		return status;
+
+	BDirectory quarantineDir(quarantineDirPath.Path());
+	status = quarantineDir.InitCheck();
+	if (status != B_OK)
+		return status;
+
+	char suffix[32];
+	snprintf(suffix, sizeof(suffix), ".corrupted-%lld",
+		(long long)time(NULL));
+	BString backupName(packagePathObj.Leaf());
+	backupName << suffix;
+
+	// Moving the entry out of the watched packages directory is what
+	// actually deactivates it - packagefs's node monitor sees the
+	// resulting B_ENTRY_REMOVED/B_ENTRY_MOVED and unmounts the package.
+	status = entry.MoveTo(&quarantineDir, backupName.String(), true);
+	if (status != B_OK)
+		return status;
+
+	BPath backupPath(quarantineDirPath.Path());
+	backupPath.Append(backupName.String());
+	outBackupPath = backupPath.Path();
+
+	fprintf(stderr, "HPKGQuarantinePackage: moved %s to %s\n",
+		packagePath, outBackupPath.String());
+
+	return B_OK;
+}
+
+status_t
+HPKGConfirmPackageInPlace(const char* packagePath)
+{
+	if (!packagePath)
+		return B_BAD_VALUE;
+
+	BEntry entry(packagePath);
+	status_t status = entry.InitCheck();
+	if (status != B_OK)
+		return status;
+
+	if (!entry.Exists())
+		return B_ENTRY_NOT_FOUND;
+
+	fprintf(stderr, "HPKGConfirmPackageInPlace: %s is in place; "
+		"packagefs will auto-activate it\n", packagePath);
+
+	return B_OK;
 }

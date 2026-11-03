@@ -1,15 +1,22 @@
 SubDir HAIKU_TOP src bin fsck_hpkgs ;
 
-UsePrivateHeaders package storage crypto ;
+UsePrivateHeaders app interface shared storage package crypto ;
 
 # Add search path for HPKGIntegrityConstants.h
 SEARCH_SOURCE += [ FDirName $(HAIKU_TOP) src kits package hpkg ] ;
+
+# Recovery strategies are shared with the package daemon (same .cpp
+# files compiled into both binaries - see src/servers/package/Jamfile)
+SEARCH_SOURCE += [ FDirName $(HAIKU_TOP) src servers package ] ;
 
 local sources =
 	fsck_hpkgs.cpp
 	PackageVerifier.cpp
 	ConsoleReporter.cpp
 	IntegrityQuery.cpp
+	RecoveryStrategy.cpp
+	RepositoryRecovery.cpp
+	ManualRecovery.cpp
 	;
 
 # Use SimpleTest (no SetType processing) 

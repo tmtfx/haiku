@@ -58,7 +58,13 @@ private:
 	status_t _CopyReplacementFile(
 		const char* sourcePath,
 		const char* destinationPath);
-	
+
+	// Deactivate the corrupted package (move it out of the packages
+	// directory) before the verified replacement is moved into place
+	status_t _DeactivateCorruptedPackage(
+		const char* packagePath,
+		BString& outBackupPath);
+
 	// Re-activate package through package daemon
 	status_t _ReactivatePackage(
 		const char* packagePath);

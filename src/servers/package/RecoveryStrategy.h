@@ -181,9 +181,29 @@ public:
 	virtual void NotifyAutoRecoverySuccess(const char* packageName, const char* details);
 	virtual void NotifyAutoRecoveryFailed(const char* packageName, const char* error);
 	virtual void NotifyManualRecoveryNeeded(const char* packageName, const char* reason);
-	
+
 private:
 	void _SendNotification(const char* title, const char* message);
 };
+
+// Parse/format the integrity.hpkg.source attribute value into/from the
+// HPKGRecoverySource enum (implemented in RecoveryStrategy.cpp).
+HPKGRecoverySource HPKGParseRecoverySource(const char* sourceStr);
+const char* HPKGRecoverySourceToString(HPKGRecoverySource source);
+
+// Shared real activation primitives used by every RecoveryStrategy.
+// On this fork's packagefs, the packages directory is watched with
+// B_WATCH_DIRECTORY (see src/servers/package/Volume.cpp), so simply
+// moving a .hpkg file out of / back into that directory is what
+// actually deactivates/reactivates it - no package_daemon IPC call
+// exists or is needed for this.
+
+// Atomically move packagePath into a sibling ".hpkg_integrity_quarantine"
+// directory. Returns the quarantined file's new path in outBackupPath.
+status_t HPKGQuarantinePackage(const char* packagePath, BString& outBackupPath);
+
+// Confirm a package file is present at packagePath after being moved/
+// renamed into place (the move itself is what re-activates it).
+status_t HPKGConfirmPackageInPlace(const char* packagePath);
 
 #endif // _RECOVERY_STRATEGY_H

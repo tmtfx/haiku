@@ -13,6 +13,9 @@
 #include "HPKGIntegrityConstants.h"
 
 #include <string.h>
+#include <errno.h>
+#include <fs_index.h>
+#include <TypeConstants.h>
 
 
 namespace BPackageKit {
@@ -106,6 +109,32 @@ _HPKGIsValidChecksumHex(const char* hexStr)
 	}
 
 	return true;
+}
+
+
+// ==============================================================================
+// Ensure a BFS Index Exists
+// ==============================================================================
+// Best-effort, idempotent index creation. BeOS/Haiku report an
+// already-existing index as B_BAD_VALUE (not B_FILE_EXISTS) - see
+// src/bin/mkindex.cpp for the same check - so both are treated as success.
+// A volume that doesn't support indices (e.g. not BFS) also isn't
+// treated as an error: BQuery still returns correct results without an
+// index, just via a slower linear scan done by the filesystem itself.
+//
+status_t
+_HPKGEnsureIndex(dev_t device, const char* attributeName)
+{
+	if (attributeName == NULL)
+		return B_BAD_VALUE;
+
+	if (fs_create_index(device, attributeName, B_STRING_TYPE, 0) == 0)
+		return B_OK;
+
+	if (errno == B_BAD_VALUE || errno == B_FILE_EXISTS)
+		return B_OK;
+
+	return errno;
 }
 
 

@@ -37,6 +37,7 @@ namespace BPrivate {
 #define HPKG_ATTR_CHECKSUM	"integrity.hpkg.sha256"		// SHA256 hex string
 #define HPKG_ATTR_VERIFIED	"integrity.hpkg.verified"	// Last verification timestamp
 #define HPKG_ATTR_SOURCE	"integrity.hpkg.source"		// Package source (e.g., "repository")
+#define HPKG_ATTR_STATUS	"integrity.hpkg.status"		// Last scan result: "ok"/"corrupted"/"unverified"
 
 
 // ==============================================================================
@@ -151,6 +152,14 @@ status_t _HPKGHexToDigest(const char* hexStr, size_t hexLen, uint8* outDigest);
 // Validate if a string is a valid SHA256 hex representation
 // Valid: 64 characters, all hex digits (0-9, a-f, A-F)
 bool _HPKGIsValidChecksumHex(const char* hexStr);
+
+
+// Create a BFS index for one of the HPKG_ATTR_* string attributes on the
+// given device, so BQuery lookups against it are fast. Idempotent: an
+// already-existing index (or a volume that doesn't support indices, e.g.
+// not BFS) is not an error. Best-effort only - callers should not treat
+// a non-B_OK result as fatal.
+status_t _HPKGEnsureIndex(dev_t device, const char* attributeName);
 
 
 }	// namespace BPrivate

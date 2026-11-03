@@ -17,13 +17,16 @@
 #include <stdlib.h>
 #include <string.h>
 #include <cerrno>
+#include <ctime>
 #include <dirent.h>
+#include <fnmatch.h>
 #include <sys/stat.h>
 #include <ctype.h>
 
 #include <File.h>
 #include <Directory.h>
 #include <Entry.h>
+#include <ObjectList.h>
 #include <Path.h>
 #include <Node.h>
 #include <TypeConstants.h>
@@ -32,6 +35,9 @@
 #include "PackageVerifier.h"
 #include "ConsoleReporter.h"
 #include "IntegrityQuery.h"
+#include "../../servers/package/RecoveryStrategy.h"
+#include "../../servers/package/RepositoryRecovery.h"
+#include "../../servers/package/ManualRecovery.h"
 
 using namespace BPackageKit::BPrivate;
 
@@ -65,7 +71,8 @@ _IsHPKGFile(const char* filename)
 
 
 static status_t
-_ScanPackagesDirectory(PackageVerifier& verifier, ConsoleReporter& reporter)
+_ScanPackagesDirectory(PackageVerifier& verifier, ConsoleReporter& reporter,
+	BObjectList<PackageVerificationResult, true>* outFailed = NULL)
 {
 	DIR* dir = opendir(PACKAGES_PATH);
 	if (dir == NULL) {
@@ -75,33 +82,93 @@ _ScanPackagesDirectory(PackageVerifier& verifier, ConsoleReporter& reporter)
 
 	struct dirent* entry;
 	int filesProcessed = 0;
-	
+
 	while ((entry = readdir(dir)) != NULL) {
 		// Skip . and ..
 		if (entry->d_name[0] == '.')
 			continue;
-		
+
 		// Process only .hpkg files
 		if (!_IsHPKGFile(entry->d_name))
 			continue;
-		
+
 		BPath fullPath(PACKAGES_PATH);
 		fullPath.Append(entry->d_name);
-		
+
 		PackageVerificationResult result;
 		status_t status = verifier.VerifyPackage(fullPath.Path(), &result);
-		
+
 		reporter.ReportPackage(result);
 		filesProcessed++;
+
+		if (outFailed != NULL && !result.isValid)
+			outFailed->AddItem(new PackageVerificationResult(result));
 	}
 
 	closedir(dir);
-	
+
 	if (filesProcessed == 0) {
 		fprintf(stderr, "Warning: No HPKG files found in %s\n", PACKAGES_PATH);
 	}
-	
+
 	return B_OK;
+}
+
+
+// Build a PackageCorruptionInfo (RecoveryStrategy's input type) from a
+// failed PackageVerificationResult (fsck_hpkgs's own scan output type).
+static PackageCorruptionInfo
+_BuildCorruptionInfo(const PackageVerificationResult& result)
+{
+	PackageCorruptionInfo info;
+	info.packagePath = result.filePath;
+	info.packageName = result.filename;
+	info.expectedChecksum = result.attributedChecksum;
+	info.actualChecksum = result.calculatedChecksum;
+	info.corruptionDetectedTime = time(NULL);
+	info.sourceType = result.attributedSource.IsEmpty()
+		? RECOVERY_SOURCE_UNKNOWN
+		: HPKGParseRecoverySource(result.attributedSource.String());
+	info.sourceInfo = result.attributedSource;
+	return info;
+}
+
+
+// Attempt to recover one package. If replacementFile is given, it is
+// handed directly to ManualRecovery (this is the only strategy that can
+// actually succeed without a real network client - see
+// RepositoryRecovery::_DownloadFromRepository). Otherwise, the normal
+// RecoveryCoordinator dispatch is used (repository strategy first, falls
+// through to manual, which - with no file provided - correctly reports
+// that user intervention is needed rather than pretending to fix it).
+static void
+_AttemptRepair(const PackageVerificationResult& result,
+	const char* replacementFile, bool dryRun,
+	RecoveryLogger* logger, RecoveryNotifier* notifier)
+{
+	PackageCorruptionInfo info = _BuildCorruptionInfo(result);
+
+	if (dryRun) {
+		fprintf(stdout, "  Would attempt recovery for %s (source: %s)\n",
+			info.packageName.String(),
+			HPKGRecoverySourceToString(info.sourceType));
+		return;
+	}
+
+	RecoveryResult recoveryResult;
+
+	if (replacementFile != NULL) {
+		ManualRecovery manual(logger, notifier);
+		manual.RecoverWithFile(info, replacementFile, recoveryResult);
+	} else {
+		RecoveryCoordinator coordinator;
+		coordinator.AddStrategy(new RepositoryRecovery(logger, notifier));
+		coordinator.AddStrategy(new ManualRecovery(logger, notifier));
+		coordinator.AttemptRecovery(info, recoveryResult);
+	}
+
+	fprintf(stdout, "  %s: %s\n", info.packageName.String(),
+		recoveryResult.statusMessage.String());
 }
 
 
@@ -129,6 +196,9 @@ _PrintUsage(const char* programName)
 	fprintf(stdout, "  --path <dir>      Custom packages directory\n");
 	fprintf(stdout, "\nOPTIONS (repair):\n");
 	fprintf(stdout, "  --package <name>  Repair specific package (glob pattern supported)\n");
+	fprintf(stdout, "  --file <path>     Known-good replacement .hpkg to recover from\n");
+	fprintf(stdout, "                    (required - there is no automatic network download;\n");
+	fprintf(stdout, "                    --package must match exactly one file when used)\n");
 	fprintf(stdout, "  --dry-run         Show what would be repaired without making changes\n");
 	fprintf(stdout, "  --path <dir>      Custom packages directory\n");
 	fprintf(stdout, "\nEXAMPLES:\n");
@@ -149,6 +219,7 @@ main(int argc, char* argv[])
 	const char* queryStatus = NULL;
 	const char* querySince = NULL;
 	const char* repairPackage = NULL;
+	const char* repairFile = NULL;
 	bool verbose = false;
 	bool quiet = false;
 	bool repair = false;
@@ -187,6 +258,13 @@ main(int argc, char* argv[])
 				fprintf(stderr, "Error: --package requires an argument\n");
 				return 1;
 			}
+		} else if (strcmp(argv[i], "--file") == 0) {
+			if (i + 1 < argc) {
+				repairFile = argv[++i];
+			} else {
+				fprintf(stderr, "Error: --file requires an argument\n");
+				return 1;
+			}
 		} else if (strcmp(argv[i], "--status") == 0) {
 			if (i + 1 < argc) {
 				queryStatus = argv[++i];
@@ -220,8 +298,10 @@ main(int argc, char* argv[])
 		
 		PackageVerifier verifier;
 		ConsoleReporter reporter;
-		
-		status_t status = _ScanPackagesDirectory(verifier, reporter);
+		BObjectList<PackageVerificationResult, true> failedPackages;
+
+		status_t status = _ScanPackagesDirectory(verifier, reporter,
+			&failedPackages);
 		if (status != B_OK) {
 			fprintf(stderr, "Error during scanning: %s\n", strerror(status));
 			return 1;
@@ -245,20 +325,24 @@ main(int argc, char* argv[])
 			if (dryRun) {
 				if (!quiet) {
 					fprintf(stdout, "\n=== DRY-RUN: What would be repaired ===\n");
-					fprintf(stdout, "Would attempt to recover %u packages from repository\n",
-						corruptFiles);
-					fprintf(stdout, "Would skip %u packages (missing attributes, no checksum)\n",
-						missingAttributeFiles);
+				}
+				for (int32 i = 0; i < failedPackages.CountItems(); i++) {
+					_AttemptRepair(*failedPackages.ItemAt(i), NULL, true,
+						NULL, NULL);
 				}
 			} else {
 				if (!quiet) {
 					fprintf(stdout, "\n=== Attempting Recovery ===\n");
-					fprintf(stdout, "Attempting to recover %u corrupted package(s)...\n",
-						corruptFiles);
+					fprintf(stdout, "Attempting to recover %u corrupted/unverified package(s)...\n",
+						corruptFiles + missingAttributeFiles);
 				}
-				// TODO: Integrate with RecoveryCoordinator
-				// For now, log that recovery was requested
-				fprintf(stderr, "INFO: Auto-recovery integration pending (Phase 6 implementation)\n");
+
+				FileRecoveryLogger logger;
+				SilentRecoveryNotifier notifier;
+				for (int32 i = 0; i < failedPackages.CountItems(); i++) {
+					_AttemptRepair(*failedPackages.ItemAt(i), NULL, false,
+						&logger, &notifier);
+				}
 			}
 		}
 		
@@ -310,48 +394,79 @@ main(int argc, char* argv[])
 		
 		return 0;
 	} else if (strcmp(command, "repair") == 0) {
+		if (!repairPackage) {
+			fprintf(stderr, "Error: repair requires --package <name or glob>\n");
+			return 1;
+		}
+
 		if (!quiet) {
-			fprintf(stdout, "Repair mode: Attempting to recover corrupted packages\n\n");
+			fprintf(stdout, "Repair mode: Target %s%s\n\n", repairPackage,
+				dryRun ? " (DRY-RUN, no changes)" : "");
 		}
-		
-		if (repairPackage) {
-			if (!quiet) {
-				fprintf(stdout, "Target: %s pattern\n", repairPackage);
-			}
-		} else {
-			if (!quiet) {
-				fprintf(stdout, "Target: All corrupted packages\n");
-			}
+
+		DIR* dir = opendir(packagesPath);
+		if (dir == NULL) {
+			fprintf(stderr, "Error: Cannot open %s: %m\n", packagesPath);
+			return 1;
 		}
-		
-		if (dryRun) {
-			if (!quiet) {
-				fprintf(stdout, "Mode: DRY-RUN (preview only, no changes)\n\n");
-			}
-		} else {
-			if (!quiet) {
-				fprintf(stdout, "Mode: Live recovery\n\n");
-			}
+
+		PackageVerifier verifier;
+		BObjectList<PackageVerificationResult, true> matches;
+
+		struct dirent* dirEntry;
+		while ((dirEntry = readdir(dir)) != NULL) {
+			if (dirEntry->d_name[0] == '.' || !_IsHPKGFile(dirEntry->d_name))
+				continue;
+
+			if (fnmatch(repairPackage, dirEntry->d_name, 0) != 0)
+				continue;
+
+			BPath fullPath(packagesPath);
+			fullPath.Append(dirEntry->d_name);
+
+			PackageVerificationResult* result = new PackageVerificationResult();
+			verifier.VerifyPackage(fullPath.Path(), result);
+			matches.AddItem(result);
 		}
-		
-		// TODO: Implement repair command with RecoveryCoordinator
-		// For now, show placeholder
-		fprintf(stderr, "INFO: Repair command integration pending (Phase 6D implementation)\n");
-		fprintf(stderr, "INFO: Would scan for corrupted packages matching pattern: %s\n",
-			repairPackage ? repairPackage : "all");
-		fprintf(stderr, "INFO: Would execute recovery strategies: Repository → Manual\n");
-		fprintf(stderr, "INFO: Would log all recovery attempts to /var/log/package_integrity_recovery.log\n");
-		
-		if (!dryRun) {
-			if (!quiet) {
-				fprintf(stdout, "\n✓ Repair operations complete\n");
-			}
-		} else {
-			if (!quiet) {
-				fprintf(stdout, "\nPreview complete (no changes made)\n");
-			}
+		closedir(dir);
+
+		if (matches.CountItems() == 0) {
+			fprintf(stderr, "No package matching \"%s\" found in %s\n",
+				repairPackage, packagesPath);
+			return 1;
 		}
-		
+
+		if (repairFile != NULL && matches.CountItems() > 1) {
+			fprintf(stderr, "Error: --package matched %" B_PRId32 " files; "
+				"--file only makes sense for exactly one\n",
+				matches.CountItems());
+			return 1;
+		}
+
+		FileRecoveryLogger logger;
+		SilentRecoveryNotifier notifier;
+
+		for (int32 i = 0; i < matches.CountItems(); i++) {
+			const PackageVerificationResult& result = *matches.ItemAt(i);
+
+			if (result.isValid && repairFile == NULL) {
+				if (!quiet) {
+					fprintf(stdout, "  %s: already OK, nothing to repair\n",
+						result.filename.String());
+				}
+				continue;
+			}
+
+			_AttemptRepair(result, repairFile, dryRun,
+				dryRun ? NULL : &logger, dryRun ? NULL : &notifier);
+		}
+
+		if (!quiet) {
+			fprintf(stdout, dryRun ? "\nPreview complete (no changes made)\n"
+				: "\nRepair attempt(s) complete - see above for per-package "
+					"results.\n");
+		}
+
 		return 0;
 	}
 	

@@ -33,7 +33,7 @@ using namespace BPackageKit::BPrivate;
 
 status_t
 HPKGIntegrityWriter::WriteChecksum(const entry_ref& entry,
-	const BString& checksum)
+	const BString& checksum, const char* source)
 {
 	// Validate checksum format
 	if (!_IsValidChecksum(checksum)) {
@@ -42,9 +42,20 @@ HPKGIntegrityWriter::WriteChecksum(const entry_ref& entry,
 		return B_BAD_VALUE;
 	}
 
+	// Best-effort: create the BFS indices the first time we write these
+	// attributes, so fsck_hpkgs's `query` command can use a real BQuery
+	// instead of always falling back to a directory scan. Not fatal if
+	// it fails (e.g. non-BFS volume).
+	_HPKGEnsureIndex(entry.device, HPKG_ATTR_CHECKSUM);
+	_HPKGEnsureIndex(entry.device, HPKG_ATTR_VERIFIED);
+	_HPKGEnsureIndex(entry.device, HPKG_ATTR_SOURCE);
+
 	// Write to extended attribute
 	status_t status = _WriteAttribute(entry, HPKG_ATTR_CHECKSUM,
 		checksum.String());
+
+	if (status == B_OK && source != NULL)
+		_WriteAttribute(entry, HPKG_ATTR_SOURCE, source);
 
 	if (status == B_OK) {
 		fprintf(stderr, "HPKGIntegrityWriter: Wrote checksum for %s\n",

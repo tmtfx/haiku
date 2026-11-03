@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 
 #include <File.h>
 #include <Node.h>
@@ -86,17 +87,20 @@ PackageVerifier::VerifyPackage(const char* filePath,
 	if (!outResult->attributeExists) {
 		outResult->isValid = false;
 		outResult->statusMessage = "No checksum attribute found";
+		_WriteBackStatus(filePath, "unverified");
 		return B_OK;
 	}
-	
+
 	if (outResult->attributedChecksum != outResult->calculatedChecksum) {
 		outResult->isValid = false;
 		outResult->statusMessage = "Checksum mismatch - file may be corrupted";
+		_WriteBackStatus(filePath, "corrupted");
 		return B_OK;
 	}
-	
+
 	outResult->isValid = true;
 	outResult->statusMessage = "Verified OK";
+	_WriteBackStatus(filePath, "ok");
 	return B_OK;
 }
 
@@ -158,6 +162,35 @@ PackageVerifier::_CalculateChecksum(const char* filePath,
 	char hexBuffer[65];
 	_HPKGDigestToHex(digest, sizeof(digest), hexBuffer);
 	outChecksum = hexBuffer;
-	
+
 	return B_OK;
+}
+
+
+void
+PackageVerifier::_WriteBackStatus(const char* filePath, const char* status)
+{
+	BNode node(filePath);
+	if (node.InitCheck() != B_OK)
+		return;
+
+	node_ref nref;
+	if (node.GetNodeRef(&nref) == B_OK) {
+		_HPKGEnsureIndex(nref.device, HPKG_ATTR_STATUS);
+		_HPKGEnsureIndex(nref.device, HPKG_ATTR_VERIFIED);
+	}
+
+	size_t statusLen = strlen(status);
+	node.WriteAttr(HPKG_ATTR_STATUS, B_STRING_TYPE, 0, status,
+		statusLen + 1);
+
+	time_t now = time(NULL);
+	struct tm* timeinfo = gmtime(&now);
+	if (timeinfo != NULL) {
+		char tsBuffer[HPKG_TIMESTAMP_BUFFER_SIZE];
+		strftime(tsBuffer, sizeof(tsBuffer), "%Y-%m-%dT%H:%M:%S UTC",
+			timeinfo);
+		node.WriteAttr(HPKG_ATTR_VERIFIED, B_STRING_TYPE, 0, tsBuffer,
+			strlen(tsBuffer) + 1);
+	}
 }

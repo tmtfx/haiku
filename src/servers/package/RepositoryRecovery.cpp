@@ -16,6 +16,8 @@
 // For BCrypto SHA256
 #include <crypto/BCrypto.h>
 
+using namespace BPackageKit::BPrivate;
+
 RepositoryRecovery::RepositoryRecovery(
 	RecoveryLogger* logger,
 	RecoveryNotifier* notifier)
@@ -139,18 +141,21 @@ RepositoryRecovery::_DownloadFromRepository(
 	const BString& expectedChecksum,
 	BString& outDownloadedPath)
 {
-	// TODO: This is a stub for actual download implementation
-	// In production, this would:
-	// 1. Parse repository path/URL
-	// 2. Use curl or similar to download
-	// 3. Verify checksum during download
-	// 4. Save to temporary location
-	// 5. Return path to temporary file
-	
-	fprintf(stderr, "INFO: Would download from repository: %s\n", repositoryPath);
-	fprintf(stderr, "INFO: Expected checksum: %s\n", expectedChecksum.String());
-	
-	// For now, return an error (real implementation would download)
+	// There is no local cache of already-downloaded .hpkg content to
+	// recover from here: BPackageRoster's repository cache only holds
+	// repository metadata/indices (see PackageRoster.cpp), not package
+	// payloads, and DownloadFileRequest writes straight to the final
+	// destination with no persistent copy kept afterwards. A real
+	// network re-download would additionally need a Network Kit HTTP
+	// client plus the repository's actual base URL, which
+	// integrity.hpkg.source does not currently persist (only the
+	// literal string "repository"). Rather than fake a download, fail
+	// honestly so the caller falls back to manual recovery.
+	fprintf(stderr, "RepositoryRecovery: no local source available to "
+		"recover from %s (expected checksum %s) - automatic repository "
+		"re-download is not implemented; manual recovery is required\n",
+		repositoryPath, expectedChecksum.String());
+
 	return B_NOT_SUPPORTED;
 }
 
@@ -161,15 +166,29 @@ RepositoryRecovery::_VerifyChecksum(
 {
 	if (!filePath)
 		return B_BAD_VALUE;
-	
-	// TODO: Integrate with BCrypto SHA256 from IntegrityQuery or create helper
-	// This would verify the file's SHA256 matches expected
-	
-	fprintf(stderr, "INFO: Would verify checksum of %s\n", filePath);
-	fprintf(stderr, "INFO: Expected: %s\n", expectedChecksum.String());
-	
-	// Stub implementation
-	return B_NOT_SUPPORTED;
+
+	BFile file(filePath, B_READ_ONLY);
+	status_t status = file.InitCheck();
+	if (status != B_OK)
+		return status;
+
+	BCrypto crypto;
+	uint8 digest[HPKG_CHECKSUM_LENGTH_BYTES];
+	status = crypto.Digest(B_CRYPTO_SHA256, &file, digest);
+	if (status != B_OK)
+		return status;
+
+	char hexBuffer[HPKG_CHECKSUM_BUFFER_SIZE];
+	_HPKGDigestToHex(digest, sizeof(digest), hexBuffer);
+
+	if (expectedChecksum != hexBuffer) {
+		fprintf(stderr, "RepositoryRecovery: checksum mismatch for %s "
+			"(expected %s, got %s)\n", filePath,
+			expectedChecksum.String(), hexBuffer);
+		return B_BAD_DATA;
+	}
+
+	return B_OK;
 }
 
 status_t
@@ -177,42 +196,14 @@ RepositoryRecovery::_DeactivateCorruptedPackage(
 	const char* packagePath,
 	BString& outBackupPath)
 {
-	if (!packagePath)
-		return B_BAD_VALUE;
-	
-	// TODO: This is critical safety - must use package daemon
-	// In production:
-	// 1. Query package manager for dependents
-	// 2. Check if any critical packages depend on this
-	// 3. If safe, deactivate through package daemon
-	// 4. Back up original file to recovery location
-	
-	fprintf(stderr, "INFO: Would deactivate package: %s\n", packagePath);
-	
-	// Create backup path
-	BString backupPath(packagePath);
-	backupPath.Append(".corrupted");
-	outBackupPath = backupPath;
-	
-	// Stub - real implementation would use package daemon
-	return B_NOT_SUPPORTED;
+	return HPKGQuarantinePackage(packagePath, outBackupPath);
 }
 
 status_t
 RepositoryRecovery::_ReactivatePackage(
 	const char* packagePath)
 {
-	if (!packagePath)
-		return B_BAD_VALUE;
-	
-	// TODO: Use package daemon to activate package
-	// This is the critical point where the recovered package
-	// gets activated into the system
-	
-	fprintf(stderr, "INFO: Would re-activate package: %s\n", packagePath);
-	
-	// Stub - real implementation would use package daemon IPC
-	return B_NOT_SUPPORTED;
+	return HPKGConfirmPackageInPlace(packagePath);
 }
 
 status_t

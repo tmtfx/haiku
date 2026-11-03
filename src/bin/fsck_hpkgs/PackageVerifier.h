@@ -64,6 +64,13 @@ private:
 	
 	status_t				_CalculateChecksum(const char* filePath,
 								BString& outChecksum);
+
+	// Write the scan result back as integrity.hpkg.status, and refresh
+	// integrity.hpkg.verified. Best-effort: failures (e.g. read-only
+	// volume) are not propagated, the verification result itself is
+	// already final by the time this is called.
+	void					_WriteBackStatus(const char* filePath,
+								const char* status);
 };
 
 

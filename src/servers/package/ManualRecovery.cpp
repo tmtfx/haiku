@@ -1,4 +1,5 @@
 #include "ManualRecovery.h"
+#include "HPKGIntegrityConstants.h"
 
 #include <File.h>
 #include <Path.h>
@@ -11,6 +12,12 @@
 #include <string.h>
 #include <time.h>
 #include <sys/stat.h>
+#include <errno.h>
+
+// For BCrypto SHA256
+#include <crypto/BCrypto.h>
+
+using namespace BPackageKit::BPrivate;
 
 ManualRecovery::ManualRecovery(
 	RecoveryLogger* logger,
@@ -117,14 +124,37 @@ ManualRecovery::_VerifyChecksum(
 {
 	if (!filePath)
 		return B_BAD_VALUE;
-	
-	// TODO: Calculate SHA256 of file and compare
-	// This would integrate with BCrypto SHA256 implementation
-	
-	fprintf(stderr, "INFO: Would verify checksum of %s\n", filePath);
-	fprintf(stderr, "INFO: Expected: %s\n", expectedChecksum.String());
-	
-	return B_NOT_SUPPORTED;
+
+	BFile file(filePath, B_READ_ONLY);
+	status_t status = file.InitCheck();
+	if (status != B_OK)
+		return status;
+
+	BCrypto crypto;
+	uint8 digest[HPKG_CHECKSUM_LENGTH_BYTES];
+	status = crypto.Digest(B_CRYPTO_SHA256, &file, digest);
+	if (status != B_OK)
+		return status;
+
+	char hexBuffer[HPKG_CHECKSUM_BUFFER_SIZE];
+	_HPKGDigestToHex(digest, sizeof(digest), hexBuffer);
+
+	if (expectedChecksum != hexBuffer) {
+		fprintf(stderr, "ManualRecovery: checksum mismatch for %s "
+			"(expected %s, got %s)\n", filePath,
+			expectedChecksum.String(), hexBuffer);
+		return B_BAD_DATA;
+	}
+
+	return B_OK;
+}
+
+status_t
+ManualRecovery::_DeactivateCorruptedPackage(
+	const char* packagePath,
+	BString& outBackupPath)
+{
+	return HPKGQuarantinePackage(packagePath, outBackupPath);
 }
 
 status_t
@@ -162,13 +192,7 @@ status_t
 ManualRecovery::_ReactivatePackage(
 	const char* packagePath)
 {
-	if (!packagePath)
-		return B_BAD_VALUE;
-	
-	// TODO: Use package daemon to activate package
-	fprintf(stderr, "INFO: Would re-activate package: %s\n", packagePath);
-
-	return B_NOT_SUPPORTED;
+	return HPKGConfirmPackageInPlace(packagePath);
 }
 
 status_t
@@ -260,35 +284,72 @@ ManualRecovery::RecoverWithFile(
 		return status;
 	}
 	
-	// Step 3: Copy replacement file to package location
-	status = _CopyReplacementFile(
-		replacementFilePath,
-		corruption.packagePath.String());
-	
+	// Step 3: Stage the verified replacement next to the target, under a
+	// temporary name. Never overwrite the live package file in place:
+	// packagefs's node monitor reacts to the directory entry being
+	// created/removed/moved, not to a file's content changing underneath
+	// an unchanged entry, so an in-place rewrite would silently leave the
+	// corrupted package mounted.
+	BString stagedPath(corruption.packagePath);
+	stagedPath << ".recovered";
+
+	status = _CopyReplacementFile(replacementFilePath, stagedPath.String());
 	if (status != B_OK) {
 		outResult.status = RECOVERY_STATUS_FAILED;
-		outResult.statusMessage = "Failed to copy replacement file";
+		outResult.statusMessage = "Failed to stage replacement file";
 		outResult.errorCode = status;
-		
+
 		if (fLogger)
 			fLogger->LogRecoveryComplete(outResult);
-		
+
+		remove(stagedPath.String());
 		return status;
 	}
-	
-	// Step 4: Re-activate package
+
+	// Step 4: Deactivate the corrupted package - moving it out of the
+	// packages directory is what actually unmounts it.
+	BString backupPath;
+	status = _DeactivateCorruptedPackage(
+		corruption.packagePath.String(), backupPath);
+	if (status != B_OK) {
+		outResult.status = RECOVERY_STATUS_FAILED;
+		outResult.statusMessage = "Failed to deactivate corrupted package";
+		outResult.errorCode = status;
+
+		if (fLogger)
+			fLogger->LogRecoveryComplete(outResult);
+
+		remove(stagedPath.String());
+		return status;
+	}
+
+	// Step 5: Move the verified replacement into the original path -
+	// this is what actually re-activates it.
+	if (rename(stagedPath.String(), corruption.packagePath.String()) != 0) {
+		outResult.status = RECOVERY_STATUS_FAILED;
+		outResult.statusMessage = "Failed to install recovered package";
+		outResult.errorCode = errno;
+
+		if (fLogger)
+			fLogger->LogRecoveryComplete(outResult);
+
+		remove(stagedPath.String());
+		return B_IO_ERROR;
+	}
+
+	// Step 6: Confirm re-activation
 	status = _ReactivatePackage(corruption.packagePath.String());
 	if (status != B_OK) {
 		outResult.status = RECOVERY_STATUS_FAILED;
 		outResult.statusMessage = "Failed to re-activate recovered package";
 		outResult.errorCode = status;
-		
+
 		if (fLogger)
 			fLogger->LogRecoveryComplete(outResult);
-		
+
 		return status;
 	}
-	
+
 	// Success!
 	outResult.status = RECOVERY_STATUS_SUCCESS;
 	outResult.statusMessage = "Package recovered and re-activated successfully";

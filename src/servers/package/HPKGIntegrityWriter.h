@@ -43,6 +43,9 @@ public:
 	 * Params:
 	 *   entry       - entry_ref of the .hpkg file
 	 *   checksum    - SHA256 hex string (64 characters)
+	 *   source      - where this package came from (e.g. "repository");
+	 *                 stored in integrity.hpkg.source so recovery code can
+	 *                 later tell which strategy applies
 	 *
 	 * Returns:
 	 *   B_OK        - Checksum written successfully
@@ -51,7 +54,7 @@ public:
 	 *   B_BAD_VALUE - Invalid checksum format
 	 */
 	static status_t WriteChecksum(const entry_ref& entry,
-		const BString& checksum);
+		const BString& checksum, const char* source = "repository");
 
 
 	/*
