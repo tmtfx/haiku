@@ -1155,15 +1155,16 @@ ScanThread parses JSON output and posts results to window. Provides:
 | 3 | fsck.hpkgs Tool | 4-5h | Phase 1-2 | ✅ **COMPLETE** |
 | 4 | BCrypto Integration | 2-3h | Phase 3 | ✅ **COMPLETE** |
 | 5 | Query API & Indexing | 2-3h | Phase 3-4 | ✅ **COMPLETE** |
-| 6 | GUI Application | 4-5h | Phase 3-5 | ⏳ **NEXT** |
-| 7 | Quick Launcher | 1h | Phase 6 | ⏳ **NEXT** |
-| 8 | Documentation | 2-3h | All phases | ⏳ **FINAL** |
+| 6 | Auto-Recovery Framework | 2-3h | Phase 5 | ⏳ **NEXT** |
+| 7 | GUI Application | 4-5h | Phase 6 | ⏳ **NEXT** |
+| 8 | Quick Launcher | 1h | Phase 7 | ⏳ **NEXT** |
+| 9 | Documentation | 2-3h | All phases | ⏳ **FINAL** |
 
 **Total Estimated Time:** 
 - **Core (Phases 1-5):** 13-17 hours ✅ **COMPLETE**
-- **GUI & Launcher (Phases 6-7):** 5-6 hours ⏳ **NEXT**
-- **Documentation (Phase 8):** 2-3 hours ⏳ **FINAL**
-- **Grand Total:** 20-26 hours
+- **Recovery & GUI (Phases 6-7):** 6-8 hours ⏳ **NEXT**
+- **Launcher & Documentation (Phases 8-9):** 3-4 hours ⏳ **FINAL**
+- **Grand Total:** 22-29 hours
 
 **Realistic Schedule:** 1-2 weeks of focused development (completed core in ~4 sessions)
 
@@ -1178,22 +1179,28 @@ ScanThread parses JSON output and posts results to window. Provides:
    - Ready for testing on native Haiku
 
 ### In Progress / Next
-2. → **Phase 6:** GUI Application (IntegrityChecker.app)
+2. → **Phase 6:** Auto-Recovery Framework (RecoveryStrategy interface)
+   - Start: src/servers/package/RecoveryStrategy.h/cpp
+   - Features: repository connector, --repair flag
+   - Duration: 2-3 hours
+   - Depends on: Phases 1-5 (complete)
+
+3. → **Phase 7:** GUI Application (IntegrityChecker.app)
    - Start: src/apps/integrity_checker/
    - Features: progress bar, results list, query builder
    - Duration: 4-5 hours
-   - Depends on: Phases 1-5 (complete)
+   - Depends on: Phases 1-6 (complete)
 
-3. → **Phase 7:** Quick Launcher Tool
+4. → **Phase 8:** Quick Launcher Tool
    - Start: src/bin/integrity_launcher/
    - Simple wrapper for fsck_hpkgs with dialog
    - Duration: 1 hour
-   - Depends on: Phase 6
+   - Depends on: Phase 7
 
-4. → **Phase 8:** Complete Documentation
+5. → **Phase 9:** Complete Documentation
    - User guide, developer reference, security model
    - Duration: 2-3 hours
-   - Depends on: Phases 1-7
+   - Depends on: Phases 1-8
 
 ### Final Steps
 5. **Integration Testing:** Test on native Haiku
