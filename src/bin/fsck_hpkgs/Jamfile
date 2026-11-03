@@ -1,0 +1,27 @@
+SubDir HAIKU_TOP src bin fsck_hpkgs ;
+
+SetSubDirSupportedPlatformsBegin ;
+	AddSubDirSupportedPlatforms haiku ;
+SetSubDirSupportedPlatformsEnd ;
+
+UsePrivateHeaders package storage ;
+
+# Add search path for HPKGIntegrityConstants.h
+SEARCH_SOURCE += [ FDirName $(HAIKU_TOP) src kits package hpkg ] ;
+
+local sources =
+	fsck_hpkgs.cpp
+	PackageVerifier.cpp
+	ConsoleReporter.cpp
+	;
+
+SimpleTest fsck_hpkgs :
+	$(sources)
+	: be
+	[ TargetLibsupc++ ]
+	;
+
+Package haiku :
+	fsck_hpkgs
+	: bin
+	;
