@@ -27,7 +27,7 @@
 This project implements **SHA256-based data integrity checking** for HPKG (Haiku Package) files using **BFS extended attributes**, providing **ZFS/btrfs-like scrubbing capabilities** with **automatic corruption detection and recovery**.
 
 ### Key Features
-- ✅ **Immutable checksum storage** in BFS extended attributes (`user.hpkg.sha256`)
+- ✅ **Immutable checksum storage** in BFS extended attributes (`integrity.hpkg.sha256`)
 - ✅ **Zero file modification** - HPKG files remain identical byte-for-byte
 - ✅ **Automatic verification** via `fsck.hpkgs` tool
 - ✅ **Corruption detection** - any mismatch triggers alert
@@ -81,9 +81,9 @@ Store SHA256 checksums in **BFS extended attributes** of HPKG files:
 File: /boot/system/packages/haiku-0.1-1-x86_64.hpkg
 ├── Data: [unchanged, byte-for-byte identical]
 └── Extended Attributes:
-    ├── user.hpkg.sha256    = "a1b2c3d4...ef0" (64-char hex)
-    ├── user.hpkg.verified  = "2026-11-02 22:10:15 UTC"
-    └── user.hpkg.source    = "repository"
+    ├── integrity.hpkg.sha256    = "a1b2c3d4...ef0" (64-char hex)
+    ├── integrity.hpkg.verified  = "2026-11-02 22:10:15 UTC"
+    └── integrity.hpkg.source    = "repository"
 ```
 
 ### Why Extended Attributes?
@@ -116,12 +116,12 @@ Layer 1: Package Installation
   ├── Package Activation (CommitTransactionHandler)
   │   └─ NEW: HPKGIntegrityWriter captures checksum
   └─ Attribute Write (BNode::WriteAttr)
-      └─ user.hpkg.sha256 persisted to disk
+      └─ integrity.hpkg.sha256 persisted to disk
 
 Layer 2: Verification & Monitoring
   ├── fsck.hpkgs CLI tool
   │   ├─ Scans /boot/system/packages
-  │   ├─ Reads user.hpkg.sha256
+  │   ├─ Reads integrity.hpkg.sha256
   │   └─ Computes current SHA256 & compares
   ├── IntegrityChecker utility
   │   └─ Reusable verification logic
@@ -142,9 +142,9 @@ namespace BPackageKit {
 namespace BPrivate {
 
 // Attribute names
-#define HPKG_ATTR_CHECKSUM "user.hpkg.sha256"
-#define HPKG_ATTR_VERIFIED "user.hpkg.verified"
-#define HPKG_ATTR_SOURCE   "user.hpkg.source"
+#define HPKG_ATTR_CHECKSUM "integrity.hpkg.sha256"
+#define HPKG_ATTR_VERIFIED "integrity.hpkg.verified"
+#define HPKG_ATTR_SOURCE   "integrity.hpkg.source"
 
 // Checksum format
 #define HPKG_SHA256_HEX_LENGTH 64
@@ -304,10 +304,10 @@ Exit codes:
 **Capabilities:**
 ```bash
 # Find packages without checksums
-query: "name:*.hpkg AND NOT user.hpkg.sha256:*"
+query: "name:*.hpkg AND NOT integrity.hpkg.sha256:*"
 
 # Find packages with failed verification
-query: "name:*.hpkg AND user.hpkg.verified:CORRUPT"
+query: "name:*.hpkg AND integrity.hpkg.verified:CORRUPT"
 ```
 
 **Tasks:**
@@ -382,7 +382,7 @@ query: "name:*.hpkg AND user.hpkg.verified:CORRUPT"
    ├─ Calls HPKGIntegrityWriter::WriteChecksum()  ← NEW
    │  ├─ Retrieves verified checksum from cache
    │  ├─ Encodes to hex string
-   │  └─ Writes user.hpkg.sha256 attribute
+   │  └─ Writes integrity.hpkg.sha256 attribute
    └─ Completes transaction
    ↓
 4. Result:
@@ -401,7 +401,7 @@ query: "name:*.hpkg AND user.hpkg.verified:CORRUPT"
    └─ For each .hpkg file:
       ↓
    3. IntegrityChecker::VerifyPackage(path):
-      ├─ Read user.hpkg.sha256 attribute
+      ├─ Read integrity.hpkg.sha256 attribute
       │  ├─ If missing → status = "UNVERIFIED"
       │  └─ If present → continue
       │
@@ -440,7 +440,7 @@ Repository DB                DownloadFileRequest
                                     ↓
                              HPKGIntegrityWriter::WriteChecksum()
                                     ↓
-                             BNode::WriteAttr(user.hpkg.sha256, "a1b2c3d4...")
+                             BNode::WriteAttr(integrity.hpkg.sha256, "a1b2c3d4...")
                                     ↓
                              ✅ Checksum persisted
 ```
@@ -462,8 +462,8 @@ Purpose:
 
 Key definitions:
 ```cpp
-#define HPKG_ATTR_CHECKSUM "user.hpkg.sha256"
-#define HPKG_ATTR_VERIFIED "user.hpkg.verified"
+#define HPKG_ATTR_CHECKSUM "integrity.hpkg.sha256"
+#define HPKG_ATTR_VERIFIED "integrity.hpkg.verified"
 
 // SHA256: 256 bits = 32 bytes = 64 hex characters
 #define HPKG_CHECKSUM_LENGTH_BYTES   32

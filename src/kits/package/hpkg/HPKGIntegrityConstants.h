@@ -29,14 +29,14 @@ namespace BPrivate {
 // Extended Attribute Names
 // ==============================================================================
 // BFS extended attributes follow the format: family.namespace.name
-// Example: user.hpkg.sha256
-// - family "user" = user-defined (non-system) attributes
+// Example: integrity.hpkg.sha256
+// - family "integrity" = system integrity metadata
 // - namespace "hpkg" = package-related attributes
 // - name = specific attribute purpose
 
-#define HPKG_ATTR_CHECKSUM	"user.hpkg.sha256"	// SHA256 hex string
-#define HPKG_ATTR_VERIFIED	"user.hpkg.verified"	// Last verification timestamp
-#define HPKG_ATTR_SOURCE	"user.hpkg.source"		// Package source (e.g., "repository")
+#define HPKG_ATTR_CHECKSUM	"integrity.hpkg.sha256"		// SHA256 hex string
+#define HPKG_ATTR_VERIFIED	"integrity.hpkg.verified"	// Last verification timestamp
+#define HPKG_ATTR_SOURCE	"integrity.hpkg.source"		// Package source (e.g., "repository")
 
 
 // ==============================================================================

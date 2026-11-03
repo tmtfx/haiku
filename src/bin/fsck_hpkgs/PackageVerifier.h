@@ -29,9 +29,9 @@ struct PackageVerificationResult {
 	
 	// Attribute state
 	bool attributeExists;
-	BString attributedChecksum;      // From user.hpkg.sha256 attribute
-	BString attributedVerified;      // From user.hpkg.verified attribute
-	BString attributedSource;        // From user.hpkg.source attribute
+	BString attributedChecksum;      // From integrity.hpkg.sha256 attribute
+	BString attributedVerified;      // From integrity.hpkg.verified attribute
+	BString attributedSource;        // From integrity.hpkg.source attribute
 	
 	// Calculated state
 	BString calculatedChecksum;      // SHA256 computed from file contents

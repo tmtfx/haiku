@@ -40,9 +40,9 @@ using namespace BPackageKit::BPrivate;
 // ==============================================================================
 
 const char* PACKAGES_PATH = "/boot/system/packages";
-const char* ATTR_CHECKSUM = "user.hpkg.sha256";
-const char* ATTR_VERIFIED = "user.hpkg.verified";
-const char* ATTR_SOURCE = "user.hpkg.source";
+const char* ATTR_CHECKSUM = "integrity.hpkg.sha256";
+const char* ATTR_VERIFIED = "integrity.hpkg.verified";
+const char* ATTR_SOURCE = "integrity.hpkg.source";
 
 
 // ==============================================================================

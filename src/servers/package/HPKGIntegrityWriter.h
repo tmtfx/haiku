@@ -28,8 +28,8 @@
  * All operations are non-blocking and log errors rather than throwing.
  *
  * Attributes written:
- *   user.hpkg.sha256  - SHA256 checksum (64-char hex)
- *   user.hpkg.verified - Verification timestamp (optional)
+ *   integrity.hpkg.sha256  - SHA256 checksum (64-char hex)
+ *   integrity.hpkg.verified - Verification timestamp (optional)
  */
 
 class HPKGIntegrityWriter {
