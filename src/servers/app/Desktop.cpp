@@ -559,14 +559,18 @@ Desktop::Init()
 				file.Read(&acc, sizeof(bool));
 				bool comp = false;
 				if (file.Read(&comp, sizeof(bool)) == (ssize_t)sizeof(bool) && comp) {
-					system_info sysInfo;
-					if (get_system_info(&sysInfo) == B_OK) {
-						uint64 totalRAM = (uint64)sysInfo.max_pages * B_PAGE_SIZE;
-						if (totalRAM >= 3800ULL * 1024 * 1024
-							&& HWInterface()->Has2DAcceleration()) {
-							fCompositor2DEnabled = true;
-						}
-					}
+					// Mirror the Screen preflet's own gate for enabling
+					// the compositor checkbox in the first place
+					// (ScreenWindow.cpp: hasSetCursorBitmap &&
+					// hardwareCursorEnabled) instead of an unrelated
+					// RAM/2D-hardware-acceleration heuristic that isn't
+					// checked anywhere else (including the live toggle,
+					// Desktop::SetCompositor2DEnabled) -- the compositor
+					// itself blends in software and doesn't use 2D
+					// hardware acceleration, so that check never
+					// reflected a real requirement.
+					if (HWInterface()->HasSetCursorBitmap() && hw)
+						fCompositor2DEnabled = true;
 				}
 			}
 		}
