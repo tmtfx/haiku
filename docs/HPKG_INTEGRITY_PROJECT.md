@@ -373,21 +373,273 @@ Query Phase (interactive, instant):
 
 ---
 
-### Phase 6: Auto-Recovery Framework (Optional) ⏳ PENDING
+### Phase 6: Auto-Recovery Framework ⏳ PENDING
 
-**Objective:** Framework for automatic package re-download and repair
+**Objective:** Framework for automatic and manual package repair based on corruption source detection
+
+**Duration:** 2-3 hours
 
 **Deliverables:**
-- Recovery strategy interface in HPKGIntegrityWriter
-- Stub implementation in fsck.hpkgs
+- `src/servers/package/RecoveryStrategy.h/cpp` - Recovery interface with implementations
+- `src/servers/package/RepositoryRecovery.h/cpp` - Automatic repository-based repair
+- `src/servers/package/ManualRecovery.h/cpp` - User-guided repair workflow
+- `src/bin/fsck_hpkgs/` - Add `--repair` flag and recovery integration
+- `src/apps/integrity_checker/` - GUI recovery dialogs and workflow
 
-**Tasks:**
-- [ ] Define recovery strategy interface
-- [ ] Implement repository connector for re-download
-- [ ] Add `--repair` flag to fsck.hpkgs (logs intention only)
-- [ ] Test re-download flow
+**Critical Design Problem Solved:**
 
-**Estimated Duration:** 2-3 hours (defer until Phase 5 complete)
+HPKG files can come from multiple sources, each requiring different recovery strategies:
+
+```
+Package Source Types:
+
+1. Repository (✅ Auto-Recoverable)
+   source="repository"
+   - Package installed via pkgman
+   - package_daemon knows exact name/version
+   - Can safely re-download and re-activate
+   - Recovery: Automatic, no user intervention needed
+
+2. Unknown Source (⚠️ Manual Recovery Only)
+   source="unknown"  
+   - User manually copied .hpkg to /boot/system/packages/
+   - No metadata about origin or version
+   - Cannot auto-recover (don't know where to get replacement)
+   - Recovery: User must locate and provide original file
+
+3. Local File (⚠️ Partial Recovery)
+   source="local:/path/to/backup.hpkg"
+   - User keeping local backup of package
+   - Path stored if known at activation time
+   - May recover if backup still exists
+   - Recovery: Try path first, fallback to manual if gone
+
+4. Network Source (⚠️ Manual Recovery)
+   source="http://example.com/packages/"
+   - Package downloaded from third-party server
+   - No guarantee server still has package
+   - Cannot verify authenticity without checksum from source
+   - Recovery: User must re-download or provide file
+```
+
+**Recovery Strategy Architecture:**
+
+```cpp
+// Base strategy interface
+class RecoveryStrategy {
+public:
+    virtual status_t CanRecover(const char* source) = 0;
+    virtual status_t Recover(
+        const PackageVerificationResult& corruption,
+        const char* sourceInfo) = 0;
+};
+
+// Implementation 1: Repository-based (automatic, safe)
+class RepositoryRecovery : public RecoveryStrategy {
+    // 1. Extract package name/version from corruption.filename
+    // 2. Query package manager repository
+    // 3. Download .hpkg with verified checksum
+    // 4. Compare: new checksum must match expected
+    // 5. Deactivate corrupted package safely
+    // 6. Activate replacement via package daemon
+    // 7. Verify activation succeeded
+    // 8. Log repair success
+};
+
+// Implementation 2: Manual user-guided (interactive)
+class ManualRecovery : public RecoveryStrategy {
+    // 1. Show desktop notification: "Package corrupted, manual repair needed"
+    // 2. Open GUI dialog: "Locate original package file"
+    // 3. User selects file via file browser
+    // 4. Verify selected file checksum matches expected
+    // 5. Copy to /boot/system/packages/ (or replace in-place)
+    // 6. Ask package daemon to re-activate
+    // 7. Verify and log
+};
+
+// Implementation 3: Backup recovery (if backup exists)
+class BackupRecovery : public RecoveryStrategy {
+    // 1. Check source path from "source" attribute
+    // 2. If path exists: verify checksum
+    // 3. If valid: activate backup
+    // 4. If path gone: fallback to ManualRecovery
+};
+```
+
+**Hybrid Recovery Policy (Default):**
+
+```
+Decision Tree:
+
+┌─────────────────────────────────┐
+│ Corruption Detected              │
+├─────────────────────────────────┤
+│ Read: integrity.hpkg.source      │
+│                                  │
+├─ "repository" ─────────────────┤
+│  ✅ RepositoryRecovery::Recover  │
+│     ├─ Auto-download             │
+│     ├─ Verify checksum           │
+│     ├─ Re-activate               │
+│     └─ No user interaction       │
+│                                  │
+├─ "local:/path/..." ────────────┤
+│  ⚠️  BackupRecovery::Recover     │
+│     ├─ Try recover from path     │
+│     ├─ If success: done          │
+│     └─ If failed: fallback→manual│
+│                                  │
+└─ "unknown" or others ──────────┤
+   ⚠️  ManualRecovery::Recover     │
+      ├─ Show notification         │
+      ├─ Wait for user action      │
+      ├─ User locates file         │
+      ├─ Verify & activate         │
+      └─ User-driven process       │
+```
+
+**Critical Safety Rules:**
+
+```
+⚠️ SAFETY REQUIREMENTS:
+
+1. NEVER modify files directly
+   ❌ WRONG: rm /boot/system/packages/corrupted.hpkg
+   ✅ RIGHT: package_daemon handles activation/deactivation
+
+2. ALWAYS verify checksum before activation
+   ❌ WRONG: "File exists, assume it's correct"
+   ✅ RIGHT: Calculate SHA256, compare with expected
+
+3. ALWAYS check dependencies before deactivation
+   ❌ WRONG: Just remove the package
+   ✅ RIGHT: Query package manager for dependents
+            Refuse if critical packages depend on it
+
+4. ALWAYS use package daemon for activation
+   ❌ WRONG: Direct file operations + manual mounting
+   ✅ RIGHT: Call package manager API via DBus/IPC
+
+5. ALWAYS log recovery attempts
+   System log: /var/log/package_integrity_recovery.log
+   - Timestamp, package, source, action, result
+   - User can audit what happened
+
+6. ALWAYS notify user of automated actions
+   Desktop notification or GUI log
+   "Recovered curl-7.85.0-2.hpkg from repository"
+```
+
+**CLI Integration (`--repair` flag):**
+
+```bash
+# Scan and auto-repair only repository packages
+$ fsck_hpkgs scan --repair
+
+Output:
+  ✓ haiku-1.0.hpkg
+  ✗ curl-7.85.0-2.hpkg (CORRUPTED, repository)
+    → Auto-recovering from repository...
+    → Downloaded and activated successfully ✓
+  ⚠ zlib-1.2.11.hpkg (unverified, unknown source)
+    → Skipping (unknown source - manual recovery needed)
+
+# Repair specific package
+$ fsck_hpkgs repair --package curl*
+  → Attempts recovery if possible
+  → Shows manual instructions if cannot auto-recover
+
+# Dry-run (show what would be repaired)
+$ fsck_hpkgs scan --repair --dry-run
+  → Lists packages that would be repaired
+  → Does NOT make any changes
+```
+
+**GUI Integration (Phase 7):**
+
+In IntegrityChecker GUI, results list shows repair capability:
+
+```
+Results:
+┌─────────────────────────────────────────────────┐
+│ ✓ haiku-1.0.hpkg                               │
+│                                                 │
+│ ✗ curl-7.85.0-2.hpkg (CORRUPTED, repository)  │
+│   [Auto-Repair] ← Shows action button           │
+│   Clicking: Runs RepositoryRecovery in bg      │
+│   Shows progress: "Downloading..."             │
+│   On success: Icon changes to ✓                │
+│                                                 │
+│ ✗ libfoo-1.2.3.hpkg (CORRUPTED, unknown)      │
+│   ⚠️  Cannot auto-repair (source unknown)      │
+│   [Locate File...] ← Opens file browser        │
+│   [Ignore This Check] ← Skip for now           │
+│   User selects file: Runs ManualRecovery      │
+│                                                 │
+└─────────────────────────────────────────────────┘
+```
+
+**Implementation Tasks:**
+
+Phase 6A: Recovery Infrastructure (1 hour)
+- [ ] Create RecoveryStrategy base class
+- [ ] Define recovery status enum and result struct
+- [ ] Create recovery logging framework
+- [ ] Create recovery notification system
+
+Phase 6B: Repository Recovery (0.75 hours)
+- [ ] Implement RepositoryRecovery class
+- [ ] Integrate with package manager API
+- [ ] Implement checksum verification
+- [ ] Test download + verify + activate flow
+- [ ] Add repository connectivity fallback handling
+
+Phase 6C: Manual Recovery (0.5 hours)
+- [ ] Implement ManualRecovery class
+- [ ] Create file selection dialog helper
+- [ ] Implement user notification system
+- [ ] Add recovery logging
+
+Phase 6D: CLI Integration (0.5 hours)
+- [ ] Add `--repair` flag to fsck_hpkgs
+- [ ] Implement repair command routing
+- [ ] Add `--dry-run` option
+- [ ] Test repair workflows
+
+**Testing Strategy:**
+
+Unit Tests:
+- [ ] RepositoryRecovery checksum verification
+- [ ] ManualRecovery file selection validation
+- [ ] Recovery logging format and content
+- [ ] Source type parsing
+
+Integration Tests:
+- [ ] End-to-end repository recovery
+- [ ] Manual recovery with file browser
+- [ ] Fallback from backup to manual
+- [ ] Permission and dependency checking
+- [ ] System stability after recovery
+
+Manual Tests:
+- [ ] Corrupt a repository package, trigger auto-repair
+- [ ] Corrupt unknown-source package, manually locate & repair
+- [ ] Test --repair --dry-run output
+- [ ] Verify recovery logged correctly
+- [ ] Check desktop notifications appear
+
+**Non-Goals (Phase 6):**
+
+- Full package manager integration (complex APIs)
+- Network-based recovery (too complex for MVP)
+- Partial file recovery (outside scope)
+- Cryptographic signature verification (future)
+- Multi-package rollback (future feature)
+
+**Implementation can be stubbed for MVP:**
+- RepositoryRecovery can log "Would download X"
+- ManualRecovery can show dialog but accept file
+- Full activation can be deferred to Phase 7+ integration
 
 ---
 
