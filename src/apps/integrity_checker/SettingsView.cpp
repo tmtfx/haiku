@@ -6,6 +6,7 @@
 #include <GroupLayout.h>
 #include <StringView.h>
 #include <LayoutItem.h>
+#include <SpaceLayoutItem.h>
 
 SettingsView::SettingsView(const char* name)
 	: BView(name, B_WILL_DRAW),

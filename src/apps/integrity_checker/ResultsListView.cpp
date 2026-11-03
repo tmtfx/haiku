@@ -2,6 +2,7 @@
 
 #include <ListItem.h>
 #include <String.h>
+#include <Window.h>
 #include <stdio.h>
 
 ResultsListView::ResultsListView(const char* name, list_view_type type)
@@ -96,18 +97,10 @@ ResultsListView::AddPackageResult(
 	// Create display string with status icon
 	BString display = _FormatDisplayString(name, status, source);
 	
-	// Create list item
+	// Create list item (status is already conveyed by the icon in
+	// the display string; BStringItem has no per-item text color API)
 	BStringItem* item = new BStringItem(display.String());
-	
-	// Color code by status
-	if (strcmp(status, "ok") == 0) {
-		item->SetTextColor(make_color(0, 150, 0, 255));  // Green
-	} else if (strcmp(status, "corrupted") == 0) {
-		item->SetTextColor(make_color(255, 0, 0, 255));  // Red
-	} else if (strcmp(status, "unverified") == 0) {
-		item->SetTextColor(make_color(255, 165, 0, 255));  // Orange
-	}
-	
+
 	AddItem(item);
 }
 

@@ -1,7 +1,7 @@
 #ifndef _RESULTS_LIST_VIEW_H
 #define _RESULTS_LIST_VIEW_H
 
-#include <ListControl.h>
+#include <ListView.h>
 #include <String.h>
 #include <Message.h>
 

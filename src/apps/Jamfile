@@ -26,6 +26,7 @@ HaikuSubInclude haikudepot ;
 HaikuSubInclude hmcp ;
 HaikuSubInclude icon-o-matic ;
 HaikuSubInclude installer ;
+HaikuSubInclude integrity_checker ;
 HaikuSubInclude launchbox ;
 HaikuSubInclude login ;
 HaikuSubInclude magnify ;

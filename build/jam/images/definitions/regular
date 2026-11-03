@@ -13,6 +13,7 @@ SYSTEM_BIN += [ FFilterByBuildFeatures
 	CortexAddOnHost
 	dpms
 	FirstBootPrompt
+	fsck_hpkgs
 	<bin>i2c@x86,x86_64
 	installsound
 	mail
@@ -37,6 +38,7 @@ SYSTEM_APPS += [ FFilterByBuildFeatures
 	GLInfo@mesa
 	HaikuDepot
 	Icon-O-Matic@expat
+	IntegrityChecker
 	LaunchBox
 	LegacyPackageInstaller
 	Magnify

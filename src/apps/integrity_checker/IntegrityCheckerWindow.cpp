@@ -12,7 +12,9 @@
 #include <LayoutItem.h>
 #include <Rect.h>
 #include <ScrollView.h>
+#include <SpaceLayoutItem.h>
 #include <StatusBar.h>
+#include <StringView.h>
 #include <TabView.h>
 #include <Menu.h>
 #include <MenuBar.h>
@@ -21,7 +23,7 @@
 
 IntegrityCheckerWindow::IntegrityCheckerWindow()
 	: BWindow(BRect(100, 100, 900, 700), "HPKG Integrity Checker",
-		B_TITLED_WINDOW, B_ASYNCHRONOUS_CONTROLS | B_AUTO_UPDATE_WINDOW_SIZES),
+		B_TITLED_WINDOW, B_ASYNCHRONOUS_CONTROLS | B_AUTO_UPDATE_SIZE_LIMITS),
 	  fTabView(NULL),
 	  fResultsView(NULL),
 	  fProgressBar(NULL),
@@ -42,7 +44,7 @@ IntegrityCheckerWindow::~IntegrityCheckerWindow()
 {
 	if (fScanThread) {
 		fScanThread->SetWindow(NULL);
-		fScanThread->Quit();
+		fScanThread->RequestQuit();
 	}
 }
 
@@ -108,7 +110,7 @@ IntegrityCheckerWindow::_CreateScanTab()
 	tabLayout->AddView(fProgressBar);
 	tabLayout->AddView(buttonView);
 	
-	fTabView->AddTab(tabView, fTabView->CountTabs());
+	fTabView->AddTab(tabView);
 	fTabView->TabAt(0)->SetLabel("Scan Results");
 }
 
@@ -143,7 +145,7 @@ IntegrityCheckerWindow::_CreateQueryTab()
 	tabLayout->AddView(scrollView);
 	tabLayout->AddView(buttonView);
 	
-	fTabView->AddTab(tabView, fTabView->CountTabs());
+	fTabView->AddTab(tabView);
 	fTabView->TabAt(1)->SetLabel("Query Builder");
 }
 
@@ -175,7 +177,7 @@ IntegrityCheckerWindow::_CreateSettingsTab()
 	tabLayout->AddView(fSettingsView);
 	tabLayout->AddView(buttonView);
 	
-	fTabView->AddTab(tabView, fTabView->CountTabs());
+	fTabView->AddTab(tabView);
 	fTabView->TabAt(2)->SetLabel("Settings");
 }
 
@@ -244,7 +246,7 @@ IntegrityCheckerWindow::_StartScan()
 	fScanInProgress = true;
 	fScanButton->SetEnabled(false);
 	fProgressBar->Reset();
-	fProgressBar->SetStatus("Scanning packages...");
+	fProgressBar->SetText("Scanning packages...");
 	fResultsView->MakeEmpty();
 	
 	// Create and start scan thread
@@ -266,8 +268,7 @@ IntegrityCheckerWindow::_UpdateProgress(int current, int total)
 	if (total > 0) {
 		char buffer[64];
 		snprintf(buffer, sizeof(buffer), "%d/%d files", current, total);
-		fProgressBar->Update(current - fProgressBar->CurrentValue(),
-			total - current, buffer);
+		fProgressBar->Update(current - fProgressBar->CurrentValue(), buffer);
 	}
 }
 
@@ -276,7 +277,7 @@ IntegrityCheckerWindow::_ScanComplete(BMessage* results)
 {
 	fScanInProgress = false;
 	fScanButton->SetEnabled(true);
-	fProgressBar->SetStatus("Scan complete!");
+	fProgressBar->SetText("Scan complete!");
 	
 	// Populate results in ResultsListView
 	// TODO: Parse results message and add items to list view

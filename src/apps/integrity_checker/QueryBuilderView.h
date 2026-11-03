@@ -1,7 +1,7 @@
 #ifndef _QUERY_BUILDER_VIEW_H
 #define _QUERY_BUILDER_VIEW_H
 
-#include <ListControl.h>
+#include <ListView.h>
 
 class QueryBuilderView : public BListView {
 public:

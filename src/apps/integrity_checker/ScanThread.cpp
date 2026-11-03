@@ -10,18 +10,48 @@
 #include <dirent.h>
 
 ScanThread::ScanThread(IntegrityCheckerWindow* window)
-	: BThread("ScanThread"),
-	  fWindow(window),
+	: fWindow(window),
+	  fThread(-1),
 	  fQuitRequested(false)
 {
 }
 
 ScanThread::~ScanThread()
 {
+	if (fThread >= 0) {
+		status_t result;
+		wait_for_thread(fThread, &result);
+	}
 }
 
 status_t
-ScanThread::Execute()
+ScanThread::Run()
+{
+	fThread = spawn_thread(_ThreadEntry, "ScanThread", B_NORMAL_PRIORITY, this);
+	if (fThread < 0)
+		return fThread;
+
+	return resume_thread(fThread);
+}
+
+bool
+ScanThread::IsRunning() const
+{
+	if (fThread < 0)
+		return false;
+
+	thread_info info;
+	return get_thread_info(fThread, &info) == B_OK;
+}
+
+status_t
+ScanThread::_ThreadEntry(void* data)
+{
+	return ((ScanThread*)data)->_Execute();
+}
+
+status_t
+ScanThread::_Execute()
 {
 	BMessage results;
 	status_t status = _RunScan(&results);
