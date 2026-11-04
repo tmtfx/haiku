@@ -8,31 +8,24 @@
 
 #include <Alert.h>
 #include <Application.h>
-#include <Box.h>
 #include <Button.h>
-#include <Directory.h>
 #include <File.h>
 #include <FindDirectory.h>
 #include <GroupLayout.h>
-#include <GroupLayoutBuilder.h>
-#include <LayoutItem.h>
+#include <GroupView.h>
 #include <Path.h>
-#include <Rect.h>
 #include <ScrollView.h>
 #include <SpaceLayoutItem.h>
 #include <StatusBar.h>
 #include <StringView.h>
 #include <TabView.h>
-#include <Menu.h>
-#include <MenuBar.h>
-#include <MenuItem.h>
 #include <stdio.h>
 #include <string.h>
 
 static const char* kSettingsFileName = "integrity_checker_settings";
 
 IntegrityCheckerWindow::IntegrityCheckerWindow()
-	: BWindow(BRect(100, 100, 900, 700), "HPKG Integrity Checker",
+	: BWindow(BRect(100, 100, 950, 760), "HPKG Integrity Checker",
 		B_TITLED_WINDOW, B_ASYNCHRONOUS_CONTROLS | B_AUTO_UPDATE_SIZE_LIMITS),
 	  fTabView(NULL),
 	  fResultsView(NULL),
@@ -62,14 +55,17 @@ IntegrityCheckerWindow::~IntegrityCheckerWindow()
 		fRepairThread->SetWindow(NULL);
 }
 
-BView*
-IntegrityCheckerWindow::_CreatePanelView(const char* name, BLayout* layout)
+BGroupView*
+IntegrityCheckerWindow::_CreatePanelView(const char* name, orientation dir,
+	float spacing)
 {
-	// A plain BView created with no flags/no explicit color paints
-	// whatever the undefined default happens to be (white, on this
-	// build) instead of the normal panel background - give every
-	// container view in this window a real background explicitly.
-	BView* view = new BView(name, B_WILL_DRAW, layout);
+	// BGroupView is a BView+BGroupLayout pair that Haiku already wires up
+	// correctly (resizing mode, attachment order, ...) - building that
+	// combination by hand was the source of several of this window's
+	// earlier bugs (a totally blank window, clipped content). Give every
+	// panel a real background too, or it paints whatever undefined
+	// default the build happens to have (white, here).
+	BGroupView* view = new BGroupView(name, dir, spacing);
 	view->SetViewUIColor(B_PANEL_BACKGROUND_COLOR);
 	return view;
 }
@@ -77,40 +73,39 @@ IntegrityCheckerWindow::_CreatePanelView(const char* name, BLayout* layout)
 void
 IntegrityCheckerWindow::_CreateUI()
 {
-	// Create main tab view
 	fTabView = new BTabView("main_tabs", B_WIDTH_FROM_LABEL);
 
 	_CreateScanTab();
 	_CreateQueryTab();
 	_CreateSettingsTab();
 
-	// Create main layout
 	BGroupLayout* layout = new BGroupLayout(B_VERTICAL, 5);
 	SetLayout(layout);
 	layout->AddView(fTabView);
 	layout->SetInsets(5, 5, 5, 5);
+
+	// SetLayout() makes the window synthesize its own top view with an
+	// unset (white) background - color it, it's always the window's
+	// first/only child at this point.
+	BView* topView = ChildAt(0);
+	if (topView != NULL)
+		topView->SetViewUIColor(B_PANEL_BACKGROUND_COLOR);
 }
 
 void
 IntegrityCheckerWindow::_CreateScanTab()
 {
-	// Create scan results tab
-	BGroupLayout* tabLayout = new BGroupLayout(B_VERTICAL, 5);
-	BView* tabView = _CreatePanelView("scan_tab", tabLayout);
-	tabLayout->SetInsets(10, 10, 10, 10);
+	BGroupView* tabView = _CreatePanelView("scan_tab", B_VERTICAL, 5);
+	tabView->GroupLayout()->SetInsets(10, 10, 10, 10);
 
-	// Results list view
 	fResultsView = new ResultsListView("results", B_SINGLE_SELECTION_LIST);
-	fResultsView->SetExplicitMinSize(BSize(750, 350));
-
 	BScrollView* scrollView = new BScrollView("results_scroll",
 		fResultsView, B_WILL_DRAW | B_FRAME_EVENTS, false, true);
+	scrollView->SetExplicitMinSize(BSize(750, 220));
 
-	// Progress bar
 	fProgressBar = new BStatusBar("progress", "Scan Progress");
 	fProgressBar->SetExplicitMaxSize(BSize(B_SIZE_UNLIMITED, 20));
 
-	// Buttons
 	fScanButton = new BButton("scan_btn", "Scan All Packages",
 		new BMessage(MSG_SCAN_START));
 	fScanButton->SetTarget(this);
@@ -119,20 +114,22 @@ IntegrityCheckerWindow::_CreateScanTab()
 	fRepairButton->SetTarget(this);
 	fRepairButton->SetEnabled(false);
 
-	BGroupLayout* buttonLayout = new BGroupLayout(B_HORIZONTAL, 5);
-	buttonLayout->AddView(fScanButton);
-	buttonLayout->AddView(fRepairButton);
-	buttonLayout->AddItem(BSpaceLayoutItem::CreateGlue());
+	BGroupView* buttonView = _CreatePanelView("buttons", B_HORIZONTAL, 5);
+	buttonView->GroupLayout()->AddView(fScanButton);
+	buttonView->GroupLayout()->AddView(fRepairButton);
+	buttonView->GroupLayout()->AddItem(BSpaceLayoutItem::CreateGlue());
+	buttonView->SetExplicitMaxSize(BSize(B_SIZE_UNLIMITED, 40));
 
-	BView* buttonView = _CreatePanelView("buttons", buttonLayout);
-	buttonLayout->SetInsets(0, 0, 0, 0);
-
-	// Add to tab layout
-	tabLayout->AddView(new BStringView(NULL, "Scan Status:"));
-	tabLayout->AddView(scrollView);
-	tabLayout->AddView(new BStringView(NULL, "Progress:"));
-	tabLayout->AddView(fProgressBar);
-	tabLayout->AddView(buttonView);
+	// Explicit weights: only the scroll view (1.0) is allowed to grow and
+	// absorb whatever extra space the window has - every fixed row (0.0)
+	// always keeps its own natural height, so it can never get squeezed
+	// out by the layout favoring the scroll view instead.
+	BGroupLayout* layout = tabView->GroupLayout();
+	layout->AddView(new BStringView(NULL, "Scan Status:"), 0.0f);
+	layout->AddView(scrollView, 1.0f);
+	layout->AddView(new BStringView(NULL, "Progress:"), 0.0f);
+	layout->AddView(fProgressBar, 0.0f);
+	layout->AddView(buttonView, 0.0f);
 
 	fTabView->AddTab(tabView);
 	fTabView->TabAt(0)->SetLabel("Scan Results");
@@ -141,36 +138,29 @@ IntegrityCheckerWindow::_CreateScanTab()
 void
 IntegrityCheckerWindow::_CreateQueryTab()
 {
-	// Create query builder tab
-	BGroupLayout* tabLayout = new BGroupLayout(B_VERTICAL, 5);
-	BView* tabView = _CreatePanelView("query_tab", tabLayout);
-	tabLayout->SetInsets(10, 10, 10, 10);
+	BGroupView* tabView = _CreatePanelView("query_tab", B_VERTICAL, 5);
+	tabView->GroupLayout()->SetInsets(10, 10, 10, 10);
 
-	// Query builder view
 	fQueryView = new QueryBuilderView("query", B_SINGLE_SELECTION_LIST);
-	fQueryView->SetExplicitMinSize(BSize(750, 400));
-
 	BScrollView* scrollView = new BScrollView("query_scroll",
 		fQueryView, B_WILL_DRAW | B_FRAME_EVENTS, false, true);
+	scrollView->SetExplicitMinSize(BSize(750, 220));
 
-	// Query button
 	fQueryButton = new BButton("query_btn", "Execute Query",
 		new BMessage(MSG_QUERY_EXECUTE));
 	fQueryButton->SetTarget(this);
 
-	BGroupLayout* buttonLayout = new BGroupLayout(B_HORIZONTAL, 5);
-	buttonLayout->AddView(fQueryButton);
-	buttonLayout->AddItem(BSpaceLayoutItem::CreateGlue());
+	BGroupView* buttonView = _CreatePanelView("buttons", B_HORIZONTAL, 5);
+	buttonView->GroupLayout()->AddView(fQueryButton);
+	buttonView->GroupLayout()->AddItem(BSpaceLayoutItem::CreateGlue());
+	buttonView->SetExplicitMaxSize(BSize(B_SIZE_UNLIMITED, 40));
 
-	BView* buttonView = _CreatePanelView("buttons", buttonLayout);
-	buttonLayout->SetInsets(0, 0, 0, 0);
-
-	// Add to tab layout
-	tabLayout->AddView(new BStringView(NULL,
+	BGroupLayout* layout = tabView->GroupLayout();
+	layout->AddView(new BStringView(NULL,
 		"Select a query below, then Execute Query - results appear in "
-		"the Scan Results tab:"));
-	tabLayout->AddView(scrollView);
-	tabLayout->AddView(buttonView);
+		"the Scan Results tab:"), 0.0f);
+	layout->AddView(scrollView, 1.0f);
+	layout->AddView(buttonView, 0.0f);
 
 	fTabView->AddTab(tabView);
 	fTabView->TabAt(1)->SetLabel("Query Builder");
@@ -179,31 +169,25 @@ IntegrityCheckerWindow::_CreateQueryTab()
 void
 IntegrityCheckerWindow::_CreateSettingsTab()
 {
-	// Create settings tab
-	BGroupLayout* tabLayout = new BGroupLayout(B_VERTICAL, 5);
-	BView* tabView = _CreatePanelView("settings_tab", tabLayout);
-	tabLayout->SetInsets(10, 10, 10, 10);
+	BGroupView* tabView = _CreatePanelView("settings_tab", B_VERTICAL, 5);
+	tabView->GroupLayout()->SetInsets(10, 10, 10, 10);
 
-	// Settings view
 	fSettingsView = new SettingsView("settings");
-	fSettingsView->SetExplicitMinSize(BSize(700, 350));
+	fSettingsView->SetExplicitMinSize(BSize(700, 220));
 
-	// Save settings button
 	fSaveSettingsButton = new BButton("save_btn", "Save Settings",
 		new BMessage(MSG_SAVE_SETTINGS));
 	fSaveSettingsButton->SetTarget(this);
 
-	BGroupLayout* buttonLayout = new BGroupLayout(B_HORIZONTAL, 5);
-	buttonLayout->AddView(fSaveSettingsButton);
-	buttonLayout->AddItem(BSpaceLayoutItem::CreateGlue());
+	BGroupView* buttonView = _CreatePanelView("buttons", B_HORIZONTAL, 5);
+	buttonView->GroupLayout()->AddView(fSaveSettingsButton);
+	buttonView->GroupLayout()->AddItem(BSpaceLayoutItem::CreateGlue());
+	buttonView->SetExplicitMaxSize(BSize(B_SIZE_UNLIMITED, 40));
 
-	BView* buttonView = _CreatePanelView("buttons", buttonLayout);
-	buttonLayout->SetInsets(0, 0, 0, 0);
-
-	// Add to tab layout
-	tabLayout->AddView(new BStringView(NULL, "Preferences:"));
-	tabLayout->AddView(fSettingsView);
-	tabLayout->AddView(buttonView);
+	BGroupLayout* layout = tabView->GroupLayout();
+	layout->AddView(new BStringView(NULL, "Preferences:"), 0.0f);
+	layout->AddView(fSettingsView, 1.0f);
+	layout->AddView(buttonView, 0.0f);
 
 	fTabView->AddTab(tabView);
 	fTabView->TabAt(2)->SetLabel("Settings");
@@ -216,11 +200,11 @@ IntegrityCheckerWindow::MessageReceived(BMessage* message)
 		case MSG_SCAN_START:
 			_StartScan();
 			break;
-		
+
 		case MSG_SCAN_COMPLETE:
 			_ScanComplete(message);
 			break;
-		
+
 		case MSG_SCAN_PROGRESS:
 		{
 			int current = message->FindInt32("current");
@@ -228,7 +212,7 @@ IntegrityCheckerWindow::MessageReceived(BMessage* message)
 			_UpdateProgress(current, total);
 			break;
 		}
-		
+
 		case MSG_QUERY_EXECUTE:
 			_ExecuteQuery();
 			break;
@@ -236,7 +220,7 @@ IntegrityCheckerWindow::MessageReceived(BMessage* message)
 		case MSG_SAVE_SETTINGS:
 			_SaveSettings();
 			break;
-		
+
 		case MSG_PACKAGE_REPAIR:
 			_HandlePackageRepair();
 			break;
@@ -273,13 +257,13 @@ IntegrityCheckerWindow::_StartScan()
 {
 	if (fScanInProgress)
 		return;
-	
+
 	fScanInProgress = true;
 	fScanButton->SetEnabled(false);
 	fProgressBar->Reset();
 	fProgressBar->SetText("Scanning packages...");
 	fResultsView->MakeEmpty();
-	
+
 	// Create and start scan thread
 	fScanThread = new ScanThread(this);
 	fScanThread->Run();

@@ -12,7 +12,8 @@ class QueryBuilderView;
 class SettingsView;
 class ScanThread;
 class RepairThread;
-class BLayout;
+class BGroupLayout;
+class BGroupView;
 
 // Message codes
 #define MSG_TAB_CHANGED 'TbCh'
@@ -62,7 +63,8 @@ private:
 	void _CreateScanTab();
 	void _CreateQueryTab();
 	void _CreateSettingsTab();
-	static BView* _CreatePanelView(const char* name, BLayout* layout);
+	static BGroupView* _CreatePanelView(const char* name, orientation dir,
+		float spacing = 5.0f);
 
 	void _StartScan();
 	void _StopScan();
