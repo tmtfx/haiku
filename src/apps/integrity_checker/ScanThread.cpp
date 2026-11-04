@@ -74,7 +74,7 @@ ScanThread::_RunScan(BMessage* outResults)
 	if (!outResults)
 		return B_BAD_VALUE;
 	
-	// Execute fsck_hpkgs with verbose output
+	// Execute fsck.hpkgs with verbose output
 	status_t status = _ExecuteFsckHpkgs(outResults);
 	
 	return status;

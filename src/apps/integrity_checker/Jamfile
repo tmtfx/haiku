@@ -8,7 +8,9 @@ SEARCH_SOURCE += [ FDirName $(HAIKU_TOP) src servers package ] ;
 
 # Add path to PackageVerifier (real scanning) and its headers - the
 # implementations of the HPKGIntegrityConstants.h helpers it calls come
-# from libpackage.so (linked below), same as fsck_hpkgs.
+# from libpackage.so (linked below), same as fsck.hpkgs. (The source
+# directory is still named fsck_hpkgs; only the built binary is
+# fsck.hpkgs.)
 SEARCH_SOURCE += [ FDirName $(HAIKU_TOP) src bin fsck_hpkgs ] ;
 SEARCH_SOURCE += [ FDirName $(HAIKU_TOP) src kits package hpkg ] ;
 

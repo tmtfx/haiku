@@ -43,7 +43,7 @@ HPKGIntegrityWriter::WriteChecksum(const entry_ref& entry,
 	}
 
 	// Best-effort: create the BFS indices the first time we write these
-	// attributes, so fsck_hpkgs's `query` command can use a real BQuery
+	// attributes, so fsck.hpkgs's `query` command can use a real BQuery
 	// instead of always falling back to a directory scan. Not fatal if
 	// it fails (e.g. non-BFS volume).
 	_HPKGEnsureIndex(entry.device, HPKG_ATTR_CHECKSUM);

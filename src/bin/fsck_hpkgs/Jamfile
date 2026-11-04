@@ -19,8 +19,10 @@ local sources =
 	ManualRecovery.cpp
 	;
 
-# Use SimpleTest (no SetType processing) 
-SimpleTest fsck_hpkgs :
+# Use SimpleTest (no SetType processing)
+# Named fsck.hpkgs (not fsck_hpkgs) to match the standard fsck.<fstype>
+# naming convention (fsck.ext2, fsck.fat, ...).
+SimpleTest fsck.hpkgs :
 	$(sources)
 	: be shared
 	package
@@ -29,4 +31,4 @@ SimpleTest fsck_hpkgs :
 	;
 
 # Install to /bin
-InstallBin $(HAIKU_APP_BIN_DIR)/fsck_hpkgs ;
+InstallBin $(HAIKU_APP_BIN_DIR)/fsck.hpkgs ;
