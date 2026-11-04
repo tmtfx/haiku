@@ -4,14 +4,19 @@
 #include "SettingsView.h"
 #include "ScanThread.h"
 #include "RepairThread.h"
+#include "../../bin/fsck_hpkgs/IntegrityQuery.h"
 
 #include <Alert.h>
 #include <Application.h>
 #include <Box.h>
 #include <Button.h>
+#include <Directory.h>
+#include <File.h>
+#include <FindDirectory.h>
 #include <GroupLayout.h>
 #include <GroupLayoutBuilder.h>
 #include <LayoutItem.h>
+#include <Path.h>
 #include <Rect.h>
 #include <ScrollView.h>
 #include <SpaceLayoutItem.h>
@@ -22,6 +27,9 @@
 #include <MenuBar.h>
 #include <MenuItem.h>
 #include <stdio.h>
+#include <string.h>
+
+static const char* kSettingsFileName = "integrity_checker_settings";
 
 IntegrityCheckerWindow::IntegrityCheckerWindow()
 	: BWindow(BRect(100, 100, 900, 700), "HPKG Integrity Checker",
@@ -40,6 +48,7 @@ IntegrityCheckerWindow::IntegrityCheckerWindow()
 	  fRepairThread(NULL)
 {
 	_CreateUI();
+	_LoadSettings();
 	CenterOnScreen();
 }
 
@@ -53,16 +62,28 @@ IntegrityCheckerWindow::~IntegrityCheckerWindow()
 		fRepairThread->SetWindow(NULL);
 }
 
+BView*
+IntegrityCheckerWindow::_CreatePanelView(const char* name, BLayout* layout)
+{
+	// A plain BView created with no flags/no explicit color paints
+	// whatever the undefined default happens to be (white, on this
+	// build) instead of the normal panel background - give every
+	// container view in this window a real background explicitly.
+	BView* view = new BView(name, B_WILL_DRAW, layout);
+	view->SetViewUIColor(B_PANEL_BACKGROUND_COLOR);
+	return view;
+}
+
 void
 IntegrityCheckerWindow::_CreateUI()
 {
 	// Create main tab view
 	fTabView = new BTabView("main_tabs", B_WIDTH_FROM_LABEL);
-	
+
 	_CreateScanTab();
 	_CreateQueryTab();
 	_CreateSettingsTab();
-	
+
 	// Create main layout
 	BGroupLayout* layout = new BGroupLayout(B_VERTICAL, 5);
 	SetLayout(layout);
@@ -75,46 +96,44 @@ IntegrityCheckerWindow::_CreateScanTab()
 {
 	// Create scan results tab
 	BGroupLayout* tabLayout = new BGroupLayout(B_VERTICAL, 5);
-	BView* tabView = new BView("scan_tab", 0, tabLayout);
+	BView* tabView = _CreatePanelView("scan_tab", tabLayout);
 	tabLayout->SetInsets(10, 10, 10, 10);
-	
+
 	// Results list view
 	fResultsView = new ResultsListView("results", B_SINGLE_SELECTION_LIST);
 	fResultsView->SetExplicitMinSize(BSize(750, 350));
-	
+
 	BScrollView* scrollView = new BScrollView("results_scroll",
 		fResultsView, B_WILL_DRAW | B_FRAME_EVENTS, false, true);
-	
+
 	// Progress bar
 	fProgressBar = new BStatusBar("progress", "Scan Progress");
 	fProgressBar->SetExplicitMaxSize(BSize(B_SIZE_UNLIMITED, 20));
-	
+
 	// Buttons
 	fScanButton = new BButton("scan_btn", "Scan All Packages",
 		new BMessage(MSG_SCAN_START));
+	fScanButton->SetTarget(this);
 	fRepairButton = new BButton("repair_btn", "Auto-Repair Selected",
 		new BMessage(MSG_PACKAGE_REPAIR));
+	fRepairButton->SetTarget(this);
 	fRepairButton->SetEnabled(false);
-	
-	BButton* queryButton = new BButton("query_btn", "Open Query Builder",
-		new BMessage(B_SIMPLE_DATA));
-	
+
 	BGroupLayout* buttonLayout = new BGroupLayout(B_HORIZONTAL, 5);
 	buttonLayout->AddView(fScanButton);
 	buttonLayout->AddView(fRepairButton);
-	buttonLayout->AddView(queryButton);
 	buttonLayout->AddItem(BSpaceLayoutItem::CreateGlue());
-	
-	BView* buttonView = new BView("buttons", 0, buttonLayout);
+
+	BView* buttonView = _CreatePanelView("buttons", buttonLayout);
 	buttonLayout->SetInsets(0, 0, 0, 0);
-	
+
 	// Add to tab layout
 	tabLayout->AddView(new BStringView(NULL, "Scan Status:"));
 	tabLayout->AddView(scrollView);
 	tabLayout->AddView(new BStringView(NULL, "Progress:"));
 	tabLayout->AddView(fProgressBar);
 	tabLayout->AddView(buttonView);
-	
+
 	fTabView->AddTab(tabView);
 	fTabView->TabAt(0)->SetLabel("Scan Results");
 }
@@ -124,32 +143,35 @@ IntegrityCheckerWindow::_CreateQueryTab()
 {
 	// Create query builder tab
 	BGroupLayout* tabLayout = new BGroupLayout(B_VERTICAL, 5);
-	BView* tabView = new BView("query_tab", 0, tabLayout);
+	BView* tabView = _CreatePanelView("query_tab", tabLayout);
 	tabLayout->SetInsets(10, 10, 10, 10);
-	
+
 	// Query builder view
 	fQueryView = new QueryBuilderView("query", B_SINGLE_SELECTION_LIST);
 	fQueryView->SetExplicitMinSize(BSize(750, 400));
-	
+
 	BScrollView* scrollView = new BScrollView("query_scroll",
 		fQueryView, B_WILL_DRAW | B_FRAME_EVENTS, false, true);
-	
+
 	// Query button
 	fQueryButton = new BButton("query_btn", "Execute Query",
 		new BMessage(MSG_QUERY_EXECUTE));
-	
+	fQueryButton->SetTarget(this);
+
 	BGroupLayout* buttonLayout = new BGroupLayout(B_HORIZONTAL, 5);
 	buttonLayout->AddView(fQueryButton);
 	buttonLayout->AddItem(BSpaceLayoutItem::CreateGlue());
-	
-	BView* buttonView = new BView("buttons", 0, buttonLayout);
+
+	BView* buttonView = _CreatePanelView("buttons", buttonLayout);
 	buttonLayout->SetInsets(0, 0, 0, 0);
-	
+
 	// Add to tab layout
-	tabLayout->AddView(new BStringView(NULL, "Filter Packages:"));
+	tabLayout->AddView(new BStringView(NULL,
+		"Select a query below, then Execute Query - results appear in "
+		"the Scan Results tab:"));
 	tabLayout->AddView(scrollView);
 	tabLayout->AddView(buttonView);
-	
+
 	fTabView->AddTab(tabView);
 	fTabView->TabAt(1)->SetLabel("Query Builder");
 }
@@ -159,29 +181,30 @@ IntegrityCheckerWindow::_CreateSettingsTab()
 {
 	// Create settings tab
 	BGroupLayout* tabLayout = new BGroupLayout(B_VERTICAL, 5);
-	BView* tabView = new BView("settings_tab", 0, tabLayout);
+	BView* tabView = _CreatePanelView("settings_tab", tabLayout);
 	tabLayout->SetInsets(10, 10, 10, 10);
-	
+
 	// Settings view
 	fSettingsView = new SettingsView("settings");
 	fSettingsView->SetExplicitMinSize(BSize(700, 350));
-	
+
 	// Save settings button
 	fSaveSettingsButton = new BButton("save_btn", "Save Settings",
-		new BMessage(B_SIMPLE_DATA));
-	
+		new BMessage(MSG_SAVE_SETTINGS));
+	fSaveSettingsButton->SetTarget(this);
+
 	BGroupLayout* buttonLayout = new BGroupLayout(B_HORIZONTAL, 5);
 	buttonLayout->AddView(fSaveSettingsButton);
 	buttonLayout->AddItem(BSpaceLayoutItem::CreateGlue());
-	
-	BView* buttonView = new BView("buttons", 0, buttonLayout);
+
+	BView* buttonView = _CreatePanelView("buttons", buttonLayout);
 	buttonLayout->SetInsets(0, 0, 0, 0);
-	
+
 	// Add to tab layout
 	tabLayout->AddView(new BStringView(NULL, "Preferences:"));
 	tabLayout->AddView(fSettingsView);
 	tabLayout->AddView(buttonView);
-	
+
 	fTabView->AddTab(tabView);
 	fTabView->TabAt(2)->SetLabel("Settings");
 }
@@ -208,6 +231,10 @@ IntegrityCheckerWindow::MessageReceived(BMessage* message)
 		
 		case MSG_QUERY_EXECUTE:
 			_ExecuteQuery();
+			break;
+
+		case MSG_SAVE_SETTINGS:
+			_SaveSettings();
 			break;
 		
 		case MSG_PACKAGE_REPAIR:
@@ -315,13 +342,106 @@ IntegrityCheckerWindow::_ScanComplete(BMessage* results)
 void
 IntegrityCheckerWindow::_ExecuteQuery()
 {
-	// TODO: Execute query from QueryBuilderView
+	const char* filter = fQueryView->GetStatusFilter();
+
+	IntegrityQuery query;
+	if (filter != NULL) {
+		if (strcmp(filter, "corrupted") == 0)
+			query.QueryCorrupted();
+		else if (strcmp(filter, "unverified") == 0)
+			query.QueryUnverified();
+		else if (strcmp(filter, "ok") == 0)
+			query.QueryOK();
+		// NULL (e.g. "Show all packages") leaves the predicate empty,
+		// which IntegrityQuery treats as "list everything".
+	}
+
+	status_t status = query.Execute("/boot/system/packages");
+	if (status != B_OK) {
+		BString message;
+		message.SetToFormat("Query failed: %s", strerror(status));
+		(new BAlert("Query failed", message.String(), "OK"))->Go();
+		return;
+	}
+
+	fResultsView->MakeEmpty();
+
+	int32 needsAttention = 0;
+	for (int32 i = 0; i < query.CountResults(); i++) {
+		PackageQueryResult result;
+		if (query.GetResult(i, result) != B_OK)
+			continue;
+
+		ResultsListView::PackageInfo info;
+		info.name = result.filename;
+		info.packagePath = result.path;
+		info.status = result.status;
+		info.checksum = result.checksum;
+
+		fResultsView->AddPackageResult(info);
+
+		if (info.status != "ok")
+			needsAttention++;
+	}
+
+	fRepairButton->SetEnabled(needsAttention > 0);
+
+	// Query results are shown in the same list the scan uses - switch
+	// there so the user actually sees them.
+	fTabView->Select(0);
 }
 
 void
 IntegrityCheckerWindow::_SaveSettings()
 {
-	// TODO: Save settings from SettingsView
+	BPath path;
+	if (find_directory(B_USER_SETTINGS_DIRECTORY, &path) != B_OK)
+		return;
+	path.Append(kSettingsFileName);
+
+	BMessage settings('IChS');
+	settings.AddBool("auto_repair", fSettingsView->IsAutoRepairEnabled());
+	settings.AddBool("notifications", fSettingsView->IsNotificationsEnabled());
+	settings.AddBool("logging", fSettingsView->IsLoggingEnabled());
+	settings.AddString("log_path", fSettingsView->GetLogPath());
+
+	BFile file(path.Path(), B_WRITE_ONLY | B_CREATE_FILE | B_ERASE_FILE);
+	if (file.InitCheck() != B_OK || settings.Flatten(&file) != B_OK) {
+		(new BAlert("Settings", "Failed to save settings.", "OK"))->Go();
+		return;
+	}
+
+	(new BAlert("Settings", "Settings saved.", "OK"))->Go();
+}
+
+void
+IntegrityCheckerWindow::_LoadSettings()
+{
+	BPath path;
+	if (find_directory(B_USER_SETTINGS_DIRECTORY, &path) != B_OK)
+		return;
+	path.Append(kSettingsFileName);
+
+	BFile file(path.Path(), B_READ_ONLY);
+	if (file.InitCheck() != B_OK)
+		return;
+
+	BMessage settings;
+	if (settings.Unflatten(&file) != B_OK)
+		return;
+
+	bool autoRepair = true, notifications = true, logging = true;
+	BString logPath;
+	settings.FindBool("auto_repair", &autoRepair);
+	settings.FindBool("notifications", &notifications);
+	settings.FindBool("logging", &logging);
+	settings.FindString("log_path", &logPath);
+
+	fSettingsView->SetAutoRepair(autoRepair);
+	fSettingsView->SetNotifications(notifications);
+	fSettingsView->SetLogging(logging);
+	if (!logPath.IsEmpty())
+		fSettingsView->SetLogPath(logPath.String());
 }
 
 void

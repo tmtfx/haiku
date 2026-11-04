@@ -12,6 +12,7 @@ class QueryBuilderView;
 class SettingsView;
 class ScanThread;
 class RepairThread;
+class BLayout;
 
 // Message codes
 #define MSG_TAB_CHANGED 'TbCh'
@@ -23,6 +24,7 @@ class RepairThread;
 #define MSG_PACKAGE_REPAIR 'PkRp'
 #define MSG_PACKAGE_LOCATE 'PkLc'
 #define MSG_REPAIR_COMPLETE 'RpCo'
+#define MSG_SAVE_SETTINGS 'SvSt'
 
 class IntegrityCheckerWindow : public BWindow {
 public:
@@ -60,6 +62,7 @@ private:
 	void _CreateScanTab();
 	void _CreateQueryTab();
 	void _CreateSettingsTab();
+	static BView* _CreatePanelView(const char* name, BLayout* layout);
 
 	void _StartScan();
 	void _StopScan();
@@ -68,6 +71,7 @@ private:
 
 	void _ExecuteQuery();
 	void _SaveSettings();
+	void _LoadSettings();
 
 	void _HandlePackageRepair();
 	void _RepairComplete(BMessage* message);

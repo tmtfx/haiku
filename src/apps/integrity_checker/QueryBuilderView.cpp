@@ -22,15 +22,15 @@ QueryBuilderView::_PopulateQueries()
 {
 	MakeEmpty();
 	
+	// Only list filters GetStatusFilter() can actually back with a real
+	// query - a "Show packages from repository"-style item that
+	// silently fell back to "show everything" would be worse than not
+	// offering it.
 	AddItem(new BStringItem("Show all packages"));
 	AddItem(new BStringItem("Show OK packages (valid checksum)"));
 	AddItem(new BStringItem("Show corrupted packages (checksum mismatch)"));
 	AddItem(new BStringItem("Show unverified packages (missing checksum)"));
-	AddItem(new BStringItem("Show packages from repository"));
-	AddItem(new BStringItem("Show packages from unknown source"));
-	AddItem(new BStringItem("Show packages verified in last 7 days"));
-	AddItem(new BStringItem("Show packages never verified"));
-	
+
 	Select(0);
 }
 

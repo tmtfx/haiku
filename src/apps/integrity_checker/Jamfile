@@ -24,6 +24,7 @@ Application IntegrityChecker
 	ScanThread.cpp
 	RepairThread.cpp
 	PackageVerifier.cpp
+	IntegrityQuery.cpp
 	RecoveryStrategy.cpp
 	RepositoryRecovery.cpp
 	ManualRecovery.cpp
