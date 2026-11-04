@@ -71,6 +71,7 @@ namespace BPrivate {
 
 #define HPKG_SOURCE_REPOSITORY			"repository"
 #define HPKG_SOURCE_LOCAL				"local"
+#define HPKG_SOURCE_BUILD				"build"	// Produced by this build, not downloaded
 #define HPKG_SOURCE_BUFFER_SIZE			32		// Space for source name + null
 
 

@@ -28,11 +28,14 @@ ManualRecovery::~ManualRecovery()
 bool
 ManualRecovery::CanRecover(const PackageCorruptionInfo& corruption)
 {
-	// Can recover packages from unknown or network sources
-	// These need user intervention to locate the file
+	// Can recover packages from unknown, network, local-backup, or
+	// self-built sources - all of these need user intervention to locate
+	// (or rebuild) a replacement file; only a genuine repository package
+	// can be fetched automatically (RepositoryRecovery).
 	return corruption.sourceType == RECOVERY_SOURCE_UNKNOWN ||
 		corruption.sourceType == RECOVERY_SOURCE_NETWORK ||
-		corruption.sourceType == RECOVERY_SOURCE_LOCAL_FILE;
+		corruption.sourceType == RECOVERY_SOURCE_LOCAL_FILE ||
+		corruption.sourceType == RECOVERY_SOURCE_BUILD;
 }
 
 BString

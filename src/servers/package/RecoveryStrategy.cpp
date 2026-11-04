@@ -284,6 +284,8 @@ HPKGParseRecoverySource(const char* sourceStr)
 	
 	if (strcmp(sourceStr, "repository") == 0)
 		return RECOVERY_SOURCE_REPOSITORY;
+	if (strcmp(sourceStr, "build") == 0)
+		return RECOVERY_SOURCE_BUILD;
 	if (strcmp(sourceStr, "local") == 0 || strncmp(sourceStr, "local:", 6) == 0)
 		return RECOVERY_SOURCE_LOCAL_FILE;
 	if (strncmp(sourceStr, "http://", 7) == 0 || strncmp(sourceStr, "https://", 8) == 0)
@@ -301,6 +303,8 @@ HPKGRecoverySourceToString(HPKGRecoverySource source)
 	switch (source) {
 		case RECOVERY_SOURCE_REPOSITORY:
 			return "repository";
+		case RECOVERY_SOURCE_BUILD:
+			return "build";
 		case RECOVERY_SOURCE_UNKNOWN:
 			return "unknown";
 		case RECOVERY_SOURCE_LOCAL_FILE:

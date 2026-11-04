@@ -190,6 +190,8 @@ rule BuildHaikuPackage package : packageInfo
 	AddVariableToScript $(script) : updateOnly
 		: [ on $(package) return $(HAIKU_CONTAINER_UPDATE_ONLY) ] ;
 	AddVariableToScript $(script) : cc : $(TARGET_CC_$(architecture)) ;
+	AddVariableToScript $(script) : sha256 : $(HOST_SHA256) ;
+	AddVariableToScript $(script) : extendedRegexSed : $(HOST_EXTENDED_REGEX_SED) ;
 	AddTargetVariableToScript $(script) : <build>addattr ;
 	AddTargetVariableToScript $(script) : <build>copyattr ;
 	AddTargetVariableToScript $(script) : <mimedb>mime_db : mimeDB ;
