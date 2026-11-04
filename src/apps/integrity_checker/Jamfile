@@ -32,4 +32,5 @@ Application IntegrityChecker
 	be localestub package
 	libcrypto_api.so
 	[ TargetLibstdc++ ]
+	: IntegrityChecker.rdef
 ;
