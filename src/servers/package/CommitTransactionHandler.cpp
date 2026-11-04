@@ -1814,6 +1814,19 @@ CommitTransactionHandler::_ChangePackageActivation(
 	// Update our state, i.e. remove deactivated packages and mark activated
 	// packages accordingly.
 	fVolumeState->ActivationChanged(packagesToActivate, packagesToDeactivate);
+
+	// integrity.hpkg.* attributes are written client-side, in
+	// BPackageManager::DownloadPackage() (src/kits/package/manager/
+	// PackageManager.cpp), right where the repository-verified checksum
+	// is actually known. This used to also try here via
+	// package->Info().Checksum(), but that always reads back empty:
+	// Package::Info() (PackageFile.cpp) is populated by
+	// BPackageInfo::ReadFromPackageFile(), which parses the .hpkg file's
+	// own embedded manifest - the HPKG format has no checksum field, so
+	// there was never anything to read. Confirmed on real hardware
+	// (`listattr` on a freshly installed package showed only
+	// BEOS:TYPE/Meta:DownloadCompleted, no integrity.* attributes at
+	// all) before this was found and fixed.
 }
 
 

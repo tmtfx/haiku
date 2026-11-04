@@ -25,6 +25,8 @@ HPKG_SOURCES =
 	FDDataReader.cpp
 	GlobalWritableFileInfo.cpp
 	HPKGDefs.cpp
+	HPKGIntegrityConstants.cpp
+	HPKGIntegrityWriter.cpp
 	PackageContentHandler.cpp
 	PackageData.cpp
 	PackageDataReader.cpp

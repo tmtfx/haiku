@@ -10,6 +10,8 @@ set -o errexit
 # compressionLevel
 # updateOnly
 # cc
+# sha256
+# extendedRegexSed
 #
 # addattr
 # copyattr
@@ -123,3 +125,13 @@ else
 	$package add -q -f "-$compressionLevel" -i "$packageInfoPath" \
 		-C "$contentsDir" "$packagePath" .
 fi
+
+# Record an integrity checksum for this package. Unlike a package fetched
+# at runtime (whose checksum comes from the repository that served it -
+# see BPackageManager::DownloadPackage()), this file was just produced by
+# this very build: the build itself is the certifying authority, so the
+# checksum is computed right here, in the same step that wrote the file.
+echo "$packageName: Writing integrity attributes ..."
+checksum=$($sha256 "$packagePath" | $extendedRegexSed 's,([^[:space:]]*).*,\1,')
+$addattr -t string integrity.hpkg.sha256 "$checksum" "$packagePath"
+$addattr -t string integrity.hpkg.source "build" "$packagePath"

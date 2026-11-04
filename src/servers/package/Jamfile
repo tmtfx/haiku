@@ -1,7 +1,10 @@
 SubDir HAIKU_TOP src servers package ;
 
 UsePrivateSystemHeaders ;
-UsePrivateHeaders app interface shared storage ;
+UsePrivateHeaders app interface shared storage crypto ;
+
+# Add path to HPKG kit headers for integrity checking
+SEARCH_SOURCE += [ FDirName $(HAIKU_TOP) src kits package hpkg ] ;
 
 Application package_daemon
 	:
@@ -13,18 +16,22 @@ Application package_daemon
 	FSUtils.cpp
 	Job.cpp
 	JobQueue.cpp
+	ManualRecovery.cpp
 	Package.cpp
 	PackageDaemon.cpp
 	PackageFile.cpp
 	PackageFileManager.cpp
 	PackageManager.cpp
 	ProblemWindow.cpp
+	RecoveryStrategy.cpp
+	RepositoryRecovery.cpp
 	ResultWindow.cpp
 	Root.cpp
 	Volume.cpp
 	VolumeState.cpp
 	:
 	be localestub package
+	libcrypto_api.so
 	[ TargetLibstdc++ ]
 	:
 	package_daemon.rdef

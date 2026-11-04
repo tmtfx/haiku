@@ -6,6 +6,7 @@ Application pkgman :
 	Command.cpp
 	command_add_repo.cpp
 	command_cleanup.cpp
+	command_download.cpp
 	command_drop_repo.cpp
 	command_full_sync.cpp
 	command_info.cpp

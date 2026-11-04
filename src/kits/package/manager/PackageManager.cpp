@@ -33,6 +33,7 @@
 
 #include "FetchFileJob.h"
 #include "FetchUtils.h"
+#include "HPKGIntegrityWriter.h"
 #include "PackageManagerUtils.h"
 #include "ValidateChecksumJob.h"
 
@@ -892,8 +893,24 @@ BPackageManager::DownloadPackage(const BString& fileURL,
 {
 	BDecisionProvider provider;
 	BContext context(provider, *this);
-	return DownloadFileRequest(context, fileURL, targetEntry, checksum)
-		.Process();
+	status_t error = DownloadFileRequest(context, fileURL, targetEntry,
+		checksum).Process();
+
+	// Record the repository-verified checksum as an extended attribute,
+	// right here where it's actually known - package_daemon can't do
+	// this itself: by the time it sees an activated package, all it has
+	// is BPackageInfo::ReadFromPackageFile(), which parses the .hpkg
+	// file's own embedded manifest, and the HPKG format has no checksum
+	// field at all. This is the only place in the whole install path
+	// that ever has both the file and its verified checksum in scope at
+	// the same time.
+	if (error == B_OK && !checksum.IsEmpty()) {
+		entry_ref ref;
+		if (targetEntry.GetRef(&ref) == B_OK)
+			HPKGIntegrityWriter::WriteChecksum(ref, checksum);
+	}
+
+	return error;
 }
 
 
