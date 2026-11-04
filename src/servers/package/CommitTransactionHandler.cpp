@@ -27,7 +27,6 @@
 #include "Constants.h"
 #include "DebugSupport.h"
 #include "Exception.h"
-#include "HPKGIntegrityWriter.h"
 #include "PackageFileManager.h"
 #include "VolumeState.h"
 
@@ -1816,25 +1815,18 @@ CommitTransactionHandler::_ChangePackageActivation(
 	// packages accordingly.
 	fVolumeState->ActivationChanged(packagesToActivate, packagesToDeactivate);
 
-	// Write integrity checksums to activated packages (non-blocking)
-	for (PackageSet::const_iterator it = packagesToActivate.begin();
-			it != packagesToActivate.end(); ++it) {
-		Package* package = *it;
-		const BString& checksum = package->Info().Checksum();
-
-		// Only write if checksum was provided by repository
-		if (!checksum.IsEmpty()) {
-			entry_ref packageEntry = package->EntryRef();
-			status_t status = HPKGIntegrityWriter::WriteChecksum(
-				packageEntry, checksum);
-
-			// Non-blocking: log errors but don't fail the transaction
-			if (status != B_OK) {
-				WARN("Failed to write integrity checksum for %s: %s\n",
-					package->FileName().String(), strerror(status));
-			}
-		}
-	}
+	// integrity.hpkg.* attributes are written client-side, in
+	// BPackageManager::DownloadPackage() (src/kits/package/manager/
+	// PackageManager.cpp), right where the repository-verified checksum
+	// is actually known. This used to also try here via
+	// package->Info().Checksum(), but that always reads back empty:
+	// Package::Info() (PackageFile.cpp) is populated by
+	// BPackageInfo::ReadFromPackageFile(), which parses the .hpkg file's
+	// own embedded manifest - the HPKG format has no checksum field, so
+	// there was never anything to read. Confirmed on real hardware
+	// (`listattr` on a freshly installed package showed only
+	// BEOS:TYPE/Meta:DownloadCompleted, no integrity.* attributes at
+	// all) before this was found and fixed.
 }
 
 
