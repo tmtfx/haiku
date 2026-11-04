@@ -33,6 +33,7 @@ static const char* kUsage =
 	"    Lists the contents of package repository file <package-repo>.\n"
 	"\n"
 	"    -f         - print canonical filenames of packages.\n"
+	"    -c         - print \"<filename> <sha256>\" pairs, one per line.\n"
 	"    -v         - be verbose (list attributes of all packages found).\n"
 	"\n"
 	"  update [ <options> ] <source-repo> <new-repo> <package-list-file> \n"

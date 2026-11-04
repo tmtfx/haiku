@@ -27,12 +27,13 @@ using namespace BPackageKit::BHPKG;
 using namespace BPackageKit;
 
 struct RepositoryContentListHandler : BRepositoryContentHandler {
-	RepositoryContentListHandler(bool filenames, bool verbose)
+	RepositoryContentListHandler(bool filenames, bool checksums, bool verbose)
 		:
 		fPrinter(),
 		fLevel(0),
 		fVerbose(verbose),
 		fFilenames(filenames),
+		fChecksums(checksums),
 		fPackageInfoContentHandler(fPackageInfo, NULL)
 	{
 	}
@@ -45,14 +46,14 @@ struct RepositoryContentListHandler : BRepositoryContentHandler {
 	virtual status_t HandlePackageAttribute(
 		const BPackageInfoAttributeValue& value)
 	{
-		if (fFilenames)
+		if (fFilenames || fChecksums)
 			fPackageInfoContentHandler.HandlePackageAttribute(value);
 
 		if (value.attributeID == B_PACKAGE_INFO_NAME) {
 			if (fVerbose) {
 				printf("package-attributes:\n");
 				fPrinter.PrintName(value.string);
-			} else if (!fFilenames) {
+			} else if (!fFilenames && !fChecksums) {
 				printf("\t%s\n", value.string);
 			}
 		} else {
@@ -68,16 +69,27 @@ struct RepositoryContentListHandler : BRepositoryContentHandler {
 
 	virtual status_t HandlePackageDone(const char* packageName)
 	{
-		if (fFilenames) {
+		if (fChecksums) {
+			printf("%s %s\n", fPackageInfo.CanonicalFileName().String(),
+				fPackageInfo.Checksum().String());
+		} else if (fFilenames) {
 			printf("%s%s\n", fVerbose ? "filename: " : "\t",
 				fPackageInfo.CanonicalFileName().String());
-			fPackageInfo.Clear();
 		}
+		if (fFilenames || fChecksums)
+			fPackageInfo.Clear();
 		return B_OK;
 	}
 
 	virtual status_t HandleRepositoryInfo(const BRepositoryInfo& repositoryInfo)
 	{
+		// In filenames/checksums mode the output is meant to be plain and
+		// machine-parseable (one line per package) - skip this decorative
+		// header entirely, same as the bare package name is skipped in
+		// HandlePackageAttribute() for that mode.
+		if (fFilenames || fChecksums)
+			return B_OK;
+
 		printf("repository-info:\n");
 		printf("\tname: %s\n", repositoryInfo.Name().String());
 		printf("\tsummary: %s\n", repositoryInfo.Summary().String());
@@ -114,6 +126,7 @@ private:
 	bool				fVerbose;
 
 	bool				fFilenames;
+	bool				fChecksums;
 	BPackageInfoContentHandler fPackageInfoContentHandler;
 	BPackageInfo		fPackageInfo;
 };
@@ -122,18 +135,19 @@ private:
 int
 command_list(int argc, const char* const* argv)
 {
-	bool verbose = false, filenames = false;
+	bool verbose = false, filenames = false, checksums = false;
 
 	while (true) {
 		static struct option sLongOptions[] = {
 			{ "help", no_argument, 0, 'h' },
 			{ "filenames", no_argument, 0, 'f' },
+			{ "checksums", no_argument, 0, 'c' },
 			{ "verbose", no_argument, 0, 'v' },
 			{ 0, 0, 0, 0 }
 		};
 
 		opterr = 0; // don't print errors
-		int c = getopt_long(argc, (char**)argv, "+hfv", sLongOptions, NULL);
+		int c = getopt_long(argc, (char**)argv, "+hcfv", sLongOptions, NULL);
 		if (c == -1)
 			break;
 
@@ -144,6 +158,10 @@ command_list(int argc, const char* const* argv)
 
 			case 'f':
 				filenames = true;
+				break;
+
+			case 'c':
+				checksums = true;
 				break;
 
 			case 'v':
@@ -170,7 +188,7 @@ command_list(int argc, const char* const* argv)
 		return 1;
 
 	// list
-	RepositoryContentListHandler handler(filenames, verbose);
+	RepositoryContentListHandler handler(filenames, checksums, verbose);
 	error = repositoryReader.ParseContent(&handler);
 	if (error != B_OK)
 		return 1;

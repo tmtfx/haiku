@@ -127,7 +127,71 @@ rule RemoteRepositoryFetchPackage repository : package : fileName
 	NoUpdate $(downloadedFile) ;
 		# Don't download the file again when something in the repository
 		# changes. It is (supposed to be) still the same file.
+
+	if $(HAIKU_NO_DOWNLOADS) != 1 {
+		# Verify the freshly downloaded file against the checksum
+		# published in the repository's own index (we're trusting the
+		# repository here, not ourselves - see HPKG_SOURCE_REPOSITORY),
+		# and only if it matches, tag the file with the same
+		# integrity.hpkg.* attributes written at runtime by
+		# BPackageManager::DownloadPackage(). Bound as a second action on
+		# $(downloadedFile), so it only runs right after an actual
+		# (re-)download, never on an already-downloaded file (see
+		# NoUpdate above). Skipped under HAIKU_NO_DOWNLOADS=1 (bootstrap/
+		# offline mode): there the "repository" is fabricated locally
+		# from files already on disk, so there would be nothing
+		# independent to verify against.
+		local packageChecksumsFile = [ on $(repository)
+			return $(HAIKU_REPOSITORY_PACKAGE_CHECKSUMS_FILE) ] ;
+		HAIKU_VERIFY_PACKAGE_FILENAME on $(downloadedFile) = $(fileName) ;
+		Depends $(downloadedFile)
+			: $(packageChecksumsFile) <build>addattr ;
+		VerifyAndTagDownloadedPackage $(downloadedFile)
+			: $(packageChecksumsFile) <build>addattr ;
+	}
+
 	return $(downloadedFile) ;
+}
+
+
+actions VerifyAndTagDownloadedPackage
+{
+	checksumsFile="$(2[1])"
+	addattr="$(2[2])"
+	packageFile="$(1)"
+	fileName="$(HAIKU_VERIFY_PACKAGE_FILENAME)"
+
+	expectedChecksum=
+	found=
+	while read -r name sum; do
+		if [ "x$name" = "x$fileName" ]; then
+			expectedChecksum="$sum"
+			found=1
+			break
+		fi
+	done < "$checksumsFile"
+
+	if [ -z "$found" ] || [ -z "$expectedChecksum" ]; then
+		echo "ERROR: package '$fileName' has no published checksum in" \
+			"the repository index ($checksumsFile) -- refusing to trust" \
+			"the download." 1>&2
+		exit 1
+	fi
+
+	realChecksum=`$(HOST_SHA256) "$packageFile" \
+		| $(HOST_EXTENDED_REGEX_SED) 's,([^[:space:]]*).*,\1,'`
+
+	if [ "x$realChecksum" != "x$expectedChecksum" ]; then
+		echo "ERROR: checksum mismatch for '$fileName' -- the file" \
+			"downloaded from the repository does NOT match the" \
+			"checksum published in its index!" 1>&2
+		echo "  expected: $expectedChecksum" 1>&2
+		echo "  actual:   $realChecksum" 1>&2
+		exit 1
+	fi
+
+	"$addattr" -t string integrity.hpkg.sha256 "$realChecksum" "$packageFile"
+	"$addattr" -t string integrity.hpkg.source repository "$packageFile"
 }
 
 
@@ -210,6 +274,18 @@ rule RemotePackageRepository repository : architecture : repositoryUrl
 	HAIKU_REPOSITORY_CONFIG_FILE on $(repository) = $(repositoryConfig) ;
 	HAIKU_REPOSITORY_PACKAGES_CHECKSUM_FILE on $(repository)
 		= $(packagesChecksumFile) ;
+
+	# Build the per-package checksums list (one "<filename> <sha256>" line
+	# per package, extracted from the repository index itself via
+	# `package_repo list -c`). RemoteRepositoryFetchPackage uses this to
+	# verify each downloaded package without re-parsing the (binary)
+	# repository index for every single one.
+	local packageChecksumsFile
+		= $(repository:G=repository-checksums-list)-checksums ;
+	MakeLocate $(packageChecksumsFile) : $(repositoriesDir) ;
+	RepositoryPackageChecksums $(packageChecksumsFile) : $(repositoryFile) ;
+	HAIKU_REPOSITORY_PACKAGE_CHECKSUMS_FILE on $(repository)
+		= $(packageChecksumsFile) ;
 }
 
 
@@ -238,6 +314,27 @@ actions GeneratedRepositoryPackageList1
 	(for file in $(HAIKU_REPOSITORY_PACKAGE_FILE_NAMES) ; do
 		echo $file
 	done) | LC_ALL=C sort -u > $(1)
+}
+
+
+rule RepositoryPackageChecksums target : repositoryFile
+{
+	# RepositoryPackageChecksums <target> : <repositoryFile> ;
+	#
+	# Builds a plain text file with one "<canonical filename> <sha256>"
+	# line per package found in <repositoryFile>, extracted from the
+	# repository index via `package_repo list -c`.
+
+	Depends $(target) : <build>package_repo $(repositoryFile) ;
+	RepositoryPackageChecksums1 $(target)
+		: <build>package_repo $(repositoryFile) ;
+}
+
+
+actions RepositoryPackageChecksums1
+{
+	$(HOST_ADD_BUILD_COMPATIBILITY_LIB_DIR)
+	$(2[1]) list -c $(2[2]) > $(1)
 }
 
 
