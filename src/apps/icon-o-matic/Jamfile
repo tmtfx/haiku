@@ -303,6 +303,59 @@ Application Icon-O-Matic :
 	: Icon-O-Matic.rdef
 ;
 
+# Scratch one-off tool, not shipped - builds and links against the same
+# icon-domain sources as Icon-O-Matic itself, minus the GUI layer.
+SimpleTest IconBadgeTool :
+	badge_tool_main.cpp
+
+	FlatIconFormat.cpp
+	FlatIconImporter.cpp
+	LittleEndianBuffer.cpp
+	PathCommandQueue.cpp
+	Defines.cpp
+	MessageImporter.cpp
+	PathSourceShape.cpp
+	ReferenceImage.cpp
+	Shape.cpp
+	VectorPath.cpp
+	GradientTransformable.cpp
+	Style.cpp
+	Transformable.cpp
+	AffineTransformer.cpp
+	CompoundStyleTransformer.cpp
+	ContourTransformer.cpp
+	PathSource.cpp
+	PerspectiveTransformer.cpp
+	StrokeTransformer.cpp
+	StyleTransformer.cpp
+	TransformerFactory.cpp
+	Icon.cpp
+	IconRenderer.cpp
+
+	IconObject.cpp
+	Observable.cpp
+	Observer.cpp
+	Selectable.cpp
+	Selection.cpp
+	CommonPropertyIDs.cpp
+	Property.cpp
+	PropertyObject.cpp
+	ColorProperty.cpp
+	IconProperty.cpp
+	Int64Property.cpp
+	OptionProperty.cpp
+
+	MessageExporter.cpp
+	Importer.cpp
+	Exporter.cpp
+	support.cpp
+	Document.cpp
+	CommandStack.cpp
+
+	: be tracker translation shared libagg.a
+		[ TargetLibstdc++ ] localestub
+;
+
 DoCatalogs Icon-O-Matic :
 	x-vnd.haiku-icon_o_matic
 	:
