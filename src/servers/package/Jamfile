@@ -16,6 +16,7 @@ Application package_daemon
 	FSUtils.cpp
 	Job.cpp
 	JobQueue.cpp
+	ManualChecksumWindow.cpp
 	ManualRecovery.cpp
 	Package.cpp
 	PackageDaemon.cpp

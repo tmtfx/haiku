@@ -1,6 +1,10 @@
 SubDir HAIKU_TOP src bin pkgman ;
 
-UsePrivateHeaders shared storage support ;
+UsePrivateHeaders shared storage support crypto ;
+
+# Add path to HPKG integrity constants (checksum validation helpers,
+# implementations come from libpackage.so, already linked below).
+SEARCH_SOURCE += [ FDirName $(HAIKU_TOP) src kits package hpkg ] ;
 
 Application pkgman :
 	Command.cpp
@@ -24,5 +28,6 @@ Application pkgman :
 	pkgman.cpp
 	:
 	shared package be
+	libcrypto_api.so
 	[ TargetLibsupc++ ] [ TargetLibstdc++ ]
 ;

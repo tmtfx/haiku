@@ -40,6 +40,7 @@
 #include "OpenPackageProcess.h"
 #include "PackageInfo.h"
 #include "PackageUtils.h"
+#include "ManualChecksumWindow.h"
 #include "ProblemWindow.h"
 #include "ResultWindow.h"
 
@@ -381,6 +382,19 @@ void
 PackageManager::ProgressPackageChecksumComplete(const char* title)
 {
 	// TODO: implement
+}
+
+
+bool
+PackageManager::RequestLocalPackageChecksum(const BPackageInfo& packageInfo,
+	const BEntry& installedEntry, BString& _checksum)
+{
+	BPath path;
+	installedEntry.GetPath(&path);
+
+	ManualChecksumWindow* window = new ManualChecksumWindow(
+		packageInfo.Name().String(), path.Path());
+	return window->Go(_checksum);
 }
 
 

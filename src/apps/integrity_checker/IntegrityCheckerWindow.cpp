@@ -113,7 +113,6 @@ IntegrityCheckerWindow::_CreateScanTab()
 		new BMessage(MSG_PACKAGE_REPAIR));
 	fRepairButton->SetTarget(this);
 	fRepairButton->SetEnabled(false);
-
 	BGroupView* buttonView = _CreatePanelView("buttons", B_HORIZONTAL, 5);
 	buttonView->GroupLayout()->AddView(fScanButton);
 	buttonView->GroupLayout()->AddView(fRepairButton);

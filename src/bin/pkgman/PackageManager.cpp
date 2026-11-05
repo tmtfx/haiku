@@ -15,10 +15,16 @@
 
 #include "PackageManager.h"
 
+#include <File.h>
 #include <InterfaceDefs.h>
+#include <Path.h>
 
 #include <sys/ioctl.h>
 #include <unistd.h>
+
+#include <crypto/BCrypto.h>
+
+#include "HPKGIntegrityConstants.h"
 
 #include <package/CleanUpAdminDirectoryRequest.h>
 #include <package/CommitTransactionResult.h>
@@ -294,6 +300,76 @@ void
 PackageManager::ProgressPackageChecksumComplete(const char* title)
 {
 	printf("done.\n");
+}
+
+
+bool
+PackageManager::RequestLocalPackageChecksum(const BPackageInfo& packageInfo,
+	const BEntry& installedEntry, BString& _checksum)
+{
+	if (!fInteractive) {
+		printf("%s: installed from a local file - no checksum set "
+			"(non-interactive mode).\n", packageInfo.Name().String());
+		return false;
+	}
+
+	BPath path;
+	installedEntry.GetPath(&path);
+
+	printf("\n%s was installed from a local file - it has no checksum to "
+		"verify against.\n", packageInfo.Name().String());
+
+	for (;;) {
+		printf("Enter a SHA256 checksum you trust, 'c' to calculate the "
+			"file's current hash, or just press Enter to skip: ");
+
+		char buffer[128];
+		if (fgets(buffer, sizeof(buffer), stdin) == NULL)
+			return false;
+
+		size_t length = strlen(buffer);
+		while (length > 0
+				&& (buffer[length - 1] == '\n' || buffer[length - 1] == '\r')) {
+			buffer[--length] = '\0';
+		}
+
+		if (length == 0)
+			return false;
+
+		if (strcmp(buffer, "c") == 0) {
+			BFile file(path.Path(), B_READ_ONLY);
+			if (file.InitCheck() != B_OK) {
+				printf("*** could not open the file: %s\n",
+					strerror(file.InitCheck()));
+				continue;
+			}
+
+			BCrypto crypto;
+			uint8 digest[32];
+			status_t status = crypto.Digest(B_CRYPTO_SHA256, &file, digest);
+			if (status != B_OK) {
+				printf("*** failed to calculate checksum: %s\n",
+					strerror(status));
+				continue;
+			}
+
+			char hex[HPKG_CHECKSUM_BUFFER_SIZE];
+			_HPKGDigestToHex(digest, sizeof(digest), hex);
+			printf("sha256: %s\n", hex);
+			continue;
+		}
+
+		BString checksum(buffer);
+		checksum.ToLower();
+		if (!_HPKGIsValidChecksumHex(checksum.String())) {
+			printf("*** that doesn't look like a SHA256 checksum (needs to "
+				"be exactly 64 hex characters)\n");
+			continue;
+		}
+
+		_checksum = checksum;
+		return true;
+	}
 }
 
 

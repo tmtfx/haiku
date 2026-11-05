@@ -328,6 +328,17 @@ public:
 	virtual	void				ProgressPackageChecksumComplete(
 									const char* title);
 
+	// Called only for a package installed from a local file (never for a
+	// repository-resolved install, which gets its checksum from the
+	// repository index instead). Returning true with a non-empty
+	// _checksum blesses that value as a local, point-in-time trust
+	// decision (written with source "local"); returning false (the
+	// default) leaves the package unverified.
+	virtual	bool				RequestLocalPackageChecksum(
+									const BPackageInfo& packageInfo,
+									const BEntry& installedEntry,
+									BString& _checksum);
+
 	virtual	void				ProgressStartApplyingChanges(
 									InstalledRepository& repository);
 	virtual	void				ProgressTransactionCommitted(

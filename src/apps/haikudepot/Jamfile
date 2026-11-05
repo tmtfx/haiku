@@ -6,7 +6,11 @@ SubDirC++Flags -Wno-error ;
 include [ FDirName $(SUBDIR) build jam JsonSchemaGenRules ] ;
 
 UsePrivateHeaders interface net netservices package shared storage ;
-UsePrivateHeaders support locale ;
+UsePrivateHeaders support locale crypto ;
+
+# Add path to HPKG integrity constants (checksum validation helpers,
+# implementations come from libpackage.so, already linked below).
+SEARCH_SOURCE += [ FDirName $(HAIKU_TOP) src kits package hpkg ] ;
 
 HAIKUDEPOT_GENERATED_SOURCES_DIRECTORY = $(TARGET_COMMON_DEBUG_LOCATE_TARGET) ;
 
@@ -243,6 +247,7 @@ local applicationSources =
 	StringUtils.cpp
 
 	# package_daemon
+	ManualChecksumWindow.cpp
 	ProblemWindow.cpp
 	ResultWindow.cpp
 ;
@@ -273,6 +278,7 @@ Application HaikuDepot
 	$(genServerReferenceParserSourceFiles)
 	:
 	be package bnetapi translation libnetservices.a libcolumnlistview.a shared
+	libcrypto_api.so
 	[ TargetLibstdc++ ] [ TargetLibsupc++ ] localestub
 	:
 	HaikuDepot.rdef

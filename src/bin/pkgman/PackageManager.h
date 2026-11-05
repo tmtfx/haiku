@@ -56,6 +56,11 @@ private:
 	virtual	void				ProgressPackageChecksumComplete(
 									const char* packageName);
 
+	virtual	bool				RequestLocalPackageChecksum(
+									const BPackageInfo& packageInfo,
+									const BEntry& installedEntry,
+									BString& _checksum);
+
 	virtual	void				ProgressStartApplyingChanges(
 									InstalledRepository& repository);
 	virtual	void				ProgressTransactionCommitted(

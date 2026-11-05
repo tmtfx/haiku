@@ -33,6 +33,7 @@
 
 #include "FetchFileJob.h"
 #include "FetchUtils.h"
+#include "HPKGIntegrityConstants.h"
 #include "HPKGIntegrityWriter.h"
 #include "PackageManagerUtils.h"
 #include "ValidateChecksumJob.h"
@@ -726,6 +727,18 @@ BPackageManager::_ClonePackageFile(LocalRepository* repository,
 		node.SetGroup(getgid());
 		node.SetPermissions(S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP |S_IROTH);
 	}
+
+	// A cloned local file has no trust anchor the way a repository
+	// download does (that gets its checksum from the repository index) -
+	// ask the client whether the user wants to bless this one with a
+	// checksum of their own before the install proceeds.
+	BString checksum;
+	if (fUserInteractionHandler->RequestLocalPackageChecksum(
+			package->Info(), entry, checksum) && !checksum.IsEmpty()) {
+		entry_ref ref;
+		if (entry.GetRef(&ref) == B_OK)
+			HPKGIntegrityWriter::WriteChecksum(ref, checksum, HPKG_SOURCE_LOCAL);
+	}
 }
 
 
@@ -1235,6 +1248,15 @@ void
 BPackageManager::UserInteractionHandler::ProgressPackageChecksumComplete(
 	const char* title)
 {
+}
+
+
+bool
+BPackageManager::UserInteractionHandler::RequestLocalPackageChecksum(
+	const BPackageInfo& packageInfo, const BEntry& installedEntry,
+	BString& _checksum)
+{
+	return false;
 }
 
 

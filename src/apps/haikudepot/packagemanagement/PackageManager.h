@@ -15,6 +15,7 @@
 
 #include <package/DaemonClient.h>
 #include <package/manager/PackageManager.h>
+#include <package/PackageInfo.h>
 
 #include "Collector.h"
 #include "DecisionProvider.h"
@@ -35,6 +36,7 @@ class ResultWindow;
 
 
 using BPackageKit::BCommitTransactionResult;
+using BPackageKit::BPackageInfo;
 using BPackageKit::BContext;
 using BPackageKit::BPackageInstallationLocation;
 using BPackageKit::BRepositoryConfig;
@@ -88,6 +90,11 @@ private:
 									const char* title);
 	virtual	void				ProgressPackageChecksumComplete(
 									const char* title);
+
+	virtual	bool				RequestLocalPackageChecksum(
+									const BPackageInfo& packageInfo,
+									const BEntry& installedEntry,
+									BString& _checksum);
 
 	virtual	void				ProgressStartApplyingChanges(
 									InstalledRepository& repository);
