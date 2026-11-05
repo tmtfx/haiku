@@ -328,17 +328,6 @@ public:
 	virtual	void				ProgressPackageChecksumComplete(
 									const char* title);
 
-	// Called only for a package installed from a local file (never for a
-	// repository-resolved install, which gets its checksum from the
-	// repository index instead). Returning true with a non-empty
-	// _checksum blesses that value as a local, point-in-time trust
-	// decision (written with source "local"); returning false (the
-	// default) leaves the package unverified.
-	virtual	bool				RequestLocalPackageChecksum(
-									const BPackageInfo& packageInfo,
-									const BEntry& installedEntry,
-									BString& _checksum);
-
 	virtual	void				ProgressStartApplyingChanges(
 									InstalledRepository& repository);
 	virtual	void				ProgressTransactionCommitted(
@@ -346,6 +335,28 @@ public:
 									const BCommitTransactionResult& result);
 	virtual	void				ProgressApplyingChangesDone(
 									InstalledRepository& repository);
+
+	// Called only for a package installed from a local file (never for a
+	// repository-resolved install, which gets its checksum from the
+	// repository index instead). Returning true with a non-empty
+	// _checksum blesses that value as a local, point-in-time trust
+	// decision (written with source "local"); returning false (the
+	// default) leaves the package unverified.
+	//
+	// Appended at the end of the vtable deliberately: this interface's
+	// base implementation lives in libpackage.so, a shared library other
+	// binaries link against independently of when they were last
+	// rebuilt - inserting a new virtual anywhere but last reorders every
+	// slot after it, so an old libpackage.so and a freshly rebuilt
+	// client (or vice versa) end up calling straight through each
+	// other's virtual calls with mismatched slot indices. Appending is
+	// the only insertion point that can't do that: every already-
+	// compiled caller's existing slot numbers stay exactly where they
+	// were.
+	virtual	bool				RequestLocalPackageChecksum(
+									const BPackageInfo& packageInfo,
+									const BEntry& installedEntry,
+									BString& _checksum);
 };
 
 
