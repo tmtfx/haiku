@@ -866,6 +866,8 @@ SysInfoView::CacheInitialSize()
 		fCPUInfoView->StringWidth(fCPUInfoView->Text()) + insets));
 	fCachedMinWidth = ceilf(std::max(fCachedMinWidth,
 		fMemSizeView->StringWidth(fMemSizeView->Text()) + insets));
+	fCachedMinWidth = ceilf(std::max(fCachedMinWidth,
+		fGPUInfoView->StringWidth(fGPUInfoView->Text()) + insets));
 
 	// width is fixed, height can grow in Pulse()
 	fCachedBaseHeight = _BaseHeight();
