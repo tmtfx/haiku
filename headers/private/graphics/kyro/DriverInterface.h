@@ -45,6 +45,7 @@ struct SharedInfo {
 	uint16		deviceID;
 	uint8		revision;
 	char		chipName[32];
+	char		chipCode[16];
 	char		deviceName[B_PATH_NAME_LENGTH];
 
 	area_id		regsArea;

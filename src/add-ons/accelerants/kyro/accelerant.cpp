@@ -9,6 +9,7 @@
 #include "accelerant.h"
 
 #include <errno.h>
+#include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -233,8 +234,13 @@ status_t
 GetAccelerantDeviceInfo(accelerant_device_info* info)
 {
 	info->version = B_ACCELERANT_VERSION;
-	strlcpy(info->name, "PowerVR Kyro Driver", sizeof(info->name));
-	strlcpy(info->chipset, gInfo.sharedInfo->chipName, sizeof(info->chipset));
+	strlcpy(info->name, gInfo.sharedInfo->chipName, sizeof(info->name));
+
+	uint32 memoryMB = (gInfo.sharedInfo->frameBufferSize + (1024 * 1024 - 1))
+		/ (1024 * 1024);
+	snprintf(info->chipset, sizeof(info->chipset), "%s, %" B_PRIu32 "MB",
+		gInfo.sharedInfo->chipCode, memoryMB);
+
 	strlcpy(info->serial_no, "unknown", sizeof(info->serial_no));
 	info->memory = gInfo.sharedInfo->frameBufferSize;
 	info->dac_speed = gInfo.sharedInfo->maxPixelClock / 1000;

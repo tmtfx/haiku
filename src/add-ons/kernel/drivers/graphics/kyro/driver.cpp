@@ -365,6 +365,39 @@ load_settings(void)
 
 
 static void
+identify_chip(uint8 revision, char* chipName, size_t chipNameSize,
+	char* chipCode, size_t chipCodeSize)
+{
+	switch (revision) {
+		case 0x01:
+			strlcpy(chipName, "PowerVR Kyro I", chipNameSize);
+			strlcpy(chipCode, "STG4000", chipCodeSize);
+			break;
+
+		case 0x05:
+		case 0x07:
+		case 0x0f:
+			strlcpy(chipName, "PowerVR Kyro II", chipNameSize);
+			strlcpy(chipCode, "STG4500", chipCodeSize);
+			break;
+
+		case 0x1f:
+			strlcpy(chipName, "PowerVR Kyro II SE", chipNameSize);
+			strlcpy(chipCode, "STG4800", chipCodeSize);
+			break;
+
+		default:
+			strlcpy(chipName, "PowerVR Kyro", chipNameSize);
+			strlcpy(chipCode, "STG4000", chipCodeSize);
+			break;
+	}
+
+	KYRO_TRACE("identify_chip revision=0x%02x -> %s (%s)\n", revision,
+		chipName, chipCode);
+}
+
+
+static void
 fill_boot_mode(SharedInfo& si)
 {
 	frame_buffer_boot_info* bootInfo = (frame_buffer_boot_info*)get_boot_item(
@@ -557,8 +590,9 @@ init_device(DeviceInfo& device)
 	device.sharedInfo->colorSpaces[1] = B_RGB32;
 	device.sharedInfo->dpmsMode = B_DPMS_ON;
 	device.sharedInfo->cursorBufferSize = 1024;
-	strlcpy(device.sharedInfo->chipName, "PowerVR Kyro/Kyro II",
-		sizeof(device.sharedInfo->chipName));
+	identify_chip(device.pciInfo.revision, device.sharedInfo->chipName,
+		sizeof(device.sharedInfo->chipName), device.sharedInfo->chipCode,
+		sizeof(device.sharedInfo->chipCode));
 	strlcpy(device.sharedInfo->deviceName, device.name,
 		sizeof(device.sharedInfo->deviceName));
 	memcpy(&device.sharedInfo->settings, &gSettings, sizeof(gSettings));
