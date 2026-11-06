@@ -104,6 +104,7 @@ static const float kSysInfoMinWidth = 163.0f;
 static const float kSysInfoMinHeight = 193.0f;
 
 static const float kDraggerMargin = 6.0f;
+static const float kDraggerSize = 7.0f;
 
 static const int32 kMsgScrollCreditsView = 'mviv';
 static const int32 kMsgTriggerFricoVideo = 'fvic';
@@ -346,7 +347,7 @@ private:
 			
 			BWindow*		fScreen;
 			
-	static const uint8		kLabelCount = 5;
+	static const uint8		kLabelCount = 6;
 	static const uint8		kSubtextCount = 5;
 };
 
@@ -846,9 +847,20 @@ SysInfoView::AttachedToWindow()
 		// if we are a replicant the parent view doesn't do this for us
 		CacheInitialSize();
 		// add extra height for dragger: fixed, and insets: font-dependent
-		float draggerHeight = fDragger->Bounds().Height() + kDraggerMargin * 2;
+		float draggerHeight = kDraggerSize + kDraggerMargin * 2;
 		float insets = be_control_look->DefaultLabelSpacing() * 2;
-		ResizeTo(fCachedMinWidth, fCachedMinHeight + draggerHeight + insets);
+		float totalHeight = fCachedMinHeight + draggerHeight + insets;
+		// CacheInitialSize() capped our max size at the text content's
+		// height alone; our BGroupLayout (which the dragger added by
+		// _CreateDragger() is also a trailing item of, see
+		// _UpdateColors()) uses that declared max, not our actual frame,
+		// to decide how much room it has to hand out. Without raising it
+		// here too, the group has no budget left for the dragger once
+		// the content above eats it all, and squeezes it to a
+		// zero/negative-height sliver -- making it invisible and
+		// unclickable.
+		SetExplicitMaxSize(BSize(fCachedMinWidth, totalHeight));
+		ResizeTo(fCachedMinWidth, totalHeight);
 	}
 }
 
@@ -1082,6 +1094,17 @@ SysInfoView::_CreateDragger()
 		new BMessage(kDeleteReplicant)));
 	fDragger->SetPopUp(popUp);
 	AddChild(fDragger, ChildAt(0));
+
+	// AddChild() also registers the dragger as a trailing item of our
+	// BGroupLayout (relied on by _UpdateColors(), which walks the layout
+	// items and skips the last two -- glue and dragger -- by index). Give
+	// that item a fixed size so the group reserves real space for it
+	// instead of leaving it whatever is left over after the text content,
+	// which can squeeze it down to a zero/negative-height sliver.
+	fDragger->SetExplicitMinSize(BSize(kDraggerSize, kDraggerSize));
+	fDragger->SetExplicitMaxSize(BSize(kDraggerSize, kDraggerSize));
+	fDragger->SetExplicitAlignment(
+		BAlignment(B_ALIGN_RIGHT, B_ALIGN_BOTTOM));
 }
 
 
