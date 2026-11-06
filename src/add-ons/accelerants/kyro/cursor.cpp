@@ -159,10 +159,16 @@ MoveCursor(uint16 x, uint16 y)
 	if (cursorY < 0)
 		cursorY = 0;
 
+	// The DAC's cursor position register has its X/Y fields swapped with
+	// respect to what the naming in the datasheet-derived macros suggests:
+	// on real hardware the low field (bits 0-10) controls the vertical
+	// position and the high field (bits 16-26) controls the horizontal
+	// position. Confirmed by on-hardware testing: without this swap,
+	// horizontal mouse movement moved the cursor vertically and vice versa.
 	uint32 value = read32(kDACCursorCtrl);
 	value &= ~((0x7ffu << 0) | (0x7ffu << 16));
-	value |= (cursorX & 0x7ffu);
-	value |= (cursorY & 0x7ffu) << 16;
+	value |= (cursorY & 0x7ffu);
+	value |= (cursorX & 0x7ffu) << 16;
 	write32(kDACCursorCtrl, value);
 }
 
