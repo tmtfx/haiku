@@ -316,27 +316,41 @@ int32 PoorManServer::_Worker(void* data)
 
 	setsockopt(hc->conn_fd, SOL_SOCKET, SO_RCVTIMEO, &kTimeVal,
 		sizeof(struct timeval));
-	retval = recv(
-		hc->conn_fd,
-		&(hc->read_buf[hc->read_idx]),
-		hc->read_size - hc->read_idx,
-		0
-	);
-	if (retval < 0)
-		goto cleanup;
 
-	hc->read_idx += retval;
-	switch(httpd_got_request(hc)) {
-		case GR_GOT_REQUEST:
+	/* The request may not arrive in a single recv() call (e.g. over a
+	 * real network link, or with browsers that send larger headers than
+	 * fit in the initial read buffer), so httpd_got_request() has to be
+	 * polled in a loop until it reports a complete (or bad) request.
+	 */
+	for (;;) {
+		if (hc->read_idx >= hc->read_size) {
+			if (hc->read_size >= POOR_MAN_MAX_REQUEST_SIZE)
+				goto cleanup;
+			httpd_realloc_str(&hc->read_buf, &hc->read_size,
+				hc->read_size + 1000);
+		}
+
+		retval = recv(
+			hc->conn_fd,
+			&(hc->read_buf[hc->read_idx]),
+			hc->read_size - hc->read_idx,
+			0
+		);
+		if (retval <= 0)
+			goto cleanup;
+
+		hc->read_idx += retval;
+
+		retval = httpd_got_request(hc);
+		if (retval == GR_GOT_REQUEST)
 			break;
-		case GR_BAD_REQUEST:
+		if (retval == GR_BAD_REQUEST) {
 			httpd_send_err(hc, 400,
 				httpd_err400title, (char *)"", httpd_err400form, (char *)"");
-			httpd_write_response(hc);//fall through
-		case GR_NO_REQUEST: //fall through
-		default: //won't happen
+			httpd_write_response(hc);
 			goto cleanup;
-			break;
+		}
+		/* GR_NO_REQUEST: not enough data yet, read more. */
 	}
 	
 	if (httpd_parse_request(hc) < 0) {

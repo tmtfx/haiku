@@ -17,6 +17,13 @@
 
 #define POOR_MAN_BUF_SIZE 1048576ll
 
+/* Upper bound for the request header buffer (hc->read_buf), which grows
+ * dynamically while waiting for a complete request line/headers to
+ * arrive. Any real browser request fits comfortably within this; a
+ * request that doesn't is treated as bogus rather than grown forever.
+ */
+#define POOR_MAN_MAX_REQUEST_SIZE (64 * 1024)
+
 #ifdef __cplusplus
 class PoorManServer{
 public:
