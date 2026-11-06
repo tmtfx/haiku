@@ -43,6 +43,9 @@ enum {
 	// Encrypted key operations (session-password protected)
 	KEY_STORE_GET_ENCRYPTED_KEY				= 'KgEK',
 	KEY_STORE_ADD_ENCRYPTED_KEY				= 'KaEK',
+
+	// Session password management
+	KEY_STORE_FORGET_PASSWORD				= 'KFgP',
 };
 
 

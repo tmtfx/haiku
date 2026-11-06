@@ -565,6 +565,16 @@ KeyStoreServer::MessageReceived(BMessage* message)
 			break;
 		}
 
+		case KEY_STORE_FORGET_PASSWORD:
+		{
+			// Clear the session password from memory.
+			fSessionPassword.SetTo("");
+			fHasSessionPassword = false;
+			fSessionPasswordValidated = false;
+			result = B_OK;
+			break;
+		}
+
 		case 0:
 		{
 			// Just the error case from above.
