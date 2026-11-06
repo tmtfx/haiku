@@ -53,15 +53,17 @@ get_accelerant_hook(uint32 feature, void* data)
 		case B_GET_EDID_INFO:
 			return (void*)GetEdidInfo;
 		case B_MOVE_CURSOR:
-			return NULL;
+			return gInfo.sharedInfo->settings.hardcursor ? (void*)MoveCursor : NULL;
 		case B_SET_CURSOR_SHAPE:
-			return NULL;
+			return gInfo.sharedInfo->settings.hardcursor ? (void*)SetCursorShape : NULL;
 		case B_SHOW_CURSOR:
-			return NULL;
+			return gInfo.sharedInfo->settings.hardcursor ? (void*)ShowCursor : NULL;
+#ifdef IS_PIRATI_BUILD
 		case B_SET_CURSOR_BITMAP:
-			return NULL;
+			return gInfo.sharedInfo->settings.hardcursor ? (void*)SetCursorBitmap : NULL;
 		case B_GET_CURSOR_BITS:
-			return NULL;
+			return gInfo.sharedInfo->settings.hardcursor ? (void*)GetCursorBits : NULL;
+#endif
 
 		case B_DPMS_MODE:
 			return (void*)kyro_dpms_mode;

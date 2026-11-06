@@ -84,8 +84,8 @@ static const char*		gDeviceNames[MAX_DEVICES + 1];
 static pci_module_info*	gPCI;
 static kyro_settings	gSettings = {
 	KYRO_ACCELERANT_NAME,
-	false,
-	0
+	true,
+	2
 };
 
 
@@ -350,6 +350,13 @@ load_settings(void)
 		KYRO_TRACE("load_settings: no kyro.settings found\n");
 		return;
 	}
+
+	gSettings.hardcursor = get_driver_boolean_parameter(handle, "hardcursor",
+		gSettings.hardcursor, gSettings.hardcursor);
+
+	const char* value = get_driver_parameter(handle, "cursorbits", NULL, NULL);
+	if (value != NULL)
+		gSettings.cursorbits = (uint32)atoi(value);
 
 	unload_driver_settings(handle);
 	KYRO_TRACE("load_settings done hardcursor=%d cursorbits=%" B_PRIu32 "\n",
