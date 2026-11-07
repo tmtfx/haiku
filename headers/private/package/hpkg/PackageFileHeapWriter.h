@@ -64,13 +64,17 @@ private:
 			struct Chunk;
 			struct ChunkSegment;
 			struct ChunkBuffer;
+			struct ChunkCompressor;
 
 			friend struct ChunkBuffer;
 
 private:
 			void				_Uninit();
 
+			status_t			_QueuePendingData();
 			status_t			_FlushPendingData();
+			status_t			_WriteCompressedBatch();
+			status_t			_DrainCompressionQueue();
 			status_t			_WriteChunk(const void* data, size_t size,
 									bool mayCompress);
 			status_t			_WriteDataCompressed(const void* data,
@@ -88,6 +92,8 @@ private:
 			size_t				fPendingDataSize;
 			Array<uint64>		fOffsets;
 			CompressionAlgorithmOwner* fCompressionAlgorithm;
+			ChunkCompressor*	fChunkCompressor;
+			bool				fChunkQueueingSuspended;
 };
 
 
