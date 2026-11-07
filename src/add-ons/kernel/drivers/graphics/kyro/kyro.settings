@@ -1,3 +1,19 @@
 accelerant kyro.accelerant
 hardcursor true
 cursorbits 2
+
+# Hardware cursor buffer layout to try - the real STG4000 format is not
+# documented, so this picks between candidates while testing on real
+# hardware. This is read by the accelerant directly (not passed through
+# the kernel driver), so changing it and restarting app_server is enough -
+# no reboot needed. This file must be copied to
+# /boot/home/config/settings/kernel/drivers/kyro.settings to actually be
+# picked up. See the comment above kCursorFormatGray8 in
+# accelerants/kyro/cursor.cpp for what each number means.
+# 0 = raw 8bpp grayscale pixels, 16 wide x 64 tall (current best guess)
+# 1 = raw BGR565 pixels, 8 wide x 64 tall
+# 2 = 2bpp packed color index, 64 wide x 64 tall (first attempt, known not
+#     to work)
+# 3 = AND/XOR 1bpp mask planes, 64 wide x 64 tall (second attempt, known
+#     not to work)
+cursorformat 0
