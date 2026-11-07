@@ -17,6 +17,8 @@ namespace {
 
 static const uint32 kDACCursorAddr = 0x1408;
 static const uint32 kDACCursorCtrl = 0x140c;
+static const uint32 kDACLUTAddress = 0x1484;
+static const uint32 kDACLUTData = 0x1488;
 
 
 static inline uint32
@@ -44,37 +46,46 @@ cursor_buffer()
 // The real STG4000 hardware cursor buffer layout isn't documented anywhere
 // we have access to, and guessing it wrong doesn't fail loudly - it just
 // draws garbage. So instead of hardcoding one guess, "cursorformat" (set in
-// kyro.settings) picks between a few candidates.
+// kyro.settings) picks between a few candidates. Gotcha found the hard way:
+// this is read from kyro.settings in /boot/home/config/settings/kernel/
+// drivers/ - editing the copy in this source tree does nothing on a real
+// test run unless that copy is also updated.
 //
-// Two things are no longer guesses, deduced from how different candidates
-// actually looked on real hardware:
-//   - The row pitch is 16 bytes, 64 rows, 1024 bytes total, regardless of
-//     pixel format. A candidate using a 64-byte pitch visibly failed to
-//     wrap to a new row (the image just smeared downward); two candidates
-//     that both happened to use a 16-byte pitch instead produced a clean,
-//     undistorted (if wrongly colored) repeating image.
+// What later testing with that file actually being picked up established:
 //   - The bytes are read as raw pixel color, not a 1bpp AND/XOR mask: an
 //     AND/XOR-mask candidate showed our own fill pattern (0xff then 0x00
-//     bytes) as solid color bars, which only makes sense if those bytes
-//     were read directly as color rather than composited as a mask.
+//     bytes) as solid color bars, which only makes sense read as color.
+//   - The row pitch is 32 bytes (1024 bytes / 32 = a 32-row canvas): an
+//     8bpp/32-wide candidate at that pitch produced the hand glyph at
+//     exactly the right size.
+//   - At that same size, the colors came out pink/flesh-toned instead of
+//     black and white - consistent with those bytes being read as a color
+//     LUT index rather than direct grayscale. See program_grayscale_lut().
+//   - A 16bpp candidate at the same 32-byte pitch got the colors right
+//     (truecolor needs no LUT) but came out twice as wide - consistent
+//     with the hardware still reading 1 byte per pixel, so our 2-byte
+//     pixels get read as two separate pixels each.
 //
-// What's still a guess is how many bits make up one pixel within that
-// fixed 16-byte row - which also decides the usable width:
-//
-//   0 = raw 8bpp grayscale pixels, 16 wide x 64 tall. No transparency.
-//       (16 wide matches the classic BeOS cursor size; current best guess)
-//   1 = raw BGR565 pixels, 8 wide x 64 tall. No transparency.
-//   2 = 2bpp packed color index (4 pixels/byte), 64 wide x 64 tall - the
-//       very first attempt. Produced a solid black block with a couple of
-//       tiny colored specks, consistent with the hardware having no color
-//       LUT for this index scheme. Kept only for reference.
-//   3 = AND/XOR 1bpp mask planes, 64 wide x 64 tall - the second attempt.
-//       Known not to work; see above. Kept only for reference.
+//   0 = raw 4bpp grayscale pixels (2 pixels/byte), 64 wide x 32 tall.
+//       Untested since the kyro.settings gotcha above was found.
+//   1 = raw 8bpp grayscale pixels, 32 wide x 32 tall. Current best guess:
+//       right size, and now paired with program_grayscale_lut() to fix
+//       the color.
+//   2 = raw BGR565 pixels, 16 wide x 32 tall. Right colors, wrong (double)
+//       size - see above.
+//   3 = 2bpp packed color index (4 pixels/byte), 64 wide x 64 tall, 16-byte
+//       pitch - the very first attempt, from before the pitch was known to
+//       be 32 bytes. Produced a solid black block with a couple of tiny
+//       colored specks. Kept only for reference.
+//   4 = AND/XOR 1bpp mask planes, 64 wide x 64 tall, 16-byte pitch - the
+//       second attempt, also from before the pitch was known. Kept only
+//       for reference.
 enum {
-	kCursorFormatGray8 = 0,
-	kCursorFormatBGR565 = 1,
-	kCursorFormatPacked2bpp = 2,
-	kCursorFormatAndXor = 3
+	kCursorFormat4bpp = 0,
+	kCursorFormatGray8 = 1,
+	kCursorFormatBGR565 = 2,
+	kCursorFormatPacked2bpp = 3,
+	kCursorFormatAndXor = 4
 };
 
 
@@ -90,20 +101,25 @@ static CursorGeometry
 cursor_geometry(uint32 format)
 {
 	CursorGeometry geo;
-	geo.height = 64;
 	switch (format) {
+		case kCursorFormatGray8:
+			// 32-byte pitch guess: 32 wide x 1 byte/px = 32 bytes/row.
+			geo.width = 32; geo.height = 32; geo.bytesPerPixel = 1;
+			break;
 		case kCursorFormatBGR565:
-			geo.width = 8; geo.bytesPerPixel = 2;
+			geo.width = 16; geo.height = 32; geo.bytesPerPixel = 2;
 			break;
 		case kCursorFormatPacked2bpp:
-			geo.width = 64; geo.bytesPerPixel = 0;
+			// Legacy 16-byte pitch guess, kept as-is for reference.
+			geo.width = 64; geo.height = 64; geo.bytesPerPixel = 0;
 			break;
 		case kCursorFormatAndXor:
-			geo.width = 64; geo.bytesPerPixel = 0;
+			// Legacy 16-byte pitch guess, kept as-is for reference.
+			geo.width = 64; geo.height = 64; geo.bytesPerPixel = 0;
 			break;
-		case kCursorFormatGray8:
+		case kCursorFormat4bpp:
 		default:
-			geo.width = 16; geo.bytesPerPixel = 1;
+			geo.width = 64; geo.height = 32; geo.bytesPerPixel = 0;
 			break;
 	}
 	return geo;
@@ -124,6 +140,9 @@ cursor_clear(uint8* dest, uint32 format, const CursorGeometry& geo)
 		// Index 0 is transparent in this scheme; an all-zero buffer is
 		// already fully transparent.
 		memset(dest, 0, geo.width / 4 * geo.height);
+	} else if (format == kCursorFormat4bpp) {
+		// Nibble value 0 is black; there's no transparency to default to.
+		memset(dest, 0, geo.width / 2 * geo.height);
 	} else
 		memset(dest, 0, geo.width * geo.height * geo.bytesPerPixel);
 }
@@ -159,6 +178,21 @@ cursor_set_pixel(uint8* dest, const CursorGeometry& geo, uint32 x, uint32 y,
 			break;
 		}
 	}
+}
+
+
+static void
+cursor_set_4bpp_pixel(uint8* dest, const CursorGeometry& geo, uint32 x,
+	uint32 y, uint8 red, uint8 green, uint8 blue, uint8 alpha)
+{
+	uint32 luma = (red * 30 + green * 59 + blue * 11) / 100;
+	uint8 nibble = alpha < 128 ? 0 : (uint8)(luma >> 4);
+
+	uint32 byteOffset = y * (geo.width / 2) + x / 2;
+	if ((x % 2) == 0)
+		dest[byteOffset] = (dest[byteOffset] & 0x0f) | (nibble << 4);
+	else
+		dest[byteOffset] = (dest[byteOffset] & 0xf0) | nibble;
 }
 
 
@@ -229,6 +263,58 @@ cursor_format(void)
 }
 
 
+// Same idea as cursor_format(): read directly from kyro.settings in user
+// space. When enabled, SetCursorBitmap ignores the real cursor bitmap and
+// draws a fixed L-shaped marker (top row + left column of the first 16x16
+// pixels, rest black) instead. The real hand-cursor glyph is hard to read
+// distortion from in a small, blurry photo - repeatedly showing up
+// "doubled" at different widths with different candidates. A single
+// unambiguous asymmetric shape makes it obvious whether what we're seeing
+// is a real duplicate, a mirrored copy, a transposed (row/column-swapped)
+// read, or something else - which decides what to try next far better
+// than another full guess at the cursor glyph does.
+static bool
+cursor_debug_marker(void)
+{
+	static int state = -1;
+	if (state < 0) {
+		state = 0;
+		void* handle = load_driver_settings("kyro.settings");
+		if (handle != NULL) {
+			state = get_driver_boolean_parameter(handle, "cursordebug",
+				false, false) ? 1 : 0;
+			unload_driver_settings(handle);
+		}
+	}
+	return state != 0;
+}
+
+
+// kCursorFormatGray8 produced the hand at the exact right size, but in a
+// pinkish/flesh color instead of black and white - consistent with the
+// hardware reading those bytes as an index into a color LUT we never
+// programmed, rather than as direct grayscale. DACLUTAddress/DACLUTData
+// exist in STG4000Reg.h but are never written anywhere in the reference
+// code we have access to, so the exact protocol here is also a guess:
+// write the index, then a packed 0x00RRGGBB value. Since every entry of a
+// grayscale ramp has R == G == B, this guess is safe even if the real
+// byte order/packing is different - a gray value looks the same regardless
+// of channel order.
+static void
+program_grayscale_lut(void)
+{
+	static bool done = false;
+	if (done)
+		return;
+	done = true;
+
+	for (uint32 i = 0; i < 256; i++) {
+		write32(kDACLUTAddress, i);
+		write32(kDACLUTData, (i << 16) | (i << 8) | i);
+	}
+}
+
+
 static void
 program_cursor_address(void)
 {
@@ -260,6 +346,8 @@ SetCursorShape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 		return B_NO_INIT;
 
 	uint32 format = cursor_format();
+	if (format == kCursorFormatGray8)
+		program_grayscale_lut();
 	CursorGeometry geo = cursor_geometry(format);
 	cursor_clear(dest, format, geo);
 
@@ -294,7 +382,10 @@ SetCursorShape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 				red = green = blue = 255;
 			else if (andBit && xorBit)
 				red = green = blue = 128;
-			cursor_set_pixel(dest, geo, x, y, red, green, blue, alpha);
+			if (format == kCursorFormat4bpp)
+				cursor_set_4bpp_pixel(dest, geo, x, y, red, green, blue, alpha);
+			else
+				cursor_set_pixel(dest, geo, x, y, red, green, blue, alpha);
 		}
 	}
 
@@ -320,19 +411,32 @@ SetCursorBitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 		return B_NO_INIT;
 
 	uint32 format = cursor_format();
+	if (format == kCursorFormatGray8)
+		program_grayscale_lut();
 	CursorGeometry geo = cursor_geometry(format);
 	cursor_clear(dest, format, geo);
 
-	const uint32 clipWidth = min_c(width, geo.width);
-	const uint32 clipHeight = min_c(height, geo.height);
+	bool debugMarker = cursor_debug_marker();
+	const uint32 markerSize = 16;
+	const uint32 clipWidth
+		= min_c(debugMarker ? markerSize : width, geo.width);
+	const uint32 clipHeight
+		= min_c(debugMarker ? markerSize : height, geo.height);
 
 	for (uint32 y = 0; y < clipHeight; y++) {
 		for (uint32 x = 0; x < clipWidth; x++) {
-			const uint8* pixel = bitmapData + y * bytesPerRow + x * 4;
-			uint8 blue = pixel[0];
-			uint8 green = pixel[1];
-			uint8 red = pixel[2];
-			uint8 alpha = colorSpace == B_RGBA32 ? pixel[3] : 255;
+			uint8 blue, green, red, alpha;
+			if (debugMarker) {
+				bool on = x == 0 || y == 0;
+				blue = green = red = on ? 255 : 0;
+				alpha = 255;
+			} else {
+				const uint8* pixel = bitmapData + y * bytesPerRow + x * 4;
+				blue = pixel[0];
+				green = pixel[1];
+				red = pixel[2];
+				alpha = colorSpace == B_RGBA32 ? pixel[3] : 255;
+			}
 
 			if (format == kCursorFormatAndXor || format == kCursorFormatPacked2bpp) {
 				bool andBit = true;
@@ -352,7 +456,10 @@ SetCursorBitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 				continue;
 			}
 
-			cursor_set_pixel(dest, geo, x, y, red, green, blue, alpha);
+			if (format == kCursorFormat4bpp)
+				cursor_set_4bpp_pixel(dest, geo, x, y, red, green, blue, alpha);
+			else
+				cursor_set_pixel(dest, geo, x, y, red, green, blue, alpha);
 		}
 	}
 

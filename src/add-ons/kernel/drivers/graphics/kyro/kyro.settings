@@ -8,12 +8,35 @@ cursorbits 2
 # the kernel driver), so changing it and restarting app_server is enough -
 # no reboot needed. This file must be copied to
 # /boot/home/config/settings/kernel/drivers/kyro.settings to actually be
-# picked up. See the comment above kCursorFormatGray8 in
+# picked up. See the comment above kCursorFormat4bpp in
 # accelerants/kyro/cursor.cpp for what each number means.
-# 0 = raw 8bpp grayscale pixels, 16 wide x 64 tall (current best guess)
-# 1 = raw BGR565 pixels, 8 wide x 64 tall
-# 2 = 2bpp packed color index, 64 wide x 64 tall (first attempt, known not
-#     to work)
-# 3 = AND/XOR 1bpp mask planes, 64 wide x 64 tall (second attempt, known
-#     not to work)
-cursorformat 0
+# (Earlier notes here were based on tests run before this file was actually
+# being picked up - see the git log/conversation history if curious. The
+# notes below are from the first test that genuinely used this file.)
+#
+# 0 = raw 4bpp grayscale pixels, 64 wide x 32 tall (32-byte pitch, untested)
+# 1 = raw 8bpp grayscale pixels, 32 wide x 32 tall (current best guess).
+#     Produced the hand at exactly the right size - confirming the 32-byte
+#     pitch - but pink/flesh colored instead of black and white, which
+#     looks like these bytes are read as a color LUT index rather than
+#     direct grayscale. cursor.cpp now programs DACLUTAddress/DACLUTData
+#     with a grayscale ramp before using this format; try this first.
+# 2 = raw BGR565 pixels, 16 wide x 32 tall. Right colors (truecolor needs
+#     no LUT), but twice as wide as it should be - consistent with the
+#     hardware actually reading 1 byte per pixel (matching format 1 above),
+#     so our 2-bytes-per-pixel data gets read as twice as many pixels.
+# 3 = 2bpp packed color index, 64 wide x 64 tall, 16-byte pitch (first
+#     attempt, known not to work)
+# 4 = AND/XOR 1bpp mask planes, 64 wide x 64 tall, 16-byte pitch (second
+#     attempt, known not to work)
+cursorformat 1
+
+# When true, SetCursorBitmap ignores the real cursor glyph and draws a
+# fixed, unambiguous L-shaped marker instead (top row + left column of a
+# 16x16 square, rest black). The hand-cursor glyph keeps showing up
+# "doubled" in slightly different ways across formats, which is hard to
+# read precisely from a phone photo; this marker makes it obvious whether
+# what's doubling is a plain repeat, a mirror, a transposed (row/column
+# swapped) read, or something else - set this, restart app_server, and
+# describe/photograph what the marker looks like.
+cursordebug false
