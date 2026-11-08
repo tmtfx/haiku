@@ -1,3 +1,47 @@
+/*
+ * Bt848/878 register map, chip reset/attach sequence, PLL programming,
+ * video-standard geometry tables, and the RISC capture-program layout
+ * (instruction opcodes and the per-line WRITE size limit) in this file are
+ * ported from the FreeBSD "bktr" driver, sys/dev/bktr/{bktr_reg.h,
+ * bktr_core.c}:
+ *
+ *   Copyright (c) 1999 Roger Hardiman
+ *   Copyright (c) 1998 Amancio Hasty
+ *   Copyright (c) 1995 Mark Tinguely and Jim Lowe
+ *   All rights reserved.
+ *
+ *   Redistribution and use in source and binary forms, with or without
+ *   modification, are permitted provided that the following conditions
+ *   are met:
+ *   1. Redistributions of source code must retain the above copyright
+ *      notice, this list of conditions and the following disclaimer.
+ *   2. Redistributions in binary form must reproduce the above copyright
+ *      notice, this list of conditions and the following disclaimer in the
+ *      documentation and/or other materials provided with the distribution.
+ *   3. All advertising materials mentioning features or use of this software
+ *      must display the following acknowledgement:
+ *        This product includes software developed by Mark Tinguely and Jim Lowe
+ *   4. The name of the author may not be used to endorse or promote products
+ *      derived from this software without specific prior written permission.
+ *
+ *   THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ *   IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ *   WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ *   DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT,
+ *   INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ *   (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ *   SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ *   HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
+ *   STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ *   ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ *   POSSIBILITY OF SUCH DAMAGE.
+ *
+ * The GPIO input-mux wiring for the ATI TV Wonder / TV Wonder VE card
+ * profiles below has no FreeBSD bktr equivalent (that card is not in its
+ * database) and is best-effort, unverified against a reference
+ * implementation.
+ */
+
 #include <ByteOrder.h>
 #include <Drivers.h>
 #include <Errors.h>
@@ -94,31 +138,46 @@ bttv_klog(const char* fmt, ...)
 #define BT848_COLOR_FMT			0x0d4
 #define BT848_COLOR_CTL			0x0d8
 #define BT848_CAP_CTL			0x0dc
-#define BT848_VTOTAL_LO			0x0b0
-#define BT848_VTOTAL_HI			0x0b4
 #define BT848_INT_STAT			0x100
 #define BT848_INT_MASK			0x104
 #define BT848_GPIO_DMA_CTL		0x10c
-#define BT848_PLL_F_LO			0x110
-#define BT848_PLL_F_HI			0x111
-#define BT848_PLL_XCI			0x112
+#define BT848_I2C_DATA_CTL		0x110
 #define BT848_RISC_STRT_ADD		0x114
 #define BT848_GPIO_OUT_EN		0x118
+#define BT848_GPIO_REG_INP		0x11c
+// PLL registers are at 0xf0/0xf4/0xf8, NOT 0x110+ (that range is
+// BT848_I2C_DATA_CTL, the I2C bus master control register). Writing PLL
+// coefficients to 0x110 as a previous version of this driver did corrupts
+// the I2C clock/data lines shared with the tuner/audio chip on the card.
+#define BT848_PLL_F_LO			0x0f0
+#define BT848_PLL_F_HI			0x0f4
+#define BT848_PLL_XCI			0x0f8
 #define BT848_GPIO_DATA			0x200
 
-#define BT848_DSTATUS_PRES		(1 << 6)
-#define BT848_DSTATUS_HLOC		(1 << 5)
+// Bit positions verified against FreeBSD bktr_reg.h's struct bt848_registers
+// dstatus field. Our previous values (PRES/HLOC off by one bit, PLOCK on
+// bit 0 instead of bit 2 -- bit 0 is actually COF) meant the PLL-lock poll
+// in bt878_set_pll() was reading the wrong bit entirely and would report
+// "timed out" regardless of whether the PLL had actually locked, silently
+// falling back to the wrong (crystal) pixel clock for PAL capture.
+#define BT848_DSTATUS_PRES		(1 << 7)
+#define BT848_DSTATUS_HLOC		(1 << 6)
 #define BT848_DSTATUS_NUML		(1 << 4)
-#define BT848_DSTATUS_PLOCK		(1 << 0)
+#define BT848_DSTATUS_PLOCK		(1 << 2)
 
 #define BT848_PLL_X				(1 << 4)
 
 #define BT848_IFORM_HACTIVE		(1 << 7)
 #define BT848_IFORM_MUXSEL		(3 << 5)
-#define BT848_IFORM_MUX0		(0 << 5)
-#define BT848_IFORM_MUX1		(1 << 5)
-#define BT848_IFORM_MUX2		(2 << 5)
-#define BT848_IFORM_MUX3		(3 << 5)
+// The Bt848 MUXSEL bit pattern for a given input is NOT the input number:
+// input 0 -> pattern 2, input 1 -> pattern 3, input 2 -> pattern 1,
+// input 3 -> pattern 0 (verified against FreeBSD bktr's
+// BT848_IFORM_M_MUX0..3 in bktr_reg.h). A naive 0,1,2,3 mapping selects the
+// wrong physical input.
+#define BT848_IFORM_MUX0		(2 << 5)
+#define BT848_IFORM_MUX1		(3 << 5)
+#define BT848_IFORM_MUX2		(1 << 5)
+#define BT848_IFORM_MUX3		(0 << 5)
 #define BT848_IFORM_XT0			(1 << 3)
 #define BT848_IFORM_XT1			(2 << 3)
 #define BT848_IFORM_PAL_BDGHI	3
@@ -169,6 +228,12 @@ bttv_klog(const char* fmt, ...)
 #define BT848_FIFO_STATUS_FM1	0x06
 #define NUM_FRAME_BUFFERS		2
 
+// Hard Bt848/878 FIFO & timing limit on a single RISC WRITE instruction's
+// byte count. Exceeding it desynchronizes the RISC program fetch, which can
+// make the chip's bus-mastering DMA engine write to arbitrary physical
+// memory. FreeBSD's bktr driver enforces the same limit as DMA_BT848_SPLIT.
+#define BT848_RISC_MAX_WRITE_BYTES	(319 * 2)
+
 #define BT848_VSCALE_INT		(1 << 5)
 
 #define FRAME_TIMEOUT			1000000
@@ -204,7 +269,6 @@ typedef struct {
 	uint16	height;
 	uint16	hdelay;
 	uint16	vdelay;
-	uint16	vtotal;
 	uint16	hscale;
 	uint16	vscale;
 	uint8	crop;
@@ -236,6 +300,13 @@ typedef struct {
 	bool		capturing;
 	bool		frame_ready;
 	bool		non_blocking;
+	// FIFO/RISC/sync error or unexpected RISC-stop count, incremented only
+	// from the interrupt handler. Most commonly driven by a missing/
+	// unstable input signal; see bt878_interrupt().
+	uint32		error_count;
+	// Frames whose RISC program completed (BT848_INT_RISCI), incremented
+	// only from the interrupt handler.
+	uint32		frame_count;
 } bt878_device;
 
 
@@ -315,7 +386,7 @@ static inline uint8
 bt878_read8(const bt878_device* device, uint32 offset)
 {
 	volatile uint8 value = *((volatile uint8*)(device->regs + offset));
-	read_mem_barrier();
+	memory_read_barrier();
 	return value;
 }
 
@@ -324,7 +395,7 @@ static inline uint32
 bt878_read32(const bt878_device* device, uint32 offset)
 {
 	volatile uint32 value = *((volatile uint32*)(device->regs + offset));
-	read_mem_barrier();
+	memory_read_barrier();
 	return value;
 }
 
@@ -332,7 +403,7 @@ bt878_read32(const bt878_device* device, uint32 offset)
 static inline void
 bt878_write8(const bt878_device* device, uint32 offset, uint8 value)
 {
-	write_mem_barrier();
+	memory_write_barrier();
 	*((volatile uint8*)(device->regs + offset)) = value;
 }
 
@@ -340,7 +411,7 @@ bt878_write8(const bt878_device* device, uint32 offset, uint8 value)
 static inline void
 bt878_write32(const bt878_device* device, uint32 offset, uint32 value)
 {
-	write_mem_barrier();
+	memory_write_barrier();
 	*((volatile uint32*)(device->regs + offset)) = value;
 }
 
@@ -539,16 +610,14 @@ bt878_compute_geometry(const bt878_device* device, bt878_geometry* geometry)
 		geometry->bdelay = 0x72;
 		geometry->hdelay = 186;
 		geometry->vdelay = 0x20;
-		geometry->vtotal = 624;
 	} else {
-		sourceWidth = 768;
+		sourceWidth = 754;
 		sourceHeight = 480;
 		geometry->iform = BT848_IFORM_NTSC | BT848_IFORM_XT0;
 		geometry->adelay = 0x68;
 		geometry->bdelay = 0x5d;
-		geometry->hdelay = 128;
+		geometry->hdelay = 135;
 		geometry->vdelay = 0x1a;
-		geometry->vtotal = 524;
 	}
 
 	geometry->width = device->width;
@@ -594,6 +663,36 @@ bt878_apply_geometry(bt878_device* device, const bt878_geometry& geometry, bool 
 }
 
 
+// Emits one or more RISC WRITE instructions for a single scanline, never
+// exceeding BT848_RISC_MAX_WRITE_BYTES per instruction (see comment at its
+// definition). SOL is set on the first chunk, EOL on the last chunk, and
+// the IRQ bit is set on the last chunk only if generateIrq is true.
+static uint32*
+bt878_emit_line_writes(uint32* program, phys_addr_t lineAddress, uint32 lineBytes,
+	bool generateIrq)
+{
+	uint32 offset = 0;
+	while (offset < lineBytes) {
+		uint32 chunk = min_c(lineBytes - offset, (uint32)BT848_RISC_MAX_WRITE_BYTES);
+		uint32 command = BT848_RISC_WRITE | BT848_RISC_BYTE_ALL | chunk;
+		if (offset == 0)
+			command |= BT848_RISC_SOL;
+
+		offset += chunk;
+		bool lastChunk = offset >= lineBytes;
+		if (lastChunk) {
+			command |= BT848_RISC_EOL;
+			if (generateIrq)
+				command |= BT848_RISC_IRQ;
+		}
+
+		*program++ = B_HOST_TO_LENDIAN_INT32(command);
+		*program++ = B_HOST_TO_LENDIAN_INT32((uint32)(lineAddress + offset - chunk));
+	}
+	return program;
+}
+
+
 static status_t
 bt878_build_risc_program(bt878_device* device)
 {
@@ -603,11 +702,15 @@ bt878_build_risc_program(bt878_device* device)
 	bool interlaced = (format.height > 288);
 	uint32 linesPerField = interlaced ? (format.height / 2) : format.height;
 
+	uint32 chunksPerLine = (format.bytes_per_line + BT848_RISC_MAX_WRITE_BYTES - 1)
+		/ BT848_RISC_MAX_WRITE_BYTES;
+	uint32 wordsPerLine = chunksPerLine * 2;
+
 	uint32 wordsPerBuffer;
 	if (interlaced)
-		wordsPerBuffer = 2 + linesPerField * 2 + 2 + linesPerField * 2;
+		wordsPerBuffer = 2 + linesPerField * wordsPerLine + 2 + linesPerField * wordsPerLine;
 	else
-		wordsPerBuffer = 2 + format.height * 2;
+		wordsPerBuffer = 2 + format.height * wordsPerLine;
 
 	uint32 totalWords = wordsPerBuffer * NUM_FRAME_BUFFERS + 2;
 	size_t requiredSize = totalWords * sizeof(uint32);
@@ -627,11 +730,9 @@ bt878_build_risc_program(bt878_device* device)
 
 			for (uint32 line = 0; line < linesPerField; line++) {
 				uint32 lineIdx = line * 2;
-				uint32 command = BT848_RISC_WRITE | BT848_RISC_SOL | BT848_RISC_EOL
-					| BT848_RISC_BYTE_ALL | format.bytes_per_line;
-				*program++ = B_HOST_TO_LENDIAN_INT32(command);
-				*program++ = B_HOST_TO_LENDIAN_INT32(
-					(uint32)(phys + lineIdx * format.bytes_per_line));
+				program = bt878_emit_line_writes(program,
+					phys + lineIdx * format.bytes_per_line, format.bytes_per_line,
+					false);
 			}
 
 			// Field 2 (Odd field): wait for VRO, write lines 1, 3, 5, ...
@@ -641,14 +742,9 @@ bt878_build_risc_program(bt878_device* device)
 
 			for (uint32 line = 0; line < linesPerField; line++) {
 				uint32 lineIdx = line * 2 + 1;
-				uint32 command = BT848_RISC_WRITE | BT848_RISC_SOL | BT848_RISC_EOL
-					| BT848_RISC_BYTE_ALL | format.bytes_per_line;
-				if (line + 1 == linesPerField)
-					command |= BT848_RISC_IRQ;
-
-				*program++ = B_HOST_TO_LENDIAN_INT32(command);
-				*program++ = B_HOST_TO_LENDIAN_INT32(
-					(uint32)(phys + lineIdx * format.bytes_per_line));
+				program = bt878_emit_line_writes(program,
+					phys + lineIdx * format.bytes_per_line, format.bytes_per_line,
+					line + 1 == linesPerField);
 			}
 		} else {
 			// Progressive (half vertical resolution): wait for VRE, write single field
@@ -657,14 +753,9 @@ bt878_build_risc_program(bt878_device* device)
 			*program++ = 0;
 
 			for (uint32 line = 0; line < format.height; line++) {
-				uint32 command = BT848_RISC_WRITE | BT848_RISC_SOL | BT848_RISC_EOL
-					| BT848_RISC_BYTE_ALL | format.bytes_per_line;
-				if (line + 1 == format.height)
-					command |= BT848_RISC_IRQ;
-
-				*program++ = B_HOST_TO_LENDIAN_INT32(command);
-				*program++ = B_HOST_TO_LENDIAN_INT32(
-					(uint32)(phys + line * format.bytes_per_line));
+				program = bt878_emit_line_writes(program,
+					phys + line * format.bytes_per_line, format.bytes_per_line,
+					line + 1 == format.height);
 			}
 		}
 	}
@@ -765,8 +856,6 @@ bt878_program_capture(bt878_device* device)
 	bt878_write8(device, BT848_TEST, 0);
 	bt878_write8(device, BT848_COLOR_FMT, BT848_COLOR_FMT_YUY2);
 	bt878_write8(device, BT848_COLOR_CTL, 0);
-	bt878_write8(device, BT848_VTOTAL_LO, geometry.vtotal & 0xff);
-	bt878_write8(device, BT848_VTOTAL_HI, geometry.vtotal >> 8);
 
 	bt878_apply_geometry(device, geometry, false);
 	bt878_apply_geometry(device, geometry, true);
@@ -847,9 +936,18 @@ bt878_start_capture_locked(bt878_device* device)
 	bt878_program_capture(device);
 	bttv_klog("[KERNEL] bt878_start_capture_locked: bt878_program_capture done\n");
 
-	bttv_klog("[KERNEL] bt878_start_capture_locked: clearing INT_STAT...\n");
-	bt878_write32(device, BT848_INT_STAT, 0xffffffff);
-
+	// Install the handler and arm the RISC/FIFO/capture pipeline BEFORE
+	// unmasking interrupts (INT_MASK). While INT_MASK is 0 the chip cannot
+	// assert its PCI interrupt line no matter what else is being
+	// programmed, so this ordering guarantees that the first interrupt
+	// Haiku ever delivers for this device happens only once the pipeline
+	// is fully valid. Unmasking first (as a previous version of this
+	// driver did) opens a window where a spurious or shared-IRQ interrupt
+	// can hit a handler that has nothing valid to report yet; on this
+	// card the Bt878's second PCI function ("Bt878 Audio Capture") shares
+	// the same physical IRQ and has no Haiku driver to acknowledge it, so
+	// an unhandled-interrupt storm on that shared line is enough to make
+	// the kernel deliberately panic (matches the KDL seen in testing).
 	bttv_klog("[KERNEL] bt878_start_capture_locked: installing interrupt handler on irq %d...\n",
 		device->pci.u.h0.interrupt_line);
 	status = install_io_interrupt_handler(device->pci.u.h0.interrupt_line,
@@ -859,11 +957,6 @@ bt878_start_capture_locked(bt878_device* device)
 		return status;
 	}
 	bttv_klog("[KERNEL] bt878_start_capture_locked: interrupt handler installed\n");
-
-	// Enable RISC, sync errors, overflow errors, and frame completion interrupt
-	bttv_klog("[KERNEL] bt878_start_capture_locked: setting INT_MASK...\n");
-	bt878_write32(device, BT848_INT_MASK,
-		BT848_INT_RISCI | BT848_INT_SCERR | BT848_INT_OCERR | BT848_INT_OFLOW | BT848_INT_ETBF);
 
 	bttv_klog("[KERNEL] bt878_start_capture_locked: writing RISC_STRT_ADD (0x%" B_PRIx32 ")...\n",
 		(uint32)device->risc_buffer.phys);
@@ -878,6 +971,15 @@ bt878_start_capture_locked(bt878_device* device)
 	bttv_klog("[KERNEL] bt878_start_capture_locked: writing CAP_CTL (EVEN+ODD enable)...\n");
 	bt878_write8(device, BT848_CAP_CTL,
 		BT848_CAP_CTL_CAPTURE_EVEN | BT848_CAP_CTL_CAPTURE_ODD);
+
+	bttv_klog("[KERNEL] bt878_start_capture_locked: clearing INT_STAT...\n");
+	bt878_write32(device, BT848_INT_STAT, 0xffffffff);
+
+	// Enable RISC, sync errors, overflow errors, and frame completion
+	// interrupt. This must be the LAST register write in this function.
+	bttv_klog("[KERNEL] bt878_start_capture_locked: setting INT_MASK...\n");
+	bt878_write32(device, BT848_INT_MASK,
+		BT848_INT_RISCI | BT848_INT_SCERR | BT848_INT_OCERR | BT848_INT_OFLOW | BT848_INT_ETBF);
 
 	device->capturing = true;
 	device->frame_ready = false;
@@ -922,30 +1024,15 @@ bt878_stop_capture_locked(bt878_device* device)
 static status_t
 bt878_initialize(bt878_device* device)
 {
-	if (device->regs_area >= B_OK)
-		return B_OK;
-
-	bt878_enable_pci(device);
-
-	status_t status = bt878_map_bar0(device);
-	if (status != B_OK)
-		return status;
-
-	for (int i = 0; i < NUM_FRAME_BUFFERS; i++) {
-		status = bt878_alloc_dma_buffer("bttv frame", &device->frame_buffers[i],
-			MAX_FRAME_WIDTH * MAX_FRAME_HEIGHT_PAL * BYTES_PER_PIXEL);
-		if (status != B_OK)
-			goto fail;
-	}
-
-	status = bt878_alloc_dma_buffer("bttv risc", &device->risc_buffer, 32768);
-	if (status != B_OK)
-		goto fail;
-
-	if (device->pci.u.h0.interrupt_line == 0 || device->pci.u.h0.interrupt_line == 0xff) {
-		status = B_BAD_VALUE;
-		goto fail;
-	}
+	// Register mapping and DMA buffers are allocated once in init_driver()
+	// and kept for the lifetime of the loaded kernel module. Allocating
+	// B_32_BIT_CONTIGUOUS memory on every open() and freeing it on every
+	// close() fragments Haiku's limited sub-4GB contiguous pool until
+	// allocation permanently fails with B_NO_MEMORY, even though plenty of
+	// RAM remains free (this is exactly why FreeBSD's bktr driver has a
+	// dedicated bktr_mem module to keep DMA memory across attach/detach).
+	if (device->pci.u.h0.interrupt_line == 0 || device->pci.u.h0.interrupt_line == 0xff)
+		return B_BAD_VALUE;
 
 	bt878_reset(device);
 
@@ -956,37 +1043,14 @@ bt878_initialize(bt878_device* device)
 	device->next_buffer = 0;
 	device->last_completed_buffer = 0;
 	return B_OK;
-
-fail:
-	bt878_free_dma_buffer(&device->risc_buffer);
-	for (int i = 0; i < NUM_FRAME_BUFFERS; i++)
-		bt878_free_dma_buffer(&device->frame_buffers[i]);
-	if (device->regs_area >= B_OK) {
-		delete_area(device->regs_area);
-		device->regs_area = -1;
-		device->regs = NULL;
-	}
-	return status;
 }
 
 
 static void
 bt878_shutdown(bt878_device* device)
 {
-	if (device->regs_area < B_OK)
-		return;
-
 	bt878_stop_capture_locked(device);
 	bt878_reset(device);
-
-	bt878_free_dma_buffer(&device->risc_buffer);
-	for (int i = 0; i < NUM_FRAME_BUFFERS; i++)
-		bt878_free_dma_buffer(&device->frame_buffers[i]);
-
-	delete_area(device->regs_area);
-	device->regs_area = -1;
-	device->regs = NULL;
-	device->regs_size = 0;
 	device->frame_ready = false;
 }
 
@@ -1015,45 +1079,63 @@ bt878_interrupt(void* data)
 		// Clear only the asserted interrupt status bits (Write 1 to clear)
 		bt878_write32(device, BT848_INT_STAT, astat);
 
+		// FIFO/RISC/sync errors, or the RISC engine unexpectedly stopping
+		// (RISC_EN status bit dropping out), mean the DMA pipeline has
+		// desynchronized. The single most common cause is simply no
+		// stable input signal being present (no antenna/cable connected,
+		// or the source is off) -- an expected, frequent steady state at
+		// typical field rates, not a rare fault. FreeBSD's bktr driver
+		// (common_bktr_intr in bktr_core.c) handles this identically:
+		// silently restart the RISC program from its start rather than
+		// logging. Logging per-occurrence here (even via the
+		// interrupt-safe dprintf()) would flood dprintf/syslog for as
+		// long as no signal is connected; only a running counter is kept.
+		bool riscStopped = (stat & BT848_INT_RISC_EN) == 0;
+		uint32 errorBits = astat & (BT848_INT_PPERR | BT848_INT_RIPERR
+			| BT848_INT_PABORT | BT848_INT_OCERR | BT848_INT_SCERR
+			| BT848_INT_OFLOW);
+		if (riscStopped || errorBits != 0) {
+			device->error_count++;
+
+			bt878_write8(device, BT848_CAP_CTL, 0);
+			bt878_write32(device, BT848_GPIO_DMA_CTL,
+				BT848_GPIO_DMA_CTL_PKTP_32 | BT848_GPIO_DMA_CTL_PLTP1_16
+				| BT848_GPIO_DMA_CTL_PLTP23_16);
+
+			bt878_write32(device, BT848_RISC_STRT_ADD,
+				(uint32)device->risc_buffer.phys);
+			bt878_write32(device, BT848_GPIO_DMA_CTL,
+				BT848_GPIO_DMA_CTL_PKTP_32 | BT848_GPIO_DMA_CTL_PLTP1_16
+				| BT848_GPIO_DMA_CTL_PLTP23_16
+				| BT848_GPIO_DMA_CTL_FIFO_ENABLE | BT848_GPIO_DMA_CTL_RISC_ENABLE);
+			bt878_write8(device, BT848_CAP_CTL,
+				BT848_CAP_CTL_CAPTURE_EVEN | BT848_CAP_CTL_CAPTURE_ODD);
+
+			device->next_buffer = 0;
+			device->last_completed_buffer = 0;
+			// Do at most one recovery attempt per interrupt dispatch
+			// instead of looping (`continue`) back to the top of this
+			// loop: with a weak/absent signal the chip can re-report the
+			// same error essentially immediately, and retrying in a
+			// tight unthrottled loop here was measured driving well
+			// over 200,000 recovery cycles/second -- hammering the chip
+			// continuously without ever letting a RISC pass actually
+			// complete, and burning CPU for no benefit. Breaking out
+			// lets the natural cadence of hardware interrupt delivery
+			// pace further attempts instead.
+			break;
+		}
+
 		// Handle frame completion (RISCI)
 		if ((astat & BT848_INT_RISCI) != 0) {
 			device->last_completed_buffer = device->next_buffer;
 			device->next_buffer = (device->next_buffer + 1) % NUM_FRAME_BUFFERS;
 			device->frame_ready = true;
+			device->frame_count++;
 
 			// Atomically release semaphore if count is negative (threads waiting)
 			release_sem_etc(device->frame_sem, 1, B_DO_NOT_RESCHEDULE);
 			handled = B_INVOKE_SCHEDULER;
-		}
-
-		// Handle synchronization errors (loss of sync)
-		if ((astat & BT848_INT_SCERR) != 0) {
-			bttv_klog("[KERNEL] bt878_interrupt: SCERR (synchronization error)\n");
-		}
-
-		// Handle overflow errors (buffer overflow)
-		if ((astat & BT848_INT_OCERR) != 0) {
-			bttv_klog("[KERNEL] bt878_interrupt: OCERR (overflow error)\n");
-		}
-
-		// Handle FIFO overflow
-		if ((astat & BT848_INT_OFLOW) != 0) {
-			bttv_klog("[KERNEL] bt878_interrupt: OFLOW (FIFO overflow)\n");
-		}
-
-		// Handle PCI errors
-		if ((astat & BT848_INT_PABORT) != 0) {
-			bttv_klog("[KERNEL] bt878_interrupt: PABORT (PCI bus abort)\n");
-		}
-
-		// Handle RISC errors
-		if ((astat & BT848_INT_RIPERR) != 0) {
-			bttv_klog("[KERNEL] bt878_interrupt: RIPERR (RISC parity error)\n");
-		}
-
-		// Handle parity errors
-		if ((astat & BT848_INT_PPERR) != 0) {
-			bttv_klog("[KERNEL] bt878_interrupt: PPERR (parity error)\n");
 		}
 	}
 
@@ -1304,6 +1386,15 @@ bt878_control(void* cookie, uint32 op, void* arg, size_t length)
 			bt878_stop_capture_locked(device);
 			return B_OK;
 
+		case BTV_GET_STATS:
+		{
+			bttv_capture_stats stats;
+			stats.frame_count = device->frame_count;
+			stats.error_count = device->error_count;
+			return user_memcpy(arg, &stats, sizeof(stats)) == B_OK
+				? B_OK : B_BAD_ADDRESS;
+		}
+
 		default:
 			return B_DEV_INVALID_IOCTL;
 	}
@@ -1373,6 +1464,32 @@ init_driver(void)
 		if (device.frame_sem < B_OK)
 			break;
 
+		bt878_enable_pci(&device);
+
+		status_t status = bt878_map_bar0(&device);
+		if (status != B_OK) {
+			delete_sem(device.frame_sem);
+			break;
+		}
+
+		for (int i = 0; i < NUM_FRAME_BUFFERS && status == B_OK; i++) {
+			status = bt878_alloc_dma_buffer("bttv frame", &device.frame_buffers[i],
+				MAX_FRAME_WIDTH * MAX_FRAME_HEIGHT_PAL * BYTES_PER_PIXEL);
+		}
+		if (status == B_OK)
+			status = bt878_alloc_dma_buffer("bttv risc", &device.risc_buffer, 32768);
+
+		if (status != B_OK) {
+			for (int i = 0; i < NUM_FRAME_BUFFERS; i++)
+				bt878_free_dma_buffer(&device.frame_buffers[i]);
+			bt878_free_dma_buffer(&device.risc_buffer);
+			delete_area(device.regs_area);
+			device.regs_area = -1;
+			device.regs = NULL;
+			delete_sem(device.frame_sem);
+			break;
+		}
+
 		bt878_default_format(&device);
 		device.frame_size = device.width * device.height * BYTES_PER_PIXEL;
 		snprintf(device.name, sizeof(device.name), DEVICE_NAME_FORMAT, sDeviceCount);
@@ -1399,7 +1516,18 @@ uninit_driver(void)
 {
 	for (int32 i = 0; i < sDeviceCount; i++) {
 		bt878_device& device = sDevices[i];
-		bt878_shutdown(&device);
+		bt878_stop_capture_locked(&device);
+
+		for (int j = 0; j < NUM_FRAME_BUFFERS; j++)
+			bt878_free_dma_buffer(&device.frame_buffers[j]);
+		bt878_free_dma_buffer(&device.risc_buffer);
+
+		if (device.regs_area >= B_OK) {
+			delete_area(device.regs_area);
+			device.regs_area = -1;
+			device.regs = NULL;
+		}
+
 		if (device.frame_sem >= B_OK)
 			delete_sem(device.frame_sem);
 	}

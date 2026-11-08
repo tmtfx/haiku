@@ -28,7 +28,8 @@ enum {
 	BTV_STOP_CAPTURE,
 	BTV_SET_INPUT,
 	BTV_GET_CONTROLS,
-	BTV_SET_CONTROLS
+	BTV_SET_CONTROLS,
+	BTV_GET_STATS
 };
 
 #define BTV_CAP_VIDEO_CAPTURE	0x00000001U
@@ -63,5 +64,17 @@ typedef struct bttv_video_controls {
 	int32	saturation;
 	int32	hue;
 } bttv_video_controls;
+
+// Diagnostic counters, updated only from the interrupt handler.
+// frame_count: number of frames whose RISC program completed (BT848_INT_RISCI).
+// error_count: number of FIFO/RISC/sync errors (or unexpected RISC stops)
+//   recovered from -- the single most common cause is no stable input signal.
+// Neither is reset by BTV_START_CAPTURE/BTV_STOP_CAPTURE; they accumulate for
+// the life of the open device, so sample both before and after a capture run
+// to see what happened during that run specifically.
+typedef struct bttv_capture_stats {
+	uint32	frame_count;
+	uint32	error_count;
+} bttv_capture_stats;
 
 #endif
