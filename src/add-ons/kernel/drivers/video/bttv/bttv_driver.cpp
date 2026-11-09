@@ -915,16 +915,23 @@ bt878_set_pll(bt878_device* device)
 // OFORM=RANGE, and only ever saw clean FIFO behavior when it happened to
 // not diverge from the post-reset default -- so here we simply never
 // touch it, matching Linux's actual behavior rather than guessing a
-// value. SCLOOP here is CAGC|CKILL rather than Linux's CAGC-only default
-// (color killer off): this driver has no user-facing color-killer
-// toggle, and CAGC|CKILL was measured to give clean, error-free capture
-// on real ATI TV Wonder VE hardware where CAGC-only did not.
+// value. SCLOOP is CAGC only (color killer off), matching Linux's real
+// default exactly (V4L2_CID_COLOR_KILLER's default is 0 -- see
+// bttv_ctrl_color_killer in bttv-driver.c). A previous version of this
+// driver forced CKILL on as well; that was an empirical choice made while
+// chasing a since-fixed RISC program sync bug (see commit history) and
+// not something Linux ever does by default -- with the real sync bug
+// fixed, forcing the color killer on was found to desaturate real
+// captures toward grayscale with chroma-subcarrier fringing at luminance
+// edges (the color killer doesn't cleanly gate chroma off, it mutes it
+// in a way that still leaves beat artifacts), confirmed on a real color
+// source where the expected content is unambiguously not grayscale.
 static void
 bt878_program_capture_format(bt878_device* device)
 {
 	bt878_write8(device, BT848_TDEC, 0);
-	bt878_write8(device, BT848_E_SCLOOP, BT848_SCLOOP_CAGC | BT848_SCLOOP_CKILL);
-	bt878_write8(device, BT848_O_SCLOOP, BT848_SCLOOP_CAGC | BT848_SCLOOP_CKILL);
+	bt878_write8(device, BT848_E_SCLOOP, BT848_SCLOOP_CAGC);
+	bt878_write8(device, BT848_O_SCLOOP, BT848_SCLOOP_CAGC);
 	bt878_write8(device, BT848_ADC, BT848_ADC_RESERVED | BT848_ADC_CRUSH);
 	bt878_write8(device, BT848_TEST, 0);
 	bt878_write8(device, BT848_COLOR_FMT, BT848_COLOR_FMT_YUY2);
