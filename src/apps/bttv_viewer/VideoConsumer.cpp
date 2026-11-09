@@ -93,7 +93,13 @@ VideoConsumer::HandleEvent(const media_timed_event* event, bigtime_t lateness,
 					fTargetView->SetFrameData((const uint8*)buffer->Data(),
 						fWidth, fHeight);
 				}
-				buffer->Recycle();
+				// Not buffer->Recycle() here -- the event was queued with
+				// B_RECYCLE_BUFFER cleanup, which recycles it once this
+				// event is removed from the queue (both on the normal
+				// path, right after this handler returns, and on the
+				// B_STOP flush path below). Recycling it explicitly here
+				// too double-recycled every buffer, corrupting the
+				// BBufferGroup until it eventually jammed.
 			}
 			break;
 		}
@@ -165,6 +171,13 @@ VideoConsumer::BufferReceived(BBuffer* buffer)
 		return;
 	}
 
+	// B_RECYCLE_BUFFER: the queue recycles this buffer once the event is
+	// removed, whether that's the normal path (right after HandleEvent's
+	// B_HANDLE_BUFFER case returns) or the B_STOP flush path below --
+	// one single place buffers get recycled, instead of also doing it
+	// explicitly in HandleEvent (which double-recycled every buffer,
+	// slowly corrupting the BBufferGroup until it jammed after roughly a
+	// hundred frames).
 	media_timed_event event(buffer->Header()->start_time,
 		BTimedEventQueue::B_HANDLE_BUFFER, buffer,
 		BTimedEventQueue::B_RECYCLE_BUFFER);

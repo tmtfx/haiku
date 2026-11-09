@@ -267,7 +267,14 @@ DirectCapture::_CaptureLoop()
 				fDriverFD, fFormat.frame_size);
 		}
 
-		ssize_t bytes = read(fDriverFD, buffer, fFormat.frame_size);
+		// pread(..., 0), not read(): the bttv driver's read hook treats
+		// any file position >= one frame's size as "past end of frame"
+		// (0 bytes, not an error), and plain read() advances the POSIX
+		// file position across calls on the same fd -- a loop calling
+		// read() here would get exactly one real frame and then 0 bytes
+		// forever. Same bug found and fixed in bttv_test_app and in the
+		// bttv media add-on's Producer.cpp.
+		ssize_t bytes = pread(fDriverFD, buffer, fFormat.frame_size, 0);
 
 		if (frameIndex < 5) {
 			viewer_log("[VIEWER] DirectCapture::_CaptureLoop: read returned %" B_PRIdSSIZE "\n", bytes);

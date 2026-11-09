@@ -1109,8 +1109,28 @@ bt878_start_capture_locked(bt878_device* device)
 	status = install_io_interrupt_handler(device->pci.u.h0.interrupt_line,
 		&bt878_interrupt, device, 0);
 	if (status != B_OK) {
-		bttv_klog("[KERNEL] bt878_start_capture_locked: install_io_interrupt_handler FAILED (%s)\n", strerror(status));
-		return status;
+		// install_io_interrupt_handler() fails like this if the exact
+		// same (irq, handler, cookie) triple is already registered --
+		// which can only mean a *previous* capture session's
+		// bt878_stop_capture_locked() never ran to remove it (e.g. the
+		// process that started that capture hung or was killed before
+		// cleanly stopping). device/bt878_interrupt are fixed for this
+		// card's whole module lifetime, so a stale leftover registration
+		// is always safe to remove and redo: retry once after an
+		// explicit remove.
+		bttv_klog("[KERNEL] bt878_start_capture_locked: install_io_interrupt_handler "
+			"FAILED (%s), removing a possible stale handler and retrying once...\n",
+			strerror(status));
+		remove_io_interrupt_handler(device->pci.u.h0.interrupt_line,
+			&bt878_interrupt, device);
+		status = install_io_interrupt_handler(device->pci.u.h0.interrupt_line,
+			&bt878_interrupt, device, 0);
+		if (status != B_OK) {
+			bttv_klog("[KERNEL] bt878_start_capture_locked: retry also FAILED (%s)\n",
+				strerror(status));
+			return status;
+		}
+		bttv_klog("[KERNEL] bt878_start_capture_locked: retry succeeded\n");
 	}
 	bttv_klog("[KERNEL] bt878_start_capture_locked: interrupt handler installed\n");
 

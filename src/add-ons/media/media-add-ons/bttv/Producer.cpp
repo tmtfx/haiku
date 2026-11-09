@@ -1197,7 +1197,16 @@ BttvProducer::_CaptureThread()
 				captureFormat.frame_size);
 		}
 
-		ssize_t bytesRead = read(fDriverFD, buffer->Data(), captureFormat.frame_size);
+		// pread(..., 0), not read(): the bttv driver's read hook treats
+		// any file position >= one frame's size as "past end of frame"
+		// (0 bytes, not an error), and plain read() advances the POSIX
+		// file position across calls on the same fd. A loop calling
+		// read() here would get exactly one real frame and then 0 bytes
+		// forever, since the position never comes back to 0. pread()
+		// reads from the given offset without touching or depending on
+		// the shared file position -- confirmed against the same bug
+		// found and fixed in /boot/home/Apps/bttv_test_app.
+		ssize_t bytesRead = pread(fDriverFD, buffer->Data(), captureFormat.frame_size, 0);
 
 		if (frameIndex < 5) {
 			producer_log("[PRODUCER] BttvProducer::_CaptureThread: read returned %" B_PRIdSSIZE "\n",
