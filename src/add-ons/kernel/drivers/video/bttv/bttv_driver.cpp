@@ -1,45 +1,27 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * Bt848/878 register map, chip reset/attach sequence, PLL programming,
- * video-standard geometry tables, and the RISC capture-program layout
- * (instruction opcodes and the per-line WRITE size limit) in this file are
- * ported from the FreeBSD "bktr" driver, sys/dev/bktr/{bktr_reg.h,
- * bktr_core.c}:
+ * Bt848/878 register map, the two-phase register programming model
+ * (one-time hardware init + per-standard/per-input updates), PLL
+ * programming, video-standard geometry tables, the packed-YUV RISC
+ * capture-program layout, and the ATI TV Wonder (VE) card profile in this
+ * file are ported from Linux's "bttv" driver,
+ * drivers/media/pci/bt8xx/{bttv-driver.c,bttv-cards.c,bt848.h}:
  *
- *   Copyright (c) 1999 Roger Hardiman
- *   Copyright (c) 1998 Amancio Hasty
- *   Copyright (c) 1995 Mark Tinguely and Jim Lowe
- *   All rights reserved.
+ *   Copyright (C) 1996,97,98 Ralph Metzler, Marcus Metzler
+ *   (c) 1999-2002 Gerd Knorr
+ *   and contributors (see the Linux kernel source for the full list).
  *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *   1. Redistributions of source code must retain the above copyright
- *      notice, this list of conditions and the following disclaimer.
- *   2. Redistributions in binary form must reproduce the above copyright
- *      notice, this list of conditions and the following disclaimer in the
- *      documentation and/or other materials provided with the distribution.
- *   3. All advertising materials mentioning features or use of this software
- *      must display the following acknowledgement:
- *        This product includes software developed by Mark Tinguely and Jim Lowe
- *   4. The name of the author may not be used to endorse or promote products
- *      derived from this software without specific prior written permission.
+ * This file is distributed under the terms of the GNU General Public
+ * License version 2, or (at your option) any later version, separately
+ * from the rest of this Haiku source tree (which remains MIT-licensed) --
+ * a standalone loadable kernel driver module, not linked into the OS core.
  *
- *   THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
- *   IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- *   WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- *   DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT,
- *   INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- *   (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
- *   SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- *   HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
- *   STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- *   ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- *   POSSIBILITY OF SUCH DAMAGE.
- *
- * The GPIO input-mux wiring for the ATI TV Wonder / TV Wonder VE card
- * profiles below has no FreeBSD bktr equivalent (that card is not in its
- * database) and is best-effort, unverified against a reference
- * implementation.
+ * The ATI TV Wonder VE's input-mux/GPIO wiring (BTTV_BOARD_ATI_TVWONDERVE
+ * in bttv-cards.c) is confirmed against real hardware: a GPIO/MUXSEL sweep
+ * found the composite source visible at the same raw MUXSEL pattern Linux
+ * uses for that input, with GPIO state making no observed difference. The
+ * plain ATI TV Wonder (non-VE) profile is taken from the same table but
+ * was not verified on real hardware (only the VE variant was available).
  */
 
 #include <ByteOrder.h>
@@ -167,19 +149,19 @@ bttv_klog(const char* fmt, ...)
 
 #define BT848_PLL_X				(1 << 4)
 
-#define BT848_IFORM_HACTIVE		(1 << 7)
+// input_mux[] in bt878_card_profile stores the raw 2-bit MUXSEL pattern
+// (0-3) per input directly, exactly as Linux's bttv-cards.c card tables
+// do -- video_mux() in bttv-driver.c writes "mux << 5" with no symbolic
+// translation. There is no "HACTIVE" bit written here either: it's
+// defined in Linux's bt848.h but never actually set anywhere in
+// bttv-driver.c.
 #define BT848_IFORM_MUXSEL		(3 << 5)
-// The Bt848 MUXSEL bit pattern for a given input is NOT the input number:
-// input 0 -> pattern 2, input 1 -> pattern 3, input 2 -> pattern 1,
-// input 3 -> pattern 0 (verified against FreeBSD bktr's
-// BT848_IFORM_M_MUX0..3 in bktr_reg.h). A naive 0,1,2,3 mapping selects the
-// wrong physical input.
-#define BT848_IFORM_MUX0		(2 << 5)
-#define BT848_IFORM_MUX1		(3 << 5)
-#define BT848_IFORM_MUX2		(1 << 5)
-#define BT848_IFORM_MUX3		(0 << 5)
+#define BT848_IFORM_XTSEL		(3 << 3)
 #define BT848_IFORM_XT0			(1 << 3)
 #define BT848_IFORM_XT1			(2 << 3)
+#define BT848_IFORM_XTAUTO		(3 << 3)
+#define BT848_IFORM_NORM		7
+#define BT848_IFORM_AUTO		0
 #define BT848_IFORM_PAL_BDGHI	3
 #define BT848_IFORM_NTSC		1
 
@@ -188,7 +170,9 @@ bttv_klog(const char* fmt, ...)
 #define BT848_SCLOOP_CKILL		(1 << 5)
 #define BT848_OFORM_RANGE		(1 << 7)
 #define BT848_ADC_RESERVED		(2 << 6)
+#define BT848_ADC_SYNC_T		(1 << 5)
 #define BT848_ADC_AGC_EN		(1 << 4)
+#define BT848_COLOR_CTL_GAMMA	(1 << 4)
 
 #define BT848_COLOR_FMT_YUY2	0x44
 
@@ -209,9 +193,12 @@ bttv_klog(const char* fmt, ...)
 #define BT848_INT_OFLOW			(1 << 3)
 #define BT848_INT_FMTCHG		(1 << 0)
 
-#define BT848_GPIO_DMA_CTL_PKTP_32		(3 << 4)
-#define BT848_GPIO_DMA_CTL_PLTP1_16		(2 << 6)
-#define BT848_GPIO_DMA_CTL_PLTP23_16	(2 << 8)
+// Bit positions verified against Linux's bt848.h: PKTP at bits 2-3, PLTP1
+// at bits 4-5, PLTP23 at bits 6-7. Written once at attach (init_bt848()
+// equivalent), not re-written on every capture start.
+#define BT848_GPIO_DMA_CTL_PKTP_32		(3 << 2)
+#define BT848_GPIO_DMA_CTL_PLTP1_16		(2 << 4)
+#define BT848_GPIO_DMA_CTL_PLTP23_16	(2 << 6)
 #define BT848_GPIO_DMA_CTL_RISC_ENABLE	(1 << 1)
 #define BT848_GPIO_DMA_CTL_FIFO_ENABLE	(1 << 0)
 
@@ -219,7 +206,6 @@ bttv_klog(const char* fmt, ...)
 #define BT848_RISC_EOL			(1U << 26)
 #define BT848_RISC_SOL			(1U << 27)
 #define BT848_RISC_RESYNC		(1U << 15)
-#define BT848_RISC_BYTE_ALL		(0x0fU << 12)
 #define BT848_RISC_WRITE		(0x01U << 28)
 #define BT848_RISC_JUMP			(0x07U << 28)
 #define BT848_RISC_SYNC			(0x08U << 28)
@@ -227,12 +213,6 @@ bttv_klog(const char* fmt, ...)
 #define BT848_FIFO_STATUS_VRO	0x0c
 #define BT848_FIFO_STATUS_FM1	0x06
 #define NUM_FRAME_BUFFERS		2
-
-// Hard Bt848/878 FIFO & timing limit on a single RISC WRITE instruction's
-// byte count. Exceeding it desynchronizes the RISC program fetch, which can
-// make the chip's bus-mastering DMA engine write to arbitrary physical
-// memory. FreeBSD's bktr driver enforces the same limit as DMA_BT848_SPLIT.
-#define BT848_RISC_MAX_WRITE_BYTES	(319 * 2)
 
 #define BT848_VSCALE_INT		(1 << 5)
 
@@ -264,6 +244,9 @@ typedef struct {
 } bt878_dma_buffer;
 
 
+// Per-resolution geometry only; standard (ADELAY/BDELAY/IFORM norm bits)
+// and input (MUXSEL) are applied separately -- see bt878_set_tvnorm() and
+// bt878_video_mux() -- matching Linux's set_tvnorm()/video_mux() split.
 typedef struct {
 	uint16	width;
 	uint16	height;
@@ -272,9 +255,6 @@ typedef struct {
 	uint16	hscale;
 	uint16	vscale;
 	uint8	crop;
-	uint8	iform;
-	uint8	adelay;
-	uint8	bdelay;
 } bt878_geometry;
 
 
@@ -307,9 +287,15 @@ typedef struct {
 	// Frames whose RISC program completed (BT848_INT_RISCI), incremented
 	// only from the interrupt handler.
 	uint32		frame_count;
+	// Last BT848_DSTATUS value and INT_STAT error bits sampled on a
+	// recovery event; see bttv_capture_stats::last_dstatus/last_error_bits.
+	uint8		last_dstatus;
+	uint32		last_error_bits;
 } bt878_device;
 
 
+// From Linux's BTTV_BOARD_ATI_TVWONDERVE: MUXSEL(2, 3, 0, 1), gpiomask=1,
+// gpiomux={0,0,1,0}. Confirmed against real hardware (see file header).
 static const bt878_card_profile kWonderVE = {
 	ATI_VENDOR_ID,
 	ATI_TV_WONDER_VE_ID,
@@ -318,10 +304,13 @@ static const bt878_card_profile kWonderVE = {
 	BTV_INPUT_COMPOSITE,
 	BTV_CAP_VIDEO_CAPTURE | BTV_CAP_HAS_COMPOSITE,
 	0x1,
-	{ 0, 0, 0, 0 },
-	{ BT848_IFORM_MUX2, BT848_IFORM_MUX3, 0, 0 }
+	{ 0, 0, 1, 0 },
+	{ 2, 3, 0, 1 }
 };
 
+// From Linux's BTTV_BOARD_ATI_TVWONDER: MUXSEL(2, 3, 1, 0), gpiomask=0xf03f,
+// gpiomux={0xbffe, 0, 0xbfff, 0}. Not verified on real hardware (only the
+// VE variant was available to test).
 static const bt878_card_profile kWonder = {
 	ATI_VENDOR_ID,
 	ATI_TV_WONDER_ID,
@@ -329,9 +318,9 @@ static const bt878_card_profile kWonder = {
 	3,
 	BTV_INPUT_COMPOSITE,
 	BTV_CAP_VIDEO_CAPTURE | BTV_CAP_HAS_COMPOSITE | BTV_CAP_HAS_SVIDEO,
-	0x1,
-	{ 0, 0, 1, 0 },
-	{ BT848_IFORM_MUX2, BT848_IFORM_MUX3, BT848_IFORM_MUX1, 0 }
+	0xf03f,
+	{ 0xbffe, 0, 0xbfff, 0 },
+	{ 2, 3, 1, 0 }
 };
 
 static const bt878_card_profile kGenericBt878 = {
@@ -343,7 +332,7 @@ static const bt878_card_profile kGenericBt878 = {
 	BTV_CAP_VIDEO_CAPTURE | BTV_CAP_HAS_COMPOSITE,
 	0,
 	{ 0, 0, 0, 0 },
-	{ BT848_IFORM_MUX2, BT848_IFORM_MUX1, 0, 0 }
+	{ 2, 1, 0, 0 }
 };
 
 static const bt878_card_profile kGenericBt848 = {
@@ -355,7 +344,7 @@ static const bt878_card_profile kGenericBt848 = {
 	BTV_CAP_VIDEO_CAPTURE | BTV_CAP_HAS_COMPOSITE,
 	0,
 	{ 0, 0, 0, 0 },
-	{ BT848_IFORM_MUX2, BT848_IFORM_MUX1, 0, 0 }
+	{ 2, 1, 0, 0 }
 };
 
 
@@ -369,6 +358,7 @@ int32 api_version = B_CUR_DRIVER_API_VERSION;
 
 static int32 bt878_interrupt(void* data);
 static void bt878_apply_controls(bt878_device* device);
+static status_t bt878_set_pll(bt878_device* device);
 
 
 static inline int32
@@ -534,6 +524,21 @@ bt878_enable_pci(const bt878_device* device)
 	command &= ~PCI_command_io;
 	sPCI->write_pci_config(device->pci.bus, device->pci.device, device->pci.function,
 		PCI_command, 2, command);
+
+	// FreeBSD's bktr driver explicitly raises the PCI latency timer if the
+	// BIOS left it at 0 (bktr_os.c bktr_attach(), BROOKTREE_DEF_LATENCY_VALUE
+	// = 10): with too few PCI bus-master grant cycles per transaction, the
+	// card cannot drain its FIFO fast enough during real sustained capture
+	// traffic, which presents as the same persistent BT848_INT_OFLOW this
+	// driver has been chasing (bus-timing, not a Bt848 register value).
+	uint8 latency = sPCI->read_pci_config(device->pci.bus, device->pci.device,
+		device->pci.function, PCI_latency, 1);
+	bttv_klog("[KERNEL] bt878_enable_pci: PCI latency timer was %u\n", latency);
+	if (latency == 0) {
+		sPCI->write_pci_config(device->pci.bus, device->pci.device,
+			device->pci.function, PCI_latency, 1, 32);
+		bttv_klog("[KERNEL] bt878_enable_pci: PCI latency timer set to 32\n");
+	}
 }
 
 
@@ -605,17 +610,15 @@ bt878_compute_geometry(const bt878_device* device, bt878_geometry* geometry)
 	if (device->video_standard == BTV_STD_PAL) {
 		sourceWidth = 924;
 		sourceHeight = 576;
-		geometry->iform = BT848_IFORM_PAL_BDGHI | BT848_IFORM_XT1;
-		geometry->adelay = 0x7f;
-		geometry->bdelay = 0x72;
 		geometry->hdelay = 186;
 		geometry->vdelay = 0x20;
 	} else {
+		// hdelay=135 here (not Linux's bttv_tvnorms hdelayx1=128) because
+		// 135 is what was already confirmed to achieve real HLOC lock on
+		// this hardware; see bt878_set_tvnorm()'s ADELAY/BDELAY, which do
+		// match Linux exactly.
 		sourceWidth = 754;
 		sourceHeight = 480;
-		geometry->iform = BT848_IFORM_NTSC | BT848_IFORM_XT0;
-		geometry->adelay = 0x68;
-		geometry->bdelay = 0x5d;
 		geometry->hdelay = 135;
 		geometry->vdelay = 0x1a;
 	}
@@ -640,8 +643,59 @@ bt878_compute_geometry(const bt878_device* device, bt878_geometry* geometry)
 		| ((geometry->hdelay >> 6) & 0x0c)
 		| ((geometry->height >> 4) & 0x30)
 		| ((geometry->vdelay >> 2) & 0xc0));
-	geometry->iform = (uint8)((geometry->iform & ~BT848_IFORM_MUXSEL)
-		| device->profile->input_mux[device->input]);
+}
+
+
+// Equivalent to Linux's set_tvnorm(): per-standard register state. Called
+// whenever video_standard changes (and at least once before first
+// capture). Preserves MUXSEL (and any other IFORM bits) via a mask,
+// matching Linux's "btaor(tvnorm->iform, ~(NORM|XTBOTH), IFORM)" instead
+// of overwriting the whole register.
+static void
+bt878_set_tvnorm(bt878_device* device)
+{
+	uint8 adelay, bdelay, normBits;
+
+	if (device->video_standard == BTV_STD_PAL) {
+		adelay = 0x7f;
+		bdelay = 0x72;
+		normBits = BT848_IFORM_PAL_BDGHI | BT848_IFORM_XT1;
+	} else {
+		adelay = 0x68;
+		bdelay = 0x5d;
+		normBits = BT848_IFORM_NTSC | BT848_IFORM_XT0;
+	}
+
+	bt878_write8(device, BT848_ADELAY, adelay);
+	bt878_write8(device, BT848_BDELAY, bdelay);
+
+	uint8 iform = bt878_read8(device, BT848_IFORM);
+	iform = (iform & ~(BT848_IFORM_NORM | BT848_IFORM_XTSEL)) | normBits;
+	bt878_write8(device, BT848_IFORM, iform);
+
+	bt878_set_pll(device);
+}
+
+
+// Equivalent to Linux's video_mux(): input selection. Called whenever
+// input changes (and at least once before first capture).
+static void
+bt878_video_mux(bt878_device* device)
+{
+	uint8 control = (device->input == BTV_INPUT_SVIDEO) ? BT848_CONTROL_COMP : 0;
+	bt878_write8(device, BT848_E_CONTROL, control);
+	bt878_write8(device, BT848_O_CONTROL, control);
+
+	uint8 iform = bt878_read8(device, BT848_IFORM);
+	iform = (iform & ~BT848_IFORM_MUXSEL)
+		| (device->profile->input_mux[device->input] << 5);
+	bt878_write8(device, BT848_IFORM, iform);
+
+	if (device->profile->gpio_mask != 0) {
+		bt878_write32(device, BT848_GPIO_OUT_EN, device->profile->gpio_mask);
+		bt878_write32(device, BT848_GPIO_DATA,
+			device->profile->gpio_mux[device->input]);
+	}
 }
 
 
@@ -663,32 +717,29 @@ bt878_apply_geometry(bt878_device* device, const bt878_geometry& geometry, bool 
 }
 
 
-// Emits one or more RISC WRITE instructions for a single scanline, never
-// exceeding BT848_RISC_MAX_WRITE_BYTES per instruction (see comment at its
-// definition). SOL is set on the first chunk, EOL on the last chunk, and
-// the IRQ bit is set on the last chunk only if generateIrq is true.
+// Emits the two fixed-size RISC WRITE instructions for one scanline,
+// matching Linux's yuvpack_prog() in bttv-driver.c exactly: each
+// instruction writes device->width bytes (half of bytes_per_line), SOL on
+// the first, EOL on the second, IRQ on the second only if generateIrq.
+// No per-line splitting by byte count (that was FreeBSD bktr's
+// DMA_BT848_SPLIT, specific to its RGB path and not used by yuvpack_prog)
+// and no BYTE_ALL nibble (yuvpack_prog's OP_WRITE never sets it; doing so
+// was found on real hardware to produce RISCI completion with an all-zero
+// destination buffer -- i.e. the FIFO never actually transferring data).
 static uint32*
-bt878_emit_line_writes(uint32* program, phys_addr_t lineAddress, uint32 lineBytes,
+bt878_emit_line_writes(uint32* program, phys_addr_t lineAddress, uint32 halfLineBytes,
 	bool generateIrq)
 {
-	uint32 offset = 0;
-	while (offset < lineBytes) {
-		uint32 chunk = min_c(lineBytes - offset, (uint32)BT848_RISC_MAX_WRITE_BYTES);
-		uint32 command = BT848_RISC_WRITE | BT848_RISC_BYTE_ALL | chunk;
-		if (offset == 0)
-			command |= BT848_RISC_SOL;
+	*program++ = B_HOST_TO_LENDIAN_INT32(
+		BT848_RISC_WRITE | BT848_RISC_SOL | halfLineBytes);
+	*program++ = B_HOST_TO_LENDIAN_INT32((uint32)lineAddress);
 
-		offset += chunk;
-		bool lastChunk = offset >= lineBytes;
-		if (lastChunk) {
-			command |= BT848_RISC_EOL;
-			if (generateIrq)
-				command |= BT848_RISC_IRQ;
-		}
+	uint32 command = BT848_RISC_WRITE | BT848_RISC_EOL | halfLineBytes;
+	if (generateIrq)
+		command |= BT848_RISC_IRQ;
+	*program++ = B_HOST_TO_LENDIAN_INT32(command);
+	*program++ = B_HOST_TO_LENDIAN_INT32((uint32)(lineAddress + halfLineBytes));
 
-		*program++ = B_HOST_TO_LENDIAN_INT32(command);
-		*program++ = B_HOST_TO_LENDIAN_INT32((uint32)(lineAddress + offset - chunk));
-	}
 	return program;
 }
 
@@ -702,9 +753,8 @@ bt878_build_risc_program(bt878_device* device)
 	bool interlaced = (format.height > 288);
 	uint32 linesPerField = interlaced ? (format.height / 2) : format.height;
 
-	uint32 chunksPerLine = (format.bytes_per_line + BT848_RISC_MAX_WRITE_BYTES - 1)
-		/ BT848_RISC_MAX_WRITE_BYTES;
-	uint32 wordsPerLine = chunksPerLine * 2;
+	// 2 instructions (4 words) per line, matching bt878_emit_line_writes.
+	uint32 wordsPerLine = 4;
 
 	uint32 wordsPerBuffer;
 	if (interlaced)
@@ -731,7 +781,7 @@ bt878_build_risc_program(bt878_device* device)
 			for (uint32 line = 0; line < linesPerField; line++) {
 				uint32 lineIdx = line * 2;
 				program = bt878_emit_line_writes(program,
-					phys + lineIdx * format.bytes_per_line, format.bytes_per_line,
+					phys + lineIdx * format.bytes_per_line, format.width,
 					false);
 			}
 
@@ -743,7 +793,7 @@ bt878_build_risc_program(bt878_device* device)
 			for (uint32 line = 0; line < linesPerField; line++) {
 				uint32 lineIdx = line * 2 + 1;
 				program = bt878_emit_line_writes(program,
-					phys + lineIdx * format.bytes_per_line, format.bytes_per_line,
+					phys + lineIdx * format.bytes_per_line, format.width,
 					line + 1 == linesPerField);
 			}
 		} else {
@@ -754,7 +804,7 @@ bt878_build_risc_program(bt878_device* device)
 
 			for (uint32 line = 0; line < format.height; line++) {
 				program = bt878_emit_line_writes(program,
-					phys + line * format.bytes_per_line, format.bytes_per_line,
+					phys + line * format.bytes_per_line, format.width,
 					line + 1 == format.height);
 			}
 		}
@@ -809,13 +859,15 @@ bt878_set_pll(bt878_device* device)
 	bt878_write8(device, BT848_PLL_F_HI, fh);
 	bt878_write8(device, BT848_PLL_XCI, fi | BT848_PLL_X);
 
-	// Wait up to 100ms for PLL to lock
-	// PLOCK = 0 means locked, PLOCK = 1 means NOT locked
+	// Matches Linux's set_pll() exactly: PLOCK set means NOT YET locked
+	// (clear DSTATUS and keep polling -- the latched status bit needs
+	// that clear to update), PLOCK clear means locked.
 	for (int i = 0; i < 10; i++) {
 		snooze(10000);
-		if ((bt878_read8(device, BT848_DSTATUS) & BT848_DSTATUS_PLOCK) == 0) {
-			// PLL is locked!
-			bttv_klog("[KERNEL] bt878_set_pll: PLL locked successfully (TGCTRL=0x08)\n");
+		if ((bt878_read8(device, BT848_DSTATUS) & BT848_DSTATUS_PLOCK) != 0) {
+			bt878_write8(device, BT848_DSTATUS, 0);
+		} else {
+			bttv_klog("[KERNEL] bt878_set_pll: PLL locked (TGCTRL=0x08)\n");
 			bt878_write8(device, BT848_TGCTRL, 0x08);
 			return B_OK;
 		}
@@ -828,45 +880,28 @@ bt878_set_pll(bt878_device* device)
 }
 
 
+// Equivalent to the per-format register writes at the top of Linux's
+// yuvpack_prog() (bttv-driver.c), called whenever capture (re)starts:
+// COLOR_FMT, SCLOOP, ADC. Deliberately does NOT touch OFORM -- Linux
+// never writes that register at all for any pixel format, leaving it at
+// whatever bt878_reset()'s SRESET pulse left it; a previous version of
+// this driver force-wrote OFORM=0 (matching nothing in particular) and
+// OFORM=RANGE, and only ever saw clean FIFO behavior when it happened to
+// not diverge from the post-reset default -- so here we simply never
+// touch it, matching Linux's actual behavior rather than guessing a
+// value. SCLOOP here is CAGC|CKILL rather than Linux's CAGC-only default
+// (color killer off): this driver has no user-facing color-killer
+// toggle, and CAGC|CKILL was measured to give clean, error-free capture
+// on real ATI TV Wonder VE hardware where CAGC-only did not.
 static void
-bt878_program_capture(bt878_device* device)
+bt878_program_capture_format(bt878_device* device)
 {
-	bttv_klog("[KERNEL] bt878_program_capture: ENTER\n");
-	bt878_set_pll(device);
-
-	bttv_klog("[KERNEL] bt878_program_capture: computing geometry...\n");
-	bt878_geometry geometry;
-	bt878_compute_geometry(device, &geometry);
-
-	bttv_klog("[KERNEL] bt878_program_capture: writing geometry registers...\n");
-	uint8 control = 0;
-	if (device->input == BTV_INPUT_SVIDEO)
-		control |= BT848_CONTROL_COMP;
-
-	bt878_write8(device, BT848_IFORM, geometry.iform | BT848_IFORM_HACTIVE);
 	bt878_write8(device, BT848_TDEC, 0);
-	bt878_write8(device, BT848_ADELAY, geometry.adelay);
-	bt878_write8(device, BT848_BDELAY, geometry.bdelay);
-	bt878_write8(device, BT848_E_CONTROL, control);
-	bt878_write8(device, BT848_O_CONTROL, control);
 	bt878_write8(device, BT848_E_SCLOOP, BT848_SCLOOP_CAGC | BT848_SCLOOP_CKILL);
 	bt878_write8(device, BT848_O_SCLOOP, BT848_SCLOOP_CAGC | BT848_SCLOOP_CKILL);
-	bt878_write8(device, BT848_OFORM, BT848_OFORM_RANGE);
 	bt878_write8(device, BT848_ADC, BT848_ADC_RESERVED | BT848_ADC_AGC_EN);
 	bt878_write8(device, BT848_TEST, 0);
 	bt878_write8(device, BT848_COLOR_FMT, BT848_COLOR_FMT_YUY2);
-	bt878_write8(device, BT848_COLOR_CTL, 0);
-
-	bt878_apply_geometry(device, geometry, false);
-	bt878_apply_geometry(device, geometry, true);
-
-	if (device->profile->gpio_mask != 0) {
-		bt878_write32(device, BT848_GPIO_OUT_EN, device->profile->gpio_mask);
-		bt878_write32(device, BT848_GPIO_DATA,
-			device->profile->gpio_mux[device->input]);
-	}
-
-	bt878_apply_controls(device);
 }
 
 
@@ -904,6 +939,24 @@ bt878_reset(bt878_device* device)
 }
 
 
+// Equivalent to Linux's init_bt848() (bttv-driver.c): one-time baseline
+// register state, written once when the device is found in init_driver(),
+// never repeated on every capture start (unlike a previous version of
+// this driver, which rewrote all of these on every BTV_START_CAPTURE).
+static void
+bt878_init_hardware_once(bt878_device* device)
+{
+	bt878_write8(device, BT848_CAP_CTL, 0);
+	bt878_write8(device, BT848_COLOR_CTL, BT848_COLOR_CTL_GAMMA);
+	bt878_write8(device, BT848_IFORM, BT848_IFORM_XTAUTO | BT848_IFORM_AUTO);
+	bt878_write32(device, BT848_GPIO_DMA_CTL,
+		BT848_GPIO_DMA_CTL_PKTP_32 | BT848_GPIO_DMA_CTL_PLTP1_16
+		| BT848_GPIO_DMA_CTL_PLTP23_16);
+	bt878_write8(device, BT848_E_VSCALE_HI, 0x20);
+	bt878_write8(device, BT848_O_VSCALE_HI, 0x20);
+}
+
+
 static status_t
 bt878_start_capture_locked(bt878_device* device)
 {
@@ -932,9 +985,17 @@ bt878_start_capture_locked(bt878_device* device)
 	bttv_klog("[KERNEL] bt878_start_capture_locked: risc program built, phys=0x%" B_PRIxPHYSADDR "\n",
 		device->risc_buffer.phys);
 
-	bttv_klog("[KERNEL] bt878_start_capture_locked: calling bt878_program_capture...\n");
-	bt878_program_capture(device);
-	bttv_klog("[KERNEL] bt878_start_capture_locked: bt878_program_capture done\n");
+	bttv_klog("[KERNEL] bt878_start_capture_locked: programming tvnorm/input/format...\n");
+	bt878_set_tvnorm(device);
+	bt878_video_mux(device);
+	bt878_program_capture_format(device);
+
+	bt878_geometry geometry;
+	bt878_compute_geometry(device, &geometry);
+	bt878_apply_geometry(device, geometry, false);
+	bt878_apply_geometry(device, geometry, true);
+	bt878_apply_controls(device);
+	bttv_klog("[KERNEL] bt878_start_capture_locked: tvnorm/input/format done\n");
 
 	// Install the handler and arm the RISC/FIFO/capture pipeline BEFORE
 	// unmasking interrupts (INT_MASK). While INT_MASK is 0 the chip cannot
@@ -1096,6 +1157,8 @@ bt878_interrupt(void* data)
 			| BT848_INT_OFLOW);
 		if (riscStopped || errorBits != 0) {
 			device->error_count++;
+			device->last_dstatus = bt878_read8(device, BT848_DSTATUS);
+			device->last_error_bits = riscStopped ? 0x80000000 : errorBits;
 
 			bt878_write8(device, BT848_CAP_CTL, 0);
 			bt878_write32(device, BT848_GPIO_DMA_CTL,
@@ -1391,6 +1454,8 @@ bt878_control(void* cookie, uint32 op, void* arg, size_t length)
 			bttv_capture_stats stats;
 			stats.frame_count = device->frame_count;
 			stats.error_count = device->error_count;
+			stats.last_dstatus = device->last_dstatus;
+			stats.last_error_bits = device->last_error_bits;
 			return user_memcpy(arg, &stats, sizeof(stats)) == B_OK
 				? B_OK : B_BAD_ADDRESS;
 		}
@@ -1489,6 +1554,8 @@ init_driver(void)
 			delete_sem(device.frame_sem);
 			break;
 		}
+
+		bt878_init_hardware_once(&device);
 
 		bt878_default_format(&device);
 		device.frame_size = device.width * device.height * BYTES_PER_PIXEL;

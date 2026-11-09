@@ -75,6 +75,16 @@ typedef struct bttv_video_controls {
 typedef struct bttv_capture_stats {
 	uint32	frame_count;
 	uint32	error_count;
+	// Raw BT848_DSTATUS value sampled opportunistically by the interrupt
+	// handler (bit 7 PRES, bit 6 HLOC, bit 4 NUML, bit 2 PLOCK). HLOC is
+	// horizontal sync lock to the *incoming video signal* -- separate
+	// from and independent of PLOCK (the internal clock PLL). For
+	// diagnostics only.
+	uint8	last_dstatus;
+	// INT_STAT error bits that triggered the last recovery (SCERR/OCERR/
+	// PABORT/RIPERR/PPERR/OFLOW), or 0x80000000 if it was instead an
+	// unexpected RISC-enable drop. For diagnostics only.
+	uint32	last_error_bits;
 } bttv_capture_stats;
 
 #endif
