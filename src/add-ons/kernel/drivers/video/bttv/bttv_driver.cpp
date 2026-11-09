@@ -1364,7 +1364,29 @@ bt878_read(void* cookie, off_t position, void* buffer, size_t* numBytes)
 		bufIdx = 0;
 
 	size_t toCopy = min_c(*numBytes, device->frame_size - (size_t)position);
-	if (user_memcpy(buffer, device->frame_buffers[bufIdx].virt + position, toCopy) != B_OK) {
+
+	// This chip's packed-YUV FIFO output is actually Y0,V,Y1,U per four
+	// bytes, not the standard YUY2/YUYV Y0,U,Y1,V order BTV_GET_CAPTURE_FORMAT
+	// advertises via pixel_format -- confirmed empirically on real hardware
+	// with a known-reference color source (a visibly blue/cool twilight
+	// scene decoded as orange/warm until U and V were swapped). Swapped
+	// here, once, at the driver boundary, so BTV_PIXEL_FORMAT_YUY2 is an
+	// honest contract and callers (the media add-on included) don't need
+	// to know about this quirk. Done in place on the DMA buffer rather
+	// than a scratch copy -- safe because a new frame is only unblocked
+	// here after bt878_interrupt() has moved the RISC program on to the
+	// *other* buffer (NUM_FRAME_BUFFERS == 2), and the whole buffer is
+	// unconditionally overwritten by the next capture of it regardless.
+	uint8* frame = device->frame_buffers[bufIdx].virt;
+	size_t quadStart = (size_t)position & ~(size_t)3;
+	size_t quadEnd = min_c(device->frame_size, (size_t)position + toCopy);
+	for (size_t q = quadStart; q + 3 < quadEnd; q += 4) {
+		uint8 tmp = frame[q + 1];
+		frame[q + 1] = frame[q + 3];
+		frame[q + 3] = tmp;
+	}
+
+	if (user_memcpy(buffer, frame + position, toCopy) != B_OK) {
 		return B_BAD_ADDRESS;
 	}
 
