@@ -125,6 +125,7 @@ bttv_klog(const char* fmt, ...)
 #define BT848_GPIO_DMA_CTL		0x10c
 #define BT848_I2C_DATA_CTL		0x110
 #define BT848_RISC_STRT_ADD		0x114
+#define BT848_RISC_COUNT		0x120
 #define BT848_GPIO_OUT_EN		0x118
 #define BT848_GPIO_REG_INP		0x11c
 // PLL registers are at 0xf0/0xf4/0xf8, NOT 0x110+ (that range is
@@ -172,6 +173,7 @@ bttv_klog(const char* fmt, ...)
 #define BT848_ADC_RESERVED		(2 << 6)
 #define BT848_ADC_SYNC_T		(1 << 5)
 #define BT848_ADC_AGC_EN		(1 << 4)
+#define BT848_ADC_CRUSH		(1 << 0)
 #define BT848_COLOR_CTL_GAMMA	(1 << 4)
 
 #define BT848_COLOR_FMT_YUY2	0x44
@@ -717,28 +719,25 @@ bt878_apply_geometry(bt878_device* device, const bt878_geometry& geometry, bool 
 }
 
 
-// Emits the two fixed-size RISC WRITE instructions for one scanline,
-// matching Linux's yuvpack_prog() in bttv-driver.c exactly: each
-// instruction writes device->width bytes (half of bytes_per_line), SOL on
-// the first, EOL on the second, IRQ on the second only if generateIrq.
-// No per-line splitting by byte count (that was FreeBSD bktr's
-// DMA_BT848_SPLIT, specific to its RGB path and not used by yuvpack_prog)
-// and no BYTE_ALL nibble (yuvpack_prog's OP_WRITE never sets it; doing so
-// was found on real hardware to produce RISCI completion with an all-zero
-// destination buffer -- i.e. the FIFO never actually transferring data).
+// Emits a single RISC WRITE instruction for one whole scanline, matching
+// Linux's real bttv_risc_packed() in bttv-risc.c: one instruction covering
+// the full bytes-per-line, with both SOL and EOL set together, IRQ added
+// only if generateIrq. The earlier two-half-line-instruction form (with
+// VRE/VRO sync below) was mistakenly modeled on FreeBSD bktr's
+// yuvpack_prog(), which doesn't exist in Linux at all -- confirmed by
+// grepping bttv-risc.c. No BYTE_ALL nibble (Linux's OP_WRITE never sets
+// it; doing so was found on real hardware to produce RISCI completion
+// with an all-zero destination buffer, i.e. the FIFO never actually
+// transferring data).
 static uint32*
-bt878_emit_line_writes(uint32* program, phys_addr_t lineAddress, uint32 halfLineBytes,
+bt878_emit_line_write(uint32* program, phys_addr_t lineAddress, uint32 lineBytes,
 	bool generateIrq)
 {
-	*program++ = B_HOST_TO_LENDIAN_INT32(
-		BT848_RISC_WRITE | BT848_RISC_SOL | halfLineBytes);
-	*program++ = B_HOST_TO_LENDIAN_INT32((uint32)lineAddress);
-
-	uint32 command = BT848_RISC_WRITE | BT848_RISC_EOL | halfLineBytes;
+	uint32 command = BT848_RISC_WRITE | BT848_RISC_SOL | BT848_RISC_EOL | lineBytes;
 	if (generateIrq)
 		command |= BT848_RISC_IRQ;
 	*program++ = B_HOST_TO_LENDIAN_INT32(command);
-	*program++ = B_HOST_TO_LENDIAN_INT32((uint32)(lineAddress + halfLineBytes));
+	*program++ = B_HOST_TO_LENDIAN_INT32((uint32)lineAddress);
 
 	return program;
 }
@@ -753,14 +752,21 @@ bt878_build_risc_program(bt878_device* device)
 	bool interlaced = (format.height > 288);
 	uint32 linesPerField = interlaced ? (format.height / 2) : format.height;
 
-	// 2 instructions (4 words) per line, matching bt878_emit_line_writes.
-	uint32 wordsPerLine = 4;
+	// 1 instruction (2 words) per line, matching bt878_emit_line_write.
+	uint32 wordsPerLine = 2;
 
+	// 4 extra words per field: the field-boundary SYNC|RESYNC|VRE/VRO
+	// (resets the hardware's sync counter -- SCERR checks against this)
+	// plus the inner SYNC|FM1 (waits for the FIFO to actually have data
+	// before the WRITE lines start). Both are present in Linux's real
+	// structure: VRE/VRO+RESYNC once per field in the master loop
+	// (bttv_risc_init_main(), bttv-risc.c), FM1 once per field at the top
+	// of the per-field buffer chunk (bttv_risc_packed(), same file).
 	uint32 wordsPerBuffer;
 	if (interlaced)
-		wordsPerBuffer = 2 + linesPerField * wordsPerLine + 2 + linesPerField * wordsPerLine;
+		wordsPerBuffer = 4 + linesPerField * wordsPerLine + 4 + linesPerField * wordsPerLine;
 	else
-		wordsPerBuffer = 2 + format.height * wordsPerLine;
+		wordsPerBuffer = 4 + format.height * wordsPerLine;
 
 	uint32 totalWords = wordsPerBuffer * NUM_FRAME_BUFFERS + 2;
 	size_t requiredSize = totalWords * sizeof(uint32);
@@ -773,39 +779,50 @@ bt878_build_risc_program(bt878_device* device)
 		phys_addr_t phys = device->frame_buffers[buf].phys;
 
 		if (interlaced) {
-			// Field 1 (Even field): wait for VRE, write lines 0, 2, 4, ...
+			// Field 1 (top/even): field-boundary sync (resets the sync
+			// counter) followed by the inner per-chunk FIFO-ready sync,
+			// matching Linux's two-level structure exactly.
 			*program++ = B_HOST_TO_LENDIAN_INT32(
 				BT848_RISC_SYNC | BT848_RISC_RESYNC | BT848_FIFO_STATUS_VRE);
+			*program++ = 0;
+			*program++ = B_HOST_TO_LENDIAN_INT32(
+				BT848_RISC_SYNC | BT848_FIFO_STATUS_FM1);
 			*program++ = 0;
 
 			for (uint32 line = 0; line < linesPerField; line++) {
 				uint32 lineIdx = line * 2;
-				program = bt878_emit_line_writes(program,
-					phys + lineIdx * format.bytes_per_line, format.width,
-					false);
+				program = bt878_emit_line_write(program,
+					phys + lineIdx * format.bytes_per_line,
+					format.bytes_per_line, false);
 			}
 
-			// Field 2 (Odd field): wait for VRO, write lines 1, 3, 5, ...
+			// Field 2 (bottom/odd): write lines 1, 3, 5, ...
 			*program++ = B_HOST_TO_LENDIAN_INT32(
 				BT848_RISC_SYNC | BT848_RISC_RESYNC | BT848_FIFO_STATUS_VRO);
+			*program++ = 0;
+			*program++ = B_HOST_TO_LENDIAN_INT32(
+				BT848_RISC_SYNC | BT848_FIFO_STATUS_FM1);
 			*program++ = 0;
 
 			for (uint32 line = 0; line < linesPerField; line++) {
 				uint32 lineIdx = line * 2 + 1;
-				program = bt878_emit_line_writes(program,
-					phys + lineIdx * format.bytes_per_line, format.width,
-					line + 1 == linesPerField);
+				program = bt878_emit_line_write(program,
+					phys + lineIdx * format.bytes_per_line,
+					format.bytes_per_line, line + 1 == linesPerField);
 			}
 		} else {
-			// Progressive (half vertical resolution): wait for VRE, write single field
+			// Progressive (half vertical resolution): write single field
 			*program++ = B_HOST_TO_LENDIAN_INT32(
 				BT848_RISC_SYNC | BT848_RISC_RESYNC | BT848_FIFO_STATUS_VRE);
 			*program++ = 0;
+			*program++ = B_HOST_TO_LENDIAN_INT32(
+				BT848_RISC_SYNC | BT848_FIFO_STATUS_FM1);
+			*program++ = 0;
 
 			for (uint32 line = 0; line < format.height; line++) {
-				program = bt878_emit_line_writes(program,
-					phys + line * format.bytes_per_line, format.width,
-					line + 1 == format.height);
+				program = bt878_emit_line_write(program,
+					phys + line * format.bytes_per_line,
+					format.bytes_per_line, line + 1 == format.height);
 			}
 		}
 	}
@@ -880,12 +897,21 @@ bt878_set_pll(bt878_device* device)
 }
 
 
-// Equivalent to the per-format register writes at the top of Linux's
-// yuvpack_prog() (bttv-driver.c), called whenever capture (re)starts:
-// COLOR_FMT, SCLOOP, ADC. Deliberately does NOT touch OFORM -- Linux
-// never writes that register at all for any pixel format, leaving it at
-// whatever bt878_reset()'s SRESET pulse left it; a previous version of
-// this driver force-wrote OFORM=0 (matching nothing in particular) and
+// COLOR_FMT itself is written where Linux writes it, in
+// bt878_build_risc_program() below (Linux: bttv_buffer_activate_video(),
+// bttv-risc.c) -- not here. This function covers the other per-format
+// bits Linux applies as V4L2 control defaults via v4l2_ctrl_handler_setup()
+// at init_bt848() time (bttv-driver.c): SCLOOP's CAGC/CKILL bits
+// (V4L2_CID_CHROMA_AGC / V4L2_CID_COLOR_KILLER) and ADC's CRUSH bit
+// (V4L2_CID_PRIVATE_AGC_CRUSH, default agc_crush=1). Note ADC_RESERVED
+// alone, *without* AGC_EN, is the real generic default -- a previous
+// version of this driver wrote RESERVED|AGC_EN, copied from
+// bttv-cards.c's PXC200-specific init_PXC200() quirk rather than the
+// generic path, and Linux's own comment there warns AGC_EN is reverse
+// logic: setting it *disables* AGC. Deliberately does NOT touch OFORM --
+// Linux never writes that register at all for any pixel format, leaving
+// it at whatever bt878_reset()'s SRESET pulse left it; a previous version
+// of this driver force-wrote OFORM=0 (matching nothing in particular) and
 // OFORM=RANGE, and only ever saw clean FIFO behavior when it happened to
 // not diverge from the post-reset default -- so here we simply never
 // touch it, matching Linux's actual behavior rather than guessing a
@@ -899,7 +925,7 @@ bt878_program_capture_format(bt878_device* device)
 	bt878_write8(device, BT848_TDEC, 0);
 	bt878_write8(device, BT848_E_SCLOOP, BT848_SCLOOP_CAGC | BT848_SCLOOP_CKILL);
 	bt878_write8(device, BT848_O_SCLOOP, BT848_SCLOOP_CAGC | BT848_SCLOOP_CKILL);
-	bt878_write8(device, BT848_ADC, BT848_ADC_RESERVED | BT848_ADC_AGC_EN);
+	bt878_write8(device, BT848_ADC, BT848_ADC_RESERVED | BT848_ADC_CRUSH);
 	bt878_write8(device, BT848_TEST, 0);
 	bt878_write8(device, BT848_COLOR_FMT, BT848_COLOR_FMT_YUY2);
 }
@@ -1019,6 +1045,20 @@ bt878_start_capture_locked(bt878_device* device)
 	}
 	bttv_klog("[KERNEL] bt878_start_capture_locked: interrupt handler installed\n");
 
+	// Order matches Linux's bttv_set_dma() exactly (bttv-risc.c):
+	// bttv_set_capture_control() writes CAP_CTL *first*, then
+	// bttv_start_dma() writes RISC_STRT_ADD followed by GPIO_DMA_CTL's
+	// FIFO/RISC enable bits. A previous version of this driver armed the
+	// RISC/FIFO engine (GPIO_DMA_CTL) *before* enabling the video
+	// front-end to actually feed it (CAP_CTL last) -- backwards from
+	// Linux, and resolution-independent FIFO overflow (reproducing
+	// identically from 720x480 down to 360x240) is consistent with the
+	// RISC engine being armed and fetching before there is any real
+	// capture data for it to process.
+	bttv_klog("[KERNEL] bt878_start_capture_locked: writing CAP_CTL (EVEN+ODD enable)...\n");
+	bt878_write8(device, BT848_CAP_CTL,
+		BT848_CAP_CTL_CAPTURE_EVEN | BT848_CAP_CTL_CAPTURE_ODD);
+
 	bttv_klog("[KERNEL] bt878_start_capture_locked: writing RISC_STRT_ADD (0x%" B_PRIx32 ")...\n",
 		(uint32)device->risc_buffer.phys);
 	bt878_write32(device, BT848_RISC_STRT_ADD, (uint32)device->risc_buffer.phys);
@@ -1029,18 +1069,21 @@ bt878_start_capture_locked(bt878_device* device)
 		| BT848_GPIO_DMA_CTL_PLTP23_16
 		| BT848_GPIO_DMA_CTL_FIFO_ENABLE | BT848_GPIO_DMA_CTL_RISC_ENABLE);
 
-	bttv_klog("[KERNEL] bt878_start_capture_locked: writing CAP_CTL (EVEN+ODD enable)...\n");
-	bt878_write8(device, BT848_CAP_CTL,
-		BT848_CAP_CTL_CAPTURE_EVEN | BT848_CAP_CTL_CAPTURE_ODD);
-
 	bttv_klog("[KERNEL] bt878_start_capture_locked: clearing INT_STAT...\n");
 	bt878_write32(device, BT848_INT_STAT, 0xffffffff);
 
-	// Enable RISC, sync errors, overflow errors, and frame completion
-	// interrupt. This must be the LAST register write in this function.
+	// Matches Linux's real init_irqreg() (bttv-driver.c) exactly for the
+	// bits we act on: frame completion (RISCI) and the two genuine fatal
+	// DMA errors (SCERR sync-counter error, OCERR opcode error). Linux
+	// does NOT mask BT848_INT_OFLOW at all -- a transient FIFO overflow is
+	// apparently self-correcting at the hardware level and not something
+	// its driver reacts to; masking and treating it as fatal here (as a
+	// previous version of this driver did) triggered needless RISC
+	// program restarts under normal operation. This must be the LAST
+	// register write in this function.
 	bttv_klog("[KERNEL] bt878_start_capture_locked: setting INT_MASK...\n");
 	bt878_write32(device, BT848_INT_MASK,
-		BT848_INT_RISCI | BT848_INT_SCERR | BT848_INT_OCERR | BT848_INT_OFLOW | BT848_INT_ETBF);
+		BT848_INT_RISCI | BT848_INT_SCERR | BT848_INT_OCERR);
 
 	device->capturing = true;
 	device->frame_ready = false;
@@ -1140,8 +1183,8 @@ bt878_interrupt(void* data)
 		// Clear only the asserted interrupt status bits (Write 1 to clear)
 		bt878_write32(device, BT848_INT_STAT, astat);
 
-		// FIFO/RISC/sync errors, or the RISC engine unexpectedly stopping
-		// (RISC_EN status bit dropping out), mean the DMA pipeline has
+		// Genuine fatal DMA errors (SCERR/OCERR -- the only error bits
+		// Linux's init_irqreg() actually masks) mean the DMA pipeline has
 		// desynchronized. The single most common cause is simply no
 		// stable input signal being present (no antenna/cable connected,
 		// or the source is off) -- an expected, frequent steady state at
@@ -1151,28 +1194,40 @@ bt878_interrupt(void* data)
 		// logging. Logging per-occurrence here (even via the
 		// interrupt-safe dprintf()) would flood dprintf/syslog for as
 		// long as no signal is connected; only a running counter is kept.
-		bool riscStopped = (stat & BT848_INT_RISC_EN) == 0;
+		//
+		// A previous version of this driver also treated raw INT_STAT
+		// bit 27 (RISC_EN) reading 0 as a fatal "RISC engine stopped"
+		// condition. That bit is never in our INT_MASK (nor in Linux's),
+		// is a live status mirror rather than a latched one-shot event,
+		// and checking it against the raw (unmasked) stat value made
+		// this fire spuriously -- once it did, the resulting teardown/
+		// rearm cascade on every subsequent interrupt permanently
+		// prevented any further frame completion. Removed; only the
+		// masked, documented error bits below are treated as fatal.
 		uint32 errorBits = astat & (BT848_INT_PPERR | BT848_INT_RIPERR
 			| BT848_INT_PABORT | BT848_INT_OCERR | BT848_INT_SCERR
 			| BT848_INT_OFLOW);
-		if (riscStopped || errorBits != 0) {
+		if (errorBits != 0) {
 			device->error_count++;
 			device->last_dstatus = bt878_read8(device, BT848_DSTATUS);
-			device->last_error_bits = riscStopped ? 0x80000000 : errorBits;
+			device->last_error_bits = errorBits;
 
 			bt878_write8(device, BT848_CAP_CTL, 0);
 			bt878_write32(device, BT848_GPIO_DMA_CTL,
 				BT848_GPIO_DMA_CTL_PKTP_32 | BT848_GPIO_DMA_CTL_PLTP1_16
 				| BT848_GPIO_DMA_CTL_PLTP23_16);
 
+			// Same order as bt878_start_capture_locked: CAP_CTL, then
+			// RISC_STRT_ADD, then GPIO_DMA_CTL's enable bits (matches
+			// Linux's bttv_set_capture_control()+bttv_start_dma()).
+			bt878_write8(device, BT848_CAP_CTL,
+				BT848_CAP_CTL_CAPTURE_EVEN | BT848_CAP_CTL_CAPTURE_ODD);
 			bt878_write32(device, BT848_RISC_STRT_ADD,
 				(uint32)device->risc_buffer.phys);
 			bt878_write32(device, BT848_GPIO_DMA_CTL,
 				BT848_GPIO_DMA_CTL_PKTP_32 | BT848_GPIO_DMA_CTL_PLTP1_16
 				| BT848_GPIO_DMA_CTL_PLTP23_16
 				| BT848_GPIO_DMA_CTL_FIFO_ENABLE | BT848_GPIO_DMA_CTL_RISC_ENABLE);
-			bt878_write8(device, BT848_CAP_CTL,
-				BT848_CAP_CTL_CAPTURE_EVEN | BT848_CAP_CTL_CAPTURE_ODD);
 
 			device->next_buffer = 0;
 			device->last_completed_buffer = 0;
@@ -1456,6 +1511,17 @@ bt878_control(void* cookie, uint32 op, void* arg, size_t length)
 			stats.error_count = device->error_count;
 			stats.last_dstatus = device->last_dstatus;
 			stats.last_error_bits = device->last_error_bits;
+			bttv_klog("[KERNEL] bt878_control: BTV_GET_STATS live "
+				"dstatus=0x%02x int_stat=0x%08" B_PRIx32 " int_mask=0x%08"
+				B_PRIx32 " gpio_dma_ctl=0x%08" B_PRIx32 " cap_ctl=0x%02x "
+				"risc_count=0x%08" B_PRIx32 " risc_strt=0x%08" B_PRIx32 "\n",
+				bt878_read8(device, BT848_DSTATUS),
+				bt878_read32(device, BT848_INT_STAT),
+				bt878_read32(device, BT848_INT_MASK),
+				bt878_read32(device, BT848_GPIO_DMA_CTL),
+				bt878_read8(device, BT848_CAP_CTL),
+				bt878_read32(device, BT848_RISC_COUNT),
+				bt878_read32(device, BT848_RISC_STRT_ADD));
 			return user_memcpy(arg, &stats, sizeof(stats)) == B_OK
 				? B_OK : B_BAD_ADDRESS;
 		}

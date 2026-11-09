@@ -82,8 +82,7 @@ typedef struct bttv_capture_stats {
 	// diagnostics only.
 	uint8	last_dstatus;
 	// INT_STAT error bits that triggered the last recovery (SCERR/OCERR/
-	// PABORT/RIPERR/PPERR/OFLOW), or 0x80000000 if it was instead an
-	// unexpected RISC-enable drop. For diagnostics only.
+	// PABORT/RIPERR/PPERR/OFLOW). For diagnostics only.
 	uint32	last_error_bits;
 } bttv_capture_stats;
 
