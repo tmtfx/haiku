@@ -52,15 +52,19 @@ VideoView::AttachedToWindow()
 void
 VideoView::Clear()
 {
-	BAutolock locker(&fBitmapLock);
-	delete fBitmap;
-	fBitmap = NULL;
-	fWidth = 0;
-	fHeight = 0;
-	fFrameCount = 0;
-	fCurrentFps = 0.0f;
-	fLastFpsCalcTime = 0;
-	fFramesAtLastFps = 0;
+	// Same fBitmapLock/window-lock ordering concern as SetFrameData():
+	// release fBitmapLock before taking the window lock.
+	{
+		BAutolock locker(&fBitmapLock);
+		delete fBitmap;
+		fBitmap = NULL;
+		fWidth = 0;
+		fHeight = 0;
+		fFrameCount = 0;
+		fCurrentFps = 0.0f;
+		fLastFpsCalcTime = 0;
+		fFramesAtLastFps = 0;
+	}
 
 	if (LockLooper()) {
 		Invalidate();
@@ -75,36 +79,53 @@ VideoView::SetFrameData(const uint8* yuy2Data, uint32 width, uint32 height)
 	if (yuy2Data == NULL || width == 0 || height == 0)
 		return;
 
-	BAutolock locker(&fBitmapLock);
+	// fBitmapLock and the window lock (LockLooper()) must never be held
+	// at the same time: Draw() always runs with the window already
+	// locked and then takes fBitmapLock (window lock -> fBitmapLock),
+	// so taking them in the opposite order here (fBitmapLock ->
+	// LockLooper()) is a classic AB-BA lock-ordering deadlock. It doesn't
+	// trigger every time -- only when this thread is holding fBitmapLock
+	// at the exact moment the window thread is inside Draw() waiting for
+	// it -- which is exactly why it showed up as a freeze after a random,
+	// unpredictable number of frames (seen anywhere from ~100 to ~700)
+	// rather than immediately or deterministically. Scoping fBitmapLock
+	// to just the bitmap mutation, released *before* LockLooper() is
+	// called, means this thread never holds both at once.
+	bool haveBitmap = false;
+	{
+		BAutolock locker(&fBitmapLock);
 
-	if (fBitmap == NULL || fWidth != width || fHeight != height) {
-		delete fBitmap;
-		fWidth = width;
-		fHeight = height;
-		fBitmap = new BBitmap(BRect(0, 0, width - 1, height - 1), B_RGB32);
-		if (fBitmap == NULL || fBitmap->InitCheck() != B_OK) {
+		if (fBitmap == NULL || fWidth != width || fHeight != height) {
 			delete fBitmap;
-			fBitmap = NULL;
-			return;
+			fWidth = width;
+			fHeight = height;
+			fBitmap = new BBitmap(BRect(0, 0, width - 1, height - 1), B_RGB32);
+			if (fBitmap == NULL || fBitmap->InitCheck() != B_OK) {
+				delete fBitmap;
+				fBitmap = NULL;
+			}
+		}
+
+		if (fBitmap != NULL) {
+			_ConvertYUY2ToRGB32(yuy2Data, (uint8*)fBitmap->Bits(), width, height);
+			haveBitmap = true;
+
+			fFrameCount++;
+			bigtime_t now = system_time();
+			if (fLastFpsCalcTime == 0) {
+				fLastFpsCalcTime = now;
+				fFramesAtLastFps = fFrameCount;
+			} else if (now - fLastFpsCalcTime >= 500000) {
+				bigtime_t elapsed = now - fLastFpsCalcTime;
+				uint64 frames = fFrameCount - fFramesAtLastFps;
+				fCurrentFps = (float)frames * 1000000.0f / (float)elapsed;
+				fLastFpsCalcTime = now;
+				fFramesAtLastFps = fFrameCount;
+			}
 		}
 	}
 
-	_ConvertYUY2ToRGB32(yuy2Data, (uint8*)fBitmap->Bits(), width, height);
-
-	fFrameCount++;
-	bigtime_t now = system_time();
-	if (fLastFpsCalcTime == 0) {
-		fLastFpsCalcTime = now;
-		fFramesAtLastFps = fFrameCount;
-	} else if (now - fLastFpsCalcTime >= 500000) {
-		bigtime_t elapsed = now - fLastFpsCalcTime;
-		uint64 frames = fFrameCount - fFramesAtLastFps;
-		fCurrentFps = (float)frames * 1000000.0f / (float)elapsed;
-		fLastFpsCalcTime = now;
-		fFramesAtLastFps = fFrameCount;
-	}
-
-	if (LockLooper()) {
+	if (haveBitmap && LockLooper()) {
 		Invalidate();
 		UnlockLooper();
 	}
