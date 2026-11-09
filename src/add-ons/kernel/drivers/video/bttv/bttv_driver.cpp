@@ -40,6 +40,7 @@
 
 static bool sEnableKernelLog = true;
 static const char* const kKernelLogPath = "/boot/home/bttv_kernel.log";
+static bigtime_t sLogStartTime = 0;
 
 
 static void
@@ -48,10 +49,24 @@ bttv_klog(const char* fmt, ...)
 	if (!sEnableKernelLog)
 		return;
 
+	// Relative (not wall-clock) timestamp, seconds.millis since this
+	// driver instance's first log line -- lets a reader measure real
+	// elapsed time between e.g. a close and the next open, instead of
+	// guessing from entry order alone (entry order alone previously led
+	// to wrongly assuming human UI clicks were effectively back-to-back).
+	if (sLogStartTime == 0)
+		sLogStartTime = system_time();
+	bigtime_t elapsed = system_time() - sLogStartTime;
+
 	char buffer[512];
+	int prefixLen = snprintf(buffer, sizeof(buffer), "[%5lld.%03lld] ",
+		(long long)(elapsed / 1000000), (long long)((elapsed / 1000) % 1000));
+	if (prefixLen < 0 || (size_t)prefixLen >= sizeof(buffer))
+		prefixLen = 0;
+
 	va_list args;
 	va_start(args, fmt);
-	vsnprintf(buffer, sizeof(buffer), fmt, args);
+	vsnprintf(buffer + prefixLen, sizeof(buffer) - prefixLen, fmt, args);
 	va_end(args);
 
 	dprintf("bttv: %s", buffer);
@@ -270,6 +285,24 @@ typedef struct {
 	bt878_dma_buffer frame_buffers[NUM_FRAME_BUFFERS];
 	bt878_dma_buffer risc_buffer;
 	sem_id		frame_sem;
+	// Benaphore guarding device state (width/height/video_standard/input/
+	// capturing/frame_size and the frame buffers' logical ownership)
+	// against concurrent bt878_control() and bt878_read() calls on
+	// different threads sharing the same open fd. Originally the driver
+	// had no locking at all -- every test tool used in development was
+	// strictly single-threaded and sequential, which never exercised
+	// this; a real client with a dedicated capture-read thread running
+	// concurrently with UI-driven format changes hit it immediately
+	// (reads racing a stop+reconfigure+restart, corrupting/truncating
+	// frames and appearing to ignore standard changes).
+	sem_id		io_lock;
+	// Incremented each time bt878_start_capture_locked() completes a
+	// (re)start. Lets a thread blocked in bt878_read()'s frame_sem wait
+	// detect that capture was stopped and restarted (e.g. by a
+	// concurrent BTV_SET_CAPTURE_FORMAT) while it was waiting, so it
+	// doesn't hand back a buffer from before the restart as if it were
+	// a freshly completed frame of the new format.
+	uint32		capture_generation;
 	int32		open_count;
 	uint32		frame_size;
 	uint16		width;
@@ -752,6 +785,10 @@ bt878_build_risc_program(bt878_device* device)
 	bool interlaced = (format.height > 288);
 	uint32 linesPerField = interlaced ? (format.height / 2) : format.height;
 
+	bttv_klog("[KERNEL] bt878_build_risc_program: format.height=%u interlaced=%d "
+		"linesPerField=%u device->height=%u device->video_standard=%u\n",
+		format.height, interlaced, linesPerField, device->height, device->video_standard);
+
 	// 1 instruction (2 words) per line, matching bt878_emit_line_write.
 	uint32 wordsPerLine = 2;
 
@@ -872,22 +909,47 @@ bt878_set_pll(bt878_device* device)
 	fout = (fout % fin) * 256;
 	uint8 fl = (uint8)(fout / fin);
 
-	bt878_write8(device, BT848_PLL_F_LO, fl);
-	bt878_write8(device, BT848_PLL_F_HI, fh);
-	bt878_write8(device, BT848_PLL_XCI, fi | BT848_PLL_X);
+	// Linux's set_pll() uses a single 10x10ms poll window and simply
+	// accepts an occasional failure (falls back to crystal clock, which
+	// is the *wrong* pixel-sample rate for PAL, and proceeds anyway).
+	// Measured on real hardware: this specific board's PLL does not
+	// always lock within that single 100ms window -- confirmed via a
+	// live register dump showing the RISC program's per-field line
+	// writes stopping early and at a *different* line count each time
+	// capture was restarted (e.g. row 200 one run, row 480 another),
+	// consistent with the pixel clock being wrong-but-free-running
+	// rather than any RISC/sync logic bug. Retrying the whole
+	// write-coefficients-then-poll sequence a few times before giving up
+	// costs at most a few hundred extra ms at capture start and matches
+	// what every other register value in this driver already tries to
+	// do: trust real hardware behavior over a single reference's assumed
+	// timing.
+	for (int attempt = 0; attempt < 4; attempt++) {
+		bt878_write8(device, BT848_PLL_F_LO, fl);
+		bt878_write8(device, BT848_PLL_F_HI, fh);
+		bt878_write8(device, BT848_PLL_XCI, fi | BT848_PLL_X);
 
-	// Matches Linux's set_pll() exactly: PLOCK set means NOT YET locked
-	// (clear DSTATUS and keep polling -- the latched status bit needs
-	// that clear to update), PLOCK clear means locked.
-	for (int i = 0; i < 10; i++) {
-		snooze(10000);
-		if ((bt878_read8(device, BT848_DSTATUS) & BT848_DSTATUS_PLOCK) != 0) {
-			bt878_write8(device, BT848_DSTATUS, 0);
-		} else {
-			bttv_klog("[KERNEL] bt878_set_pll: PLL locked (TGCTRL=0x08)\n");
-			bt878_write8(device, BT848_TGCTRL, 0x08);
-			return B_OK;
+		// Matches Linux's set_pll() exactly: PLOCK set means NOT YET locked
+		// (clear DSTATUS and keep polling -- the latched status bit needs
+		// that clear to update), PLOCK clear means locked.
+		for (int i = 0; i < 10; i++) {
+			snooze(10000);
+			uint8 dstatus = bt878_read8(device, BT848_DSTATUS);
+			if (attempt == 0) {
+				bttv_klog("[KERNEL] bt878_set_pll: poll %d raw DSTATUS=0x%02x\n",
+					i, dstatus);
+			}
+			if ((dstatus & BT848_DSTATUS_PLOCK) != 0) {
+				bt878_write8(device, BT848_DSTATUS, 0);
+			} else {
+				bttv_klog("[KERNEL] bt878_set_pll: PLL locked on attempt %d "
+					"(TGCTRL=0x08)\n", attempt);
+				bt878_write8(device, BT848_TGCTRL, 0x08);
+				return B_OK;
+			}
 		}
+		bttv_klog("[KERNEL] bt878_set_pll: attempt %d did not lock, retrying...\n",
+			attempt);
 	}
 
 	// If PLL failed to lock, fall back to crystal clock rather than killing the clock with 0x08
@@ -1094,6 +1156,7 @@ bt878_start_capture_locked(bt878_device* device)
 
 	device->capturing = true;
 	device->frame_ready = false;
+	device->capture_generation++;
 	bttv_klog("[KERNEL] bt878_start_capture_locked: EXIT SUCCESS\n");
 	return B_OK;
 }
@@ -1329,6 +1392,27 @@ bt878_free(void* cookie)
 }
 
 
+// device->io_lock guards device state (width/height/video_standard/input/
+// capturing/frame_size and buffer-index bookkeeping) against concurrent
+// bt878_control() and bt878_read() calls from different threads on the
+// same open fd. Never held across the blocking frame_sem wait in
+// bt878_read() -- that wait must stay unblockable by a concurrent
+// BTV_STOP_CAPTURE/BTV_SET_CAPTURE_FORMAT, which itself needs this lock
+// to run.
+static status_t
+bt878_lock_io(bt878_device* device)
+{
+	return acquire_sem_etc(device->io_lock, 1, B_CAN_INTERRUPT, 0);
+}
+
+
+static void
+bt878_unlock_io(bt878_device* device)
+{
+	release_sem_etc(device->io_lock, 1, 0);
+}
+
+
 static status_t
 bt878_read(void* cookie, off_t position, void* buffer, size_t* numBytes)
 {
@@ -1344,6 +1428,17 @@ bt878_read(void* cookie, off_t position, void* buffer, size_t* numBytes)
 		return B_OK;
 	}
 
+	// Snapshot before the blocking wait (unlocked -- advisory only, just
+	// needs to observe *some* value no older than "right now"): detects a
+	// concurrent BTV_STOP_CAPTURE/BTV_SET_CAPTURE_FORMAT racing this read.
+	// bt878_stop_capture_locked() wakes any thread blocked below with a
+	// plain release (not an error status), so without this check a read()
+	// that raced a reconfigure would wake up believing a real frame had
+	// arrived and hand back whatever was in last_completed_buffer -- which
+	// may belong to the *previous* format (wrong size) or not be a
+	// genuinely completed frame of the new one yet.
+	uint32 generationBefore = device->capture_generation;
+
 	if (position == 0) {
 		status_t status;
 		if (device->non_blocking) {
@@ -1357,6 +1452,34 @@ bt878_read(void* cookie, off_t position, void* buffer, size_t* numBytes)
 			if (status != B_OK)
 				return status;
 		}
+	}
+
+	status_t lockStatus = bt878_lock_io(device);
+	if (lockStatus != B_OK)
+		return lockStatus;
+
+	if (!device->capturing) {
+		bt878_unlock_io(device);
+		return B_NOT_ALLOWED;
+	}
+
+	if (position == 0 && device->capture_generation != generationBefore) {
+		// Woken by a reconfigure, not a real frame completion (or the
+		// reconfigure's new capture hasn't completed a frame yet) --
+		// report "nothing yet" rather than handing back a buffer that
+		// may not match the format the caller just read, or may not be
+		// a real frame at all. Callers (including this driver's own test
+		// tools and the bttv media add-on) already treat a short read as
+		// "try again".
+		bt878_unlock_io(device);
+		*numBytes = 0;
+		return B_OK;
+	}
+
+	if (position < 0 || (size_t)position >= device->frame_size) {
+		bt878_unlock_io(device);
+		*numBytes = 0;
+		return B_OK;
 	}
 
 	int32 bufIdx = device->last_completed_buffer;
@@ -1386,9 +1509,10 @@ bt878_read(void* cookie, off_t position, void* buffer, size_t* numBytes)
 		frame[q + 3] = tmp;
 	}
 
-	if (user_memcpy(buffer, frame + position, toCopy) != B_OK) {
+	status_t copyStatus = user_memcpy(buffer, frame + position, toCopy);
+	bt878_unlock_io(device);
+	if (copyStatus != B_OK)
 		return B_BAD_ADDRESS;
-	}
 
 	*numBytes = toCopy;
 	return B_OK;
@@ -1455,8 +1579,12 @@ bt878_control(void* cookie, uint32 op, void* arg, size_t length)
 
 		case BTV_GET_CAPTURE_FORMAT:
 		{
+			status_t lockStatus = bt878_lock_io(device);
+			if (lockStatus != B_OK)
+				return lockStatus;
 			bttv_capture_format format;
 			bt878_current_format(device, &format);
+			bt878_unlock_io(device);
 			return user_memcpy(arg, &format, sizeof(format)) == B_OK
 				? B_OK : B_BAD_ADDRESS;
 		}
@@ -1472,6 +1600,10 @@ bt878_control(void* cookie, uint32 op, void* arg, size_t length)
 			if (status != B_OK)
 				return status;
 
+			status = bt878_lock_io(device);
+			if (status != B_OK)
+				return status;
+
 			bool wasCapturing = device->capturing;
 			bt878_stop_capture_locked(device);
 			device->width = (uint16)format.width;
@@ -1482,6 +1614,7 @@ bt878_control(void* cookie, uint32 op, void* arg, size_t length)
 			device->frame_ready = false;
 			if (wasCapturing)
 				status = bt878_start_capture_locked(device);
+			bt878_unlock_io(device);
 			return status;
 		}
 
@@ -1494,11 +1627,16 @@ bt878_control(void* cookie, uint32 op, void* arg, size_t length)
 			if (input >= device->profile->video_inputs)
 				return B_BAD_VALUE;
 
+			status_t lockStatus = bt878_lock_io(device);
+			if (lockStatus != B_OK)
+				return lockStatus;
+
 			bool wasCapturing = device->capturing;
 			bt878_stop_capture_locked(device);
 			device->input = (uint8)input;
 			if (wasCapturing)
 				bt878_start_capture_locked(device);
+			bt878_unlock_io(device);
 			return B_OK;
 		}
 
@@ -1525,13 +1663,26 @@ bt878_control(void* cookie, uint32 op, void* arg, size_t length)
 		}
 
 		case BTV_START_CAPTURE:
+		{
 			bttv_klog("[KERNEL] bt878_control: BTV_START_CAPTURE\n");
-			return bt878_start_capture_locked(device);
+			status_t lockStatus = bt878_lock_io(device);
+			if (lockStatus != B_OK)
+				return lockStatus;
+			status_t status = bt878_start_capture_locked(device);
+			bt878_unlock_io(device);
+			return status;
+		}
 
 		case BTV_STOP_CAPTURE:
+		{
 			bttv_klog("[KERNEL] bt878_control: BTV_STOP_CAPTURE\n");
+			status_t lockStatus = bt878_lock_io(device);
+			if (lockStatus != B_OK)
+				return lockStatus;
 			bt878_stop_capture_locked(device);
+			bt878_unlock_io(device);
 			return B_OK;
+		}
 
 		case BTV_GET_STATS:
 		{
@@ -1624,11 +1775,18 @@ init_driver(void)
 		if (device.frame_sem < B_OK)
 			break;
 
+		device.io_lock = create_sem(1, "bttv io lock");
+		if (device.io_lock < B_OK) {
+			delete_sem(device.frame_sem);
+			break;
+		}
+
 		bt878_enable_pci(&device);
 
 		status_t status = bt878_map_bar0(&device);
 		if (status != B_OK) {
 			delete_sem(device.frame_sem);
+			delete_sem(device.io_lock);
 			break;
 		}
 
@@ -1647,6 +1805,7 @@ init_driver(void)
 			device.regs_area = -1;
 			device.regs = NULL;
 			delete_sem(device.frame_sem);
+			delete_sem(device.io_lock);
 			break;
 		}
 
@@ -1692,6 +1851,8 @@ uninit_driver(void)
 
 		if (device.frame_sem >= B_OK)
 			delete_sem(device.frame_sem);
+		if (device.io_lock >= B_OK)
+			delete_sem(device.io_lock);
 	}
 
 	if (sPCI != NULL) {
