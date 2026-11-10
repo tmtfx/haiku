@@ -62,6 +62,8 @@ private:
 		status_t					_GetHash(uint8* hashOut);
 		status_t					_GetShadow(uint8* saltOut, uint8* hashOut);
 		status_t					_GetOrAskSessionPassword();
+		status_t					_EnableFingerprintUnlock(int32 fingerId);
+		status_t					_DisableFingerprintUnlock();
 		status_t					_EncryptKeyData(BMessage& keyMessage);
 		status_t					_DecryptKeyData(BMessage& keyMessage);
 		EVP_PKEY*					_DecryptMasterPrivateKey();

@@ -46,6 +46,11 @@ enum {
 
 	// Session password management
 	KEY_STORE_FORGET_PASSWORD				= 'KFgP',
+
+	// Fingerprint-unlock escrow management (requires an already-unlocked
+	// session, since only the server holds the plaintext master password)
+	KEY_STORE_ENABLE_FINGERPRINT_UNLOCK		= 'KfpE',
+	KEY_STORE_DISABLE_FINGERPRINT_UNLOCK		= 'KfpD',
 };
 
 

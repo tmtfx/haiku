@@ -86,6 +86,7 @@ SYSTEM_PREFERENCES += [ FFilterByBuildFeatures
 	Bluetooth
 	DataTranslations
 	E-mail
+	Fingerprint
 	KeyStore
 	Media
 	Printers

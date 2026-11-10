@@ -15,10 +15,15 @@
 
 #include <Directory.h>
 #include <Entry.h>
+#include <File.h>
 #include <FindDirectory.h>
+#include <Message.h>
+#include <Messenger.h>
 #include <Path.h>
 #include <Roster.h>
 #include <String.h>
+
+#include "../fingerprint/defs.h"
 
 #include <new>
 #include <string.h>
@@ -61,6 +66,7 @@ static const uint32 kFlagQueryLockState				= 0x1000;
 static const uint32 kFlagLockKeyring				= 0x2000;
 static const uint32 kFlagEnumerateApplications		= 0x4000;
 static const uint32 kFlagRemoveApplications			= 0x8000;
+static const uint32 kFlagFingerprintUnlock			= 0x10000;
 
 static const uint32 kDefaultAppFlags = kFlagGetKey | kFlagEnumerateKeys
 	| kFlagAddKey | kFlagRemoveKey | kFlagAddKeyring | kFlagRemoveKeyring
@@ -575,6 +581,30 @@ KeyStoreServer::MessageReceived(BMessage* message)
 			break;
 		}
 
+		case KEY_STORE_ENABLE_FINGERPRINT_UNLOCK:
+		{
+			if (!fHasSessionPassword || !fSessionPasswordValidated) {
+				result = _GetOrAskSessionPassword();
+				if (result != B_OK)
+					break;
+			}
+
+			int32 fingerId;
+			if (message->FindInt32("fingerId", &fingerId) != B_OK) {
+				result = B_BAD_VALUE;
+				break;
+			}
+
+			result = _EnableFingerprintUnlock(fingerId);
+			break;
+		}
+
+		case KEY_STORE_DISABLE_FINGERPRINT_UNLOCK:
+		{
+			result = _DisableFingerprintUnlock();
+			break;
+		}
+
 		case 0:
 		{
 			// Just the error case from above.
@@ -703,6 +733,9 @@ KeyStoreServer::_AccessFlagsFor(uint32 command) const
 			return kFlagEnumerateApplications;
 		case KEY_STORE_REMOVE_APPLICATION:
 			return kFlagRemoveApplications;
+		case KEY_STORE_ENABLE_FINGERPRINT_UNLOCK:
+		case KEY_STORE_DISABLE_FINGERPRINT_UNLOCK:
+			return kFlagFingerprintUnlock;
 	}
 
 	return 0;
@@ -1076,6 +1109,136 @@ KeyStoreServer::_GetOrAskSessionPassword()
 			debug_printf("Keystore Server: BCrypto InitCheck failed\n");
 	}
 	
+	// Try fingerprint unlock before falling back to the typed-password
+	// window. This never bypasses the shadow-hash check below - it only
+	// supplies a candidate password string to it, exactly like a typed
+	// one. See Fase 1e in the project plan for the security rationale
+	// (this is a convenience gate releasing a locally-stored secret after
+	// a live match, not a cryptographic strengthening of the password).
+	BString fingerprintCandidate;
+	bool haveFingerprintCandidate = false;
+	{
+		BPath escrowPath;
+		if (find_directory(B_USER_SETTINGS_DIRECTORY, &escrowPath) == B_OK) {
+			escrowPath.Append("fingerprint_escrow");
+			BFile escrowFile(escrowPath.Path(), B_READ_ONLY);
+			if (escrowFile.InitCheck() == B_OK) {
+				uint32 magic = 0;
+				int32 storedFingerId = -1;
+				uint8 iv[16];
+				uint32 cipherLen32 = 0;
+				size_t off = 0;
+				escrowFile.ReadAt(off, &magic, sizeof(magic));
+				off += sizeof(magic);
+				escrowFile.ReadAt(off, &storedFingerId, sizeof(storedFingerId));
+				off += sizeof(storedFingerId);
+				escrowFile.ReadAt(off, iv, sizeof(iv));
+				off += sizeof(iv);
+				escrowFile.ReadAt(off, &cipherLen32, sizeof(cipherLen32));
+				off += sizeof(cipherLen32);
+
+				if (magic == 0x4650574B /* 'FPWK' */ && cipherLen32 > 0
+					&& cipherLen32 < 1024 * 1024) {
+					uint8* cipher = new(std::nothrow) uint8[cipherLen32];
+					if (cipher != NULL
+						&& escrowFile.ReadAt(off, cipher, cipherLen32)
+							== (ssize_t)cipherLen32) {
+						BMessenger fpServer(FINGERPRINT_SERVER_SIGNATURE);
+						BMessage verifyRequest(B_FP_VERIFY_START);
+						BMessage verifyReply;
+						status_t verifyStatus = fpServer.IsValid()
+							? fpServer.SendMessage(&verifyRequest, &verifyReply)
+							: B_NO_INIT;
+
+						int32 verifyError = B_ERROR;
+						int32 matchedFingerId = -1;
+						verifyReply.FindInt32("error", &verifyError);
+						verifyReply.FindInt32("fingerId", &matchedFingerId);
+
+						if (verifyStatus == B_OK && verifyError == B_OK
+							&& matchedFingerId == storedFingerId) {
+							BMessage escrowRequest(B_FP_GET_ESCROW);
+							escrowRequest.AddInt32("fingerId", matchedFingerId);
+							BMessage escrowReply;
+							if (fpServer.SendMessage(&escrowRequest, &escrowReply)
+									== B_OK) {
+								int32 escrowError = B_ERROR;
+								const uint8* key = NULL;
+								ssize_t keyLen = 0;
+								escrowReply.FindInt32("error", &escrowError);
+								escrowReply.FindData("key", B_RAW_TYPE,
+									(const void**)&key, &keyLen);
+
+								if (escrowError == B_OK && keyLen == 32) {
+									uint8 keyBuf[32];
+									memcpy(keyBuf, key, 32);
+
+									BCrypto crypto;
+									crypto.SetAlgorithm(B_CRYPTO_AES);
+									crypto.SetMode(B_CRYPTO_MODE_CBC);
+									crypto.SetPadding(true, B_CRYPTO_PKCS7);
+
+									size_t plainBufSize = cipherLen32;
+									uint8* plain = new(std::nothrow)
+										uint8[plainBufSize];
+									if (plain != NULL) {
+										ssize_t plainLen = crypto.Decrypt(keyBuf,
+											32, iv, sizeof(iv), cipher,
+											cipherLen32, plain, plainBufSize);
+										secure_memzero_server(keyBuf,
+											sizeof(keyBuf));
+										if (plainLen >= 0) {
+											fingerprintCandidate.SetTo(
+												(const char*)plain, plainLen);
+											haveFingerprintCandidate = true;
+										}
+										secure_memzero_server(plain,
+											plainBufSize);
+										delete[] plain;
+									}
+								}
+							}
+						}
+					}
+					delete[] cipher;
+				}
+			}
+		}
+	}
+
+	if (haveFingerprintCandidate) {
+		const char* passw = fingerprintCandidate.String();
+		size_t passLen = fingerprintCandidate.Length();
+		size_t inputLen = passLen + 16;
+		uint8* input = new(std::nothrow) uint8[inputLen];
+		if (input != NULL) {
+			memcpy(input, passw, passLen);
+			memcpy(input + passLen, shadowSalt, 16);
+
+			BCrypto fpCrypto;
+			uint8 fpHash[64];
+			bool matched = fpCrypto.InitCheck() == B_OK
+				&& fpCrypto.Digest(B_CRYPTO_BLAKE2B, input, inputLen, fpHash)
+					== B_OK
+				&& memcmp(fpHash, shadowHash, 64) == 0;
+			secure_memzero_server(input, inputLen);
+			delete[] input;
+
+			if (matched) {
+				fSessionPassword = fingerprintCandidate;
+				fHasSessionPassword = true;
+				fSessionPasswordValidated = true;
+				secure_memzero_server((void*)fingerprintCandidate.String(),
+					fingerprintCandidate.Length());
+				return B_OK;
+			}
+		}
+		// Stale escrow (e.g. master password changed since enabling
+		// fingerprint unlock) or decode failure - fall through to the
+		// typed-password window below, same as if fingerprint unlock
+		// had never been enabled.
+	}
+
 	MasterPasswordRequestWindow* window
 		= new(std::nothrow) MasterPasswordRequestWindow();
 	if (window == NULL) {
@@ -1175,6 +1338,120 @@ KeyStoreServer::_GetOrAskSessionPassword()
 	//return B_OK;
 }
 
+
+status_t
+KeyStoreServer::_EnableFingerprintUnlock(int32 fingerId)
+{
+	// Only reachable with an already-unlocked, validated session (checked
+	// by the caller) - fSessionPassword holds the plaintext master
+	// password at this point.
+	uint8 key[32];
+	uint8 iv[16];
+	BCrypto crypto;
+	if (crypto.InitCheck() != B_OK)
+		return B_ERROR;
+	if (crypto.GetRandomBytes(key, sizeof(key)) != B_OK
+		|| crypto.GetRandomBytes(iv, sizeof(iv)) != B_OK) {
+		return B_ERROR;
+	}
+
+	crypto.SetAlgorithm(B_CRYPTO_AES);
+	crypto.SetMode(B_CRYPTO_MODE_CBC);
+	crypto.SetPadding(true, B_CRYPTO_PKCS7);
+
+	const uint8* plainPtr = (const uint8*)fSessionPassword.String();
+	size_t plainLen = (size_t)fSessionPassword.Length();
+
+	size_t cipherBufSize = crypto.GetOutputSize(plainLen, B_CRYPTO_ENCRYPT);
+	uint8* cipher = new(std::nothrow) uint8[cipherBufSize];
+	if (cipher == NULL) {
+		secure_memzero_server(key, sizeof(key));
+		return B_NO_MEMORY;
+	}
+
+	ssize_t cipherLen = crypto.Encrypt(key, sizeof(key), iv, sizeof(iv),
+		plainPtr, plainLen, cipher, cipherBufSize);
+	if (cipherLen < 0) {
+		secure_memzero_server(key, sizeof(key));
+		delete[] cipher;
+		return B_ERROR;
+	}
+
+	BPath escrowPath;
+	status_t status = find_directory(B_USER_SETTINGS_DIRECTORY, &escrowPath);
+	if (status == B_OK)
+		escrowPath.Append("fingerprint_escrow");
+
+	if (status == B_OK) {
+		BFile file(escrowPath.Path(),
+			B_WRITE_ONLY | B_CREATE_FILE | B_ERASE_FILE);
+		status = file.InitCheck();
+		if (status == B_OK) {
+			file.SetPermissions(0600);
+			uint32 magic = 0x4650574B; // 'FPWK'
+			uint32 cipherLen32 = (uint32)cipherLen;
+			size_t off = 0;
+			file.WriteAt(off, &magic, sizeof(magic));
+			off += sizeof(magic);
+			file.WriteAt(off, &fingerId, sizeof(fingerId));
+			off += sizeof(fingerId);
+			file.WriteAt(off, iv, sizeof(iv));
+			off += sizeof(iv);
+			file.WriteAt(off, &cipherLen32, sizeof(cipherLen32));
+			off += sizeof(cipherLen32);
+			file.WriteAt(off, cipher, cipherLen);
+		}
+	}
+
+	delete[] cipher;
+
+	if (status != B_OK) {
+		secure_memzero_server(key, sizeof(key));
+		return status;
+	}
+
+	// Hand K to fingerprint_server, keyed to this fingerId. It never sees
+	// the master password itself, only this opaque 32-byte key.
+	BMessenger fpServer(FINGERPRINT_SERVER_SIGNATURE);
+	if (!fpServer.IsValid()) {
+		secure_memzero_server(key, sizeof(key));
+		BEntry(escrowPath.Path()).Remove();
+		return B_NO_INIT;
+	}
+
+	BMessage request(B_FP_SET_ESCROW);
+	request.AddInt32("fingerId", fingerId);
+	request.AddData("key", B_RAW_TYPE, key, sizeof(key));
+	secure_memzero_server(key, sizeof(key));
+
+	BMessage reply;
+	status = fpServer.SendMessage(&request, &reply);
+	int32 fpError = B_ERROR;
+	reply.FindInt32("error", &fpError);
+	if (status != B_OK || fpError != B_OK) {
+		BEntry(escrowPath.Path()).Remove();
+		return status != B_OK ? status : fpError;
+	}
+
+	return B_OK;
+}
+
+
+status_t
+KeyStoreServer::_DisableFingerprintUnlock()
+{
+	BPath escrowPath;
+	status_t status = find_directory(B_USER_SETTINGS_DIRECTORY, &escrowPath);
+	if (status != B_OK)
+		return status;
+	escrowPath.Append("fingerprint_escrow");
+
+	BEntry entry(escrowPath.Path());
+	if (entry.Exists())
+		return entry.Remove();
+
+	return B_OK;
+}
 
 
 status_t

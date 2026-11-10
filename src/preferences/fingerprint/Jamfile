@@ -1,0 +1,18 @@
+SubDir HAIKU_TOP src preferences fingerprint ;
+
+UsePrivateHeaders shared ;
+
+Application Fingerprint :
+	FingerprintApp.cpp
+	FingerprintWindow.cpp
+	FingerListItem.cpp
+	: be localestub shared [ TargetLibstdc++ ]
+	: Fingerprint.rdef
+;
+
+DoCatalogs Fingerprint :
+	x-vnd.Haiku-Fingerprint
+	:
+	FingerprintApp.cpp
+	FingerprintWindow.cpp
+;

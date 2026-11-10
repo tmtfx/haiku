@@ -11,6 +11,7 @@
 #include <Path.h>
 #include <File.h>
 #include <Directory.h>
+#include <Entry.h>
 #include <KeyStore.h>
 #include <Alert.h>
 #include <Catalog.h>
@@ -231,6 +232,19 @@ status_t ResetMasterWindow::_WriteMasterPasswordShadow(uint8* outSalt)
 
     err = shadow.Flatten(&shadowFile);
     //fprintf(stderr, "[DEBUG SHADOW-WRITE] === FINE _WriteMasterPasswordShadow (Esito: %s) ===\n\n", (err == B_OK ? "OK" : "ERR"));
+
+    if (err == B_OK) {
+        // The master password just changed, so any fingerprint escrow
+        // wrapping the OLD password must be invalidated now - otherwise a
+        // stale fingerprint match would keep releasing a password that no
+        // longer matches the new shadow hash (harmless - KeyStoreServer
+        // falls back to the typed-password prompt either way - but the
+        // file is now pointless and should not linger).
+        BPath escrowPath(settingsDir.Path(), "fingerprint_escrow");
+        BEntry escrowEntry(escrowPath.Path());
+        if (escrowEntry.Exists())
+            escrowEntry.Remove();
+    }
 
     return err;
 }
