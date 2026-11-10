@@ -335,24 +335,38 @@ MainWindow::MessageReceived(BMessage* message)
 void
 MainWindow::_UpdateResolutions()
 {
+	BMenuItem* item0 = fResolutionMenu->ItemAt(0);
+	BMenuItem* item1 = fResolutionMenu->ItemAt(1);
+
 	if (fStandard == BTV_STD_PAL) {
 		fWidth = fHalfResolution ? 360 : 720;
 		fHeight = fHalfResolution ? 288 : 576;
-		BMenuItem* item0 = fResolutionMenu->ItemAt(0);
 		if (item0 != NULL)
 			item0->SetLabel("Full (720x576)");
-		BMenuItem* item1 = fResolutionMenu->ItemAt(1);
 		if (item1 != NULL)
 			item1->SetLabel("Half (360x288)");
 	} else {
 		fWidth = fHalfResolution ? 320 : 720;
 		fHeight = fHalfResolution ? 240 : 480;
-		BMenuItem* item0 = fResolutionMenu->ItemAt(0);
 		if (item0 != NULL)
 			item0->SetLabel("Full (720x480)");
-		BMenuItem* item1 = fResolutionMenu->ItemAt(1);
 		if (item1 != NULL)
 			item1->SetLabel("Half (320x240)");
+	}
+
+	// BMenuField does not display whichever BMenuItem happens to be
+	// marked -- it displays a separate "superitem" that only copies a
+	// newly marked item's label in BMenu::_ItemMarked(), and only when
+	// the menu has SetLabelFromMarked(true) (see Menu.cpp). SetLabel() on
+	// the already-marked item above never goes through that path, so the
+	// field kept showing stale text ("Full (720x480)" after switching to
+	// PAL) until the user re-picked the item by hand, which does mark it.
+	// Push the current item's new label onto the field's own displayed
+	// item directly instead of relying on that marking side effect.
+	BMenuItem* current = fHalfResolution ? item1 : item0;
+	if (fResolutionField != NULL && fResolutionField->MenuItem() != NULL
+		&& current != NULL) {
+		fResolutionField->MenuItem()->SetLabel(current->Label());
 	}
 }
 
