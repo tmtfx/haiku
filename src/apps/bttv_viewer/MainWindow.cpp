@@ -177,6 +177,15 @@ MainWindow::_BuildLayout()
 	itemNtsc->SetMarked(true);
 	fStandardMenu->AddItem(itemNtsc);
 
+	// PAL colour encoding on NTSC-style 525-line/60Hz timing (480 active
+	// lines, not 576) -- see BTV_STD_PAL60 in DriverInterface.h. Several
+	// real composite sources tested against this driver turned out to
+	// actually be this, not genuine 625-line PAL, despite being labeled
+	// "PAL" on the source side.
+	BMessage* stdPal60Msg = new BMessage(kMsgStandardChanged);
+	stdPal60Msg->AddInt32("standard", BTV_STD_PAL60);
+	fStandardMenu->AddItem(new BMenuItem("PAL-60", stdPal60Msg));
+
 	fStandardMenu->SetTargetForItems(this);
 	fStandardField = new BMenuField("standardField", "Standard:", fStandardMenu);
 
@@ -245,11 +254,24 @@ MainWindow::MessageReceived(BMessage* message)
 		{
 			int32 source;
 			if (message->FindInt32("source", &source) == B_OK) {
-				fSourceMode = (SourceMode)source;
-				if (fCapturing) {
+				// _StopCapture() dispatches to _StopDirect()/_StopMediaKit()
+				// purely from fSourceMode -- it has no other record of
+				// which one is actually running. Changing fSourceMode
+				// first (as this used to) made it stop whichever mode was
+				// just *selected* instead of whichever was actually
+				// capturing: switching from a running Direct capture to
+				// Media Kit, for instance, called _StopMediaKit() (a
+				// no-op, fMediaRoster was never set) while the real
+				// DirectCapture thread kept running untouched in the
+				// background, racing the new Media Kit producer for the
+				// same device -- confirmed via the kernel log showing
+				// video_standard flipping between the two modes'
+				// settings mid-capture. Stop with the *old* mode first.
+				if (fCapturing)
 					_StopCapture();
+				fSourceMode = (SourceMode)source;
+				if (fCapturing)
 					_StartCapture();
-				}
 			}
 			break;
 		}
@@ -345,6 +367,16 @@ MainWindow::_UpdateResolutions()
 			item0->SetLabel("Full (720x576)");
 		if (item1 != NULL)
 			item1->SetLabel("Half (360x288)");
+	} else if (fStandard == BTV_STD_PAL60) {
+		// PAL-60: PAL's horizontal timing (720/360 wide, like real PAL)
+		// but only 480/240 active lines, like NTSC -- see BTV_STD_PAL60
+		// in DriverInterface.h.
+		fWidth = fHalfResolution ? 360 : 720;
+		fHeight = fHalfResolution ? 240 : 480;
+		if (item0 != NULL)
+			item0->SetLabel("Full (720x480)");
+		if (item1 != NULL)
+			item1->SetLabel("Half (360x240)");
 	} else {
 		fWidth = fHalfResolution ? 320 : 720;
 		fHeight = fHalfResolution ? 240 : 480;
@@ -539,6 +571,37 @@ MainWindow::_StartMediaKit()
 			viewer_log("[VIEWER] MainWindow::_StartMediaKit: _FindBttvNode FAILED (%s)\n", strerror(status));
 			_SetStatus("Media Kit: Bt848/Bt878 node not found in media server");
 			return status;
+		}
+
+		// Push input/standard/resolution via the producer's own
+		// parameters *before* Connect(), rather than relying solely on
+		// Connect()'s width/height/field_rate negotiation. That
+		// negotiation (BttvProducer::_SpecializeFormat()) can never
+		// distinguish BTV_STD_PAL60 from BTV_STD_NTSC on its own -- both
+		// are 480 active lines at the same ~29.97 Hz field rate, and
+		// PAL-60 differs only in colour encoding, invisible at the
+		// media_format level. Only done for the explicit bttv node (not
+		// SOURCE_MEDIA_DEFAULT, which might not even be this card).
+		BParameterWeb* web = NULL;
+		if (fMediaRoster->GetParameterWebFor(fProducerNode, &web) == B_OK
+			&& web != NULL) {
+			for (int32 i = 0; i < web->CountParameters(); i++) {
+				BParameter* param = web->ParameterAt(i);
+				if (param == NULL)
+					continue;
+				if (param->ID() == BTV_PARAM_INPUT) {
+					uint32 value = fInput;
+					param->SetValue(&value, sizeof(value), system_time());
+				} else if (param->ID() == BTV_PARAM_STANDARD) {
+					uint32 value = fStandard;
+					param->SetValue(&value, sizeof(value), system_time());
+				} else if (param->ID() == BTV_PARAM_RESOLUTION) {
+					uint32 value = fHalfResolution
+						? BTV_RESOLUTION_HALF : BTV_RESOLUTION_FULL;
+					param->SetValue(&value, sizeof(value), system_time());
+				}
+			}
+			delete web;
 		}
 	}
 
