@@ -29,6 +29,38 @@
 #define LESS_THAN		1
 
 
+// Sort rank buckets -- see MediaListItem::Rank() in MediaListItem.h for
+// the full rationale (replaces a non-transitive, ad hoc pairwise
+// Visitor-based comparison scheme). Lower sorts first. The audio mixer
+// shares a bucket with ordinary audio device nodes: the only two
+// concrete types that were ever actually observed interleaved and sorted
+// together purely alphabetically (e.g. "Audio mixer", "USB Audio",
+// "Yamaha ...").
+enum {
+	kRankAudioDevice = 0,
+	kRankAudioNode = 1,
+	kRankMidi = 2,
+	kRankVideoDevice = 3,
+	kRankVideoNode = 4
+};
+
+
+static int
+CompareRankAndLabel(int rankA, const char* labelA, int rankB,
+	const char* labelB)
+{
+	if (rankA != rankB)
+		return rankA < rankB ? GREATER_THAN : LESS_THAN;
+
+	int cmp = strcmp(labelA, labelB);
+	if (cmp < 0)
+		return GREATER_THAN;
+	if (cmp > 0)
+		return LESS_THAN;
+	return 0;
+}
+
+
 MediaIcons* MediaListItem::sIcons = NULL;
 
 
@@ -264,6 +296,13 @@ NodeListItem::Accept(MediaListItem::Visitor& visitor)
 
 
 int
+NodeListItem::Rank()
+{
+	return fMediaType == AUDIO_TYPE ? kRankAudioNode : kRankVideoNode;
+}
+
+
+int
 NodeListItem::CompareWith(MediaListItem* item)
 {
 	Comparator comparator(this);
@@ -283,35 +322,32 @@ NodeListItem::Comparator::Comparator(NodeListItem* compareOthersTo)
 void
 NodeListItem::Comparator::Visit(NodeListItem* item)
 {
-	result = GREATER_THAN;
-
-	if (fTarget->Type() != item->Type() && fTarget->Type() == VIDEO_TYPE)
-		result = LESS_THAN;
-	else
-		result = strcmp(fTarget->Label(), item->Label());
+	result = CompareRankAndLabel(fTarget->Rank(), fTarget->Label(),
+		item->Rank(), item->Label());
 }
 
 
 void
 NodeListItem::Comparator::Visit(DeviceListItem* item)
 {
-	result = LESS_THAN;
-	if (fTarget->Type() != item->Type() && fTarget->Type() == AUDIO_TYPE)
-		result = GREATER_THAN;
+	result = CompareRankAndLabel(fTarget->Rank(), fTarget->Label(),
+		item->Rank(), item->Label());
 }
 
 
 void
 NodeListItem::Comparator::Visit(AudioMixerListItem* item)
 {
-	result = LESS_THAN;
+	result = CompareRankAndLabel(fTarget->Rank(), fTarget->Label(),
+		item->Rank(), item->Label());
 }
 
 
 void
 NodeListItem::Comparator::Visit(MidiListItem* item)
 {
-	result = GREATER_THAN;
+	result = CompareRankAndLabel(fTarget->Rank(), fTarget->Label(),
+		item->Rank(), item->Label());
 }
 
 
@@ -336,6 +372,13 @@ DeviceListItem::Accept(MediaListItem::Visitor& visitor)
 
 
 int
+DeviceListItem::Rank()
+{
+	return fMediaType == AUDIO_TYPE ? kRankAudioDevice : kRankVideoDevice;
+}
+
+
+int
 DeviceListItem::CompareWith(MediaListItem* item)
 {
 	Comparator comparator(this);
@@ -355,34 +398,32 @@ DeviceListItem::Comparator::Comparator(DeviceListItem* compareOthersTo)
 void
 DeviceListItem::Comparator::Visit(NodeListItem* item)
 {
-	result = GREATER_THAN;
-	if (fTarget->Type() != item->Type() && fTarget->Type() == AUDIO_TYPE)
-		result = LESS_THAN;
+	result = CompareRankAndLabel(fTarget->Rank(), fTarget->Label(),
+		item->Rank(), item->Label());
 }
 
 
 void
 DeviceListItem::Comparator::Visit(DeviceListItem* item)
 {
-	result = LESS_THAN;
-	if (fTarget->Type() == AUDIO_TYPE)
-		result = GREATER_THAN;
+	result = CompareRankAndLabel(fTarget->Rank(), fTarget->Label(),
+		item->Rank(), item->Label());
 }
 
 
 void
 DeviceListItem::Comparator::Visit(AudioMixerListItem* item)
 {
-	result = LESS_THAN;
-	if (fTarget->Type() == AUDIO_TYPE)
-		result = GREATER_THAN;
+	result = CompareRankAndLabel(fTarget->Rank(), fTarget->Label(),
+		item->Rank(), item->Label());
 }
 
 
 void
 DeviceListItem::Comparator::Visit(MidiListItem* item)
 {
-	result = LESS_THAN;
+	result = CompareRankAndLabel(fTarget->Rank(), fTarget->Label(),
+		item->Rank(), item->Label());
 }
 
 
@@ -430,6 +471,13 @@ AudioMixerListItem::Accept(MediaListItem::Visitor& visitor)
 
 
 int
+AudioMixerListItem::Rank()
+{
+	return kRankAudioNode;
+}
+
+
+int
 AudioMixerListItem::CompareWith(MediaListItem* item)
 {
 	Comparator comparator(this);
@@ -449,30 +497,32 @@ AudioMixerListItem::Comparator::Comparator(AudioMixerListItem* compareOthersTo)
 void
 AudioMixerListItem::Comparator::Visit(NodeListItem* item)
 {
-	result = GREATER_THAN;
+	result = CompareRankAndLabel(fTarget->Rank(), fTarget->Label(),
+		item->Rank(), item->Label());
 }
 
 
 void
 AudioMixerListItem::Comparator::Visit(DeviceListItem* item)
 {
-	result = GREATER_THAN;
-	if (item->Type() == AUDIO_TYPE)
-		result = LESS_THAN;
+	result = CompareRankAndLabel(fTarget->Rank(), fTarget->Label(),
+		item->Rank(), item->Label());
 }
 
 
 void
 AudioMixerListItem::Comparator::Visit(AudioMixerListItem* item)
 {
-	result = 0;
+	result = CompareRankAndLabel(fTarget->Rank(), fTarget->Label(),
+		item->Rank(), item->Label());
 }
 
 
 void
 AudioMixerListItem::Comparator::Visit(MidiListItem* item)
 {
-	result = GREATER_THAN;
+	result = CompareRankAndLabel(fTarget->Rank(), fTarget->Label(),
+		item->Rank(), item->Label());
 }
 
 
@@ -515,6 +565,13 @@ MidiListItem::Accept(MediaListItem::Visitor& visitor)
 
 
 int
+MidiListItem::Rank()
+{
+	return kRankMidi;
+}
+
+
+int
 MidiListItem::CompareWith(MediaListItem* item)
 {
 	Comparator comparator(this);
@@ -534,30 +591,32 @@ MidiListItem::Comparator::Comparator(MidiListItem* compareOthersTo)
 void
 MidiListItem::Comparator::Visit(NodeListItem* item)
 {
-	result = GREATER_THAN;
+	result = CompareRankAndLabel(fTarget->Rank(), fTarget->Label(),
+		item->Rank(), item->Label());
 }
 
 
 void
 MidiListItem::Comparator::Visit(DeviceListItem* item)
 {
-	result = GREATER_THAN;
-	if (item->Type() == AUDIO_TYPE)
-		result = LESS_THAN;
+	result = CompareRankAndLabel(fTarget->Rank(), fTarget->Label(),
+		item->Rank(), item->Label());
 }
 
 
 void
 MidiListItem::Comparator::Visit(AudioMixerListItem* item)
 {
-	result = LESS_THAN;
+	result = CompareRankAndLabel(fTarget->Rank(), fTarget->Label(),
+		item->Rank(), item->Label());
 }
 
 
 void
 MidiListItem::Comparator::Visit(MidiListItem* item)
 {
-	result = 0;
+	result = CompareRankAndLabel(fTarget->Rank(), fTarget->Label(),
+		item->Rank(), item->Label());
 }
 
 
