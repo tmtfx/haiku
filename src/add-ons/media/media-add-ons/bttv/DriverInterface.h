@@ -7,7 +7,10 @@
 
 enum {
 	BTV_STD_PAL = 0,
-	BTV_STD_NTSC = 1
+	BTV_STD_NTSC = 1,
+	// See bttv_driver.h for the full rationale: PAL colour encoding on
+	// NTSC-style 525-line/60Hz timing (480 active lines, not 576).
+	BTV_STD_PAL60 = 2
 };
 
 enum {
@@ -18,6 +21,31 @@ enum {
 
 enum {
 	BTV_PIXEL_FORMAT_YUY2 = 0x32595559U
+};
+
+// BParameterWeb discrete-parameter IDs for the bttv media add-on's
+// BttvProducer, and the values its P_RESOLUTION parameter takes. Shared
+// here (not private to BttvProducer) so a client with no BMediaNode of
+// its own -- e.g. bttv_viewer's MainWindow -- can still push these via
+// BMediaRoster::GetParameterWebFor()/BParameter::SetValue() *before*
+// Connect(), which it needs to for BTV_STD_PAL60: Connect()'s format
+// negotiation (width/height/field_rate) can never distinguish PAL-60
+// from NTSC on its own, since both are 480 active lines at the same
+// ~29.97 Hz field rate -- see BttvProducer::_SpecializeFormat() in
+// Producer.cpp.
+enum {
+	BTV_PARAM_INPUT = 1,
+	BTV_PARAM_STANDARD,
+	BTV_PARAM_RESOLUTION,
+	BTV_PARAM_BRIGHTNESS,
+	BTV_PARAM_CONTRAST,
+	BTV_PARAM_SATURATION,
+	BTV_PARAM_HUE
+};
+
+enum {
+	BTV_RESOLUTION_FULL = 0,
+	BTV_RESOLUTION_HALF = 1
 };
 
 enum {

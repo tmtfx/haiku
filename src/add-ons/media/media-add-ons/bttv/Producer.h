@@ -113,20 +113,9 @@ protected:
 	virtual	status_t			StartControlPanel(BMessenger* outMessenger);
 
 private:
-			enum {
-				P_INPUT = 1,
-				P_STANDARD,
-				P_RESOLUTION,
-				P_BRIGHTNESS,
-				P_CONTRAST,
-				P_SATURATION,
-				P_HUE
-			};
-
-			enum {
-				RESOLUTION_FULL = 0,
-				RESOLUTION_HALF = 1
-			};
+			// BTV_PARAM_*/BTV_RESOLUTION_* now live in DriverInterface.h,
+			// shared with any client that needs to set these parameters
+			// without a BMediaNode of its own (see the comment there).
 
 			status_t			_OpenDriver();
 			void				_CloseDriver();

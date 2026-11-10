@@ -71,7 +71,7 @@ BttvProducer::BttvProducer(BMediaAddOn* addOn, const char* name, int32 internalI
 	fHasPendingFormat(false),
 	fSelectedInput(BTV_INPUT_COMPOSITE),
 	fSelectedStandard(BTV_STD_PAL),
-	fResolutionPreset(RESOLUTION_FULL),
+	fResolutionPreset(BTV_RESOLUTION_FULL),
 	fInputLastChange(0),
 	fStandardLastChange(0),
 	fResolutionLastChange(0),
@@ -549,43 +549,43 @@ BttvProducer::GetParameterValue(int32 id, bigtime_t* lastChange, void* value,
 		return B_BAD_VALUE;
 
 	switch (id) {
-		case P_INPUT:
+		case BTV_PARAM_INPUT:
 			*lastChange = fInputLastChange;
 			*size = sizeof(uint32);
 			*((uint32*)value) = fSelectedInput;
 			return B_OK;
 
-		case P_STANDARD:
+		case BTV_PARAM_STANDARD:
 			*lastChange = fStandardLastChange;
 			*size = sizeof(uint32);
 			*((uint32*)value) = fSelectedStandard;
 			return B_OK;
 
-		case P_RESOLUTION:
+		case BTV_PARAM_RESOLUTION:
 			*lastChange = fResolutionLastChange;
 			*size = sizeof(uint32);
 			*((uint32*)value) = fResolutionPreset;
 			return B_OK;
 
-		case P_BRIGHTNESS:
+		case BTV_PARAM_BRIGHTNESS:
 			*lastChange = fBrightnessLastChange;
 			*size = sizeof(float);
 			*((float*)value) = fControls.brightness;
 			return B_OK;
 
-		case P_CONTRAST:
+		case BTV_PARAM_CONTRAST:
 			*lastChange = fContrastLastChange;
 			*size = sizeof(float);
 			*((float*)value) = fControls.contrast;
 			return B_OK;
 
-		case P_SATURATION:
+		case BTV_PARAM_SATURATION:
 			*lastChange = fSaturationLastChange;
 			*size = sizeof(float);
 			*((float*)value) = fControls.saturation;
 			return B_OK;
 
-		case P_HUE:
+		case BTV_PARAM_HUE:
 			*lastChange = fHueLastChange;
 			*size = sizeof(float);
 			*((float*)value) = fControls.hue;
@@ -610,25 +610,25 @@ BttvProducer::SetParameterValue(int32 id, bigtime_t when, const void* value,
 	uint32 resolution = fResolutionPreset;
 
 	switch (id) {
-		case P_INPUT:
+		case BTV_PARAM_INPUT:
 			if (newValue == fSelectedInput)
 				return;
 			input = newValue;
 			break;
 
-		case P_STANDARD:
+		case BTV_PARAM_STANDARD:
 			if (newValue == fSelectedStandard)
 				return;
 			standard = newValue;
 			break;
 
-		case P_RESOLUTION:
+		case BTV_PARAM_RESOLUTION:
 			if (newValue == fResolutionPreset)
 				return;
 			resolution = newValue;
 			break;
 
-		case P_BRIGHTNESS:
+		case BTV_PARAM_BRIGHTNESS:
 		{
 			if (size != sizeof(float))
 				return;
@@ -639,13 +639,13 @@ BttvProducer::SetParameterValue(int32 id, bigtime_t when, const void* value,
 			fBrightnessLastChange = when;
 			{
 				float current = fControls.brightness;
-				BroadcastNewParameterValue(fBrightnessLastChange, P_BRIGHTNESS,
+				BroadcastNewParameterValue(fBrightnessLastChange, BTV_PARAM_BRIGHTNESS,
 					&current, sizeof(current));
 			}
 			return;
 		}
 
-		case P_CONTRAST:
+		case BTV_PARAM_CONTRAST:
 		{
 			if (size != sizeof(float))
 				return;
@@ -656,13 +656,13 @@ BttvProducer::SetParameterValue(int32 id, bigtime_t when, const void* value,
 			fContrastLastChange = when;
 			{
 				float current = fControls.contrast;
-				BroadcastNewParameterValue(fContrastLastChange, P_CONTRAST,
+				BroadcastNewParameterValue(fContrastLastChange, BTV_PARAM_CONTRAST,
 					&current, sizeof(current));
 			}
 			return;
 		}
 
-		case P_SATURATION:
+		case BTV_PARAM_SATURATION:
 		{
 			if (size != sizeof(float))
 				return;
@@ -673,13 +673,13 @@ BttvProducer::SetParameterValue(int32 id, bigtime_t when, const void* value,
 			fSaturationLastChange = when;
 			{
 				float current = fControls.saturation;
-				BroadcastNewParameterValue(fSaturationLastChange, P_SATURATION,
+				BroadcastNewParameterValue(fSaturationLastChange, BTV_PARAM_SATURATION,
 					&current, sizeof(current));
 			}
 			return;
 		}
 
-		case P_HUE:
+		case BTV_PARAM_HUE:
 		{
 			if (size != sizeof(float))
 				return;
@@ -690,7 +690,7 @@ BttvProducer::SetParameterValue(int32 id, bigtime_t when, const void* value,
 			fHueLastChange = when;
 			{
 				float current = fControls.hue;
-				BroadcastNewParameterValue(fHueLastChange, P_HUE,
+				BroadcastNewParameterValue(fHueLastChange, BTV_PARAM_HUE,
 					&current, sizeof(current));
 			}
 			return;
@@ -709,21 +709,21 @@ BttvProducer::SetParameterValue(int32 id, bigtime_t when, const void* value,
 		return;
 
 	switch (id) {
-		case P_INPUT:
+		case BTV_PARAM_INPUT:
 			fInputLastChange = when;
-			BroadcastNewParameterValue(fInputLastChange, P_INPUT, &fSelectedInput,
+			BroadcastNewParameterValue(fInputLastChange, BTV_PARAM_INPUT, &fSelectedInput,
 				sizeof(fSelectedInput));
 			break;
 
-		case P_STANDARD:
+		case BTV_PARAM_STANDARD:
 			fStandardLastChange = when;
-			BroadcastNewParameterValue(fStandardLastChange, P_STANDARD,
+			BroadcastNewParameterValue(fStandardLastChange, BTV_PARAM_STANDARD,
 				&fSelectedStandard, sizeof(fSelectedStandard));
 			break;
 
-		case P_RESOLUTION:
+		case BTV_PARAM_RESOLUTION:
 			fResolutionLastChange = when;
-			BroadcastNewParameterValue(fResolutionLastChange, P_RESOLUTION,
+			BroadcastNewParameterValue(fResolutionLastChange, BTV_PARAM_RESOLUTION,
 				&fResolutionPreset, sizeof(fResolutionPreset));
 			break;
 	}
@@ -797,7 +797,9 @@ BttvProducer::_ApplyCaptureFormat(const bttv_capture_format& format)
 void
 BttvProducer::_UpdateOutputFormat()
 {
-	float fieldRate = fCaptureFormat.video_standard == BTV_STD_NTSC ? 29.97f : 25.0f;
+	// PAL-60 is "PAL" only in colour encoding -- its field rate is the
+	// NTSC-family ~59.94 Hz (525-line/60Hz timing), not PAL's 50Hz.
+	float fieldRate = fCaptureFormat.video_standard != BTV_STD_PAL ? 29.97f : 25.0f;
 
 	fOutput.format.type = B_MEDIA_RAW_VIDEO;
 	fOutput.format.u.raw_video = media_raw_video_format::wildcard;
@@ -825,7 +827,7 @@ BttvProducer::_CreateParameterWeb()
 	BParameterGroup* main = web->MakeGroup(Name());
 	BParameterGroup* controls = main->MakeGroup("Capture");
 
-	BDiscreteParameter* input = controls->MakeDiscreteParameter(P_INPUT,
+	BDiscreteParameter* input = controls->MakeDiscreteParameter(BTV_PARAM_INPUT,
 		B_MEDIA_NO_TYPE, "Input", B_INPUT_MUX);
 	input->AddItem(BTV_INPUT_COMPOSITE, "Composite");
 
@@ -835,40 +837,59 @@ BttvProducer::_CreateParameterWeb()
 	if ((fCardInfo.capabilities & BTV_CAP_HAS_SVIDEO) != 0)
 		input->AddItem(BTV_INPUT_SVIDEO, "S-Video");
 
-	BDiscreteParameter* standard = controls->MakeDiscreteParameter(P_STANDARD,
+	BDiscreteParameter* standard = controls->MakeDiscreteParameter(BTV_PARAM_STANDARD,
 		B_MEDIA_NO_TYPE, "Standard", B_VIDEO_FORMAT);
 	standard->AddItem(BTV_STD_PAL, "PAL");
 	standard->AddItem(BTV_STD_NTSC, "NTSC");
+	standard->AddItem(BTV_STD_PAL60, "PAL-60");
 
-	BDiscreteParameter* resolution = controls->MakeDiscreteParameter(P_RESOLUTION,
+	BDiscreteParameter* resolution = controls->MakeDiscreteParameter(BTV_PARAM_RESOLUTION,
 		B_MEDIA_NO_TYPE, "Resolution", B_RESOLUTION);
-	resolution->AddItem(RESOLUTION_FULL, "Full");
-	resolution->AddItem(RESOLUTION_HALF, "Half");
+	resolution->AddItem(BTV_RESOLUTION_FULL, "Full");
+	resolution->AddItem(BTV_RESOLUTION_HALF, "Half");
 
 	BParameterGroup* image = main->MakeGroup("Image");
-	image->MakeContinuousParameter(P_BRIGHTNESS, B_MEDIA_RAW_VIDEO,
+	image->MakeContinuousParameter(BTV_PARAM_BRIGHTNESS, B_MEDIA_RAW_VIDEO,
 		"Brightness", B_LEVEL, "", -128, 127, 1);
-	image->MakeContinuousParameter(P_CONTRAST, B_MEDIA_RAW_VIDEO,
+	image->MakeContinuousParameter(BTV_PARAM_CONTRAST, B_MEDIA_RAW_VIDEO,
 		"Contrast", B_LEVEL, "", 0, 255, 1);
-	image->MakeContinuousParameter(P_SATURATION, B_MEDIA_RAW_VIDEO,
+	image->MakeContinuousParameter(BTV_PARAM_SATURATION, B_MEDIA_RAW_VIDEO,
 		"Saturation", B_LEVEL, "", 0, 255, 1);
-	image->MakeContinuousParameter(P_HUE, B_MEDIA_RAW_VIDEO,
+	image->MakeContinuousParameter(BTV_PARAM_HUE, B_MEDIA_RAW_VIDEO,
 		"Hue", B_LEVEL, "", -128, 127, 1);
 
 	return web;
 }
 
 
+// PAL-60 shares PAL's horizontal timing (so the same half-width, 360,
+// not NTSC's 320) but is 480 active lines like NTSC (so the same
+// half-height, 240, not PAL's 288). See BTV_STD_PAL60 in
+// DriverInterface.h.
+static uint32
+full_height_for(uint32 standard)
+{
+	return standard == BTV_STD_PAL ? 576 : 480;
+}
+
+
+static uint32
+half_width_for(uint32 standard)
+{
+	return standard == BTV_STD_NTSC ? 320 : 360;
+}
+
+
 uint32
 BttvProducer::_ResolutionPresetFor(const bttv_capture_format& format) const
 {
-	uint32 halfHeight = format.video_standard == BTV_STD_PAL ? 288 : 240;
-	uint32 halfWidth = format.video_standard == BTV_STD_PAL ? 360 : 320;
+	uint32 halfHeight = full_height_for(format.video_standard) / 2;
+	uint32 halfWidth = half_width_for(format.video_standard);
 
 	if (format.width == halfWidth && format.height == halfHeight)
-		return RESOLUTION_HALF;
+		return BTV_RESOLUTION_HALF;
 
-	return RESOLUTION_FULL;
+	return BTV_RESOLUTION_FULL;
 }
 
 
@@ -881,12 +902,13 @@ BttvProducer::_CaptureFormatFor(uint32 input, uint32 standard,
 	format.video_standard = standard;
 	format.pixel_format = BTV_PIXEL_FORMAT_YUY2;
 
-	if (resolution == RESOLUTION_HALF) {
-		format.width = standard == BTV_STD_PAL ? 360 : 320;
-		format.height = standard == BTV_STD_PAL ? 288 : 240;
+	uint32 fullHeight = full_height_for(standard);
+	if (resolution == BTV_RESOLUTION_HALF) {
+		format.width = half_width_for(standard);
+		format.height = fullHeight / 2;
 	} else {
 		format.width = 720;
-		format.height = standard == BTV_STD_PAL ? 576 : 480;
+		format.height = fullHeight;
 	}
 
 	format.bytes_per_line = format.width * 2;
@@ -905,9 +927,10 @@ BttvProducer::_ApplyCaptureSettings(uint32 input, uint32 standard,
 		return B_BAD_VALUE;
 	if (input != BTV_INPUT_COMPOSITE && input != BTV_INPUT_TUNER && input != BTV_INPUT_SVIDEO)
 		return B_BAD_VALUE;
-	if (standard != BTV_STD_PAL && standard != BTV_STD_NTSC)
+	if (standard != BTV_STD_PAL && standard != BTV_STD_NTSC
+		&& standard != BTV_STD_PAL60)
 		return B_BAD_VALUE;
-	if (resolution != RESOLUTION_FULL && resolution != RESOLUTION_HALF)
+	if (resolution != BTV_RESOLUTION_FULL && resolution != BTV_RESOLUTION_HALF)
 		return B_BAD_VALUE;
 
 	bttv_capture_format newCaptureFormat = _CaptureFormatFor(input, standard,
@@ -1011,17 +1034,33 @@ BttvProducer::_SpecializeFormat(media_format* format,
 		requestedHeight = fCaptureFormat.height;
 	}
 
+	// NTSC and PAL-60 are both 480 active lines at a ~29.97 Hz field
+	// rate -- format/field_rate alone can never tell them apart (PAL-60
+	// differs only in colour encoding, invisible at this level). Only
+	// ever resolve *to* PAL-60 by preserving an already-selected PAL-60
+	// when the requested height/field_rate are consistent with it but
+	// don't positively demand NTSC or real PAL; never guess PAL-60 from
+	// a blank slate (there's nothing in a generic 480-line/30fps request
+	// that would justify it over plain NTSC).
 	uint32 requestedStandard = fCaptureFormat.video_standard;
 	float requestedFieldRate = format->u.raw_video.field_rate;
-	if (requestedFieldRate != 0.0f
-		&& requestedFieldRate != media_raw_video_format::wildcard.field_rate) {
-		requestedStandard = requestedFieldRate > 27.0f ? BTV_STD_NTSC : BTV_STD_PAL;
-	}
+	bool haveFieldRate = requestedFieldRate != 0.0f
+		&& requestedFieldRate != media_raw_video_format::wildcard.field_rate;
 
-	if (requestedHeight > kMaxFrameHeightNTSC)
+	if (haveFieldRate && requestedFieldRate <= 27.0f) {
+		// Only real PAL runs at ~25 Hz; neither NTSC nor PAL-60 do.
 		requestedStandard = BTV_STD_PAL;
-	else if (requestedHeight <= kMaxFrameHeightNTSC && requestedFieldRate > 27.0f)
+	} else if (requestedHeight > kMaxFrameHeightNTSC) {
+		// Only real PAL can be taller than 480 lines.
+		requestedStandard = BTV_STD_PAL;
+	} else if (requestedStandard == BTV_STD_PAL) {
+		// Was real PAL (576 lines/25Hz), but now asked for something
+		// consistent with the 480-line/~30Hz family instead -- can't
+		// tell NTSC from PAL-60 from this alone, default to NTSC.
 		requestedStandard = BTV_STD_NTSC;
+	}
+	// Otherwise requestedStandard already correctly stays whatever it
+	// was (NTSC or PAL-60), since nothing here contradicts it.
 
 	uint32 maxHeight = requestedStandard == BTV_STD_PAL
 		? kMaxFrameHeightPAL : kMaxFrameHeightNTSC;
@@ -1041,7 +1080,7 @@ BttvProducer::_SpecializeFormat(media_format* format,
 
 	format->type = B_MEDIA_RAW_VIDEO;
 	format->u.raw_video = media_raw_video_format::wildcard;
-	format->u.raw_video.field_rate = requestedStandard == BTV_STD_NTSC ? 29.97f : 25.0f;
+	format->u.raw_video.field_rate = requestedStandard != BTV_STD_PAL ? 29.97f : 25.0f;
 	format->u.raw_video.interlace = 1;
 	format->u.raw_video.first_active = 0;
 	format->u.raw_video.last_active = requestedHeight - 1;
