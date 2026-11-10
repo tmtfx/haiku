@@ -44,6 +44,15 @@ public:
 	virtual	void				MessageReceived(BMessage* message);
 	virtual	bool				QuitRequested();
 
+			// For BttvViewerApp to take over shutdown of this window
+			// (Lock()+Quit(), from the application thread) once this
+			// window is done using it. Call once, right after
+			// construction, and hold onto the result independently --
+			// don't assume fControlsWindow (or this MainWindow) is still
+			// around later. See the long comment in ~MainWindow().
+			ControlsWindow*		GetControlsWindow() const
+									{ return fControlsWindow; }
+
 private:
 			void				_BuildLayout();
 			void				_UpdateResolutions();

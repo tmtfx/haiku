@@ -89,21 +89,31 @@ MainWindow::MainWindow()
 
 MainWindow::~MainWindow()
 {
+	// fControlsWindow is deliberately *not* locked/quit here. Doing it
+	// from this thread -- itself mid-teardown of this window -- reaching
+	// across to lock a *second* window hung indefinitely (confirmed via
+	// logging: execution reliably stopped at exactly "locking
+	// fControlsWindow..." every time, nothing after it). Ownership for
+	// shutdown purposes now lives in BttvViewerApp (see ControlsWindow()
+	// below and BttvViewerApp::QuitRequested() in Main.cpp), which grabs
+	// the pointer right after construction and does the Lock()+Quit()
+	// from the *application* thread -- a thread that holds none of this
+	// window's locks, so there's no cross-window lock-ordering cycle.
+	viewer_log("[VIEWER] MainWindow::~MainWindow: ENTER\n");
 	delete fPulseRunner;
-
-	if (fControlsWindow != NULL) {
-		fControlsWindow->Lock();
-		fControlsWindow->Quit();
-		fControlsWindow = NULL;
-	}
+	viewer_log("[VIEWER] MainWindow::~MainWindow: fPulseRunner deleted\n");
+	viewer_log("[VIEWER] MainWindow::~MainWindow: EXIT\n");
 }
 
 
 bool
 MainWindow::QuitRequested()
 {
+	viewer_log("[VIEWER] MainWindow::QuitRequested: ENTER\n");
 	_StopCapture();
+	viewer_log("[VIEWER] MainWindow::QuitRequested: _StopCapture done, posting B_QUIT_REQUESTED...\n");
 	be_app->PostMessage(B_QUIT_REQUESTED);
+	viewer_log("[VIEWER] MainWindow::QuitRequested: EXIT (returning true)\n");
 	return true;
 }
 
