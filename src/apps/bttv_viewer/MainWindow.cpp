@@ -186,6 +186,17 @@ MainWindow::_BuildLayout()
 	stdPal60Msg->AddInt32("standard", BTV_STD_PAL60);
 	fStandardMenu->AddItem(new BMenuItem("PAL-60", stdPal60Msg));
 
+	// Neither genuine PAL nor PAL-60 produce live video on this card in
+	// practice (both need its PLL-synthesized clock path, which real-
+	// hardware testing shows doesn't actually drive live sampling --
+	// see BTV_STD_FAKE_PAL in DriverInterface.h). This is NTSC's entire
+	// configuration (the one standard confirmed to work), just with
+	// PAL's correct VTOTAL grafted on, for PAL-encoded sources.
+	BMessage* stdFakePalMsg = new BMessage(kMsgStandardChanged);
+	stdFakePalMsg->AddInt32("standard", BTV_STD_FAKE_PAL);
+	fStandardMenu->AddItem(new BMenuItem("Fake-PAL (NTSC timing)",
+		stdFakePalMsg));
+
 	fStandardMenu->SetTargetForItems(this);
 	fStandardField = new BMenuField("standardField", "Standard:", fStandardMenu);
 

@@ -2,10 +2,31 @@
 
 #include <Buffer.h>
 #include <TimeSource.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 
 #include "VideoView.h"
+
+static const char* const kConsumerLogPath = "/boot/home/bttv_viewer.log";
+
+static void
+consumer_log(const char* fmt, ...)
+{
+	char buffer[512];
+	va_list args;
+	va_start(args, fmt);
+	vsnprintf(buffer, sizeof(buffer), fmt, args);
+	va_end(args);
+
+	FILE* f = fopen(kConsumerLogPath, "a");
+	if (f != NULL) {
+		fputs(buffer, f);
+		fflush(f);
+		fsync(fileno(f));
+		fclose(f);
+	}
+}
 
 
 VideoConsumer::VideoConsumer(const char* name, VideoView* targetView)
@@ -89,6 +110,15 @@ VideoConsumer::HandleEvent(const media_timed_event* event, bigtime_t lateness,
 		{
 			BBuffer* buffer = (BBuffer*)event->pointer;
 			if (buffer != NULL) {
+				static int sLoggedFrames = 0;
+				if (sLoggedFrames < 5) {
+					sLoggedFrames++;
+					consumer_log("[CONSUMER] HandleEvent B_HANDLE_BUFFER: "
+						"runState=%d connected=%d fWidth=%u fHeight=%u "
+						"buffer->SizeAvailable=%" B_PRIu32 " buffer->Data=%p\n",
+						RunState(), fConnected, fWidth, fHeight,
+						buffer->SizeAvailable(), buffer->Data());
+				}
 				if (RunState() == B_STARTED && fConnected && fTargetView != NULL) {
 					fTargetView->SetFrameData((const uint8*)buffer->Data(),
 						fWidth, fHeight);
@@ -238,6 +268,11 @@ VideoConsumer::Connected(const media_source& producer,
 	fWidth = withFormat.u.raw_video.display.line_width;
 	fHeight = withFormat.u.raw_video.display.line_count;
 	fConnected = true;
+
+	consumer_log("[CONSUMER] Connected: fWidth=%u fHeight=%u "
+		"bytes_per_row=%u colorSpace=0x%x\n",
+		fWidth, fHeight, withFormat.u.raw_video.display.bytes_per_row,
+		withFormat.u.raw_video.display.format);
 
 	return B_OK;
 }
