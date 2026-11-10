@@ -20,7 +20,33 @@ enum {
 	// lines no matter what height is requested, because the chip's own
 	// vertical timing genuinely only ever sees 480 active lines from
 	// that source.
-	BTV_STD_PAL60 = 2
+	BTV_STD_PAL60 = 2,
+	// Neither genuine PAL nor PAL-60 produce live video on this card in
+	// practice: both take the PLL-synthesized-clock path (TGCTRL=0x08),
+	// and real-hardware testing (alternating between exactly two fixed
+	// luma values across repeated reads, in lockstep with the 2-buffer
+	// round robin, while frame_count and RISC_COUNT advance completely
+	// normally) shows the RISC/FIFO completion machinery cycling
+	// correctly while the actual video decoder underneath it never
+	// samples fresh data -- i.e. whatever is wrong is downstream of the
+	// PLL path specifically, not a RISC/geometry/driver logic bug (those
+	// have all been fixed and verified separately). NTSC (direct
+	// crystal clock, TGCTRL=0x00) is the only standard confirmed to
+	// capture genuinely live video on this card.
+	//
+	// BTV_STD_FAKE_PAL takes NTSC's entire register configuration
+	// (ADELAY/BDELAY/IFORM norm+crystal bits, geometry, crystal-clock
+	// path) completely unchanged, with exactly one difference: VTOTAL
+	// is set to 624 (same value confirmed to fix a vertical wrap/shift
+	// artifact -- the start of a frame showing the *tail* of the
+	// previous one -- when tested against a real PAL-encoded camera
+	// source) instead of NTSC's own 0. Not a real PAL capture (color
+	// encoding, resolution and field rate all stay NTSC's), just NTSC's
+	// proven-live clock path with PAL's frame-boundary timing grafted
+	// on, for sources whose vertical sync behaves more like PAL than
+	// NTSC even though this card can't actually run its PLL-based PAL
+	// path against them.
+	BTV_STD_FAKE_PAL = 3
 };
 
 enum {

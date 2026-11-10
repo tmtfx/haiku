@@ -637,7 +637,7 @@ bt878_validate_format(const bt878_device* device, const bttv_capture_format* for
 
 	if (format->pixel_format != 0 && format->pixel_format != BTV_PIXEL_FORMAT_YUY2)
 		return B_BAD_VALUE;
-	if (format->video_standard > BTV_STD_PAL60)
+	if (format->video_standard > BTV_STD_FAKE_PAL)
 		return B_BAD_VALUE;
 	if (format->input >= device->profile->video_inputs)
 		return B_BAD_VALUE;
@@ -665,23 +665,49 @@ bt878_compute_geometry(const bt878_device* device, bt878_geometry* geometry)
 		return;
 	}
 
-	geometry->vtotal = 0;
-
+	// VTOTAL (the chip's own total-lines-per-frame counter, independent
+	// of VACTIVE/VDELAY/CROP) was never written at all until PAL-60
+	// needed it -- confirmed on real hardware that leaving it at
+	// whatever the chip already had (boot/reset default, or a leftover
+	// value from a previous standard) produces a vertical wrap/shift
+	// artifact: the first several captured lines of a frame are
+	// actually the *tail* of the previous frame's picture (e.g. the
+	// bottom of a shirt collar appearing at the top), not blanking.
+	// This affected NTSC and PAL too, just less obviously than PAL-60's
+	// hard 480-line ceiling -- confirmed by manually poking NTSC's
+	// VTOTAL to a real value live and watching the wrap disappear. Give
+	// every standard its own correct value instead of leaving any of
+	// them at 0.
 	if (device->video_standard == BTV_STD_PAL) {
 		sourceWidth = 924;
 		sourceHeight = 576;
 		geometry->hdelay = 186;
 		geometry->vdelay = 0x20;
+		// 625 lines/frame for real PAL, same "-1" convention as the
+		// other two standards below.
+		geometry->vtotal = 624;
 	} else if (device->video_standard == BTV_STD_PAL60) {
 		// PAL-60: PAL colour/horizontal timing (same swidth/hdelay as
 		// genuine PAL-BDGHI, matching Linux's real PAL-60 tvnorm entry
 		// exactly), but only 480 active lines and NTSC's vdelay -- see
-		// BTV_STD_PAL60 in bttv_driver.h.
+		// BTV_STD_PAL60 in bttv_driver.h. Same 525-line/frame family as
+		// NTSC, hence the same vtotal.
 		sourceWidth = 924;
 		sourceHeight = 480;
 		geometry->hdelay = 186;
 		geometry->vdelay = 0x1a;
 		geometry->vtotal = 524;
+	} else if (device->video_standard == BTV_STD_FAKE_PAL) {
+		// Identical to NTSC below in every respect except vtotal -- see
+		// BTV_STD_FAKE_PAL in bttv_driver.h. 624, not NTSC's 0: fixes
+		// the vertical wrap/shift artifact against a real PAL-encoded
+		// source (confirmed live on real hardware), without needing
+		// this card's apparently non-functional PLL clock path at all.
+		sourceWidth = 754;
+		sourceHeight = 480;
+		geometry->hdelay = 135;
+		geometry->vdelay = 0x1a;
+		geometry->vtotal = 624;
 	} else {
 		// hdelay=135 here (not Linux's bttv_tvnorms hdelayx1=128) because
 		// 135 is what was already confirmed to achieve real HLOC lock on
@@ -691,6 +717,9 @@ bt878_compute_geometry(const bt878_device* device, bt878_geometry* geometry)
 		sourceHeight = 480;
 		geometry->hdelay = 135;
 		geometry->vdelay = 0x1a;
+		// Left at 0 (untouched): confirmed live on real hardware (A/B,
+		// 0 vs 524) that NTSC is already correct with VTOTAL at 0 --
+		// no wrap artifact, no cutoff.
 	}
 
 	geometry->width = device->width;
@@ -944,9 +973,14 @@ bt878_set_pll(bt878_device* device)
 		return B_OK;
 	}
 
-	if (device->video_standard == BTV_STD_NTSC) {
+	// BTV_STD_FAKE_PAL takes NTSC's crystal-direct clock path exactly
+	// (see BTV_STD_FAKE_PAL in bttv_driver.h) -- it never engages this
+	// card's apparently non-functional PLL path at all.
+	if (device->video_standard == BTV_STD_NTSC
+		|| device->video_standard == BTV_STD_FAKE_PAL) {
 		// NTSC crystal on ATI TV Wonder VE is 28.636363 MHz; PLL can sleep
-		bttv_klog("[KERNEL] bt878_set_pll: NTSC standard, using crystal clock (TGCTRL=0x00)\n");
+		bttv_klog("[KERNEL] bt878_set_pll: NTSC/fake-PAL standard, using "
+			"crystal clock (TGCTRL=0x00)\n");
 		bt878_write8(device, BT848_TGCTRL, 0x00);
 		bt878_write8(device, BT848_PLL_XCI, 0x00);
 		return B_OK;
@@ -1221,27 +1255,33 @@ bt878_start_capture_locked(bt878_device* device)
 	bttv_klog("[KERNEL] bt878_start_capture_locked: clearing INT_STAT...\n");
 	bt878_write32(device, BT848_INT_STAT, 0xffffffff);
 
-	// Matches Linux's real init_irqreg() (bttv-driver.c) for the bits we
-	// treat as fatal: frame completion (RISCI) and the two genuine fatal
+	// Matches Linux's real init_irqreg() (bttv-driver.c) exactly for the
+	// bits we act on: frame completion (RISCI) and the two genuine fatal
 	// DMA errors (SCERR sync-counter error, OCERR opcode error). Linux
 	// does NOT mask BT848_INT_OFLOW at all -- a transient FIFO overflow is
 	// apparently self-correcting at the hardware level and not something
 	// its driver reacts to; masking and treating it as fatal here (as a
 	// previous version of this driver did) triggered needless RISC
-	// program restarts under normal NTSC operation.
+	// program restarts under normal operation. This must be the LAST
+	// register write in this function.
 	//
-	// OFLOW is masked in *in addition* to that, purely so the interrupt
-	// handler's diagnostic-only branch above can see and count it (see
-	// bt878_interrupt()) -- it is explicitly excluded from errorBits
-	// there, so it still never triggers a restart. This is to measure
-	// whether PAL's reproducible per-frame cutoff at an exact line count
-	// correlates with FIFO overflow, which was never actually checked
-	// under real PAL bandwidth before. This must be the LAST register
-	// write in this function.
+	// OFLOW was briefly also masked in here (in addition to the three
+	// below), purely so the interrupt handler's diagnostic-only branch
+	// (see bt878_interrupt(), still present and still explicitly
+	// excluded from errorBits there, so re-enabling this never risks a
+	// RISC restart) could count it -- to check whether PAL's then-
+	// reproducible per-frame cutoff at an exact line count correlated
+	// with FIFO overflow. It measured zero overflows during healthy
+	// runs (VTOTAL was the actual fix, see bt878_apply_geometry()), so
+	// it's disabled again below. Kept here, commented out, rather than
+	// deleted: if OFLOW ever needs measuring again, uncomment this one
+	// line instead of re-deriving it.
+	// bt878_write32(device, BT848_INT_MASK,
+	//     BT848_INT_RISCI | BT848_INT_SCERR | BT848_INT_OCERR
+	//     | BT848_INT_OFLOW);
 	bttv_klog("[KERNEL] bt878_start_capture_locked: setting INT_MASK...\n");
 	bt878_write32(device, BT848_INT_MASK,
-		BT848_INT_RISCI | BT848_INT_SCERR | BT848_INT_OCERR
-		| BT848_INT_OFLOW);
+		BT848_INT_RISCI | BT848_INT_SCERR | BT848_INT_OCERR);
 
 	device->capturing = true;
 	device->frame_ready = false;
@@ -1363,15 +1403,18 @@ bt878_interrupt(void* data)
 		// rearm cascade on every subsequent interrupt permanently
 		// prevented any further frame completion. Removed; only the
 		// masked, documented error bits below are treated as fatal.
-		// Diagnostic-only: OFLOW is deliberately NOT treated as fatal
-		// (see the INT_MASK comment in bt878_start_capture_locked() --
-		// masking+restarting on it caused needless RISC restarts under
-		// normal NTSC operation). But PAL captures reproducibly cut off
-		// at a suspiciously exact line count on every single frame, and
-		// that was never actually measured against OFLOW under real PAL
-		// bandwidth specifically. Count and sample RISC_COUNT at the
-		// moment it fires, change nothing else, so BTV_GET_STATS can
-		// show whether it's happening at all and roughly where.
+		// Diagnostic-only, currently dormant: OFLOW is no longer in
+		// INT_MASK (see bt878_start_capture_locked()), so astat never
+		// has this bit set and this branch never runs. Kept rather than
+		// deleted, alongside the commented-out INT_MASK line there: it
+		// was used to confirm FIFO overflow was NOT the cause of PAL's
+		// then-reproducible per-frame cutoff at an exact line count
+		// (measured zero overflows during healthy runs; VTOTAL was the
+		// actual fix). If OFLOW is ever unmasked again for some other
+		// reason, this will resume counting it and sampling RISC_COUNT
+		// at the moment it fires, with no other effect -- it's
+		// explicitly excluded from errorBits below, so it can never
+		// trigger a RISC restart.
 		if ((astat & BT848_INT_OFLOW) != 0) {
 			device->oflow_count++;
 			device->last_oflow_risc_count = bt878_read32(device, BT848_RISC_COUNT);
