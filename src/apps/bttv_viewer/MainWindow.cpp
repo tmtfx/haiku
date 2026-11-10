@@ -55,9 +55,15 @@ MainWindow::MainWindow()
 	fResolutionMenu(NULL),
 	fSourceMode(SOURCE_DIRECT_DRIVER),
 	fInput(BTV_INPUT_COMPOSITE),
-	fStandard(BTV_STD_PAL),
+	// NTSC, not PAL: on this card PAL's PLL never locks (confirmed via
+	// raw DSTATUS polling -- PLOCK stuck across all retries), so it
+	// falls back to the crystal clock, which is the wrong rate for
+	// PAL and produces a broken/blank picture. Defaulting to PAL left
+	// every fresh launch needing a manual switch to NTSC before
+	// anything would show, in both Direct and Media Kit mode.
+	fStandard(BTV_STD_NTSC),
 	fWidth(720),
-	fHeight(576),
+	fHeight(480),
 	fHalfResolution(false),
 	fCapturing(false),
 	fControlsWindow(NULL),
@@ -163,13 +169,13 @@ MainWindow::_BuildLayout()
 	fStandardMenu = new BPopUpMenu("StandardMenu");
 	BMessage* stdPalMsg = new BMessage(kMsgStandardChanged);
 	stdPalMsg->AddInt32("standard", BTV_STD_PAL);
-	BMenuItem* itemPal = new BMenuItem("PAL (50Hz)", stdPalMsg);
-	itemPal->SetMarked(true);
-	fStandardMenu->AddItem(itemPal);
+	fStandardMenu->AddItem(new BMenuItem("PAL (50Hz)", stdPalMsg));
 
 	BMessage* stdNtscMsg = new BMessage(kMsgStandardChanged);
 	stdNtscMsg->AddInt32("standard", BTV_STD_NTSC);
-	fStandardMenu->AddItem(new BMenuItem("NTSC (60Hz)", stdNtscMsg));
+	BMenuItem* itemNtsc = new BMenuItem("NTSC (60Hz)", stdNtscMsg);
+	itemNtsc->SetMarked(true);
+	fStandardMenu->AddItem(itemNtsc);
 
 	fStandardMenu->SetTargetForItems(this);
 	fStandardField = new BMenuField("standardField", "Standard:", fStandardMenu);
@@ -178,7 +184,7 @@ MainWindow::_BuildLayout()
 	fResolutionMenu = new BPopUpMenu("ResolutionMenu");
 	BMessage* resFullMsg = new BMessage(kMsgResolutionChanged);
 	resFullMsg->AddBool("half", false);
-	BMenuItem* itemFull = new BMenuItem("Full (720x576)", resFullMsg);
+	BMenuItem* itemFull = new BMenuItem("Full (720x480)", resFullMsg);
 	itemFull->SetMarked(true);
 	fResolutionMenu->AddItem(itemFull);
 

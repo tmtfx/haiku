@@ -93,13 +93,27 @@ VideoConsumer::HandleEvent(const media_timed_event* event, bigtime_t lateness,
 					fTargetView->SetFrameData((const uint8*)buffer->Data(),
 						fWidth, fHeight);
 				}
-				// Not buffer->Recycle() here -- the event was queued with
-				// B_RECYCLE_BUFFER cleanup, which recycles it once this
-				// event is removed from the queue (both on the normal
-				// path, right after this handler returns, and on the
-				// B_STOP flush path below). Recycling it explicitly here
-				// too double-recycled every buffer, corrupting the
-				// BBufferGroup until it eventually jammed.
+				// Explicit Recycle() is required here: BMediaEventLooper::
+				// ControlLoop() (see src/kits/media/MediaEventLooper.cpp)
+				// removes events via RemoveFirstEvent(&event) -- the
+				// overload that hands the event back to the caller -- which
+				// skips TimedEventQueueData::CleanupAndFree() entirely (see
+				// TimedEventQueue.cpp: that overload just frees the queue
+				// entry, it never inspects event.cleanup). The
+				// B_RECYCLE_BUFFER cleanup tag this event was queued with
+				// (see BufferReceived() below) only gets acted on by
+				// CleanupAndFree(), which is reached only through
+				// RemoveFirstEvent(NULL) -- i.e. only via FlushEvents(), the
+				// B_STOP path below. So on this normal live-dispatch path
+				// the tag alone never recycles anything: omitting this call
+				// (as a previous fix mistakenly did, assuming the tag was
+				// sufficient) starves the BBufferGroup after exactly as
+				// many frames as it has buffers, with the producer stuck
+				// polling RequestBuffer() forever. This call and the
+				// flush-path recycle never overlap: an event already
+				// dispatched here is no longer in the queue for
+				// FlushEvents() to find.
+				buffer->Recycle();
 			}
 			break;
 		}
