@@ -163,7 +163,14 @@ bttv_klog(const char* fmt, ...)
 #define BT848_DSTATUS_NUML		(1 << 4)
 #define BT848_DSTATUS_PLOCK		(1 << 2)
 
-#define BT848_PLL_X				(1 << 4)
+// Was wrongly (1 << 4): the real PLL enable bit in BT848_PLL_XCI is bit 7
+// (confirmed against Linux's bt848.h: BT848_PLL_X (1<<7)). With the wrong
+// bit, bt878_set_pll() wrote the correct frequency coefficients into
+// PLL_F_LO/HI but never actually turned the PLL synthesizer on, so DSTATUS
+// PLOCK stayed permanently unlocked on every poll of every retry -- this
+// looked exactly like a flaky/marginal PLL on this specific board, but was
+// a pure software bug: the hardware was never being asked to lock at all.
+#define BT848_PLL_X				(1 << 7)
 
 // input_mux[] in bt878_card_profile stores the raw 2-bit MUXSEL pattern
 // (0-3) per input directly, exactly as Linux's bttv-cards.c card tables
