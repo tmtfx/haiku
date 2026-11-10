@@ -617,6 +617,9 @@ BttvProducer::SetParameterValue(int32 id, bigtime_t when, const void* value,
 			break;
 
 		case BTV_PARAM_STANDARD:
+			producer_log("[PRODUCER] SetParameterValue: BTV_PARAM_STANDARD "
+				"newValue=%" B_PRIu32 " fSelectedStandard=%" B_PRIu32 "\n",
+				newValue, fSelectedStandard);
 			if (newValue == fSelectedStandard)
 				return;
 			standard = newValue;
@@ -705,7 +708,12 @@ BttvProducer::SetParameterValue(int32 id, bigtime_t when, const void* value,
 
 
 
-	if (_ApplyCaptureSettings(input, standard, resolution) != B_OK)
+	status_t applyStatus = _ApplyCaptureSettings(input, standard, resolution);
+	producer_log("[PRODUCER] SetParameterValue: _ApplyCaptureSettings(input=%"
+		B_PRIu32 ", standard=%" B_PRIu32 ", resolution=%" B_PRIu32
+		") returned %s, fSelectedStandard now=%" B_PRIu32 "\n",
+		input, standard, resolution, strerror(applyStatus), fSelectedStandard);
+	if (applyStatus != B_OK)
 		return;
 
 	switch (id) {
@@ -842,6 +850,7 @@ BttvProducer::_CreateParameterWeb()
 	standard->AddItem(BTV_STD_PAL, "PAL");
 	standard->AddItem(BTV_STD_NTSC, "NTSC");
 	standard->AddItem(BTV_STD_PAL60, "PAL-60");
+	standard->AddItem(BTV_STD_FAKE_PAL, "Fake-PAL (NTSC timing)");
 
 	BDiscreteParameter* resolution = controls->MakeDiscreteParameter(BTV_PARAM_RESOLUTION,
 		B_MEDIA_NO_TYPE, "Resolution", B_RESOLUTION);
@@ -864,8 +873,10 @@ BttvProducer::_CreateParameterWeb()
 
 // PAL-60 shares PAL's horizontal timing (so the same half-width, 360,
 // not NTSC's 320) but is 480 active lines like NTSC (so the same
-// half-height, 240, not PAL's 288). See BTV_STD_PAL60 in
-// DriverInterface.h.
+// half-height, 240, not PAL's 288). Fake-PAL is NTSC's horizontal
+// timing *and* active line count (only VTOTAL differs, invisible at
+// this level), so it takes NTSC's half-width too. See BTV_STD_PAL60
+// and BTV_STD_FAKE_PAL in DriverInterface.h.
 static uint32
 full_height_for(uint32 standard)
 {
@@ -876,7 +887,8 @@ full_height_for(uint32 standard)
 static uint32
 half_width_for(uint32 standard)
 {
-	return standard == BTV_STD_NTSC ? 320 : 360;
+	return (standard == BTV_STD_NTSC || standard == BTV_STD_FAKE_PAL)
+		? 320 : 360;
 }
 
 
@@ -928,7 +940,7 @@ BttvProducer::_ApplyCaptureSettings(uint32 input, uint32 standard,
 	if (input != BTV_INPUT_COMPOSITE && input != BTV_INPUT_TUNER && input != BTV_INPUT_SVIDEO)
 		return B_BAD_VALUE;
 	if (standard != BTV_STD_PAL && standard != BTV_STD_NTSC
-		&& standard != BTV_STD_PAL60)
+		&& standard != BTV_STD_PAL60 && standard != BTV_STD_FAKE_PAL)
 		return B_BAD_VALUE;
 	if (resolution != BTV_RESOLUTION_FULL && resolution != BTV_RESOLUTION_HALF)
 		return B_BAD_VALUE;
@@ -939,6 +951,23 @@ BttvProducer::_ApplyCaptureSettings(uint32 input, uint32 standard,
 	status_t status = _SpecializeFormat(&newFormat, &newCaptureFormat);
 	if (status != B_OK)
 		return status;
+
+	// _SpecializeFormat() re-derives video_standard from fCaptureFormat
+	// (the *current*, about-to-be-replaced standard) plus format/
+	// field_rate heuristics -- appropriate for Connect()-time negotiation,
+	// where that's all the caller has to go on, but wrong here: this
+	// function's caller already knows exactly which standard it wants
+	// (the `standard` parameter, explicit, not inferred). Confirmed via
+	// logging that _SpecializeFormat() was silently downgrading an
+	// explicit BTV_STD_PAL60 request back to BTV_STD_NTSC whenever
+	// fCaptureFormat.video_standard happened to be BTV_STD_PAL at the
+	// time (its "was PAL, now asked for 480-line family, can't tell
+	// NTSC from PAL-60, default NTSC" rule) -- NOT because anything
+	// about the actual PAL-60 request was ambiguous, just because
+	// _SpecializeFormat() never saw the real request, only
+	// fOutput.format's stale field_rate/height and the old standard.
+	// The explicit request wins here.
+	newCaptureFormat.video_standard = standard;
 
 	bool restartCapture = fRunning;
 	if (fConnected) {
@@ -1061,6 +1090,11 @@ BttvProducer::_SpecializeFormat(media_format* format,
 	}
 	// Otherwise requestedStandard already correctly stays whatever it
 	// was (NTSC or PAL-60), since nothing here contradicts it.
+	producer_log("[PRODUCER] _SpecializeFormat: fCaptureFormat.video_standard="
+		"%" B_PRIu32 " requestedFieldRate=%.2f requestedHeight=%" B_PRIu32
+		" -> requestedStandard=%" B_PRIu32 "\n",
+		fCaptureFormat.video_standard, requestedFieldRate, requestedHeight,
+		requestedStandard);
 
 	uint32 maxHeight = requestedStandard == BTV_STD_PAL
 		? kMaxFrameHeightPAL : kMaxFrameHeightNTSC;

@@ -10,7 +10,13 @@ enum {
 	BTV_STD_NTSC = 1,
 	// See bttv_driver.h for the full rationale: PAL colour encoding on
 	// NTSC-style 525-line/60Hz timing (480 active lines, not 576).
-	BTV_STD_PAL60 = 2
+	BTV_STD_PAL60 = 2,
+	// See bttv_driver.h for the full rationale: NTSC's entire register
+	// configuration (the only standard confirmed to capture genuinely
+	// live video on this card) with VTOTAL=624 instead of NTSC's 0, for
+	// PAL-encoded sources whose vertical timing this card's PLL path
+	// can't actually lock onto.
+	BTV_STD_FAKE_PAL = 3
 };
 
 enum {
