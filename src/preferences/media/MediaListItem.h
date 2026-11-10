@@ -61,6 +61,21 @@ public:
 
 	virtual	void				Accept(Visitor& visitor) = 0;
 
+	// Sort rank: lower sorts first. Groups every item into one of a
+	// handful of fixed category buckets (see the kRank* constants in
+	// MediaListItem.cpp) so CompareWith() across every pair of concrete
+	// item types reduces to "compare rank, then compare Label()" --
+	// trivially a valid strict weak ordering. The previous scheme (a
+	// Visitor-based web of ad hoc pairwise rules, one per concrete type
+	// combination) could not guarantee that: with enough different item
+	// kinds being sorted together, inconsistent/non-transitive pairwise
+	// rules fed into a qsort-style sort produce formally undefined
+	// results -- confirmed on real hardware, where a registered video
+	// capture node (a kind of entry no add-on had ever exercised before)
+	// sorted *before* the audio category header entirely, even though no
+	// single pairwise rule, read in isolation, called for that.
+	virtual	int					Rank() = 0;
+
 	// use the visitor pattern for comparison,
 	// -1 : < item; 0 : == item; 1 : > item
 	virtual	int					CompareWith(MediaListItem* item) = 0;
@@ -94,6 +109,8 @@ public:
 
 	virtual	const char*			Label();
 			media_type			Type() {return fMediaType;}
+
+	virtual	int					Rank();
 
 	virtual	void				Accept(MediaListItem::Visitor& visitor);
 
@@ -132,6 +149,7 @@ public:
 
 			MediaListItem::media_type Type() {return fMediaType;}
 	virtual	const char*			Label() {return fTitle;}
+	virtual	int					Rank();
 	virtual	void				AlterWindow(MediaWindow* window);
 	virtual	void				Accept(MediaListItem::Visitor& visitor);
 
@@ -165,6 +183,7 @@ public:
 
 
 	virtual	const char*			Label() {return fTitle;}
+	virtual	int					Rank();
 	virtual	void				AlterWindow(MediaWindow* window);
 	virtual	void				Accept(MediaListItem::Visitor& visitor);
 
@@ -198,6 +217,8 @@ public:
 	virtual	void				AlterWindow(MediaWindow* window);
 
 	virtual	const char*			Label();
+
+	virtual	int					Rank();
 
 	virtual	void				Accept(MediaListItem::Visitor& visitor);
 

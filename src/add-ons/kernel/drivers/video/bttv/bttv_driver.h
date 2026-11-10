@@ -1,0 +1,142 @@
+#ifndef _BTTV_DRIVER_H
+#define _BTTV_DRIVER_H
+
+#include <Drivers.h>
+#include <SupportDefs.h>
+
+
+enum {
+	BTV_STD_PAL = 0,
+	BTV_STD_NTSC = 1,
+	// PAL colour encoding on NTSC-style 525-line/60Hz timing (480 active
+	// lines, not 576) -- what video recorders produce playing an NTSC
+	// tape on a PAL deck, and empirically what several composite video
+	// sources tested against this driver actually output when set to
+	// "PAL" (confirmed via Linux's own bttv_tvnorms[] "PAL-60" entry:
+	// same Fsc/PLL target as genuine PAL-BDGHI, but sheight=480,
+	// vdelay=0x1a, and an explicit non-zero VTOTAL=524). Selecting plain
+	// BTV_STD_PAL against one of these sources gets a real PLL lock
+	// (same colour subcarrier) but caps out at exactly 480 real captured
+	// lines no matter what height is requested, because the chip's own
+	// vertical timing genuinely only ever sees 480 active lines from
+	// that source.
+	BTV_STD_PAL60 = 2,
+	// Neither genuine PAL nor PAL-60 produce live video on this card in
+	// practice: both take the PLL-synthesized-clock path (TGCTRL=0x08),
+	// and real-hardware testing (alternating between exactly two fixed
+	// luma values across repeated reads, in lockstep with the 2-buffer
+	// round robin, while frame_count and RISC_COUNT advance completely
+	// normally) shows the RISC/FIFO completion machinery cycling
+	// correctly while the actual video decoder underneath it never
+	// samples fresh data -- i.e. whatever is wrong is downstream of the
+	// PLL path specifically, not a RISC/geometry/driver logic bug (those
+	// have all been fixed and verified separately). NTSC (direct
+	// crystal clock, TGCTRL=0x00) is the only standard confirmed to
+	// capture genuinely live video on this card.
+	//
+	// BTV_STD_FAKE_PAL takes NTSC's entire register configuration
+	// (ADELAY/BDELAY/IFORM norm+crystal bits, geometry, crystal-clock
+	// path) completely unchanged, with exactly one difference: VTOTAL
+	// is set to 624 (same value confirmed to fix a vertical wrap/shift
+	// artifact -- the start of a frame showing the *tail* of the
+	// previous one -- when tested against a real PAL-encoded camera
+	// source) instead of NTSC's own 0. Not a real PAL capture (color
+	// encoding, resolution and field rate all stay NTSC's), just NTSC's
+	// proven-live clock path with PAL's frame-boundary timing grafted
+	// on, for sources whose vertical sync behaves more like PAL than
+	// NTSC even though this card can't actually run its PLL-based PAL
+	// path against them.
+	BTV_STD_FAKE_PAL = 3
+};
+
+enum {
+	BTV_INPUT_TUNER = 0,
+	BTV_INPUT_COMPOSITE = 1,
+	BTV_INPUT_SVIDEO = 2
+};
+
+enum {
+	BTV_PIXEL_FORMAT_YUY2 = 0x32595559U
+};
+
+enum {
+	BTV_GET_CARD_INFO = B_DEVICE_OP_CODES_END + 0x100,
+	BTV_GET_CAPTURE_FORMAT,
+	BTV_SET_CAPTURE_FORMAT,
+	BTV_START_CAPTURE,
+	BTV_STOP_CAPTURE,
+	BTV_SET_INPUT,
+	BTV_GET_CONTROLS,
+	BTV_SET_CONTROLS,
+	BTV_GET_STATS,
+	// TEMPORARY, diagnostic-only: raw register peek/poke, so register-level
+	// hypotheses can be tried live against real hardware without a
+	// recompile+reinstall+reboot cycle for each one. Remove once done.
+	BTV_DEBUG_READ_REG,
+	BTV_DEBUG_WRITE_REG
+};
+
+// For BTV_DEBUG_READ_REG/BTV_DEBUG_WRITE_REG. width is 1 or 4 (bytes);
+// value is the register's current value after a read, or the value to
+// write for a write.
+typedef struct bttv_debug_reg {
+	uint32	offset;
+	uint32	value;
+	uint8	width;
+} bttv_debug_reg;
+
+#define BTV_CAP_VIDEO_CAPTURE	0x00000001U
+#define BTV_CAP_HAS_TUNER		0x00000002U
+#define BTV_CAP_HAS_COMPOSITE	0x00000004U
+#define BTV_CAP_HAS_SVIDEO		0x00000008U
+
+typedef struct bttv_card_info {
+	uint16	vendor_id;
+	uint16	device_id;
+	uint16	subsystem_vendor_id;
+	uint16	subsystem_device_id;
+	uint32	capabilities;
+	uint32	video_inputs;
+	char	card_name[32];
+	char	device_name[64];
+} bttv_card_info;
+
+typedef struct bttv_capture_format {
+	uint32	width;
+	uint32	height;
+	uint32	bytes_per_line;
+	uint32	frame_size;
+	uint32	pixel_format;
+	uint32	video_standard;
+	uint32	input;
+} bttv_capture_format;
+
+typedef struct bttv_video_controls {
+	int32	brightness;
+	int32	contrast;
+	int32	saturation;
+	int32	hue;
+} bttv_video_controls;
+
+// Diagnostic counters, updated only from the interrupt handler.
+// frame_count: number of frames whose RISC program completed (BT848_INT_RISCI).
+// error_count: number of FIFO/RISC/sync errors (or unexpected RISC stops)
+//   recovered from -- the single most common cause is no stable input signal.
+// Neither is reset by BTV_START_CAPTURE/BTV_STOP_CAPTURE; they accumulate for
+// the life of the open device, so sample both before and after a capture run
+// to see what happened during that run specifically.
+typedef struct bttv_capture_stats {
+	uint32	frame_count;
+	uint32	error_count;
+	// Raw BT848_DSTATUS value sampled opportunistically by the interrupt
+	// handler (bit 7 PRES, bit 6 HLOC, bit 4 NUML, bit 2 PLOCK). HLOC is
+	// horizontal sync lock to the *incoming video signal* -- separate
+	// from and independent of PLOCK (the internal clock PLL). For
+	// diagnostics only.
+	uint8	last_dstatus;
+	// INT_STAT error bits that triggered the last recovery (SCERR/OCERR/
+	// PABORT/RIPERR/PPERR/OFLOW). For diagnostics only.
+	uint32	last_error_bits;
+} bttv_capture_stats;
+
+#endif

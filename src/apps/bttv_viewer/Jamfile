@@ -1,0 +1,15 @@
+SubDir HAIKU_TOP src apps bttv_viewer ;
+
+UsePrivateHeaders shared ;
+UseHeaders [ FDirName $(HAIKU_TOP) src add-ons media media-add-ons bttv ] ;
+
+Application BttvViewer :
+	ControlsWindow.cpp
+	DirectCapture.cpp
+	Main.cpp
+	MainWindow.cpp
+	VideoConsumer.cpp
+	VideoView.cpp
+	: be localestub media shared [ TargetLibstdc++ ]
+	: bttv_viewer.rdef
+;

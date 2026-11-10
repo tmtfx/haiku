@@ -1,5 +1,6 @@
 SubDir HAIKU_TOP src add-ons media media-add-ons ;
 
+SubInclude HAIKU_TOP src add-ons media media-add-ons bttv ;
 # SubInclude HAIKU_TOP src add-ons media media-add-ons demultiplexer ;
 SubInclude HAIKU_TOP src add-ons media media-add-ons dvb ;
 SubInclude HAIKU_TOP src add-ons media media-add-ons equalizer ;

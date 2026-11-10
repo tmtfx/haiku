@@ -1,0 +1,1327 @@
+#include "Producer.h"
+
+#include <fcntl.h>
+#include <unistd.h>
+
+#include <Autolock.h>
+#include <Buffer.h>
+#include <BufferGroup.h>
+#include <Debug.h>
+#include <MediaAddOn.h>
+#include <MediaFormats.h>
+#include <ParameterWeb.h>
+#include <TimeSource.h>
+
+#include <algorithm>
+#include <stdarg.h>
+#include <stdio.h>
+#include <string.h>
+
+static bool sEnableProducerLog = true;
+static const char* const kProducerLogPath = "/boot/home/bttv_media_addon.log";
+
+
+static void
+producer_log(const char* fmt, ...)
+{
+	if (!sEnableProducerLog)
+		return;
+
+	char buffer[512];
+	va_list args;
+	va_start(args, fmt);
+	vsnprintf(buffer, sizeof(buffer), fmt, args);
+	va_end(args);
+
+	FILE* f = fopen(kProducerLogPath, "a");
+	if (f != NULL) {
+		fputs(buffer, f);
+		fflush(f);
+		fsync(fileno(f));
+		fclose(f);
+	}
+}
+
+
+static const uint32 kMaxFrameWidth = 720;
+static const uint32 kMaxFrameHeightPAL = 576;
+static const uint32 kMaxFrameHeightNTSC = 480;
+
+
+BttvProducer::BttvProducer(BMediaAddOn* addOn, const char* name, int32 internalID,
+	const char* driverPath)
+	:
+	BMediaNode(name),
+	BBufferProducer(B_MEDIA_RAW_VIDEO),
+	BControllable(),
+	BMediaEventLooper(),
+	fInitStatus(B_NO_INIT),
+	fInternalID(internalID),
+	fAddOn(addOn),
+	fDriverPath(driverPath),
+	fDriverFD(-1),
+	fLock("bttv producer"),
+	fBufferGroup(NULL),
+	fOwnsBufferGroup(false),
+	fCaptureThread(-1),
+	fRunning(false),
+	fConnected(false),
+	fEnabled(false),
+	fProcessingLatency(0),
+	fHasPendingFormat(false),
+	fSelectedInput(BTV_INPUT_COMPOSITE),
+	fSelectedStandard(BTV_STD_PAL),
+	fResolutionPreset(BTV_RESOLUTION_FULL),
+	fInputLastChange(0),
+	fStandardLastChange(0),
+	fResolutionLastChange(0),
+	fBrightnessLastChange(0),
+	fContrastLastChange(0),
+	fSaturationLastChange(0),
+	fHueLastChange(0),
+	fFrameSequence(0)
+{
+	producer_log("[PRODUCER] BttvProducer::BttvProducer: ENTER (driver=%s)\n", driverPath);
+
+	AddNodeKind(B_PHYSICAL_INPUT);
+	fOutput = media_output();
+	memset(&fConnectedFormat, 0, sizeof(fConnectedFormat));
+	memset(&fCaptureFormat, 0, sizeof(fCaptureFormat));
+	memset(&fCardInfo, 0, sizeof(fCardInfo));
+
+	producer_log("[PRODUCER] BttvProducer: calling _OpenDriver()...\n");
+	fInitStatus = _OpenDriver();
+	if (fInitStatus != B_OK) {
+		producer_log("[PRODUCER] BttvProducer: _OpenDriver() FAILED (%s)\n", strerror(fInitStatus));
+		return;
+	}
+	producer_log("[PRODUCER] BttvProducer: _OpenDriver() SUCCESS, fd=%d\n", fDriverFD);
+
+	if (ioctl(fDriverFD, BTV_GET_CARD_INFO, &fCardInfo, sizeof(fCardInfo)) < 0) {
+		producer_log("[PRODUCER] BttvProducer: BTV_GET_CARD_INFO ioctl failed, using fallback\n");
+		memset(&fCardInfo, 0, sizeof(fCardInfo));
+		fCardInfo.capabilities = BTV_CAP_VIDEO_CAPTURE | BTV_CAP_HAS_COMPOSITE;
+		fCardInfo.video_inputs = 2;
+	}
+
+	producer_log("[PRODUCER] BttvProducer: calling _RefreshCaptureFormat()...\n");
+	fInitStatus = _RefreshCaptureFormat();
+	if (fInitStatus != B_OK)
+		return;
+
+	fCaptureFormat.input = BTV_INPUT_COMPOSITE;
+
+	producer_log("[PRODUCER] BttvProducer: calling _ApplyCaptureFormat()...\n");
+	fInitStatus = _ApplyCaptureFormat();
+	if (fInitStatus != B_OK)
+		return;
+
+	producer_log("[PRODUCER] BttvProducer: calling _RefreshControls()...\n");
+	fInitStatus = _RefreshControls();
+	if (fInitStatus != B_OK)
+		return;
+
+	_UpdateOutputFormat();
+	fConnectedFormat = fOutput.format.u.raw_video;
+	fSelectedInput = fCaptureFormat.input;
+	fSelectedStandard = fCaptureFormat.video_standard;
+	fResolutionPreset = _ResolutionPresetFor(fCaptureFormat);
+	fInputLastChange = fStandardLastChange = fResolutionLastChange = system_time();
+	fBrightnessLastChange = fContrastLastChange = fSaturationLastChange
+		= fHueLastChange = fInputLastChange;
+	fInitStatus = B_OK;
+	producer_log("[PRODUCER] BttvProducer::BttvProducer: EXIT SUCCESS\n");
+}
+
+
+BttvProducer::~BttvProducer()
+{
+	if (fRunning)
+		_HandleStop();
+	if (fConnected)
+		Disconnect(fOutput.source, fOutput.destination);
+	else
+		_DestroyBufferGroup();
+	_CloseDriver();
+}
+
+
+port_id
+BttvProducer::ControlPort() const
+{
+	return BMediaNode::ControlPort();
+}
+
+
+BMediaAddOn*
+BttvProducer::AddOn(int32* internalID) const
+{
+	if (internalID != NULL)
+		*internalID = fInternalID;
+	return fAddOn;
+}
+
+
+status_t
+BttvProducer::HandleMessage(int32 message, const void* data, size_t size)
+{
+	if (BBufferProducer::HandleMessage(message, data, size) == B_OK)
+		return B_OK;
+	if (BControllable::HandleMessage(message, data, size) == B_OK)
+		return B_OK;
+
+	return BMediaNode::HandleMessage(message, data, size);
+}
+
+
+void
+BttvProducer::Preroll()
+{
+}
+
+
+void
+BttvProducer::SetTimeSource(BTimeSource* timeSource)
+{
+	(void)timeSource;
+}
+
+
+status_t
+BttvProducer::RequestCompleted(const media_request_info& info)
+{
+	return BMediaNode::RequestCompleted(info);
+}
+
+
+void
+BttvProducer::NodeRegistered()
+{
+	if (fInitStatus != B_OK) {
+		ReportError(B_NODE_IN_DISTRESS);
+		return;
+	}
+
+	fOutput.node = Node();
+	fOutput.source.port = ControlPort();
+	fOutput.source.id = 0;
+	fOutput.destination = media_destination::null;
+	snprintf(fOutput.name, sizeof(fOutput.name), "%s output", Name());
+	fConnectedFormat = fOutput.format.u.raw_video;
+	SetParameterWeb(_CreateParameterWeb());
+
+	Run();
+}
+
+
+void
+BttvProducer::Start(bigtime_t performanceTime)
+{
+	BMediaEventLooper::Start(performanceTime);
+}
+
+
+void
+BttvProducer::Stop(bigtime_t performanceTime, bool immediate)
+{
+	BMediaEventLooper::Stop(performanceTime, immediate);
+}
+
+
+void
+BttvProducer::Seek(bigtime_t mediaTime, bigtime_t performanceTime)
+{
+	BMediaEventLooper::Seek(mediaTime, performanceTime);
+}
+
+
+void
+BttvProducer::TimeWarp(bigtime_t atRealTime, bigtime_t toPerformanceTime)
+{
+	BMediaEventLooper::TimeWarp(atRealTime, toPerformanceTime);
+}
+
+
+status_t
+BttvProducer::AddTimer(bigtime_t atPerformanceTime, int32 cookie)
+{
+	return BMediaEventLooper::AddTimer(atPerformanceTime, cookie);
+}
+
+
+void
+BttvProducer::SetRunMode(run_mode mode)
+{
+	BMediaEventLooper::SetRunMode(mode);
+}
+
+
+void
+BttvProducer::HandleEvent(const media_timed_event* event, bigtime_t lateness,
+	bool realTimeEvent)
+{
+	(void)lateness;
+	(void)realTimeEvent;
+
+	switch (event->type) {
+		case BTimedEventQueue::B_START:
+			_HandleStart();
+			break;
+		case BTimedEventQueue::B_STOP:
+			_HandleStop();
+			break;
+		default:
+			break;
+	}
+}
+
+
+void
+BttvProducer::CleanUpEvent(const media_timed_event* event)
+{
+	BMediaEventLooper::CleanUpEvent(event);
+}
+
+
+bigtime_t
+BttvProducer::OfflineTime()
+{
+	return BMediaEventLooper::OfflineTime();
+}
+
+
+void
+BttvProducer::ControlLoop()
+{
+	BMediaEventLooper::ControlLoop();
+}
+
+
+status_t
+BttvProducer::DeleteHook(BMediaNode* node)
+{
+	return BMediaEventLooper::DeleteHook(node);
+}
+
+
+status_t
+BttvProducer::FormatSuggestionRequested(media_type type, int32 quality,
+	media_format* format)
+{
+	(void)quality;
+
+	if (format == NULL)
+		return B_BAD_VALUE;
+	if (type != B_MEDIA_RAW_VIDEO)
+		return B_MEDIA_BAD_FORMAT;
+
+	bttv_capture_format captureFormat = fCaptureFormat;
+	if (_SpecializeFormat(format, &captureFormat) != B_OK)
+		return B_MEDIA_BAD_FORMAT;
+
+	return B_OK;
+}
+
+
+status_t
+BttvProducer::FormatProposal(const media_source& output, media_format* format)
+{
+	if (format == NULL)
+		return B_BAD_VALUE;
+	if (output != fOutput.source)
+		return B_MEDIA_BAD_SOURCE;
+
+	bttv_capture_format captureFormat = fCaptureFormat;
+	return _SpecializeFormat(format, &captureFormat);
+}
+
+
+status_t
+BttvProducer::FormatChangeRequested(const media_source& source,
+	const media_destination& destination, media_format* ioFormat,
+	int32* deprecated)
+{
+	(void)source;
+	(void)destination;
+	(void)ioFormat;
+	(void)deprecated;
+	return B_ERROR;
+}
+
+
+status_t
+BttvProducer::GetNextOutput(int32* cookie, media_output* outOutput)
+{
+	if (cookie == NULL || outOutput == NULL)
+		return B_BAD_VALUE;
+	if (*cookie != 0)
+		return B_BAD_INDEX;
+
+	*outOutput = fOutput;
+	(*cookie)++;
+	return B_OK;
+}
+
+
+status_t
+BttvProducer::DisposeOutputCookie(int32 cookie)
+{
+	(void)cookie;
+	return B_OK;
+}
+
+
+status_t
+BttvProducer::SetBufferGroup(const media_source& forSource, BBufferGroup* group)
+{
+	if (forSource != fOutput.source)
+		return B_MEDIA_BAD_SOURCE;
+
+	BAutolock locker(&fLock);
+	if (fBufferGroup != NULL && fOwnsBufferGroup)
+		delete fBufferGroup;
+
+	fBufferGroup = group;
+	fOwnsBufferGroup = false;
+	return B_OK;
+}
+
+
+status_t
+BttvProducer::VideoClippingChanged(const media_source& forSource,
+	int16 numShorts, int16* clipData, const media_video_display_info& display,
+	int32* deprecated)
+{
+	(void)forSource;
+	(void)numShorts;
+	(void)clipData;
+	(void)display;
+	(void)deprecated;
+	return B_ERROR;
+}
+
+
+status_t
+BttvProducer::GetLatency(bigtime_t* outLatency)
+{
+	if (outLatency == NULL)
+		return B_BAD_VALUE;
+
+	*outLatency = EventLatency() + SchedulingLatency() + fProcessingLatency;
+	return B_OK;
+}
+
+
+status_t
+BttvProducer::PrepareToConnect(const media_source& source,
+	const media_destination& destination, media_format* format,
+	media_source* outSource, char* outName)
+{
+	if (format == NULL || outSource == NULL || outName == NULL)
+		return B_BAD_VALUE;
+	if (fConnected)
+		return EALREADY;
+	if (source != fOutput.source)
+		return B_MEDIA_BAD_SOURCE;
+	if (fOutput.destination != media_destination::null)
+		return B_MEDIA_ALREADY_CONNECTED;
+
+	bttv_capture_format captureFormat = fCaptureFormat;
+	status_t status = _SpecializeFormat(format, &captureFormat);
+	if (status != B_OK)
+		return status;
+
+	fPendingCaptureFormat = captureFormat;
+	fHasPendingFormat = true;
+	*outSource = fOutput.source;
+	snprintf(outName, B_MEDIA_NAME_LENGTH, "%s", fOutput.name);
+	return B_OK;
+}
+
+
+void
+BttvProducer::Connect(status_t error, const media_source& source,
+	const media_destination& destination, const media_format& format,
+	char* ioName)
+{
+	if (error != B_OK || source != fOutput.source) {
+		fHasPendingFormat = false;
+		return;
+	}
+
+	if (fHasPendingFormat) {
+		if (_ApplyCaptureFormat(fPendingCaptureFormat) == B_OK) {
+			_UpdateOutputFormat();
+			fHasPendingFormat = false;
+		}
+	}
+
+	fOutput.destination = destination;
+	fConnectedFormat = fOutput.format.u.raw_video;
+	snprintf(ioName, B_MEDIA_NAME_LENGTH, "%s", fOutput.name);
+
+	if (_EnsureBufferGroup() != B_OK) {
+		fOutput.destination = media_destination::null;
+		return;
+	}
+
+	bigtime_t downstreamLatency = 0;
+	media_node_id timeSourceID = 0;
+	FindLatencyFor(fOutput.destination, &downstreamLatency, &timeSourceID);
+	SetEventLatency(downstreamLatency + 2000);
+
+	fConnected = true;
+	fEnabled = true;
+}
+
+
+void
+BttvProducer::Disconnect(const media_source& source,
+	const media_destination& destination)
+{
+	if (!fConnected)
+		return;
+	if (source != fOutput.source || destination != fOutput.destination)
+		return;
+
+	fEnabled = false;
+	fConnected = false;
+	fHasPendingFormat = false;
+	fOutput.destination = media_destination::null;
+	_DestroyBufferGroup();
+}
+
+
+void
+BttvProducer::LateNoticeReceived(const media_source& source, bigtime_t howMuch,
+	bigtime_t performanceTime)
+{
+	(void)source;
+	(void)howMuch;
+	(void)performanceTime;
+}
+
+
+void
+BttvProducer::EnableOutput(const media_source& source, bool enabled,
+	int32* deprecated)
+{
+	(void)deprecated;
+
+	if (source == fOutput.source)
+		fEnabled = enabled;
+}
+
+
+status_t
+BttvProducer::SetPlayRate(int32 numer, int32 denom)
+{
+	(void)numer;
+	(void)denom;
+	return B_ERROR;
+}
+
+
+void
+BttvProducer::AdditionalBufferRequested(const media_source& source,
+	media_buffer_id prevBuffer, bigtime_t prevTime, const media_seek_tag* prevTag)
+{
+	(void)source;
+	(void)prevBuffer;
+	(void)prevTime;
+	(void)prevTag;
+}
+
+
+void
+BttvProducer::LatencyChanged(const media_source& source,
+	const media_destination& destination, bigtime_t newLatency, uint32 flags)
+{
+	BBufferProducer::LatencyChanged(source, destination, newLatency, flags);
+}
+
+
+status_t
+BttvProducer::GetParameterValue(int32 id, bigtime_t* lastChange, void* value,
+	size_t* size)
+{
+	if (lastChange == NULL || value == NULL || size == NULL)
+		return B_BAD_VALUE;
+
+	switch (id) {
+		case BTV_PARAM_INPUT:
+			*lastChange = fInputLastChange;
+			*size = sizeof(uint32);
+			*((uint32*)value) = fSelectedInput;
+			return B_OK;
+
+		case BTV_PARAM_STANDARD:
+			*lastChange = fStandardLastChange;
+			*size = sizeof(uint32);
+			*((uint32*)value) = fSelectedStandard;
+			return B_OK;
+
+		case BTV_PARAM_RESOLUTION:
+			*lastChange = fResolutionLastChange;
+			*size = sizeof(uint32);
+			*((uint32*)value) = fResolutionPreset;
+			return B_OK;
+
+		case BTV_PARAM_BRIGHTNESS:
+			*lastChange = fBrightnessLastChange;
+			*size = sizeof(float);
+			*((float*)value) = fControls.brightness;
+			return B_OK;
+
+		case BTV_PARAM_CONTRAST:
+			*lastChange = fContrastLastChange;
+			*size = sizeof(float);
+			*((float*)value) = fControls.contrast;
+			return B_OK;
+
+		case BTV_PARAM_SATURATION:
+			*lastChange = fSaturationLastChange;
+			*size = sizeof(float);
+			*((float*)value) = fControls.saturation;
+			return B_OK;
+
+		case BTV_PARAM_HUE:
+			*lastChange = fHueLastChange;
+			*size = sizeof(float);
+			*((float*)value) = fControls.hue;
+			return B_OK;
+
+		default:
+			return B_BAD_VALUE;
+	}
+}
+
+
+void
+BttvProducer::SetParameterValue(int32 id, bigtime_t when, const void* value,
+	size_t size)
+{
+	if (value == NULL)
+		return;
+
+	uint32 newValue = size == sizeof(uint32) ? *((const uint32*)value) : 0;
+	uint32 input = fSelectedInput;
+	uint32 standard = fSelectedStandard;
+	uint32 resolution = fResolutionPreset;
+
+	switch (id) {
+		case BTV_PARAM_INPUT:
+			if (newValue == fSelectedInput)
+				return;
+			input = newValue;
+			break;
+
+		case BTV_PARAM_STANDARD:
+			producer_log("[PRODUCER] SetParameterValue: BTV_PARAM_STANDARD "
+				"newValue=%" B_PRIu32 " fSelectedStandard=%" B_PRIu32 "\n",
+				newValue, fSelectedStandard);
+			if (newValue == fSelectedStandard)
+				return;
+			standard = newValue;
+			break;
+
+		case BTV_PARAM_RESOLUTION:
+			if (newValue == fResolutionPreset)
+				return;
+			resolution = newValue;
+			break;
+
+		case BTV_PARAM_BRIGHTNESS:
+		{
+			if (size != sizeof(float))
+				return;
+			bttv_video_controls controls = fControls;
+			controls.brightness = (int32)(*((const float*)value));
+			if (_ApplyControls(controls) != B_OK)
+				return;
+			fBrightnessLastChange = when;
+			{
+				float current = fControls.brightness;
+				BroadcastNewParameterValue(fBrightnessLastChange, BTV_PARAM_BRIGHTNESS,
+					&current, sizeof(current));
+			}
+			return;
+		}
+
+		case BTV_PARAM_CONTRAST:
+		{
+			if (size != sizeof(float))
+				return;
+			bttv_video_controls controls = fControls;
+			controls.contrast = (int32)(*((const float*)value));
+			if (_ApplyControls(controls) != B_OK)
+				return;
+			fContrastLastChange = when;
+			{
+				float current = fControls.contrast;
+				BroadcastNewParameterValue(fContrastLastChange, BTV_PARAM_CONTRAST,
+					&current, sizeof(current));
+			}
+			return;
+		}
+
+		case BTV_PARAM_SATURATION:
+		{
+			if (size != sizeof(float))
+				return;
+			bttv_video_controls controls = fControls;
+			controls.saturation = (int32)(*((const float*)value));
+			if (_ApplyControls(controls) != B_OK)
+				return;
+			fSaturationLastChange = when;
+			{
+				float current = fControls.saturation;
+				BroadcastNewParameterValue(fSaturationLastChange, BTV_PARAM_SATURATION,
+					&current, sizeof(current));
+			}
+			return;
+		}
+
+		case BTV_PARAM_HUE:
+		{
+			if (size != sizeof(float))
+				return;
+			bttv_video_controls controls = fControls;
+			controls.hue = (int32)(*((const float*)value));
+			if (_ApplyControls(controls) != B_OK)
+				return;
+			fHueLastChange = when;
+			{
+				float current = fControls.hue;
+				BroadcastNewParameterValue(fHueLastChange, BTV_PARAM_HUE,
+					&current, sizeof(current));
+			}
+			return;
+		}
+
+		default:
+			return;
+	}
+
+	if (size != sizeof(uint32))
+		return;
+
+
+
+	status_t applyStatus = _ApplyCaptureSettings(input, standard, resolution);
+	producer_log("[PRODUCER] SetParameterValue: _ApplyCaptureSettings(input=%"
+		B_PRIu32 ", standard=%" B_PRIu32 ", resolution=%" B_PRIu32
+		") returned %s, fSelectedStandard now=%" B_PRIu32 "\n",
+		input, standard, resolution, strerror(applyStatus), fSelectedStandard);
+	if (applyStatus != B_OK)
+		return;
+
+	switch (id) {
+		case BTV_PARAM_INPUT:
+			fInputLastChange = when;
+			BroadcastNewParameterValue(fInputLastChange, BTV_PARAM_INPUT, &fSelectedInput,
+				sizeof(fSelectedInput));
+			break;
+
+		case BTV_PARAM_STANDARD:
+			fStandardLastChange = when;
+			BroadcastNewParameterValue(fStandardLastChange, BTV_PARAM_STANDARD,
+				&fSelectedStandard, sizeof(fSelectedStandard));
+			break;
+
+		case BTV_PARAM_RESOLUTION:
+			fResolutionLastChange = when;
+			BroadcastNewParameterValue(fResolutionLastChange, BTV_PARAM_RESOLUTION,
+				&fResolutionPreset, sizeof(fResolutionPreset));
+			break;
+	}
+}
+
+
+status_t
+BttvProducer::StartControlPanel(BMessenger* outMessenger)
+{
+	return BControllable::StartControlPanel(outMessenger);
+}
+
+
+status_t
+BttvProducer::_OpenDriver()
+{
+	fDriverFD = open(fDriverPath, O_RDWR);
+	return fDriverFD >= 0 ? B_OK : B_ERROR;
+}
+
+
+void
+BttvProducer::_CloseDriver()
+{
+	if (fDriverFD >= 0) {
+		close(fDriverFD);
+		fDriverFD = -1;
+	}
+}
+
+
+status_t
+BttvProducer::_RefreshCaptureFormat()
+{
+	if (ioctl(fDriverFD, BTV_GET_CAPTURE_FORMAT, &fCaptureFormat,
+		sizeof(fCaptureFormat)) < 0) {
+		return B_ERROR;
+	}
+
+	return B_OK;
+}
+
+
+status_t
+BttvProducer::_ApplyCaptureFormat()
+{
+	return _ApplyCaptureFormat(fCaptureFormat);
+}
+
+
+status_t
+BttvProducer::_ApplyCaptureFormat(const bttv_capture_format& format)
+{
+	bttv_capture_format desiredFormat = format;
+	desiredFormat.pixel_format = BTV_PIXEL_FORMAT_YUY2;
+
+	if (ioctl(fDriverFD, BTV_SET_CAPTURE_FORMAT, &desiredFormat,
+		sizeof(desiredFormat)) < 0) {
+		return B_ERROR;
+	}
+
+	if (ioctl(fDriverFD, BTV_SET_INPUT, &desiredFormat.input,
+		sizeof(desiredFormat.input)) < 0) {
+		return B_ERROR;
+	}
+
+	return _RefreshCaptureFormat();
+}
+
+
+void
+BttvProducer::_UpdateOutputFormat()
+{
+	// PAL-60 is "PAL" only in colour encoding -- its field rate is the
+	// NTSC-family ~59.94 Hz (525-line/60Hz timing), not PAL's 50Hz.
+	float fieldRate = fCaptureFormat.video_standard != BTV_STD_PAL ? 29.97f : 25.0f;
+
+	fOutput.format.type = B_MEDIA_RAW_VIDEO;
+	fOutput.format.u.raw_video = media_raw_video_format::wildcard;
+	fOutput.format.u.raw_video.field_rate = fieldRate;
+	fOutput.format.u.raw_video.interlace = 1;
+	fOutput.format.u.raw_video.first_active = 0;
+	fOutput.format.u.raw_video.last_active = (int32)fCaptureFormat.height - 1;
+	fOutput.format.u.raw_video.orientation = B_VIDEO_TOP_LEFT_RIGHT;
+	fOutput.format.u.raw_video.pixel_width_aspect = 1;
+	fOutput.format.u.raw_video.pixel_height_aspect = 1;
+	fOutput.format.u.raw_video.display.format = B_YCbCr422;
+	fOutput.format.u.raw_video.display.line_width = fCaptureFormat.width;
+	fOutput.format.u.raw_video.display.line_count = fCaptureFormat.height;
+	fOutput.format.u.raw_video.display.bytes_per_row = fCaptureFormat.bytes_per_line;
+	fOutput.format.u.raw_video.display.pixel_offset = 0;
+	fOutput.format.u.raw_video.display.line_offset = 0;
+	fOutput.format.u.raw_video.display.flags = 0;
+}
+
+
+BParameterWeb*
+BttvProducer::_CreateParameterWeb()
+{
+	BParameterWeb* web = new BParameterWeb();
+	BParameterGroup* main = web->MakeGroup(Name());
+	BParameterGroup* controls = main->MakeGroup("Capture");
+
+	BDiscreteParameter* input = controls->MakeDiscreteParameter(BTV_PARAM_INPUT,
+		B_MEDIA_NO_TYPE, "Input", B_INPUT_MUX);
+	input->AddItem(BTV_INPUT_COMPOSITE, "Composite");
+
+	if ((fCardInfo.capabilities & BTV_CAP_HAS_TUNER) != 0)
+		input->AddItem(BTV_INPUT_TUNER, "Tuner (Analog)");
+
+	if ((fCardInfo.capabilities & BTV_CAP_HAS_SVIDEO) != 0)
+		input->AddItem(BTV_INPUT_SVIDEO, "S-Video");
+
+	BDiscreteParameter* standard = controls->MakeDiscreteParameter(BTV_PARAM_STANDARD,
+		B_MEDIA_NO_TYPE, "Standard", B_VIDEO_FORMAT);
+	standard->AddItem(BTV_STD_PAL, "PAL");
+	standard->AddItem(BTV_STD_NTSC, "NTSC");
+	standard->AddItem(BTV_STD_PAL60, "PAL-60");
+	standard->AddItem(BTV_STD_FAKE_PAL, "Fake-PAL (NTSC timing)");
+
+	BDiscreteParameter* resolution = controls->MakeDiscreteParameter(BTV_PARAM_RESOLUTION,
+		B_MEDIA_NO_TYPE, "Resolution", B_RESOLUTION);
+	resolution->AddItem(BTV_RESOLUTION_FULL, "Full");
+	resolution->AddItem(BTV_RESOLUTION_HALF, "Half");
+
+	BParameterGroup* image = main->MakeGroup("Image");
+	image->MakeContinuousParameter(BTV_PARAM_BRIGHTNESS, B_MEDIA_RAW_VIDEO,
+		"Brightness", B_LEVEL, "", -128, 127, 1);
+	image->MakeContinuousParameter(BTV_PARAM_CONTRAST, B_MEDIA_RAW_VIDEO,
+		"Contrast", B_LEVEL, "", 0, 255, 1);
+	image->MakeContinuousParameter(BTV_PARAM_SATURATION, B_MEDIA_RAW_VIDEO,
+		"Saturation", B_LEVEL, "", 0, 255, 1);
+	image->MakeContinuousParameter(BTV_PARAM_HUE, B_MEDIA_RAW_VIDEO,
+		"Hue", B_LEVEL, "", -128, 127, 1);
+
+	return web;
+}
+
+
+// PAL-60 shares PAL's horizontal timing (so the same half-width, 360,
+// not NTSC's 320) but is 480 active lines like NTSC (so the same
+// half-height, 240, not PAL's 288). Fake-PAL is NTSC's horizontal
+// timing *and* active line count (only VTOTAL differs, invisible at
+// this level), so it takes NTSC's half-width too. See BTV_STD_PAL60
+// and BTV_STD_FAKE_PAL in DriverInterface.h.
+static uint32
+full_height_for(uint32 standard)
+{
+	return standard == BTV_STD_PAL ? 576 : 480;
+}
+
+
+static uint32
+half_width_for(uint32 standard)
+{
+	return (standard == BTV_STD_NTSC || standard == BTV_STD_FAKE_PAL)
+		? 320 : 360;
+}
+
+
+uint32
+BttvProducer::_ResolutionPresetFor(const bttv_capture_format& format) const
+{
+	uint32 halfHeight = full_height_for(format.video_standard) / 2;
+	uint32 halfWidth = half_width_for(format.video_standard);
+
+	if (format.width == halfWidth && format.height == halfHeight)
+		return BTV_RESOLUTION_HALF;
+
+	return BTV_RESOLUTION_FULL;
+}
+
+
+bttv_capture_format
+BttvProducer::_CaptureFormatFor(uint32 input, uint32 standard,
+	uint32 resolution) const
+{
+	bttv_capture_format format = fCaptureFormat;
+	format.input = input;
+	format.video_standard = standard;
+	format.pixel_format = BTV_PIXEL_FORMAT_YUY2;
+
+	uint32 fullHeight = full_height_for(standard);
+	if (resolution == BTV_RESOLUTION_HALF) {
+		format.width = half_width_for(standard);
+		format.height = fullHeight / 2;
+	} else {
+		format.width = 720;
+		format.height = fullHeight;
+	}
+
+	format.bytes_per_line = format.width * 2;
+	format.frame_size = format.bytes_per_line * format.height;
+	return format;
+}
+
+
+status_t
+BttvProducer::_ApplyCaptureSettings(uint32 input, uint32 standard,
+	uint32 resolution)
+{
+	if (input == BTV_INPUT_SVIDEO && (fCardInfo.capabilities & BTV_CAP_HAS_SVIDEO) == 0)
+		return B_BAD_VALUE;
+	if (fCardInfo.video_inputs > 0 && input >= fCardInfo.video_inputs)
+		return B_BAD_VALUE;
+	if (input != BTV_INPUT_COMPOSITE && input != BTV_INPUT_TUNER && input != BTV_INPUT_SVIDEO)
+		return B_BAD_VALUE;
+	if (standard != BTV_STD_PAL && standard != BTV_STD_NTSC
+		&& standard != BTV_STD_PAL60 && standard != BTV_STD_FAKE_PAL)
+		return B_BAD_VALUE;
+	if (resolution != BTV_RESOLUTION_FULL && resolution != BTV_RESOLUTION_HALF)
+		return B_BAD_VALUE;
+
+	bttv_capture_format newCaptureFormat = _CaptureFormatFor(input, standard,
+		resolution);
+	media_format newFormat = fOutput.format;
+	status_t status = _SpecializeFormat(&newFormat, &newCaptureFormat);
+	if (status != B_OK)
+		return status;
+
+	// _SpecializeFormat() re-derives video_standard from fCaptureFormat
+	// (the *current*, about-to-be-replaced standard) plus format/
+	// field_rate heuristics -- appropriate for Connect()-time negotiation,
+	// where that's all the caller has to go on, but wrong here: this
+	// function's caller already knows exactly which standard it wants
+	// (the `standard` parameter, explicit, not inferred). Confirmed via
+	// logging that _SpecializeFormat() was silently downgrading an
+	// explicit BTV_STD_PAL60 request back to BTV_STD_NTSC whenever
+	// fCaptureFormat.video_standard happened to be BTV_STD_PAL at the
+	// time (its "was PAL, now asked for 480-line family, can't tell
+	// NTSC from PAL-60, default NTSC" rule) -- NOT because anything
+	// about the actual PAL-60 request was ambiguous, just because
+	// _SpecializeFormat() never saw the real request, only
+	// fOutput.format's stale field_rate/height and the old standard.
+	// The explicit request wins here.
+	newCaptureFormat.video_standard = standard;
+
+	bool restartCapture = fRunning;
+	if (fConnected) {
+		status = ChangeFormat(fOutput.source, fOutput.destination, &newFormat);
+		if (status != B_OK)
+			return status;
+	}
+
+	if (restartCapture)
+		_HandleStop();
+
+	status = _ApplyCaptureFormat(newCaptureFormat);
+	if (status != B_OK) {
+		if (restartCapture)
+			_HandleStart();
+		return status;
+	}
+
+	_UpdateOutputFormat();
+	fConnectedFormat = fOutput.format.u.raw_video;
+	fSelectedInput = fCaptureFormat.input;
+	fSelectedStandard = fCaptureFormat.video_standard;
+	fResolutionPreset = _ResolutionPresetFor(fCaptureFormat);
+
+	if (fOwnsBufferGroup) {
+		_DestroyBufferGroup();
+		status = _EnsureBufferGroup();
+		if (status != B_OK)
+			return status;
+	}
+
+	if (restartCapture)
+		_HandleStart();
+
+	return B_OK;
+}
+
+
+status_t
+BttvProducer::_RefreshControls()
+{
+	if (ioctl(fDriverFD, BTV_GET_CONTROLS, &fControls, sizeof(fControls)) < 0)
+		return B_ERROR;
+
+	return B_OK;
+}
+
+
+status_t
+BttvProducer::_ApplyControls(const bttv_video_controls& controls)
+{
+	if (ioctl(fDriverFD, BTV_SET_CONTROLS, (void*)&controls, sizeof(controls)) < 0)
+		return B_ERROR;
+
+	fControls = controls;
+	return _RefreshControls();
+}
+
+
+status_t
+BttvProducer::_SpecializeFormat(media_format* format,
+	bttv_capture_format* captureFormat)
+{
+	if (format == NULL || captureFormat == NULL)
+		return B_BAD_VALUE;
+
+	if (format->type == B_MEDIA_UNKNOWN_TYPE) {
+		format->type = B_MEDIA_RAW_VIDEO;
+		format->u.raw_video = media_raw_video_format::wildcard;
+	}
+
+	if (format->type != B_MEDIA_RAW_VIDEO)
+		return B_MEDIA_BAD_FORMAT;
+
+	if (format->u.raw_video.interlace != media_raw_video_format::wildcard.interlace
+		&& format->u.raw_video.interlace != 1)
+		return B_MEDIA_BAD_FORMAT;
+
+	color_space requestedColor = format->u.raw_video.display.format;
+	if (requestedColor != media_raw_video_format::wildcard.display.format
+		&& requestedColor != B_YCbCr422)
+		return B_MEDIA_BAD_FORMAT;
+
+	uint32 requestedWidth = format->u.raw_video.display.line_width;
+	if (requestedWidth == 0
+		|| requestedWidth == media_raw_video_format::wildcard.display.line_width) {
+		requestedWidth = fCaptureFormat.width;
+	}
+
+	uint32 requestedHeight = format->u.raw_video.display.line_count;
+	if (requestedHeight == 0
+		|| requestedHeight == media_raw_video_format::wildcard.display.line_count) {
+		requestedHeight = fCaptureFormat.height;
+	}
+
+	// NTSC and PAL-60 are both 480 active lines at a ~29.97 Hz field
+	// rate -- format/field_rate alone can never tell them apart (PAL-60
+	// differs only in colour encoding, invisible at this level). Only
+	// ever resolve *to* PAL-60 by preserving an already-selected PAL-60
+	// when the requested height/field_rate are consistent with it but
+	// don't positively demand NTSC or real PAL; never guess PAL-60 from
+	// a blank slate (there's nothing in a generic 480-line/30fps request
+	// that would justify it over plain NTSC).
+	uint32 requestedStandard = fCaptureFormat.video_standard;
+	float requestedFieldRate = format->u.raw_video.field_rate;
+	bool haveFieldRate = requestedFieldRate != 0.0f
+		&& requestedFieldRate != media_raw_video_format::wildcard.field_rate;
+
+	if (haveFieldRate && requestedFieldRate <= 27.0f) {
+		// Only real PAL runs at ~25 Hz; neither NTSC nor PAL-60 do.
+		requestedStandard = BTV_STD_PAL;
+	} else if (requestedHeight > kMaxFrameHeightNTSC) {
+		// Only real PAL can be taller than 480 lines.
+		requestedStandard = BTV_STD_PAL;
+	} else if (requestedStandard == BTV_STD_PAL) {
+		// Was real PAL (576 lines/25Hz), but now asked for something
+		// consistent with the 480-line/~30Hz family instead -- can't
+		// tell NTSC from PAL-60 from this alone, default to NTSC.
+		requestedStandard = BTV_STD_NTSC;
+	}
+	// Otherwise requestedStandard already correctly stays whatever it
+	// was (NTSC or PAL-60), since nothing here contradicts it.
+	producer_log("[PRODUCER] _SpecializeFormat: fCaptureFormat.video_standard="
+		"%" B_PRIu32 " requestedFieldRate=%.2f requestedHeight=%" B_PRIu32
+		" -> requestedStandard=%" B_PRIu32 "\n",
+		fCaptureFormat.video_standard, requestedFieldRate, requestedHeight,
+		requestedStandard);
+
+	uint32 maxHeight = requestedStandard == BTV_STD_PAL
+		? kMaxFrameHeightPAL : kMaxFrameHeightNTSC;
+
+	if (requestedWidth == 0 || requestedWidth > kMaxFrameWidth
+		|| (requestedWidth & 1) != 0)
+		return B_MEDIA_BAD_FORMAT;
+	if (requestedHeight == 0 || requestedHeight > maxHeight)
+		return B_MEDIA_BAD_FORMAT;
+
+	captureFormat->width = requestedWidth;
+	captureFormat->height = requestedHeight;
+	captureFormat->bytes_per_line = requestedWidth * 2;
+	captureFormat->frame_size = captureFormat->bytes_per_line * requestedHeight;
+	captureFormat->pixel_format = BTV_PIXEL_FORMAT_YUY2;
+	captureFormat->video_standard = requestedStandard;
+
+	format->type = B_MEDIA_RAW_VIDEO;
+	format->u.raw_video = media_raw_video_format::wildcard;
+	format->u.raw_video.field_rate = requestedStandard != BTV_STD_PAL ? 29.97f : 25.0f;
+	format->u.raw_video.interlace = 1;
+	format->u.raw_video.first_active = 0;
+	format->u.raw_video.last_active = requestedHeight - 1;
+	format->u.raw_video.orientation = B_VIDEO_TOP_LEFT_RIGHT;
+	format->u.raw_video.pixel_width_aspect = 1;
+	format->u.raw_video.pixel_height_aspect = 1;
+	format->u.raw_video.display.format = B_YCbCr422;
+	format->u.raw_video.display.line_width = requestedWidth;
+	format->u.raw_video.display.line_count = requestedHeight;
+	format->u.raw_video.display.bytes_per_row = requestedWidth * 2;
+	format->u.raw_video.display.pixel_offset = 0;
+	format->u.raw_video.display.line_offset = 0;
+	format->u.raw_video.display.flags = 0;
+	return B_OK;
+}
+
+
+void
+BttvProducer::_HandleStart()
+{
+	producer_log("[PRODUCER] BttvProducer::_HandleStart: ENTER (running=%d, fd=%d)\n",
+		fRunning, fDriverFD);
+
+	if (fRunning) {
+		producer_log("[PRODUCER] BttvProducer::_HandleStart: already running\n");
+		return;
+	}
+
+	producer_log("[PRODUCER] BttvProducer::_HandleStart: calling ioctl(BTV_START_CAPTURE)...\n");
+	int ret = ioctl(fDriverFD, BTV_START_CAPTURE, NULL, 0);
+	producer_log("[PRODUCER] BttvProducer::_HandleStart: ioctl(BTV_START_CAPTURE) returned %d\n", ret);
+	if (ret < 0)
+		return;
+
+	fFrameSequence = 0;
+	fRunning = true;
+	producer_log("[PRODUCER] BttvProducer::_HandleStart: spawning capture thread...\n");
+	fCaptureThread = spawn_thread(&_CaptureThreadEntry, "bttv capture",
+		B_DISPLAY_PRIORITY, this);
+	if (fCaptureThread < B_OK) {
+		producer_log("[PRODUCER] BttvProducer::_HandleStart: spawn_thread FAILED\n");
+		fRunning = false;
+		ioctl(fDriverFD, BTV_STOP_CAPTURE, NULL, 0);
+		return;
+	}
+
+	producer_log("[PRODUCER] BttvProducer::_HandleStart: resuming capture thread %" B_PRId32 "...\n",
+		fCaptureThread);
+	resume_thread(fCaptureThread);
+	producer_log("[PRODUCER] BttvProducer::_HandleStart: EXIT SUCCESS\n");
+}
+
+
+void
+BttvProducer::_HandleStop()
+{
+	producer_log("[PRODUCER] BttvProducer::_HandleStop: ENTER (running=%d)\n", fRunning);
+	if (!fRunning)
+		return;
+
+	fRunning = false;
+	producer_log("[PRODUCER] BttvProducer::_HandleStop: calling ioctl(BTV_STOP_CAPTURE)...\n");
+	ioctl(fDriverFD, BTV_STOP_CAPTURE, NULL, 0);
+	producer_log("[PRODUCER] BttvProducer::_HandleStop: ioctl(BTV_STOP_CAPTURE) returned\n");
+
+	if (fCaptureThread >= B_OK) {
+		producer_log("[PRODUCER] BttvProducer::_HandleStop: waiting for thread %" B_PRId32 "...\n",
+			fCaptureThread);
+		status_t result = B_OK;
+		wait_for_thread(fCaptureThread, &result);
+		producer_log("[PRODUCER] BttvProducer::_HandleStop: thread terminated\n");
+		fCaptureThread = -1;
+	}
+	producer_log("[PRODUCER] BttvProducer::_HandleStop: EXIT\n");
+}
+
+
+status_t
+BttvProducer::_EnsureBufferGroup()
+{
+	BAutolock locker(&fLock);
+	if (fBufferGroup != NULL)
+		return B_OK;
+
+	fBufferGroup = new BBufferGroup(fCaptureFormat.frame_size, 4);
+	if (fBufferGroup == NULL)
+		return B_NO_MEMORY;
+	if (fBufferGroup->InitCheck() != B_OK) {
+		delete fBufferGroup;
+		fBufferGroup = NULL;
+		return B_ERROR;
+	}
+	fOwnsBufferGroup = true;
+
+	return B_OK;
+}
+
+
+void
+BttvProducer::_DestroyBufferGroup()
+{
+	BAutolock locker(&fLock);
+	if (fBufferGroup != NULL && fOwnsBufferGroup)
+		delete fBufferGroup;
+	fBufferGroup = NULL;
+	fOwnsBufferGroup = false;
+}
+
+
+int32
+BttvProducer::_CaptureThreadEntry(void* cookie)
+{
+	return ((BttvProducer*)cookie)->_CaptureThread();
+}
+
+
+int32
+BttvProducer::_CaptureThread()
+{
+	producer_log("[PRODUCER] BttvProducer::_CaptureThread: thread started\n");
+	uint64 frameIndex = 0;
+
+	while (fRunning) {
+		if (!fConnected || !fEnabled) {
+			snooze(20000);
+			continue;
+		}
+
+		BBufferGroup* bufferGroup = NULL;
+		media_source source;
+		media_destination destination;
+		bttv_capture_format captureFormat;
+		{
+			BAutolock locker(&fLock);
+			bufferGroup = fBufferGroup;
+			if (bufferGroup == NULL) {
+				snooze(10000);
+				continue;
+			}
+			source = fOutput.source;
+			destination = fOutput.destination;
+			captureFormat = fCaptureFormat;
+		}
+
+		BBuffer* buffer = bufferGroup->RequestBuffer(captureFormat.frame_size, 0);
+		if (buffer == NULL) {
+			snooze(2000);
+			continue;
+		}
+
+		if (frameIndex < 5) {
+			producer_log("[PRODUCER] BttvProducer::_CaptureThread: calling read(size=%" B_PRIu32 ")...\n",
+				captureFormat.frame_size);
+		}
+
+		// pread(..., 0), not read(): the bttv driver's read hook treats
+		// any file position >= one frame's size as "past end of frame"
+		// (0 bytes, not an error), and plain read() advances the POSIX
+		// file position across calls on the same fd. A loop calling
+		// read() here would get exactly one real frame and then 0 bytes
+		// forever, since the position never comes back to 0. pread()
+		// reads from the given offset without touching or depending on
+		// the shared file position -- confirmed against the same bug
+		// found and fixed in /boot/home/Apps/bttv_test_app.
+		ssize_t bytesRead = pread(fDriverFD, buffer->Data(), captureFormat.frame_size, 0);
+
+		if (frameIndex < 5) {
+			producer_log("[PRODUCER] BttvProducer::_CaptureThread: read returned %" B_PRIdSSIZE "\n",
+				bytesRead);
+		}
+
+		if (bytesRead < 0) {
+			buffer->Recycle();
+			snooze(2000);
+			continue;
+		}
+		if ((size_t)bytesRead != captureFormat.frame_size) {
+			buffer->Recycle();
+			snooze(2000);
+			continue;
+		}
+
+		frameIndex++;
+		bigtime_t processStart = system_time();
+
+		media_header* header = buffer->Header();
+		header->type = B_MEDIA_RAW_VIDEO;
+		header->time_source = TimeSource()->ID();
+		header->size_used = bytesRead;
+		header->file_pos = 0;
+		header->orig_size = 0;
+		header->data_offset = 0;
+		header->start_time = TimeSource()->PerformanceTimeFor(system_time());
+		header->u.raw_video.field_gamma = 1.0f;
+		header->u.raw_video.field_sequence = fFrameSequence++;
+		header->u.raw_video.field_number = 0;
+		header->u.raw_video.pulldown_number = 0;
+		header->u.raw_video.first_active_line = 0;
+		header->u.raw_video.line_count = captureFormat.height;
+
+		if (SendBuffer(buffer, source, destination) != B_OK)
+			buffer->Recycle();
+
+		fProcessingLatency = system_time() - processStart;
+	}
+
+	producer_log("[PRODUCER] BttvProducer::_CaptureThread: thread exiting, totalFrames=%" B_PRIu64 "\n",
+		frameIndex);
+	return B_OK;
+}
