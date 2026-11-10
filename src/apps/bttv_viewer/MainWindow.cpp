@@ -403,6 +403,20 @@ void
 MainWindow::_StopCapture()
 {
 	viewer_log("[VIEWER] MainWindow::_StopCapture: ENTER (mode=%d)\n", fSourceMode);
+
+	// QuitRequested() always calls this defensively, even when the Stop
+	// button already did (fCapturing already false) -- nothing to do in
+	// that case, and _StopDirect()/_StopMediaKit() unconditionally
+	// Unlock() this window before their blocking wait regardless of
+	// whether there's real work to join. Skipping the call entirely when
+	// there's nothing running avoids an unnecessary unlock/relock right
+	// in the middle of the window's own close/quit sequence, where it's
+	// least safe to experiment with the lock count.
+	if (!fCapturing) {
+		viewer_log("[VIEWER] MainWindow::_StopCapture: not capturing, nothing to do\n");
+		return;
+	}
+
 	if (fSourceMode == SOURCE_DIRECT_DRIVER) {
 		_StopDirect();
 	} else {
