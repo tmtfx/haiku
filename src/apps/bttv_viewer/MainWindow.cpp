@@ -444,8 +444,22 @@ MainWindow::_StartDirect()
 void
 MainWindow::_StopDirect()
 {
+	// This runs from MessageReceived(), i.e. with this window already
+	// locked. fDirectCapture.Stop() calls wait_for_thread() to join the
+	// capture thread -- but that thread's last in-flight frame may still
+	// be inside VideoView::SetFrameData(), which needs this same window
+	// lock (LockLooper()) to post its Invalidate(). Staying locked here
+	// would deadlock them against each other exactly like the
+	// fBitmapLock/window-lock inversion fixed in VideoView.cpp: this
+	// thread blocked in wait_for_thread() holding the window lock, the
+	// capture thread blocked on LockLooper() waiting for it. Unlocking
+	// before the blocking wait, like bttv_test_app's TestWindow already
+	// does for the same reason, lets the capture thread's last
+	// LockLooper() succeed and finish.
 	viewer_log("[VIEWER] MainWindow::_StopDirect: calling fDirectCapture.Stop()...\n");
+	Unlock();
 	fDirectCapture.Stop();
+	Lock();
 	if (fVideoView != NULL)
 		fVideoView->Clear();
 	viewer_log("[VIEWER] MainWindow::_StopDirect: EXIT\n");
@@ -569,6 +583,17 @@ MainWindow::_StopMediaKit()
 	if (fMediaRoster == NULL)
 		return;
 
+	// Same reasoning as _StopDirect(): this runs from MessageReceived(),
+	// i.e. with this window already locked. StopNode(..., true) blocks
+	// synchronously until VideoConsumer's own event-loop thread actually
+	// processes the stop -- but that thread's in-flight buffer handling
+	// calls fVideoView->SetFrameData(), which needs this same window's
+	// lock (LockLooper()) since fVideoView is shared with Direct mode.
+	// Staying locked here risks the identical AB-BA deadlock fixed for
+	// Direct mode: this thread blocked in StopNode() holding the window
+	// lock, the consumer's thread blocked on LockLooper() waiting for it.
+	Unlock();
+
 	if (fConsumer != NULL) {
 		viewer_log("[VIEWER] MainWindow::_StopMediaKit: stopping consumer and producer nodes...\n");
 		fMediaRoster->StopNode(fConsumer->Node(), 0, true);
@@ -597,6 +622,8 @@ MainWindow::_StopMediaKit()
 
 	if (fVideoView != NULL)
 		fVideoView->Clear();
+
+	Lock();
 
 	viewer_log("[VIEWER] MainWindow::_StopMediaKit: EXIT\n");
 }
