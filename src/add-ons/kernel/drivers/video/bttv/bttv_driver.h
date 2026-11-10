@@ -7,7 +7,20 @@
 
 enum {
 	BTV_STD_PAL = 0,
-	BTV_STD_NTSC = 1
+	BTV_STD_NTSC = 1,
+	// PAL colour encoding on NTSC-style 525-line/60Hz timing (480 active
+	// lines, not 576) -- what video recorders produce playing an NTSC
+	// tape on a PAL deck, and empirically what several composite video
+	// sources tested against this driver actually output when set to
+	// "PAL" (confirmed via Linux's own bttv_tvnorms[] "PAL-60" entry:
+	// same Fsc/PLL target as genuine PAL-BDGHI, but sheight=480,
+	// vdelay=0x1a, and an explicit non-zero VTOTAL=524). Selecting plain
+	// BTV_STD_PAL against one of these sources gets a real PLL lock
+	// (same colour subcarrier) but caps out at exactly 480 real captured
+	// lines no matter what height is requested, because the chip's own
+	// vertical timing genuinely only ever sees 480 active lines from
+	// that source.
+	BTV_STD_PAL60 = 2
 };
 
 enum {
@@ -29,8 +42,22 @@ enum {
 	BTV_SET_INPUT,
 	BTV_GET_CONTROLS,
 	BTV_SET_CONTROLS,
-	BTV_GET_STATS
+	BTV_GET_STATS,
+	// TEMPORARY, diagnostic-only: raw register peek/poke, so register-level
+	// hypotheses can be tried live against real hardware without a
+	// recompile+reinstall+reboot cycle for each one. Remove once done.
+	BTV_DEBUG_READ_REG,
+	BTV_DEBUG_WRITE_REG
 };
+
+// For BTV_DEBUG_READ_REG/BTV_DEBUG_WRITE_REG. width is 1 or 4 (bytes);
+// value is the register's current value after a read, or the value to
+// write for a write.
+typedef struct bttv_debug_reg {
+	uint32	offset;
+	uint32	value;
+	uint8	width;
+} bttv_debug_reg;
 
 #define BTV_CAP_VIDEO_CAPTURE	0x00000001U
 #define BTV_CAP_HAS_TUNER		0x00000002U

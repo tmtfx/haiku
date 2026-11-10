@@ -129,6 +129,8 @@ bttv_klog(const char* fmt, ...)
 #define BT848_O_HSCALE_HI		0x0a0
 #define BT848_O_HSCALE_LO		0x0a4
 #define BT848_O_CONTROL			0x0ac
+#define BT848_VTOTAL_LO			0x0b0
+#define BT848_VTOTAL_HI			0x0b4
 #define BT848_O_SCLOOP			0x0c0
 #define BT848_O_VSCALE_HI		0x0cc
 #define BT848_O_VSCALE_LO		0x0d0
@@ -279,6 +281,13 @@ typedef struct {
 	uint16	hscale;
 	uint16	vscale;
 	uint8	crop;
+	// 0 for PAL/NTSC (leaves VTOTAL at whatever the chip already has --
+	// confirmed on real hardware to work fine for both, and explicitly
+	// writing 0 there made PAL-60 capture *worse*, not better, so it is
+	// only ever written when non-zero). 524 for PAL-60, matching Linux's
+	// real bttv_tvnorms[] PAL-60 entry -- the one and only tvnorm in
+	// that whole table with an explicit non-zero vtotal.
+	uint16	vtotal;
 } bt878_geometry;
 
 
@@ -333,6 +342,11 @@ typedef struct {
 	// recovery event; see bttv_capture_stats::last_dstatus/last_error_bits.
 	uint8		last_dstatus;
 	uint32		last_error_bits;
+	// Diagnostic-only FIFO overflow counter; see bt878_interrupt() and
+	// the INT_MASK comment in bt878_start_capture_locked(). Not treated
+	// as fatal, never triggers a RISC restart.
+	uint32		oflow_count;
+	uint32		last_oflow_risc_count;
 } bt878_device;
 
 
@@ -616,12 +630,14 @@ bt878_current_format(const bt878_device* device, bttv_capture_format* format)
 static status_t
 bt878_validate_format(const bt878_device* device, const bttv_capture_format* format)
 {
+	// PAL-60 shares PAL's colour/PLL path but is 480 active lines like
+	// NTSC, not 576 -- see BTV_STD_PAL60 in bttv_driver.h.
 	uint32 maxHeight = format->video_standard == BTV_STD_PAL
 		? MAX_FRAME_HEIGHT_PAL : MAX_FRAME_HEIGHT_NTSC;
 
 	if (format->pixel_format != 0 && format->pixel_format != BTV_PIXEL_FORMAT_YUY2)
 		return B_BAD_VALUE;
-	if (format->video_standard > BTV_STD_NTSC)
+	if (format->video_standard > BTV_STD_PAL60)
 		return B_BAD_VALUE;
 	if (format->input >= device->profile->video_inputs)
 		return B_BAD_VALUE;
@@ -649,11 +665,23 @@ bt878_compute_geometry(const bt878_device* device, bt878_geometry* geometry)
 		return;
 	}
 
+	geometry->vtotal = 0;
+
 	if (device->video_standard == BTV_STD_PAL) {
 		sourceWidth = 924;
 		sourceHeight = 576;
 		geometry->hdelay = 186;
 		geometry->vdelay = 0x20;
+	} else if (device->video_standard == BTV_STD_PAL60) {
+		// PAL-60: PAL colour/horizontal timing (same swidth/hdelay as
+		// genuine PAL-BDGHI, matching Linux's real PAL-60 tvnorm entry
+		// exactly), but only 480 active lines and NTSC's vdelay -- see
+		// BTV_STD_PAL60 in bttv_driver.h.
+		sourceWidth = 924;
+		sourceHeight = 480;
+		geometry->hdelay = 186;
+		geometry->vdelay = 0x1a;
+		geometry->vtotal = 524;
 	} else {
 		// hdelay=135 here (not Linux's bttv_tvnorms hdelayx1=128) because
 		// 135 is what was already confirmed to achieve real HLOC lock on
@@ -698,7 +726,12 @@ bt878_set_tvnorm(bt878_device* device)
 {
 	uint8 adelay, bdelay, normBits;
 
-	if (device->video_standard == BTV_STD_PAL) {
+	// PAL-60 shares PAL-BDGHI's ADELAY/BDELAY/IFORM norm+crystal bits
+	// exactly (same colour encoding and horizontal timing, same PLL
+	// target) -- only its vertical geometry differs. See BTV_STD_PAL60
+	// in bttv_driver.h and Linux's real PAL-60 tvnorm entry.
+	if (device->video_standard == BTV_STD_PAL
+		|| device->video_standard == BTV_STD_PAL60) {
 		adelay = 0x7f;
 		bdelay = 0x72;
 		normBits = BT848_IFORM_PAL_BDGHI | BT848_IFORM_XT1;
@@ -756,6 +789,22 @@ bt878_apply_geometry(bt878_device* device, const bt878_geometry& geometry, bool 
 	bt878_write8(device, BT848_E_VDELAY_LO + offset, geometry.vdelay & 0xff);
 	bt878_write8(device, BT848_E_CROP + offset, geometry.crop);
 	bt878_write8(device, BT848_E_VTC + offset, 0);
+
+	// VTOTAL is left untouched for PAL/NTSC (geometry.vtotal == 0):
+	// confirmed on real hardware that explicitly writing 0 there (Linux's
+	// own literal tvnorm->vtotal for PAL-BDGHI/NTSC, since neither sets
+	// the field in their struct initializer) makes things *worse*, not
+	// better -- active PAL-60-shaped video collapsed from 480 real lines
+	// down to about 1. Whatever VTOTAL needs to be for genuine PAL/NTSC
+	// on this chip/board, it isn't 0, and leaving it alone (whatever the
+	// chip already has) works correctly for both, so don't touch it.
+	// PAL-60 is different: it's the one tvnorm in Linux's real
+	// bttv_tvnorms[] table with an explicit non-zero vtotal (524) --
+	// written here only when geometry.vtotal is actually set.
+	if (geometry.vtotal != 0) {
+		bt878_write8(device, BT848_VTOTAL_HI, geometry.vtotal >> 8);
+		bt878_write8(device, BT848_VTOTAL_LO, geometry.vtotal & 0xff);
+	}
 }
 
 
@@ -903,7 +952,11 @@ bt878_set_pll(bt878_device* device)
 		return B_OK;
 	}
 
-	bttv_klog("[KERNEL] bt878_set_pll: PAL standard on Bt878/879, programming PLL...\n");
+	// PAL-60 reaches here too: same Fsc/PLL target as genuine PAL-BDGHI
+	// (see BTV_STD_PAL60 in bttv_driver.h), only the vertical geometry
+	// differs, which is handled elsewhere (bt878_compute_geometry()).
+	bttv_klog("[KERNEL] bt878_set_pll: PAL/PAL-60 standard on Bt878/879, "
+		"programming PLL...\n");
 	uint32 fin = 28636363 / 4;
 	uint32 fout = 35468950 / 4;
 
@@ -1168,18 +1221,27 @@ bt878_start_capture_locked(bt878_device* device)
 	bttv_klog("[KERNEL] bt878_start_capture_locked: clearing INT_STAT...\n");
 	bt878_write32(device, BT848_INT_STAT, 0xffffffff);
 
-	// Matches Linux's real init_irqreg() (bttv-driver.c) exactly for the
-	// bits we act on: frame completion (RISCI) and the two genuine fatal
+	// Matches Linux's real init_irqreg() (bttv-driver.c) for the bits we
+	// treat as fatal: frame completion (RISCI) and the two genuine fatal
 	// DMA errors (SCERR sync-counter error, OCERR opcode error). Linux
 	// does NOT mask BT848_INT_OFLOW at all -- a transient FIFO overflow is
 	// apparently self-correcting at the hardware level and not something
 	// its driver reacts to; masking and treating it as fatal here (as a
 	// previous version of this driver did) triggered needless RISC
-	// program restarts under normal operation. This must be the LAST
-	// register write in this function.
+	// program restarts under normal NTSC operation.
+	//
+	// OFLOW is masked in *in addition* to that, purely so the interrupt
+	// handler's diagnostic-only branch above can see and count it (see
+	// bt878_interrupt()) -- it is explicitly excluded from errorBits
+	// there, so it still never triggers a restart. This is to measure
+	// whether PAL's reproducible per-frame cutoff at an exact line count
+	// correlates with FIFO overflow, which was never actually checked
+	// under real PAL bandwidth before. This must be the LAST register
+	// write in this function.
 	bttv_klog("[KERNEL] bt878_start_capture_locked: setting INT_MASK...\n");
 	bt878_write32(device, BT848_INT_MASK,
-		BT848_INT_RISCI | BT848_INT_SCERR | BT848_INT_OCERR);
+		BT848_INT_RISCI | BT848_INT_SCERR | BT848_INT_OCERR
+		| BT848_INT_OFLOW);
 
 	device->capturing = true;
 	device->frame_ready = false;
@@ -1301,9 +1363,22 @@ bt878_interrupt(void* data)
 		// rearm cascade on every subsequent interrupt permanently
 		// prevented any further frame completion. Removed; only the
 		// masked, documented error bits below are treated as fatal.
+		// Diagnostic-only: OFLOW is deliberately NOT treated as fatal
+		// (see the INT_MASK comment in bt878_start_capture_locked() --
+		// masking+restarting on it caused needless RISC restarts under
+		// normal NTSC operation). But PAL captures reproducibly cut off
+		// at a suspiciously exact line count on every single frame, and
+		// that was never actually measured against OFLOW under real PAL
+		// bandwidth specifically. Count and sample RISC_COUNT at the
+		// moment it fires, change nothing else, so BTV_GET_STATS can
+		// show whether it's happening at all and roughly where.
+		if ((astat & BT848_INT_OFLOW) != 0) {
+			device->oflow_count++;
+			device->last_oflow_risc_count = bt878_read32(device, BT848_RISC_COUNT);
+		}
+
 		uint32 errorBits = astat & (BT848_INT_PPERR | BT848_INT_RIPERR
-			| BT848_INT_PABORT | BT848_INT_OCERR | BT848_INT_SCERR
-			| BT848_INT_OFLOW);
+			| BT848_INT_PABORT | BT848_INT_OCERR | BT848_INT_SCERR);
 		if (errorBits != 0) {
 			device->error_count++;
 			device->last_dstatus = bt878_read8(device, BT848_DSTATUS);
@@ -1721,16 +1796,82 @@ bt878_control(void* cookie, uint32 op, void* arg, size_t length)
 			bttv_klog("[KERNEL] bt878_control: BTV_GET_STATS live "
 				"dstatus=0x%02x int_stat=0x%08" B_PRIx32 " int_mask=0x%08"
 				B_PRIx32 " gpio_dma_ctl=0x%08" B_PRIx32 " cap_ctl=0x%02x "
-				"risc_count=0x%08" B_PRIx32 " risc_strt=0x%08" B_PRIx32 "\n",
+				"risc_count=0x%08" B_PRIx32 " risc_strt=0x%08" B_PRIx32 " "
+				"oflow_count=%" B_PRIu32 " last_oflow_risc_count=0x%08"
+				B_PRIx32 "\n",
 				bt878_read8(device, BT848_DSTATUS),
 				bt878_read32(device, BT848_INT_STAT),
 				bt878_read32(device, BT848_INT_MASK),
 				bt878_read32(device, BT848_GPIO_DMA_CTL),
 				bt878_read8(device, BT848_CAP_CTL),
 				bt878_read32(device, BT848_RISC_COUNT),
-				bt878_read32(device, BT848_RISC_STRT_ADD));
+				bt878_read32(device, BT848_RISC_STRT_ADD),
+				device->oflow_count,
+				device->last_oflow_risc_count);
+			// Vertical geometry registers actually latched on the chip
+			// right now, for both fields -- to check against what
+			// bt878_compute_geometry()/bt878_apply_geometry() intended to
+			// program, instead of guessing blindly at further register
+			// writes. E_CROP/O_CROP carry VACTIVE's and VDELAY's bits
+			// 9:8 (see bt878_compute_geometry()'s crop formula), so
+			// VACTIVE_LO/VDELAY_LO alone don't tell the whole story.
+			bttv_klog("[KERNEL] bt878_control: BTV_GET_STATS live geometry "
+				"E: vactive_lo=0x%02x vdelay_lo=0x%02x vscale_hi=0x%02x "
+				"vscale_lo=0x%02x crop=0x%02x | O: vactive_lo=0x%02x "
+				"vdelay_lo=0x%02x vscale_hi=0x%02x vscale_lo=0x%02x "
+				"crop=0x%02x | vtotal_hi=0x%02x vtotal_lo=0x%02x\n",
+				bt878_read8(device, BT848_E_VACTIVE_LO),
+				bt878_read8(device, BT848_E_VDELAY_LO),
+				bt878_read8(device, BT848_E_VSCALE_HI),
+				bt878_read8(device, BT848_E_VSCALE_LO),
+				bt878_read8(device, BT848_E_CROP),
+				bt878_read8(device, BT848_O_VACTIVE_LO),
+				bt878_read8(device, BT848_O_VDELAY_LO),
+				bt878_read8(device, BT848_O_VSCALE_HI),
+				bt878_read8(device, BT848_O_VSCALE_LO),
+				bt878_read8(device, BT848_O_CROP),
+				bt878_read8(device, BT848_VTOTAL_HI),
+				bt878_read8(device, BT848_VTOTAL_LO));
 			return user_memcpy(arg, &stats, sizeof(stats)) == B_OK
 				? B_OK : B_BAD_ADDRESS;
+		}
+
+		// TEMPORARY, diagnostic-only: see BTV_DEBUG_READ_REG/WRITE_REG in
+		// bttv_driver.h. Lets register-level hypotheses be tried live
+		// against real hardware without a recompile+reinstall+reboot
+		// cycle per attempt. Remove once done.
+		case BTV_DEBUG_READ_REG:
+		{
+			bttv_debug_reg reg;
+			if (user_memcpy(&reg, arg, sizeof(reg)) != B_OK)
+				return B_BAD_ADDRESS;
+			if (reg.offset >= device->regs_size)
+				return B_BAD_VALUE;
+			if (bt878_lock_io(device) != B_OK)
+				return B_INTERRUPTED;
+			reg.value = reg.width == 4
+				? bt878_read32(device, reg.offset)
+				: bt878_read8(device, reg.offset);
+			bt878_unlock_io(device);
+			return user_memcpy(arg, &reg, sizeof(reg)) == B_OK
+				? B_OK : B_BAD_ADDRESS;
+		}
+
+		case BTV_DEBUG_WRITE_REG:
+		{
+			bttv_debug_reg reg;
+			if (user_memcpy(&reg, arg, sizeof(reg)) != B_OK)
+				return B_BAD_ADDRESS;
+			if (reg.offset >= device->regs_size)
+				return B_BAD_VALUE;
+			if (bt878_lock_io(device) != B_OK)
+				return B_INTERRUPTED;
+			if (reg.width == 4)
+				bt878_write32(device, reg.offset, reg.value);
+			else
+				bt878_write8(device, reg.offset, (uint8)reg.value);
+			bt878_unlock_io(device);
+			return B_OK;
 		}
 
 		default:
