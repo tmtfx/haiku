@@ -162,6 +162,7 @@ rule HaikuImageGetPrivateSystemLibs
 
 SYSTEM_SERVERS += [ FFilterByBuildFeatures
 	ai_server
+	fingerprint_server
 	mail_daemon
 	media_addon_server
 	media_server
