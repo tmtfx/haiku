@@ -1,0 +1,64 @@
+SubDir HAIKU_TOP src libs fingerprint nbis ;
+
+# Vendored NIST Biometric Image Software (NBIS) - just the mindtct (minutiae
+# extraction) and bozorth3 (minutiae matching) libraries, pristine upstream
+# source (public domain, see license headers in each file) with two small
+# documented patches to include/lfs.h to drop a dependency on the ANSI/NIST
+# Type-9 record support (an2k.h/RECORD/FIELD/ANSI_NIST) that only
+# to_type9.c/update.c need - neither of those files is vendored here since
+# fingerprint_server never writes that file format. See README.haiku for
+# provenance.
+
+UseHeaders [ FDirName $(HAIKU_TOP) src libs fingerprint nbis include ] : true ;
+
+# Vendored third-party C, not worth hand-fixing every warning in.
+SubDirCcFlags -Wno-error -Wno-misleading-indentation -Wno-unused-variable
+	-Wno-unused-but-set-variable -Wno-array-parameter ;
+
+local mindtctSources =
+	binar.c
+	block.c
+	chaincod.c
+	contour.c
+	detect.c
+	dft.c
+	free.c
+	getmin.c
+	globals.c
+	imgutil.c
+	init.c
+	line.c
+	link.c
+	log.c
+	loop.c
+	maps.c
+	matchpat.c
+	minutia.c
+	morph.c
+	quality.c
+	remove.c
+	ridges.c
+	shape.c
+	sort.c
+	util.c
+	xytreps.c
+	;
+
+local bozorth3Sources =
+	bozorth3.c
+	bz_alloc.c
+	bz_drvrs.c
+	bz_gbls.c
+	bz_io.c
+	bz_sort.c
+	;
+
+StaticLibrary libnbis.a :
+	$(mindtctSources)
+	$(bozorth3Sources)
+;
+
+SEARCH on [ FGristFiles $(mindtctSources) ]
+	= [ FDirName $(HAIKU_TOP) src libs fingerprint nbis mindtct ] ;
+SEARCH on [ FGristFiles $(bozorth3Sources) ]
+	= [ FDirName $(HAIKU_TOP) src libs fingerprint nbis bozorth3 ] ;

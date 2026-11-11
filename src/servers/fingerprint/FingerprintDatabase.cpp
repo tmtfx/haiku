@@ -4,7 +4,6 @@
  */
 #include "FingerprintDatabase.h"
 
-#include <math.h>
 #include <stdlib.h>
 #include <time.h>
 
@@ -17,94 +16,16 @@
 #include <Message.h>
 #include <Path.h>
 
-
-// Downsample factor for the placeholder correlation matcher - keeps the
-// search window cheap regardless of the source device's resolution.
-static const int kDownsample = 4;
-static const int kSearchRange = 8;	// +/- pixels, in downsampled units
-static const int32 kMatchThreshold = 700;	// out of 1000, empirical placeholder
+#include "NbisMatcher.h"
 
 
-static void
-DownsampleImage(const uint8* image, int width, int height, uint8* out)
-{
-	int smallWidth = width / kDownsample;
-	int smallHeight = height / kDownsample;
-	for (int y = 0; y < smallHeight; y++) {
-		for (int x = 0; x < smallWidth; x++) {
-			uint32 sum = 0;
-			for (int dy = 0; dy < kDownsample; dy++) {
-				for (int dx = 0; dx < kDownsample; dx++) {
-					int sy = y * kDownsample + dy;
-					int sx = x * kDownsample + dx;
-					sum += image[sy * width + sx];
-				}
-			}
-			out[y * smallWidth + x] = (uint8)(sum / (kDownsample * kDownsample));
-		}
-	}
-}
-
-
-// Normalized cross-correlation at a single (dx, dy) shift, over the
-// overlapping region only. Returns a value roughly in [-1000, 1000].
-static int32
-CorrelateAt(const uint8* a, const uint8* b, int smallWidth, int smallHeight,
-	int dx, int dy)
-{
-	int x0 = dx > 0 ? dx : 0;
-	int x1 = dx < 0 ? smallWidth + dx : smallWidth;
-	int y0 = dy > 0 ? dy : 0;
-	int y1 = dy < 0 ? smallHeight + dy : smallHeight;
-	if (x1 <= x0 || y1 <= y0)
-		return -1000;
-
-	int64 sumA = 0, sumB = 0, sumAB = 0, sumA2 = 0, sumB2 = 0;
-	int64 n = 0;
-	for (int y = y0; y < y1; y++) {
-		for (int x = x0; x < x1; x++) {
-			int32 va = a[y * smallWidth + x];
-			int32 vb = b[(y - dy) * smallWidth + (x - dx)];
-			sumA += va;
-			sumB += vb;
-			sumAB += va * vb;
-			sumA2 += va * va;
-			sumB2 += vb * vb;
-			n++;
-		}
-	}
-	if (n == 0)
-		return -1000;
-
-	double meanA = (double)sumA / n;
-	double meanB = (double)sumB / n;
-	double cov = (double)sumAB / n - meanA * meanB;
-	double varA = (double)sumA2 / n - meanA * meanA;
-	double varB = (double)sumB2 / n - meanB * meanB;
-	double denom = varA * varB;
-	if (denom <= 0.0)
-		return -1000;
-
-	double corr = cov / sqrt(denom);
-	return (int32)(corr * 1000.0);
-}
-
-
-static int32
-BestCorrelation(const uint8* smallA, const uint8* smallB, int smallWidth,
-	int smallHeight)
-{
-	int32 best = -1000;
-	for (int dy = -kSearchRange; dy <= kSearchRange; dy++) {
-		for (int dx = -kSearchRange; dx <= kSearchRange; dx++) {
-			int32 score = CorrelateAt(smallA, smallB, smallWidth, smallHeight,
-				dx, dy);
-			if (score > best)
-				best = score;
-		}
-	}
-	return best;
-}
+// bozorth3 match scores aren't on a fixed 0-1000 scale like the earlier
+// placeholder correlation matcher - this is a starting point commonly
+// cited for low-false-accept-rate operation in NBIS/FVC-style
+// evaluations, NOT validated against this specific sensor. Expect to
+// retune empirically against real captures, same as the placeholder
+// matcher's threshold was.
+static const int32 kMatchThreshold = 40;
 
 
 FingerprintDatabase::FingerprintDatabase()
@@ -177,19 +98,37 @@ FingerprintDatabase::SaveEnrollment(const char* label,
 	if (sampleCount <= 0)
 		return B_BAD_VALUE;
 
-	int32 fingerId = _NextFingerId();
-
 	BMessage record;
 	record.AddString("label", label);
 	record.AddInt64("createdAt", (int64)time(NULL));
-	record.AddInt32("sampleCount", sampleCount);
 	record.AddInt32("imageWidth", imageWidth);
 	record.AddInt32("imageHeight", imageHeight);
+
+	int32 usableTemplates = 0;
 	for (int32 i = 0; i < sampleCount; i++) {
-		record.AddData("sample", B_RAW_TYPE, samples[i],
-			imageWidth * imageHeight, false);
+		uint8* nbisTemplate = NULL;
+		size_t templateSize = 0;
+		int32 minutiaeCount = 0;
+		status_t status = NbisMatcher::ExtractMinutiae(samples[i], imageWidth,
+			imageHeight, &nbisTemplate, &templateSize, &minutiaeCount);
+		if (status != B_OK || minutiaeCount == 0) {
+			delete[] nbisTemplate;
+			continue; // a blurry/partial capture mindtct found nothing in -
+			          // skip it rather than fail the whole enrollment
+		}
+
+		record.AddData("minutiaeTemplate", B_RAW_TYPE, nbisTemplate,
+			templateSize, false);
+		delete[] nbisTemplate;
+		usableTemplates++;
 	}
 
+	if (usableTemplates == 0)
+		return B_ERROR; // none of the captures yielded any minutiae at all
+
+	record.AddInt32("sampleCount", usableTemplates);
+
+	int32 fingerId = _NextFingerId();
 	BString path;
 	status_t status = _EntryPath(fingerId, path);
 	if (status != B_OK)
@@ -272,17 +211,22 @@ FingerprintDatabase::Match(const uint8* probeImage, int32 imageWidth,
 	if (fTemplatesDir.IsEmpty())
 		return B_NO_INIT;
 
-	int smallWidth = imageWidth / kDownsample;
-	int smallHeight = imageHeight / kDownsample;
-	size_t smallSize = (size_t)smallWidth * smallHeight;
-
-	uint8* smallProbe = new(std::nothrow) uint8[smallSize];
-	if (smallProbe == NULL)
-		return B_NO_MEMORY;
-	DownsampleImage(probeImage, imageWidth, imageHeight, smallProbe);
+	uint8* probeTemplate = NULL;
+	size_t probeSize = 0;
+	int32 probeMinutiaeCount = 0;
+	status_t status = NbisMatcher::ExtractMinutiae(probeImage, imageWidth,
+		imageHeight, &probeTemplate, &probeSize, &probeMinutiaeCount);
+	if (status != B_OK)
+		return status;
+	if (probeMinutiaeCount == 0) {
+		delete[] probeTemplate;
+		*outFingerId = -1;
+		*outScore = 0;
+		return B_NAME_NOT_FOUND;
+	}
 
 	int32 bestFingerId = -1;
-	int32 bestScore = -1000;
+	int32 bestScore = 0;
 
 	BDirectory dir(fTemplatesDir.String());
 	BEntry entry;
@@ -305,36 +249,18 @@ FingerprintDatabase::Match(const uint8* probeImage, int32 imageWidth,
 			continue;
 
 		int32 sampleCount = 0;
-		int32 recordWidth = 0, recordHeight = 0;
 		record.FindInt32("sampleCount", &sampleCount);
-		record.FindInt32("imageWidth", &recordWidth);
-		record.FindInt32("imageHeight", &recordHeight);
-
-		// A record enrolled on a different device model/geometry can't be
-		// meaningfully compared against this probe - skip it rather than
-		// garbage-matching misaligned buffers.
-		if (recordWidth != imageWidth || recordHeight != imageHeight)
-			continue;
 
 		for (int32 i = 0; i < sampleCount; i++) {
-			const void* sampleData;
-			ssize_t sampleSize;
-			if (record.FindData("sample", B_RAW_TYPE, i, &sampleData,
-					&sampleSize) != B_OK) {
+			const void* storedData;
+			ssize_t storedSize;
+			if (record.FindData("minutiaeTemplate", B_RAW_TYPE, i,
+					&storedData, &storedSize) != B_OK) {
 				continue;
 			}
-			if ((size_t)sampleSize != (size_t)(imageWidth * imageHeight))
-				continue;
 
-			uint8* smallSample = new(std::nothrow) uint8[smallSize];
-			if (smallSample == NULL)
-				continue;
-			DownsampleImage((const uint8*)sampleData, imageWidth, imageHeight,
-				smallSample);
-
-			int32 score = BestCorrelation(smallProbe, smallSample, smallWidth,
-				smallHeight);
-			delete[] smallSample;
+			int32 score = NbisMatcher::Compare(probeTemplate, probeSize,
+				(const uint8*)storedData, (size_t)storedSize);
 			if (score > bestScore) {
 				bestScore = score;
 				bestFingerId = fingerId;
@@ -342,7 +268,7 @@ FingerprintDatabase::Match(const uint8* probeImage, int32 imageWidth,
 		}
 	}
 
-	delete[] smallProbe;
+	delete[] probeTemplate;
 
 	*outScore = bestScore;
 	if (bestFingerId < 0 || bestScore < kMatchThreshold) {

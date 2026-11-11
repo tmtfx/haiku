@@ -13,16 +13,12 @@
 class BMessage;
 
 
-// Stores enrolled fingerprint samples (raw captured images, one file per
-// finger under the user's private settings directory) and matches a
-// freshly captured probe image against them.
-//
-// NOTE: matching here is a placeholder downsampled normalized-cross-
-// correlation over a small search window, NOT real minutiae-based
-// matching. It is good enough to validate the end-to-end daemon/IPC/
-// keystore-escrow plumbing on real hardware, but should be replaced by
-// the planned NBIS (mindtct + bozorth3) pipeline for anything beyond
-// personal/experimental use - see Fase 1c in the project plan.
+// Stores enrolled fingerprint minutiae templates (extracted via NBIS
+// mindtct, one file per finger under the user's private settings
+// directory) and matches a freshly captured probe image against them via
+// NBIS bozorth3 - see src/libs/fingerprint/nbis/README.haiku and
+// NbisMatcher.h. Raw images are never written to disk, only the
+// extracted minutiae (a much smaller, less sensitive representation).
 class FingerprintDatabase {
 public:
 								FingerprintDatabase();

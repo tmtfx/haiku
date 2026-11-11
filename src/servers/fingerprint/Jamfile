@@ -4,11 +4,13 @@ UsePrivateHeaders shared ;
 
 UseHeaders [ FDirName $(HAIKU_TOP) src servers fingerprint protocol ] ;
 UseHeaders [ FDirName $(HAIKU_TOP) src servers fingerprint protocol uru4000 ] ;
+UseHeaders [ FDirName $(HAIKU_TOP) src libs fingerprint nbis include ] : true ;
 
 Application fingerprint_server :
 	FingerprintServer.cpp
 	FingerprintDatabase.cpp
 	EscrowStore.cpp
+	NbisMatcher.cpp
 	:
 	be
 	libdevice.so
@@ -16,6 +18,7 @@ Application fingerprint_server :
 	shared
 	libfpprotocol.a
 	libfpuru4000.a
+	libnbis.a
 	[ TargetLibstdc++ ]
 	: fingerprint_server.rdef
 ;
