@@ -39,6 +39,7 @@ DoCatalogs Network :
 	NetworkWindow.cpp
 	NetworkProfile.cpp
 	NetworkSettingsAddOn.cpp
+	QRCodeWindow.h
 	RadioView.cpp
 	WirelessNetworkMenuItem.cpp
 

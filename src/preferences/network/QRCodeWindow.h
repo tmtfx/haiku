@@ -7,12 +7,16 @@
 
 #include <Bitmap.h>
 #include <Button.h>
+#include <Catalog.h>
 #include <LayoutBuilder.h>
 #include <StringView.h>
 #include <View.h>
 #include <Window.h>
 
 #include "qrcodegen.hpp" // Libreria MIT di Project Nayuki
+
+#undef B_TRANSLATION_CONTEXT
+#define B_TRANSLATION_CONTEXT "QRCodeWindow"
 
 class QRCodeView : public BView {
 public:
@@ -73,7 +77,7 @@ private:
 class QRCodeWindow : public BWindow {
 public:
 	QRCodeWindow(const char* ssid, const char* password, const char* authType = "WPA")
-		: BWindow(BRect(0, 0, 320, 380), "Condividi rete Wi-Fi",
+		: BWindow(BRect(0, 0, 320, 380), B_TRANSLATE("Share Wi-Fi network"),
 			B_TITLED_WINDOW_LOOK, B_NORMAL_WINDOW_FEEL,
 			B_NOT_RESIZABLE | B_NOT_ZOOMABLE | B_AUTO_UPDATE_SIZE_LIMITS)
 	{
@@ -84,11 +88,11 @@ public:
 		QRCodeView* qrView = new QRCodeView(qrText.String());
 		
 		BString passwordText;
-		passwordText.SetToFormat("Password: %s", password);
+		passwordText.SetToFormat(B_TRANSLATE("Password: %s"), password);
 		BStringView* passLabel = new BStringView("pass_label", passwordText.String());
 		passLabel->SetAlignment(B_ALIGN_CENTER);
 
-		BButton* closeButton = new BButton("close", "Chiudi", new BMessage(B_QUIT_REQUESTED));
+		BButton* closeButton = new BButton("close", B_TRANSLATE("Close"), new BMessage(B_QUIT_REQUESTED));
 
 		BLayoutBuilder::Group<>(this, B_VERTICAL)
 			.SetInsets(B_USE_DEFAULT_SPACING)
