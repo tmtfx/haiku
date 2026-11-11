@@ -17,7 +17,7 @@
 #include <Message.h>
 #include <Path.h>
 
-#include "protocol/uru4000/Uru4000Protocol.h"
+#include "Uru4000Protocol.h"
 
 using namespace Uru4000;
 

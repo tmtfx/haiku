@@ -13,7 +13,7 @@
 
 #include "EscrowStore.h"
 #include "FingerprintDatabase.h"
-#include "protocol/uru4000/Uru4000Device.h"
+#include "Uru4000Device.h"
 
 
 // Watches the USB bus for the fingerprint reader, as a tiny subclass of

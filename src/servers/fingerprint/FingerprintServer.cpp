@@ -15,7 +15,7 @@
 #include <Path.h>
 
 #include "defs.h"
-#include "protocol/uru4000/Uru4000Protocol.h"
+#include "Uru4000Protocol.h"
 
 using namespace Uru4000;
 

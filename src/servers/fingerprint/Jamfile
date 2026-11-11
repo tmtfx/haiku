@@ -2,16 +2,18 @@ SubDir HAIKU_TOP src servers fingerprint ;
 
 UsePrivateHeaders shared ;
 
+UseHeaders [ FDirName $(HAIKU_TOP) src servers fingerprint protocol uru4000 ] ;
+
 Application fingerprint_server :
 	FingerprintServer.cpp
 	FingerprintDatabase.cpp
 	EscrowStore.cpp
-	protocol/uru4000/Uru4000Device.cpp
 	:
 	be
 	libdevice.so
 	localestub
 	shared
+	libfpuru4000.a
 	[ TargetLibstdc++ ]
 	: fingerprint_server.rdef
 ;
@@ -21,3 +23,5 @@ DoCatalogs fingerprint_server :
 	:
 	FingerprintServer.cpp
 ;
+
+SubInclude HAIKU_TOP src servers fingerprint protocol ;

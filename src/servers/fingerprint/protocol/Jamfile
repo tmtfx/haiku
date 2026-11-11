@@ -1,0 +1,3 @@
+SubDir HAIKU_TOP src servers fingerprint protocol ;
+
+SubInclude HAIKU_TOP src servers fingerprint protocol uru4000 ;
