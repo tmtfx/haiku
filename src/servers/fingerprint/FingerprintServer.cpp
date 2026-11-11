@@ -66,8 +66,7 @@ FingerprintServer::FingerprintServer()
 	fOperationInProgress(false),
 	fCancelRequested(false),
 	fWorkerThread(-1),
-	fLastMatchFingerId(-1),
-	fLastMatchTime(0),
+	fLastSequenceMatchTime(0),
 	fScreensaverUnlockEnabled(false),
 	fWatcher(NULL)
 {
@@ -186,8 +185,14 @@ FingerprintServer::MessageReceived(BMessage* message)
 		case B_FP_VERIFY_CANCEL:
 			_HandleVerifyCancel(message);
 			break;
-		case B_FP_SET_ESCROW:
-			_HandleSetEscrow(message);
+		case B_FP_SET_SEQUENCE_ESCROW:
+			_HandleSetSequenceEscrow(message);
+			break;
+		case B_FP_CLEAR_SEQUENCE_ESCROW:
+			_HandleClearSequenceEscrow(message);
+			break;
+		case B_FP_SEQUENCE_VERIFY_START:
+			_HandleSequenceVerifyStart(message);
 			break;
 		case B_FP_GET_ESCROW:
 			_HandleGetEscrow(message);
@@ -223,9 +228,35 @@ FingerprintServer::_HandleDelete(BMessage* message)
 {
 	int32 fingerId;
 	status_t status = B_BAD_VALUE;
-	if (message->FindInt32("fingerId", &fingerId) == B_OK) {
+	if (message->FindInt32("fingerId", &fingerId) == B_OK)
 		status = fDatabase.Delete(fingerId);
-		fEscrowStore.Delete(fingerId); // best effort, inert if absent
+
+	BMessage reply;
+	reply.AddInt32("error", status);
+	message->SendReply(&reply);
+}
+
+
+void
+FingerprintServer::_HandleSetSequenceEscrow(BMessage* message)
+{
+	int32 sequence[EscrowStore::kSequenceLength];
+	const void* key;
+	ssize_t keyLength;
+	status_t status = B_BAD_VALUE;
+
+	bool haveSequence = true;
+	for (int32 i = 0; i < EscrowStore::kSequenceLength; i++) {
+		if (message->FindInt32("sequence", i, &sequence[i]) != B_OK) {
+			haveSequence = false;
+			break;
+		}
+	}
+
+	if (haveSequence
+		&& message->FindData("key", B_RAW_TYPE, &key, &keyLength) == B_OK
+		&& keyLength == 32) {
+		status = fEscrowStore.Set(sequence, (const uint8*)key, 32);
 	}
 
 	BMessage reply;
@@ -235,18 +266,9 @@ FingerprintServer::_HandleDelete(BMessage* message)
 
 
 void
-FingerprintServer::_HandleSetEscrow(BMessage* message)
+FingerprintServer::_HandleClearSequenceEscrow(BMessage* message)
 {
-	int32 fingerId;
-	const void* key;
-	ssize_t keyLength;
-	status_t status = B_BAD_VALUE;
-
-	if (message->FindInt32("fingerId", &fingerId) == B_OK
-		&& message->FindData("key", B_RAW_TYPE, &key, &keyLength) == B_OK
-		&& keyLength == 32) {
-		status = fEscrowStore.Set(fingerId, (const uint8*)key, 32);
-	}
+	status_t status = fEscrowStore.Clear();
 
 	BMessage reply;
 	reply.AddInt32("error", status);
@@ -257,18 +279,15 @@ FingerprintServer::_HandleSetEscrow(BMessage* message)
 void
 FingerprintServer::_HandleGetEscrow(BMessage* message)
 {
-	int32 fingerId;
-	status_t status = B_BAD_VALUE;
+	status_t status;
 	uint8 key[32];
 
-	if (message->FindInt32("fingerId", &fingerId) == B_OK) {
-		bool fresh = fingerId == fLastMatchFingerId
-			&& (system_time() - fLastMatchTime) < kEscrowFreshness;
-		if (!fresh) {
-			status = B_NOT_ALLOWED;
-		} else {
-			status = fEscrowStore.Get(fingerId, key, sizeof(key));
-		}
+	bool fresh = (system_time() - fLastSequenceMatchTime) < kEscrowFreshness;
+	if (!fresh) {
+		status = B_NOT_ALLOWED;
+	} else {
+		int32 storedSequence[EscrowStore::kSequenceLength];
+		status = fEscrowStore.Get(storedSequence, key, sizeof(key));
 	}
 
 	BMessage reply;
@@ -278,7 +297,7 @@ FingerprintServer::_HandleGetEscrow(BMessage* message)
 	message->SendReply(&reply);
 
 	// one-shot: don't allow a second GET_ESCROW off the same match
-	fLastMatchFingerId = -1;
+	fLastSequenceMatchTime = 0;
 }
 
 
@@ -468,6 +487,45 @@ FingerprintServer::_HandleVerifyStart(BMessage* message)
 }
 
 
+void
+FingerprintServer::_HandleSequenceVerifyStart(BMessage* message)
+{
+	if (fVendorID == 0) {
+		BMessage reply;
+		reply.AddInt32("error", B_NO_INIT);
+		message->SendReply(&reply);
+		return;
+	}
+	if (fOperationInProgress) {
+		BMessage reply;
+		reply.AddInt32("error", B_BUSY);
+		message->SendReply(&reply);
+		return;
+	}
+	if (!fEscrowStore.HasEscrow()) {
+		BMessage reply;
+		reply.AddInt32("error", B_NO_INIT);
+		message->SendReply(&reply);
+		return;
+	}
+
+	fOperationInProgress = true;
+	fCancelRequested = false;
+
+	BMessage* detached = DetachCurrentMessage();
+
+	struct SequenceVerifyArgs {
+		FingerprintServer* server;
+		BMessage* request;
+	};
+	SequenceVerifyArgs* args = new SequenceVerifyArgs { this, detached };
+
+	fWorkerThread = spawn_thread(_SequenceVerifyThreadEntry, "fp_seq_verify",
+		B_NORMAL_PRIORITY, args);
+	resume_thread(fWorkerThread);
+}
+
+
 // #pragma mark - worker threads
 
 
@@ -497,6 +555,69 @@ FingerprintServer::_VerifyThreadEntry(void* data)
 	args->server->_VerifyThread(args->request);
 	delete args;
 	return B_OK;
+}
+
+
+status_t
+FingerprintServer::_SequenceVerifyThreadEntry(void* data)
+{
+	struct SequenceVerifyArgs {
+		FingerprintServer* server;
+		BMessage* request;
+	};
+	SequenceVerifyArgs* args = (SequenceVerifyArgs*)data;
+	args->server->_SequenceVerifyThread(args->request);
+	delete args;
+	return B_OK;
+}
+
+
+status_t
+FingerprintServer::_CaptureAndIdentifyOneFinger(FingerprintDevice* device,
+	int32* outFingerId, int32* outScore)
+{
+	*outFingerId = -1;
+	*outScore = -1000;
+
+	bool gotFinger = false;
+	status_t status = device->WaitForFingerOn(&gotFinger);
+	if (status != B_OK)
+		return status;
+	if (!gotFinger)
+		return B_ERROR;
+
+	size_t bufferSize = device->CaptureBufferSize();
+	size_t headerSize = device->ImageHeaderSize();
+	int32 imageWidth = device->ImageWidth();
+	int32 imageHeight = device->ImageHeight();
+
+	uint8* buffer = new(std::nothrow) uint8[bufferSize];
+	ssize_t n = device->CaptureImage(buffer, bufferSize);
+	if (n >= (ssize_t)headerSize) {
+		size_t pixelBytes = (size_t)n - headerSize;
+		size_t imageBytes = (size_t)(imageWidth * imageHeight);
+		if (pixelBytes > imageBytes)
+			pixelBytes = imageBytes;
+		uint8* probe = new(std::nothrow) uint8[imageBytes];
+		memset(probe, 0, imageBytes);
+		memcpy(probe, buffer + headerSize, pixelBytes);
+		status = fDatabase.Match(probe, imageWidth, imageHeight, outFingerId,
+			outScore);
+		delete[] probe;
+	} else {
+		status = B_IO_ERROR;
+	}
+	delete[] buffer;
+
+	bool gotRelease = false;
+	device->WaitForFingerOff(&gotRelease);
+
+	// B_NAME_NOT_FOUND from Match() just means "no match" - not a capture
+	// error, so callers can tell the two apart via *outFingerId (-1) rather
+	// than treating a plain non-match as a hard failure.
+	if (status == B_NAME_NOT_FOUND)
+		return B_OK;
+	return status;
 }
 
 
@@ -607,52 +728,80 @@ FingerprintServer::_VerifyThread(BMessage* request)
 	int32 fingerId = -1;
 	int32 score = -1000;
 
-	if (status == B_OK && !fCancelRequested) {
-		bool gotFinger = false;
-		status = device->WaitForFingerOn(&gotFinger);
-		if (status == B_OK && gotFinger) {
-			size_t bufferSize = device->CaptureBufferSize();
-			size_t headerSize = device->ImageHeaderSize();
-			int32 imageWidth = device->ImageWidth();
-			int32 imageHeight = device->ImageHeight();
-
-			uint8* buffer = new(std::nothrow) uint8[bufferSize];
-			ssize_t n = device->CaptureImage(buffer, bufferSize);
-			if (n >= (ssize_t)headerSize) {
-				size_t pixelBytes = (size_t)n - headerSize;
-				size_t imageBytes = (size_t)(imageWidth * imageHeight);
-				if (pixelBytes > imageBytes)
-					pixelBytes = imageBytes;
-				uint8* probe = new(std::nothrow) uint8[imageBytes];
-				memset(probe, 0, imageBytes);
-				memcpy(probe, buffer + headerSize, pixelBytes);
-				status = fDatabase.Match(probe, imageWidth, imageHeight,
-					&fingerId, &score);
-				delete[] probe;
-			} else {
-				status = B_IO_ERROR;
-			}
-			delete[] buffer;
-
-			bool gotRelease = false;
-			device->WaitForFingerOff(&gotRelease);
-		}
-	}
+	if (status == B_OK && !fCancelRequested)
+		status = _CaptureAndIdentifyOneFinger(device, &fingerId, &score);
 
 	if (device != NULL)
 		device->Deactivate();
 	delete device;
-
-	if (status == B_OK && fingerId >= 0) {
-		fLastMatchFingerId = fingerId;
-		fLastMatchTime = system_time();
-	}
 
 	BMessage reply;
 	reply.AddInt32("fingerId", fingerId);
 	reply.AddInt32("score", score);
 	reply.AddInt32("error", (status == B_OK && fingerId < 0)
 		? (status_t)B_NAME_NOT_FOUND : status);
+	request->SendReply(&reply);
+	delete request;
+
+	fOperationInProgress = false;
+}
+
+
+void
+FingerprintServer::_SequenceVerifyThread(BMessage* request)
+{
+	FingerprintDevice* device = FingerprintDeviceRegistry::Create(fVendorID,
+		fProductID);
+	status_t status = device != NULL ? B_OK : B_NO_INIT;
+
+	BString path;
+	if (status == B_OK)
+		status = _FindDevicePath(&path);
+	if (status == B_OK)
+		status = device->Open(path.String());
+	if (status == B_OK)
+		status = device->Activate();
+
+	int32 touched[EscrowStore::kSequenceLength];
+	for (int32 i = 0; i < EscrowStore::kSequenceLength; i++)
+		touched[i] = -1;
+
+	// Collect-all-then-check: keep taking touches for the whole sequence
+	// even if an earlier one didn't match anything, per the user's own
+	// choice (no early-abort feedback) - only the final comparison below
+	// decides success.
+	for (int32 i = 0; i < EscrowStore::kSequenceLength
+			&& status == B_OK && !fCancelRequested; i++) {
+		int32 score = -1000;
+		status = _CaptureAndIdentifyOneFinger(device, &touched[i], &score);
+	}
+
+	if (device != NULL)
+		device->Deactivate();
+	delete device;
+
+	bool matched = false;
+	if (status == B_OK) {
+		int32 storedSequence[EscrowStore::kSequenceLength];
+		uint8 key[32];
+		if (fEscrowStore.Get(storedSequence, key, sizeof(key)) == B_OK) {
+			matched = true;
+			for (int32 i = 0; i < EscrowStore::kSequenceLength; i++) {
+				if (touched[i] != storedSequence[i]) {
+					matched = false;
+					break;
+				}
+			}
+		}
+	}
+
+	if (matched)
+		fLastSequenceMatchTime = system_time();
+
+	BMessage reply;
+	reply.AddInt32("error", matched
+		? (status_t)B_OK
+		: (status == B_OK ? (status_t)B_NAME_NOT_FOUND : status));
 	request->SendReply(&reply);
 	delete request;
 

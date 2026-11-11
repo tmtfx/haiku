@@ -22,6 +22,7 @@
 #include <StringView.h>
 
 #include "FingerListItem.h"
+#include "FingerprintActivationWindow.h"
 #include "../../servers/fingerprint/defs.h"
 #include "../../../headers/private/app/KeyStoreDefs.h"
 
@@ -290,15 +291,22 @@ FingerprintWindow::_ToggleMasterPasswordUnlock(bool enable)
 
 	BMessage request;
 	if (enable) {
-		int32 selected = fListView->CurrentSelection();
-		if (selected < 0) {
-			fStatusView->SetText(B_TRANSLATE("Select a finger from the list first."));
+		FingerprintActivationWindow* activation
+			= new FingerprintActivationWindow();
+		int32 sequence[4];
+		dev_t stickDevice;
+		status_t activationStatus
+			= activation->RequestActivation(sequence, &stickDevice);
+		if (activationStatus != B_OK) {
 			fMasterPasswordCheckBox->SetValue(B_CONTROL_OFF);
+			fStatusView->SetText(B_TRANSLATE("Activation cancelled."));
 			return;
 		}
-		FingerListItem* item = (FingerListItem*)fListView->ItemAt(selected);
+
 		request.what = KEY_STORE_ENABLE_FINGERPRINT_UNLOCK;
-		request.AddInt32("fingerId", item->FingerId());
+		for (int32 i = 0; i < 4; i++)
+			request.AddInt32("sequence", sequence[i]);
+		request.AddInt32("device", (int32)stickDevice);
 	} else {
 		request.what = KEY_STORE_DISABLE_FINGERPRINT_UNLOCK;
 	}

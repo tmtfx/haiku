@@ -5,6 +5,7 @@ UsePrivateHeaders shared ;
 Application Fingerprint :
 	FingerprintApp.cpp
 	FingerprintWindow.cpp
+	FingerprintActivationWindow.cpp
 	FingerListItem.cpp
 	: be localestub shared [ TargetLibstdc++ ]
 	: Fingerprint.rdef
@@ -15,4 +16,5 @@ DoCatalogs Fingerprint :
 	:
 	FingerprintApp.cpp
 	FingerprintWindow.cpp
+	FingerprintActivationWindow.cpp
 ;

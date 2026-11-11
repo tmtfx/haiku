@@ -15,6 +15,9 @@
 #include <KeyStore.h>
 #include <Alert.h>
 #include <Catalog.h>
+#include <Message.h>
+#include <Messenger.h>
+#include "../../../headers/private/app/KeyStoreDefs.h"
 #include <openssl/evp.h>
 #include <openssl/x509.h>
 #include <openssl/rsa.h>
@@ -239,11 +242,18 @@ status_t ResetMasterWindow::_WriteMasterPasswordShadow(uint8* outSalt)
         // stale fingerprint match would keep releasing a password that no
         // longer matches the new shadow hash (harmless - KeyStoreServer
         // falls back to the typed-password prompt either way - but the
-        // file is now pointless and should not linger).
-        BPath escrowPath(settingsDir.Path(), "fingerprint_escrow");
-        BEntry escrowEntry(escrowPath.Path());
-        if (escrowEntry.Exists())
-            escrowEntry.Remove();
+        // sequence-escrow in fingerprint_server and the marker on the USB
+        // stick are now pointless and should not linger). This reuses
+        // KeyStoreServer's own disable path (best-effort: clears its local
+        // stick-id record, removes the stick's marker file if currently
+        // reachable, clears fingerprint_server's sequence-escrow) rather
+        // than duplicating the removable-volume scan here.
+        BMessenger keyStore(BPrivate::kKeyStoreServerSignature);
+        if (keyStore.IsValid()) {
+            BMessage request(BPrivate::KEY_STORE_DISABLE_FINGERPRINT_UNLOCK);
+            BMessage reply;
+            keyStore.SendMessage(&request, &reply);
+        }
     }
 
     return err;

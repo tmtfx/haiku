@@ -59,7 +59,9 @@ private:
 			void				_HandleDelete(BMessage* message);
 			void				_HandleVerifyStart(BMessage* message);
 			void				_HandleVerifyCancel(BMessage* message);
-			void				_HandleSetEscrow(BMessage* message);
+			void				_HandleSetSequenceEscrow(BMessage* message);
+			void				_HandleClearSequenceEscrow(BMessage* message);
+			void				_HandleSequenceVerifyStart(BMessage* message);
 			void				_HandleGetEscrow(BMessage* message);
 			void				_HandleSetScreensaverUnlock(
 									BMessage* message);
@@ -72,6 +74,7 @@ private:
 
 	static	status_t			_EnrollThreadEntry(void* data);
 	static	status_t			_VerifyThreadEntry(void* data);
+	static	status_t			_SequenceVerifyThreadEntry(void* data);
 
 			// Take ownership of the client's request via
 			// DetachCurrentMessage() and reply to it only once the whole
@@ -84,6 +87,16 @@ private:
 			void				_EnrollThread(BMessage* request,
 									const BString& label);
 			void				_VerifyThread(BMessage* request);
+			void				_SequenceVerifyThread(BMessage* request);
+
+			// Shared by _VerifyThread and _SequenceVerifyThread: arms the
+			// already-open device for one touch, captures, identifies via
+			// FingerprintDatabase::Match(), then waits for release. Device
+			// Open()/Activate()/Deactivate()/Close() are the caller's
+			// responsibility - this only drives one touch cycle.
+			status_t			_CaptureAndIdentifyOneFinger(
+									FingerprintDevice* device,
+									int32* outFingerId, int32* outScore);
 
 			FingerprintDatabase	fDatabase;
 			EscrowStore			fEscrowStore;
@@ -94,8 +107,11 @@ private:
 			volatile bool		fCancelRequested;
 			thread_id			fWorkerThread;
 
-			int32				fLastMatchFingerId;
-			bigtime_t			fLastMatchTime;
+			// Set only by a fully successful _SequenceVerifyThread (all 4
+			// touches matched the stored sequence, in order); gates
+			// _HandleGetEscrow exactly like the old single-finger
+			// freshness check did, just no longer tied to one fingerId.
+			bigtime_t			fLastSequenceMatchTime;
 
 			bool				fScreensaverUnlockEnabled;
 

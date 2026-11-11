@@ -43,11 +43,29 @@ enum {
 										//    "fingerId": int32, "score": int32
 	B_FP_VERIFY_CANCEL		= 'FPv2',	// (none) - same caveat as ENROLL_CANCEL
 
-	B_FP_SET_ESCROW			= 'FPs1',	// "fingerId": int32, "key": raw[32]
-										// -> reply: "error": int32
-	B_FP_GET_ESCROW			= 'FPs2',	// "fingerId": int32 (must follow a
-										// fresh successful VERIFY_START match
-										// for the same fingerId)
+	// Keystore escrow, revised design (2026-11-12): a single sequence-escrow
+	// record (4 ordered fingerIds + a 32-byte key K), never a per-fingerId
+	// escrow. fingerprint_server only ever gates release of K on a live,
+	// in-order 4-touch match - it never sees or stores the master password
+	// or the USB stick that holds the AES(K, password) blob; that lives
+	// entirely in keystore_server. See the "Fase 1e (revisionata)" plan
+	// section for the full rationale (the original single-escrow-on-disk
+	// design was found insecure: anyone with local file read access could
+	// reconstruct the password without ever touching the sensor).
+	B_FP_SET_SEQUENCE_ESCROW	= 'FPs1',	// "sequence": int32[4],
+												// "key": raw[32]
+												// -> reply: "error": int32
+	B_FP_CLEAR_SEQUENCE_ESCROW	= 'FPs3',	// (none)
+												// -> reply: "error": int32
+	B_FP_SEQUENCE_VERIFY_START	= 'FPs4',	// (none) - blocks through all 4
+												// touches (collect-all-then-
+												// check, no early-abort
+												// feedback)
+												// -> reply: "error": int32
+												//    (B_OK only if the full
+												//    sequence matched)
+	B_FP_GET_ESCROW			= 'FPs2',	// (none) - must follow a fresh
+										// successful SEQUENCE_VERIFY_START
 										// -> reply: "error": int32,
 										//    "key": raw[32]
 

@@ -13,6 +13,7 @@
 #include <String.h>
 
 struct app_info;
+class BPath;
 class Keyring;
 
 typedef struct evp_pkey_st EVP_PKEY;
@@ -62,8 +63,29 @@ private:
 		status_t					_GetHash(uint8* hashOut);
 		status_t					_GetShadow(uint8* saltOut, uint8* hashOut);
 		status_t					_GetOrAskSessionPassword();
-		status_t					_EnableFingerprintUnlock(int32 fingerId);
+
+		// Fingerprint-unlock escrow (Fase 1e revisionata): K lives only in
+		// fingerprint_server, gated on a live ordered 4-finger match;
+		// AES(K, master password) lives on a user-chosen removable USB
+		// stick, never on the internal disk - see the project plan for the
+		// full rationale (the original single-disk-escrow design was found
+		// insecure). This class only owns the stick's identity (a random
+		// 16-byte id, stored both on the stick and in our own settings)
+		// and the AES encrypt/decrypt of the master password itself.
+		status_t					_EnableFingerprintUnlock(
+											const int32* sequence,
+											dev_t stickDevice);
 		status_t					_DisableFingerprintUnlock();
+		status_t					_ListRemovableVolumes(BMessage& reply);
+		status_t					_StickIdPath(BPath& outPath);
+		status_t					_SaveStickId(const uint8* stickId);
+		status_t					_LoadStickId(uint8* outStickId);
+		status_t					_ClearStickId();
+		// Scans mounted removable, non-boot volumes for our marker file
+		// whose stored stickId matches the one in our own settings.
+		// B_ENTRY_NOT_FOUND if the stick isn't currently reachable - not
+		// an error, just "fall back to the typed password".
+		status_t					_FindFingerprintStick(BPath& outMarkerPath);
 		status_t					_EncryptKeyData(BMessage& keyMessage);
 		status_t					_DecryptKeyData(BMessage& keyMessage);
 		EVP_PKEY*					_DecryptMasterPrivateKey();

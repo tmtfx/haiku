@@ -30,44 +30,38 @@ EscrowStore::Init()
 		return status;
 
 	path.Append("fingerprint_server");
-	path.Append("escrow");
-
 	status = create_directory(path.Path(), 0700);
 	if (status != B_OK && status != B_FILE_EXISTS)
 		return status;
 
-	fEscrowDir = path.Path();
+	path.Append("sequence_escrow");
+	fPath = path.Path();
 	return B_OK;
 }
 
 
 status_t
-EscrowStore::_EntryPath(int32 fingerId, BString& path)
+EscrowStore::Set(const int32* sequence, const uint8* key, size_t keyLength)
 {
-	if (fEscrowDir.IsEmpty())
+	if (fPath.IsEmpty())
 		return B_NO_INIT;
-	path = fEscrowDir;
-	path << "/" << fingerId << ".key";
-	return B_OK;
-}
+	if (keyLength != 32)
+		return B_BAD_VALUE;
 
-
-status_t
-EscrowStore::Set(int32 fingerId, const uint8* key, size_t keyLength)
-{
-	BString path;
-	status_t status = _EntryPath(fingerId, path);
-	if (status != B_OK)
-		return status;
-
-	BFile file(path.String(), B_WRITE_ONLY | B_CREATE_FILE | B_ERASE_FILE);
-	status = file.InitCheck();
+	BFile file(fPath.String(), B_WRITE_ONLY | B_CREATE_FILE | B_ERASE_FILE);
+	status_t status = file.InitCheck();
 	if (status != B_OK)
 		return status;
 
 	file.SetPermissions(0600);
 
-	ssize_t written = file.Write(key, keyLength);
+	ssize_t written = file.Write(sequence, kSequenceLength * sizeof(int32));
+	if (written < 0)
+		return (status_t)written;
+	if ((size_t)written != kSequenceLength * sizeof(int32))
+		return B_IO_ERROR;
+
+	written = file.Write(key, keyLength);
 	if (written < 0)
 		return (status_t)written;
 	if ((size_t)written != keyLength)
@@ -78,19 +72,25 @@ EscrowStore::Set(int32 fingerId, const uint8* key, size_t keyLength)
 
 
 status_t
-EscrowStore::Get(int32 fingerId, uint8* outKey, size_t keyLength)
+EscrowStore::Get(int32* outSequence, uint8* outKey, size_t keyLength)
 {
-	BString path;
-	status_t status = _EntryPath(fingerId, path);
+	if (fPath.IsEmpty())
+		return B_NO_INIT;
+	if (keyLength != 32)
+		return B_BAD_VALUE;
+
+	BFile file(fPath.String(), B_READ_ONLY);
+	status_t status = file.InitCheck();
 	if (status != B_OK)
 		return status;
 
-	BFile file(path.String(), B_READ_ONLY);
-	status = file.InitCheck();
-	if (status != B_OK)
-		return status;
+	ssize_t readBytes = file.Read(outSequence, kSequenceLength * sizeof(int32));
+	if (readBytes < 0)
+		return (status_t)readBytes;
+	if ((size_t)readBytes != kSequenceLength * sizeof(int32))
+		return B_IO_ERROR;
 
-	ssize_t readBytes = file.Read(outKey, keyLength);
+	readBytes = file.Read(outKey, keyLength);
 	if (readBytes < 0)
 		return (status_t)readBytes;
 	if ((size_t)readBytes != keyLength)
@@ -101,16 +101,25 @@ EscrowStore::Get(int32 fingerId, uint8* outKey, size_t keyLength)
 
 
 status_t
-EscrowStore::Delete(int32 fingerId)
+EscrowStore::Clear()
 {
-	BString path;
-	status_t status = _EntryPath(fingerId, path);
-	if (status != B_OK)
-		return status;
+	if (fPath.IsEmpty())
+		return B_NO_INIT;
 
-	BEntry entry(path.String());
+	BEntry entry(fPath.String());
 	if (!entry.Exists())
-		return B_ENTRY_NOT_FOUND;
+		return B_OK;
 
 	return entry.Remove();
+}
+
+
+bool
+EscrowStore::HasEscrow()
+{
+	if (fPath.IsEmpty())
+		return false;
+
+	BEntry entry(fPath.String());
+	return entry.Exists();
 }

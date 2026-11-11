@@ -10,27 +10,30 @@
 #include <SupportDefs.h>
 
 
-// Stores the 32-byte escrow keys ("K") that keystore_server hands us via
-// B_FP_SET_ESCROW, one per enrolled finger, under the user's private
-// settings directory (owner-only permissions). fingerprint_server never
-// sees the master password itself, only this opaque key - see Fase 1e in
+// Stores the single active sequence-escrow record ("K", 32 bytes, plus the
+// ordered 4-fingerId sequence that must be matched live before K is
+// released), under the user's private settings directory (owner-only
+// permissions). fingerprint_server never sees the master password or the
+// USB stick that holds its encrypted form - see Fase 1e (revisionata) in
 // the project plan for the full keystore wrap-key design.
 class EscrowStore {
 public:
+	static const int32			kSequenceLength = 4;
+
 								EscrowStore();
 								~EscrowStore();
 
 			status_t			Init();
 
-			status_t			Set(int32 fingerId, const uint8* key,
+			status_t			Set(const int32* sequence, const uint8* key,
 									size_t keyLength);
-			status_t			Get(int32 fingerId, uint8* outKey,
+			status_t			Get(int32* outSequence, uint8* outKey,
 									size_t keyLength);
-			status_t			Delete(int32 fingerId);
+			status_t			Clear();
+			bool				HasEscrow();
 
 private:
-			BString				fEscrowDir;
-			status_t			_EntryPath(int32 fingerId, BString& path);
+			BString				fPath;
 };
 
 
