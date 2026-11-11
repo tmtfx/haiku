@@ -11,6 +11,8 @@
 
 #include <Directory.h>
 #include <Entry.h>
+#include <File.h>
+#include <FindDirectory.h>
 #include <Message.h>
 #include <OS.h>
 #include <Path.h>
@@ -66,10 +68,12 @@ FingerprintServer::FingerprintServer()
 	fWorkerThread(-1),
 	fLastMatchFingerId(-1),
 	fLastMatchTime(0),
+	fScreensaverUnlockEnabled(false),
 	fWatcher(NULL)
 {
 	fDatabase.Init();
 	fEscrowStore.Init();
+	_LoadSettings();
 }
 
 
@@ -188,6 +192,12 @@ FingerprintServer::MessageReceived(BMessage* message)
 		case B_FP_GET_ESCROW:
 			_HandleGetEscrow(message);
 			break;
+		case B_FP_SET_SCREENSAVER_UNLOCK:
+			_HandleSetScreensaverUnlock(message);
+			break;
+		case B_FP_GET_SCREENSAVER_UNLOCK:
+			_HandleGetScreensaverUnlock(message);
+			break;
 		default:
 			BApplication::MessageReceived(message);
 			break;
@@ -269,6 +279,88 @@ FingerprintServer::_HandleGetEscrow(BMessage* message)
 
 	// one-shot: don't allow a second GET_ESCROW off the same match
 	fLastMatchFingerId = -1;
+}
+
+
+void
+FingerprintServer::_HandleSetScreensaverUnlock(BMessage* message)
+{
+	bool enabled = false;
+	message->FindBool("enabled", &enabled);
+	fScreensaverUnlockEnabled = enabled;
+	status_t status = _SaveSettings();
+
+	BMessage reply;
+	reply.AddInt32("error", status);
+	message->SendReply(&reply);
+}
+
+
+void
+FingerprintServer::_HandleGetScreensaverUnlock(BMessage* message)
+{
+	BMessage reply;
+	reply.AddBool("enabled", fScreensaverUnlockEnabled);
+	reply.AddInt32("error", B_OK);
+	message->SendReply(&reply);
+}
+
+
+status_t
+FingerprintServer::_SettingsPath(BString* outPath)
+{
+	BPath path;
+	status_t status = find_directory(B_USER_SETTINGS_DIRECTORY, &path);
+	if (status != B_OK)
+		return status;
+
+	path.Append("fingerprint_server");
+	status = create_directory(path.Path(), 0700);
+	if (status != B_OK && status != B_FILE_EXISTS)
+		return status;
+
+	path.Append("settings");
+	*outPath = path.Path();
+	return B_OK;
+}
+
+
+void
+FingerprintServer::_LoadSettings()
+{
+	BString path;
+	if (_SettingsPath(&path) != B_OK)
+		return;
+
+	BFile file(path.String(), B_READ_ONLY);
+	if (file.InitCheck() != B_OK)
+		return;
+
+	BMessage settings;
+	if (settings.Unflatten(&file) != B_OK)
+		return;
+
+	settings.FindBool("screensaverUnlock", &fScreensaverUnlockEnabled);
+}
+
+
+status_t
+FingerprintServer::_SaveSettings()
+{
+	BString path;
+	status_t status = _SettingsPath(&path);
+	if (status != B_OK)
+		return status;
+
+	BMessage settings;
+	settings.AddBool("screensaverUnlock", fScreensaverUnlockEnabled);
+
+	BFile file(path.String(), B_WRITE_ONLY | B_CREATE_FILE | B_ERASE_FILE);
+	status = file.InitCheck();
+	if (status != B_OK)
+		return status;
+
+	return settings.Flatten(&file);
 }
 
 

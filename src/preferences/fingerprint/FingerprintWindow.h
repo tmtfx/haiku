@@ -29,6 +29,7 @@ private:
 			void				_StartDelete();
 			void				_StartVerify();
 			void				_ToggleMasterPasswordUnlock(bool enable);
+			void				_ToggleScreensaverUnlock(bool enable);
 			void				_SetBusy(bool busy, const char* status);
 
 	static	status_t			_EnrollThreadEntry(void* data);
@@ -39,6 +40,7 @@ private:
 			BButton*			fDeleteButton;
 			BButton*			fVerifyButton;
 			BCheckBox*			fMasterPasswordCheckBox;
+			BCheckBox*			fScreensaverCheckBox;
 			BStringView*		fStatusView;
 };
 

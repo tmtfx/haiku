@@ -62,9 +62,28 @@ PasswordWindow::PasswordWindow()
 	button->ResizeToPreferred();
 	button->SetTarget(NULL, be_app);
 
+	// Hidden/disabled by default - ScreenBlanker enables this only if
+	// fingerprint unlock is turned on in the Fingerprint preflet and at
+	// least one finger is enrolled. Clicking it does not try to reconstruct
+	// the screensaver's own crypt()-hashed password at all: unlike the
+	// master-password/keystore integration, there is nothing to decrypt
+	// here, so a live match alone is enough to authorize the unlock.
+	fFingerprintButton = new BButton(BRect(), "fingerprint",
+		B_TRANSLATE("Usa impronta"), new BMessage(kMsgFingerprintStart),
+		B_FOLLOW_NONE);
+	customBox->AddChild(fFingerprintButton);
+	fFingerprintButton->ResizeToPreferred();
+	fFingerprintButton->SetTarget(NULL, be_app);
+	fFingerprintButton->SetEnabled(false);
+
 	BRect frame = fPassword->Frame();
 	button->MoveTo(frame.right - button->Bounds().Width(), frame.bottom + 10.0);
-	customBox->ResizeTo(frame.right + 10.0,	button->Frame().bottom + 10.0);
+	fFingerprintButton->MoveTo(frame.left, button->Frame().bottom + 10.0);
+
+	float boxWidth = frame.right;
+	if (fFingerprintButton->Frame().right > boxWidth)
+		boxWidth = fFingerprintButton->Frame().right;
+	customBox->ResizeTo(boxWidth + 10.0, fFingerprintButton->Frame().bottom + 10.0);
 
 	frame = customBox->Frame();
 	ResizeTo(frame.right + 10.0, frame.bottom + 10.0);
@@ -81,6 +100,16 @@ PasswordWindow::SetPassword(const char* text)
 	if (Lock()) {
 		fPassword->SetText(text);
 		fPassword->MakeFocus(true);
+		Unlock();
+	}
+}
+
+
+void
+PasswordWindow::SetFingerprintAvailable(bool available)
+{
+	if (Lock()) {
+		fFingerprintButton->SetEnabled(available);
 		Unlock();
 	}
 }

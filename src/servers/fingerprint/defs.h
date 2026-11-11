@@ -50,6 +50,12 @@ enum {
 										// for the same fingerId)
 										// -> reply: "error": int32,
 										//    "key": raw[32]
+
+	B_FP_SET_SCREENSAVER_UNLOCK	= 'FPc1',	// "enabled": bool
+												// -> reply: "error": int32
+	B_FP_GET_SCREENSAVER_UNLOCK	= 'FPc2',	// (none)
+												// -> reply: "error": int32,
+												//    "enabled": bool
 };
 
 

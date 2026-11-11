@@ -22,6 +22,7 @@
 
 
 const static uint32 kMsgResumeSaver = 'RSSV';
+const static uint32 kMsgFingerprintResult = 'ULFr';
 
 
 class ScreenBlanker : public BApplication {
@@ -46,6 +47,12 @@ private:
 			void				_QueueTurnOffScreen();
 			void				_Shutdown();
 
+			void				_CheckFingerprintConfigured();
+			void				_StartFingerprintVerify();
+			void				_CancelFingerprintVerify();
+			void				_UpdateFingerprintButton();
+	static	status_t			_FingerprintThreadEntry(void* data);
+
 			ScreenSaverSettings	fSettings;
 			ScreenSaverWindow*	fWindow;
 			ScreenSaverRunner*	fSaverRunner;
@@ -59,6 +66,15 @@ private:
 			BMessageRunner*		fStandByScreenRunner;
 			BMessageRunner*		fSuspendScreenRunner;
 			BMessageRunner*		fTurnOffScreenRunner;
+
+			// Whether fingerprint-unlock is enabled in the Fingerprint
+			// preflet AND at least one finger is enrolled - checked once at
+			// startup, see _CheckFingerprintConfigured(). fFingerprintBusy
+			// is additionally true while a verify attempt (started by the
+			// user clicking the button) is in flight; the button is only
+			// enabled when configured and not busy.
+			bool				fFingerprintConfigured;
+			bool				fFingerprintBusy;
 };
 
 #endif	// SCREEN_SAVER_APP_H

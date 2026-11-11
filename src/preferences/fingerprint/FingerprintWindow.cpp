@@ -32,6 +32,7 @@ enum {
 	kMsgEnrollResult = 'fpER',
 	kMsgVerifyResult = 'fpVR',
 	kMsgToggleMasterPassword = 'fpMp',
+	kMsgToggleScreensaver = 'fpSs',
 };
 
 
@@ -67,6 +68,10 @@ FingerprintWindow::FingerprintWindow()
 		"Usa l'impronta selezionata per sbloccare la master password",
 		new BMessage(kMsgToggleMasterPassword));
 
+	fScreensaverCheckBox = new BCheckBox("useForScreensaver",
+		"Usa un'impronta registrata per sbloccare lo screensaver",
+		new BMessage(kMsgToggleScreensaver));
+
 	fStatusView = new BStringView("status", "Pronto.");
 
 	BLayoutBuilder::Group<>(this, B_VERTICAL, B_USE_DEFAULT_SPACING)
@@ -78,8 +83,17 @@ FingerprintWindow::FingerprintWindow()
 			.Add(fVerifyButton)
 		.End()
 		.Add(fMasterPasswordCheckBox)
+		.Add(fScreensaverCheckBox)
 		.Add(fStatusView)
 	.End();
+
+	BMessage request(B_FP_GET_SCREENSAVER_UNLOCK);
+	BMessage reply;
+	if (ServerMessenger().SendMessage(&request, &reply) == B_OK) {
+		bool enabled = false;
+		reply.FindBool("enabled", &enabled);
+		fScreensaverCheckBox->SetValue(enabled ? B_CONTROL_ON : B_CONTROL_OFF);
+	}
 
 	_RefreshList();
 }
@@ -306,6 +320,29 @@ FingerprintWindow::_ToggleMasterPasswordUnlock(bool enable)
 
 
 void
+FingerprintWindow::_ToggleScreensaverUnlock(bool enable)
+{
+	BMessage request(B_FP_SET_SCREENSAVER_UNLOCK);
+	request.AddBool("enabled", enable);
+
+	BMessage reply;
+	status_t status = ServerMessenger().SendMessage(&request, &reply);
+	int32 error = B_ERROR;
+	reply.FindInt32("error", &error);
+
+	if (status != B_OK || error != B_OK) {
+		fStatusView->SetText("Impossibile aggiornare l'impostazione.");
+		fScreensaverCheckBox->SetValue(enable ? B_CONTROL_OFF : B_CONTROL_ON);
+		return;
+	}
+
+	fStatusView->SetText(enable
+		? "Sblocco screensaver tramite impronta attivato."
+		: "Sblocco screensaver tramite impronta disattivato.");
+}
+
+
+void
 FingerprintWindow::MessageReceived(BMessage* message)
 {
 	switch (message->what) {
@@ -324,6 +361,11 @@ FingerprintWindow::MessageReceived(BMessage* message)
 		case kMsgToggleMasterPassword:
 			_ToggleMasterPasswordUnlock(
 				fMasterPasswordCheckBox->Value() == B_CONTROL_ON);
+			break;
+
+		case kMsgToggleScreensaver:
+			_ToggleScreensaverUnlock(
+				fScreensaverCheckBox->Value() == B_CONTROL_ON);
 			break;
 
 		case kMsgEnrollResult:

@@ -61,6 +61,14 @@ private:
 			void				_HandleVerifyCancel(BMessage* message);
 			void				_HandleSetEscrow(BMessage* message);
 			void				_HandleGetEscrow(BMessage* message);
+			void				_HandleSetScreensaverUnlock(
+									BMessage* message);
+			void				_HandleGetScreensaverUnlock(
+									BMessage* message);
+
+			status_t			_SettingsPath(BString* outPath);
+			void				_LoadSettings();
+			status_t			_SaveSettings();
 
 	static	status_t			_EnrollThreadEntry(void* data);
 	static	status_t			_VerifyThreadEntry(void* data);
@@ -88,6 +96,8 @@ private:
 
 			int32				fLastMatchFingerId;
 			bigtime_t			fLastMatchTime;
+
+			bool				fScreensaverUnlockEnabled;
 
 			FingerprintUSBWatcher* fWatcher;
 };
