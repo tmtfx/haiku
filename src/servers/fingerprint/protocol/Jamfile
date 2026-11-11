@@ -1,3 +1,10 @@
 SubDir HAIKU_TOP src servers fingerprint protocol ;
 
+local sources =
+	FingerprintDeviceRegistry.cpp ;
+
+StaticLibrary libfpprotocol.a :
+	$(sources)
+;
+
 SubInclude HAIKU_TOP src servers fingerprint protocol uru4000 ;

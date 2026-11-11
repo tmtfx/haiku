@@ -13,7 +13,7 @@
 
 #include "EscrowStore.h"
 #include "FingerprintDatabase.h"
-#include "Uru4000Device.h"
+#include "FingerprintDevice.h"
 
 
 // Watches the USB bus for the fingerprint reader, as a tiny subclass of
@@ -41,10 +41,18 @@ public:
 	virtual	void				ReadyToRun();
 
 			// called by FingerprintUSBWatcher
-			void				SetDevicePath(const BString& path);
-			void				ClearDevicePath();
+			void				SetDevicePresent(uint16 vendorID,
+									uint16 productID);
+			void				ClearDevicePresent();
 
 private:
+			// Scans /dev/bus/usb for a currently-attached device matching
+			// fVendorID/fProductID and returns its path. Done fresh at the
+			// start of each enroll/verify rather than trusting a path
+			// captured earlier, since a device's bus path can change
+			// across a replug and nothing re-validates a cached one.
+			status_t			_FindDevicePath(BString* outPath);
+
 			void				_HandleEnrollStart(BMessage* message);
 			void				_HandleEnrollCancel(BMessage* message);
 			void				_HandleList(BMessage* message);
@@ -72,7 +80,8 @@ private:
 			FingerprintDatabase	fDatabase;
 			EscrowStore			fEscrowStore;
 
-			BString				fDevicePath;	// empty if no reader attached
+			uint16				fVendorID;		// 0 if no reader attached
+			uint16				fProductID;
 			bool				fOperationInProgress;
 			volatile bool		fCancelRequested;
 			thread_id			fWorkerThread;

@@ -17,34 +17,30 @@
 #include <Message.h>
 #include <Path.h>
 
-#include "Uru4000Protocol.h"
-
-using namespace Uru4000;
-
 
 // Downsample factor for the placeholder correlation matcher - keeps the
-// search window cheap (full-res images are 384x290).
+// search window cheap regardless of the source device's resolution.
 static const int kDownsample = 4;
-static const int kSmallWidth = kImageWidth / kDownsample;
-static const int kSmallHeight = kImageHeight / kDownsample;
 static const int kSearchRange = 8;	// +/- pixels, in downsampled units
 static const int32 kMatchThreshold = 700;	// out of 1000, empirical placeholder
 
 
 static void
-DownsampleImage(const uint8* image, uint8* out)
+DownsampleImage(const uint8* image, int width, int height, uint8* out)
 {
-	for (int y = 0; y < kSmallHeight; y++) {
-		for (int x = 0; x < kSmallWidth; x++) {
+	int smallWidth = width / kDownsample;
+	int smallHeight = height / kDownsample;
+	for (int y = 0; y < smallHeight; y++) {
+		for (int x = 0; x < smallWidth; x++) {
 			uint32 sum = 0;
 			for (int dy = 0; dy < kDownsample; dy++) {
 				for (int dx = 0; dx < kDownsample; dx++) {
 					int sy = y * kDownsample + dy;
 					int sx = x * kDownsample + dx;
-					sum += image[sy * kImageWidth + sx];
+					sum += image[sy * width + sx];
 				}
 			}
-			out[y * kSmallWidth + x] = (uint8)(sum / (kDownsample * kDownsample));
+			out[y * smallWidth + x] = (uint8)(sum / (kDownsample * kDownsample));
 		}
 	}
 }
@@ -53,12 +49,13 @@ DownsampleImage(const uint8* image, uint8* out)
 // Normalized cross-correlation at a single (dx, dy) shift, over the
 // overlapping region only. Returns a value roughly in [-1000, 1000].
 static int32
-CorrelateAt(const uint8* a, const uint8* b, int dx, int dy)
+CorrelateAt(const uint8* a, const uint8* b, int smallWidth, int smallHeight,
+	int dx, int dy)
 {
 	int x0 = dx > 0 ? dx : 0;
-	int x1 = dx < 0 ? kSmallWidth + dx : kSmallWidth;
+	int x1 = dx < 0 ? smallWidth + dx : smallWidth;
 	int y0 = dy > 0 ? dy : 0;
-	int y1 = dy < 0 ? kSmallHeight + dy : kSmallHeight;
+	int y1 = dy < 0 ? smallHeight + dy : smallHeight;
 	if (x1 <= x0 || y1 <= y0)
 		return -1000;
 
@@ -66,8 +63,8 @@ CorrelateAt(const uint8* a, const uint8* b, int dx, int dy)
 	int64 n = 0;
 	for (int y = y0; y < y1; y++) {
 		for (int x = x0; x < x1; x++) {
-			int32 va = a[y * kSmallWidth + x];
-			int32 vb = b[(y - dy) * kSmallWidth + (x - dx)];
+			int32 va = a[y * smallWidth + x];
+			int32 vb = b[(y - dy) * smallWidth + (x - dx)];
 			sumA += va;
 			sumB += vb;
 			sumAB += va * vb;
@@ -94,12 +91,14 @@ CorrelateAt(const uint8* a, const uint8* b, int dx, int dy)
 
 
 static int32
-BestCorrelation(const uint8* smallA, const uint8* smallB)
+BestCorrelation(const uint8* smallA, const uint8* smallB, int smallWidth,
+	int smallHeight)
 {
 	int32 best = -1000;
 	for (int dy = -kSearchRange; dy <= kSearchRange; dy++) {
 		for (int dx = -kSearchRange; dx <= kSearchRange; dx++) {
-			int32 score = CorrelateAt(smallA, smallB, dx, dy);
+			int32 score = CorrelateAt(smallA, smallB, smallWidth, smallHeight,
+				dx, dy);
 			if (score > best)
 				best = score;
 		}
@@ -170,7 +169,8 @@ FingerprintDatabase::_NextFingerId()
 
 status_t
 FingerprintDatabase::SaveEnrollment(const char* label,
-	const uint8* const* samples, int32 sampleCount, int32* outFingerId)
+	const uint8* const* samples, int32 sampleCount, int32 imageWidth,
+	int32 imageHeight, int32* outFingerId)
 {
 	if (fTemplatesDir.IsEmpty())
 		return B_NO_INIT;
@@ -183,9 +183,11 @@ FingerprintDatabase::SaveEnrollment(const char* label,
 	record.AddString("label", label);
 	record.AddInt64("createdAt", (int64)time(NULL));
 	record.AddInt32("sampleCount", sampleCount);
+	record.AddInt32("imageWidth", imageWidth);
+	record.AddInt32("imageHeight", imageHeight);
 	for (int32 i = 0; i < sampleCount; i++) {
 		record.AddData("sample", B_RAW_TYPE, samples[i],
-			kImageWidth * kImageHeight, false);
+			imageWidth * imageHeight, false);
 	}
 
 	BString path;
@@ -264,14 +266,20 @@ FingerprintDatabase::List(BMessage* reply)
 
 
 status_t
-FingerprintDatabase::Match(const uint8* probeImage, int32* outFingerId,
-	int32* outScore)
+FingerprintDatabase::Match(const uint8* probeImage, int32 imageWidth,
+	int32 imageHeight, int32* outFingerId, int32* outScore)
 {
 	if (fTemplatesDir.IsEmpty())
 		return B_NO_INIT;
 
-	uint8 smallProbe[kSmallWidth * kSmallHeight];
-	DownsampleImage(probeImage, smallProbe);
+	int smallWidth = imageWidth / kDownsample;
+	int smallHeight = imageHeight / kDownsample;
+	size_t smallSize = (size_t)smallWidth * smallHeight;
+
+	uint8* smallProbe = new(std::nothrow) uint8[smallSize];
+	if (smallProbe == NULL)
+		return B_NO_MEMORY;
+	DownsampleImage(probeImage, imageWidth, imageHeight, smallProbe);
 
 	int32 bestFingerId = -1;
 	int32 bestScore = -1000;
@@ -297,7 +305,16 @@ FingerprintDatabase::Match(const uint8* probeImage, int32* outFingerId,
 			continue;
 
 		int32 sampleCount = 0;
+		int32 recordWidth = 0, recordHeight = 0;
 		record.FindInt32("sampleCount", &sampleCount);
+		record.FindInt32("imageWidth", &recordWidth);
+		record.FindInt32("imageHeight", &recordHeight);
+
+		// A record enrolled on a different device model/geometry can't be
+		// meaningfully compared against this probe - skip it rather than
+		// garbage-matching misaligned buffers.
+		if (recordWidth != imageWidth || recordHeight != imageHeight)
+			continue;
 
 		for (int32 i = 0; i < sampleCount; i++) {
 			const void* sampleData;
@@ -306,19 +323,26 @@ FingerprintDatabase::Match(const uint8* probeImage, int32* outFingerId,
 					&sampleSize) != B_OK) {
 				continue;
 			}
-			if ((size_t)sampleSize != (size_t)(kImageWidth * kImageHeight))
+			if ((size_t)sampleSize != (size_t)(imageWidth * imageHeight))
 				continue;
 
-			uint8 smallSample[kSmallWidth * kSmallHeight];
-			DownsampleImage((const uint8*)sampleData, smallSample);
+			uint8* smallSample = new(std::nothrow) uint8[smallSize];
+			if (smallSample == NULL)
+				continue;
+			DownsampleImage((const uint8*)sampleData, imageWidth, imageHeight,
+				smallSample);
 
-			int32 score = BestCorrelation(smallProbe, smallSample);
+			int32 score = BestCorrelation(smallProbe, smallSample, smallWidth,
+				smallHeight);
+			delete[] smallSample;
 			if (score > bestScore) {
 				bestScore = score;
 				bestFingerId = fingerId;
 			}
 		}
 	}
+
+	delete[] smallProbe;
 
 	*outScore = bestScore;
 	if (bestFingerId < 0 || bestScore < kMatchThreshold) {

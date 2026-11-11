@@ -9,15 +9,14 @@
 
 #include <new>
 
+#include <Directory.h>
 #include <Entry.h>
 #include <Message.h>
 #include <OS.h>
 #include <Path.h>
 
+#include "FingerprintDeviceRegistry.h"
 #include "defs.h"
-#include "Uru4000Protocol.h"
-
-using namespace Uru4000;
 
 
 static const int32 kEnrollSampleCount = 3;
@@ -37,18 +36,12 @@ FingerprintUSBWatcher::FingerprintUSBWatcher(FingerprintServer* owner)
 status_t
 FingerprintUSBWatcher::DeviceAdded(BUSBDevice* device)
 {
-	if (device->VendorID() != kVendorID || device->ProductID() != kProductID)
+	if (!FingerprintDeviceRegistry::Matches(device->VendorID(),
+			device->ProductID())) {
 		return B_ERROR; // not interested, BUSBRoster deletes the object
+	}
 
-	BString path;
-	// BUSBDevice doesn't expose its own raw path, but Location() plus the
-	// bus layout under /dev/bus/usb is what BUSBRoster used to find it; we
-	// just need *a* path that BUSBDevice::SetTo() style construction from
-	// FingerprintServer can reopen later. Simplest robust option: rescan
-	// /dev/bus/usb for a device matching VID/PID when we actually need to
-	// open it, rather than caching this particular path (bus-rescan is
-	// cheap and avoids any staleness if the path changes on replug).
-	fOwner->SetDevicePath("rescan");
+	fOwner->SetDevicePresent(device->VendorID(), device->ProductID());
 	return B_OK; // keep the object alive, we'll get DeviceRemoved() later
 }
 
@@ -56,7 +49,7 @@ FingerprintUSBWatcher::DeviceAdded(BUSBDevice* device)
 void
 FingerprintUSBWatcher::DeviceRemoved(BUSBDevice* device)
 {
-	fOwner->ClearDevicePath();
+	fOwner->ClearDevicePresent();
 }
 
 
@@ -66,6 +59,8 @@ FingerprintUSBWatcher::DeviceRemoved(BUSBDevice* device)
 FingerprintServer::FingerprintServer()
 	:
 	BApplication(FINGERPRINT_SERVER_SIGNATURE),
+	fVendorID(0),
+	fProductID(0),
 	fOperationInProgress(false),
 	fCancelRequested(false),
 	fWorkerThread(-1),
@@ -94,16 +89,63 @@ FingerprintServer::ReadyToRun()
 
 
 void
-FingerprintServer::SetDevicePath(const BString& path)
+FingerprintServer::SetDevicePresent(uint16 vendorID, uint16 productID)
 {
-	fDevicePath = path;
+	fVendorID = vendorID;
+	fProductID = productID;
 }
 
 
 void
-FingerprintServer::ClearDevicePath()
+FingerprintServer::ClearDevicePresent()
 {
-	fDevicePath = "";
+	fVendorID = 0;
+	fProductID = 0;
+}
+
+
+status_t
+FingerprintServer::_FindDevicePath(BString* outPath)
+{
+	if (fVendorID == 0)
+		return B_NO_INIT;
+
+	BDirectory busDir("/dev/bus/usb");
+	if (busDir.InitCheck() != B_OK)
+		return B_NO_INIT;
+
+	BEntry hubEntry;
+	while (busDir.GetNextEntry(&hubEntry) == B_OK) {
+		BPath hubPath;
+		if (hubEntry.GetPath(&hubPath) != B_OK || !hubEntry.IsDirectory())
+			continue;
+
+		BDirectory hubDir(hubPath.Path());
+		BEntry deviceEntry;
+		while (hubDir.GetNextEntry(&deviceEntry) == B_OK) {
+			char name[B_FILE_NAME_LENGTH];
+			if (deviceEntry.GetName(name) != B_OK)
+				continue;
+			if (strcmp(name, "raw") == 0)
+				continue; // pseudo-entry, ioctl-only, not a real device
+
+			BPath devicePath;
+			if (deviceEntry.GetPath(&devicePath) != B_OK)
+				continue;
+
+			BUSBDevice device(devicePath.Path());
+			if (device.InitCheck() != B_OK)
+				continue;
+
+			if (device.VendorID() == fVendorID
+				&& device.ProductID() == fProductID) {
+				*outPath = devicePath.Path();
+				return B_OK;
+			}
+		}
+	}
+
+	return B_ENTRY_NOT_FOUND;
 }
 
 
@@ -240,7 +282,7 @@ FingerprintServer::_HandleGetEscrow(BMessage* message)
 void
 FingerprintServer::_HandleEnrollStart(BMessage* message)
 {
-	if (fDevicePath.IsEmpty()) {
+	if (fVendorID == 0) {
 		BMessage reply;
 		reply.AddInt32("error", B_NO_INIT);
 		message->SendReply(&reply);
@@ -293,7 +335,7 @@ FingerprintServer::_HandleVerifyCancel(BMessage* message)
 void
 FingerprintServer::_HandleVerifyStart(BMessage* message)
 {
-	if (fDevicePath.IsEmpty()) {
+	if (fVendorID == 0) {
 		BMessage reply;
 		reply.AddInt32("error", B_NO_INIT);
 		message->SendReply(&reply);
@@ -358,51 +400,59 @@ FingerprintServer::_VerifyThreadEntry(void* data)
 void
 FingerprintServer::_EnrollThread(BMessage* request, const BString& label)
 {
-	Uru4000Device device;
-	status_t status = device.Open(fDevicePath == "rescan"
-		? "/dev/bus/usb/0/5" : fDevicePath.String());
-	// NOTE: the "rescan" placeholder path resolution is a known shortcut -
-	// see the TODO in FingerprintUSBWatcher::DeviceAdded. Fine for a
-	// single-reader development box; a real multi-bus-location scan
-	// belongs here before shipping.
+	FingerprintDevice* device = FingerprintDeviceRegistry::Create(fVendorID,
+		fProductID);
+	status_t status = device != NULL ? B_OK : B_NO_INIT;
 
+	BString path;
 	if (status == B_OK)
-		status = device.Activate();
+		status = _FindDevicePath(&path);
+	if (status == B_OK)
+		status = device->Open(path.String());
+	if (status == B_OK)
+		status = device->Activate();
 
 	uint8* samples[kEnrollSampleCount];
 	for (int32 i = 0; i < kEnrollSampleCount; i++)
 		samples[i] = NULL;
 
+	int32 imageWidth = device != NULL ? device->ImageWidth() : 0;
+	int32 imageHeight = device != NULL ? device->ImageHeight() : 0;
+
 	int32 captured = 0;
 	for (; captured < kEnrollSampleCount && status == B_OK
 			&& !fCancelRequested; captured++) {
 		bool gotFinger = false;
-		status = device.WaitForFingerOn(&gotFinger);
+		status = device->WaitForFingerOn(&gotFinger);
 		if (status != B_OK || !gotFinger)
 			break;
 
-		uint8* buffer = new(std::nothrow) uint8[kImageStructSize];
-		ssize_t n = device.CaptureImage(buffer, kImageStructSize);
-		// A short bulk transfer is the NORMAL case here (the device reports
-		// fewer than the max 290 lines almost every capture) - only treat
-		// it as an error if we didn't even get the fixed-size header.
-		if (n < (ssize_t)kImageHeaderSize) {
+		size_t bufferSize = device->CaptureBufferSize();
+		size_t headerSize = device->ImageHeaderSize();
+		uint8* buffer = new(std::nothrow) uint8[bufferSize];
+		ssize_t n = device->CaptureImage(buffer, bufferSize);
+		// A short transfer is the NORMAL case here (many sensors report
+		// fewer lines/bytes than the max almost every capture) - only
+		// treat it as an error if we didn't even get the fixed-size
+		// header.
+		if (n < (ssize_t)headerSize) {
 			delete[] buffer;
 			status = B_IO_ERROR;
 			break;
 		}
-		size_t pixelBytes = (size_t)n - kImageHeaderSize;
-		if (pixelBytes > (size_t)(kImageWidth * kImageHeight))
-			pixelBytes = kImageWidth * kImageHeight;
+		size_t pixelBytes = (size_t)n - headerSize;
+		size_t imageBytes = (size_t)(imageWidth * imageHeight);
+		if (pixelBytes > imageBytes)
+			pixelBytes = imageBytes;
 
-		uint8* image = new(std::nothrow) uint8[kImageWidth * kImageHeight];
-		memset(image, 0, kImageWidth * kImageHeight);
-		memcpy(image, buffer + kImageHeaderSize, pixelBytes);
+		uint8* image = new(std::nothrow) uint8[imageBytes];
+		memset(image, 0, imageBytes);
+		memcpy(image, buffer + headerSize, pixelBytes);
 		delete[] buffer;
 		samples[captured] = image;
 
 		bool gotRelease = false;
-		status_t offStatus = device.WaitForFingerOff(&gotRelease);
+		status_t offStatus = device->WaitForFingerOff(&gotRelease);
 		if (offStatus != B_OK) {
 			status = offStatus;
 			captured++; // this sample was still captured successfully
@@ -410,18 +460,21 @@ FingerprintServer::_EnrollThread(BMessage* request, const BString& label)
 		}
 	}
 
-	device.Deactivate();
+	if (device != NULL)
+		device->Deactivate();
 
 	int32 fingerId = -1;
 	if (status == B_OK && captured == kEnrollSampleCount) {
 		status = fDatabase.SaveEnrollment(label.String(),
-			(const uint8* const*)samples, kEnrollSampleCount, &fingerId);
+			(const uint8* const*)samples, kEnrollSampleCount, imageWidth,
+			imageHeight, &fingerId);
 	} else if (status == B_OK) {
 		status = fCancelRequested ? B_CANCELED : B_ERROR;
 	}
 
 	for (int32 i = 0; i < kEnrollSampleCount; i++)
 		delete[] samples[i];
+	delete device;
 
 	BMessage reply;
 	reply.AddInt32("fingerId", fingerId);
@@ -436,41 +489,56 @@ FingerprintServer::_EnrollThread(BMessage* request, const BString& label)
 void
 FingerprintServer::_VerifyThread(BMessage* request)
 {
-	Uru4000Device device;
-	status_t status = device.Open(fDevicePath == "rescan"
-		? "/dev/bus/usb/0/5" : fDevicePath.String());
+	FingerprintDevice* device = FingerprintDeviceRegistry::Create(fVendorID,
+		fProductID);
+	status_t status = device != NULL ? B_OK : B_NO_INIT;
 
+	BString path;
 	if (status == B_OK)
-		status = device.Activate();
+		status = _FindDevicePath(&path);
+	if (status == B_OK)
+		status = device->Open(path.String());
+	if (status == B_OK)
+		status = device->Activate();
 
 	int32 fingerId = -1;
 	int32 score = -1000;
 
 	if (status == B_OK && !fCancelRequested) {
 		bool gotFinger = false;
-		status = device.WaitForFingerOn(&gotFinger);
+		status = device->WaitForFingerOn(&gotFinger);
 		if (status == B_OK && gotFinger) {
-			uint8* buffer = new(std::nothrow) uint8[kImageStructSize];
-			ssize_t n = device.CaptureImage(buffer, kImageStructSize);
-			if (n >= (ssize_t)kImageHeaderSize) {
-				size_t pixelBytes = (size_t)n - kImageHeaderSize;
-				if (pixelBytes > (size_t)(kImageWidth * kImageHeight))
-					pixelBytes = kImageWidth * kImageHeight;
-				uint8 probe[kImageWidth * kImageHeight];
-				memset(probe, 0, sizeof(probe));
-				memcpy(probe, buffer + kImageHeaderSize, pixelBytes);
-				status = fDatabase.Match(probe, &fingerId, &score);
+			size_t bufferSize = device->CaptureBufferSize();
+			size_t headerSize = device->ImageHeaderSize();
+			int32 imageWidth = device->ImageWidth();
+			int32 imageHeight = device->ImageHeight();
+
+			uint8* buffer = new(std::nothrow) uint8[bufferSize];
+			ssize_t n = device->CaptureImage(buffer, bufferSize);
+			if (n >= (ssize_t)headerSize) {
+				size_t pixelBytes = (size_t)n - headerSize;
+				size_t imageBytes = (size_t)(imageWidth * imageHeight);
+				if (pixelBytes > imageBytes)
+					pixelBytes = imageBytes;
+				uint8* probe = new(std::nothrow) uint8[imageBytes];
+				memset(probe, 0, imageBytes);
+				memcpy(probe, buffer + headerSize, pixelBytes);
+				status = fDatabase.Match(probe, imageWidth, imageHeight,
+					&fingerId, &score);
+				delete[] probe;
 			} else {
 				status = B_IO_ERROR;
 			}
 			delete[] buffer;
 
 			bool gotRelease = false;
-			device.WaitForFingerOff(&gotRelease);
+			device->WaitForFingerOff(&gotRelease);
 		}
 	}
 
-	device.Deactivate();
+	if (device != NULL)
+		device->Deactivate();
+	delete device;
 
 	if (status == B_OK && fingerId >= 0) {
 		fLastMatchFingerId = fingerId;

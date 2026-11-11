@@ -8,6 +8,7 @@
 
 #include <USBKit.h>
 
+#include "../FingerprintDevice.h"
 #include "Uru4000Protocol.h"
 
 
@@ -19,14 +20,14 @@
 // issued from elsewhere. This class is therefore NOT thread-safe and
 // must only ever be driven sequentially from a single worker thread at
 // a time (confirmed empirically during the Phase 0 spike).
-class Uru4000Device {
+class Uru4000Device : public FingerprintDevice {
 public:
 								Uru4000Device();
-								~Uru4000Device();
+	virtual						~Uru4000Device();
 
-			status_t			Open(const char* path);
-			void				Close();
-			bool				IsOpen() const { return fDevice != NULL; }
+	virtual	status_t			Open(const char* path);
+	virtual	void				Close();
+	virtual	bool				IsOpen() const { return fDevice != NULL; }
 
 			uint16				VendorID() const;
 			uint16				ProductID() const;
@@ -35,26 +36,35 @@ public:
 			// device reports powered-up, then reads one interrupt packet
 			// (expected to be IRQDATA_SCANPWR_ON). Must be called with no
 			// other transfer in flight (true on a freshly opened device).
-			status_t			Activate();
+	virtual	status_t			Activate();
 
 			// Arms the sensor to wait for a finger and blocks on exactly
 			// one interrupt read. Returns B_OK with *gotFinger = true if
 			// IRQDATA_FINGER_ON was seen.
-			status_t			WaitForFingerOn(bool* gotFinger);
+	virtual	status_t			WaitForFingerOn(bool* gotFinger);
 
 			// Switches to capture mode and reads one raw image struct via
 			// the bulk endpoint. buffer must be at least
 			// Uru4000::kImageStructSize bytes. Returns the actual byte
 			// count transferred (like BulkTransfer) or a negative error.
-			ssize_t				CaptureImage(void* buffer, size_t size);
+	virtual	ssize_t				CaptureImage(void* buffer, size_t size);
 
 			// Arms for finger-off and blocks on exactly one interrupt
 			// read, expected to be IRQDATA_FINGER_OFF.
-			status_t			WaitForFingerOff(bool* gotRelease);
+	virtual	status_t			WaitForFingerOff(bool* gotRelease);
 
 			// Powers the sensor down (MODE_OFF). Safe to call multiple
 			// times / when not armed.
-			void				Deactivate();
+	virtual	void				Deactivate();
+
+	virtual	int32				ImageWidth() const
+									{ return Uru4000::kImageWidth; }
+	virtual	int32				ImageHeight() const
+									{ return Uru4000::kImageHeight; }
+	virtual	size_t				ImageHeaderSize() const
+									{ return Uru4000::kImageHeaderSize; }
+	virtual	size_t				CaptureBufferSize() const
+									{ return Uru4000::kImageStructSize; }
 
 private:
 			ssize_t				ReadRegs(uint16 reg, uint8* buf, uint16 len);

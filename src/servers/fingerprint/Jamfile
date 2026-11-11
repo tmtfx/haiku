@@ -2,6 +2,7 @@ SubDir HAIKU_TOP src servers fingerprint ;
 
 UsePrivateHeaders shared ;
 
+UseHeaders [ FDirName $(HAIKU_TOP) src servers fingerprint protocol ] ;
 UseHeaders [ FDirName $(HAIKU_TOP) src servers fingerprint protocol uru4000 ] ;
 
 Application fingerprint_server :
@@ -13,6 +14,7 @@ Application fingerprint_server :
 	libdevice.so
 	localestub
 	shared
+	libfpprotocol.a
 	libfpuru4000.a
 	[ TargetLibstdc++ ]
 	: fingerprint_server.rdef
