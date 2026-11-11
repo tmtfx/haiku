@@ -170,9 +170,14 @@ FingerprintWindow::_EnrollThreadEntry(void* data)
 	Args* args = (Args*)data;
 
 	BMessage reply;
-	ServerMessenger().SendMessage(args->request, &reply);
+	status_t status = ServerMessenger().SendMessage(args->request, &reply);
 	delete args->request;
 
+	if (status != B_OK) {
+		reply.MakeEmpty();
+		reply.AddInt32("fingerId", -1);
+		reply.AddInt32("error", status);
+	}
 	reply.what = kMsgEnrollResult;
 	args->window->PostMessage(&reply);
 
@@ -236,9 +241,15 @@ FingerprintWindow::_VerifyThreadEntry(void* data)
 	Args* args = (Args*)data;
 
 	BMessage reply;
-	ServerMessenger().SendMessage(args->request, &reply);
+	status_t status = ServerMessenger().SendMessage(args->request, &reply);
 	delete args->request;
 
+	if (status != B_OK) {
+		reply.MakeEmpty();
+		reply.AddInt32("fingerId", -1);
+		reply.AddInt32("score", 0);
+		reply.AddInt32("error", status);
+	}
 	reply.what = kMsgVerifyResult;
 	args->window->PostMessage(&reply);
 
