@@ -75,6 +75,17 @@ FingerprintServer::FingerprintServer()
 
 FingerprintServer::~FingerprintServer()
 {
+	// Stop() must be called explicitly, before delete, while fWatcher is
+	// still fully a FingerprintUSBWatcher. BUSBRoster::~BUSBRoster() also
+	// calls Stop() as a safety net, but by the time that runs (as part of
+	// the base-class destructor sub-object), the vtable has already been
+	// rewound to plain BUSBRoster - whose DeviceAdded()/DeviceRemoved() are
+	// pure virtual. If a device is still attached at that point, Stop()
+	// tears down its WatchedEntry, which calls the (now pure virtual)
+	// DeviceRemoved() and aborts with "pure virtual method called". This is
+	// why quitting while the reader is plugged in crashed every time.
+	if (fWatcher != NULL)
+		fWatcher->Stop();
 	delete fWatcher;
 }
 
