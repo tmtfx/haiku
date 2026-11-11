@@ -9,7 +9,7 @@ This repository contains a custom fork of the **Haiku OS** operating system. The
 Due to the integration of third-party drivers released under the **GNU General Public License (GPL)**, this repository and its related distributed binary builds / ISO images are released as a whole under the **GPL v2** license.
 
 * **Haiku Source Code:** Individual source files inherited directly from the original Haiku project remain individually under the **MIT** license (with their respective copyright notices intact).
-* **Graphics and Video Drivers:** Some of the added/modified driver components are released under the **GPL v2** license.
+* **Graphics and Video Drivers:** Some of the added/modified driver components (actually only AST and bttv drivers) are released under the **GPL v2** license.
 * **ISO Images / Binary Distribution:** The final compiled work falls entirely under the terms of the GPL v2 license.
 
 For further details, please refer to the [`LICENSE.md`](LICENSE.md) file.
