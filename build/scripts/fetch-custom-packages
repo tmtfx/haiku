@@ -1,0 +1,56 @@
+#!/bin/sh
+#
+# Fetches locally-patched package replacements that aren't available from
+# the official HaikuPorts repository, placing them in the download cache
+# where Jam expects them (generated.<arch>/download/). Jam only downloads
+# a package if it isn't already present there, so running this once per
+# fresh checkout (before the real build) is enough to make it use these
+# instead of the stock upstream packages.
+#
+# Can be run from anywhere (resolves paths relative to its own location),
+# e.g. from the root of the haiku source tree:
+#   build/scripts/fetch-custom-packages
+# or from within generated.<arch>, where build scripts are usually invoked:
+#   ../build/scripts/fetch-custom-packages
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+HAIKU_TOP="$SCRIPT_DIR/../.."
+ARCH=x86_64
+DOWNLOAD_DIR="$HAIKU_TOP/generated.$ARCH/download"
+
+mkdir -p "$DOWNLOAD_DIR"
+
+fetch_package()
+{
+	name="$1"
+	url="$2"
+	dest="$DOWNLOAD_DIR/$name"
+
+	if [ -e "$dest" ]; then
+		echo "$name already present, skipping"
+		return
+	fi
+
+	echo "Fetching $name ..."
+	curl -fL "$url" -o "$dest"
+}
+
+# wpa_supplicant with Wi-Fi QR code scanning (webcam/image file) added to the
+# join-network dialog. Built from https://github.com/tmtfx/wpa_supplicant,
+# branch haiku-wifi-qr-scan, via the recipe in
+# net-wireless/wpa_supplicant/wpa_supplicant-2.11.haiku.1.recipe of
+# https://github.com/tmtfx/haikuports.
+#
+# Saved as "...-1" (not the "-3" revision it was actually built/released as):
+# build/jam/repositories/HaikuPorts/x86_64 is left untouched on purpose, since
+# editing it changes its checksum, which is also used as a cache key for the
+# *entire* repository index on HaikuPorts' server - a combination that was
+# never published there 404s on download, breaking every other package too,
+# not just this one. Keeping the manifest's "-1" entry and dropping our build
+# in under that same expected filename reuses Jam's normal "already
+# downloaded" skip without touching the shared index.
+fetch_package \
+	"wpa_supplicant-2.11.haiku.1-1-x86_64.hpkg" \
+	"https://github.com/tmtfx/wpa_supplicant/releases/download/v2.11.haiku.1-3-qr-scan/wpa_supplicant-2.11.haiku.1-3-x86_64.hpkg"
