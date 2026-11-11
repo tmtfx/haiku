@@ -3,6 +3,10 @@
 export HAIKU_REVISION=PiratiDelFrico-rev11
 export HAIKU_IMAGE_SIZE=1280
 
+# Questo script gira da dentro generated.x86_64 (copiato lì prima dell'avvio),
+# quindi il sorgente di haiku è la cartella parente.
+../build/scripts/fetch-custom-packages
+
 mkdir -p .logs
 ERROR_LOG=".logs/build_error.log"
 > "$ERROR_LOG"
