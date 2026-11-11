@@ -10,6 +10,7 @@
 #include <Alert.h>
 #include <Application.h>
 #include <Button.h>
+#include <Catalog.h>
 #include <CheckBox.h>
 #include <LayoutBuilder.h>
 #include <ListView.h>
@@ -23,6 +24,10 @@
 #include "FingerListItem.h"
 #include "../../servers/fingerprint/defs.h"
 #include "../../../headers/private/app/KeyStoreDefs.h"
+
+
+#undef B_TRANSLATION_CONTEXT
+#define B_TRANSLATION_CONTEXT "Fingerprint preferences"
 
 
 enum {
@@ -57,22 +62,22 @@ FingerprintWindow::FingerprintWindow()
 	BScrollView* scrollView = new BScrollView("scroll", fListView,
 		0, false, true);
 
-	fEnrollButton = new BButton("enroll", "Registra nuova impronta",
+	fEnrollButton = new BButton("enroll", B_TRANSLATE("Enroll new finger"),
 		new BMessage(kMsgEnroll));
-	fDeleteButton = new BButton("delete", "Elimina selezionata",
+	fDeleteButton = new BButton("delete", B_TRANSLATE("Delete selected"),
 		new BMessage(kMsgDelete));
-	fVerifyButton = new BButton("verify", "Test verifica",
+	fVerifyButton = new BButton("verify", B_TRANSLATE("Test verify"),
 		new BMessage(kMsgVerify));
 
 	fMasterPasswordCheckBox = new BCheckBox("useForMasterPassword",
-		"Usa l'impronta selezionata per sbloccare la master password",
+		B_TRANSLATE("Use the selected finger to unlock the master password"),
 		new BMessage(kMsgToggleMasterPassword));
 
 	fScreensaverCheckBox = new BCheckBox("useForScreensaver",
-		"Usa un'impronta registrata per sbloccare lo screensaver",
+		B_TRANSLATE("Use an enrolled finger to unlock the screen saver"),
 		new BMessage(kMsgToggleScreensaver));
 
-	fStatusView = new BStringView("status", "Pronto.");
+	fStatusView = new BStringView("status", B_TRANSLATE("Ready."));
 
 	BLayoutBuilder::Group<>(this, B_VERTICAL, B_USE_DEFAULT_SPACING)
 		.SetInsets(B_USE_WINDOW_INSETS)
@@ -132,7 +137,7 @@ FingerprintWindow::_RefreshList()
 	BMessage reply;
 	status_t status = ServerMessenger().SendMessage(&request, &reply);
 	if (status != B_OK) {
-		fStatusView->SetText("Impossibile contattare fingerprint_server.");
+		fStatusView->SetText(B_TRANSLATE("Could not reach fingerprint_server."));
 		return;
 	}
 
@@ -147,20 +152,20 @@ FingerprintWindow::_RefreshList()
 	}
 
 	if (fListView->CountItems() == 0)
-		fStatusView->SetText("Nessuna impronta registrata.");
+		fStatusView->SetText(B_TRANSLATE("No fingers enrolled."));
 	else
-		fStatusView->SetText("Pronto.");
+		fStatusView->SetText(B_TRANSLATE("Ready."));
 }
 
 
 void
 FingerprintWindow::_StartEnroll()
 {
-	_SetBusy(true, "Registrazione: appoggia e solleva il dito 3 volte "
-		"quando richiesto dal sensore...");
+	_SetBusy(true, B_TRANSLATE("Enrolling: place and lift your finger 3 "
+		"times as prompted by the sensor..."));
 
 	BMessage* request = new BMessage(B_FP_ENROLL_START);
-	request->AddString("label", "Dito");
+	request->AddString("label", B_TRANSLATE("Finger"));
 
 	struct Args {
 		FingerprintWindow* window;
@@ -205,7 +210,7 @@ FingerprintWindow::_StartDelete()
 {
 	int32 selected = fListView->CurrentSelection();
 	if (selected < 0) {
-		fStatusView->SetText("Seleziona prima un'impronta dalla lista.");
+		fStatusView->SetText(B_TRANSLATE("Select a finger from the list first."));
 		return;
 	}
 	FingerListItem* item = (FingerListItem*)fListView->ItemAt(selected);
@@ -218,10 +223,10 @@ FingerprintWindow::_StartDelete()
 	int32 error = B_ERROR;
 	reply.FindInt32("error", &error);
 	if (status == B_OK && error == B_OK) {
-		fStatusView->SetText("Impronta eliminata.");
+		fStatusView->SetText(B_TRANSLATE("Finger deleted."));
 		_RefreshList();
 	} else {
-		fStatusView->SetText("Errore durante l'eliminazione.");
+		fStatusView->SetText(B_TRANSLATE("Deletion failed."));
 	}
 }
 
@@ -229,7 +234,7 @@ FingerprintWindow::_StartDelete()
 void
 FingerprintWindow::_StartVerify()
 {
-	_SetBusy(true, "Verifica: appoggia il dito sul sensore...");
+	_SetBusy(true, B_TRANSLATE("Verifying: place your finger on the sensor..."));
 
 	BMessage* request = new BMessage(B_FP_VERIFY_START);
 
@@ -277,7 +282,7 @@ FingerprintWindow::_ToggleMasterPasswordUnlock(bool enable)
 {
 	BMessenger keyStore(kKeyStoreServerSignature);
 	if (!keyStore.IsValid()) {
-		fStatusView->SetText("keystore_server non raggiungibile.");
+		fStatusView->SetText(B_TRANSLATE("keystore_server is not reachable."));
 		fMasterPasswordCheckBox->SetValue(enable ? B_CONTROL_OFF
 			: B_CONTROL_ON);
 		return;
@@ -287,7 +292,7 @@ FingerprintWindow::_ToggleMasterPasswordUnlock(bool enable)
 	if (enable) {
 		int32 selected = fListView->CurrentSelection();
 		if (selected < 0) {
-			fStatusView->SetText("Seleziona prima un'impronta dalla lista.");
+			fStatusView->SetText(B_TRANSLATE("Select a finger from the list first."));
 			fMasterPasswordCheckBox->SetValue(B_CONTROL_OFF);
 			return;
 		}
@@ -304,8 +309,9 @@ FingerprintWindow::_ToggleMasterPasswordUnlock(bool enable)
 		int32 result = B_ERROR;
 		reply.FindInt32("result", &result);
 		char buf[160];
-		snprintf(buf, sizeof(buf), "%s fallita: %s",
-			enable ? "Attivazione" : "Disattivazione",
+		snprintf(buf, sizeof(buf), enable
+			? B_TRANSLATE("Enabling failed: %s")
+			: B_TRANSLATE("Disabling failed: %s"),
 			strerror(status != B_OK ? status : result));
 		fStatusView->SetText(buf);
 		fMasterPasswordCheckBox->SetValue(enable ? B_CONTROL_OFF
@@ -314,8 +320,8 @@ FingerprintWindow::_ToggleMasterPasswordUnlock(bool enable)
 	}
 
 	fStatusView->SetText(enable
-		? "Sblocco master password tramite impronta attivato."
-		: "Sblocco master password tramite impronta disattivato.");
+		? B_TRANSLATE("Fingerprint unlock for the master password enabled.")
+		: B_TRANSLATE("Fingerprint unlock for the master password disabled."));
 }
 
 
@@ -331,14 +337,14 @@ FingerprintWindow::_ToggleScreensaverUnlock(bool enable)
 	reply.FindInt32("error", &error);
 
 	if (status != B_OK || error != B_OK) {
-		fStatusView->SetText("Impossibile aggiornare l'impostazione.");
+		fStatusView->SetText(B_TRANSLATE("Could not update the setting."));
 		fScreensaverCheckBox->SetValue(enable ? B_CONTROL_OFF : B_CONTROL_ON);
 		return;
 	}
 
 	fStatusView->SetText(enable
-		? "Sblocco screensaver tramite impronta attivato."
-		: "Sblocco screensaver tramite impronta disattivato.");
+		? B_TRANSLATE("Fingerprint unlock for the screen saver enabled.")
+		: B_TRANSLATE("Fingerprint unlock for the screen saver disabled."));
 }
 
 
@@ -376,12 +382,12 @@ FingerprintWindow::MessageReceived(BMessage* message)
 			message->FindInt32("fingerId", &fingerId);
 
 			if (error == B_OK) {
-				_SetBusy(false, "Impronta registrata.");
+				_SetBusy(false, B_TRANSLATE("Finger enrolled."));
 				_RefreshList();
 			} else {
 				char buf[128];
 				snprintf(buf, sizeof(buf),
-					"Registrazione fallita: %s", strerror(error));
+					B_TRANSLATE("Enrollment failed: %s"), strerror(error));
 				_SetBusy(false, buf);
 			}
 			break;
@@ -399,12 +405,12 @@ FingerprintWindow::MessageReceived(BMessage* message)
 			char buf[128];
 			if (error == B_OK) {
 				snprintf(buf, sizeof(buf),
-					"Match! Impronta #%ld (punteggio %ld)", (long)fingerId,
-					(long)score);
+					B_TRANSLATE("Match! Finger #%ld (score %ld)"),
+					(long)fingerId, (long)score);
 			} else if (error == B_NAME_NOT_FOUND) {
-				snprintf(buf, sizeof(buf), "Nessuna corrispondenza.");
+				snprintf(buf, sizeof(buf), B_TRANSLATE("No match."));
 			} else {
-				snprintf(buf, sizeof(buf), "Verifica fallita: %s",
+				snprintf(buf, sizeof(buf), B_TRANSLATE("Verify failed: %s"),
 					strerror(error));
 			}
 			_SetBusy(false, buf);

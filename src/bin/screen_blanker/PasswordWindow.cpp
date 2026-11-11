@@ -69,7 +69,7 @@ PasswordWindow::PasswordWindow()
 	// master-password/keystore integration, there is nothing to decrypt
 	// here, so a live match alone is enough to authorize the unlock.
 	fFingerprintButton = new BButton(BRect(), "fingerprint",
-		B_TRANSLATE("Usa impronta"), new BMessage(kMsgFingerprintStart),
+		B_TRANSLATE("Use fingerprint"), new BMessage(kMsgFingerprintStart),
 		B_FOLLOW_NONE);
 	customBox->AddChild(fFingerprintButton);
 	fFingerprintButton->ResizeToPreferred();
