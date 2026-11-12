@@ -4,6 +4,7 @@
  */
 #include <Application.h>
 
+#include "FingerprintPasswordGateWindow.h"
 #include "FingerprintWindow.h"
 
 
@@ -17,6 +18,16 @@ public:
 
 	virtual void ReadyToRun()
 	{
+		// Gate behind the master password: without this, anyone with
+		// access to the running session could freely enroll/delete
+		// fingerprint templates and set up the sequence-escrow feature
+		// (Fase 1e) with no authentication at all - see
+		// FingerprintPasswordGateWindow.h for the full rationale.
+		if (FingerprintPasswordGateWindow::CheckAccess() != B_OK) {
+			PostMessage(B_QUIT_REQUESTED);
+			return;
+		}
+
 		(new FingerprintWindow())->Show();
 	}
 };

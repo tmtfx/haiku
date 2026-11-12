@@ -1,13 +1,18 @@
 SubDir HAIKU_TOP src preferences fingerprint ;
 
 UsePrivateHeaders shared ;
+UsePublicHeaders crypto support ;
+
+local cryptoLib = libcrypto_api.so ;
+SEARCH on $(cryptoLib) = /boot/system/lib ;
 
 Application Fingerprint :
 	FingerprintApp.cpp
 	FingerprintWindow.cpp
 	FingerprintActivationWindow.cpp
+	FingerprintPasswordGateWindow.cpp
 	FingerListItem.cpp
-	: be localestub shared [ TargetLibstdc++ ]
+	: be localestub shared [ TargetLibstdc++ ] $(cryptoLib)
 	: Fingerprint.rdef
 ;
 
@@ -17,4 +22,5 @@ DoCatalogs Fingerprint :
 	FingerprintApp.cpp
 	FingerprintWindow.cpp
 	FingerprintActivationWindow.cpp
+	FingerprintPasswordGateWindow.cpp
 ;
