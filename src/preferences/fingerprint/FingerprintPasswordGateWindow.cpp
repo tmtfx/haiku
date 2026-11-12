@@ -157,6 +157,7 @@ FingerprintPasswordGateWindow::FingerprintPasswordGateWindow(
 	.End();
 
 	fUnlockButton->MakeDefault(true);
+	fPassword->MakeFocus(true);
 }
 
 
