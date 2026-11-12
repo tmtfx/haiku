@@ -63,7 +63,7 @@ cursor_set_pixel(uint8* dest, uint32 x, uint32 y, uint8 red, uint8 green,
 	uint8 blue, uint8 alpha)
 {
 	uint8 value = (red & 0xe0) | ((green & 0xe0) >> 3) | (blue >> 6);
-	dest[y * kCursorWidth + x] = alpha < 128 ? 0 : value;
+	dest[y * kCursorWidth + x] = alpha < 128 ? 0x04 : value;
 }
 
 
@@ -146,7 +146,23 @@ SetCursorBitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 	if (dest == NULL)
 		return B_NO_INIT;
 
-	memset(dest, 0, kCursorWidth * kCursorHeight);
+	memset(dest, 0x04, kCursorWidth * kCursorHeight);
+	// --- TEST DIAGNOSTICO: Riempiamo la griglia 32x32 con i 256 valori (0x00 - 0xFF) ---
+    // Ripetiamo il pattern 4 volte per coprire l'intera matrice 32x32 (16x16 pixel per blocco di 256 valori)
+    /*
+    for (uint32 y = 0; y < kCursorHeight; y++) {
+        for (uint32 x = 0; x < kCursorWidth; x++) {
+            // Combiniamo X e Y per ottenere un valore progressivo da 0 a 255
+            // Esempio: un gradiente/scacchiera che mappa ogni singolo byte
+            uint8 testValue = (y * 8 + x / 4) & 0xFF; 
+            
+            // Oppure, se preferisci una mappatura lineare pura (i primi 256 pixel coprono tutti i valori):
+            // uint32 index = y * kCursorWidth + x;
+            // uint8 testValue = (index < 256) ? (uint8)index : 0;
+
+            dest[y * kCursorWidth + x] = testValue;
+        }
+    }*/
 
 	const uint32 clipWidth = min_c(width, kCursorWidth);
 	const uint32 clipHeight = min_c(height, kCursorHeight);
