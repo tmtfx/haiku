@@ -228,8 +228,28 @@ FingerprintServer::_HandleDelete(BMessage* message)
 {
 	int32 fingerId;
 	status_t status = B_BAD_VALUE;
-	if (message->FindInt32("fingerId", &fingerId) == B_OK)
+	if (message->FindInt32("fingerId", &fingerId) == B_OK) {
 		status = fDatabase.Delete(fingerId);
+		if (status == B_OK) {
+			// If the deleted finger was part of the active sequence
+			// escrow, invalidate it now rather than leaving it around
+			// stale - otherwise a later enrollment reusing that same
+			// fingerId (FingerprintDatabase hands out the lowest free id,
+			// so this is a real possibility after deleting everything)
+			// could silently satisfy a sequence position it was never
+			// actually authorized for.
+			int32 storedSequence[EscrowStore::kSequenceLength];
+			uint8 key[32];
+			if (fEscrowStore.Get(storedSequence, key, sizeof(key)) == B_OK) {
+				for (int32 i = 0; i < EscrowStore::kSequenceLength; i++) {
+					if (storedSequence[i] == fingerId) {
+						fEscrowStore.Clear();
+						break;
+					}
+				}
+			}
+		}
+	}
 
 	BMessage reply;
 	reply.AddInt32("error", status);
@@ -774,6 +794,9 @@ FingerprintServer::_SequenceVerifyThread(BMessage* request)
 			&& status == B_OK && !fCancelRequested; i++) {
 		int32 score = -1000;
 		status = _CaptureAndIdentifyOneFinger(device, &touched[i], &score);
+		fprintf(stderr, "[SequenceVerify] touch %d: fingerId=%d score=%d "
+			"status=%s\n", (int)i, (int)touched[i], (int)score,
+			strerror(status));
 	}
 
 	if (device != NULL)
@@ -785,6 +808,10 @@ FingerprintServer::_SequenceVerifyThread(BMessage* request)
 		int32 storedSequence[EscrowStore::kSequenceLength];
 		uint8 key[32];
 		if (fEscrowStore.Get(storedSequence, key, sizeof(key)) == B_OK) {
+			fprintf(stderr, "[SequenceVerify] stored sequence: "
+				"%d %d %d %d\n", (int)storedSequence[0],
+				(int)storedSequence[1], (int)storedSequence[2],
+				(int)storedSequence[3]);
 			matched = true;
 			for (int32 i = 0; i < EscrowStore::kSequenceLength; i++) {
 				if (touched[i] != storedSequence[i]) {
@@ -792,8 +819,11 @@ FingerprintServer::_SequenceVerifyThread(BMessage* request)
 					break;
 				}
 			}
+		} else {
+			fprintf(stderr, "[SequenceVerify] fEscrowStore.Get() failed\n");
 		}
 	}
+	fprintf(stderr, "[SequenceVerify] matched=%d\n", matched);
 
 	if (matched)
 		fLastSequenceMatchTime = system_time();

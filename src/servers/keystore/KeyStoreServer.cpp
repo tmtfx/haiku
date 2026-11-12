@@ -1175,7 +1175,17 @@ KeyStoreServer::_GetOrAskSessionPassword()
 						int32 verifyError = B_ERROR;
 						verifyReply.FindInt32("error", &verifyError);
 
-						if (verifyStatus == B_OK && verifyError == B_OK) {
+						if (verifyStatus == B_OK && verifyError == B_NO_INIT) {
+							// fingerprint_server has no active sequence
+							// escrow at all - most likely it got
+							// invalidated there (e.g. a finger that was
+							// part of the sequence got deleted). Our side
+							// is now orphaned too: clean it up so the
+							// preflet/next attempt doesn't keep finding a
+							// stale, unusable marker.
+							BEntry(markerPath.Path()).Remove();
+							_ClearStickId();
+						} else if (verifyStatus == B_OK && verifyError == B_OK) {
 							BMessage escrowRequest(B_FP_GET_ESCROW);
 							BMessage escrowReply;
 							if (fpServer.SendMessage(&escrowRequest, &escrowReply)
