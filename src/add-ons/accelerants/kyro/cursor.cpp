@@ -31,6 +31,7 @@ struct cursor_animation_state {
 	bool		terminate;
 	float		speedFactor;
 	bigtime_t	frameInterval;
+	bigtime_t	startDelay;
 	uint32		uploadedFrameCount;
 	uint32		nextUploadFrame;
 	uint32		currentFrame;
@@ -43,6 +44,7 @@ static cursor_animation_state sCursorAnimation = {
 	false,
 	10.0f,
 	100000,
+	0,
 	1,
 	0,
 	0,
@@ -117,8 +119,11 @@ cursor_animation_thread(void* cookie)
 	(void)cookie;
 
 	while (!sCursorAnimation.terminate) {
-		bigtime_t timeout = sCursorAnimation.running
-			? sCursorAnimation.frameInterval : 500000;
+		bigtime_t interval = sCursorAnimation.frameInterval;
+		if (sCursorAnimation.currentFrame == 0 && sCursorAnimation.startDelay > 0)
+			interval += sCursorAnimation.startDelay;
+
+		bigtime_t timeout = sCursorAnimation.running ? interval : 500000;
 		status_t status = acquire_sem_etc(sCursorAnimation.semaphore, 1,
 			B_RELATIVE_TIMEOUT | B_CAN_INTERRUPT, timeout);
 		if (sCursorAnimation.terminate)
@@ -130,7 +135,7 @@ cursor_animation_thread(void* cookie)
 			continue;
 		}
 
-		if (status != B_TIMED_OUT && status != B_OK && status != B_INTERRUPTED)
+		if (status != B_TIMED_OUT)
 			continue;
 
 		sCursorAnimation.currentFrame++;
@@ -419,6 +424,17 @@ SetCursorAnimationSpeed(float speedFactor)
 }
 
 
+status_t
+SetCursorAnimationStartDelay(uint32 startDelayMs)
+{
+	if (!SupportsCursorAnimation())
+		return B_NOT_SUPPORTED;
+
+	sCursorAnimation.startDelay = (bigtime_t)startDelayMs * 1000;
+	return B_OK;
+}
+
+
 void
 CursorAnimationUninit(void)
 {
@@ -437,6 +453,7 @@ CursorAnimationUninit(void)
 	sCursorAnimation.terminate = false;
 	sCursorAnimation.speedFactor = 10.0f;
 	sCursorAnimation.frameInterval = 100000;
+	sCursorAnimation.startDelay = 0;
 	sCursorAnimation.uploadedFrameCount = 1;
 	sCursorAnimation.nextUploadFrame = 0;
 	sCursorAnimation.currentFrame = 0;

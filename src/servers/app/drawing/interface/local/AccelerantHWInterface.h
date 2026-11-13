@@ -181,6 +181,7 @@ private:
 			start_cursor_ani			fAccStartCursorAni;
 			stop_cursor_ani			fAccStopCursorAni;
 			set_cursor_ani_speed		fAccSetCursorAniSpeed;
+			set_cursor_ani_start_delay	fAccSetCursorAniStartDelay;
 
 			uint32					fCursorBits;
 
@@ -243,6 +244,7 @@ private:
 			bigtime_t		fCursorAnimationLastMoveAt;
 			bigtime_t		fCursorAnimationIdleDelay;
 			bigtime_t		fCursorAnimationFrameDelay;
+			uint32			fCursorAnimationStartDelay;
 			uint32			fCursorAnimationTrigger;
 			uint32			fCursorAnimationSupportedFrames;
 			float			fCursorAnimationSpeedFactor;

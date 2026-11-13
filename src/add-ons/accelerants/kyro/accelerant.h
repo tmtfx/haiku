@@ -59,6 +59,7 @@ uint32 CursorSupportedFrames(void);
 status_t StartCursorAnimation(void);
 status_t StopCursorAnimation(void);
 status_t SetCursorAnimationSpeed(float speedFactor);
+status_t SetCursorAnimationStartDelay(uint32 startDelayMs);
 void CursorAnimationUninit(void);
 uint32 kyro_overlay_count(const display_mode* mode);
 const uint32* kyro_overlay_supported_spaces(const display_mode* mode);

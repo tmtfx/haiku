@@ -74,6 +74,8 @@ get_accelerant_hook(uint32 feature, void* data)
 			return (void*)StopCursorAnimation;
 		case B_SET_CURSOR_ANI_SPEED:
 			return (void*)SetCursorAnimationSpeed;
+		case B_SET_CURSOR_ANI_START_DELAY:
+			return (void*)SetCursorAnimationStartDelay;
 
 		case B_DPMS_MODE:
 			return (void*)kyro_dpms_mode;

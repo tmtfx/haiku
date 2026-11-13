@@ -66,6 +66,7 @@ enum {
 	B_START_CURSOR_ANI,					/* optional */
 	B_STOP_CURSOR_ANI,					/* optional */
 	B_SET_CURSOR_ANI_SPEED,				/* optional */
+	B_SET_CURSOR_ANI_START_DELAY,		/* optional */
 
 	/* synchronization */
 	B_ACCELERANT_ENGINE_COUNT = 0x300,	/* required */
@@ -331,6 +332,7 @@ typedef uint32 (*cursor_supported_frames)(void);
 typedef status_t (*start_cursor_ani)(void);
 typedef status_t (*stop_cursor_ani)(void);
 typedef status_t (*set_cursor_ani_speed)(float speedFactor);
+typedef status_t (*set_cursor_ani_start_delay)(uint32 startDelayMs);
 
 typedef uint32 (*accelerant_engine_count)(void);
 typedef status_t (*acquire_engine)(uint32 capabilities, uint32 maxWait,

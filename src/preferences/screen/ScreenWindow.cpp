@@ -522,7 +522,7 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 
 	fCursorAnimationIdleSlider = new BSlider("cursor_ani_idle",
 		B_TRANSLATE("Cursor animation idle delay (ms):"),
-		new BMessage(SLIDER_CURSOR_ANIMATION_IDLE_MSG), 0, 3000, B_HORIZONTAL);
+		new BMessage(SLIDER_CURSOR_ANIMATION_IDLE_MSG), 0, 15000, B_HORIZONTAL);
 	fCursorAnimationIdleSlider->SetValue(fSettings->CursorAnimationIdleDelayMs());
 	fCursorAnimationIdleSlider->SetEnabled(canEnableCursorAnimation
 		&& fCursorAnimationCheckbox->Value() == B_CONTROL_ON);

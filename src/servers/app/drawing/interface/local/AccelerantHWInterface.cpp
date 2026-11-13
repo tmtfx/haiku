@@ -215,6 +215,7 @@ AccelerantHWInterface::AccelerantHWInterface()
 	fAccStartCursorAni(NULL),
 	fAccStopCursorAni(NULL),
 	fAccSetCursorAniSpeed(NULL),
+	fAccSetCursorAniStartDelay(NULL),
 	fCursorBits(0),
 
 	// dpms hooks
@@ -269,6 +270,7 @@ AccelerantHWInterface::AccelerantHWInterface()
 	fCursorAnimationLastMoveAt(0),
 	fCursorAnimationIdleDelay(0),
 	fCursorAnimationFrameDelay(0),
+	fCursorAnimationStartDelay(0),
 	fCursorAnimationTrigger(ServerCursor::B_CURSOR_ANI_TRIGGER_IMMEDIATE),
 	fCursorAnimationSupportedFrames(0),
 	fCursorAnimationSpeedFactor(1.0f),
@@ -624,6 +626,8 @@ AccelerantHWInterface::_SetupDefaultHooks()
 		= (stop_cursor_ani)fAccelerantHook(B_STOP_CURSOR_ANI, NULL);
 	fAccSetCursorAniSpeed = (set_cursor_ani_speed)fAccelerantHook(
 		B_SET_CURSOR_ANI_SPEED, NULL);
+	fAccSetCursorAniStartDelay = (set_cursor_ani_start_delay)fAccelerantHook(
+		B_SET_CURSOR_ANI_START_DELAY, NULL);
 
 	fCursorBits = fAccGetCursorBits != NULL ? fAccGetCursorBits() : 0;
 	fCursorAnimationSupportedFrames = fAccCursorSupportedFrames != NULL
@@ -707,6 +711,7 @@ AccelerantHWInterface::Shutdown()
 	fAccStartCursorAni = NULL;
 	fAccStopCursorAni = NULL;
 	fAccSetCursorAniSpeed = NULL;
+	fAccSetCursorAniStartDelay = NULL;
 	fRetraceSemaphore = B_UNSUPPORTED;
 
 	if (fAccelerantHook != NULL) {
@@ -1999,11 +2004,22 @@ AccelerantHWInterface::_UpdateCursorAnimationLocked()
 	fCursorAnimationCurrentFrame = 0;
 	fCursorAnimationFrameDelay = max_c((bigtime_t)1000,
 		(bigtime_t)cursor->AnimationFrameDelayMs() * 1000);
-	fCursorAnimationIdleDelay = (bigtime_t)fUserCursorAnimationIdleDelayMs * 1000;
+
+	uint32 idleDelayMs = cursor->AnimationIdleDelayMs();
+	if (fUserCursorAnimationIdleDelayMs > 0)
+		idleDelayMs = fUserCursorAnimationIdleDelayMs;
+	fCursorAnimationIdleDelay = (bigtime_t)idleDelayMs * 1000;
+
 	fCursorAnimationTrigger = cursor->AnimationTrigger();
+	fCursorAnimationStartDelay = cursor->AnimationStartDelayMs();
 	fCursorAnimationSpeedFactor = (1000.0f
 		/ max_c(1.0f, (float)cursor->AnimationFrameDelayMs()))
 		* fUserCursorAnimationSpeedFactor;
+
+	if (fCursorAnimationRunning && fAccStopCursorAni != NULL) {
+		fAccStopCursorAni();
+	}
+	fCursorAnimationRunning = false;
 
 	for (uint32 i = 0; i < frameCount; i++) {
 		if (_ApplyCursorAnimationFrameLocked(i) != B_OK) {
@@ -2014,11 +2030,13 @@ AccelerantHWInterface::_UpdateCursorAnimationLocked()
 
 	bigtime_t now = system_time();
 	fCursorAnimationLastMoveAt = now;
-	fCursorAnimationStartAt = now + (bigtime_t)cursor->AnimationStartDelayMs() * 1000;
-	if (fCursorAnimationTrigger == ServerCursor::B_CURSOR_ANI_TRIGGER_IDLE
-		&& fCursorAnimationIdleDelay > 0) {
-		fCursorAnimationStartAt = max_c(fCursorAnimationStartAt,
-			fCursorAnimationLastMoveAt + fCursorAnimationIdleDelay);
+	if (fCursorAnimationTrigger == ServerCursor::B_CURSOR_ANI_TRIGGER_IDLE) {
+		fCursorAnimationStartAt = now + fCursorAnimationIdleDelay;
+	} else if (fAccSetCursorAniStartDelay != NULL) {
+		fCursorAnimationStartAt = now;
+	} else {
+		fCursorAnimationStartAt = now
+			+ (bigtime_t)fCursorAnimationStartDelay * 1000;
 	}
 	fCursorAnimationNextFrameAt = fCursorAnimationStartAt;
 	fCursorAnimationActive = true;
@@ -2082,6 +2100,8 @@ AccelerantHWInterface::_CursorAnimationThread()
 
 		if (fAccSetCursorAniSpeed != NULL)
 			fAccSetCursorAniSpeed(fCursorAnimationSpeedFactor);
+		if (fAccSetCursorAniStartDelay != NULL)
+			fAccSetCursorAniStartDelay(fCursorAnimationStartDelay);
 		if (fAccStartCursorAni == NULL || fAccStartCursorAni() != B_OK) {
 			_StopCursorAnimationLocked();
 			UnlockExclusiveAccess();
