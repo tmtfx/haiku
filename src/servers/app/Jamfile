@@ -1,5 +1,10 @@
 SubDir HAIKU_TOP src servers app ;
 
+actions GenerateCursorAnimationData
+{
+	$(HOST_PYTHON) $(2[1]) --root $(2[2]) --output $(1)
+}
+
 UseLibraryHeaders agg ;
 UsePrivateHeaders app graphics input interface shared storage support ;
 
@@ -12,6 +17,23 @@ UseHeaders [ FDirName $(HAIKU_TOP) src servers app drawing Painter drawing_modes
 UseHeaders [ FDirName $(HAIKU_TOP) src servers app drawing interface local ] ;
 UseHeaders [ FDirName $(HAIKU_TOP) src servers app drawing interface remote ] ;
 UseHeaders [ FDirName $(HAIKU_TOP) src servers app stackandtile ] ;
+
+local cursorAnimationGeneratorScript
+	= [ FDirName $(HAIKU_TOP) src servers app generate_cursor_animation_data.py ] ;
+local cursorAnimationAssetsRoot
+	= [ FDirName $(HAIKU_TOP) data artwork cursors ] ;
+local cursorAnimationAssets
+	= [ GLOB $(cursorAnimationAssetsRoot) : * ] ;
+local cursorFramesDirectory ;
+for cursorFramesDirectory in [ GLOB $(cursorAnimationAssetsRoot) : *.frames ] {
+	cursorAnimationAssets += [ GLOB $(cursorFramesDirectory) : * ] ;
+}
+
+local cursorAnimationDataSource = [ FGristFiles CursorAnimationData.cpp ] ;
+Depends $(cursorAnimationDataSource)
+	: $(cursorAnimationGeneratorScript) $(cursorAnimationAssets) ;
+GenerateCursorAnimationData $(cursorAnimationDataSource)
+	: $(cursorAnimationGeneratorScript) $(cursorAnimationAssetsRoot) ;
 
 UseHeaders [ FDirName $(HAIKU_TOP) src servers app decorator ] ;
 local decorator_src =
@@ -65,6 +87,7 @@ Application app_server :
 	BitmapManager.cpp
 	Canvas.cpp
 	ClientMemoryAllocator.cpp
+	CursorAnimationData.cpp
 	CursorManager.cpp
 	CursorSet.cpp
 	DelayedMessage.cpp

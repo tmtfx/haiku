@@ -1230,6 +1230,105 @@ ServerApp::_DispatchMessage(int32 code, BPrivate::LinkReceiver& link)
 			break;
 		}
 
+		case AS_CREATE_CURSOR_BITMAP_ANIMATED:
+		{
+			STRACE(("ServerApp %s: Create animated cursor bitmap\n", Signature()));
+
+			status_t status = B_ERROR;
+
+			int32 size = 0, bytesPerRow = 0;
+			BRect cursorRect;
+			color_space colorspace = B_RGBA32;
+			BPoint hotspot;
+			int32 frameCount = 0;
+			uint32 startDelayMs = 0;
+			uint32 idleDelayMs = 0;
+			float speed = 0.0f;
+			uint32 trigger = ServerCursor::B_CURSOR_ANI_TRIGGER_IMMEDIATE;
+			ServerCursor* cursor = NULL;
+
+			if (link.Read<BRect>(&cursorRect) == B_OK
+				&& link.Read<BPoint>(&hotspot) == B_OK
+				&& link.Read<color_space>(&colorspace) == B_OK
+				&& link.Read<int32>(&bytesPerRow) == B_OK
+				&& link.Read<int32>(&size) == B_OK
+				&& size > 0
+				&& link.Read<int32>(&frameCount) == B_OK
+				&& frameCount >= 2
+				&& frameCount <= ServerCursor::B_CURSOR_MAX_ANIMATION_FRAMES
+				&& link.Read<uint32>(&startDelayMs) == B_OK
+				&& link.Read<uint32>(&idleDelayMs) == B_OK
+				&& link.Read<float>(&speed) == B_OK
+				&& speed > 0.0f
+				&& link.Read<uint32>(&trigger) == B_OK
+				&& trigger <= ServerCursor::B_CURSOR_ANI_TRIGGER_IDLE) {
+
+				BStackOrHeapArray<uint8, 256> byteArray(size);
+				if (!byteArray.IsValid()) {
+					status = B_NO_MEMORY;
+				} else if (link.Read(byteArray, size) == B_OK) {
+					cursor = fDesktop->GetCursorManager().CreateCursor(
+						fClientTeam, cursorRect, colorspace, 0, hotspot);
+					if (cursor == NULL) {
+						status = B_NO_MEMORY;
+					} else {
+						cursor->ImportBits(byteArray, size, bytesPerRow, colorspace);
+
+						uint32 frameDelayMs = max_c((uint32)1,
+							(uint32)(1000.0f / speed + 0.5f));
+						status = cursor->ConfigureAnimation((uint32)frameCount,
+							frameDelayMs, startDelayMs, idleDelayMs, trigger);
+						if (status == B_OK) {
+							for (int32 frameIndex = 1; frameIndex < frameCount;
+									frameIndex++) {
+								int32 frameBytesPerRow = 0;
+								int32 frameSize = 0;
+								if (link.Read<int32>(&frameBytesPerRow) != B_OK
+									|| link.Read<int32>(&frameSize) != B_OK
+									|| frameSize <= 0) {
+									status = B_BAD_DATA;
+									break;
+								}
+
+								BStackOrHeapArray<uint8, 256> frameData(frameSize);
+								if (!frameData.IsValid()) {
+									status = B_NO_MEMORY;
+									break;
+								}
+								if (link.Read(frameData, frameSize) != B_OK) {
+									status = B_BAD_DATA;
+									break;
+								}
+
+								status = cursor->SetAnimationFrame((uint32)frameIndex,
+									frameData, (uint32)frameBytesPerRow, colorspace,
+									(size_t)frameSize);
+								if (status != B_OK)
+									break;
+							}
+						}
+					}
+				}
+			}
+
+			if (cursor != NULL && status != B_OK) {
+				if (fDesktop->GetCursorManager().Lock()) {
+					fDesktop->GetCursorManager().RemoveCursor(cursor);
+					fDesktop->GetCursorManager().Unlock();
+				}
+				cursor = NULL;
+			}
+
+			if (cursor != NULL) {
+				fLink.StartMessage(B_OK);
+				fLink.Attach<int32>(cursor->Token());
+			} else
+				fLink.StartMessage(status);
+
+			fLink.Flush();
+			break;
+		}
+
 		case AS_CLONE_CURSOR:
 		{
 			STRACE(("ServerApp %s: Reference BCursor\n", Signature()));

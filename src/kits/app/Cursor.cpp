@@ -119,6 +119,66 @@ BCursor::BCursor(const BBitmap* bitmap, const BPoint& hotspot)
 }
 
 
+BCursor::BCursor(const BBitmap* bitmap, const BPoint& hotspot,
+	const BBitmap* const* frames, int32 frameCount, float speed,
+	uint32 startDelayMs, uint32 idleDelayMs, uint32 trigger)
+	:
+	fServerToken(-1),
+	fNeedToFree(false)
+{
+	if (bitmap == NULL || frames == NULL
+		|| frameCount < 2 || frameCount > B_CURSOR_MAX_ANIMATION_FRAMES
+		|| speed <= 0.0f || trigger > B_CURSOR_ANI_TRIGGER_IDLE) {
+		return;
+	}
+
+	BRect bounds = bitmap->Bounds();
+	color_space colorspace = bitmap->ColorSpace();
+	void* bits = bitmap->Bits();
+	int32 size = bitmap->BitsLength();
+	if (bits == NULL || size <= 0)
+		return;
+
+	for (int32 i = 1; i < frameCount; i++) {
+		const BBitmap* frame = frames[i - 1];
+		if (frame == NULL || frame->Bits() == NULL || frame->BitsLength() <= 0
+			|| frame->Bounds() != bounds || frame->ColorSpace() != colorspace) {
+			return;
+		}
+	}
+
+	BPrivate::AppServerLink link;
+	link.StartMessage(AS_CREATE_CURSOR_BITMAP_ANIMATED);
+	link.Attach<BRect>(bounds);
+	link.Attach<BPoint>(hotspot);
+	link.Attach<color_space>(colorspace);
+	link.Attach<int32>(bitmap->BytesPerRow());
+	link.Attach<int32>(size);
+	link.Attach(bits, size);
+	link.Attach<int32>(frameCount);
+	link.Attach<uint32>(startDelayMs);
+	link.Attach<uint32>(idleDelayMs);
+	link.Attach<float>(speed);
+	link.Attach<uint32>(trigger);
+
+	for (int32 i = 1; i < frameCount; i++) {
+		const BBitmap* frame = frames[i - 1];
+		link.Attach<int32>(frame->BytesPerRow());
+		link.Attach<int32>(frame->BitsLength());
+		link.Attach(frame->Bits(), frame->BitsLength());
+	}
+
+	status_t status;
+	if (link.FlushWithReply(status) == B_OK) {
+		if (status == B_OK) {
+			link.Read<int32>(&fServerToken);
+			fNeedToFree = true;
+		} else
+			fServerToken = status;
+	}
+}
+
+
 BCursor::~BCursor()
 {
 	_FreeCursorData();

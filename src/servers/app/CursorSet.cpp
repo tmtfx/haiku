@@ -262,11 +262,16 @@ CursorSet::FindCursor(BCursorID which, ServerCursor **_cursor) const
 		int32 frameDelayMs = 100;
 		int32 startDelayMs = 0;
 		int32 idleDelayMs = 0;
+		float speed = 0.0f;
 		int32 trigger = ServerCursor::B_CURSOR_ANI_TRIGGER_IMMEDIATE;
-		message.FindInt32("cursor_ani_frame_delay_ms", &frameDelayMs);
 		message.FindInt32("cursor_ani_start_delay_ms", &startDelayMs);
 		message.FindInt32("cursor_ani_idle_delay_ms", &idleDelayMs);
 		message.FindInt32("cursor_ani_trigger", &trigger);
+		if (message.FindFloat("cursor_ani_speed", &speed) == B_OK && speed > 0.0f) {
+			frameDelayMs = max_c((int32)1, (int32)(1000.0f / speed + 0.5f));
+		} else {
+			message.FindInt32("cursor_ani_frame_delay_ms", &frameDelayMs);
+		}
 
 		status_t aniStatus = cursor->ConfigureAnimation((uint32)frameCount,
 			max_c((int32)1, frameDelayMs), max_c((int32)0, startDelayMs),

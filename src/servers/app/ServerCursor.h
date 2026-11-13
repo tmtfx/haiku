@@ -80,6 +80,7 @@ public:
 									const uint8*& bits, uint16& width,
 									uint16& height, uint16& bytesPerRow,
 									color_space& colorSpace) const;
+			void				ResetAnimation();
 
 private:
 	friend class CursorManager;

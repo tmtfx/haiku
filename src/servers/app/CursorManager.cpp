@@ -12,22 +12,214 @@
 
 #include "CursorManager.h"
 
+#include "CursorAnimationData.h"
 #include "ServerCursor.h"
 #include "ServerConfig.h"
 #include "ServerTokenSpace.h"
 
 #include <Autolock.h>
 #include <Directory.h>
+#include <Entry.h>
+#include <File.h>
+#include <FindDirectory.h>
+#include <Path.h>
 #include <String.h>
 #include <IconUtils.h>
 
 #include <agg_pixfmt_rgba.h>
 #include <agg_blur.h>
 
+#include <ctype.h>
+#include <limits.h>
 #include <new>
+#include <stdint.h>
+#include <stdlib.h>
 #include <stdio.h>
 
 #include "CursorData.cpp"
+
+namespace {
+
+const char* const kCursorFramesDirSuffix = ".frames";
+const char* const kCursorAnimationManifestName = "animation.txt";
+
+
+struct cursor_animation_manifest {
+	cursor_animation_manifest()
+		:
+		frameCount(0),
+		startDelayMs(0),
+		idleDelayMs(0),
+		speed(0.0f),
+		trigger(ServerCursor::B_CURSOR_ANI_TRIGGER_IMMEDIATE),
+		hasFrameCount(false),
+		hasStartDelay(false),
+		hasIdleDelay(false),
+		hasSpeed(false),
+		hasTrigger(false)
+	{
+	}
+
+	uint32	frameCount;
+	uint32	startDelayMs;
+	uint32	idleDelayMs;
+	float	speed;
+	uint32	trigger;
+	bool	hasFrameCount;
+	bool	hasStartDelay;
+	bool	hasIdleDelay;
+	bool	hasSpeed;
+	bool	hasTrigger;
+};
+
+
+char*
+trim_string(char* string)
+{
+	if (string == NULL)
+		return NULL;
+
+	while (isspace((unsigned char)*string))
+		string++;
+
+	char* end = string + strlen(string);
+	while (end > string && isspace((unsigned char)*(end - 1)))
+		end--;
+	*end = '\0';
+	return string;
+}
+
+
+status_t
+read_file_data(const char* path, uint8*& _buffer, size_t& _size)
+{
+	_buffer = NULL;
+	_size = 0;
+
+	BFile file(path, B_READ_ONLY);
+	status_t status = file.InitCheck();
+	if (status != B_OK)
+		return status;
+
+	off_t size = 0;
+	status = file.GetSize(&size);
+	if (status != B_OK)
+		return status;
+	if (size <= 0 || (uint64_t)size > SIZE_MAX)
+		return B_BAD_DATA;
+
+	uint8* data = new (std::nothrow) uint8[(size_t)size];
+	if (data == NULL)
+		return B_NO_MEMORY;
+
+	ssize_t bytesRead = file.Read(data, size);
+	if (bytesRead != size) {
+		delete[] data;
+		return B_IO_ERROR;
+	}
+
+	_buffer = data;
+	_size = (size_t)size;
+	return B_OK;
+}
+
+
+status_t
+parse_animation_manifest(const char* path, cursor_animation_manifest& manifest)
+{
+	uint8* data = NULL;
+	size_t dataSize = 0;
+	status_t status = read_file_data(path, data, dataSize);
+	if (status != B_OK)
+		return status;
+
+	uint8* text = new (std::nothrow) uint8[dataSize + 1];
+	if (text == NULL) {
+		delete[] data;
+		return B_NO_MEMORY;
+	}
+	memcpy(text, data, dataSize);
+	text[dataSize] = '\0';
+	delete[] data;
+
+	char* nextLine = NULL;
+	for (char* line = strtok_r((char*)text, "\n", &nextLine);
+			line != NULL; line = strtok_r(NULL, "\n", &nextLine)) {
+		char* hash = strchr(line, '#');
+		if (hash != NULL)
+			*hash = '\0';
+
+		char* content = trim_string(line);
+		if (content == NULL || content[0] == '\0')
+			continue;
+
+		char* equal = strchr(content, '=');
+		if (equal == NULL) {
+			delete[] text;
+			return B_BAD_DATA;
+		}
+
+		*equal = '\0';
+		char* key = trim_string(content);
+		char* value = trim_string(equal + 1);
+		if (key == NULL || value == NULL || key[0] == '\0' || value[0] == '\0') {
+			delete[] text;
+			return B_BAD_DATA;
+		}
+
+		if (strcmp(key, "frame_count") == 0) {
+			manifest.frameCount = (uint32)strtoul(value, NULL, 10);
+			manifest.hasFrameCount = true;
+		} else if (strcmp(key, "start_delay_ms") == 0) {
+			manifest.startDelayMs = (uint32)strtoul(value, NULL, 10);
+			manifest.hasStartDelay = true;
+		} else if (strcmp(key, "idle_delay_ms") == 0) {
+			manifest.idleDelayMs = (uint32)strtoul(value, NULL, 10);
+			manifest.hasIdleDelay = true;
+		} else if (strcmp(key, "speed") == 0) {
+			manifest.speed = strtof(value, NULL);
+			manifest.hasSpeed = true;
+		} else if (strcmp(key, "trigger") == 0) {
+			if (strcmp(value, "immediate") == 0) {
+				manifest.trigger = ServerCursor::B_CURSOR_ANI_TRIGGER_IMMEDIATE;
+			} else if (strcmp(value, "on_idle") == 0) {
+				manifest.trigger = ServerCursor::B_CURSOR_ANI_TRIGGER_IDLE;
+			} else {
+				manifest.trigger = (uint32)strtoul(value, NULL, 10);
+			}
+			manifest.hasTrigger = true;
+		}
+	}
+
+	delete[] text;
+
+	if (!manifest.hasFrameCount || !manifest.hasStartDelay || !manifest.hasIdleDelay
+		|| !manifest.hasSpeed || !manifest.hasTrigger) {
+		return B_BAD_DATA;
+	}
+
+	if (manifest.frameCount < 2
+		|| manifest.frameCount > ServerCursor::B_CURSOR_MAX_ANIMATION_FRAMES
+		|| manifest.speed <= 0.0f
+		|| manifest.trigger > ServerCursor::B_CURSOR_ANI_TRIGGER_IDLE) {
+		return B_BAD_VALUE;
+	}
+
+	return B_OK;
+}
+
+
+status_t
+get_system_cursor_asset_dir(BPath& _path)
+{
+	status_t status = find_directory(B_SYSTEM_DATA_DIRECTORY, &_path);
+	if (status != B_OK)
+		return status;
+
+	return _path.Append("artwork/cursors");
+}
+
+} // namespace
 
 
 CursorManager::CursorManager()
@@ -58,46 +250,50 @@ CursorManager::InitializeCursors(float scale)
 		const uint8* data;
 		uint32 dataLength;
 		BPoint hotspot;
+		const char* assetName;
 
-#define C(IDNAME, NAME, HOTSPOT) {fCursor##NAME, B_CURSOR_ID_##IDNAME, \
-		kCursor##NAME, B_COUNT_OF(kCursor##NAME), HOTSPOT}
+#define C(IDNAME, NAME, HOTSPOT, ASSET) {fCursor##NAME, B_CURSOR_ID_##IDNAME, \
+		kCursor##NAME, B_COUNT_OF(kCursor##NAME), HOTSPOT, ASSET}
 	} standardCursors[] = {
-		{fCursorNoCursor, B_CURSOR_ID_NO_CURSOR, NULL, 0, BPoint(0, 0)},
+		{fCursorNoCursor, B_CURSOR_ID_NO_CURSOR, NULL, 0, BPoint(0, 0), NULL},
 
-		C(SYSTEM_DEFAULT,	SystemDefault,	kHandHotspot),
-		C(CONTEXT_MENU,		ContextMenu,	kHandHotspot),
-		C(COPY,				Copy,			kHandHotspot),
-		C(CREATE_LINK,		CreateLink,		kHandHotspot),
-		C(CROSS_HAIR,		CrossHair,		BPoint(10, 10)),
-		C(FOLLOW_LINK,		FollowLink,		BPoint(5, 0)),
-		C(GRAB,				Grab,			kHandHotspot),
-		C(GRABBING,			Grabbing,		kHandHotspot),
-		C(HELP,				Help,			BPoint(0, 8)),
-		C(I_BEAM,			IBeam,			BPoint(7, 9)),
-		C(I_BEAM_HORIZONTAL, IBeamHorizontal, BPoint(8, 8)),
-		C(MOVE,				Move,			kResizeHotspot),
-		C(NOT_ALLOWED,		NotAllowed,		BPoint(8, 8)),
-		C(PROGRESS,			Progress,		BPoint(7, 10)),
-		C(RESIZE_EAST,		ResizeEast,		kResizeHotspot),
-		C(RESIZE_EAST_WEST, ResizeEastWest, kResizeHotspot),
-		C(RESIZE_NORTH,		ResizeNorth,	kResizeHotspot),
-		C(RESIZE_NORTH_EAST, ResizeNorthEast, kResizeHotspot),
-		C(RESIZE_NORTH_EAST_SOUTH_WEST, ResizeNorthEastSouthWest, kResizeHotspot),
-		C(RESIZE_NORTH_SOUTH, ResizeNorthSouth, kResizeHotspot),
-		C(RESIZE_NORTH_WEST, ResizeNorthWest, kResizeHotspot),
-		C(RESIZE_NORTH_WEST_SOUTH_EAST, ResizeNorthWestSouthEast, kResizeHotspot),
-		C(RESIZE_SOUTH,		ResizeSouth,	kResizeHotspot),
-		C(RESIZE_SOUTH_EAST, ResizeSouthEast, kResizeHotspot),
-		C(RESIZE_SOUTH_WEST, ResizeSouthWest, kResizeHotspot),
-		C(RESIZE_WEST,		ResizeWest,		kResizeHotspot),
-		C(ZOOM_IN,			ZoomIn,			BPoint(6, 6)),
-		C(ZOOM_OUT,			ZoomOut,		BPoint(6, 6))
+		C(SYSTEM_DEFAULT,	SystemDefault,	kHandHotspot, "Pointer"),
+		C(CONTEXT_MENU,		ContextMenu,	kHandHotspot, "ContextMenu"),
+		C(COPY,				Copy,			kHandHotspot, "Copy"),
+		C(CREATE_LINK,		CreateLink,		kHandHotspot, "CreateLink"),
+		C(CROSS_HAIR,		CrossHair,		BPoint(10, 10), "Cross"),
+		C(FOLLOW_LINK,		FollowLink,		BPoint(5, 0), "FollowLink"),
+		C(GRAB,				Grab,			kHandHotspot, "Grab"),
+		C(GRABBING,			Grabbing,		kHandHotspot, "Grabbing"),
+		C(HELP,				Help,			BPoint(0, 8), "Help"),
+		C(I_BEAM,			IBeam,			BPoint(7, 9), "IBeam"),
+		C(I_BEAM_HORIZONTAL, IBeamHorizontal, BPoint(8, 8), "IBeamHorizontal"),
+		C(MOVE,				Move,			kResizeHotspot, "Move"),
+		C(NOT_ALLOWED,		NotAllowed,		BPoint(8, 8), "NotAllowed"),
+		C(PROGRESS,			Progress,		BPoint(7, 10), "Progress"),
+		C(RESIZE_EAST,		ResizeEast,		kResizeHotspot, "ResizeEast"),
+		C(RESIZE_EAST_WEST, ResizeEastWest, kResizeHotspot, "ResizeEastWest"),
+		C(RESIZE_NORTH,		ResizeNorth,	kResizeHotspot, "ResizeNorth"),
+		C(RESIZE_NORTH_EAST, ResizeNorthEast, kResizeHotspot, "ResizeNorthEast"),
+		C(RESIZE_NORTH_EAST_SOUTH_WEST, ResizeNorthEastSouthWest, kResizeHotspot,
+			"ResizeNorthEastSouthWest"),
+		C(RESIZE_NORTH_SOUTH, ResizeNorthSouth, kResizeHotspot, "ResizeNorthSouth"),
+		C(RESIZE_NORTH_WEST, ResizeNorthWest, kResizeHotspot, "ResizeNorthWest"),
+		C(RESIZE_NORTH_WEST_SOUTH_EAST, ResizeNorthWestSouthEast, kResizeHotspot,
+			"ResizeNorthWestSouthEast"),
+		C(RESIZE_SOUTH,		ResizeSouth,	kResizeHotspot, "ResizeSouth"),
+		C(RESIZE_SOUTH_EAST, ResizeSouthEast, kResizeHotspot, "ResizeSouthEast"),
+		C(RESIZE_SOUTH_WEST, ResizeSouthWest, kResizeHotspot, "ResizeSouthWest"),
+		C(RESIZE_WEST,		ResizeWest,		kResizeHotspot, "ResizeWest"),
+		C(ZOOM_IN,			ZoomIn,			BPoint(6, 6), "ZoomIn"),
+		C(ZOOM_OUT,			ZoomOut,		BPoint(6, 6), "ZoomOut")
 	};
 #undef C
 
 	for (size_t i = 0; i < B_COUNT_OF(standardCursors); i++) {
 		const StandardCursor& info = standardCursors[i];
-		_InitCursor(info.member, info.id, info.data, info.dataLength, info.hotspot, scale);
+		_InitCursor(info.member, info.id, info.data, info.dataLength, info.hotspot,
+			scale, info.assetName);
 	}
 }
 
@@ -471,7 +667,8 @@ CursorManager::_RenderVectorCursor(uint32 size, const uint8* vector,
 */
 void
 CursorManager::_InitCursor(ServerCursor*& cursorMember, BCursorID id,
-	const uint8* vector, uint32 vectorSize, const BPoint& hotSpot, float scale)
+	const uint8* vector, uint32 vectorSize, const BPoint& hotSpot, float scale,
+	const char* assetName)
 {
 	int32 cursorSize = (int32)(22 * scale);
 	float shadow = 3 / 10.0;
@@ -487,7 +684,127 @@ CursorManager::_InitCursor(ServerCursor*& cursorMember, BCursorID id,
 	}
 
 	cursorMember->SetHotSpot(scaledHotspot);
+	_ConfigureSystemCursorAnimation(*cursorMember, assetName, cursorSize, shadow);
 	AddCursor(cursorMember, id);
+}
+
+
+void
+CursorManager::_ConfigureSystemCursorAnimation(ServerCursor& cursor,
+	const char* assetName, uint32 cursorSize, float shadowStrength)
+{
+	if (assetName == NULL || assetName[0] == '\0')
+		return;
+
+	const cursor_animation_definition* compiledDefinition
+		= FindSystemCursorAnimationDefinition(assetName);
+	if (compiledDefinition != NULL) {
+		uint32 frameDelayMs = max_c((uint32)1,
+			(uint32)(1000.0f / compiledDefinition->speed + 0.5f));
+		if (cursor.ConfigureAnimation(compiledDefinition->frameCount, frameDelayMs,
+				compiledDefinition->startDelayMs, compiledDefinition->idleDelayMs,
+				compiledDefinition->trigger) != B_OK) {
+			cursor.ResetAnimation();
+			return;
+		}
+
+		const uint32 expectedFrameData = compiledDefinition->frameCount - 1;
+		if (compiledDefinition->frameDataCount != expectedFrameData) {
+			cursor.ResetAnimation();
+			return;
+		}
+
+		for (uint32 frameIndex = 1; frameIndex < compiledDefinition->frameCount;
+				frameIndex++) {
+			const cursor_animation_frame_data& frame
+				= compiledDefinition->frames[frameIndex - 1];
+			BBitmap bitmap = _RenderVectorCursor(cursorSize, frame.vectorData,
+				(uint32)frame.vectorSize, shadowStrength);
+			status_t status = cursor.SetAnimationFrame(frameIndex,
+				(const uint8*)bitmap.Bits(), (uint32)bitmap.BytesPerRow(),
+				bitmap.ColorSpace(), bitmap.BitsLength());
+			if (status != B_OK) {
+				cursor.ResetAnimation();
+				return;
+			}
+		}
+		return;
+	}
+
+	BPath assetsDir;
+	if (get_system_cursor_asset_dir(assetsDir) != B_OK)
+		return;
+
+	BString framesDirName(assetName);
+	framesDirName << kCursorFramesDirSuffix;
+
+	BPath framesPath(assetsDir);
+	if (framesPath.Append(framesDirName.String()) != B_OK)
+		return;
+
+	BEntry framesEntry(framesPath.Path());
+	if (!framesEntry.Exists())
+		return;
+
+	BPath manifestPath(framesPath);
+	if (manifestPath.Append(kCursorAnimationManifestName) != B_OK)
+		return;
+
+	cursor_animation_manifest manifest;
+	if (parse_animation_manifest(manifestPath.Path(), manifest) != B_OK)
+		return;
+
+	uint32 frameDelayMs = max_c((uint32)1,
+		(uint32)(1000.0f / manifest.speed + 0.5f));
+	if (cursor.ConfigureAnimation(manifest.frameCount, frameDelayMs,
+			manifest.startDelayMs, manifest.idleDelayMs, manifest.trigger) != B_OK) {
+		cursor.ResetAnimation();
+		return;
+	}
+
+	for (uint32 frameIndex = 1; frameIndex < manifest.frameCount; frameIndex++) {
+		char frameFileName[32];
+		snprintf(frameFileName, sizeof(frameFileName), "frame_%02" B_PRIu32,
+			frameIndex);
+
+		uint8* vectorData = NULL;
+		size_t vectorSize = 0;
+
+		BPath framePath(framesPath);
+		status_t status = framePath.Append(frameFileName);
+		if (status != B_OK) {
+			cursor.ResetAnimation();
+			return;
+		}
+
+		status = read_file_data(framePath.Path(), vectorData, vectorSize);
+		if (status != B_OK) {
+			BPath frameHvifPath(framesPath);
+			BString hvifName(frameFileName);
+			hvifName << ".hvif";
+			if (frameHvifPath.Append(hvifName.String()) != B_OK) {
+				cursor.ResetAnimation();
+				return;
+			}
+
+			status = read_file_data(frameHvifPath.Path(), vectorData, vectorSize);
+			if (status != B_OK) {
+				cursor.ResetAnimation();
+				return;
+			}
+		}
+
+		BBitmap bitmap = _RenderVectorCursor(cursorSize, vectorData,
+			(uint32)vectorSize, shadowStrength);
+		delete[] vectorData;
+
+		status = cursor.SetAnimationFrame(frameIndex, (const uint8*)bitmap.Bits(),
+			(uint32)bitmap.BytesPerRow(), bitmap.ColorSpace(), bitmap.BitsLength());
+		if (status != B_OK) {
+			cursor.ResetAnimation();
+			return;
+		}
+	}
 }
 
 

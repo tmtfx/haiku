@@ -299,6 +299,13 @@ ServerCursor::GetAnimationFrame(uint32 frameIndex, const uint8*& bits,
 
 
 void
+ServerCursor::ResetAnimation()
+{
+	_ResetAnimationFrames();
+}
+
+
+void
 ServerCursor::_ResetAnimationFrames()
 {
 	for (uint32 i = 0; i < B_CURSOR_MAX_ANIMATION_FRAMES - 1; i++) {
