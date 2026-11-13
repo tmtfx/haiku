@@ -175,6 +175,7 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 			| B_AUTO_UPDATE_SIZE_LIMITS, B_ALL_WORKSPACES),
 	fIsVesa(false),
 	fBootWorkspaceApplied(false),
+		fHasCursorAnimationCapability(false),
 	fUserSelectedColorSpace(NULL),
 	fOtherRefresh(NULL),
 	fScreenMode(this),
@@ -478,6 +479,7 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 	B_TRANSLATE("Enable hardware cursor bitmap"), new BMessage(TOGGLE_HARDWARE_CURSOR_MSG));
 	// Ask app_server whether the driver exposes B_SET_CURSOR_BITMAP
 	bool hasSetCursorBitmap = false;
+	bool hasCursorAnimation = false;
 	{
 		BMessenger msgr("application/x-vnd.haiku-app_server");
 		BMessage request('hsbm');
@@ -485,12 +487,45 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 		if (msgr.IsValid() && msgr.SendMessage(&request, &reply, 200000) == B_OK) {
 			reply.FindBool("has_set_cursor_bitmap", &hasSetCursorBitmap);
 		}
+
+		BMessage requestAni('hcai');
+		BMessage replyAni;
+		if (msgr.IsValid()
+			&& msgr.SendMessage(&requestAni, &replyAni, 200000) == B_OK) {
+			replyAni.FindBool("has_cursor_animation", &hasCursorAnimation);
+		}
 	}
+	fHasCursorAnimationCapability = hasCursorAnimation;
 	fHardwareCursorCheckbox->SetEnabled(hasSetCursorBitmap);
 	if (fSettings->HardwareCursorEnabled() && hasSetCursorBitmap)
 		fHardwareCursorCheckbox->SetValue(B_CONTROL_ON);
 	else
 		fHardwareCursorCheckbox->SetValue(B_CONTROL_OFF);
+
+	fCursorAnimationCheckbox = new BCheckBox("cursor_animation",
+		B_TRANSLATE("Enable hardware cursor animation"),
+		new BMessage(TOGGLE_CURSOR_ANIMATION_MSG));
+	bool canEnableCursorAnimation = hasSetCursorBitmap
+		&& hasCursorAnimation
+		&& fHardwareCursorCheckbox->Value() == B_CONTROL_ON;
+	fCursorAnimationCheckbox->SetEnabled(canEnableCursorAnimation);
+	fCursorAnimationCheckbox->SetValue(canEnableCursorAnimation
+		&& fSettings->CursorAnimationEnabled()
+		? B_CONTROL_ON : B_CONTROL_OFF);
+
+	fCursorAnimationSpeedSlider = new BSlider("cursor_ani_speed",
+		B_TRANSLATE("Cursor animation speed (%):"),
+		new BMessage(SLIDER_CURSOR_ANIMATION_SPEED_MSG), 25, 400, B_HORIZONTAL);
+	fCursorAnimationSpeedSlider->SetValue(fSettings->CursorAnimationSpeedPercent());
+	fCursorAnimationSpeedSlider->SetEnabled(canEnableCursorAnimation
+		&& fCursorAnimationCheckbox->Value() == B_CONTROL_ON);
+
+	fCursorAnimationIdleSlider = new BSlider("cursor_ani_idle",
+		B_TRANSLATE("Cursor animation idle delay (ms):"),
+		new BMessage(SLIDER_CURSOR_ANIMATION_IDLE_MSG), 0, 3000, B_HORIZONTAL);
+	fCursorAnimationIdleSlider->SetValue(fSettings->CursorAnimationIdleDelayMs());
+	fCursorAnimationIdleSlider->SetEnabled(canEnableCursorAnimation
+		&& fCursorAnimationCheckbox->Value() == B_CONTROL_ON);
 
 	f2DAccelerationCheckbox = new BCheckBox("2d_acceleration",
 		B_TRANSLATE("Enable 2D hardware acceleration"),
@@ -650,6 +685,9 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 
 	// add the checkboxes below the grid
 	outerControlsView->AddChild(fHardwareCursorCheckbox);
+	outerControlsView->AddChild(fCursorAnimationCheckbox);
+	outerControlsView->AddChild(fCursorAnimationSpeedSlider);
+	outerControlsView->AddChild(fCursorAnimationIdleSlider);
 	//outerControlsView->AddChild(f2DAccelerationCheckbox);
 	outerControlsView->AddChild(BLayoutBuilder::Group<>(B_HORIZONTAL, B_USE_DEFAULT_SPACING)
 		.Add(f2DAccelerationCheckbox)
@@ -1321,6 +1359,23 @@ ScreenWindow::MessageReceived(BMessage* message)
 		{
 			bool enabled = fHardwareCursorCheckbox->Value() == B_CONTROL_ON;
 			fSettings->SetHardwareCursorEnabled(enabled);
+
+			bool canEnableCursorAnimation = enabled
+				&& fHasCursorAnimationCapability;
+			fCursorAnimationCheckbox->SetEnabled(canEnableCursorAnimation);
+			if (!canEnableCursorAnimation) {
+				fCursorAnimationCheckbox->SetValue(B_CONTROL_OFF);
+				fCursorAnimationSpeedSlider->SetEnabled(false);
+				fCursorAnimationIdleSlider->SetEnabled(false);
+				fSettings->SetCursorAnimationEnabled(false);
+			} else {
+				fCursorAnimationCheckbox->SetValue(
+					fSettings->CursorAnimationEnabled() ? B_CONTROL_ON : B_CONTROL_OFF);
+				fCursorAnimationSpeedSlider->SetEnabled(
+					fCursorAnimationCheckbox->Value() == B_CONTROL_ON);
+				fCursorAnimationIdleSlider->SetEnabled(
+					fCursorAnimationCheckbox->Value() == B_CONTROL_ON);
+			}
 			
 			if (enabled)
 				f2DCompositorCheckbox->SetEnabled(true);
@@ -1329,6 +1384,29 @@ ScreenWindow::MessageReceived(BMessage* message)
 				f2DCompositorCheckbox->SetEnabled(false);
 				fSettings->SetCompositor2DEnabled(false);
 			}
+			break;
+		}
+
+		case TOGGLE_CURSOR_ANIMATION_MSG:
+		{
+			bool enabled = fCursorAnimationCheckbox->Value() == B_CONTROL_ON;
+			fSettings->SetCursorAnimationEnabled(enabled);
+			fCursorAnimationSpeedSlider->SetEnabled(enabled);
+			fCursorAnimationIdleSlider->SetEnabled(enabled);
+			break;
+		}
+
+		case SLIDER_CURSOR_ANIMATION_SPEED_MSG:
+		{
+			fSettings->SetCursorAnimationSpeedPercent(
+				fCursorAnimationSpeedSlider->Value());
+			break;
+		}
+
+		case SLIDER_CURSOR_ANIMATION_IDLE_MSG:
+		{
+			fSettings->SetCursorAnimationIdleDelayMs(
+				fCursorAnimationIdleSlider->Value());
 			break;
 		}
 

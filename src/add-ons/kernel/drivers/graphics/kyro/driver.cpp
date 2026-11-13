@@ -85,6 +85,7 @@ static pci_module_info*	gPCI;
 static kyro_settings	gSettings = {
 	KYRO_ACCELERANT_NAME,
 	true,
+	false,
 	2
 };
 
@@ -353,14 +354,17 @@ load_settings(void)
 
 	gSettings.hardcursor = get_driver_boolean_parameter(handle, "hardcursor",
 		gSettings.hardcursor, gSettings.hardcursor);
+	gSettings.cursorani = get_driver_boolean_parameter(handle, "cursorani",
+		gSettings.cursorani, gSettings.cursorani);
 
 	const char* value = get_driver_parameter(handle, "cursorbits", NULL, NULL);
 	if (value != NULL)
 		gSettings.cursorbits = (uint32)atoi(value);
 
 	unload_driver_settings(handle);
-	KYRO_TRACE("load_settings done hardcursor=%d cursorbits=%" B_PRIu32 "\n",
-		gSettings.hardcursor, gSettings.cursorbits);
+	KYRO_TRACE("load_settings done hardcursor=%d cursorani=%d cursorbits=%"
+		B_PRIu32 "\n", gSettings.hardcursor, gSettings.cursorani,
+		gSettings.cursorbits);
 }
 
 
@@ -590,6 +594,9 @@ init_device(DeviceInfo& device)
 	device.sharedInfo->colorSpaces[1] = B_RGB32;
 	device.sharedInfo->dpmsMode = B_DPMS_ON;
 	device.sharedInfo->cursorBufferSize = 1024;
+	device.sharedInfo->cursorFrameBufferCount = 1;
+	memset(device.sharedInfo->cursorFrameOffsets, 0,
+		sizeof(device.sharedInfo->cursorFrameOffsets));
 	identify_chip(device.pciInfo.revision, device.sharedInfo->chipName,
 		sizeof(device.sharedInfo->chipName), device.sharedInfo->chipCode,
 		sizeof(device.sharedInfo->chipCode));
@@ -617,10 +624,28 @@ init_device(DeviceInfo& device)
 		return status;
 	}
 
-	device.sharedInfo->cursorOffset
-		= device.sharedInfo->frameBufferSize > device.sharedInfo->cursorBufferSize
-			? device.sharedInfo->frameBufferSize - device.sharedInfo->cursorBufferSize
-			: 0;
+	uint32 maxFrameBuffers = KYRO_MAX_CURSOR_FRAME_BUFFERS;
+	if (device.sharedInfo->cursorBufferSize == 0)
+		device.sharedInfo->cursorBufferSize = 1024;
+
+	uint32 availableFrameBuffers
+		= device.sharedInfo->frameBufferSize / device.sharedInfo->cursorBufferSize;
+	if (availableFrameBuffers == 0)
+		availableFrameBuffers = 1;
+	if (availableFrameBuffers > maxFrameBuffers)
+		availableFrameBuffers = maxFrameBuffers;
+
+	device.sharedInfo->cursorFrameBufferCount = availableFrameBuffers;
+
+	uint32 reservedCursorBytes = availableFrameBuffers
+		* device.sharedInfo->cursorBufferSize;
+	device.sharedInfo->cursorOffset = device.sharedInfo->frameBufferSize > reservedCursorBytes
+		? device.sharedInfo->frameBufferSize - reservedCursorBytes : 0;
+
+	for (uint32 i = 0; i < availableFrameBuffers; i++) {
+		device.sharedInfo->cursorFrameOffsets[i] = device.sharedInfo->cursorOffset
+			+ i * device.sharedInfo->cursorBufferSize;
+	}
 
 	edid1_info* bootEdid = (edid1_info*)get_boot_item(VESA_EDID_BOOT_INFO, NULL);
 	if (bootEdid != NULL) {
@@ -632,9 +657,11 @@ init_device(DeviceInfo& device)
 		KYRO_TRACE("init_device: no bootloader EDID available\n");
 	}
 
-	KYRO_TRACE("init_device done sharedArea=%" B_PRId32 " cursorOffset=%" B_PRIu32
+	KYRO_TRACE("init_device done sharedArea=%" B_PRId32
+		" cursorOffset=%" B_PRIu32 " cursorFrames=%" B_PRIu32
 		" maxPixelClock=%" B_PRIu32 "\n", device.sharedArea,
-		device.sharedInfo->cursorOffset, device.sharedInfo->maxPixelClock);
+		device.sharedInfo->cursorOffset, device.sharedInfo->cursorFrameBufferCount,
+		device.sharedInfo->maxPixelClock);
 #ifdef IS_PIRATI_BUILD
 	draw_logo(device);
 	snooze(2000000);

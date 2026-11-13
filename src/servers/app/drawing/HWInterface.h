@@ -61,6 +61,8 @@ public:
 
 	// Query whether this HWInterface supports the accelerant bitmap cursor hook
 	virtual bool HasSetCursorBitmap() const { return false; }
+	// Query whether this HWInterface supports animated hardware cursor
+	virtual bool HasAnimatedCursorSupport() const { return false; }
 	// Query whether this HWInterface supports 2D hardware acceleration
 	virtual bool Has2DAcceleration() const { return false; }
 	// locking

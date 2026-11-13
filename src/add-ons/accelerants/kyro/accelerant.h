@@ -54,6 +54,12 @@ status_t SetCursorBitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 	color_space colorSpace, uint16 bytesPerRow, const uint8* bitmapData);
 void MoveCursor(uint16 x, uint16 y);
 void ShowCursor(bool show);
+bool SupportsCursorAnimation(void);
+uint32 CursorSupportedFrames(void);
+status_t StartCursorAnimation(void);
+status_t StopCursorAnimation(void);
+status_t SetCursorAnimationSpeed(float speedFactor);
+void CursorAnimationUninit(void);
 uint32 kyro_overlay_count(const display_mode* mode);
 const uint32* kyro_overlay_supported_spaces(const display_mode* mode);
 uint32 kyro_overlay_supported_features(uint32 colorSpace);

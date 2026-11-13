@@ -64,6 +64,16 @@ get_accelerant_hook(uint32 feature, void* data)
 		case B_GET_CURSOR_BITS:
 			return gInfo.sharedInfo->settings.hardcursor ? (void*)GetCursorBits : NULL;
 #endif
+		case B_SUPPORTS_CURSOR_ANI:
+			return (void*)SupportsCursorAnimation;
+		case B_CURSOR_SUPPORTED_FRAMES:
+			return (void*)CursorSupportedFrames;
+		case B_START_CURSOR_ANI:
+			return (void*)StartCursorAnimation;
+		case B_STOP_CURSOR_ANI:
+			return (void*)StopCursorAnimation;
+		case B_SET_CURSOR_ANI_SPEED:
+			return (void*)SetCursorAnimationSpeed;
 
 		case B_DPMS_MODE:
 			return (void*)kyro_dpms_mode;

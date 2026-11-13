@@ -18,6 +18,7 @@
 #include <OS.h>
 #include <String.h>
 #include <File.h>
+#include <stdio.h>
 
 #include <new>
 
@@ -254,6 +255,55 @@ CursorSet::FindCursor(BCursorID which, ServerCursor **_cursor) const
 
 	memcpy(cursor->Bits(), buffer,
 		min_c(bufferLength, (ssize_t)cursor->BitsLength()));
+
+	int32 frameCount = 0;
+	if (message.FindInt32("cursor_ani_frame_count", &frameCount) == B_OK
+		&& frameCount > 1) {
+		int32 frameDelayMs = 100;
+		int32 startDelayMs = 0;
+		int32 idleDelayMs = 0;
+		int32 trigger = ServerCursor::B_CURSOR_ANI_TRIGGER_IMMEDIATE;
+		message.FindInt32("cursor_ani_frame_delay_ms", &frameDelayMs);
+		message.FindInt32("cursor_ani_start_delay_ms", &startDelayMs);
+		message.FindInt32("cursor_ani_idle_delay_ms", &idleDelayMs);
+		message.FindInt32("cursor_ani_trigger", &trigger);
+
+		status_t aniStatus = cursor->ConfigureAnimation((uint32)frameCount,
+			max_c((int32)1, frameDelayMs), max_c((int32)0, startDelayMs),
+			max_c((int32)0, idleDelayMs), (uint32)trigger);
+		if (aniStatus == B_OK) {
+			for (int32 frameIndex = 1; frameIndex < frameCount; frameIndex++) {
+				char dataName[48];
+				char rowBytesName[56];
+				snprintf(dataName, sizeof(dataName), "cursor_ani_frame_%02" B_PRId32,
+					frameIndex);
+				snprintf(rowBytesName, sizeof(rowBytesName),
+					"cursor_ani_frame_%02" B_PRId32 "_rowbytes", frameIndex);
+
+				const void* frameData = NULL;
+				ssize_t frameDataLength = 0;
+				if (message.FindData(dataName, B_RAW_TYPE, &frameData,
+						&frameDataLength) != B_OK
+					|| frameData == NULL) {
+					aniStatus = B_BAD_DATA;
+					break;
+				}
+
+				int32 rowBytes = cursor->BytesPerRow();
+				message.FindInt32(rowBytesName, &rowBytes);
+				aniStatus = cursor->SetAnimationFrame((uint32)frameIndex,
+					(const uint8*)frameData, (uint32)rowBytes,
+					cursor->ColorSpace(), (size_t)frameDataLength);
+				if (aniStatus != B_OK)
+					break;
+			}
+		}
+
+		if (aniStatus != B_OK) {
+			delete cursor;
+			return aniStatus;
+		}
+	}
 
 	*_cursor = cursor;
 	return B_OK;

@@ -8,6 +8,8 @@
 
 #include "accelerant.h"
 
+#include <math.h>
+#include <OS.h>
 #include <string.h>
 
 
@@ -23,6 +25,30 @@ static const uint32 kDACCursorCtrl = 0x140c;
 // exactly the right size and proportions.
 static const uint32 kCursorWidth = 32;
 static const uint32 kCursorHeight = 32;
+
+struct cursor_animation_state {
+	bool		running;
+	bool		terminate;
+	float		speedFactor;
+	bigtime_t	frameInterval;
+	uint32		uploadedFrameCount;
+	uint32		nextUploadFrame;
+	uint32		currentFrame;
+	sem_id		semaphore;
+	thread_id	thread;
+};
+
+static cursor_animation_state sCursorAnimation = {
+	false,
+	false,
+	10.0f,
+	100000,
+	1,
+	0,
+	0,
+	-1,
+	-1
+};
 
 
 static inline uint32
@@ -40,10 +66,13 @@ write32(uint32 offset, uint32 value)
 
 
 static uint8*
-cursor_buffer()
+cursor_buffer(uint32 frameIndex)
 {
-	return gInfo.frameBuffer == NULL
-		? NULL : gInfo.frameBuffer + gInfo.sharedInfo->cursorOffset;
+	if (gInfo.frameBuffer == NULL || gInfo.sharedInfo == NULL)
+		return NULL;
+	if (frameIndex >= gInfo.sharedInfo->cursorFrameBufferCount)
+		return NULL;
+	return gInfo.frameBuffer + gInfo.sharedInfo->cursorFrameOffsets[frameIndex];
 }
 
 
@@ -68,12 +97,74 @@ cursor_set_pixel(uint8* dest, uint32 x, uint32 y, uint8 red, uint8 green,
 
 
 static void
-program_cursor_address(void)
+program_cursor_address(uint32 frameIndex)
 {
+	if (gInfo.sharedInfo == NULL
+		|| frameIndex >= gInfo.sharedInfo->cursorFrameBufferCount) {
+		return;
+	}
+
 	uint32 value = read32(kDACCursorAddr);
 	value &= ~0x001fffff;
-	value |= (gInfo.sharedInfo->cursorOffset >> 4) & 0x001fffff;
+	value |= (gInfo.sharedInfo->cursorFrameOffsets[frameIndex] >> 4) & 0x001fffff;
 	write32(kDACCursorAddr, value);
+}
+
+
+static status_t
+cursor_animation_thread(void* cookie)
+{
+	(void)cookie;
+
+	while (!sCursorAnimation.terminate) {
+		bigtime_t timeout = sCursorAnimation.running
+			? sCursorAnimation.frameInterval : 500000;
+		status_t status = acquire_sem_etc(sCursorAnimation.semaphore, 1,
+			B_RELATIVE_TIMEOUT | B_CAN_INTERRUPT, timeout);
+		if (sCursorAnimation.terminate)
+			break;
+
+		if (!sCursorAnimation.running || sCursorAnimation.uploadedFrameCount < 2) {
+			if (status == B_INTERRUPTED)
+				continue;
+			continue;
+		}
+
+		if (status != B_TIMED_OUT && status != B_OK && status != B_INTERRUPTED)
+			continue;
+
+		sCursorAnimation.currentFrame++;
+		if (sCursorAnimation.currentFrame >= sCursorAnimation.uploadedFrameCount)
+			sCursorAnimation.currentFrame = 0;
+
+		program_cursor_address(sCursorAnimation.currentFrame);
+	}
+
+	return B_OK;
+}
+
+
+static status_t
+ensure_animation_thread(void)
+{
+	if (sCursorAnimation.thread >= B_OK)
+		return B_OK;
+
+	sCursorAnimation.semaphore = create_sem(0, "kyro cursor ani");
+	if (sCursorAnimation.semaphore < B_OK)
+		return sCursorAnimation.semaphore;
+
+	sCursorAnimation.terminate = false;
+	sCursorAnimation.thread = spawn_thread(cursor_animation_thread,
+		"kyro cursor ani", B_DISPLAY_PRIORITY, NULL);
+	if (sCursorAnimation.thread < B_OK) {
+		delete_sem(sCursorAnimation.semaphore);
+		sCursorAnimation.semaphore = -1;
+		return sCursorAnimation.thread;
+	}
+
+	resume_thread(sCursorAnimation.thread);
+	return B_OK;
 }
 
 } // namespace
@@ -93,7 +184,7 @@ SetCursorShape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 	if (width > 64 || height > 64)
 		return B_BAD_VALUE;
 
-	uint8* dest = cursor_buffer();
+	uint8* dest = cursor_buffer(0);
 	if (dest == NULL)
 		return B_NO_INIT;
 
@@ -127,7 +218,7 @@ SetCursorShape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 
 	gInfo.sharedInfo->cursor.hotX = hotX;
 	gInfo.sharedInfo->cursor.hotY = hotY;
-	program_cursor_address();
+	program_cursor_address(0);
 	MoveCursor(gInfo.sharedInfo->cursor.x, gInfo.sharedInfo->cursor.y);
 	return B_OK;
 }
@@ -142,7 +233,21 @@ SetCursorBitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 	if (colorSpace != B_RGBA32 && colorSpace != B_RGB32)
 		return B_BAD_VALUE;
 
-	uint8* dest = cursor_buffer();
+	if (ensure_animation_thread() != B_OK)
+		return B_ERROR;
+
+	if (!sCursorAnimation.running) {
+		if (sCursorAnimation.nextUploadFrame == 0)
+			sCursorAnimation.uploadedFrameCount = 0;
+		sCursorAnimation.currentFrame = sCursorAnimation.nextUploadFrame;
+	}
+
+	uint32 targetFrame = sCursorAnimation.running
+		? sCursorAnimation.currentFrame : sCursorAnimation.nextUploadFrame;
+	if (targetFrame >= gInfo.sharedInfo->cursorFrameBufferCount)
+		targetFrame = 0;
+
+	uint8* dest = cursor_buffer(targetFrame);
 	if (dest == NULL)
 		return B_NO_INIT;
 
@@ -180,8 +285,19 @@ SetCursorBitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 
 	gInfo.sharedInfo->cursor.hotX = hotX;
 	gInfo.sharedInfo->cursor.hotY = hotY;
-	program_cursor_address();
+	program_cursor_address(targetFrame);
 	MoveCursor(gInfo.sharedInfo->cursor.x, gInfo.sharedInfo->cursor.y);
+
+	if (!sCursorAnimation.running) {
+		if (targetFrame + 1 < gInfo.sharedInfo->cursorFrameBufferCount)
+			sCursorAnimation.nextUploadFrame = targetFrame + 1;
+		else
+			sCursorAnimation.nextUploadFrame = 0;
+
+		if (sCursorAnimation.uploadedFrameCount < targetFrame + 1)
+			sCursorAnimation.uploadedFrameCount = targetFrame + 1;
+	}
+
 	return B_OK;
 }
 
@@ -223,4 +339,107 @@ ShowCursor(bool show)
 		value &= ~(1u << 31);
 	write32(kDACCursorCtrl, value);
 	gInfo.sharedInfo->cursor.visible = show;
+}
+
+
+bool
+SupportsCursorAnimation(void)
+{
+	return gInfo.sharedInfo != NULL
+		&& gInfo.sharedInfo->settings.hardcursor
+		&& gInfo.sharedInfo->settings.cursorani;
+}
+
+
+uint32
+CursorSupportedFrames(void)
+{
+	if (!SupportsCursorAnimation())
+		return 0;
+
+	if (gInfo.sharedInfo->cursorFrameBufferCount < 2)
+		return 0;
+
+	return gInfo.sharedInfo->cursorFrameBufferCount - 1;
+}
+
+
+status_t
+StartCursorAnimation(void)
+{
+	if (!SupportsCursorAnimation())
+		return B_NOT_SUPPORTED;
+
+	if (sCursorAnimation.uploadedFrameCount < 2)
+		return B_BAD_VALUE;
+
+	if (ensure_animation_thread() != B_OK)
+		return B_ERROR;
+
+	sCursorAnimation.currentFrame = 0;
+	program_cursor_address(0);
+	MoveCursor(gInfo.sharedInfo->cursor.x, gInfo.sharedInfo->cursor.y);
+
+	sCursorAnimation.running = true;
+	if (sCursorAnimation.semaphore >= B_OK)
+		release_sem(sCursorAnimation.semaphore);
+	return B_OK;
+}
+
+
+status_t
+StopCursorAnimation(void)
+{
+	if (!SupportsCursorAnimation())
+		return B_NOT_SUPPORTED;
+
+	sCursorAnimation.running = false;
+	sCursorAnimation.currentFrame = 0;
+	sCursorAnimation.nextUploadFrame = 0;
+	program_cursor_address(0);
+	MoveCursor(gInfo.sharedInfo->cursor.x, gInfo.sharedInfo->cursor.y);
+	return B_OK;
+}
+
+
+status_t
+SetCursorAnimationSpeed(float speedFactor)
+{
+	if (!SupportsCursorAnimation())
+		return B_NOT_SUPPORTED;
+
+	if (!isfinite(speedFactor) || speedFactor <= 0.0f)
+		return B_BAD_VALUE;
+
+	sCursorAnimation.speedFactor = speedFactor;
+	sCursorAnimation.frameInterval = (bigtime_t)(1000000.0f / speedFactor);
+	if (sCursorAnimation.frameInterval < 5000)
+		sCursorAnimation.frameInterval = 5000;
+	return B_OK;
+}
+
+
+void
+CursorAnimationUninit(void)
+{
+	if (sCursorAnimation.thread >= B_OK) {
+		sCursorAnimation.terminate = true;
+		if (sCursorAnimation.semaphore >= B_OK)
+			release_sem(sCursorAnimation.semaphore);
+		status_t result;
+		wait_for_thread(sCursorAnimation.thread, &result);
+	}
+
+	if (sCursorAnimation.semaphore >= B_OK)
+		delete_sem(sCursorAnimation.semaphore);
+
+	sCursorAnimation.running = false;
+	sCursorAnimation.terminate = false;
+	sCursorAnimation.speedFactor = 10.0f;
+	sCursorAnimation.frameInterval = 100000;
+	sCursorAnimation.uploadedFrameCount = 1;
+	sCursorAnimation.nextUploadFrame = 0;
+	sCursorAnimation.currentFrame = 0;
+	sCursorAnimation.semaphore = -1;
+	sCursorAnimation.thread = -1;
 }

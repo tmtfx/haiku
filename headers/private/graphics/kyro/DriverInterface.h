@@ -18,6 +18,7 @@
 #define KYRO_DRIVER_NAME				"kyro"
 #define KYRO_ACCELERANT_NAME			"kyro.accelerant"
 #define KYRO_PRIVATE_DATA_MAGIC			0x4b59524f
+#define KYRO_MAX_CURSOR_FRAME_BUFFERS	16
 
 
 enum {
@@ -36,6 +37,7 @@ struct KyroGetPrivateData {
 typedef struct {
 	char	accelerant[B_FILE_NAME_LENGTH];
 	bool	hardcursor;
+	bool	cursorani;
 	uint32	cursorbits;
 } kyro_settings;
 
@@ -63,6 +65,8 @@ struct SharedInfo {
 
 	uint32		cursorOffset;
 	uint32		cursorBufferSize;
+	uint32		cursorFrameBufferCount;
+	uint32		cursorFrameOffsets[KYRO_MAX_CURSOR_FRAME_BUFFERS];
 
 	struct {
 		uint16	hotX;

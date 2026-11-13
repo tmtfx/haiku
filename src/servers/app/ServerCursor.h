@@ -22,6 +22,12 @@ class CursorManager;
 
 class ServerCursor : public ServerBitmap {
 public:
+	enum {
+		B_CURSOR_ANI_TRIGGER_IMMEDIATE = 0,
+		B_CURSOR_ANI_TRIGGER_IDLE = 1,
+		B_CURSOR_MAX_ANIMATION_FRAMES = 16
+	};
+
 								ServerCursor(BRect r, color_space space,
 									int32 flags, BPoint hotspot,
 									int32 bytesPerRow = -1,
@@ -52,13 +58,61 @@ public:
 			const uint8*		CursorData() const
 									{ return fCursorData; }
 
+			status_t			ConfigureAnimation(uint32 frameCount,
+									uint32 frameDelayMs, uint32 startDelayMs,
+									uint32 idleDelayMs, uint32 trigger);
+			status_t			SetAnimationFrame(uint32 frameIndex,
+									const uint8* data, uint32 bytesPerRow,
+									color_space colorSpace, size_t dataSize);
+			bool				HasAnimation() const
+									{ return fAnimationFrameCount > 1; }
+			uint32				AnimationFrameCount() const
+									{ return fAnimationFrameCount; }
+			uint32				AnimationFrameDelayMs() const
+									{ return fAnimationFrameDelayMs; }
+			uint32				AnimationStartDelayMs() const
+									{ return fAnimationStartDelayMs; }
+			uint32				AnimationIdleDelayMs() const
+									{ return fAnimationIdleDelayMs; }
+			uint32				AnimationTrigger() const
+									{ return fAnimationTrigger; }
+			bool				GetAnimationFrame(uint32 frameIndex,
+									const uint8*& bits, uint16& width,
+									uint16& height, uint16& bytesPerRow,
+									color_space& colorSpace) const;
+
 private:
 	friend class CursorManager;
+
+	struct animation_frame {
+		animation_frame()
+			:
+			bits(NULL),
+			bitsLength(0),
+			bytesPerRow(0),
+			colorSpace(B_NO_COLOR_SPACE)
+		{
+		}
+
+		uint8*		bits;
+		size_t		bitsLength;
+		uint16		bytesPerRow;
+		color_space	colorSpace;
+	};
+
+			void				_ResetAnimationFrames();
+			void				_CopyAnimationFrom(const ServerCursor& other);
 
 			BPoint				fHotSpot;
 			team_id				fOwningTeam;
 			uint8*				fCursorData;
 			CursorManager*		fManager;
+			uint32				fAnimationFrameCount;
+			uint32				fAnimationFrameDelayMs;
+			uint32				fAnimationStartDelayMs;
+			uint32				fAnimationIdleDelayMs;
+			uint32				fAnimationTrigger;
+			animation_frame		fAnimationFrames[B_CURSOR_MAX_ANIMATION_FRAMES - 1];
 };
 
 

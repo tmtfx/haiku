@@ -167,6 +167,36 @@ AppServer::MessageReceived(BMessage* message)
 			break;
 		}
 
+		case AS_SET_CURSOR_ANI_SETTINGS:
+		{
+			bool enable;
+			int32 speedPercent;
+			int32 idleDelayMs;
+			if (message->FindBool("enable", &enable) == B_OK
+				&& message->FindInt32("speed_percent", &speedPercent) == B_OK
+				&& message->FindInt32("idle_delay_ms", &idleDelayMs) == B_OK) {
+				BAutolock locker(gScreenManager);
+				if (gScreenManager && gScreenManager->CountScreens() > 0) {
+					Screen* s = gScreenManager->ScreenAt(0);
+
+					if (s != NULL && s->HWInterface() != NULL) {
+						AccelerantHWInterface* interface
+							= dynamic_cast<AccelerantHWInterface*>(s->HWInterface());
+
+						if (interface != NULL) {
+							if (speedPercent < 10)
+								speedPercent = 10;
+							if (idleDelayMs < 0)
+								idleDelayMs = 0;
+							interface->SetUserCursorAnimationSettings(enable,
+								speedPercent / 100.0f, (uint32)idleDelayMs);
+						}
+					}
+				}
+			}
+			break;
+		}
+
 		case AS_SET_2D_ACCELERATION_ENABLED:
 		{
 			bool enable;
@@ -247,6 +277,22 @@ AppServer::MessageReceived(BMessage* message)
 
 			BMessage reply;
 			reply.AddBool("has_2d_acceleration", has);
+			message->SendReply(&reply);
+			break;
+		}
+
+		case 'hcai':
+		{
+			bool has = false;
+			BAutolock locker(gScreenManager);
+			if (gScreenManager && gScreenManager->CountScreens() > 0) {
+				Screen* s = gScreenManager->ScreenAt(0);
+				if (s && s->HWInterface())
+					has = s->HWInterface()->HasAnimatedCursorSupport();
+			}
+
+			BMessage reply;
+			reply.AddBool("has_cursor_animation", has);
 			message->SendReply(&reply);
 			break;
 		}

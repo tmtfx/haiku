@@ -217,6 +217,7 @@ void
 UninitAccelerant(void)
 {
 	KYRO_ACCEL_TRACE("UninitAccelerant begin\n");
+	CursorAnimationUninit();
 	if (!gInfo.isClone && gInfo.sharedInfo != NULL)
 		gInfo.sharedInfo->accelerantInUse = false;
 

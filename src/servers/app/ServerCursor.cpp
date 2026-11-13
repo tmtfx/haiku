@@ -47,7 +47,12 @@ ServerCursor::ServerCursor(BRect r, color_space format, int32 flags,
 	fHotSpot(hotspot),
 	fOwningTeam(-1),
 	fCursorData(NULL),
-	fManager(NULL)
+	fManager(NULL),
+	fAnimationFrameCount(0),
+	fAnimationFrameDelayMs(100),
+	fAnimationStartDelayMs(0),
+	fAnimationIdleDelayMs(0),
+	fAnimationTrigger(B_CURSOR_ANI_TRIGGER_IMMEDIATE)
 {
 	fHotSpot.ConstrainTo(Bounds());
 	AllocateBuffer();
@@ -64,7 +69,12 @@ ServerCursor::ServerCursor(const uint8* data)
 	fHotSpot(0, 0),
 	fOwningTeam(-1),
 	fCursorData(NULL),
-	fManager(NULL)
+	fManager(NULL),
+	fAnimationFrameCount(0),
+	fAnimationFrameDelayMs(100),
+	fAnimationStartDelayMs(0),
+	fAnimationIdleDelayMs(0),
+	fAnimationTrigger(B_CURSOR_ANI_TRIGGER_IMMEDIATE)
 {
 	// 68-byte array used in BeOS for holding cursors.
 	// This API has serious problems and should be deprecated (but supported)
@@ -131,7 +141,12 @@ ServerCursor::ServerCursor(const uint8* alreadyPaddedData, uint32 width,
 	fHotSpot(0, 0),
 	fOwningTeam(-1),
 	fCursorData(NULL),
-	fManager(NULL)
+	fManager(NULL),
+	fAnimationFrameCount(0),
+	fAnimationFrameDelayMs(100),
+	fAnimationStartDelayMs(0),
+	fAnimationIdleDelayMs(0),
+	fAnimationTrigger(B_CURSOR_ANI_TRIGGER_IMMEDIATE)
 {
 	AllocateBuffer();
 	if (Bits())
@@ -148,7 +163,12 @@ ServerCursor::ServerCursor(const ServerCursor* cursor)
 	fHotSpot(0, 0),
 	fOwningTeam(-1),
 	fCursorData(NULL),
-	fManager(NULL)
+	fManager(NULL),
+	fAnimationFrameCount(0),
+	fAnimationFrameDelayMs(100),
+	fAnimationStartDelayMs(0),
+	fAnimationIdleDelayMs(0),
+	fAnimationTrigger(B_CURSOR_ANI_TRIGGER_IMMEDIATE)
 {
 	// TODO: Hm. I don't move this into the if clause,
 	// because it might break code elsewhere.
@@ -163,6 +183,7 @@ ServerCursor::ServerCursor(const ServerCursor* cursor)
 			if (fCursorData)
 				memcpy(fCursorData, cursor->fCursorData, 68);
 		}
+		_CopyAnimationFrom(*cursor);
 	}
 }
 
@@ -170,6 +191,7 @@ ServerCursor::ServerCursor(const ServerCursor* cursor)
 //!	Frees the heap space allocated for the cursor's image data
 ServerCursor::~ServerCursor()
 {
+	_ResetAnimationFrames();
 	delete[] fCursorData;
 }
 
@@ -189,4 +211,135 @@ void
 ServerCursor::AttachedToManager(CursorManager* manager)
 {
 	fManager = manager;
+}
+
+
+status_t
+ServerCursor::ConfigureAnimation(uint32 frameCount, uint32 frameDelayMs,
+	uint32 startDelayMs, uint32 idleDelayMs, uint32 trigger)
+{
+	if (frameCount < 2 || frameCount > B_CURSOR_MAX_ANIMATION_FRAMES)
+		return B_BAD_VALUE;
+	if (trigger != B_CURSOR_ANI_TRIGGER_IMMEDIATE
+		&& trigger != B_CURSOR_ANI_TRIGGER_IDLE) {
+		return B_BAD_VALUE;
+	}
+
+	_ResetAnimationFrames();
+	fAnimationFrameCount = frameCount;
+	fAnimationFrameDelayMs = max_c((uint32)1, frameDelayMs);
+	fAnimationStartDelayMs = startDelayMs;
+	fAnimationIdleDelayMs = idleDelayMs;
+	fAnimationTrigger = trigger;
+	return B_OK;
+}
+
+
+status_t
+ServerCursor::SetAnimationFrame(uint32 frameIndex, const uint8* data,
+	uint32 bytesPerRow, color_space colorSpace, size_t dataSize)
+{
+	if (frameIndex < 1 || frameIndex >= fAnimationFrameCount || data == NULL)
+		return B_BAD_VALUE;
+	if (bytesPerRow == 0)
+		return B_BAD_VALUE;
+	if (colorSpace != ColorSpace())
+		return B_BAD_VALUE;
+
+	const uint16 height = (uint16)Bounds().IntegerHeight() + 1;
+	const size_t minDataSize = (size_t)bytesPerRow * height;
+	if (dataSize < minDataSize)
+		return B_BAD_VALUE;
+
+	animation_frame& frame = fAnimationFrames[frameIndex - 1];
+	delete[] frame.bits;
+	frame.bits = new (nothrow) uint8[minDataSize];
+	if (frame.bits == NULL) {
+		frame.bitsLength = 0;
+		frame.bytesPerRow = 0;
+		frame.colorSpace = B_NO_COLOR_SPACE;
+		return B_NO_MEMORY;
+	}
+
+	memcpy(frame.bits, data, minDataSize);
+	frame.bitsLength = minDataSize;
+	frame.bytesPerRow = (uint16)bytesPerRow;
+	frame.colorSpace = colorSpace;
+	return B_OK;
+}
+
+
+bool
+ServerCursor::GetAnimationFrame(uint32 frameIndex, const uint8*& bits,
+	uint16& width, uint16& height, uint16& bytesPerRow,
+	color_space& colorSpace) const
+{
+	if (frameIndex >= fAnimationFrameCount)
+		return false;
+
+	width = (uint16)Bounds().IntegerWidth() + 1;
+	height = (uint16)Bounds().IntegerHeight() + 1;
+
+	if (frameIndex == 0) {
+		bits = Bits();
+		bytesPerRow = (uint16)BytesPerRow();
+		colorSpace = ColorSpace();
+		return bits != NULL;
+	}
+
+	const animation_frame& frame = fAnimationFrames[frameIndex - 1];
+	if (frame.bits == NULL || frame.bytesPerRow == 0)
+		return false;
+
+	bits = frame.bits;
+	bytesPerRow = frame.bytesPerRow;
+	colorSpace = frame.colorSpace;
+	return true;
+}
+
+
+void
+ServerCursor::_ResetAnimationFrames()
+{
+	for (uint32 i = 0; i < B_CURSOR_MAX_ANIMATION_FRAMES - 1; i++) {
+		delete[] fAnimationFrames[i].bits;
+		fAnimationFrames[i].bits = NULL;
+		fAnimationFrames[i].bitsLength = 0;
+		fAnimationFrames[i].bytesPerRow = 0;
+		fAnimationFrames[i].colorSpace = B_NO_COLOR_SPACE;
+	}
+
+	fAnimationFrameCount = 0;
+	fAnimationFrameDelayMs = 100;
+	fAnimationStartDelayMs = 0;
+	fAnimationIdleDelayMs = 0;
+	fAnimationTrigger = B_CURSOR_ANI_TRIGGER_IMMEDIATE;
+}
+
+
+void
+ServerCursor::_CopyAnimationFrom(const ServerCursor& other)
+{
+	if (!other.HasAnimation())
+		return;
+
+	if (ConfigureAnimation(other.fAnimationFrameCount,
+			other.fAnimationFrameDelayMs, other.fAnimationStartDelayMs,
+			other.fAnimationIdleDelayMs, other.fAnimationTrigger) != B_OK) {
+		return;
+	}
+
+	for (uint32 i = 1; i < other.fAnimationFrameCount; i++) {
+		const animation_frame& src = other.fAnimationFrames[i - 1];
+		if (src.bits == NULL || src.bytesPerRow == 0) {
+			_ResetAnimationFrames();
+			return;
+		}
+
+		if (SetAnimationFrame(i, src.bits, src.bytesPerRow, src.colorSpace,
+				src.bitsLength) != B_OK) {
+			_ResetAnimationFrames();
+			return;
+		}
+	}
 }
