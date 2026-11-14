@@ -1173,6 +1173,11 @@ KeyStoreServer::_GetOrAskSessionPassword()
 									uint8 keyBuf[32];
 									memcpy(keyBuf, key, 32);
 
+#if 0
+									/*
+									 * TODO: Ripristinare questa implementazione una volta corretto
+									 * il supporto ad AES_CBC in BCrypto.
+									 */
 									BCrypto crypto;
 									crypto.SetAlgorithm(B_CRYPTO_AES);
 									crypto.SetMode(B_CRYPTO_MODE_CBC);
@@ -1195,6 +1200,43 @@ KeyStoreServer::_GetOrAskSessionPassword()
 										secure_memzero_server(plain,
 											plainBufSize);
 										delete[] plain;
+									}
+#endif
+									// Decifratura AES-256-CBC con OpenSSL EVP
+									size_t plainBufSize = cipherLen32;
+									uint8* plain = new(std::nothrow) uint8[plainBufSize];
+									if (plain != NULL) {
+										EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+										int len = 0;
+										int plainLen = 0;
+										bool decryptOk = false;
+
+										if (ctx != NULL
+											&& EVP_DecryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, keyBuf, iv) == 1) {
+											EVP_CIPHER_CTX_set_padding(ctx, 1);
+											if (EVP_DecryptUpdate(ctx, plain, &len, cipher, (int)cipherLen32) == 1) {
+												plainLen = len;
+												if (EVP_DecryptFinal_ex(ctx, plain + len, &len) == 1) {
+													plainLen += len;
+													decryptOk = true;
+												}
+											}
+										}
+
+										if (ctx != NULL)
+											EVP_CIPHER_CTX_free(ctx);
+
+										secure_memzero_server(keyBuf, sizeof(keyBuf));
+
+										if (decryptOk && plainLen >= 0) {
+											fingerprintCandidate.SetTo((const char*)plain, plainLen);
+											haveFingerprintCandidate = true;
+										}
+
+										secure_memzero_server(plain, plainBufSize);
+										delete[] plain;
+									} else {
+										secure_memzero_server(keyBuf, sizeof(keyBuf));
 									}
 								}
 							}
@@ -1339,6 +1381,10 @@ KeyStoreServer::_GetOrAskSessionPassword()
 }
 
 
+#if 0
+/*
+ * TODO: Ripristinare questa implementazione una volta corretto il supporto ad AES_CBC in BCrypto.
+ */
 status_t
 KeyStoreServer::_EnableFingerprintUnlock(int32 fingerId)
 {
@@ -1372,6 +1418,124 @@ KeyStoreServer::_EnableFingerprintUnlock(int32 fingerId)
 	ssize_t cipherLen = crypto.Encrypt(key, sizeof(key), iv, sizeof(iv),
 		plainPtr, plainLen, cipher, cipherBufSize);
 	if (cipherLen < 0) {
+		secure_memzero_server(key, sizeof(key));
+		delete[] cipher;
+		return B_ERROR;
+	}
+
+	BPath escrowPath;
+	status_t status = find_directory(B_USER_SETTINGS_DIRECTORY, &escrowPath);
+	if (status == B_OK)
+		escrowPath.Append("fingerprint_escrow");
+
+	if (status == B_OK) {
+		BFile file(escrowPath.Path(),
+			B_WRITE_ONLY | B_CREATE_FILE | B_ERASE_FILE);
+		status = file.InitCheck();
+		if (status == B_OK) {
+			file.SetPermissions(0600);
+			uint32 magic = 0x4650574B; // 'FPWK'
+			uint32 cipherLen32 = (uint32)cipherLen;
+			size_t off = 0;
+			file.WriteAt(off, &magic, sizeof(magic));
+			off += sizeof(magic);
+			file.WriteAt(off, &fingerId, sizeof(fingerId));
+			off += sizeof(fingerId);
+			file.WriteAt(off, iv, sizeof(iv));
+			off += sizeof(iv);
+			file.WriteAt(off, &cipherLen32, sizeof(cipherLen32));
+			off += sizeof(cipherLen32);
+			file.WriteAt(off, cipher, cipherLen);
+		}
+	}
+
+	delete[] cipher;
+
+	if (status != B_OK) {
+		secure_memzero_server(key, sizeof(key));
+		return status;
+	}
+
+	// Hand K to fingerprint_server, keyed to this fingerId. It never sees
+	// the master password itself, only this opaque 32-byte key.
+	BMessenger fpServer(FINGERPRINT_SERVER_SIGNATURE);
+	if (!fpServer.IsValid()) {
+		secure_memzero_server(key, sizeof(key));
+		BEntry(escrowPath.Path()).Remove();
+		return B_NO_INIT;
+	}
+
+	BMessage request(B_FP_SET_ESCROW);
+	request.AddInt32("fingerId", fingerId);
+	request.AddData("key", B_RAW_TYPE, key, sizeof(key));
+	secure_memzero_server(key, sizeof(key));
+
+	BMessage reply;
+	status = fpServer.SendMessage(&request, &reply);
+	int32 fpError = B_ERROR;
+	reply.FindInt32("error", &fpError);
+	if (status != B_OK || fpError != B_OK) {
+		BEntry(escrowPath.Path()).Remove();
+		return status != B_OK ? status : fpError;
+	}
+
+	return B_OK;
+}
+#endif
+
+
+status_t
+KeyStoreServer::_EnableFingerprintUnlock(int32 fingerId)
+{
+	// Only reachable with an already-unlocked, validated session (checked
+	// by the caller) - fSessionPassword holds the plaintext master
+	// password at this point.
+	uint8 key[32];
+	uint8 iv[16];
+	BCrypto crypto;
+	if (crypto.InitCheck() != B_OK)
+		return B_ERROR;
+	if (crypto.GetRandomBytes(key, sizeof(key)) != B_OK
+		|| crypto.GetRandomBytes(iv, sizeof(iv)) != B_OK) {
+		return B_ERROR;
+	}
+
+	const unsigned char* plainPtr = (const unsigned char*)fSessionPassword.String();
+	int plainLen = fSessionPassword.Length();
+
+	// Dimensione massima buffer di cifratura OpenSSL AES-256-CBC con padding PKCS7
+	size_t cipherBufSize = plainLen + 16;
+	uint8* cipher = new(std::nothrow) uint8[cipherBufSize];
+	if (cipher == NULL) {
+		secure_memzero_server(key, sizeof(key));
+		return B_NO_MEMORY;
+	}
+
+	EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+	if (ctx == NULL) {
+		secure_memzero_server(key, sizeof(key));
+		delete[] cipher;
+		return B_NO_MEMORY;
+	}
+
+	int len = 0;
+	int cipherLen = 0;
+	bool encryptOk = false;
+
+	if (EVP_EncryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, key, iv) == 1) {
+		EVP_CIPHER_CTX_set_padding(ctx, 1);
+		if (EVP_EncryptUpdate(ctx, cipher, &len, plainPtr, plainLen) == 1) {
+			cipherLen = len;
+			if (EVP_EncryptFinal_ex(ctx, cipher + len, &len) == 1) {
+				cipherLen += len;
+				encryptOk = true;
+			}
+		}
+	}
+
+	EVP_CIPHER_CTX_free(ctx);
+
+	if (!encryptOk) {
 		secure_memzero_server(key, sizeof(key));
 		delete[] cipher;
 		return B_ERROR;
