@@ -83,10 +83,10 @@ static DeviceInfo		gDeviceInfo[MAX_DEVICES];
 static const char*		gDeviceNames[MAX_DEVICES + 1];
 static pci_module_info*	gPCI;
 static kyro_settings	gSettings = {
-	KYRO_ACCELERANT_NAME,
-	true,
-	false,
-	2
+	KYRO_ACCELERANT_NAME, // accelerant (filename)
+	true, // hardcursor (hardware cursor)
+	false, // cursorani (animated hardware cursor)
+	2 // cursorbits (number of bits supported)
 };
 
 
