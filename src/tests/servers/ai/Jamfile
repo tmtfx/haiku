@@ -1,0 +1,16 @@
+SubDir HAIKU_TOP src tests servers ai ;
+
+UsePrivateHeaders network netservices shared ;
+UsePublicHeaders ai support ;
+
+SimpleTest test_models :
+	test_models.cpp
+	:
+	be
+	libai_api.so
+	libbnetapi.so
+	libnetservices.a
+	<$(TARGET_PACKAGING_ARCH)>libshared.a
+	$(TARGET_NETWORK_LIBS)
+	[ TargetLibstdc++ ]
+;
