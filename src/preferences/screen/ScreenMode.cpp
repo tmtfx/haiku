@@ -207,6 +207,22 @@ ScreenMode::~ScreenMode()
 
 
 status_t
+ScreenMode::UpdateModeList()
+{
+	free(fModeList);
+	fModeList = NULL;
+	fModeCount = 0;
+
+	BScreen screen(fWindow);
+	status_t status = screen.GetModeList(&fModeList, &fModeCount);
+	if (status == B_OK && fModeList != NULL && fModeCount > 0)
+		qsort(fModeList, fModeCount, sizeof(display_mode), compare_mode);
+
+	return status;
+}
+
+
+status_t
 ScreenMode::Set(const screen_mode& mode, int32 workspace)
 {
 	if (!fUpdatedModes)

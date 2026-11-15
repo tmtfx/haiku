@@ -328,6 +328,8 @@ get_accelerant_hook(uint32 feature, void* data)
 			return (void*)xgi_get_preferred_mode;
 		case B_GET_EDID_INFO:
 			return (void*)xgi_get_edid_info;
+		case B_SET_EDID_INFO:
+			return (void*)xgi_set_edid_info;
 
 		/* Hardware Cursor */
 		case B_MOVE_CURSOR:

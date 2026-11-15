@@ -47,6 +47,8 @@ get_accelerant_hook(uint32 feature, void* data)
 #ifdef __HAIKU__
 		case B_GET_EDID_INFO:
 			return (void*)GetEdidInfo;
+		case B_SET_EDID_INFO:
+			return (void*)SetEdidInfo;
 #endif
 		case B_GET_FRAME_BUFFER_CONFIG:
 			return (void*)GetFrameBufferConfig;

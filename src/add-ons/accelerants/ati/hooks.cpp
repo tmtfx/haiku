@@ -46,6 +46,8 @@ get_accelerant_hook(uint32 feature, void* data)
 			return (void*)GetPreferredDisplayMode;
 		case B_GET_EDID_INFO:
 			return (void*)GetEdidInfo;
+		case B_SET_EDID_INFO:
+			return (void*)SetEdidInfo;
 		case B_GET_FRAME_BUFFER_CONFIG:
 			return (void*)GetFrameBufferConfig;
 		case B_GET_PIXEL_CLOCK_LIMITS:

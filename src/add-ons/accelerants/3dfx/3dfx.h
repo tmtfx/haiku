@@ -13,9 +13,9 @@
 
 #define BIT(n)	(1UL<<(n))
 
-#define ROP_COPY	0xcc
-#define ROP_INVERT	0x55
-#define ROP_XOR		0x66
+#define ROP_COPY	0xccU
+#define ROP_INVERT	0x55U
+#define ROP_XOR		0x66U
 
 #define MEM_TYPE_SGRAM	0
 #define MEM_TYPE_SDRAM	1

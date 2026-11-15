@@ -107,6 +107,7 @@ void	 Trio64_SetIndexedColors(uint count, uint8 first, uint8* color_data, uint32
 void	 Virge_SetIndexedColors(uint count, uint8 first, uint8* color_data, uint32 flags);
 status_t GetPreferredDisplayMode(display_mode* preferredMode);
 status_t GetEdidInfo(void* info, size_t size, uint32* _version);
+status_t SetEdidInfo(void* info, size_t size, uint32 _version);
 
 // DPMS
 uint32   Savage_DPMSCapabilities(void);

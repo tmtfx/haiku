@@ -575,6 +575,48 @@ intel_get_edid_info(void* info, size_t size, uint32* _version)
 }
 
 
+status_t
+intel_set_edid_info(void* info, size_t size, uint32 version)
+{
+	if (version != EDID_VERSION_1)
+		return B_NOT_SUPPORTED;
+	if (info == NULL || size < sizeof(struct edid1_info))
+		return B_BAD_VALUE;
+
+	memcpy(&gInfo->edid_info, info, sizeof(struct edid1_info));
+	gInfo->has_edid = true;
+
+	if (gInfo->mode_list_area >= 0)
+		delete_area(gInfo->mode_list_area);
+
+	display_mode* list = NULL;
+	uint32 count = 0;
+
+	const color_space kSupportedSpaces[] = {B_RGB32_LITTLE, B_RGB16_LITTLE,
+		B_CMAP8};
+	const color_space* supportedSpaces = NULL;
+	int colorSpaceCount = 0;
+
+	if (gInfo->shared_info->device_type.Generation() >= 4) {
+		supportedSpaces = kSupportedSpaces;
+		colorSpaceCount = B_COUNT_OF(kSupportedSpaces);
+	}
+
+	gInfo->mode_list_area = create_display_modes("intel extreme modes",
+		&gInfo->edid_info, NULL, 0,
+		supportedSpaces, colorSpaceCount, NULL, &list, &count);
+
+	if (gInfo->mode_list_area < B_OK)
+		return gInfo->mode_list_area;
+
+	gInfo->mode_list = list;
+	gInfo->shared_info->mode_list_area = gInfo->mode_list_area;
+	gInfo->shared_info->mode_count = count;
+
+	return B_OK;
+}
+
+
 // Get the backlight registers. We need the backlight frequency (we never write it, but we ned to
 // know it's value as the duty cycle/brihtness level is proportional to it), and the duty cycle
 // register (read to get the current backlight value, written to set it). On older generations,

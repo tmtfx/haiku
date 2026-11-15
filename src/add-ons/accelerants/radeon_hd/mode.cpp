@@ -146,6 +146,28 @@ radeon_get_edid_info(void* info, size_t size, uint32* edid_version)
 }
 
 
+status_t
+radeon_set_edid_info(void* info, size_t size, uint32 edid_version)
+{
+	uint8 crtcID = 0;
+
+	TRACE("%s\n", __func__);
+	if (edid_version != EDID_VERSION_1)
+		return B_NOT_SUPPORTED;
+	if (info == NULL || size < sizeof(struct edid1_info))
+		return B_BAD_VALUE;
+
+	memcpy(&gDisplay[crtcID]->edidData, info, sizeof(struct edid1_info));
+	memcpy(&gInfo->shared_info->edid_info, info, sizeof(struct edid1_info));
+	gInfo->shared_info->has_edid = true;
+
+	if (gInfo->mode_list_area >= 0)
+		delete_area(gInfo->mode_list_area);
+
+	return create_mode_list();
+}
+
+
 uint32
 radeon_dpms_capabilities(void)
 {

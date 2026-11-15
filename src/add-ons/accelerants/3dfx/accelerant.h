@@ -78,6 +78,7 @@ status_t MoveDisplay(uint16 h_display_start, uint16 v_display_start);
 void	 TDFX_SetIndexedColors(uint count, uint8 first, uint8* color_data,
 			uint32 flags);
 status_t GetEdidInfo(void* info, size_t size, uint32* _version);
+status_t SetEdidInfo(void* info, size_t size, uint32 _version);
 
 // DPMS
 uint32	 TDFX_DPMSCapabilities(void);

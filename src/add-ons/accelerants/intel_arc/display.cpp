@@ -3309,6 +3309,23 @@ intel_arc_get_edid_info(void* info, size_t size, uint32* version)
 }
 
 status_t
+intel_arc_set_edid_info(void* info, size_t size, uint32 version)
+{
+	if (version != EDID_VERSION_1)
+		return B_NOT_SUPPORTED;
+	if (info == NULL || size < sizeof(edid1_info))
+		return B_BAD_VALUE;
+
+	memcpy(&gInfo->edid_info, info, sizeof(edid1_info));
+	gInfo->has_edid = true;
+
+	if (gInfo->mode_list_area >= 0)
+		delete_area(gInfo->mode_list_area);
+
+	return create_mode_list();
+}
+
+status_t
 intel_arc_get_frame_buffer_config(frame_buffer_config* config)
 {
 	(void)handle_hotplug_event();

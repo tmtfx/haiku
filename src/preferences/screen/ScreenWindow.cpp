@@ -1548,6 +1548,13 @@ ScreenWindow::_LoadEDID(const entry_ref* ref)
 		B_TRANSLATE("OK"), NULL, NULL, B_WIDTH_AS_USUAL, B_INFO_ALERT);
 	alert->Go();
 
+	fScreenMode.UpdateModeList();
+	_BuildSupportedColorSpaces();
+	_CheckResolutionMenu();
+	_CheckRefreshMenu();
+	_CheckColorMenu();
+	_UpdateControls();
+	_UpdateMonitor();
 	_UpdateActiveMode();
 }
 

@@ -742,6 +742,24 @@ GetEdidInfo(void* info, size_t size, uint32* version)
 }
 
 
+status_t
+SetEdidInfo(void* info, size_t size, uint32 version)
+{
+	if (version != EDID_VERSION_1)
+		return B_NOT_SUPPORTED;
+	if (info == NULL || size < sizeof(edid1_info))
+		return B_BAD_VALUE;
+
+	memcpy(&gInfo.sharedInfo->edidInfo, info, sizeof(edid1_info));
+	gInfo.sharedInfo->hasEdid = true;
+
+	if (gInfo.modeListArea >= 0)
+		delete_area(gInfo.modeListArea);
+
+	return CreateModeList();
+}
+
+
 uint32
 kyro_dpms_mode(void)
 {

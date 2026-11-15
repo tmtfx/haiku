@@ -605,6 +605,8 @@ get_accelerant_hook(uint32 feature, void* /*data*/)
 			return (void*)intel_arc_get_display_mode;
 		case B_GET_EDID_INFO:
 			return (void*)intel_arc_get_edid_info;
+		case B_SET_EDID_INFO:
+			return (void*)intel_arc_set_edid_info;
 		case B_GET_FRAME_BUFFER_CONFIG:
 			return (void*)intel_arc_get_frame_buffer_config;
 		case B_GET_PIXEL_CLOCK_LIMITS:

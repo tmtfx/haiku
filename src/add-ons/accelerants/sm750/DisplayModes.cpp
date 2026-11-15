@@ -57,6 +57,55 @@ sm750_get_edid_info(void* info, size_t size, uint32* _version)
     return B_OK;
 }
 
+status_t
+sm750_set_edid_info(void* info, size_t size, uint32 _version)
+{
+    if (_version != EDID_VERSION_1)
+        return B_NOT_SUPPORTED;
+    if (info == NULL || size < sizeof(struct edid1_info))
+        return B_BAD_VALUE;
+
+    shared_info *si = gInfo->si;
+    edid1_info* edid = (edid1_info*)info;
+    if (si->card_info.is_panel) {
+        gInfo->edid_panel_info = *edid;
+        gInfo->has_edid_panel = true;
+    } else {
+        gInfo->edid_crt_info = *edid;
+        gInfo->has_edid_crt = true;
+    }
+
+    if (si->mode_list_area >= 0)
+        delete_area(si->mode_list_area);
+
+    static const color_space kSpaces[] = { B_RGB32, B_RGB16, B_CMAP8 };
+    static const uint32 kSpaceCount = sizeof(kSpaces) / sizeof(kSpaces[0]);
+
+    display_mode* list = NULL;
+    uint32 count = 0;
+
+    area_id new_area = create_display_modes("sm750 modes", edid, 
+        NULL, 0,
+        kSpaces, kSpaceCount,
+        NULL,
+        &list, &count);
+
+    if (new_area >= 0) {
+        si->mode_list_area = new_area;
+        si->mode_count = count;
+        gInfo->mode_list = list;
+
+        if (count > 0) {
+            if (si->card_info.is_panel) si->preferred_mode = list[0];
+            else si->preferred_mode2 = list[0];
+        }
+
+        return B_OK;
+    }
+
+    return B_ERROR;
+}
+
 extern "C" status_t 
 create_mode_list_from_edid(uint8* raw_buffer) 
 {

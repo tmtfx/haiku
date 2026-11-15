@@ -803,6 +803,26 @@ GetEdidInfo(void* info, size_t size, uint32* _version)
 	*_version = EDID_VERSION_1;
 	return B_OK;
 }
+
+
+status_t
+SetEdidInfo(void* info, size_t size, uint32 _version)
+{
+	SharedInfo& si = *gInfo.sharedInfo;
+
+	if (_version != EDID_VERSION_1)
+		return B_NOT_SUPPORTED;
+	if (info == NULL || size < sizeof(struct edid1_info))
+		return B_BAD_VALUE;
+
+	memcpy(&si.edidInfo, info, sizeof(struct edid1_info));
+	si.bHaveEDID = true;
+
+	if (gInfo.modeListArea >= 0)
+		delete_area(gInfo.modeListArea);
+
+	return CreateModeList();
+}
 #endif
 
 

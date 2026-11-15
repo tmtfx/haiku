@@ -44,6 +44,7 @@ status_t MoveDisplay(uint16 horizontalStart, uint16 verticalStart);
 status_t GetTimingConstraints(display_timing_constraints* constraints);
 status_t GetPreferredDisplayMode(display_mode* mode);
 status_t GetEdidInfo(void* info, size_t size, uint32* version);
+status_t SetEdidInfo(void* info, size_t size, uint32 version);
 uint32 kyro_dpms_mode(void);
 uint32 kyro_dpms_capabilities(void);
 status_t kyro_set_dpms_mode(uint32 mode);

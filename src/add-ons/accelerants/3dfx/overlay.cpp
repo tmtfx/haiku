@@ -266,7 +266,7 @@ AllocateOverlay(void)
 	}
 	TRACE("AllocateOverlay() Overlay allocated, overlayToken: %d\n",
 		si.overlayToken);
-	return (overlay_token)++si.overlayToken;
+	return (overlay_token)(addr_t)++si.overlayToken;
 }
 
 
@@ -277,7 +277,7 @@ ReleaseOverlay(overlay_token overlayToken)
 
 	TRACE("ReleaseOverlay() called\n");
 
-	if (overlayToken != (overlay_token)si.overlayToken)
+	if (overlayToken != (overlay_token)(addr_t)si.overlayToken)
 		return B_BAD_VALUE;
 
 	TDFX_StopOverlay();
@@ -295,7 +295,7 @@ ConfigureOverlay (overlay_token overlayToken, const overlay_buffer* buffer,
 {
 	SharedInfo& si = *gInfo.sharedInfo;
 
-	if (overlayToken != (overlay_token)si.overlayToken)
+	if (overlayToken != (overlay_token)(addr_t)si.overlayToken)
 		return B_BAD_VALUE;
 
 	if (buffer == NULL)

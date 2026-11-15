@@ -143,6 +143,7 @@ status_t MoveDisplay(uint16 h_display_start, uint16 v_display_start);
 status_t GetTimingConstraints(display_timing_constraints* dtc);
 status_t GetPreferredDisplayMode(display_mode* preferredMode);
 status_t GetEdidInfo(void* info, size_t size, uint32* _version);
+status_t SetEdidInfo(void* info, size_t size, uint32 _version);
 
 // Engine Hook Declarations
 uint32   AccelerantEngineCount(void);

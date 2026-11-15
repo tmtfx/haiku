@@ -43,6 +43,7 @@ status_t	intel_arc_get_preferred_mode(display_mode* mode);
 status_t	intel_arc_set_display_mode(display_mode* mode);
 status_t	intel_arc_get_display_mode(display_mode* mode);
 status_t	intel_arc_get_edid_info(void* info, size_t size, uint32* version);
+status_t	intel_arc_set_edid_info(void* info, size_t size, uint32 version);
 status_t	intel_arc_get_frame_buffer_config(frame_buffer_config* config);
 status_t	intel_arc_get_pixel_clock_limits(display_mode* mode, uint32* low,
 				uint32* high);

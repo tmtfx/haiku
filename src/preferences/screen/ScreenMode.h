@@ -55,6 +55,7 @@ public:
 
 			status_t			Revert();
 			void				UpdateOriginalModes();
+			status_t			UpdateModeList();
 
 			bool				SupportsColorSpace(const screen_mode& mode,
 									color_space space);

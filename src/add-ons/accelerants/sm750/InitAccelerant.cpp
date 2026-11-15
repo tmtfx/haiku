@@ -466,6 +466,7 @@ void* get_accelerant_hook(uint32 feature, void* data) {
         case B_GET_PREFERRED_DISPLAY_MODE:  return (void*)sm750_get_preferred_mode;
         //B_GET_MONITOR_INFO
         case B_GET_EDID_INFO:               return (void*)sm750_get_edid_info;
+        case B_SET_EDID_INFO:               return (void*)sm750_set_edid_info;
         //B_SET_BRIGHTNESS
         //B_GET_BRIGHTNESS
         

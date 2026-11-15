@@ -294,7 +294,11 @@ vesa_set_edid_info(void* info, size_t size, uint32 version)
 
 	memcpy(&gInfo->shared_info->edid_info, info, sizeof(struct edid1_info));
 	gInfo->shared_info->has_edid = true;
-	return B_OK;
+
+	if (gInfo->mode_list_area >= 0)
+		delete_area(gInfo->mode_list_area);
+
+	return create_mode_list();
 }
 
 

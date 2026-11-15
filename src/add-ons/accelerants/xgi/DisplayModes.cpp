@@ -773,3 +773,20 @@ xgi_get_edid_info(void* info, size_t size, uint32* version)
 	*version = EDID_VERSION_1;
 	return B_OK;
 }
+
+status_t
+xgi_set_edid_info(void* info, size_t size, uint32 version)
+{
+	if (version != EDID_VERSION_1)
+		return B_NOT_SUPPORTED;
+	if (info == NULL || size < sizeof(edid1_info))
+		return B_BAD_VALUE;
+
+	memcpy(&gInfo.sharedInfo->edidInfo, info, sizeof(edid1_info));
+	gInfo.sharedInfo->hasEdid = true;
+
+	if (gInfo.modeListArea >= 0)
+		delete_area(gInfo.modeListArea);
+
+	return xgi_create_mode_list();
+}

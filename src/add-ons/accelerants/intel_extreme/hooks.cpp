@@ -47,6 +47,8 @@ get_accelerant_hook(uint32 feature, void* data)
 #ifdef __HAIKU__
 		case B_GET_EDID_INFO:
 			return (void*)intel_get_edid_info;
+		case B_SET_EDID_INFO:
+			return (void*)intel_set_edid_info;
 
 		/* laptop panel backlight */
 		case B_SET_BRIGHTNESS:

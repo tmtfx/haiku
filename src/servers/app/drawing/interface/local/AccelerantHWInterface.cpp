@@ -1241,12 +1241,16 @@ AccelerantHWInterface::GetEDID(void* info, uint32 size, uint32* version)
 status_t
 AccelerantHWInterface::SetEDID(const void* info, uint32 size, uint32 version)
 {
-	AutoReadLocker _(this);
+	AutoWriteLocker _(this);
 
 	if (fAccSetEDIDInfo == NULL)
 		return B_UNSUPPORTED;
 
-	return fAccSetEDIDInfo(const_cast<void*>(info), size, version);
+	status_t status = fAccSetEDIDInfo(const_cast<void*>(info), size, version);
+	if (status == B_OK)
+		_UpdateModeList();
+
+	return status;
 }
 
 

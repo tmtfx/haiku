@@ -46,6 +46,8 @@ get_accelerant_hook(uint32 feature, void* data)
 			return (void*)radeon_accelerant_mode_count;
 		case B_GET_EDID_INFO:
 			return (void*)radeon_get_edid_info;
+		case B_SET_EDID_INFO:
+			return (void*)radeon_set_edid_info;
 		case B_GET_MODE_LIST:
 			return (void*)radeon_get_mode_list;
 		case B_GET_PREFERRED_DISPLAY_MODE:

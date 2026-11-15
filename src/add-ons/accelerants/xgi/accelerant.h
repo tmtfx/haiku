@@ -312,6 +312,7 @@ uint32		xgi_dpms_mode(void);
 status_t	xgi_set_dpms_mode(uint32 flags);
 status_t	xgi_get_preferred_mode(display_mode* preferredMode);
 status_t	xgi_get_edid_info(void* info, size_t size, uint32* version);
+status_t	xgi_set_edid_info(void* info, size_t size, uint32 version);
 status_t	xgi_create_mode_list(void);
 void		xgi_program_crt1(const display_mode& mode, uint32 pitchBytes);
 
