@@ -7,6 +7,7 @@
 #include "AppAccessRequestWindow.h"
 
 #include <Catalog.h>
+#include <ControlLook.h>
 #include <LayoutBuilder.h>
 #include <LayoutUtils.h>
 #include <NodeInfo.h>
@@ -23,6 +24,79 @@
 static const uint32 kMessageDisallow = 'btda';
 static const uint32 kMessageOnce = 'btao';
 static const uint32 kMessageAlways = 'btaa';
+
+
+class DangerButton : public BButton {
+public:
+	DangerButton(const char* label, BMessage* message, rgb_color baseColor,
+		rgb_color textColor)
+		:
+		BButton(label, message),
+		fBaseColor(baseColor),
+		fTextColor(textColor),
+		fHovered(false)
+	{
+	}
+
+	virtual void MouseMoved(BPoint where, uint32 code,
+		const BMessage* dragMessage)
+	{
+		BButton::MouseMoved(where, code, dragMessage);
+		if (IsTracking()) {
+			bool inside = Bounds().Contains(where);
+			if (fHovered != inside) {
+				fHovered = inside;
+				Invalidate();
+			}
+		} else if (code == B_ENTERED_VIEW) {
+			fHovered = true;
+			Invalidate();
+		} else if (code == B_EXITED_VIEW) {
+			fHovered = false;
+			Invalidate();
+		}
+	}
+
+	virtual void MouseUp(BPoint where)
+	{
+		BButton::MouseUp(where);
+		fHovered = Bounds().Contains(where);
+		Invalidate();
+	}
+
+	virtual void Draw(BRect updateRect)
+	{
+		BRect rect(Bounds());
+		rgb_color background = ViewColor();
+
+		uint32 flags = be_control_look->Flags(this);
+		if (IsDefault())
+			flags |= BControlLook::B_DEFAULT_BUTTON;
+		if (IsFlat() && !IsTracking())
+			flags |= BControlLook::B_FLAT;
+		if (fHovered)
+			flags |= BControlLook::B_HOVER;
+
+		be_control_look->DrawButtonFrame(this, rect, updateRect, fBaseColor,
+			background, flags);
+		be_control_look->DrawButtonBackground(this, rect, updateRect,
+			fBaseColor, flags);
+
+		const BBitmap* icon = IconBitmap(
+			(Value() == B_CONTROL_OFF
+					? B_INACTIVE_ICON_BITMAP : B_ACTIVE_ICON_BITMAP)
+				| (IsEnabled() ? 0 : B_DISABLED_ICON_BITMAP));
+
+		be_control_look->DrawLabel(this, Label(), icon, rect, updateRect,
+			fBaseColor, flags, BAlignment(B_ALIGN_CENTER, B_ALIGN_MIDDLE),
+			&fTextColor);
+	}
+
+private:
+	rgb_color	fBaseColor;
+	rgb_color	fTextColor;
+	bool		fHovered;
+};
 
 
 AppAccessRequestWindow::AppAccessRequestWindow(const char* keyringName,
@@ -93,10 +167,16 @@ AppAccessRequestWindow::AppAccessRequestWindow(const char* keyringName,
 
 	fDisallowButton = new(std::nothrow) BButton(B_TRANSLATE("Disallow"),
 		new BMessage(kMessageDisallow));
-	fOnceButton = new(std::nothrow) BButton(B_TRANSLATE("Allow once"),
-		new BMessage(kMessageOnce));
-	fAlwaysButton = new(std::nothrow) BButton(B_TRANSLATE("Allow always"),
-		new BMessage(kMessageAlways));
+
+	rgb_color orangeColor = make_color(240, 155, 20);
+	rgb_color orangeTextColor = make_color(0, 0, 0);
+	fOnceButton = new(std::nothrow) DangerButton(B_TRANSLATE("Allow once"),
+		new BMessage(kMessageOnce), orangeColor, orangeTextColor);
+
+	rgb_color darkRedColor = make_color(170, 40, 40);
+	rgb_color darkRedTextColor = make_color(255, 255, 255);
+	fAlwaysButton = new(std::nothrow) DangerButton(B_TRANSLATE("Allow always"),
+		new BMessage(kMessageAlways), darkRedColor, darkRedTextColor);
 
 	BLayoutBuilder::Group<>(this, B_HORIZONTAL, B_USE_ITEM_SPACING)
 		.Add(fStripeView)
