@@ -19,6 +19,7 @@
 #include <frame_buffer_console.h>
 
 #include "DriverInterface.h"
+#include <edid_override.h>
 
 #ifdef IS_PIRATI_BUILD
 #include "ati_logo.h"
@@ -906,6 +907,10 @@ InitDevice(DeviceInfo& di)
 	}
 
 	pci_info& pciInfo = di.pciInfo;
+
+	// EDID override from ati.settings ("edid <path>")
+	si.bypassEdid = load_edid_override("ati.settings", &si.edidInfo) == B_OK;
+	si.bHaveEDID = si.bypassEdid;
 
 	si.vendorID = pciInfo.vendor_id;
 	si.deviceID = pciInfo.device_id;

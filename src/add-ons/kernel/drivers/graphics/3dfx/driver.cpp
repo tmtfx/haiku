@@ -17,6 +17,7 @@
 #endif	// __HAIKU__
 
 #include "DriverInterface.h"
+#include <edid_override.h>
 
 
 #undef TRACE
@@ -230,6 +231,10 @@ InitDevice(DeviceInfo& di)
 	memset(&si, 0, sharedSize);
 
 	pci_info& pciInfo = di.pciInfo;
+
+	// EDID override from 3dfx.settings ("edid <path>")
+	si.bypassEdid = load_edid_override("3dfx.settings", &si.edidInfo) == B_OK;
+	si.bHaveEDID = si.bypassEdid;
 
 	si.vendorID = pciInfo.vendor_id;
 	si.deviceID = pciInfo.device_id;

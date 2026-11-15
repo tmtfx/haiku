@@ -18,6 +18,7 @@
 #include <boot_item.h>
 
 #include "DriverInterface.h"
+#include <edid_override.h>
 
 
 #undef TRACE
@@ -266,6 +267,10 @@ InitDevice(DeviceInfo& di)
 	si.videoMemArea = -1;
 
 	pci_info& pciInfo = di.pciInfo;
+
+	// EDID override from intel_810.settings ("edid <path>")
+	si.bypassEdid = load_edid_override("intel_810.settings", &si.edidInfo) == B_OK;
+	si.bHaveEDID = si.bypassEdid;
 
 	si.vendorID = pciInfo.vendor_id;
 	si.deviceID = pciInfo.device_id;

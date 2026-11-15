@@ -15,6 +15,7 @@
 #include "DriverInterface.h"
 #include "sm750_macros.h"
 #include "common_modes.h"
+#include <edid_override.h>
 
 #ifdef IS_PIRATI_BUILD
 #include "sm750_logo.h"
@@ -287,19 +288,31 @@ void sm750_init_chip(DeviceInfo *di) {
     
     sm750_init_interrupts(di);
     
+    // EDID override from sm750.settings ("edid <path>"): the accelerant will
+    // use si->bypassedEdid instead of the boot loader/BIOS/I2C EDID.
+    // NOTE: the boot loader/BIOS detection below must still run even when
+    // bypassing, because has_edid_vesa is what selects the PANEL (HDMI) or
+    // CRT (VGA) branch; only the EDID *content* is replaced.
+    si->bypassEdid
+        = load_edid_override("sm750.settings", &si->bypassedEdid) == B_OK;
+
     edid1_raw local_edid;
-    edid1_raw* boot_edid = (edid1_raw*)get_boot_item(VESA_EDID_BOOT_INFO, NULL);
+    // The boot loader publishes an already decoded edid1_info (see
+    // frame_buffer_console.cpp), NOT a raw EDID block.
+    edid1_info* boot_edid = (edid1_info*)get_boot_item(VESA_EDID_BOOT_INFO, NULL);
 
     if (boot_edid != NULL) {
-        memcpy(&si->vesa_edid_raw, boot_edid, sizeof(edid1_raw));
+        memcpy(&si->vesa_edid_info, boot_edid, sizeof(edid1_info));
+        si->card_info.has_edid_vesa = true;
+    } else if (GetEdidFromBIOS(&local_edid) == B_OK
+        && local_edid.version.version == 1) {
+        // VBE 4F15 returns the raw 128 byte block 0 only: the extension
+        // blocks are not available, so don't let edid_decode() read past it.
+        local_edid.num_sections = 0;
+        edid_decode(&si->vesa_edid_info, &local_edid);
         si->card_info.has_edid_vesa = true;
     } else {
-        if (GetEdidFromBIOS(&local_edid) == B_OK) {
-        	memcpy(&si->vesa_edid_raw, &local_edid, sizeof(edid1_raw));
-            si->card_info.has_edid_vesa = true;
-        } else {
-        	si->card_info.has_edid_vesa = false;
-        }
+        si->card_info.has_edid_vesa = false;
     }
     
     if (si->settings.force_CRT) {

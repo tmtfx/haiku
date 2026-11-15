@@ -90,15 +90,21 @@ create_mode_list()
     display_mode* list = NULL;
     uint32 count = 0;
     area_id new_area = -1;
-    edid1_info info;
     bool edid_valid = false;
     uint8 temp_edid_raw[128];
     gInfo->has_edid_panel = false;
     gInfo->has_edid_crt = false;
     bool is_panel = gInfo->si->card_info.is_panel;
 
-    // TRY HARDWARE (I2C) DETECTION
-    if (sm750_read_edid(temp_edid_raw) == B_OK) {
+    if (gInfo->si->bypassEdid) {
+        // EDID OVERRIDE (sm750.settings "edid <path>"): skip I2C and VESA
+        debug_printf("SM750_ACC: Using EDID override from sm750.settings\n");
+        if (create_mode_list_from_edid(NULL) == B_OK) {
+            debug_printf("SM750_ACC: Modes list updated with EDID override data.\n");
+            edid_valid = true;
+        }
+    } else if (sm750_read_edid(temp_edid_raw) == B_OK) {
+        // TRY HARDWARE (I2C) DETECTION
         debug_printf("SM750_ACC: Succesfully read EDID from %s\n", is_panel ? "PANEL" : "CRT");
         if (create_mode_list_from_edid(temp_edid_raw) == B_OK) {
             debug_printf("SM750_ACC: Modes list updated with monitor data.\n");
@@ -115,10 +121,14 @@ create_mode_list()
 
     // LIST GENERATION
     if (edid_valid) {
-        // Magic function from libkernel_graphics.a: creates an area with all the modes
-        // supported by monitor looking at EDID timings.
-        new_area = create_display_modes("sm750 modes", &info, 
-            NULL, 0, NULL, 0, NULL, &list, &count);
+        // create_mode_list_from_edid() already built the list with
+        // create_display_modes() from the EDID that was found: reuse it.
+        // (Previously create_display_modes() was called a second time here
+        // with an uninitialized edid1_info, which leaked the first area and
+        // built the list from stack garbage.)
+        new_area = gInfo->si->mode_list_area;
+        list = gInfo->mode_list;
+        count = gInfo->si->mode_count;
     } 
     
     // FALLBACKS: BIOS OR 1024x768
@@ -293,10 +303,6 @@ static status_t init_common(int fd,bool isClone) {
 		if (result == B_OK) {
 			// nothing for now
 		}
-		if (si->card_info.has_edid_vesa) {
-            edid_decode(&gInfo->edid_vesa_info, &si->vesa_edid_raw);
-            //debug_printf("SM750_ACC: EDID VESA decoded\n");
-        }
         create_mode_list();
         
         gInfo->mode_list_area = clone_area("sm750 modes user", (void**)&gInfo->mode_list,

@@ -222,6 +222,7 @@ struct SharedInfo {
 
     /* EDID */
     bool            hasEdid;
+    bool            bypassEdid; /* edidInfo loaded from xgi.settings "edid" */
     edid1_info      edidInfo;
 
     /* Hardware Cursor */

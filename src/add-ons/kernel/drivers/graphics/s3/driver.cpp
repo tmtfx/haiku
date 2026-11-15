@@ -25,6 +25,7 @@
 #endif
 
 #include "DriverInterface.h"
+#include <edid_override.h>
 
 
 #undef TRACE
@@ -500,6 +501,10 @@ FRAME_BUFFER_BOOT_INFO, NULL);
 	} else {
 		si.has_boot_info = false;
 	}
+
+	// EDID override from s3.settings ("edid <path>")
+	si.bypassEdid = load_edid_override("s3.settings", &si.edidInfo) == B_OK;
+	si.bHaveEDID = si.bypassEdid;
 
 	si.vendorID = pciInfo.vendor_id;
 	si.deviceID = pciInfo.device_id;

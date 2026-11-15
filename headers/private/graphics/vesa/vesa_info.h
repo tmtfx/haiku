@@ -42,6 +42,8 @@ struct vesa_shared_info {
 
 	edid1_info		edid_info;
 	bool			has_edid;
+	bool			bypass_edid;
+		// edid_info was loaded from the "edid" key of the driver settings
 	bios_type_enum	bios_type;
 	uint16			mode_table_offset;
 		// Atombios only: offset to the table of video modes in the bios, used for patching in

@@ -196,7 +196,10 @@ create_mode_list(void)
 {
 	CALLED();
 
-	for (uint32 i = 0; i < gInfo->port_count; i++) {
+	// EDID override from the "intel_extreme" settings file: don't use the
+	// EDID read from the ports
+	for (uint32 i = 0; !gInfo->shared_info->bypass_edid
+			&& i < gInfo->port_count; i++) {
 		if (gInfo->ports[i] == NULL)
 			continue;
 
@@ -208,7 +211,8 @@ create_mode_list(void)
 	}
 	// use EDID found at boot time if there since we don't have any ourselves
 	if (!gInfo->has_edid && gInfo->shared_info->has_vesa_edid_info) {
-		TRACE("%s: Using VESA edid info\n", __func__);
+		TRACE("%s: Using %s edid info\n", __func__,
+			gInfo->shared_info->bypass_edid ? "override" : "VESA");
 		memcpy(&gInfo->edid_info, &gInfo->shared_info->vesa_edid_info,
 			sizeof(edid1_info));
 		// show in log what we got

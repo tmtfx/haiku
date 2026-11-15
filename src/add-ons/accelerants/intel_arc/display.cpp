@@ -3500,6 +3500,11 @@ read_edid_from_hardware(void)
             read_dpcd_caps_from_port(port);
         }
 
+        // EDID override (intel_arc.settings): only DPCD is probed, the
+        // EDID itself comes from boot_edid (step 5)
+        if (gInfo->shared_info->bypass_edid)
+            continue;
+
         if (read_edid_from_port(port, gInfo->edid_info) == B_OK) {
             if (enableAllDebugLogs) debug_printf("intel_arc.accelerant: Successfully read EDID from DDI Port %u\n", port);
             gInfo->has_edid = true;
@@ -3507,9 +3512,12 @@ read_edid_from_hardware(void)
         }
     }
 
-    // 5. Fallback su Boot EDID
+    // 5. Fallback su Boot EDID (o EDID override da intel_arc.settings)
     if (gInfo->shared_info->has_boot_edid) {
-        debug_printf("intel_arc.accelerant: Hardware EDID read failed, falling back to boot EDID\n");
+        if (gInfo->shared_info->bypass_edid)
+            debug_printf("intel_arc.accelerant: Using EDID override from intel_arc.settings\n");
+        else
+            debug_printf("intel_arc.accelerant: Hardware EDID read failed, falling back to boot EDID\n");
         memcpy(&gInfo->edid_info, &gInfo->shared_info->boot_edid, sizeof(edid1_info));
         gInfo->has_edid = true;
 

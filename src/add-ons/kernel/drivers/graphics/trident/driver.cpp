@@ -27,6 +27,7 @@
 #include <frame_buffer_console.h>
 
 #include "DriverInterface.h"
+#include <edid_override.h>
 
 #ifdef IS_PIRATI_BUILD
 #include "trident_logo.h"
@@ -500,6 +501,10 @@ InitDevice(DeviceInfo& di)
 	} else {
 		si.has_boot_info = false;
 	}
+
+	// EDID override from trident.settings ("edid <path>")
+	si.bypassEdid = load_edid_override("trident.settings", &si.edidInfo) == B_OK;
+	si.bHaveEDID = si.bypassEdid;
 
 	si.vendorID = pciInfo.vendor_id;
 	si.deviceID = pciInfo.device_id;

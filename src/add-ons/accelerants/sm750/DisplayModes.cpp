@@ -34,10 +34,17 @@ sm750_get_edid_info(void* info, size_t size, uint32* _version)
         found = true;
     }
     
+    // EDID override from sm750.settings: used when no EDID has been read
+    // (or set at runtime through B_SET_EDID_INFO) for the active head.
+    if (!found && si->bypassEdid) {
+        if (EnableLogs) debug_printf("SM750_ACC: providing the EDID override from sm750.settings.\n");
+        *target = si->bypassedEdid;
+        found = true;
+    }
+
     if (!found && si->card_info.has_edid_vesa) {
-    	edid_decode(&gInfo->edid_vesa_info, &si->vesa_edid_raw);
         if (EnableLogs) debug_printf("SM750_ACC: I2C failed, providing a backup VESA EDID.\n");
-        *target = gInfo->edid_vesa_info;
+        *target = si->vesa_edid_info;	// already decoded by the driver
         found = true;
     }
 
@@ -112,13 +119,23 @@ create_mode_list_from_edid(uint8* raw_buffer)
     shared_info *si = gInfo->si;
     edid1_info info;
     
-    // 1. Decodifica (I2C o VESA)
-    if (raw_buffer == NULL) {
+    // 1. Decodifica (override da sm750.settings, I2C o VESA)
+    if (raw_buffer == NULL && si->bypassEdid) {
+        // EDID override: already decoded, no need for edid_decode()
+        info = si->bypassedEdid;
+        if (si->card_info.is_panel) { gInfo->edid_panel_info = info; gInfo->has_edid_panel = true; }
+        else { gInfo->edid_crt_info = info; gInfo->has_edid_crt = true; }
+    } else if (raw_buffer == NULL) {
         if (si->card_info.has_edid_vesa) {
-            edid_decode(&info, &si->vesa_edid_raw);
+            info = si->vesa_edid_info;	// already decoded by the driver
         } else return B_ERROR;
     } else {
-        edid_decode(&info, (edid1_raw*)raw_buffer);
+        // raw_buffer holds the 128 byte block 0 read through I2C only: the
+        // extension blocks are not read, so don't let edid_decode() go past it
+        edid1_raw raw;
+        memcpy(&raw, raw_buffer, sizeof(raw));
+        raw.num_sections = 0;
+        edid_decode(&info, &raw);
         // Salvataggio per uso futuro
         if (si->card_info.is_panel) { gInfo->edid_panel_info = info; gInfo->has_edid_panel = true; }
         else { gInfo->edid_crt_info = info; gInfo->has_edid_crt = true; }

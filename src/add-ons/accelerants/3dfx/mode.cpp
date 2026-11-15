@@ -98,7 +98,9 @@ CreateModeList(bool (*checkMode)(const display_mode* mode))
 	// info from the video BIOS since that always failed when attempted during
 	// the development of this driver.
 
-	si.bHaveEDID = TDFX_GetEdidInfo(si.edidInfo);
+	// An EDID override (3dfx.settings "edid" or B_SET_EDID_INFO) is kept and
+	// DDC is not probed.
+	si.bHaveEDID = si.bypassEdid || TDFX_GetEdidInfo(si.edidInfo);
 
 	if (si.bHaveEDID) {
 #ifdef ENABLE_DEBUG_TRACE
@@ -359,6 +361,8 @@ SetEdidInfo(void* info, size_t size, uint32 _version)
 
 	memcpy(&si.edidInfo, info, sizeof(struct edid1_info));
 	si.bHaveEDID = true;
+	// keep it: CreateModeList() must not replace it with DDC/BIOS data
+	si.bypassEdid = true;
 
 	if (gInfo.modeListArea >= 0)
 		delete_area(gInfo.modeListArea);

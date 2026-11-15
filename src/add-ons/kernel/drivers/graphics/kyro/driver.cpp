@@ -26,6 +26,7 @@
 #include <vesa_info.h>
 
 #include "DriverInterface.h"
+#include <edid_override.h>
 #ifdef IS_PIRATI_BUILD
 #include "kyro_logo.h"
 #endif
@@ -622,8 +623,14 @@ init_device(DeviceInfo& device)
 			? device.sharedInfo->frameBufferSize - device.sharedInfo->cursorBufferSize
 			: 0;
 
-	edid1_info* bootEdid = (edid1_info*)get_boot_item(VESA_EDID_BOOT_INFO, NULL);
-	if (bootEdid != NULL) {
+	device.sharedInfo->bypassEdid = load_edid_override("kyro.settings",
+		&device.sharedInfo->edidInfo) == B_OK;
+	edid1_info* bootEdid = device.sharedInfo->bypassEdid ? NULL
+		: (edid1_info*)get_boot_item(VESA_EDID_BOOT_INFO, NULL);
+	if (device.sharedInfo->bypassEdid) {
+		device.sharedInfo->hasEdid = true;
+		KYRO_TRACE("init_device: using EDID override from kyro.settings\n");
+	} else if (bootEdid != NULL) {
 		device.sharedInfo->hasEdid = true;
 		memcpy(&device.sharedInfo->edidInfo, bootEdid, sizeof(edid1_info));
 		KYRO_TRACE("init_device: bootloader EDID found\n");

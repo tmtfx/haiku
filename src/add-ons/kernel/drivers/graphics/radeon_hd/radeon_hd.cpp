@@ -26,6 +26,7 @@
 #include <util/AreaKeeper.h>
 #include <boot_item.h>
 #include <driver_settings.h>
+#include <edid_override.h>
 #include <util/kernel_cpp.h>
 #include <vm/vm.h>
 
@@ -961,10 +962,17 @@ radeon_hd_init(radeon_info &info)
 	info.shared_info->rom_area = (biosStatus == B_OK) ? info.rom_area : -1;
 
 	// *** Pull active monitor VESA EDID from boot loader
-	edid1_info* edidInfo
-		= (edid1_info*)get_boot_item(EDID_BOOT_INFO, NULL);
+	// *** or use the EDID override from radeon_hd.settings ("edid <path>")
+	info.shared_info->bypass_edid = load_edid_override("radeon_hd.settings",
+		&info.shared_info->edid_info) == B_OK;
+	edid1_info* edidInfo = info.shared_info->bypass_edid ? NULL
+		: (edid1_info*)get_boot_item(EDID_BOOT_INFO, NULL);
 
-	if (edidInfo != NULL) {
+	if (info.shared_info->bypass_edid) {
+		TRACE("card(%" B_PRId32 "): %s using EDID override.\n",
+			info.id, __func__);
+		info.shared_info->has_edid = true;
+	} else if (edidInfo != NULL) {
 		TRACE("card(%" B_PRId32 "): %s found VESA EDID information.\n",
 			info.id, __func__);
 		info.shared_info->has_edid = true;

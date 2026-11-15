@@ -243,6 +243,9 @@ struct radeon_shared_info {
 	uint32			frame_buffer_size;		// FB size mapped
 
 	bool			has_edid;
+	bool			bypass_edid;
+		// edid_info was loaded from radeon_hd.settings "edid": it replaces
+		// the EDID read through DDC for the first attached display
 	edid1_info		edid_info;
 
 	struct lock		accelerant_lock;

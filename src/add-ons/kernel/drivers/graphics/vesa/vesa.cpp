@@ -16,6 +16,7 @@
 #include "driver.h"
 #include "utility.h"
 #include "vesa_info.h"
+#include <edid_override.h>
 
 #ifdef IS_PIRATI_BUILD
 #include "vesa_logo.h"
@@ -456,9 +457,14 @@ vesa_init(vesa_info& info)
 	sharedInfo.current_mode.space = get_color_space_for_depth(
 		bufferInfo->depth);
 
-	edid1_info* edidInfo = (edid1_info*)get_boot_item(VESA_EDID_BOOT_INFO,
-		NULL);
-	if (edidInfo != NULL) {
+	// EDID override from the "vesa" settings file ("edid <path>")
+	sharedInfo.bypass_edid = load_edid_override("vesa",
+		&sharedInfo.edid_info) == B_OK;
+	edid1_info* edidInfo = sharedInfo.bypass_edid ? NULL
+		: (edid1_info*)get_boot_item(VESA_EDID_BOOT_INFO, NULL);
+	if (sharedInfo.bypass_edid)
+		sharedInfo.has_edid = true;
+	else if (edidInfo != NULL) {
 		sharedInfo.has_edid = true;
 		memcpy(&sharedInfo.edid_info, edidInfo, sizeof(edid1_info));
 	}

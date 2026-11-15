@@ -19,6 +19,7 @@
 
 #include <boot_item.h>
 #include <driver_settings.h>
+#include <edid_override.h>
 #include <util/AreaKeeper.h>
 #include <util/kernel_cpp.h>
 
@@ -927,9 +928,15 @@ intel_extreme_init(intel_info &info)
 		}
 	}
 
-	edid1_info* edidInfo = (edid1_info*)get_boot_item(VESA_EDID_BOOT_INFO,
-		NULL);
-	if (edidInfo != NULL) {
+	// EDID override from the "intel_extreme" settings file ("edid <path>"),
+	// it replaces the boot loader EDID
+	info.shared_info->bypass_edid = load_edid_override("intel_extreme",
+		&info.shared_info->vesa_edid_info) == B_OK;
+	edid1_info* edidInfo = info.shared_info->bypass_edid ? NULL
+		: (edid1_info*)get_boot_item(VESA_EDID_BOOT_INFO, NULL);
+	if (info.shared_info->bypass_edid)
+		info.shared_info->has_vesa_edid_info = true;
+	else if (edidInfo != NULL) {
 		info.shared_info->has_vesa_edid_info = true;
 		memcpy(&info.shared_info->vesa_edid_info, edidInfo, sizeof(edid1_info));
 	}
