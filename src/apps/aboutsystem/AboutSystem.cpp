@@ -2046,6 +2046,8 @@ AboutView::_CreateCreditsView()
 
 	// copyrights for various projects we use
 
+	BPath gplPath;
+	_GetLicensePath("GNU GPL v2", gplPath);
 	BPath mitPath;
 	_GetLicensePath("MIT", mitPath);
 	BPath lgplPath;
@@ -2059,45 +2061,62 @@ AboutView::_CreateCreditsView()
 	// Haiku license
 	BString haikuLicense = B_TRANSLATE_COMMENT("The code that is unique to "
 		"Haiku, especially the kernel and all code that applications may link "
-		"against, is distributed under a mixed terms of <MIT license> and "
-		"<GPL license>. "
+		"against, is distributed under the terms of the <GPL license>, while "
+		"maintaining the <MIT license> for individual components released under "
+		"MIT terms. "
 		"Some system libraries contain third party code distributed under the "
 		"<LGPL license>. You can find the copyrights to third party code below."
-		"\n\n", "<MIT license> and <LGPL license> aren't variables and can be "
-		"translated. However, please, don't remove < and > as they're needed "
-		"as placeholders for proper hypertext functionality.");
-	int32 licensePart1 = haikuLicense.FindFirst("<");
-	int32 licensePart2 = haikuLicense.FindFirst(">");
-	int32 licensePart3 = haikuLicense.FindLast("<");
-	int32 licensePart4 = haikuLicense.FindLast(">");
-	BString part;
-	haikuLicense.CopyInto(part, 0, licensePart1);
-	fCreditsView->SetFontAndColor(be_plain_font, B_FONT_ALL, &fTextColor);
-	fCreditsView->Insert(part);
+		"\n\n", "<GPL license>, <MIT license> and <LGPL license> aren't variables "
+		"and can be translated. However, please, don't remove < and > as they're "
+		"needed as placeholders for proper hypertext functionality.");
 
-	part.Truncate(0);
-	haikuLicense.CopyInto(part, licensePart1 + 1, licensePart2 - 1
-		- licensePart1);
-	fCreditsView->SetFontAndColor(be_plain_font, B_FONT_ALL, &fLinkColor);
-	fCreditsView->InsertHyperText(part, new OpenFileAction(mitPath.Path()));
+	int32 gplStart = haikuLicense.FindFirst("<");
+	int32 gplEnd = (gplStart >= 0) ? haikuLicense.FindFirst(">", gplStart) : -1;
+	int32 mitStart = (gplEnd >= 0) ? haikuLicense.FindFirst("<", gplEnd) : -1;
+	int32 mitEnd = (mitStart >= 0) ? haikuLicense.FindFirst(">", mitStart) : -1;
+	int32 lgplStart = (mitEnd >= 0) ? haikuLicense.FindFirst("<", mitEnd) : -1;
+	int32 lgplEnd = (lgplStart >= 0) ? haikuLicense.FindFirst(">", lgplStart) : -1;
 
-	part.Truncate(0);
-	haikuLicense.CopyInto(part, licensePart2 + 1, licensePart3 - 1
-		- licensePart2);
-	fCreditsView->SetFontAndColor(be_plain_font, B_FONT_ALL, &fTextColor);
-	fCreditsView->Insert(part);
+	if (gplStart >= 0 && gplEnd > gplStart && mitStart > gplEnd && mitEnd > mitStart
+		&& lgplStart > mitEnd && lgplEnd > lgplStart) {
+		BString part;
+		haikuLicense.CopyInto(part, 0, gplStart);
+		fCreditsView->SetFontAndColor(be_plain_font, B_FONT_ALL, &fTextColor);
+		fCreditsView->Insert(part);
 
-	part.Truncate(0);
-	haikuLicense.CopyInto(part, licensePart3 + 1, licensePart4 - 1
-		- licensePart3);
-	fCreditsView->SetFontAndColor(be_plain_font, B_FONT_ALL, &fLinkColor);
-	fCreditsView->InsertHyperText(part, new OpenFileAction(lgplPath.Path()));
+		part.Truncate(0);
+		haikuLicense.CopyInto(part, gplStart + 1, gplEnd - 1 - gplStart);
+		fCreditsView->SetFontAndColor(be_plain_font, B_FONT_ALL, &fLinkColor);
+		fCreditsView->InsertHyperText(part, new OpenFileAction(gplPath.Path()));
 
-	part.Truncate(0);
-	haikuLicense.CopyInto(part, licensePart4 + 1, haikuLicense.Length() - 1
-		- licensePart4);
-	fCreditsView->SetFontAndColor(be_plain_font, B_FONT_ALL, &fTextColor);
-	fCreditsView->Insert(part);
+		part.Truncate(0);
+		haikuLicense.CopyInto(part, gplEnd + 1, mitStart - 1 - gplEnd);
+		fCreditsView->SetFontAndColor(be_plain_font, B_FONT_ALL, &fTextColor);
+		fCreditsView->Insert(part);
+
+		part.Truncate(0);
+		haikuLicense.CopyInto(part, mitStart + 1, mitEnd - 1 - mitStart);
+		fCreditsView->SetFontAndColor(be_plain_font, B_FONT_ALL, &fLinkColor);
+		fCreditsView->InsertHyperText(part, new OpenFileAction(mitPath.Path()));
+
+		part.Truncate(0);
+		haikuLicense.CopyInto(part, mitEnd + 1, lgplStart - 1 - mitEnd);
+		fCreditsView->SetFontAndColor(be_plain_font, B_FONT_ALL, &fTextColor);
+		fCreditsView->Insert(part);
+
+		part.Truncate(0);
+		haikuLicense.CopyInto(part, lgplStart + 1, lgplEnd - 1 - lgplStart);
+		fCreditsView->SetFontAndColor(be_plain_font, B_FONT_ALL, &fLinkColor);
+		fCreditsView->InsertHyperText(part, new OpenFileAction(lgplPath.Path()));
+
+		part.Truncate(0);
+		haikuLicense.CopyInto(part, lgplEnd + 1, haikuLicense.Length() - 1 - lgplEnd);
+		fCreditsView->SetFontAndColor(be_plain_font, B_FONT_ALL, &fTextColor);
+		fCreditsView->Insert(part);
+	} else {
+		fCreditsView->SetFontAndColor(be_plain_font, B_FONT_ALL, &fTextColor);
+		fCreditsView->Insert(haikuLicense);
+	}
 
 	// GNU copyrights
 	AddCopyrightEntry("The GNU Project",
@@ -2395,13 +2414,20 @@ AboutView::_CreateCreditsView()
 		.SetLicense(kBSDTwoClause)
 		.SetURL("https://www.tarsnap.com/scrypt.html"));
 
+	// md4c
+	_AddPackageCredit(PackageCredit("md4c")
+		.SetCopyright(B_TRANSLATE(COPYRIGHT_STRING "2016-2024 Martin Mitáš"))
+		.SetLicense("MIT")
+		.SetURL("https://github.com/mity/md4c"));
+
 	// Fork mixed MIT/GPL licensing note
 	_AddPackageCredit(PackageCredit("Fork licensing")
 		.SetCopyrights(
 			B_TRANSLATE(COPYRIGHT_STRING "2026 Fabio Tomat."),
-			B_TRANSLATE(COPYRIGHT_STRING "2026 GitHub Copilot."),
+			B_TRANSLATE(COPYRIGHT_STRING "2026 GitHub Copilot / Gemini / Claude."),
+			B_TRANSLATE("This fork is released under the GNU GPL v2 license, while "
+				"most individual components remain covered by the MIT license."),
 			NULL)
-		.SetSources(B_TRANSLATE("This fork contains components released under both MIT and GNU GPL v2 licenses."), NULL)
 		.SetLicenses("MIT", kGPLv2, NULL));
 
 	_AddCopyrightsFromAttribute();
