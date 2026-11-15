@@ -30,6 +30,7 @@
 #include "ScreenManager.h"
 #include "ServerProtocol.h"
 #include "HWInterface.h"
+#include <edid.h>
 
 
 //#define DEBUG_SERVER
@@ -247,6 +248,66 @@ AppServer::MessageReceived(BMessage* message)
 
 			BMessage reply;
 			reply.AddBool("has_2d_acceleration", has);
+			message->SendReply(&reply);
+			break;
+		}
+
+		case 'gedi':
+		{
+			status_t status = B_NOT_SUPPORTED;
+			edid1_info edid;
+			memset(&edid, 0, sizeof(edid));
+			uint32 version = 0;
+
+			int32 screenIndex = 0;
+			message->FindInt32("screen", &screenIndex);
+
+			BAutolock locker(gScreenManager);
+			if (gScreenManager && screenIndex >= 0
+				&& screenIndex < gScreenManager->CountScreens()) {
+				Screen* s = gScreenManager->ScreenAt(screenIndex);
+				if (s != NULL && s->HWInterface() != NULL)
+					status = s->HWInterface()->GetEDID(&edid, sizeof(edid), &version);
+			}
+
+			BMessage reply;
+			reply.AddInt32("status", status);
+			if (status == B_OK) {
+				reply.AddData("edid", B_RAW_TYPE, &edid, sizeof(edid));
+				reply.AddInt32("version", (int32)version);
+			}
+			message->SendReply(&reply);
+			break;
+		}
+
+		case 'sedi':
+		{
+			status_t status = B_BAD_VALUE;
+			const void* edidData = NULL;
+			ssize_t dataSize = 0;
+			int32 version = EDID_VERSION_1;
+			message->FindInt32("version", &version);
+
+			int32 screenIndex = 0;
+			message->FindInt32("screen", &screenIndex);
+
+			if (message->FindData("edid", B_RAW_TYPE, &edidData, &dataSize) == B_OK
+				&& dataSize == sizeof(edid1_info) && edidData != NULL) {
+				BAutolock locker(gScreenManager);
+				if (gScreenManager && screenIndex >= 0
+					&& screenIndex < gScreenManager->CountScreens()) {
+					Screen* s = gScreenManager->ScreenAt(screenIndex);
+					if (s != NULL && s->HWInterface() != NULL)
+						status = s->HWInterface()->SetEDID(edidData, dataSize, (uint32)version);
+					else
+						status = B_ERROR;
+				} else {
+					status = B_ERROR;
+				}
+			}
+
+			BMessage reply;
+			reply.AddInt32("status", status);
 			message->SendReply(&reply);
 			break;
 		}

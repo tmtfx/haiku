@@ -63,6 +63,9 @@ public:
 	virtual status_t			SetBrightness(float);
 	virtual status_t			GetBrightness(float*);
 
+	virtual status_t			GetEDID(void* info, uint32 size, uint32* version);
+	virtual status_t			SetEDID(const void* info, uint32 size, uint32 version);
+
 	virtual status_t			GetAccelerantPath(BString& path);
 	virtual status_t			GetDriverPath(BString& path);
 
@@ -179,6 +182,7 @@ private:
 			// brightness hooks
 			set_brightness		fAccSetBrightness;
 			get_brightness		fAccGetBrightness;
+			set_edid_info		fAccSetEDIDInfo;
 
 			// overlay hooks
 			overlay_count				fAccOverlayCount;

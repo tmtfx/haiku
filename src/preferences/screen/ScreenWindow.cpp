@@ -48,6 +48,8 @@
 
 #include <InterfacePrivate.h>
 #include <CheckBox.h>
+#include <FilePanel.h>
+#include <edid.h>
 
 #include "AlertWindow.h"
 #include "Constants.h"
@@ -179,7 +181,9 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 	fOtherRefresh(NULL),
 	fScreenMode(this),
 	fUndoScreenMode(this),
-	fModified(false)
+	fModified(false),
+	fDumpFilePanel(NULL),
+	fLoadFilePanel(NULL)
 {
 	BScreen screen(this);
 
@@ -231,6 +235,17 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 		screen.Frame().IntegerHeight() + 1);
 	fMonitorView->SetToolTip(B_TRANSLATE("Set background" B_UTF8_ELLIPSIS));
 	groupView->AddChild(fMonitorView);
+
+	// EDID dump and load buttons
+	fDumpEDIDButton = new BButton("dumpEDID", B_TRANSLATE("Dump EDID"),
+		new BMessage(BUTTON_DUMP_EDID_MSG));
+	fLoadEDIDButton = new BButton("loadEDID", B_TRANSLATE("Load EDID"),
+		new BMessage(BUTTON_LOAD_EDID_MSG));
+
+	groupView->AddChild(BLayoutBuilder::Group<>(B_HORIZONTAL, B_USE_SMALL_SPACING)
+		.Add(fDumpEDIDButton)
+		.Add(fLoadEDIDButton)
+		.View());
 
 	// brightness slider
 	fBrightnessSlider = new BSlider("brightness", B_TRANSLATE("Brightness:"),
@@ -704,6 +719,8 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 ScreenWindow::~ScreenWindow()
 {
 	delete fSettings;
+	delete fDumpFilePanel;
+	delete fLoadFilePanel;
 }
 
 
@@ -1362,9 +1379,176 @@ ScreenWindow::MessageReceived(BMessage* message)
 			break;
 		}
 
+		case BUTTON_DUMP_EDID_MSG:
+			if (fDumpFilePanel == NULL) {
+				BMessenger messenger(this);
+				fDumpFilePanel = new BFilePanel(B_SAVE_PANEL, &messenger, NULL,
+					B_FILE_NODE, false, NULL);
+				fDumpFilePanel->SetSaveText("edid_info.bin");
+			}
+			fDumpFilePanel->Show();
+			break;
+
+		case BUTTON_LOAD_EDID_MSG:
+			if (fLoadFilePanel == NULL) {
+				BMessenger messenger(this);
+				fLoadFilePanel = new BFilePanel(B_OPEN_PANEL, &messenger, NULL,
+					B_FILE_NODE, false, NULL);
+			}
+			fLoadFilePanel->Show();
+			break;
+
+		case B_SAVE_REQUESTED:
+		{
+			entry_ref dirRef;
+			const char* name;
+			if (message->FindRef("directory", &dirRef) == B_OK
+				&& message->FindString("name", &name) == B_OK) {
+				_DumpEDID(&dirRef, name);
+			}
+			break;
+		}
+
+		case B_REFS_RECEIVED:
+		{
+			entry_ref ref;
+			if (message->FindRef("refs", &ref) == B_OK) {
+				_LoadEDID(&ref);
+			}
+			break;
+		}
+
 		default:
 			BWindow::MessageReceived(message);
 	}
+}
+
+
+void
+ScreenWindow::_DumpEDID(const entry_ref* dirRef, const char* name)
+{
+	BMessenger msgr("application/x-vnd.haiku-app_server");
+	BMessage request('gedi');
+	BMessage reply;
+	if (!msgr.IsValid() || msgr.SendMessage(&request, &reply, 200000) != B_OK) {
+		BAlert* alert = new BAlert(B_TRANSLATE("Error"),
+			B_TRANSLATE("Could not communicate with the app_server."),
+			B_TRANSLATE("OK"), NULL, NULL, B_WIDTH_AS_USUAL, B_STOP_ALERT);
+		alert->Go();
+		return;
+	}
+
+	status_t status = B_ERROR;
+	reply.FindInt32("status", &status);
+	if (status != B_OK) {
+		BString errStr(B_TRANSLATE("Could not retrieve EDID from display driver:\n\t"));
+		errStr << strerror(status);
+		BAlert* alert = new BAlert(B_TRANSLATE("Error"), errStr.String(),
+			B_TRANSLATE("OK"), NULL, NULL, B_WIDTH_AS_USUAL, B_STOP_ALERT);
+		alert->Go();
+		return;
+	}
+
+	const void* edidData = NULL;
+	ssize_t dataSize = 0;
+	if (reply.FindData("edid", B_RAW_TYPE, &edidData, &dataSize) != B_OK
+		|| edidData == NULL || dataSize <= 0) {
+		BAlert* alert = new BAlert(B_TRANSLATE("Error"),
+			B_TRANSLATE("Invalid EDID data received from app_server."),
+			B_TRANSLATE("OK"), NULL, NULL, B_WIDTH_AS_USUAL, B_STOP_ALERT);
+		alert->Go();
+		return;
+	}
+
+	BDirectory directory(dirRef);
+	BFile file(&directory, name, B_WRITE_ONLY | B_CREATE_FILE | B_ERASE_FILE);
+	if (file.InitCheck() != B_OK) {
+		BString errStr(B_TRANSLATE("Could not create file:\n\t"));
+		errStr << strerror(file.InitCheck());
+		BAlert* alert = new BAlert(B_TRANSLATE("Error"), errStr.String(),
+			B_TRANSLATE("OK"), NULL, NULL, B_WIDTH_AS_USUAL, B_STOP_ALERT);
+		alert->Go();
+		return;
+	}
+
+	ssize_t written = file.Write(edidData, dataSize);
+	if (written < dataSize) {
+		BAlert* alert = new BAlert(B_TRANSLATE("Error"),
+			B_TRANSLATE("Failed to write complete EDID data to file."),
+			B_TRANSLATE("OK"), NULL, NULL, B_WIDTH_AS_USUAL, B_STOP_ALERT);
+		alert->Go();
+		return;
+	}
+
+	BAlert* alert = new BAlert(B_TRANSLATE("Dump EDID"),
+		B_TRANSLATE("EDID successfully saved to disk."),
+		B_TRANSLATE("OK"), NULL, NULL, B_WIDTH_AS_USUAL, B_INFO_ALERT);
+	alert->Go();
+}
+
+
+void
+ScreenWindow::_LoadEDID(const entry_ref* ref)
+{
+	BFile file(ref, B_READ_ONLY);
+	if (file.InitCheck() != B_OK) {
+		BString errStr(B_TRANSLATE("Could not open file:\n\t"));
+		errStr << strerror(file.InitCheck());
+		BAlert* alert = new BAlert(B_TRANSLATE("Error"), errStr.String(),
+			B_TRANSLATE("OK"), NULL, NULL, B_WIDTH_AS_USUAL, B_STOP_ALERT);
+		alert->Go();
+		return;
+	}
+
+	off_t size = 0;
+	file.GetSize(&size);
+	if (size < (off_t)sizeof(edid1_info)) {
+		BAlert* alert = new BAlert(B_TRANSLATE("Error"),
+			B_TRANSLATE("File is too small to contain valid edid1_info structure."),
+			B_TRANSLATE("OK"), NULL, NULL, B_WIDTH_AS_USUAL, B_STOP_ALERT);
+		alert->Go();
+		return;
+	}
+
+	edid1_info edid;
+	if (file.Read(&edid, sizeof(edid)) != (ssize_t)sizeof(edid)) {
+		BAlert* alert = new BAlert(B_TRANSLATE("Error"),
+			B_TRANSLATE("Error reading EDID data from file."),
+			B_TRANSLATE("OK"), NULL, NULL, B_WIDTH_AS_USUAL, B_STOP_ALERT);
+		alert->Go();
+		return;
+	}
+
+	BMessenger msgr("application/x-vnd.haiku-app_server");
+	BMessage request('sedi');
+	request.AddData("edid", B_RAW_TYPE, &edid, sizeof(edid));
+	request.AddInt32("version", 1);
+	BMessage reply;
+	if (!msgr.IsValid() || msgr.SendMessage(&request, &reply, 200000) != B_OK) {
+		BAlert* alert = new BAlert(B_TRANSLATE("Error"),
+			B_TRANSLATE("Could not communicate with the app_server."),
+			B_TRANSLATE("OK"), NULL, NULL, B_WIDTH_AS_USUAL, B_STOP_ALERT);
+		alert->Go();
+		return;
+	}
+
+	status_t status = B_ERROR;
+	reply.FindInt32("status", &status);
+	if (status != B_OK) {
+		BString errStr(B_TRANSLATE("Driver failed to load EDID:\n\t"));
+		errStr << strerror(status);
+		BAlert* alert = new BAlert(B_TRANSLATE("Error"), errStr.String(),
+			B_TRANSLATE("OK"), NULL, NULL, B_WIDTH_AS_USUAL, B_STOP_ALERT);
+		alert->Go();
+		return;
+	}
+
+	BAlert* alert = new BAlert(B_TRANSLATE("Load EDID"),
+		B_TRANSLATE("EDID successfully loaded into graphics driver."),
+		B_TRANSLATE("OK"), NULL, NULL, B_WIDTH_AS_USUAL, B_INFO_ALERT);
+	alert->Go();
+
+	_UpdateActiveMode();
 }
 
 

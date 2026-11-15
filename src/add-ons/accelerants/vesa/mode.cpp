@@ -283,6 +283,22 @@ vesa_get_edid_info(void* info, size_t size, uint32* _version)
 
 
 status_t
+vesa_set_edid_info(void* info, size_t size, uint32 version)
+{
+	TRACE(("vesa_set_edid_info()\n"));
+
+	if (version != EDID_VERSION_1)
+		return B_NOT_SUPPORTED;
+	if (info == NULL || size < sizeof(struct edid1_info))
+		return B_BAD_VALUE;
+
+	memcpy(&gInfo->shared_info->edid_info, info, sizeof(struct edid1_info));
+	gInfo->shared_info->has_edid = true;
+	return B_OK;
+}
+
+
+status_t
 vesa_get_frame_buffer_config(frame_buffer_config* config)
 {
 	TRACE(("vesa_get_frame_buffer_config()\n"));

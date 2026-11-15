@@ -25,6 +25,7 @@ class BSlider;
 class BSpinner;
 class BStringView;
 class BCheckBox;
+class BFilePanel;
 
 class RefreshWindow;
 class MonitorView;
@@ -60,6 +61,9 @@ private:
 			void			_UpdateColorLabel();
 
 			void			_Apply();
+
+			void			_DumpEDID(const entry_ref* dirRef, const char* name);
+			void			_LoadEDID(const entry_ref* ref);
 
 			status_t		_WriteVesaModeFile(const screen_mode& mode) const;
 			bool			_IsVesa() const { return fIsVesa; }
@@ -118,6 +122,11 @@ private:
 			uint32			fOriginalWorkspacesRows;
 			float			fOriginalBrightness;
 			bool			fModified;
+
+			BButton*		fDumpEDIDButton;
+			BButton*		fLoadEDIDButton;
+			BFilePanel*		fDumpFilePanel;
+			BFilePanel*		fLoadFilePanel;
 };
 
 #endif	/* SCREEN_WINDOW_H */

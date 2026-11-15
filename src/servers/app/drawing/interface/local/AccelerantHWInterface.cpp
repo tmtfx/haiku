@@ -220,6 +220,7 @@ AccelerantHWInterface::AccelerantHWInterface()
 	// brightness hooks
 	fAccSetBrightness(NULL),
 	fAccGetBrightness(NULL),
+	fAccSetEDIDInfo(NULL),
 
 	// overlay hooks
 	fAccOverlayCount(NULL),
@@ -546,6 +547,8 @@ AccelerantHWInterface::_SetupDefaultHooks()
 	// brightness
 	fAccGetBrightness = (get_brightness)fAccelerantHook(B_GET_BRIGHTNESS, NULL);
 	fAccSetBrightness = (set_brightness)fAccelerantHook(B_SET_BRIGHTNESS, NULL);
+
+	fAccSetEDIDInfo = (set_edid_info)fAccelerantHook(B_SET_EDID_INFO, NULL);
 
 	return B_OK;
 }
@@ -1220,6 +1223,30 @@ AccelerantHWInterface::GetBrightness(float* brightness)
 		return B_UNSUPPORTED;
 
 	return fAccGetBrightness(brightness);
+}
+
+
+status_t
+AccelerantHWInterface::GetEDID(void* info, uint32 size, uint32* version)
+{
+	AutoReadLocker _(this);
+
+	if (fAccGetEDIDInfo == NULL)
+		return B_UNSUPPORTED;
+
+	return fAccGetEDIDInfo(info, size, version);
+}
+
+
+status_t
+AccelerantHWInterface::SetEDID(const void* info, uint32 size, uint32 version)
+{
+	AutoReadLocker _(this);
+
+	if (fAccSetEDIDInfo == NULL)
+		return B_UNSUPPORTED;
+
+	return fAccSetEDIDInfo(const_cast<void*>(info), size, version);
 }
 
 

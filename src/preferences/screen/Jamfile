@@ -21,7 +21,7 @@ Application Screen :
 	ScreenSettings.cpp
 	ScreenWindow.cpp
 	Utility.cpp
-	: be [ TargetLibstdc++ ] [ TargetLibsupc++ ] localestub libaccelerantscommon.a
+	: be tracker [ TargetLibstdc++ ] [ TargetLibsupc++ ] localestub libaccelerantscommon.a
 	: Screen.rdef
 	;
 

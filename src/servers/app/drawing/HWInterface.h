@@ -115,6 +115,11 @@ public:
 	virtual status_t			SetBrightness(float) = 0;
 	virtual status_t			GetBrightness(float*) = 0;
 
+	virtual status_t			GetEDID(void* info, uint32 size, uint32* version)
+									{ return B_NOT_SUPPORTED; }
+	virtual status_t			SetEDID(const void* info, uint32 size, uint32 version)
+									{ return B_NOT_SUPPORTED; }
+
 	virtual status_t			GetAccelerantPath(BString& path);
 	virtual status_t			GetDriverPath(BString& path);
 
