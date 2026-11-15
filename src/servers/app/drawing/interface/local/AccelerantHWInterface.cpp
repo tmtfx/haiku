@@ -1705,6 +1705,13 @@ AccelerantHWInterface::_UpdateHardwareCursor(bool wasHardwareCursorEnabled)
 	// cursor backends only expose limited palette/shape formats.
 	const bool canUseBitmapCursorForDrag = fDragBitmap == NULL || fCursorBits >= 32;
 	if (canUseBitmapCursorForDrag && fAccSetCursorBitmap != NULL && fUserEnableHardwareCursor) {
+		// The accelerant picks the VRAM slot for a bitmap upload from its own
+		// animation state: while an animation is running it writes into the
+		// frame currently on screen, otherwise into the next free slot. Reset
+		// it first, so the new cursor always lands in slot 0 - otherwise a
+		// later stop reprograms slot 0, which still holds the old cursor.
+		_ResetCursorAnimationLocked();
+
 		uint16 xHotSpot = (uint16)cursor->GetHotSpot().x;
 		uint16 yHotSpot = (uint16)cursor->GetHotSpot().y;
 		uint16 width = (uint16)cursor->Bounds().IntegerWidth() + 1;
@@ -1928,19 +1935,36 @@ AccelerantHWInterface::MoveCursorTo(float x, float y)
 
 
 void
-AccelerantHWInterface::_StopCursorAnimationLocked()
+AccelerantHWInterface::_ResetCursorAnimationLocked()
 {
-	if (fCursorAnimationRunning && fAccStopCursorAni != NULL)
+	// Always stop the accelerant side, even if no animation is running yet
+	// (e.g. still waiting for the start/idle delay): stopping also rewinds
+	// the accelerant's upload slot to 0 and shows slot 0.
+	if (fAccStopCursorAni != NULL)
 		fAccStopCursorAni();
-
-	if (fCursorAnimationActive && fAccSetCursorBitmap != NULL)
-		_ApplyCursorAnimationFrameLocked(0);
 
 	fCursorAnimationActive = false;
 	fCursorAnimationRunning = false;
 	fCursorAnimationFrameCount = 0;
 	fCursorAnimationCurrentFrame = 0;
 	fCursorAnimationGeneration++;
+}
+
+
+void
+AccelerantHWInterface::_StopCursorAnimationLocked()
+{
+	bool wasActive = fCursorAnimationActive || fCursorAnimationRunning;
+	if (!wasActive)
+		return;
+
+	_ResetCursorAnimationLocked();
+
+	// Slot 0 is now on screen: refresh it with the current cursor's base
+	// frame (fails harmlessly if the current cursor has no animation, in
+	// which case it was already uploaded to slot 0 as a static bitmap).
+	if (fAccSetCursorBitmap != NULL)
+		_ApplyCursorAnimationFrameLocked(0);
 }
 
 
@@ -2016,9 +2040,11 @@ AccelerantHWInterface::_UpdateCursorAnimationLocked()
 		/ max_c(1.0f, (float)cursor->AnimationFrameDelayMs()))
 		* fUserCursorAnimationSpeedFactor;
 
-	if (fCursorAnimationRunning && fAccStopCursorAni != NULL) {
+	// Rewind the accelerant's upload slot to 0 unconditionally, so frames
+	// 0..frameCount-1 land in slots 0..frameCount-1 (the base bitmap uploaded
+	// by _UpdateHardwareCursor() is simply overwritten by frame 0).
+	if (fAccStopCursorAni != NULL)
 		fAccStopCursorAni();
-	}
 	fCursorAnimationRunning = false;
 
 	for (uint32 i = 0; i < frameCount; i++) {

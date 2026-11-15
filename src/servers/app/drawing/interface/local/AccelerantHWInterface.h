@@ -139,6 +139,7 @@ private:
 			void				_SetGrayscalePalette();
 			void				_UpdateHardwareCursor(bool wasHardwareCursorEnabled);
 			void				_UpdateCursorAnimationLocked();
+			void				_ResetCursorAnimationLocked();
 			void				_StopCursorAnimationLocked();
 			status_t			_ApplyCursorAnimationFrameLocked(uint32 frameIndex);
 			static	status_t		_CursorAnimationThreadEntry(void* cookie);
