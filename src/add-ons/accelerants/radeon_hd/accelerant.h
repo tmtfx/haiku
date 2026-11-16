@@ -26,6 +26,9 @@
 	// Maximum displays (more then two requires AtomBIOS)
 #define MAX_GPIO_PINS   64
 	// Maximum possible GPIO pins in gGPIOInfo
+#define RADEON_HD_MAX_CURSOR_FRAMES 16
+	// Maximum animated hardware cursor frames (matches
+	// ServerCursor::B_CURSOR_MAX_ANIMATION_FRAMES)
 
 struct gpu_state {
 	uint32 d1vgaControl;
@@ -82,14 +85,19 @@ struct accelerant_info {
 	RingQueue*		ringQueue[RADEON_QUEUE_MAX]; // Ring buffer command processor
 
 	/* Cursor state */
-	uint32		cursor_fb_offset; /* offset from framebuffer base */
-	addr_t		cursor_phys; /* physical GPU address */
-	uint8*		cursor_vaddr; /* virtual pointer into mapped framebuffer */
+	uint32		cursor_fb_offset; /* offset from framebuffer base (frame 0) */
+	addr_t		cursor_phys; /* physical GPU address (frame 0) */
+	uint8*		cursor_vaddr; /* virtual pointer into mapped framebuffer (frame 0) */
 	uint16		cursor_width;
 	uint16		cursor_height;
 	uint16		cursor_hotx;
 	uint16		cursor_hoty;
 	bool		cursor_visible;
+
+	/* Animated hardware cursor: additional frame buffers reserved right
+	   next to the frame 0 buffer above, same fixed 64x64 ARGB32 slot size. */
+	uint32		cursor_frame_count;
+	uint32		cursor_frame_fb_offset[RADEON_HD_MAX_CURSOR_FRAMES];
 };
 
 

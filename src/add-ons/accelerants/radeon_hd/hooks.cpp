@@ -98,6 +98,18 @@ get_accelerant_hook(uint32 feature, void* data)
 		case B_GET_CURSOR_BITS:
 			return (void*)radeon_get_cursor_bits;
 #endif
+		case B_SUPPORTS_CURSOR_ANI:
+			return (void*)radeon_supports_cursor_ani;
+		case B_CURSOR_SUPPORTED_FRAMES:
+			return (void*)radeon_cursor_supported_frames;
+		case B_START_CURSOR_ANI:
+			return (void*)radeon_start_cursor_ani;
+		case B_STOP_CURSOR_ANI:
+			return (void*)radeon_stop_cursor_ani;
+		case B_SET_CURSOR_ANI_SPEED:
+			return (void*)radeon_set_cursor_ani_speed;
+		case B_SET_CURSOR_ANI_START_DELAY:
+			return (void*)radeon_set_cursor_ani_start_delay;
 	}
 
 	return NULL;

@@ -55,7 +55,7 @@ gpio_info* gGPIOInfo[MAX_GPIO_PINS];
 static status_t
 init_hardware_cursor(accelerant_info* info)
 {
-    uint32 cursorSize = 64 * 64 * 4; // 16 KB (ARGB32)
+    uint32 cursorSize = 64 * 64 * 4; // 16 KB per frame (ARGB32)
     uint32 alignment = 4096;         // Allineamento richiesto dall'hardware AMD
 
     // Recuperiamo la dimensione della VRAM passata dal driver del kernel
@@ -66,24 +66,39 @@ init_hardware_cursor(accelerant_info* info)
         return B_NO_MEMORY;
     }
 
+    // Quante slot da cursorSize riusciamo a riservare in fondo alla VRAM,
+    // fino al tetto RADEON_HD_MAX_CURSOR_FRAMES (= B_CURSOR_MAX_ANIMATION_FRAMES
+    // lato app_server): la prima slot resta il cursore statico "frame 0",
+    // le altre servono solo se/quando viene caricata un'animazione.
+    uint32 frameCount = RADEON_HD_MAX_CURSOR_FRAMES;
+    while (frameCount > 1 && fbSize < (uint64)frameCount * cursorSize)
+        frameCount--;
+
     // Calcoliamo l'offset sicuro partendo dal fondo della VRAM
-    uint64 offset = fbSize - cursorSize;
+    uint64 reserved = (uint64)frameCount * cursorSize;
+    uint64 offset = fbSize - reserved;
     offset &= ~((uint64)(alignment - 1)); // Forziamo l'allineamento a pagina (4KB)
 
     // Sottraiamo la memoria isolandola: l'allocatore grafico non la toccherà
     // Nota: adatta il campo a seconda di come si chiama la struttura (es. info->fb.vramSize o simili)
-    // info->fb.vramSize = offset; 
+    // info->fb.vramSize = offset;
+
+    info->cursor_frame_count = frameCount;
+    for (uint32 i = 0; i < frameCount; i++)
+        info->cursor_frame_fb_offset[i] = (uint32)(offset + (uint64)i * cursorSize);
 
     // Salviamo i puntatori logici e fisici definitivi all'interno di gInfo
-    info->cursor_fb_offset = (uint32)offset;
+    // (frame 0 resta accessibile anche dai vecchi campi cursor_fb_offset/
+    // cursor_phys/cursor_vaddr, usati dal path cursore statico)
+    info->cursor_fb_offset = info->cursor_frame_fb_offset[0];
     info->cursor_phys = (addr_t)info->shared_info->frame_buffer_phys + info->cursor_fb_offset;
     info->cursor_vaddr = (uint8*)info->shared_info->frame_buffer + info->cursor_fb_offset;
 
     // Pulizia preventiva per azzerare artefatti o residui di memoria al boot
-    memset(info->cursor_vaddr, 0, cursorSize);
+    memset(info->shared_info->frame_buffer + offset, 0, reserved);
 
-    TRACE("%s: Hardware cursor inizializzato con successo. Offset VRAM: %" B_PRIu32 "\n", 
-        __func__, info->cursor_fb_offset);
+    TRACE("%s: Hardware cursor inizializzato con successo. Offset VRAM: %" B_PRIu32
+        " frames: %" B_PRIu32 "\n", __func__, info->cursor_fb_offset, info->cursor_frame_count);
 
     return B_OK;
 }
@@ -326,6 +341,8 @@ void
 radeon_uninit_accelerant(void)
 {
 	TRACE("%s enter\n", __func__);
+
+	radeon_cursor_ani_uninit();
 
 	gInfo->mode_list = NULL;
 
