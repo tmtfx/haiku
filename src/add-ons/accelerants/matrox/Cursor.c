@@ -24,6 +24,86 @@
 #include "acc_std.h"
 #include "mga_macros.h"
 
+#include <math.h>
+
+
+// Animazione cursore hardware (solo G100+): stesso schema di kyro/radeon_hd/
+// ATI. Un thread dedicato ricicla le slot caricate via SET_CURSOR_BITMAP,
+// riprogrammando solo CURADDL/CURADDH tramite gx00_crtc_cursor_set_frame_address().
+typedef struct {
+	bool		running;
+	bool		terminate;
+	float		speedFactor;
+	bigtime_t	frameInterval;
+	bigtime_t	startDelay;
+	uint32		uploadedFrameCount;
+	uint32		nextUploadFrame;
+	uint32		currentFrame;
+	sem_id		semaphore;
+	thread_id	thread;
+} matrox_cursor_animation_state;
+
+static matrox_cursor_animation_state sCursorAnimation = {
+	false, false, 10.0f, 100000, 0, 1, 0, 0, -1, -1
+};
+
+
+static status_t
+matrox_cursor_animation_thread(void* cookie)
+{
+	(void)cookie;
+
+	while (!sCursorAnimation.terminate) {
+		bigtime_t interval = sCursorAnimation.frameInterval;
+		if (sCursorAnimation.currentFrame == 0 && sCursorAnimation.startDelay > 0)
+			interval += sCursorAnimation.startDelay;
+
+		bigtime_t timeout = sCursorAnimation.running ? interval : 500000;
+		status_t status = acquire_sem_etc(sCursorAnimation.semaphore, 1,
+			B_RELATIVE_TIMEOUT | B_CAN_INTERRUPT, timeout);
+		if (sCursorAnimation.terminate)
+			break;
+
+		if (!sCursorAnimation.running || sCursorAnimation.uploadedFrameCount < 2)
+			continue;
+		if (status != B_TIMED_OUT)
+			continue;
+
+		sCursorAnimation.currentFrame++;
+		if (sCursorAnimation.currentFrame >= sCursorAnimation.uploadedFrameCount)
+			sCursorAnimation.currentFrame = 0;
+
+		si->cursor_active_offset = si->cursor_frame_offsets[sCursorAnimation.currentFrame];
+		gx00_crtc_cursor_set_frame_address(si->cursor_active_offset);
+	}
+
+	return B_OK;
+}
+
+
+static status_t
+matrox_ensure_animation_thread(void)
+{
+	if (sCursorAnimation.thread >= B_OK)
+		return B_OK;
+
+	sCursorAnimation.semaphore = create_sem(0, "matrox cursor ani");
+	if (sCursorAnimation.semaphore < B_OK)
+		return sCursorAnimation.semaphore;
+
+	sCursorAnimation.terminate = false;
+	sCursorAnimation.thread = spawn_thread(matrox_cursor_animation_thread,
+		"matrox cursor ani", B_DISPLAY_PRIORITY, NULL);
+	if (sCursorAnimation.thread < B_OK) {
+		delete_sem(sCursorAnimation.semaphore);
+		sCursorAnimation.semaphore = -1;
+		return sCursorAnimation.thread;
+	}
+
+	resume_thread(sCursorAnimation.thread);
+	return B_OK;
+}
+
 static status_t program_old_matrox_cursor(uint16 width, uint16 height, uint16 bytesPerRow, const uint8* bitmapData)
 {
 	uint8 temp_buf[1024];
@@ -88,22 +168,36 @@ static status_t matrox_set_cursor_bitmap_gseries(uint16 width, uint16 height, ui
 	if (width > 64 || height > 64)
 		return B_ERROR;
 
-	// Hardware cursor virtual address starts at the beginning of the VRAM
 	vuint8 * dest;
     int i;
+	uint32 targetFrame;
 
-    dest = (vuint8*) si->framebuffer;
+	if (matrox_ensure_animation_thread() != B_OK)
+		return B_ERROR;
+
+	if (!sCursorAnimation.running) {
+		if (sCursorAnimation.nextUploadFrame == 0)
+			sCursorAnimation.uploadedFrameCount = 0;
+		sCursorAnimation.currentFrame = sCursorAnimation.nextUploadFrame;
+	}
+
+	targetFrame = sCursorAnimation.running
+		? sCursorAnimation.currentFrame : sCursorAnimation.nextUploadFrame;
+	if (targetFrame >= si->cursor_frame_count)
+		targetFrame = 0;
+
+    dest = (vuint8*) si->framebuffer + si->cursor_frame_offsets[targetFrame];
 	if (dest == NULL) return B_NO_INIT;
 
 	// Avoid flickering
 	uint8 curctrl = DXIR(CURCTRL);
-	DXIW(CURCTRL, curctrl & ~0x01); 
+	DXIW(CURCTRL, curctrl & ~0x01);
 
-	
+
 	// Reset HC to 0 for transparency
     // AND=0 and XOR=0 means transparency
     for (i = 0; i < 1024 ; i++) {
-        dest[i] = 0x00; 
+        dest[i] = 0x00;
     }
 
 	const uint8* src = (const uint8*)bitmapData;
@@ -183,6 +277,19 @@ static status_t matrox_set_cursor_bitmap_gseries(uint16 width, uint16 height, ui
 	}
 
 	DXIW(CURCTRL, curctrl);
+
+	si->cursor_active_offset = si->cursor_frame_offsets[targetFrame];
+	gx00_crtc_cursor_set_frame_address(si->cursor_active_offset);
+
+	if (!sCursorAnimation.running) {
+		if (targetFrame + 1 < si->cursor_frame_count)
+			sCursorAnimation.nextUploadFrame = targetFrame + 1;
+		else
+			sCursorAnimation.nextUploadFrame = 0;
+
+		if (sCursorAnimation.uploadedFrameCount < targetFrame + 1)
+			sCursorAnimation.uploadedFrameCount = targetFrame + 1;
+	}
 
 	return B_OK;
 }
@@ -359,7 +466,111 @@ status_t SET_CURSOR_BITMAP(uint16 width, uint16 height, uint16 hotX, uint16 hotY
 		// SERIES G (G100 - G550) - 2 bit - RGB palette
 		// ============================================
 		
-		// NOTE: Hardware cursor is in the reserved VRAM's first KB
+		// NOTE: Hardware cursor is in a reserved tail region of VRAM
 		return matrox_set_cursor_bitmap_gseries(width, height, bytesPerRow, bitmapData);
 	}
+}
+
+
+bool
+SUPPORTS_CURSOR_ANI(void)
+{
+	// Pre-G100 cards have no cursor surface-address register (serial DAC
+	// push only), so they never get cursor_frame_count >= 2.
+	return si->cursor_frame_count >= 2;
+}
+
+
+uint32
+CURSOR_SUPPORTED_FRAMES(void)
+{
+	if (!SUPPORTS_CURSOR_ANI())
+		return 0;
+	return si->cursor_frame_count - 1;
+}
+
+
+status_t
+START_CURSOR_ANI(void)
+{
+	if (!SUPPORTS_CURSOR_ANI())
+		return B_NOT_SUPPORTED;
+	if (sCursorAnimation.uploadedFrameCount < 2)
+		return B_BAD_VALUE;
+	if (matrox_ensure_animation_thread() != B_OK)
+		return B_ERROR;
+
+	sCursorAnimation.currentFrame = 0;
+	si->cursor_active_offset = si->cursor_frame_offsets[0];
+	gx00_crtc_cursor_set_frame_address(si->cursor_active_offset);
+
+	sCursorAnimation.running = true;
+	if (sCursorAnimation.semaphore >= B_OK)
+		release_sem(sCursorAnimation.semaphore);
+	return B_OK;
+}
+
+
+status_t
+STOP_CURSOR_ANI(void)
+{
+	if (!SUPPORTS_CURSOR_ANI())
+		return B_NOT_SUPPORTED;
+
+	sCursorAnimation.running = false;
+	sCursorAnimation.currentFrame = 0;
+	sCursorAnimation.nextUploadFrame = 0;
+
+	si->cursor_active_offset = si->cursor_frame_offsets[0];
+	gx00_crtc_cursor_set_frame_address(si->cursor_active_offset);
+	return B_OK;
+}
+
+
+status_t
+SET_CURSOR_ANI_SPEED(float speedFactor)
+{
+	if (!SUPPORTS_CURSOR_ANI())
+		return B_NOT_SUPPORTED;
+	if (!isfinite(speedFactor) || speedFactor <= 0.0f)
+		return B_BAD_VALUE;
+
+	sCursorAnimation.speedFactor = speedFactor;
+	sCursorAnimation.frameInterval = (bigtime_t)(1000000.0f / speedFactor);
+	if (sCursorAnimation.frameInterval < 5000)
+		sCursorAnimation.frameInterval = 5000;
+	return B_OK;
+}
+
+
+status_t
+SET_CURSOR_ANI_START_DELAY(uint32 startDelayMs)
+{
+	if (!SUPPORTS_CURSOR_ANI())
+		return B_NOT_SUPPORTED;
+	sCursorAnimation.startDelay = (bigtime_t)startDelayMs * 1000;
+	return B_OK;
+}
+
+
+void
+matrox_cursor_animation_uninit(void)
+{
+	if (sCursorAnimation.thread >= B_OK) {
+		sCursorAnimation.terminate = true;
+		if (sCursorAnimation.semaphore >= B_OK)
+			release_sem(sCursorAnimation.semaphore);
+		status_t result;
+		wait_for_thread(sCursorAnimation.thread, &result);
+	}
+	if (sCursorAnimation.semaphore >= B_OK)
+		delete_sem(sCursorAnimation.semaphore);
+
+	sCursorAnimation.running = false;
+	sCursorAnimation.terminate = false;
+	sCursorAnimation.uploadedFrameCount = 1;
+	sCursorAnimation.nextUploadFrame = 0;
+	sCursorAnimation.currentFrame = 0;
+	sCursorAnimation.semaphore = -1;
+	sCursorAnimation.thread = -1;
 }

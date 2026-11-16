@@ -105,3 +105,55 @@ GetCursorBits(void)
 {
 	return 1; // 1 bit + transparency/inversion
 }
+
+
+bool
+SupportsCursorAnimation(void)
+{
+	return gInfo.SupportsCursorAnimation != NULL && gInfo.SupportsCursorAnimation();
+}
+
+
+uint32
+CursorSupportedFrames(void)
+{
+	if (gInfo.CursorSupportedFrames == NULL)
+		return 0;
+	return gInfo.CursorSupportedFrames();
+}
+
+
+status_t
+StartCursorAnimation(void)
+{
+	if (gInfo.StartCursorAnimation == NULL)
+		return B_NOT_SUPPORTED;
+	return gInfo.StartCursorAnimation();
+}
+
+
+status_t
+StopCursorAnimation(void)
+{
+	if (gInfo.StopCursorAnimation == NULL)
+		return B_NOT_SUPPORTED;
+	return gInfo.StopCursorAnimation();
+}
+
+
+status_t
+SetCursorAnimationSpeed(float speedFactor)
+{
+	if (gInfo.SetCursorAnimationSpeed == NULL)
+		return B_NOT_SUPPORTED;
+	return gInfo.SetCursorAnimationSpeed(speedFactor);
+}
+
+
+status_t
+SetCursorAnimationStartDelay(uint32 startDelayMs)
+{
+	if (gInfo.SetCursorAnimationStartDelay == NULL)
+		return B_NOT_SUPPORTED;
+	return gInfo.SetCursorAnimationStartDelay(startDelayMs);
+}

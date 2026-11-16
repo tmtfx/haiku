@@ -15,7 +15,15 @@
 
 
 
-void 
+void
+Virge_SetCursorFrameAddress(uint32 offset)
+{
+	WriteCrtcReg(0x4d, (0xff & offset / 1024));
+	WriteCrtcReg(0x4c, (0x0f00 & offset / 1024) >> 8);
+}
+
+
+void
 Virge_ShowCursor(bool bShow)
 {
 	// Turn cursor on/off.
@@ -108,8 +116,7 @@ Virge_LoadCursorImage(int width, int height, uint8* andMask, uint8* xorMask)
 
 	// Set cursor location in video memory.
 
-	WriteCrtcReg(0x4d, (0xff & si.cursorOffset / 1024));
-	WriteCrtcReg(0x4c, (0x0f00 & si.cursorOffset / 1024) >> 8);
+	Virge_SetCursorFrameAddress(si.cursorFrameOffsets[0]);
 
 	// Set the cursor colors which are black foreground and white background.
 

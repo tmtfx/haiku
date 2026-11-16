@@ -58,7 +58,11 @@ private:
 									uint32 vectorSize, float shadowStrength);
 			void				_InitCursor(ServerCursor*& cursorMember, BCursorID id,
 									const uint8* vector, uint32 vectorSize,
-									const BPoint& hotSpot, float scale);
+									const BPoint& hotSpot, float scale,
+									const char* assetName);
+			void				_ConfigureSystemCursorAnimation(
+									ServerCursor& cursor, const char* assetName,
+									uint32 cursorSize, float shadowStrength);
 			void				_LoadCursor(ServerCursor*& cursorMember,
 									const CursorSet& set, BCursorID id);
 			ServerCursor*		_FindCursor(team_id cientTeam,

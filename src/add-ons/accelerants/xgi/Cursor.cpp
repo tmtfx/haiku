@@ -63,7 +63,100 @@
 
 #include "accelerant.h"
 
+#include <math.h>
 #include <string.h>
+
+
+// Animazione cursore hardware: stesso schema di kyro/radeon_hd/ATI/Matrox/S3/
+// Trident. La bitmap e' sempre quella mono AND/XOR gia' prodotta da
+// xgi_set_cursor_bitmap() (nessun vero colore su questo chip).
+namespace {
+
+struct cursor_animation_state {
+	bool		running;
+	bool		terminate;
+	float		speedFactor;
+	bigtime_t	frameInterval;
+	bigtime_t	startDelay;
+	uint32		uploadedFrameCount;
+	uint32		nextUploadFrame;
+	uint32		currentFrame;
+	sem_id		semaphore;
+	thread_id	thread;
+};
+
+cursor_animation_state sCursorAnimation = {
+	false, false, 10.0f, 100000, 0, 1, 0, 0, -1, -1
+};
+
+} // namespace
+
+
+static void
+xgi_set_cursor_frame_address(uint32 offset)
+{
+	uint32 cursorBase = offset / 1024;
+	uint32 ctrl = read32(XGI_REG_CURSOR_CTRL);
+	ctrl &= 0xF0FE0000;
+	ctrl |= (cursorBase & 0x1FFFF);
+	write32(XGI_REG_CURSOR_CTRL, ctrl);
+	gInfo.sharedInfo->cursorActiveOffset = offset;
+}
+
+
+static status_t
+xgi_cursor_animation_thread(void*)
+{
+	while (!sCursorAnimation.terminate) {
+		bigtime_t interval = sCursorAnimation.frameInterval;
+		if (sCursorAnimation.currentFrame == 0 && sCursorAnimation.startDelay > 0)
+			interval += sCursorAnimation.startDelay;
+
+		bigtime_t timeout = sCursorAnimation.running ? interval : 500000;
+		status_t status = acquire_sem_etc(sCursorAnimation.semaphore, 1,
+			B_RELATIVE_TIMEOUT | B_CAN_INTERRUPT, timeout);
+		if (sCursorAnimation.terminate)
+			break;
+
+		if (!sCursorAnimation.running || sCursorAnimation.uploadedFrameCount < 2)
+			continue;
+		if (status != B_TIMED_OUT)
+			continue;
+
+		sCursorAnimation.currentFrame++;
+		if (sCursorAnimation.currentFrame >= sCursorAnimation.uploadedFrameCount)
+			sCursorAnimation.currentFrame = 0;
+
+		xgi_set_cursor_frame_address(
+			gInfo.sharedInfo->cursorFrameOffsets[sCursorAnimation.currentFrame]);
+	}
+
+	return B_OK;
+}
+
+
+static status_t
+xgi_ensure_animation_thread(void)
+{
+	if (sCursorAnimation.thread >= B_OK)
+		return B_OK;
+
+	sCursorAnimation.semaphore = create_sem(0, "xgi cursor ani");
+	if (sCursorAnimation.semaphore < B_OK)
+		return sCursorAnimation.semaphore;
+
+	sCursorAnimation.terminate = false;
+	sCursorAnimation.thread = spawn_thread(xgi_cursor_animation_thread,
+		"xgi cursor ani", B_DISPLAY_PRIORITY, NULL);
+	if (sCursorAnimation.thread < B_OK) {
+		delete_sem(sCursorAnimation.semaphore);
+		sCursorAnimation.semaphore = -1;
+		return sCursorAnimation.thread;
+	}
+
+	resume_thread(sCursorAnimation.thread);
+	return B_OK;
+}
 
 /*
  * Porting of vWaitCRT1VerticalRetrace() (refcode/xgi_dac.c:633-657): wait
@@ -167,8 +260,22 @@ xgi_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 		return B_NO_INIT;
 	}
 
-	uint8* cursorBuffer = gInfo.frameBuffer + gInfo.sharedInfo->cursorOffset;
-	uint32 cursorBase = gInfo.sharedInfo->cursorOffset / 1024;
+	if (xgi_ensure_animation_thread() != B_OK)
+		return B_ERROR;
+
+	if (!sCursorAnimation.running) {
+		if (sCursorAnimation.nextUploadFrame == 0)
+			sCursorAnimation.uploadedFrameCount = 0;
+		sCursorAnimation.currentFrame = sCursorAnimation.nextUploadFrame;
+	}
+
+	uint32 targetFrame = sCursorAnimation.running
+		? sCursorAnimation.currentFrame : sCursorAnimation.nextUploadFrame;
+	if (targetFrame >= gInfo.sharedInfo->cursorFrameCount)
+		targetFrame = 0;
+
+	uint8* cursorBuffer = gInfo.frameBuffer + gInfo.sharedInfo->cursorFrameOffsets[targetFrame];
+	uint32 cursorBase = gInfo.sharedInfo->cursorFrameOffsets[targetFrame] / 1024;
 
 	gInfo.sharedInfo->cursor.hotX = hotX;
 	gInfo.sharedInfo->cursor.hotY = hotY;
@@ -206,10 +313,17 @@ xgi_set_cursor_shape(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
 	}
 
 	/* Program cursor address in MMIO 0x8500 */
-	uint32 ctrl = read32(XGI_REG_CURSOR_CTRL);
-	ctrl &= 0xF0FE0000;
-	ctrl |= (cursorBase & 0x1FFFF);
-	write32(XGI_REG_CURSOR_CTRL, ctrl);
+	xgi_set_cursor_frame_address(gInfo.sharedInfo->cursorFrameOffsets[targetFrame]);
+
+	if (!sCursorAnimation.running) {
+		if (targetFrame + 1 < gInfo.sharedInfo->cursorFrameCount)
+			sCursorAnimation.nextUploadFrame = targetFrame + 1;
+		else
+			sCursorAnimation.nextUploadFrame = 0;
+
+		if (sCursorAnimation.uploadedFrameCount < targetFrame + 1)
+			sCursorAnimation.uploadedFrameCount = targetFrame + 1;
+	}
 
 	/* Set standard cursor colors: White BG, Black FG */
 	write32(XGI_REG_CURSOR_BG, 0x00FFFFFF);
@@ -269,7 +383,7 @@ xgi_show_cursor(bool isVisible)
 
 	uint32 ctrlBefore = read32(XGI_REG_CURSOR_CTRL);
 	uint32 ctrl = ctrlBefore;
-	uint32 cursorBase = gInfo.sharedInfo->cursorOffset / 1024;
+	uint32 cursorBase = gInfo.sharedInfo->cursorActiveOffset / 1024;
 
 	if (isVisible) {
 		ctrl &= 0x00FE0000;
@@ -395,3 +509,103 @@ xgi_get_cursor_bits(void)
 	return 1;
 }
 #endif
+
+
+bool
+xgi_supports_cursor_ani(void)
+{
+	return gInfo.sharedInfo != NULL && gInfo.sharedInfo->cursorFrameCount >= 2;
+}
+
+
+uint32
+xgi_cursor_supported_frames(void)
+{
+	if (!xgi_supports_cursor_ani())
+		return 0;
+	return gInfo.sharedInfo->cursorFrameCount - 1;
+}
+
+
+status_t
+xgi_start_cursor_ani(void)
+{
+	if (!xgi_supports_cursor_ani())
+		return B_NOT_SUPPORTED;
+	if (sCursorAnimation.uploadedFrameCount < 2)
+		return B_BAD_VALUE;
+	if (xgi_ensure_animation_thread() != B_OK)
+		return B_ERROR;
+
+	sCursorAnimation.currentFrame = 0;
+	xgi_set_cursor_frame_address(gInfo.sharedInfo->cursorFrameOffsets[0]);
+
+	sCursorAnimation.running = true;
+	if (sCursorAnimation.semaphore >= B_OK)
+		release_sem(sCursorAnimation.semaphore);
+	return B_OK;
+}
+
+
+status_t
+xgi_stop_cursor_ani(void)
+{
+	if (!xgi_supports_cursor_ani())
+		return B_NOT_SUPPORTED;
+
+	sCursorAnimation.running = false;
+	sCursorAnimation.currentFrame = 0;
+	sCursorAnimation.nextUploadFrame = 0;
+
+	xgi_set_cursor_frame_address(gInfo.sharedInfo->cursorFrameOffsets[0]);
+	return B_OK;
+}
+
+
+status_t
+xgi_set_cursor_ani_speed(float speedFactor)
+{
+	if (!xgi_supports_cursor_ani())
+		return B_NOT_SUPPORTED;
+	if (!isfinite(speedFactor) || speedFactor <= 0.0f)
+		return B_BAD_VALUE;
+
+	sCursorAnimation.speedFactor = speedFactor;
+	sCursorAnimation.frameInterval = (bigtime_t)(1000000.0f / speedFactor);
+	if (sCursorAnimation.frameInterval < 5000)
+		sCursorAnimation.frameInterval = 5000;
+	return B_OK;
+}
+
+
+status_t
+xgi_set_cursor_ani_start_delay(uint32 startDelayMs)
+{
+	if (!xgi_supports_cursor_ani())
+		return B_NOT_SUPPORTED;
+	sCursorAnimation.startDelay = (bigtime_t)startDelayMs * 1000;
+	return B_OK;
+}
+
+
+void
+xgi_cursor_ani_uninit(void)
+{
+	if (sCursorAnimation.thread >= B_OK) {
+		sCursorAnimation.terminate = true;
+		if (sCursorAnimation.semaphore >= B_OK)
+			release_sem(sCursorAnimation.semaphore);
+		status_t result;
+		wait_for_thread(sCursorAnimation.thread, &result);
+	}
+	if (sCursorAnimation.semaphore >= B_OK)
+		delete_sem(sCursorAnimation.semaphore);
+
+	sCursorAnimation.running = false;
+	sCursorAnimation.terminate = false;
+	sCursorAnimation.uploadedFrameCount = 1;
+	sCursorAnimation.nextUploadFrame = 0;
+	sCursorAnimation.currentFrame = 0;
+	sCursorAnimation.semaphore = -1;
+	sCursorAnimation.thread = -1;
+}

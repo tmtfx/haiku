@@ -46,12 +46,26 @@ enum BCursorID {
 
 class BCursor : BArchivable {
 public:
+	enum {
+		B_CURSOR_ANI_TRIGGER_IMMEDIATE = 0,
+		B_CURSOR_ANI_TRIGGER_IDLE = 1,
+		B_CURSOR_MAX_ANIMATION_FRAMES = 16
+	};
+
 								BCursor(const void* cursorData);
 								BCursor(const BCursor& other);
 								BCursor(BCursorID id);
 								BCursor(BMessage* data);
 								BCursor(const BBitmap* bitmap,
 									const BPoint& hotspot);
+								BCursor(const BBitmap* bitmap,
+									const BPoint& hotspot,
+									const BBitmap* const* frames,
+									int32 frameCount, float speed,
+									uint32 startDelayMs = 0,
+									uint32 idleDelayMs = 0,
+									uint32 trigger
+										= B_CURSOR_ANI_TRIGGER_IMMEDIATE);
 	virtual	~BCursor();
 
 			status_t			InitCheck() const;

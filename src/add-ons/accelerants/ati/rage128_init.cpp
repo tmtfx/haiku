@@ -120,12 +120,29 @@ Rage128_Init(void)
 
 	si.videoMemSize = INREG(R128_CONFIG_MEMSIZE);
 
-	si.cursorOffset = (si.videoMemSize - CURSOR_BYTES) & ~0xfff;	// align to 4k boundary
+	// Reserve as many CURSOR_BYTES slots as fit (up to ATI_MAX_CURSOR_FRAMES)
+	// for the animated hardware cursor; slot 0 is the normal static cursor.
+	{
+		uint32 frameCount = ATI_MAX_CURSOR_FRAMES;
+		while (frameCount > 1 && si.videoMemSize < (uint64)frameCount * CURSOR_BYTES)
+			frameCount--;
+
+		uint32 reserved = frameCount * CURSOR_BYTES;
+		uint32 base = (si.videoMemSize - reserved) & ~0xfff;	// align to 4k boundary
+
+		si.cursorFrameCount = frameCount;
+		for (uint32 i = 0; i < frameCount; i++)
+			si.cursorFrameOffsets[i] = base + i * CURSOR_BYTES;
+		si.cursorOffset = si.cursorFrameOffsets[0];
+		si.cursorActiveOffset = si.cursorOffset;
+	}
 	si.frameBufferOffset = 0;
 	si.maxFrameBufferSize = si.cursorOffset - si.frameBufferOffset;
 
-	TRACE("Video Memory size: %d MB  frameBufferOffset: 0x%x  cursorOffset: 0x%x\n",
-		si.videoMemSize / 1024 / 1024, si.frameBufferOffset, si.cursorOffset);
+	TRACE("Video Memory size: %d MB  frameBufferOffset: 0x%x  cursorOffset: 0x%x"
+		"  cursorFrames: %" B_PRIu32 "\n",
+		si.videoMemSize / 1024 / 1024, si.frameBufferOffset, si.cursorOffset,
+		si.cursorFrameCount);
 
 	// Get the specifications of the memory used by the chip.
 
@@ -207,6 +224,14 @@ Rage128_SetFunctionPointers(void)
 	gInfo.SetCursorPosition = Rage128_SetCursorPosition;
 	gInfo.SetCursorBitmap = Rage128_SetCursorBitmap;
 	gInfo.ShowCursor = Rage128_ShowCursor;
+
+	gInfo.SupportsCursorAnimation = Rage128_SupportsCursorAnimation;
+	gInfo.CursorSupportedFrames = Rage128_CursorSupportedFrames;
+	gInfo.StartCursorAnimation = Rage128_StartCursorAnimation;
+	gInfo.StopCursorAnimation = Rage128_StopCursorAnimation;
+	gInfo.SetCursorAnimationSpeed = Rage128_SetCursorAnimationSpeed;
+	gInfo.SetCursorAnimationStartDelay = Rage128_SetCursorAnimationStartDelay;
+	gInfo.CursorAnimationUninit = Rage128_CursorAnimationUninit;
 
 	gInfo.FillRectangle = Rage128_FillRectangle;
 	gInfo.FillSpan = Rage128_FillSpan;

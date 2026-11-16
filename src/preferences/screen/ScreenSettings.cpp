@@ -25,7 +25,9 @@ static const char* kSettingsFileName = "Screen_data";
 
 static void
 _WriteSettingsFile(const BPoint& offset, bool hardwareCursorEnabled, bool acceleration2DEnabled,
-	bool compositor2DEnabled, bool visual2DDebugEnabled)
+	bool compositor2DEnabled, bool visual2DDebugEnabled,
+	bool cursorAnimationEnabled, int32 cursorAnimationSpeedPercent,
+	int32 cursorAnimationIdleDelayMs)
 {
 	BPath path;
 	if (find_directory(B_USER_SETTINGS_DIRECTORY, &path) < B_OK)
@@ -40,7 +42,22 @@ _WriteSettingsFile(const BPoint& offset, bool hardwareCursorEnabled, bool accele
 		file.Write(&acceleration2DEnabled, sizeof(bool));
 		file.Write(&compositor2DEnabled, sizeof(bool));
 		file.Write(&visual2DDebugEnabled, sizeof(bool));
+		file.Write(&cursorAnimationEnabled, sizeof(bool));
+		file.Write(&cursorAnimationSpeedPercent, sizeof(int32));
+		file.Write(&cursorAnimationIdleDelayMs, sizeof(int32));
 	}
+}
+
+
+static void
+_SendCursorAnimationSettings(bool enabled, int32 speedPercent, int32 idleDelayMs)
+{
+	BMessage msg(AS_SET_CURSOR_ANI_SETTINGS);
+	msg.AddBool("enable", enabled);
+	msg.AddInt32("speed_percent", speedPercent);
+	msg.AddInt32("idle_delay_ms", idleDelayMs);
+	BMessenger appServerMessenger("application/x-vnd.Haiku-app_server");
+	appServerMessenger.SendMessage(&msg);
 }
 
 
@@ -52,6 +69,9 @@ ScreenSettings::ScreenSettings()
 	fAcceleration2DEnabled = false; // default
 	fCompositor2DEnabled = false; // default
 	fVisual2DDebugEnabled = false; // default
+	fCursorAnimationEnabled = false; // default
+	fCursorAnimationSpeedPercent = 100; // default
+	fCursorAnimationIdleDelayMs = 0; // default
 
 	BPath path;
 	if (find_directory(B_USER_SETTINGS_DIRECTORY, &path) == B_OK) {
@@ -85,6 +105,23 @@ ScreenSettings::ScreenSettings()
                 ssize_t read5 = file.Read(&dbg, sizeof(bool));
                 if (read5 == (ssize_t)sizeof(bool))
                     fVisual2DDebugEnabled = dbg;
+
+				bool cursorAnimation = false;
+				ssize_t read6 = file.Read(&cursorAnimation, sizeof(bool));
+				if (read6 == (ssize_t)sizeof(bool))
+					fCursorAnimationEnabled = cursorAnimation;
+
+				int32 animationSpeed = 100;
+				ssize_t read7 = file.Read(&animationSpeed, sizeof(int32));
+				if (read7 == (ssize_t)sizeof(int32))
+					fCursorAnimationSpeedPercent
+						= animationSpeed < 10 ? 10 : animationSpeed;
+
+				int32 animationDelay = 0;
+				ssize_t read8 = file.Read(&animationDelay, sizeof(int32));
+				if (read8 == (ssize_t)sizeof(int32))
+					fCursorAnimationIdleDelayMs
+						= animationDelay < 0 ? 0 : animationDelay;
 			}
 		}
 	}
@@ -96,7 +133,9 @@ ScreenSettings::ScreenSettings()
 ScreenSettings::~ScreenSettings()
 {
 	BPoint offset = fWindowFrame.LeftTop();
-	_WriteSettingsFile(offset, fHardwareCursorEnabled, fAcceleration2DEnabled, fCompositor2DEnabled, fVisual2DDebugEnabled);
+	_WriteSettingsFile(offset, fHardwareCursorEnabled, fAcceleration2DEnabled,
+		fCompositor2DEnabled, fVisual2DDebugEnabled, fCursorAnimationEnabled,
+		fCursorAnimationSpeedPercent, fCursorAnimationIdleDelayMs);
 }
 
 
@@ -113,7 +152,9 @@ ScreenSettings::SetHardwareCursorEnabled(bool enabled)
 	fHardwareCursorEnabled = enabled;
 	// persist immediately
 	BPoint offset = fWindowFrame.LeftTop();
-	_WriteSettingsFile(offset, fHardwareCursorEnabled, fAcceleration2DEnabled, fCompositor2DEnabled, fVisual2DDebugEnabled);
+	_WriteSettingsFile(offset, fHardwareCursorEnabled, fAcceleration2DEnabled,
+		fCompositor2DEnabled, fVisual2DDebugEnabled, fCursorAnimationEnabled,
+		fCursorAnimationSpeedPercent, fCursorAnimationIdleDelayMs);
 	// communicate with app_server
 	BMessage msg(AS_SET_HW_CUR_BITMAP_ENABLED);
 	msg.AddBool("enable", enabled);
@@ -128,7 +169,9 @@ ScreenSettings::SetAcceleration2DEnabled(bool enabled)
 	fAcceleration2DEnabled = enabled;
 	// persist immediately
 	BPoint offset = fWindowFrame.LeftTop();
-	_WriteSettingsFile(offset, fHardwareCursorEnabled, fAcceleration2DEnabled, fCompositor2DEnabled,fVisual2DDebugEnabled);
+	_WriteSettingsFile(offset, fHardwareCursorEnabled, fAcceleration2DEnabled,
+		fCompositor2DEnabled, fVisual2DDebugEnabled, fCursorAnimationEnabled,
+		fCursorAnimationSpeedPercent, fCursorAnimationIdleDelayMs);
 	// communicate with app_server
 	BMessage msg(AS_SET_2D_ACCELERATION_ENABLED);
 	msg.AddBool("enable", enabled);
@@ -143,7 +186,9 @@ ScreenSettings::SetCompositor2DEnabled(bool enabled)
 	fCompositor2DEnabled = enabled;
 	// persist immediately
 	BPoint offset = fWindowFrame.LeftTop();
-	_WriteSettingsFile(offset, fHardwareCursorEnabled, fAcceleration2DEnabled, fCompositor2DEnabled, fVisual2DDebugEnabled);
+	_WriteSettingsFile(offset, fHardwareCursorEnabled, fAcceleration2DEnabled,
+		fCompositor2DEnabled, fVisual2DDebugEnabled, fCursorAnimationEnabled,
+		fCursorAnimationSpeedPercent, fCursorAnimationIdleDelayMs);
 	// communicate with app_server
 	BMessage msg(AS_SET_2D_COMPOSITOR_ENABLED);
 	msg.AddBool("enable", enabled);
@@ -157,10 +202,55 @@ ScreenSettings::SetVisual2DDebugEnabled(bool enabled)
     fVisual2DDebugEnabled = enabled;
     // persist immediately
     BPoint offset = fWindowFrame.LeftTop();
-    _WriteSettingsFile(offset, fHardwareCursorEnabled, fAcceleration2DEnabled, fCompositor2DEnabled, fVisual2DDebugEnabled);
+    _WriteSettingsFile(offset, fHardwareCursorEnabled, fAcceleration2DEnabled,
+		fCompositor2DEnabled, fVisual2DDebugEnabled, fCursorAnimationEnabled,
+		fCursorAnimationSpeedPercent, fCursorAnimationIdleDelayMs);
     // communicate with app_server
     BMessage msg(AS_SET_2D_DEBUG_ENABLED);
     msg.AddBool("enable", enabled);
     BMessenger appServerMessenger("application/x-vnd.Haiku-app_server");
     appServerMessenger.SendMessage(&msg);
+}
+
+
+void
+ScreenSettings::SetCursorAnimationEnabled(bool enabled)
+{
+	fCursorAnimationEnabled = enabled;
+	BPoint offset = fWindowFrame.LeftTop();
+	_WriteSettingsFile(offset, fHardwareCursorEnabled, fAcceleration2DEnabled,
+		fCompositor2DEnabled, fVisual2DDebugEnabled, fCursorAnimationEnabled,
+		fCursorAnimationSpeedPercent, fCursorAnimationIdleDelayMs);
+	_SendCursorAnimationSettings(fCursorAnimationEnabled,
+		fCursorAnimationSpeedPercent, fCursorAnimationIdleDelayMs);
+}
+
+
+void
+ScreenSettings::SetCursorAnimationSpeedPercent(int32 percent)
+{
+	fCursorAnimationSpeedPercent = percent;
+	if (fCursorAnimationSpeedPercent < 10)
+		fCursorAnimationSpeedPercent = 10;
+	BPoint offset = fWindowFrame.LeftTop();
+	_WriteSettingsFile(offset, fHardwareCursorEnabled, fAcceleration2DEnabled,
+		fCompositor2DEnabled, fVisual2DDebugEnabled, fCursorAnimationEnabled,
+		fCursorAnimationSpeedPercent, fCursorAnimationIdleDelayMs);
+	_SendCursorAnimationSettings(fCursorAnimationEnabled,
+		fCursorAnimationSpeedPercent, fCursorAnimationIdleDelayMs);
+}
+
+
+void
+ScreenSettings::SetCursorAnimationIdleDelayMs(int32 delayMs)
+{
+	fCursorAnimationIdleDelayMs = delayMs;
+	if (fCursorAnimationIdleDelayMs < 0)
+		fCursorAnimationIdleDelayMs = 0;
+	BPoint offset = fWindowFrame.LeftTop();
+	_WriteSettingsFile(offset, fHardwareCursorEnabled, fAcceleration2DEnabled,
+		fCompositor2DEnabled, fVisual2DDebugEnabled, fCursorAnimationEnabled,
+		fCursorAnimationSpeedPercent, fCursorAnimationIdleDelayMs);
+	_SendCursorAnimationSettings(fCursorAnimationEnabled,
+		fCursorAnimationSpeedPercent, fCursorAnimationIdleDelayMs);
 }

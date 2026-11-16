@@ -72,6 +72,7 @@ private:
 			ScreenSettings*	fSettings;
 			bool			fIsVesa;
 			bool			fBootWorkspaceApplied;
+			bool			fHasCursorAnimationCapability;
 
 			BBox*			fScreenBox;
 			BStringView*	fDeviceInfo;
@@ -103,6 +104,9 @@ private:
 
 			BSlider*		fBrightnessSlider;
 			BCheckBox*		fHardwareCursorCheckbox;
+			BCheckBox*		fCursorAnimationCheckbox;
+			BSlider*		fCursorAnimationSpeedSlider;
+			BSlider*		fCursorAnimationIdleSlider;
 			BCheckBox*		f2DAccelerationCheckbox;
 			BCheckBox*		f2DDebugCheckbox;
 			BCheckBox*		f2DCompositorCheckbox;

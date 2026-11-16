@@ -161,6 +161,13 @@ status_t SetCursorBitmap(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y
 uint32   GetCursorBits(void);
 void	 MoveCursor(uint16 x, uint16 y);
 void	 ShowCursor(bool bShow);
+bool	 SupportsCursorAnimation(void);
+uint32	 CursorSupportedFrames(void);
+status_t StartCursorAnimation(void);
+status_t StopCursorAnimation(void);
+status_t SetCursorAnimationSpeed(float speedFactor);
+status_t SetCursorAnimationStartDelay(uint32 startDelayMs);
+void	 CursorAnimationUninit(void);
 
 // Overlay Hook Declarations
 uint32 trident_overlay_count(const display_mode* dm);

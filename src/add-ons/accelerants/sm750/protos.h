@@ -27,6 +27,13 @@ void sm750_move_cursor(uint16 x, uint16 y);
 void sm750_show_cursor(bool is_visible);
 status_t sm750_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY, color_space colorSpace, uint16 bytesPerRow, const uint8* bitmapData);
 uint32 sm750_get_cursor_bits(void);
+bool sm750_supports_cursor_ani(void);
+uint32 sm750_cursor_supported_frames(void);
+status_t sm750_start_cursor_ani(void);
+status_t sm750_stop_cursor_ani(void);
+status_t sm750_set_cursor_ani_speed(float speedFactor);
+status_t sm750_set_cursor_ani_start_delay(uint32 startDelayMs);
+void sm750_cursor_ani_uninit(void);
 status_t sm750_get_edid_info(void* info, size_t size, uint32* _version);
 status_t sm750_set_edid_info(void* info, size_t size, uint32 _version);
 

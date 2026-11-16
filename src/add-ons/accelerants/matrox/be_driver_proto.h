@@ -37,6 +37,13 @@ void MOVE_CURSOR(uint16 x, uint16 y);
 void SHOW_CURSOR(bool is_visible);
 uint32 GET_CURSOR_BITS(void);
 status_t SET_CURSOR_BITMAP(uint16 width, uint16 height, uint16 hotX, uint16 hotY, color_space colorSpace, uint16 bytesPerRow, const uint8* bitmapData);
+bool SUPPORTS_CURSOR_ANI(void);
+uint32 CURSOR_SUPPORTED_FRAMES(void);
+status_t START_CURSOR_ANI(void);
+status_t STOP_CURSOR_ANI(void);
+status_t SET_CURSOR_ANI_SPEED(float speedFactor);
+status_t SET_CURSOR_ANI_START_DELAY(uint32 startDelayMs);
+void matrox_cursor_animation_uninit(void);
 
 uint32 ACCELERANT_ENGINE_COUNT(void);
 status_t ACQUIRE_ENGINE(uint32 capabilities, uint32 max_wait, sync_token *st, engine_token **et);

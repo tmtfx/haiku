@@ -55,6 +55,7 @@ struct AccelerantInfo {
 	bool	(*LoadCursorImage)(int width, int height, uint8* and_mask, uint8* xor_mask);
 	void	(*SetCursorPosition)(int x, int y);
 	void	(*ShowCursor)(bool bShow);
+	void	(*SetCursorFrameAddress)(uint32 offset);
 
 	// Pointers to 2D acceleration functions.
 	void	(*FillRectangle)(engine_token*, uint32 color, fill_rect_params*, uint32 count);
@@ -132,6 +133,16 @@ void	 MoveCursor(uint16 x, uint16 y);
 void	 Savage_ShowCursor(bool bShow);
 void	 Trio64_ShowCursor(bool bShow);
 void	 Virge_ShowCursor(bool bShow);
+bool	 SupportsCursorAnimation(void);
+uint32	 CursorSupportedFrames(void);
+status_t StartCursorAnimation(void);
+status_t StopCursorAnimation(void);
+status_t SetCursorAnimationSpeed(float speedFactor);
+status_t SetCursorAnimationStartDelay(uint32 startDelayMs);
+void	 CursorAnimationUninit(void);
+void	 Savage_SetCursorFrameAddress(uint32 offset);
+void	 Trio64_SetCursorFrameAddress(uint32 offset);
+void	 Virge_SetCursorFrameAddress(uint32 offset);
 
 // Engine Management
 uint32   AccelerantEngineCount(void);

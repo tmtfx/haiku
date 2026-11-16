@@ -192,12 +192,29 @@ Mach64_Init(void)
 			si.videoMemSize = (ioValue - 7) * 2048 * 1024;
 	}
 
-	si.cursorOffset = (si.videoMemSize - CURSOR_BYTES) & ~0xfff;	// align to 4k boundary
+	// Reserve as many CURSOR_BYTES slots as fit (up to ATI_MAX_CURSOR_FRAMES)
+	// for the animated hardware cursor; slot 0 is the normal static cursor.
+	{
+		uint32 frameCount = ATI_MAX_CURSOR_FRAMES;
+		while (frameCount > 1 && si.videoMemSize < (uint64)frameCount * CURSOR_BYTES)
+			frameCount--;
+
+		uint32 reserved = frameCount * CURSOR_BYTES;
+		uint32 base = (si.videoMemSize - reserved) & ~0xfff;	// align to 4k boundary
+
+		si.cursorFrameCount = frameCount;
+		for (uint32 i = 0; i < frameCount; i++)
+			si.cursorFrameOffsets[i] = base + i * CURSOR_BYTES;
+		si.cursorOffset = si.cursorFrameOffsets[0];
+		si.cursorActiveOffset = si.cursorOffset;
+	}
 	si.frameBufferOffset = 0;
 	si.maxFrameBufferSize = si.cursorOffset - si.frameBufferOffset;
 
-	TRACE("Video Memory size: %d MB  frameBufferOffset: 0x%x  cursorOffset: 0x%x\n",
-		si.videoMemSize / 1024 / 1024, si.frameBufferOffset, si.cursorOffset);
+	TRACE("Video Memory size: %d MB  frameBufferOffset: 0x%x  cursorOffset: 0x%x"
+		"  cursorFrames: %" B_PRIu32 "\n",
+		si.videoMemSize / 1024 / 1024, si.frameBufferOffset, si.cursorOffset,
+		si.cursorFrameCount);
 
 	// 264VT-B's and later have DSP registers.
 
@@ -267,6 +284,14 @@ Mach64_SetFunctionPointers(void)
 	gInfo.SetCursorBitmap = Mach64_SetCursorBitmap;
 	gInfo.SetCursorPosition = Mach64_SetCursorPosition;
 	gInfo.ShowCursor = Mach64_ShowCursor;
+
+	gInfo.SupportsCursorAnimation = Mach64_SupportsCursorAnimation;
+	gInfo.CursorSupportedFrames = Mach64_CursorSupportedFrames;
+	gInfo.StartCursorAnimation = Mach64_StartCursorAnimation;
+	gInfo.StopCursorAnimation = Mach64_StopCursorAnimation;
+	gInfo.SetCursorAnimationSpeed = Mach64_SetCursorAnimationSpeed;
+	gInfo.SetCursorAnimationStartDelay = Mach64_SetCursorAnimationStartDelay;
+	gInfo.CursorAnimationUninit = Mach64_CursorAnimationUninit;
 
 	gInfo.FillRectangle = Mach64_FillRectangle;
 	gInfo.FillSpan = Mach64_FillSpan;

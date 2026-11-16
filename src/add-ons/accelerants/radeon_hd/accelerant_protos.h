@@ -58,6 +58,13 @@ status_t radeon_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint
 uint32 radeon_get_cursor_bits(void);
 void radeon_move_cursor(uint16 x, uint16 y);
 void radeon_show_cursor(bool isVisible);
+bool radeon_supports_cursor_ani(void);
+uint32 radeon_cursor_supported_frames(void);
+status_t radeon_start_cursor_ani(void);
+status_t radeon_stop_cursor_ani(void);
+status_t radeon_set_cursor_ani_speed(float speedFactor);
+status_t radeon_set_cursor_ani_start_delay(uint32 startDelayMs);
+void radeon_cursor_ani_uninit(void);
 
 
 #ifdef __cplusplus

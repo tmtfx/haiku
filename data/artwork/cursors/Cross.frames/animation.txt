@@ -1,0 +1,5 @@
+frame_count=2
+start_delay_ms=0
+idle_delay_ms=0
+speed=8
+trigger=immediate

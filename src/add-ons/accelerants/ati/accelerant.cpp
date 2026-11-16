@@ -176,6 +176,9 @@ CloneAccelerant(void* data)
 void
 UninitAccelerant(void)
 {
+	if (gInfo.CursorAnimationUninit != NULL)
+		gInfo.CursorAnimationUninit();
+
 	delete_area(gInfo.modeListArea);
 	gInfo.modeList = NULL;
 

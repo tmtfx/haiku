@@ -23,6 +23,10 @@
 
 #define ENABLE_DEBUG_TRACE		// if defined, turns on debug output to syslog
 
+#define ATI_MAX_CURSOR_FRAMES 16
+	// Maximum animated hardware cursor frame buffers (matches
+	// ServerCursor::B_CURSOR_MAX_ANIMATION_FRAMES in the app_server)
+
 
 struct Benaphore {
 	sem_id	sem;
@@ -189,7 +193,12 @@ struct SharedInfo {
 	phys_addr_t	videoMemPCI;	// video memory addr as viewed from the PCI bus (for DMA)
 	uint32	videoMemSize; 		// video memory size in bytes.
 
-	uint32	cursorOffset;		// offset of cursor in video memory
+	uint32	cursorOffset;		// offset of cursor in video memory (frame 0)
+	uint32	cursorActiveOffset;	// offset of the frame currently driving the
+								// cursor position register (animation flips
+								// this among cursorFrameOffsets[])
+	uint32	cursorFrameCount;	// number of reserved animated cursor frame slots (>= 1)
+	uint32	cursorFrameOffsets[ATI_MAX_CURSOR_FRAMES];
 	uint32	frameBufferOffset;	// offset of frame buffer in video memory
 	uint32	maxFrameBufferSize;	// max available video memory for frame buffer
 

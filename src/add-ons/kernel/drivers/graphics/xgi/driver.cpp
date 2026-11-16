@@ -407,10 +407,27 @@ map_device(DeviceInfo& device)
 
 	/* refcode places the cursor shape buffer directly below the command
 	 * queue (CursorOffset = cmdQueueOffset - VOLARI_CURSOR_SHAPE_SIZE,
-	 * xgi_accel.c:218), not just "top of VRAM" on its own. */
+	 * xgi_accel.c:218), not just "top of VRAM" on its own. For the animated
+	 * hardware cursor we reserve as many VOLARI_CURSOR_SHAPE_SIZE slots as
+	 * fit (up to XGI_MAX_CURSOR_FRAMES) right below the command queue;
+	 * slot 0 is the normal static cursor. */
 	shared.cursorBufferSize = VOLARI_CURSOR_SHAPE_SIZE;
-	shared.cursorOffset = (shared.cmdQueue.offset > shared.cursorBufferSize)
-		? (shared.cmdQueue.offset - shared.cursorBufferSize) : 0;
+	{
+		uint32 frameCount = XGI_MAX_CURSOR_FRAMES;
+		while (frameCount > 1
+				&& shared.cmdQueue.offset < frameCount * shared.cursorBufferSize) {
+			frameCount--;
+		}
+
+		uint32 base = (shared.cmdQueue.offset > frameCount * shared.cursorBufferSize)
+			? (shared.cmdQueue.offset - frameCount * shared.cursorBufferSize) : 0;
+
+		shared.cursorFrameCount = frameCount;
+		for (uint32 i = 0; i < frameCount; i++)
+			shared.cursorFrameOffsets[i] = base + i * shared.cursorBufferSize;
+		shared.cursorOffset = shared.cursorFrameOffsets[0];
+		shared.cursorActiveOffset = shared.cursorOffset;
+	}
 
 	XGI_TRACE("map_device done: fbArea=%" B_PRId32 " regsArea=%" B_PRId32
 		" cursorOffset=0x%" B_PRIx32 "\n",

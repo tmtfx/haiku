@@ -97,7 +97,7 @@ InitAccelerant(int fileDesc)
 		} else {
 			result = gInfo.ChipInit();	// perform init related to current chip
 			if (result == B_OK) {
-				result = si.engineLock.Init("ATI engine lock");
+				result = si.engineLock.Init("S3 engine lock");
 				if (result == B_OK) {
 					if (gInfo.ShowCursor != NULL)
 						gInfo.ShowCursor(false);
@@ -176,9 +176,11 @@ CloneAccelerant(void* data)
 }
 
 
-void 
+void
 UninitAccelerant(void)
 {
+	CursorAnimationUninit();
+
 	delete_area(gInfo.modeListArea);
 	gInfo.modeList = NULL;
 

@@ -669,9 +669,20 @@ SetDisplayMode(display_mode* pMode)
 
 	si.displayMode = mode;
 
-	// Place cursor pattern at the end of the frame buffer
-	si.maxFrameBufferSize = si.videoMemSize;
-	si.cursorOffset = si.maxFrameBufferSize - 4096;
+	// Place cursor pattern(s) at the end of the frame buffer
+	{
+		uint32 frameCount = TRIDENT_MAX_CURSOR_FRAMES;
+		while (frameCount > 1 && si.videoMemSize < (uint64)frameCount * 4096)
+			frameCount--;
+
+		uint32 base = si.videoMemSize - frameCount * 4096;
+
+		si.cursorFrameCount = frameCount;
+		for (uint32 i = 0; i < frameCount; i++)
+			si.cursorFrameOffsets[i] = base + i * 4096;
+		si.cursorOffset = si.cursorFrameOffsets[0];
+	}
+	si.maxFrameBufferSize = si.cursorOffset;
 
 	if (enable_log)
 		debug_printf("Trident_ACC: SetDisplayMode completed successfully. Cursor offset: %u\n",

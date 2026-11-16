@@ -210,6 +210,12 @@ AccelerantHWInterface::AccelerantHWInterface()
 	fAccGetCursorBits(NULL),
 	fAccMoveCursor(NULL),
 	fAccShowCursor(NULL),
+	fAccSupportsCursorAni(NULL),
+	fAccCursorSupportedFrames(NULL),
+	fAccStartCursorAni(NULL),
+	fAccStopCursorAni(NULL),
+	fAccSetCursorAniSpeed(NULL),
+	fAccSetCursorAniStartDelay(NULL),
 	fCursorBits(0),
 
 	// dpms hooks
@@ -249,8 +255,28 @@ AccelerantHWInterface::AccelerantHWInterface()
 	fBlitParamsCount(kDefaultParamsCount),
 
 	fUserEnableHardwareCursor(true),
+	fUserEnableCursorAnimation(false),
 	fUserEnable2DAcceleration(false),
-	fVisual2DDebug(false)
+	fVisual2DDebug(false),
+	fCursorAnimationThread(-1),
+	fCursorAnimationSem(-1),
+	fCursorAnimationTerminate(false),
+	fCursorAnimationActive(false),
+	fCursorAnimationRunning(false),
+	fCursorAnimationFrameCount(0),
+	fCursorAnimationCurrentFrame(0),
+	fCursorAnimationGeneration(0),
+	fCursorAnimationNextFrameAt(0),
+	fCursorAnimationStartAt(0),
+	fCursorAnimationLastMoveAt(0),
+	fCursorAnimationIdleDelay(0),
+	fCursorAnimationFrameDelay(0),
+	fCursorAnimationStartDelay(0),
+	fCursorAnimationTrigger(ServerCursor::B_CURSOR_ANI_TRIGGER_IMMEDIATE),
+	fCursorAnimationSupportedFrames(0),
+	fCursorAnimationSpeedFactor(1.0f),
+	fUserCursorAnimationSpeedFactor(1.0f),
+	fUserCursorAnimationIdleDelayMs(0)
 {
 	fDisplayMode.virtual_width = 0;
 	fDisplayMode.virtual_height = 0;
@@ -260,11 +286,33 @@ AccelerantHWInterface::AccelerantHWInterface()
 	//fSyncToken.counter = 0;
 	//fSyncToken.engine_id = 0;
 	memset(&fSyncToken, 0, sizeof(sync_token));
+
+	fCursorAnimationSem = create_sem(0, "cursor animation");
+	if (fCursorAnimationSem >= B_OK) {
+		fCursorAnimationThread = spawn_thread(_CursorAnimationThreadEntry,
+			"cursor animation thread", B_DISPLAY_PRIORITY, this);
+		if (fCursorAnimationThread >= B_OK)
+			resume_thread(fCursorAnimationThread);
+		else {
+			delete_sem(fCursorAnimationSem);
+			fCursorAnimationSem = -1;
+		}
+	}
 }
 
 
 AccelerantHWInterface::~AccelerantHWInterface()
 {
+	if (fCursorAnimationThread >= B_OK) {
+		fCursorAnimationTerminate = true;
+		if (fCursorAnimationSem >= B_OK)
+			release_sem(fCursorAnimationSem);
+		status_t result;
+		wait_for_thread(fCursorAnimationThread, &result);
+	}
+	if (fCursorAnimationSem >= B_OK)
+		delete_sem(fCursorAnimationSem);
+
 	delete[] fRectParams;
 	delete[] fBlitParams;
 
@@ -276,6 +324,19 @@ bool
 AccelerantHWInterface::HasSetCursorBitmap() const
 {
 	return fAccSetCursorBitmap != NULL;
+}
+
+
+bool
+AccelerantHWInterface::HasAnimatedCursorSupport() const
+{
+	return fAccSetCursorBitmap != NULL
+		&& fAccSupportsCursorAni != NULL
+		&& fAccCursorSupportedFrames != NULL
+		&& fAccStartCursorAni != NULL
+		&& fAccStopCursorAni != NULL
+		&& fAccSetCursorAniSpeed != NULL
+		&& fAccSupportsCursorAni();
 }
 
 
@@ -330,6 +391,27 @@ AccelerantHWInterface::Initialize()
 					bool acc = false;
 					if (file.Read(&acc, sizeof(bool)) == (ssize_t)sizeof(bool))
 						fUserEnable2DAcceleration = acc;
+					bool comp = false;
+					file.Read(&comp, sizeof(bool));
+					bool dbg = false;
+					file.Read(&dbg, sizeof(bool));
+					bool cursorAnimation = false;
+					if (file.Read(&cursorAnimation, sizeof(bool))
+							== (ssize_t)sizeof(bool)) {
+						fUserEnableCursorAnimation = cursorAnimation;
+					}
+					int32 animationSpeed = 100;
+					if (file.Read(&animationSpeed, sizeof(int32))
+							== (ssize_t)sizeof(int32)) {
+						fUserCursorAnimationSpeedFactor
+							= max_c(0.1f, animationSpeed / 100.0f);
+					}
+					int32 animationIdleDelayMs = 0;
+					if (file.Read(&animationIdleDelayMs, sizeof(int32))
+							== (ssize_t)sizeof(int32)) {
+						fUserCursorAnimationIdleDelayMs
+							= max_c((int32)0, animationIdleDelayMs);
+					}
 				}
 			}
 		}
@@ -535,8 +617,22 @@ AccelerantHWInterface::_SetupDefaultHooks()
 		= (get_cursor_bits)fAccelerantHook(B_GET_CURSOR_BITS, NULL);
 	fAccMoveCursor = (move_cursor)fAccelerantHook(B_MOVE_CURSOR, NULL);
 	fAccShowCursor = (show_cursor)fAccelerantHook(B_SHOW_CURSOR, NULL);
+	fAccSupportsCursorAni
+		= (supports_cursor_ani)fAccelerantHook(B_SUPPORTS_CURSOR_ANI, NULL);
+	fAccCursorSupportedFrames = (cursor_supported_frames)fAccelerantHook(
+		B_CURSOR_SUPPORTED_FRAMES, NULL);
+	fAccStartCursorAni
+		= (start_cursor_ani)fAccelerantHook(B_START_CURSOR_ANI, NULL);
+	fAccStopCursorAni
+		= (stop_cursor_ani)fAccelerantHook(B_STOP_CURSOR_ANI, NULL);
+	fAccSetCursorAniSpeed = (set_cursor_ani_speed)fAccelerantHook(
+		B_SET_CURSOR_ANI_SPEED, NULL);
+	fAccSetCursorAniStartDelay = (set_cursor_ani_start_delay)fAccelerantHook(
+		B_SET_CURSOR_ANI_START_DELAY, NULL);
 
 	fCursorBits = fAccGetCursorBits != NULL ? fAccGetCursorBits() : 0;
+	fCursorAnimationSupportedFrames = fAccCursorSupportedFrames != NULL
+		? fAccCursorSupportedFrames() : 0;
 
 	// dpms
 	fAccDPMSCapabilities
@@ -603,11 +699,22 @@ AccelerantHWInterface::_UpdateHooksAfterModeChange()
 status_t
 AccelerantHWInterface::Shutdown()
 {
+	if (LockExclusiveAccess()) {
+		_StopCursorAnimationLocked();
+		UnlockExclusiveAccess();
+	}
+
 	fAccAcquireEngine = NULL;
 	fAccReleaseEngine = NULL;
 	fAccSyncToToken = NULL;
 	fAccScreenBlit = NULL;
 	fAccFillRect = NULL;
+	fAccSupportsCursorAni = NULL;
+	fAccCursorSupportedFrames = NULL;
+	fAccStartCursorAni = NULL;
+	fAccStopCursorAni = NULL;
+	fAccSetCursorAniSpeed = NULL;
+	fAccSetCursorAniStartDelay = NULL;
 	fRetraceSemaphore = B_UNSUPPORTED;
 
 	if (fAccelerantHook != NULL) {
@@ -1629,6 +1736,13 @@ AccelerantHWInterface::_UpdateHardwareCursor(bool wasHardwareCursorEnabled)
 	// cursor backends only expose limited palette/shape formats.
 	const bool canUseBitmapCursorForDrag = fDragBitmap == NULL || fCursorBits >= 32;
 	if (canUseBitmapCursorForDrag && fAccSetCursorBitmap != NULL && fUserEnableHardwareCursor) {
+		// The accelerant picks the VRAM slot for a bitmap upload from its own
+		// animation state: while an animation is running it writes into the
+		// frame currently on screen, otherwise into the next free slot. Reset
+		// it first, so the new cursor always lands in slot 0 - otherwise a
+		// later stop reprograms slot 0, which still holds the old cursor.
+		_ResetCursorAnimationLocked();
+
 		uint16 xHotSpot = (uint16)cursor->GetHotSpot().x;
 		uint16 yHotSpot = (uint16)cursor->GetHotSpot().y;
 		uint16 width = (uint16)cursor->Bounds().IntegerWidth() + 1;
@@ -1714,9 +1828,10 @@ AccelerantHWInterface::_UpdateHardwareCursor(bool wasHardwareCursorEnabled)
 	if (fAccShowCursor != NULL)
 		fAccShowCursor(cursorSet);
 
-	UnlockExclusiveAccess();
-
 	fHardwareCursorEnabled = cursorSet;
+	_UpdateCursorAnimationLocked();
+
+	UnlockExclusiveAccess();
 
 	if (!cursorSet && wasHardwareCursorEnabled && fFloatingOverlaysLock.Lock()) {
 		Invalidate(_CursorFrame());
@@ -1739,6 +1854,24 @@ AccelerantHWInterface::SetCursor(ServerCursor* cursor)
 void AccelerantHWInterface::SetUserHardwareCursor(bool enable)
 {
 	fUserEnableHardwareCursor = enable; 
+	if (!enable && LockExclusiveAccess()) {
+		_StopCursorAnimationLocked();
+		UnlockExclusiveAccess();
+	}
+}
+
+
+void AccelerantHWInterface::SetUserCursorAnimationSettings(bool enable,
+	float speedFactor, uint32 idleDelayMs)
+{
+	fUserEnableCursorAnimation = enable;
+	fUserCursorAnimationSpeedFactor = max_c(0.1f, speedFactor);
+	fUserCursorAnimationIdleDelayMs = idleDelayMs;
+
+	if (LockExclusiveAccess()) {
+		_UpdateCursorAnimationLocked();
+		UnlockExclusiveAccess();
+	}
 }
 
 void AccelerantHWInterface::SetUser2DAcceleration(bool enable)
@@ -1767,6 +1900,7 @@ AccelerantHWInterface::SetDragBitmap(const ServerBitmap* bitmap,
 
 	if (bitmap != NULL && wasHardwareCursorEnabled && !canUseBitmapCursorForDrag
 		&& LockExclusiveAccess()) {
+		_StopCursorAnimationLocked();
 		if (fAccShowCursor != NULL)
 			fAccShowCursor(false);
 		UnlockExclusiveAccess();
@@ -1790,6 +1924,8 @@ AccelerantHWInterface::SetCursorVisible(bool visible)
 		else
 			fHardwareCursorEnabled = false;
 
+		_UpdateCursorAnimationLocked();
+
 		UnlockExclusiveAccess();
 	}
 }
@@ -1801,6 +1937,21 @@ AccelerantHWInterface::MoveCursorTo(float x, float y)
 	HWInterface::MoveCursorTo(x, y);
 
 	if (fHardwareCursorEnabled && LockExclusiveAccess()) {
+		fCursorAnimationLastMoveAt = system_time();
+		if (fCursorAnimationActive
+			&& fCursorAnimationTrigger == ServerCursor::B_CURSOR_ANI_TRIGGER_IDLE) {
+			if (fCursorAnimationRunning && fAccStopCursorAni != NULL) {
+				fAccStopCursorAni();
+				fCursorAnimationRunning = false;
+				fCursorAnimationCurrentFrame = 0;
+			}
+
+			fCursorAnimationStartAt = fCursorAnimationLastMoveAt
+				+ fCursorAnimationIdleDelay;
+			if (fCursorAnimationSem >= B_OK)
+				release_sem_etc(fCursorAnimationSem, 1, B_DO_NOT_RESCHEDULE);
+		}
+
 		if (fAccMoveCursor != NULL)
 				fAccMoveCursor((uint16)x, (uint16)y);
 		else {
@@ -1811,6 +1962,216 @@ AccelerantHWInterface::MoveCursorTo(float x, float y)
 
 		UnlockExclusiveAccess();
 	}
+}
+
+
+void
+AccelerantHWInterface::_ResetCursorAnimationLocked()
+{
+	// Always stop the accelerant side, even if no animation is running yet
+	// (e.g. still waiting for the start/idle delay): stopping also rewinds
+	// the accelerant's upload slot to 0 and shows slot 0.
+	if (fAccStopCursorAni != NULL)
+		fAccStopCursorAni();
+
+	fCursorAnimationActive = false;
+	fCursorAnimationRunning = false;
+	fCursorAnimationFrameCount = 0;
+	fCursorAnimationCurrentFrame = 0;
+	fCursorAnimationGeneration++;
+}
+
+
+void
+AccelerantHWInterface::_StopCursorAnimationLocked()
+{
+	bool wasActive = fCursorAnimationActive || fCursorAnimationRunning;
+	if (!wasActive)
+		return;
+
+	_ResetCursorAnimationLocked();
+
+	// Slot 0 is now on screen: refresh it with the current cursor's base
+	// frame (fails harmlessly if the current cursor has no animation, in
+	// which case it was already uploaded to slot 0 as a static bitmap).
+	if (fAccSetCursorBitmap != NULL)
+		_ApplyCursorAnimationFrameLocked(0);
+}
+
+
+status_t
+AccelerantHWInterface::_ApplyCursorAnimationFrameLocked(uint32 frameIndex)
+{
+	ServerCursorReference cursor = CursorAndDragBitmap();
+	if (!cursor.IsSet())
+		return B_BAD_VALUE;
+
+	const uint8* bits = NULL;
+	uint16 width = 0;
+	uint16 height = 0;
+	uint16 bytesPerRow = 0;
+	color_space colorSpace = B_NO_COLOR_SPACE;
+	if (!cursor->GetAnimationFrame(frameIndex, bits, width, height, bytesPerRow,
+			colorSpace) || bits == NULL) {
+		return B_BAD_DATA;
+	}
+
+	return fAccSetCursorBitmap(width, height, (uint16)cursor->GetHotSpot().x,
+		(uint16)cursor->GetHotSpot().y, colorSpace, bytesPerRow, bits);
+}
+
+
+void
+AccelerantHWInterface::_UpdateCursorAnimationLocked()
+{
+	if (!HasAnimatedCursorSupport() || !fUserEnableCursorAnimation
+		|| !fHardwareCursorEnabled || !fCursorVisible || fAccSetCursorBitmap == NULL) {
+		_StopCursorAnimationLocked();
+		return;
+	}
+
+	if (fAccSupportsCursorAni == NULL || !fAccSupportsCursorAni()) {
+		_StopCursorAnimationLocked();
+		return;
+	}
+
+	ServerCursorReference cursor = CursorAndDragBitmap();
+	if (!cursor.IsSet() || !cursor->HasAnimation()) {
+		_StopCursorAnimationLocked();
+		return;
+	}
+
+	uint32 frameCount = cursor->AnimationFrameCount();
+	if (frameCount < 2 || frameCount > ServerCursor::B_CURSOR_MAX_ANIMATION_FRAMES) {
+		_StopCursorAnimationLocked();
+		return;
+	}
+
+	uint32 supportedFrames = fAccCursorSupportedFrames != NULL
+		? fAccCursorSupportedFrames() : 0;
+	fCursorAnimationSupportedFrames = supportedFrames;
+	if (frameCount - 1 > supportedFrames) {
+		_StopCursorAnimationLocked();
+		return;
+	}
+
+	fCursorAnimationFrameCount = frameCount;
+	fCursorAnimationCurrentFrame = 0;
+	fCursorAnimationFrameDelay = max_c((bigtime_t)1000,
+		(bigtime_t)cursor->AnimationFrameDelayMs() * 1000);
+
+	uint32 idleDelayMs = cursor->AnimationIdleDelayMs();
+	if (fUserCursorAnimationIdleDelayMs > 0)
+		idleDelayMs = fUserCursorAnimationIdleDelayMs;
+	fCursorAnimationIdleDelay = (bigtime_t)idleDelayMs * 1000;
+
+	fCursorAnimationTrigger = cursor->AnimationTrigger();
+	fCursorAnimationStartDelay = cursor->AnimationStartDelayMs();
+	fCursorAnimationSpeedFactor = (1000.0f
+		/ max_c(1.0f, (float)cursor->AnimationFrameDelayMs()))
+		* fUserCursorAnimationSpeedFactor;
+
+	// Rewind the accelerant's upload slot to 0 unconditionally, so frames
+	// 0..frameCount-1 land in slots 0..frameCount-1 (the base bitmap uploaded
+	// by _UpdateHardwareCursor() is simply overwritten by frame 0).
+	if (fAccStopCursorAni != NULL)
+		fAccStopCursorAni();
+	fCursorAnimationRunning = false;
+
+	for (uint32 i = 0; i < frameCount; i++) {
+		if (_ApplyCursorAnimationFrameLocked(i) != B_OK) {
+			_StopCursorAnimationLocked();
+			return;
+		}
+	}
+
+	bigtime_t now = system_time();
+	fCursorAnimationLastMoveAt = now;
+	if (fCursorAnimationTrigger == ServerCursor::B_CURSOR_ANI_TRIGGER_IDLE) {
+		fCursorAnimationStartAt = now + fCursorAnimationIdleDelay;
+	} else if (fAccSetCursorAniStartDelay != NULL) {
+		fCursorAnimationStartAt = now;
+	} else {
+		fCursorAnimationStartAt = now
+			+ (bigtime_t)fCursorAnimationStartDelay * 1000;
+	}
+	fCursorAnimationNextFrameAt = fCursorAnimationStartAt;
+	fCursorAnimationActive = true;
+	fCursorAnimationRunning = false;
+	fCursorAnimationGeneration++;
+
+	if (fCursorAnimationSem >= B_OK)
+		release_sem_etc(fCursorAnimationSem, 1, B_DO_NOT_RESCHEDULE);
+}
+
+
+status_t
+AccelerantHWInterface::_CursorAnimationThreadEntry(void* cookie)
+{
+	return ((AccelerantHWInterface*)cookie)->_CursorAnimationThread();
+}
+
+
+status_t
+AccelerantHWInterface::_CursorAnimationThread()
+{
+	while (!fCursorAnimationTerminate) {
+		bigtime_t timeout = 500000;
+		if (LockExclusiveAccess()) {
+			if (fCursorAnimationActive && !fCursorAnimationRunning) {
+				bigtime_t now = system_time();
+				if (fCursorAnimationStartAt > now)
+					timeout = fCursorAnimationStartAt - now;
+				else
+					timeout = 0;
+			}
+			UnlockExclusiveAccess();
+		}
+
+		acquire_sem_etc(fCursorAnimationSem, 1,
+			B_RELATIVE_TIMEOUT | B_CAN_INTERRUPT, timeout);
+
+		if (fCursorAnimationTerminate)
+			break;
+
+		if (!LockExclusiveAccess())
+			continue;
+
+		if (!fCursorAnimationActive || !fHardwareCursorEnabled || !fCursorVisible) {
+			UnlockExclusiveAccess();
+			continue;
+		}
+
+		bigtime_t now = system_time();
+		if (fCursorAnimationRunning) {
+			UnlockExclusiveAccess();
+			continue;
+		}
+
+		bigtime_t dueAt = fCursorAnimationStartAt;
+
+		if (now < dueAt) {
+			UnlockExclusiveAccess();
+			continue;
+		}
+
+		if (fAccSetCursorAniSpeed != NULL)
+			fAccSetCursorAniSpeed(fCursorAnimationSpeedFactor);
+		if (fAccSetCursorAniStartDelay != NULL)
+			fAccSetCursorAniStartDelay(fCursorAnimationStartDelay);
+		if (fAccStartCursorAni == NULL || fAccStartCursorAni() != B_OK) {
+			_StopCursorAnimationLocked();
+			UnlockExclusiveAccess();
+			continue;
+		}
+
+		fCursorAnimationRunning = true;
+		fCursorAnimationCurrentFrame = 0;
+
+		UnlockExclusiveAccess();
+	}
+
+	return B_OK;
 }
 
 

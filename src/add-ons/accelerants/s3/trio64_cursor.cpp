@@ -15,7 +15,15 @@
 
 
 
-void 
+void
+Trio64_SetCursorFrameAddress(uint32 offset)
+{
+	WriteCrtcReg(0x4c, (0x0f00 & offset / 1024) >> 8);
+	WriteCrtcReg(0x4d, (0xff & offset / 1024));
+}
+
+
+void
 Trio64_ShowCursor(bool bShow)
 {
 	// Turn cursor on/off.
@@ -108,8 +116,7 @@ Trio64_LoadCursorImage(int width, int height, uint8* andMask, uint8* xorMask)
 
 	// Set cursor location in video memory.
 
-	WriteCrtcReg(0x4c, (0x0f00 & si.cursorOffset / 1024) >> 8);
-	WriteCrtcReg(0x4d, (0xff & si.cursorOffset / 1024));
+	Trio64_SetCursorFrameAddress(si.cursorFrameOffsets[0]);
 
 	// Set the cursor colors which are black foreground and white background.
 

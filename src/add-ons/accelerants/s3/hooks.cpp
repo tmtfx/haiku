@@ -62,6 +62,18 @@ get_accelerant_hook(uint32 feature, void* data)
 		case B_GET_CURSOR_BITS:
 			return (void*)GetCursorBits;
 #endif
+		case B_SUPPORTS_CURSOR_ANI:
+			return (void*)(si.bDisableHdwCursor ? NULL : SupportsCursorAnimation);
+		case B_CURSOR_SUPPORTED_FRAMES:
+			return (void*)(si.bDisableHdwCursor ? NULL : CursorSupportedFrames);
+		case B_START_CURSOR_ANI:
+			return (void*)(si.bDisableHdwCursor ? NULL : StartCursorAnimation);
+		case B_STOP_CURSOR_ANI:
+			return (void*)(si.bDisableHdwCursor ? NULL : StopCursorAnimation);
+		case B_SET_CURSOR_ANI_SPEED:
+			return (void*)(si.bDisableHdwCursor ? NULL : SetCursorAnimationSpeed);
+		case B_SET_CURSOR_ANI_START_DELAY:
+			return (void*)(si.bDisableHdwCursor ? NULL : SetCursorAnimationStartDelay);
 
 		// Engine Management
 		case B_ACCELERANT_ENGINE_COUNT:	return (void*)AccelerantEngineCount;

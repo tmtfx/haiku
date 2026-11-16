@@ -64,14 +64,53 @@ static status_t init_vram_manager(shared_info* si)
     if (status == B_OK) {
         si->cursor.vram_offset = cursorOffset;
         si->cursor.block_id = cursorBlockID;
+        si->cursor.frameCount = 1;
+        si->cursor.frameVramOffset[0] = cursorOffset;
+        si->cursor.frameBlockId[0] = cursorBlockID;
+
+        // Extra slots for the animated hardware cursor (reduced-color mode):
+        // same 1024 bytes actually used per frame as the single-buffer case
+        // above (the 16KB block is just safety-margin padding, not a real
+        // per-frame requirement). Stop early, degrading frameCount, if the
+        // heap can't spare any more - B_CURSOR_SUPPORTED_FRAMES will then
+        // report fewer frames instead of failing outright.
+        for (uint32 i = 1; i < SM750_MAX_CURSOR_FRAMES; i++) {
+            uint32 blockID, offset;
+            if (mem_alloc((mem_info*)local_mem_mgr, 1024, (void*)0x43555253,
+                    &blockID, &offset) != B_OK) {
+                break;
+            }
+            si->cursor.frameVramOffset[i] = offset;
+            si->cursor.frameBlockId[i] = blockID;
+            si->cursor.frameCount = i + 1;
+        }
+
         if (si->settings.usealphacursor) {
         	if (ret == B_OK) {
         		si->cursor.alpha_vram_offset = alphacursorOffset;
         		si->cursor.alpha_block_id = alphacursorBlockID;
+        		si->cursor.alphaFrameCount = 1;
+        		si->cursor.alphaFrameVramOffset[0] = alphacursorOffset;
+        		si->cursor.alphaFrameBlockId[0] = alphacursorBlockID;
+
+        		// Extra slots for the animated alpha-plane cursor: 64x64x2 =
+        		// 8192 bytes actually used per frame (the 163840-byte block
+        		// above is shared with the much larger drag'n'drop preview
+        		// window, not a per-animation-frame requirement).
+        		for (uint32 i = 1; i < SM750_MAX_CURSOR_FRAMES; i++) {
+        			uint32 blockID, offset;
+        			if (mem_alloc((mem_info*)local_mem_mgr, 8192, (void*)0x414C5048,
+        					&blockID, &offset) != B_OK) {
+        				break;
+        			}
+        			si->cursor.alphaFrameVramOffset[i] = offset;
+        			si->cursor.alphaFrameBlockId[i] = blockID;
+        			si->cursor.alphaFrameCount = i + 1;
+        		}
         	}
         }
         si->mem_mgr = local_mem_mgr;
-        
+
         //debug_printf("SM750_ACC: Cursor dinamically allocated at offset 0x%x\n", cursorOffset);
     } else {
         debug_printf("SM750_ACC ERROR: Unable to allocate memory for the cursor!\n");
@@ -338,6 +377,16 @@ static status_t init_common(int fd,bool isClone) {
 	gInfo->alphacursor_virtual_address = (void *)((addr_t)si->framebuffer + si->cursor.alpha_vram_offset);
 	uint16* dest = (uint16*)gInfo->alphacursor_virtual_address;
 	memset(dest, 0, 320 * 256 * 2);
+
+	for (uint32 i = 0; i < si->cursor.frameCount; i++) {
+		gInfo->cursor_frame_virtual_address[i]
+			= (void*)((addr_t)si->framebuffer + si->cursor.frameVramOffset[i]);
+	}
+	for (uint32 i = 0; i < si->cursor.alphaFrameCount; i++) {
+		gInfo->alphacursor_frame_virtual_address[i]
+			= (void*)((addr_t)si->framebuffer + si->cursor.alphaFrameVramOffset[i]);
+		memset(gInfo->alphacursor_frame_virtual_address[i], 0, 64 * 64 * 2);
+	}
     
     // Token for 2D engine
     gInfo->sm750_engine_token.engine_id = 1; 
@@ -413,6 +462,8 @@ sem_id sm750_retrace_semaphore(void)
 
 
 void sm750_uninit_accelerant(void) {
+    sm750_cursor_ani_uninit();
+
     shared_info* si = gInfo->si;
     thread_id vblankThread = gInfo->vblank_thread;
 
@@ -477,7 +528,14 @@ void* get_accelerant_hook(uint32 feature, void* data) {
 #ifdef IS_PIRATI_BUILD
         case B_SET_CURSOR_BITMAP:           return (void*)sm750_set_cursor_bitmap;
         case B_GET_CURSOR_BITS:             return (void*)sm750_get_cursor_bits;
-#endif        
+#endif
+        case B_SUPPORTS_CURSOR_ANI:         return (void*)sm750_supports_cursor_ani;
+        case B_CURSOR_SUPPORTED_FRAMES:     return (void*)sm750_cursor_supported_frames;
+        case B_START_CURSOR_ANI:            return (void*)sm750_start_cursor_ani;
+        case B_STOP_CURSOR_ANI:             return (void*)sm750_stop_cursor_ani;
+        case B_SET_CURSOR_ANI_SPEED:        return (void*)sm750_set_cursor_ani_speed;
+        case B_SET_CURSOR_ANI_START_DELAY:  return (void*)sm750_set_cursor_ani_start_delay;
+
         /* Engine */
         case B_MOVE_DISPLAY:                return (void*)sm750_move_display_area;
 

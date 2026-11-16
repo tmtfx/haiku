@@ -29,6 +29,7 @@ public:
 	virtual						~AccelerantHWInterface();
 
 	virtual bool HasSetCursorBitmap() const;
+	virtual bool HasAnimatedCursorSupport() const;
 	virtual bool Has2DAcceleration() const;
 	virtual	status_t			Initialize();
 	virtual	status_t			Shutdown();
@@ -107,6 +108,8 @@ public:
 	virtual	RenderingBuffer*	BackBuffer() const;
 	virtual	bool				IsDoubleBuffered() const;
 	virtual void 				SetUserHardwareCursor(bool enable);
+	virtual void 				SetUserCursorAnimationSettings(bool enable,
+									float speedFactor, uint32 idleDelayMs);
 	virtual void 				SetUser2DAcceleration(bool enable);
 	virtual void				SetUserDebugLed(bool enable);
 	bool						IsVisual2DDebugEnabled() const { return fVisual2DDebug; }
@@ -138,6 +141,12 @@ private:
 			void				_SetSystemPalette();
 			void				_SetGrayscalePalette();
 			void				_UpdateHardwareCursor(bool wasHardwareCursorEnabled);
+			void				_UpdateCursorAnimationLocked();
+			void				_ResetCursorAnimationLocked();
+			void				_StopCursorAnimationLocked();
+			status_t			_ApplyCursorAnimationFrameLocked(uint32 frameIndex);
+			static	status_t		_CursorAnimationThreadEntry(void* cookie);
+			status_t			_CursorAnimationThread();
 			bigtime_t			_RetraceTimeout() const;
 
 private:
@@ -171,6 +180,12 @@ private:
 			get_cursor_bits			fAccGetCursorBits;
 			move_cursor				fAccMoveCursor;
 			show_cursor				fAccShowCursor;
+			supports_cursor_ani		fAccSupportsCursorAni;
+			cursor_supported_frames	fAccCursorSupportedFrames;
+			start_cursor_ani			fAccStartCursorAni;
+			stop_cursor_ani			fAccStopCursorAni;
+			set_cursor_ani_speed		fAccSetCursorAniSpeed;
+			set_cursor_ani_start_delay	fAccSetCursorAniStartDelay;
 
 			uint32					fCursorBits;
 
@@ -216,10 +231,30 @@ private:
 
 			// user preference: if false, avoid calling accelerant bitmap cursor hook
 			bool			fUserEnableHardwareCursor;
+			bool			fUserEnableCursorAnimation;
 			// user preference: if false, disable 2D hardware acceleration (pure AGG)
 			bool			fUserEnable2DAcceleration;
 			// user preference: if false, disable small colored square on the bottom right corner for debugging purposes
 			bool			fVisual2DDebug;
+			thread_id		fCursorAnimationThread;
+			sem_id			fCursorAnimationSem;
+			volatile bool	fCursorAnimationTerminate;
+			volatile bool	fCursorAnimationActive;
+			bool			fCursorAnimationRunning;
+			uint32			fCursorAnimationFrameCount;
+			uint32			fCursorAnimationCurrentFrame;
+			uint32			fCursorAnimationGeneration;
+			bigtime_t		fCursorAnimationNextFrameAt;
+			bigtime_t		fCursorAnimationStartAt;
+			bigtime_t		fCursorAnimationLastMoveAt;
+			bigtime_t		fCursorAnimationIdleDelay;
+			bigtime_t		fCursorAnimationFrameDelay;
+			uint32			fCursorAnimationStartDelay;
+			uint32			fCursorAnimationTrigger;
+			uint32			fCursorAnimationSupportedFrames;
+			float			fCursorAnimationSpeedFactor;
+			float			fUserCursorAnimationSpeedFactor;
+			uint32			fUserCursorAnimationIdleDelayMs;
 };
 
 #endif // ACCELERANT_HW_INTERFACE_H

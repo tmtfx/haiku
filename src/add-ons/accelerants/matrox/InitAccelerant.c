@@ -326,6 +326,8 @@ error0:
 
 void UNINIT_ACCELERANT(void)
 {
+	matrox_cursor_animation_uninit();
+
 	if (accelerantIsClone)
 	{
 		LOG(4,("UNINIT_ACCELERANT: shutting down clone accelerant.\n"));

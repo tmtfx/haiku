@@ -39,12 +39,25 @@ class ScreenSettings {
         bool Visual2DDebugEnabled() const { return fVisual2DDebugEnabled; }
         void SetVisual2DDebugEnabled(bool enabled);
 
+		// animated cursor preferences
+		bool CursorAnimationEnabled() const { return fCursorAnimationEnabled; }
+		void SetCursorAnimationEnabled(bool enabled);
+		int32 CursorAnimationSpeedPercent() const
+			{ return fCursorAnimationSpeedPercent; }
+		void SetCursorAnimationSpeedPercent(int32 percent);
+		int32 CursorAnimationIdleDelayMs() const
+			{ return fCursorAnimationIdleDelayMs; }
+		void SetCursorAnimationIdleDelayMs(int32 delayMs);
+
 	private:
 		BRect fWindowFrame;
 		bool fHardwareCursorEnabled;
 		bool fAcceleration2DEnabled;
 		bool fCompositor2DEnabled;
 		bool fVisual2DDebugEnabled;
+		bool fCursorAnimationEnabled;
+		int32 fCursorAnimationSpeedPercent;
+		int32 fCursorAnimationIdleDelayMs;
 };
 
 #endif	// SCREEN_SETTINGS_H
