@@ -2,6 +2,8 @@
  * Copyright 2026, Fabio Tomat <f.t.public@gmail.com>
  * All rights reserved. Distributed under the terms of the MIT license.
  */
+#include <math.h>
+#include <OS.h>
 #include <string.h>
 #include "sm750_macros.h"
 #include "DriverInterface.h"
@@ -15,8 +17,118 @@ extern accelerant_info *gInfo;
 bool actualoutbounds = false;
 bool previousoutbounds = false;
 
+
+// Animazione cursore hardware: stesso schema usato per kyro/radeon_hd/ATI/
+// Matrox/S3/Trident/XGI. Un'unica macchina a stati, perche' le due modalita'
+// cursore di questo chip (ridotta a pochi colori vs. piano alpha) sono scelte
+// una volta sola all'avvio (si->settings.usealphacursor) e non cambiano mai
+// a runtime - le funzioni sottostanti smistano internamente in base a quella
+// flag.
+namespace {
+
+struct cursor_animation_state {
+	bool		running;
+	bool		terminate;
+	float		speedFactor;
+	bigtime_t	frameInterval;
+	bigtime_t	startDelay;
+	uint32		uploadedFrameCount;
+	uint32		nextUploadFrame;
+	uint32		currentFrame;
+	sem_id		semaphore;
+	thread_id	thread;
+};
+
+cursor_animation_state sCursorAnimation = {
+	false, false, 10.0f, 100000, 0, 1, 0, 0, -1, -1
+};
+
+} // namespace
+
+
+// Riprogramma solo il registro di indirizzo superficie sulla slot indicata,
+// senza toccare pixel/geometria - usato sia dal thread di animazione che
+// dall'upload. In modalita' ridotta preserva il bit di enable/visibilita'
+// gia' impostato (lo switch di frame non deve mai rendere visibile un
+// cursore nascosto).
+static void
+sm750_set_cursor_frame_address(uint32 frameIndex)
+{
+	shared_info* si = gInfo->si;
+	vuint32* regs = gInfo->regs;
+
+	if (si->settings.usealphacursor) {
+		uint32 offset = si->cursor.alphaFrameVramOffset[frameIndex] & 0x03FFFFF0;
+		SM750_WREG32(SM750_DISP_PANEL_ALPHA_FB_ADDR, offset);
+	} else {
+		uint32 reg = si->card_info.is_panel ? SM750_DISP_PANEL_CUR_ADDR : SM750_DISP_CRT_CUR_ADDR;
+		uint32 enableBit = SM750_REG32(reg) & (1u << 31);
+		uint32 addr = si->cursor.frameVramOffset[frameIndex] & 0x03FFFFF0;
+		SM750_WREG32(reg, enableBit | addr);
+	}
+}
+
+
 static status_t
-sm750_update_alpha_cursor(uint16 x, uint16 y, uint16 width, uint16 height, uint16 bytesPerRow, const uint8* bitmapData)
+sm750_cursor_animation_thread(void*)
+{
+	while (!sCursorAnimation.terminate) {
+		bigtime_t interval = sCursorAnimation.frameInterval;
+		if (sCursorAnimation.currentFrame == 0 && sCursorAnimation.startDelay > 0)
+			interval += sCursorAnimation.startDelay;
+
+		bigtime_t timeout = sCursorAnimation.running ? interval : 500000;
+		status_t status = acquire_sem_etc(sCursorAnimation.semaphore, 1,
+			B_RELATIVE_TIMEOUT | B_CAN_INTERRUPT, timeout);
+		if (sCursorAnimation.terminate)
+			break;
+
+		if (!sCursorAnimation.running || sCursorAnimation.uploadedFrameCount < 2)
+			continue;
+		if (status != B_TIMED_OUT)
+			continue;
+
+		sCursorAnimation.currentFrame++;
+		if (sCursorAnimation.currentFrame >= sCursorAnimation.uploadedFrameCount)
+			sCursorAnimation.currentFrame = 0;
+
+		sm750_set_cursor_frame_address(sCursorAnimation.currentFrame);
+	}
+
+	return B_OK;
+}
+
+
+static status_t
+sm750_ensure_animation_thread(void)
+{
+	if (sCursorAnimation.thread >= B_OK)
+		return B_OK;
+
+	sCursorAnimation.semaphore = create_sem(0, "sm750 cursor ani");
+	if (sCursorAnimation.semaphore < B_OK)
+		return sCursorAnimation.semaphore;
+
+	sCursorAnimation.terminate = false;
+	sCursorAnimation.thread = spawn_thread(sm750_cursor_animation_thread,
+		"sm750 cursor ani", B_DISPLAY_PRIORITY, NULL);
+	if (sCursorAnimation.thread < B_OK) {
+		delete_sem(sCursorAnimation.semaphore);
+		sCursorAnimation.semaphore = -1;
+		return sCursorAnimation.thread;
+	}
+
+	resume_thread(sCursorAnimation.thread);
+	return B_OK;
+}
+
+
+// Identica alla sm750_update_alpha_cursor originale (stessa matematica di
+// crop/allineamento empiricamente tarata - vedi i commenti italiani sotto),
+// generalizzata solo per operare sulla slot "frameIndex" invece che sempre
+// sull'unico buffer alpha originale.
+static status_t
+sm750_update_alpha_cursor_frame(uint32 frameIndex, uint16 x, uint16 y, uint16 width, uint16 height, uint16 bytesPerRow, const uint8* bitmapData)
 {
 	    // Dai vari test si nota che impostando right = left + 64 e 
         // bottom = top + 64 per coprire tutta l'area del cursore alpha
@@ -28,15 +140,15 @@ sm750_update_alpha_cursor(uint16 x, uint16 y, uint16 width, uint16 height, uint1
         // move_cursor, a quella dimensione non si presentano troppo spesso
         // gli artefatti e l'area è sufficientemente grande per il trascinamento di icone
         // con il drag'n'drop.
-    if (gInfo->alphacursor_virtual_address == NULL) {
+    if (gInfo->alphacursor_frame_virtual_address[frameIndex] == NULL) {
         debug_printf("SM750_ACC: Cursor: alpha-cursor memory address not initialized\n");
         return B_NO_INIT;
     }
 
     shared_info *si = gInfo->si;
     vuint32 *regs = gInfo->regs;
-    
-    uint16* dest = (uint16*)gInfo->alphacursor_virtual_address;
+
+    uint16* dest = (uint16*)gInfo->alphacursor_frame_virtual_address[frameIndex];
     const uint8* src = (const uint8* )bitmapData;
 
     // Posizione logica considerando l'hotspot (può diventare negativa)
@@ -82,7 +194,7 @@ sm750_update_alpha_cursor(uint16 x, uint16 y, uint16 width, uint16 height, uint1
     SM750_WREG32(SM750_DISP_PANEL_ALPHA_PL_BR_POS, br_val);
 
     // Indirizzo VRAM allineato
-    uint32 alpha_addr = si->cursor.alpha_vram_offset & 0x03FFFFF0;
+    uint32 alpha_addr = si->cursor.alphaFrameVramOffset[frameIndex] & 0x03FFFFF0;
     SM750_WREG32(SM750_DISP_PANEL_ALPHA_FB_ADDR, alpha_addr);
 
     // Allineamento a 128-bit per il pitch dei blocchi basato sulla larghezza attiva
@@ -168,13 +280,14 @@ sm750_move_cursor(uint16 x, uint16 y)
         // Se ci troviamo fuori dai bordi O veniamo da una condizione di fuori bordo 
         // (serve a ripulire/ripristinare quando rientriamo o ci muoviamo sul confine)
         if (actualoutbounds || previousoutbounds) {
-            // Richiamiamo l'helper che gestisce il posizionamento e il cropping software
-            // Nota: passiamo la larghezza/altezza originale salvata in cursor_bitmap_width/height 
-            // e recuperiamo il bytesPerRow salvato (o ricalcolato se lo memorizziamo).
-            // Assicurati di avere il bytesPerRow a disposizione in si->cursor o passalo salvandolo prima.
-            sm750_update_alpha_cursor(x, y, si->cursor.cursor_bitmap_width, 
-                                      si->cursor.cursor_bitmap_height, 
-                                      si->cursor.bytesPerRaw, si->cursor.bitmapData);
+            // Richiamiamo l'helper che gestisce il posizionamento e il cropping software,
+            // sul frame attualmente visualizzato (frame 0 se non e' in corso un'animazione).
+            uint32 activeFrame = sCursorAnimation.running ? sCursorAnimation.currentFrame : 0;
+            sm750_update_alpha_cursor_frame(activeFrame, x, y,
+                                      si->cursor.frameWidth[activeFrame],
+                                      si->cursor.frameHeight[activeFrame],
+                                      si->cursor.frameBytesPerRow[activeFrame],
+                                      si->cursor.frameBitmapData[activeFrame]);
         } else {
             // Caso standard in pieno schermo: aggiorniamo solo i registri della finestra 
             // senza ricalcolare la VRAM pixel per pixel (massima velocità)
@@ -309,26 +422,57 @@ sm750_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
     si->cursor.cursor_bitmap_height = height;
     si->cursor.bytesPerRaw = bytesPerRow;
     si->cursor.bitmapData = bitmapData;
-    
+
+    if (sm750_ensure_animation_thread() != B_OK)
+        return B_ERROR;
+
+    uint32 frameCount = si->settings.usealphacursor
+        ? si->cursor.alphaFrameCount : si->cursor.frameCount;
+
+    // Selezione della slot di destinazione per l'animazione: stesso schema
+    // gia' usato per kyro/radeon_hd/ATI/Matrox/S3/Trident/XGI.
+    if (!sCursorAnimation.running) {
+        if (sCursorAnimation.nextUploadFrame == 0)
+            sCursorAnimation.uploadedFrameCount = 0;
+        sCursorAnimation.currentFrame = sCursorAnimation.nextUploadFrame;
+    }
+
+    uint32 targetFrame = sCursorAnimation.running
+        ? sCursorAnimation.currentFrame : sCursorAnimation.nextUploadFrame;
+    if (targetFrame >= frameCount)
+        targetFrame = 0;
+
+    // Ricordiamo la bitmap grezza di questo frame: serve all'helper di
+    // ridisegno del piano alpha vicino ai bordi schermo (vedi
+    // sm750_move_cursor), che deve poter ridisegnare QUALSIASI frame, non
+    // solo l'ultimo caricato.
+    si->cursor.frameWidth[targetFrame] = width;
+    si->cursor.frameHeight[targetFrame] = height;
+    si->cursor.frameBytesPerRow[targetFrame] = bytesPerRow;
+    si->cursor.frameBitmapData[targetFrame] = bitmapData;
+
+    status_t result;
+
     if (si->settings.usealphacursor){
     	// Calcoliamo la posizione top-left considerando l'hotspot
         int16 left = (int16)si->cursor.x - (int16)si->cursor.hot_x;
         int16 top = (int16)si->cursor.y - (int16)si->cursor.hot_y;
-        
+
         // --- GESTIONE STATO BOUNDS ---
         actualoutbounds = (left < 0 || top < 0);
         previousoutbounds = actualoutbounds; // Allineiamo lo stato iniziale
         // Sfruttiamo l'helper centralizzato che gestisce anche i bordi negativi e il cropping
-        return sm750_update_alpha_cursor(si->cursor.x, si->cursor.y, width, height, bytesPerRow, bitmapData);
+        result = sm750_update_alpha_cursor_frame(targetFrame, si->cursor.x, si->cursor.y,
+            width, height, bytesPerRow, bitmapData);
     } else {
         //if (si->cursor.v_address == NULL) {
-        if (gInfo->cursor_virtual_address == NULL) {
+        if (gInfo->cursor_frame_virtual_address[targetFrame] == NULL) {
             debug_printf("SM750_ACC: Cursor: cursor memory address not initialized\n");
             return B_NO_INIT;
         }
-        
-        uint8* dest = (uint8*)gInfo->cursor_virtual_address;
-    
+
+        uint8* dest = (uint8*)gInfo->cursor_frame_virtual_address[targetFrame];
+
         // Cleaning the entire KB
         // 2-bit per pixel format
         // Fill with "10" (Transparent) -> binary: 10101010 = 0xAA
@@ -379,7 +523,7 @@ sm750_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
     
     
         // Force colors and address
-        uint32 addr_val = (1 << 31) | (si->cursor.vram_offset & 0x03FFFFF0);
+        uint32 addr_val = (1 << 31) | (si->cursor.frameVramOffset[targetFrame] & 0x03FFFFF0);
 
         // SM750 Color registers
         // Color 1 (0,0) = White
@@ -397,8 +541,20 @@ sm750_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX, uint16 hotY,
             SM750_WREG32(SM750_DISP_CRT_CUR_ADDR, addr_val);
         }
 
+        result = B_OK;
     }
-    return B_OK;
+
+    if (result == B_OK && !sCursorAnimation.running) {
+        if (targetFrame + 1 < frameCount)
+            sCursorAnimation.nextUploadFrame = targetFrame + 1;
+        else
+            sCursorAnimation.nextUploadFrame = 0;
+
+        if (sCursorAnimation.uploadedFrameCount < targetFrame + 1)
+            sCursorAnimation.uploadedFrameCount = targetFrame + 1;
+    }
+
+    return result;
 }
 
 
@@ -410,4 +566,114 @@ sm750_get_cursor_bits(void)
 
 	if (gInfo->si->settings.usealphacursor) return 32;
 	return gInfo->si->settings.cursorbits;
+}
+
+
+bool
+sm750_supports_cursor_ani(void)
+{
+	if (gInfo == NULL || gInfo->si == NULL)
+		return false;
+
+	shared_info* si = gInfo->si;
+	uint32 frameCount = si->settings.usealphacursor
+		? si->cursor.alphaFrameCount : si->cursor.frameCount;
+	return frameCount >= 2;
+}
+
+
+uint32
+sm750_cursor_supported_frames(void)
+{
+	if (!sm750_supports_cursor_ani())
+		return 0;
+
+	shared_info* si = gInfo->si;
+	uint32 frameCount = si->settings.usealphacursor
+		? si->cursor.alphaFrameCount : si->cursor.frameCount;
+	return frameCount - 1;
+}
+
+
+status_t
+sm750_start_cursor_ani(void)
+{
+	if (!sm750_supports_cursor_ani())
+		return B_NOT_SUPPORTED;
+	if (sCursorAnimation.uploadedFrameCount < 2)
+		return B_BAD_VALUE;
+	if (sm750_ensure_animation_thread() != B_OK)
+		return B_ERROR;
+
+	sCursorAnimation.currentFrame = 0;
+	sm750_set_cursor_frame_address(0);
+
+	sCursorAnimation.running = true;
+	if (sCursorAnimation.semaphore >= B_OK)
+		release_sem(sCursorAnimation.semaphore);
+	return B_OK;
+}
+
+
+status_t
+sm750_stop_cursor_ani(void)
+{
+	if (!sm750_supports_cursor_ani())
+		return B_NOT_SUPPORTED;
+
+	sCursorAnimation.running = false;
+	sCursorAnimation.currentFrame = 0;
+	sCursorAnimation.nextUploadFrame = 0;
+
+	sm750_set_cursor_frame_address(0);
+	return B_OK;
+}
+
+
+status_t
+sm750_set_cursor_ani_speed(float speedFactor)
+{
+	if (!sm750_supports_cursor_ani())
+		return B_NOT_SUPPORTED;
+	if (!isfinite(speedFactor) || speedFactor <= 0.0f)
+		return B_BAD_VALUE;
+
+	sCursorAnimation.speedFactor = speedFactor;
+	sCursorAnimation.frameInterval = (bigtime_t)(1000000.0f / speedFactor);
+	if (sCursorAnimation.frameInterval < 5000)
+		sCursorAnimation.frameInterval = 5000;
+	return B_OK;
+}
+
+
+status_t
+sm750_set_cursor_ani_start_delay(uint32 startDelayMs)
+{
+	if (!sm750_supports_cursor_ani())
+		return B_NOT_SUPPORTED;
+	sCursorAnimation.startDelay = (bigtime_t)startDelayMs * 1000;
+	return B_OK;
+}
+
+
+void
+sm750_cursor_ani_uninit(void)
+{
+	if (sCursorAnimation.thread >= B_OK) {
+		sCursorAnimation.terminate = true;
+		if (sCursorAnimation.semaphore >= B_OK)
+			release_sem(sCursorAnimation.semaphore);
+		status_t result;
+		wait_for_thread(sCursorAnimation.thread, &result);
+	}
+	if (sCursorAnimation.semaphore >= B_OK)
+		delete_sem(sCursorAnimation.semaphore);
+
+	sCursorAnimation.running = false;
+	sCursorAnimation.terminate = false;
+	sCursorAnimation.uploadedFrameCount = 1;
+	sCursorAnimation.nextUploadFrame = 0;
+	sCursorAnimation.currentFrame = 0;
+	sCursorAnimation.semaphore = -1;
+	sCursorAnimation.thread = -1;
 }

@@ -21,6 +21,13 @@
 
 #define DRIVER_PREFIX "sm750"
 
+#define SM750_MAX_CURSOR_FRAMES 16
+	/* Maximum animated hardware cursor frame buffers (matches
+	 * ServerCursor::B_CURSOR_MAX_ANIMATION_FRAMES in the app_server).
+	 * Applies to BOTH cursor modes this chip supports - the reduced-color
+	 * legacy cursor and the alpha-plane cursor - frame 0 of each always
+	 * aliases the original single-buffer fields below. */
+
 /* --- Benaphore per la sincronizzazione --- */
 #ifdef __cplusplus
 /* Se stiamo compilando un file .cpp (Accelerante), usiamo i metodi */
@@ -189,6 +196,27 @@ typedef struct {
 		uint16	cursor_bitmap_height;
 		uint16	bytesPerRaw;
 		const uint8*	bitmapData;
+
+		/* Animated hardware cursor: extra frame slots, one set per cursor
+		 * mode. Frame 0 of each array always equals the field above it
+		 * (vram_offset/block_id, alpha_vram_offset/alpha_block_id). */
+		uint32	frameCount;					/* reduced-color slots reserved (>= 1) */
+		phys_addr_t	frameVramOffset[SM750_MAX_CURSOR_FRAMES];
+		uint32	frameBlockId[SM750_MAX_CURSOR_FRAMES];
+
+		uint32	alphaFrameCount;			/* alpha-plane slots reserved (>= 1, or 0 if usealphacursor is off) */
+		phys_addr_t	alphaFrameVramOffset[SM750_MAX_CURSOR_FRAMES];
+		uint32	alphaFrameBlockId[SM750_MAX_CURSOR_FRAMES];
+
+		/* Per-frame raw bitmap backing, needed to redraw the alpha plane
+		 * when the cursor crosses near a screen edge (see
+		 * sm750_update_alpha_cursor_frame()). Same lifetime assumption as
+		 * the single bitmapData field above: valid as long as app_server's
+		 * ServerCursor that owns these frames is alive. */
+		uint16	frameWidth[SM750_MAX_CURSOR_FRAMES];
+		uint16	frameHeight[SM750_MAX_CURSOR_FRAMES];
+		uint16	frameBytesPerRow[SM750_MAX_CURSOR_FRAMES];
+		const uint8*	frameBitmapData[SM750_MAX_CURSOR_FRAMES];
 	} cursor;
 
 	/* DAC Palette (CLUT) */
@@ -273,6 +301,8 @@ typedef struct {
     thread_id       vblank_thread;
     void	*cursor_virtual_address;
     void	*alphacursor_virtual_address;
+    void	*cursor_frame_virtual_address[SM750_MAX_CURSOR_FRAMES];
+    void	*alphacursor_frame_virtual_address[SM750_MAX_CURSOR_FRAMES];
 } accelerant_info;
 
 /* Stato globale del driver */
