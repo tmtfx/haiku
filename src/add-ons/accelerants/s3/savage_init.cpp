@@ -240,12 +240,28 @@ Savage_Init(void)
 	// the very end of the video memory.
 
 	si.cobOffset = (si.videoMemSize - cobSize) & ~0x1ffff;	// align cob to 128k
-	si.cursorOffset = (si.cobOffset - CURSOR_BYTES) & ~0xfff;	// align to 4k boundary
+
+	// Reserve as many CURSOR_BYTES slots as fit (up to S3_MAX_CURSOR_FRAMES)
+	// right before the COB, for the animated hardware cursor; slot 0 is the
+	// normal static cursor.
+	{
+		uint32 frameCount = S3_MAX_CURSOR_FRAMES;
+		while (frameCount > 1 && si.cobOffset < (uint64)frameCount * CURSOR_BYTES)
+			frameCount--;
+
+		uint32 base = (si.cobOffset - frameCount * CURSOR_BYTES) & ~0xfff;	// align to 4k
+
+		si.cursorFrameCount = frameCount;
+		for (uint32 i = 0; i < frameCount; i++)
+			si.cursorFrameOffsets[i] = base + i * CURSOR_BYTES;
+		si.cursorOffset = si.cursorFrameOffsets[0];
+	}
 	si.frameBufferOffset = 0;
 	si.maxFrameBufferSize = si.cursorOffset - si.frameBufferOffset;
 
 	TRACE("cobSizeIndex: %d	cobSize: %d  cobOffset: 0x%x\n", si.cobSizeIndex, cobSize, si.cobOffset);
-	TRACE("cursorOffset: 0x%x  frameBufferOffset: 0x%x\n", si.cursorOffset, si.frameBufferOffset);
+	TRACE("cursorOffset: 0x%x  frameBufferOffset: 0x%x  cursorFrames: %" B_PRIu32 "\n",
+		si.cursorOffset, si.frameBufferOffset, si.cursorFrameCount);
 
 	// Reset graphics engine to avoid memory corruption.
 
@@ -339,6 +355,7 @@ Savage_SetFunctionPointers(void)
 	gInfo.LoadCursorImage = Savage_LoadCursorImage;
 	gInfo.SetCursorPosition = Savage_SetCursorPosition;
 	gInfo.ShowCursor = Savage_ShowCursor;
+	gInfo.SetCursorFrameAddress = Savage_SetCursorFrameAddress;
 
 	gInfo.FillRectangle = Savage_FillRectangle;
 	gInfo.FillSpan = Savage_FillSpan;

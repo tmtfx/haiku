@@ -59,6 +59,15 @@ struct AccelerantInfo {
 	void	(*SetCursorPosition)(int x, int y);
 	void	(*ShowCursor)(bool bShow);
 
+	// Pointers to animated hardware cursor functions.
+	bool	 (*SupportsCursorAnimation)(void);
+	uint32	 (*CursorSupportedFrames)(void);
+	status_t (*StartCursorAnimation)(void);
+	status_t (*StopCursorAnimation)(void);
+	status_t (*SetCursorAnimationSpeed)(float speedFactor);
+	status_t (*SetCursorAnimationStartDelay)(uint32 startDelayMs);
+	void	 (*CursorAnimationUninit)(void);
+
 	// Pointers to 2D acceleration functions.
 	void	(*FillRectangle)(engine_token*, uint32 color, fill_rect_params*,
 				uint32 count);
@@ -133,6 +142,13 @@ status_t SetCursorBitmap(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y
                 color_space colorSpace, uint16 bytesPerRow, const uint8* bitmapData);
 void	 MoveCursor(uint16 x, uint16 y);
 uint32	 GetCursorBits(void);
+bool	 SupportsCursorAnimation(void);
+uint32	 CursorSupportedFrames(void);
+status_t StartCursorAnimation(void);
+status_t StopCursorAnimation(void);
+status_t SetCursorAnimationSpeed(float speedFactor);
+status_t SetCursorAnimationStartDelay(uint32 startDelayMs);
+void	 CursorAnimationUninit(void);
 
 // Engine Management
 uint32   AccelerantEngineCount(void);
@@ -205,6 +221,13 @@ status_t Mach64_SetCursorBitmap(uint16 width, uint16 height, uint16 hot_x, uint1
                        color_space colorSpace, uint16 bytesPerRow, const uint8* bitmapData);
 void	 Mach64_SetCursorPosition(int x, int y);
 void	 Mach64_ShowCursor(bool bShow);
+bool	 Mach64_SupportsCursorAnimation(void);
+uint32	 Mach64_CursorSupportedFrames(void);
+status_t Mach64_StartCursorAnimation(void);
+status_t Mach64_StopCursorAnimation(void);
+status_t Mach64_SetCursorAnimationSpeed(float speedFactor);
+status_t Mach64_SetCursorAnimationStartDelay(uint32 startDelayMs);
+void	 Mach64_CursorAnimationUninit(void);
 
 void	 Mach64_AdjustFrame(const DisplayModeEx& mode);
 status_t Mach64_SetDisplayMode(const DisplayModeEx& mode);
@@ -233,6 +256,13 @@ status_t Rage128_SetCursorBitmap(uint16 width, uint16 height, uint16 hot_x, uint
                          color_space colorSpace, uint16 bytesPerRow, const uint8* bitmapData);
 void	 Rage128_SetCursorPosition(int x, int y);
 void	 Rage128_ShowCursor(bool bShow);
+bool	 Rage128_SupportsCursorAnimation(void);
+uint32	 Rage128_CursorSupportedFrames(void);
+status_t Rage128_StartCursorAnimation(void);
+status_t Rage128_StopCursorAnimation(void);
+status_t Rage128_SetCursorAnimationSpeed(float speedFactor);
+status_t Rage128_SetCursorAnimationStartDelay(uint32 startDelayMs);
+void	 Rage128_CursorAnimationUninit(void);
 
 void	 Rage128_AdjustFrame(const DisplayModeEx& mode);
 status_t Rage128_SetDisplayMode(const DisplayModeEx& mode);

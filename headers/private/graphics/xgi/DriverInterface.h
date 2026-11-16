@@ -75,6 +75,10 @@
 #define XGI_ACCELERANT_NAME        "xgi.accelerant"
 #define XGI_PRIVATE_DATA_MAGIC     0x58474931  /* 'XGI1' */
 
+#define XGI_MAX_CURSOR_FRAMES 16
+	/* Maximum animated hardware cursor frame buffers (matches
+	 * ServerCursor::B_CURSOR_MAX_ANIMATION_FRAMES in the app_server) */
+
 #define PCI_VENDOR_XGI             0x18CA
 
 /* Supported XGI Device IDs */
@@ -225,8 +229,14 @@ struct SharedInfo {
     edid1_info      edidInfo;
 
     /* Hardware Cursor */
-    uint32          cursorOffset;      /* Offset in VRAM */
+    uint32          cursorOffset;      /* Offset in VRAM (frame 0) */
     uint32          cursorBufferSize;  /* Typically 1024 bytes */
+    uint32          cursorFrameCount;  /* number of reserved animated cursor
+                                           frame slots (>= 1), computed by the
+                                           kernel driver in map_device() */
+    uint32          cursorFrameOffsets[XGI_MAX_CURSOR_FRAMES];
+    uint32          cursorActiveOffset; /* slot currently driving
+                                            XGI_REG_CURSOR_CTRL */
     struct {
         uint16      hotX;
         uint16      hotY;

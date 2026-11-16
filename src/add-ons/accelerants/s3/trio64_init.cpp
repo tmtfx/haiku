@@ -114,9 +114,24 @@ Trio64_Init(void)
 		return B_ERROR;
 
 	si.videoMemSize = ramSizeMB * 1024 * 1024;
-	si.cursorOffset = si.videoMemSize - CURSOR_BYTES;	// put cursor at end of video memory
+
+	// Reserve as many CURSOR_BYTES slots as fit (up to S3_MAX_CURSOR_FRAMES)
+	// at the end of video memory for the animated hardware cursor; slot 0
+	// is the normal static cursor.
+	{
+		uint32 frameCount = S3_MAX_CURSOR_FRAMES;
+		while (frameCount > 1 && si.videoMemSize < (uint64)frameCount * CURSOR_BYTES)
+			frameCount--;
+
+		uint32 base = si.videoMemSize - frameCount * CURSOR_BYTES;
+
+		si.cursorFrameCount = frameCount;
+		for (uint32 i = 0; i < frameCount; i++)
+			si.cursorFrameOffsets[i] = base + i * CURSOR_BYTES;
+		si.cursorOffset = si.cursorFrameOffsets[0];	// put cursor at end of video memory
+	}
 	si.frameBufferOffset = 0;
-	si.maxFrameBufferSize = si.videoMemSize - CURSOR_BYTES;
+	si.maxFrameBufferSize = si.cursorOffset;
 
 	// Detect current mclk.
 
@@ -161,6 +176,7 @@ Trio64_SetFunctionPointers(void)
 	gInfo.LoadCursorImage = Trio64_LoadCursorImage;
 	gInfo.SetCursorPosition = Trio64_SetCursorPosition;
 	gInfo.ShowCursor = Trio64_ShowCursor;
+	gInfo.SetCursorFrameAddress = Trio64_SetCursorFrameAddress;
 
 	// Note that the 2D accel functions set below do not work with all display
 	// modes;  thus, when a mode is set, the function setting the mode will

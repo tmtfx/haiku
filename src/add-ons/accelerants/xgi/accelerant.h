@@ -326,6 +326,13 @@ status_t	xgi_set_cursor_bitmap(uint16 width, uint16 height, uint16 hotX,
 				const uint8* bitmapData);
 uint32		xgi_get_cursor_bits(void);
 #endif
+bool		xgi_supports_cursor_ani(void);
+uint32		xgi_cursor_supported_frames(void);
+status_t	xgi_start_cursor_ani(void);
+status_t	xgi_stop_cursor_ani(void);
+status_t	xgi_set_cursor_ani_speed(float speedFactor);
+status_t	xgi_set_cursor_ani_start_delay(uint32 startDelayMs);
+void		xgi_cursor_ani_uninit(void);
 
 /* Prototypes - Engine.cpp */
 uint32		xgi_accelerant_engine_count(void);

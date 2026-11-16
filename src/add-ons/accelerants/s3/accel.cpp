@@ -176,9 +176,11 @@ CloneAccelerant(void* data)
 }
 
 
-void 
+void
 UninitAccelerant(void)
 {
+	CursorAnimationUninit();
+
 	delete_area(gInfo.modeListArea);
 	gInfo.modeList = NULL;
 

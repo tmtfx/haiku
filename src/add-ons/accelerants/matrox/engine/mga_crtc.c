@@ -513,15 +513,29 @@ status_t gx00_crtc_cursor_init()
 	if (si->ps.card_type >= G100)
 	{
 		vuint32 * fb;
-		/* cursor bitmap will be stored at the start of the framebuffer on >= G100 */
-		const uint32 curadd = 0;
+		uint32 frameCount, j;
+		uint64 vramBytes = (uint64)si->ps.memory_size * 1024 * 1024;
+		uint32 curadd;
+
+		/* Reserve as many 1024-byte slots as fit (up to
+		 * MATROX_MAX_CURSOR_FRAMES) at the TAIL of VRAM for the animated
+		 * hardware cursor - NOT at offset 0, which overlaps the start of
+		 * the scanned-out framebuffer. ProposeDisplayMode.c already
+		 * reserves this same tail region (pointer_reservation) when
+		 * capping how large a mode's framebuffer may grow. */
+		frameCount = MATROX_MAX_CURSOR_FRAMES;
+		while (frameCount > 1 && vramBytes < (uint64)frameCount * 1024)
+			frameCount--;
+
+		curadd = (uint32)(vramBytes - (uint64)frameCount * 1024);
+
+		si->cursor_frame_count = frameCount;
+		for (j = 0; j < frameCount; j++)
+			si->cursor_frame_offsets[j] = curadd + j * 1024;
+		si->cursor_active_offset = si->cursor_frame_offsets[0];
 
 		/* set cursor bitmap adress ... */
-		DXIW(CURADDL,curadd >> 10);
-		DXIW(CURADDH,curadd >> 18);
-		/* ... and repeat that: G100 requires other programming order than later cards!?! */
-		DXIW(CURADDL,curadd >> 10);
-		DXIW(CURADDH,curadd >> 18);
+		gx00_crtc_cursor_set_frame_address(si->cursor_active_offset);
 
 		/*set cursor colour*/
 		DXIW(CURCOL0RED,0XFF);
@@ -534,9 +548,9 @@ status_t gx00_crtc_cursor_init()
 		DXIW(CURCOL2GREEN,0);
 		DXIW(CURCOL2BLUE,0);
 
-		/*clear cursor*/
-		fb = (vuint32 *) si->framebuffer + curadd;
-		for (i=0;i<(1024/4);i++)
+		/*clear all reserved cursor frame slots*/
+		fb = (vuint32 *) ((uint8*)si->framebuffer + curadd);
+		for (i = 0; i < (int)(frameCount * 1024 / 4); i++)
 		{
 			fb[i]=0;
 		}
@@ -603,6 +617,22 @@ status_t gx00_crtc_cursor_hide()
 	return B_OK;
 }
 
+/* Reprogram the cursor surface-address register to point at a different
+ * reserved frame slot (G100+ only). Used both for the initial upload and,
+ * during animation, to flip to the next pre-loaded frame without touching
+ * pixel data. */
+status_t gx00_crtc_cursor_set_frame_address(uint32 offset)
+{
+	/* set cursor bitmap adress ... */
+	DXIW(CURADDL,offset >> 10);
+	DXIW(CURADDH,offset >> 18);
+	/* ... and repeat that: G100 requires other programming order than later cards!?! */
+	DXIW(CURADDL,offset >> 10);
+	DXIW(CURADDH,offset >> 18);
+
+	return B_OK;
+}
+
 /*set up cursor shape*/
 status_t gx00_crtc_cursor_define(uint8* andMask,uint8* xorMask)
 {
@@ -612,8 +642,8 @@ status_t gx00_crtc_cursor_define(uint8* andMask,uint8* xorMask)
 	{
 		vuint8 * cursor;
 
-		/*get a pointer to the cursor*/
-		cursor = (vuint8*) si->framebuffer;
+		/*get a pointer to frame slot 0 (the legacy B/W shape is never animated)*/
+		cursor = (vuint8*) si->framebuffer + si->cursor_frame_offsets[0];
 
 		/*draw the cursor*/
 		for(y=0;y<16;y++)
@@ -623,6 +653,9 @@ status_t gx00_crtc_cursor_define(uint8* andMask,uint8* xorMask)
 			cursor[y*16+6]=~*andMask++;
 			cursor[y*16+14]=*xorMask++;
 		}
+
+		si->cursor_active_offset = si->cursor_frame_offsets[0];
+		gx00_crtc_cursor_set_frame_address(si->cursor_active_offset);
 	}
 	else
 	/* <= G100 cards have dedicated cursor bitmap RAM (in TVP3026 DAC) */

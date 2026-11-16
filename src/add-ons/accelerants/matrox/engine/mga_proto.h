@@ -95,6 +95,7 @@ status_t gx00_crtc_cursor_define(uint8*,uint8*);
 status_t gx00_crtc_cursor_position(uint16 x ,uint16 y);
 status_t gx00_crtc_cursor_show(void);
 status_t gx00_crtc_cursor_hide(void);
+status_t gx00_crtc_cursor_set_frame_address(uint32 offset);
 
 /*CRTC2 functions*/
 /*XXX - validate_timing*/

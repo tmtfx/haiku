@@ -72,8 +72,22 @@ InitAccelerant(int fileDesc)
 
 		TRACE("Vendor ID: 0x%X, Device ID: 0x%X\n", si.vendorID, si.deviceID);
 
-		si.maxFrameBufferSize = si.videoMemSize;
-		si.cursorOffset = si.maxFrameBufferSize - 4096;
+		// Reserve as many 4096-byte slots as fit (up to TRIDENT_MAX_CURSOR_FRAMES)
+		// at the tail of VRAM for the animated hardware cursor; slot 0 is the
+		// normal static cursor.
+		{
+			uint32 frameCount = TRIDENT_MAX_CURSOR_FRAMES;
+			while (frameCount > 1 && si.videoMemSize < (uint64)frameCount * 4096)
+				frameCount--;
+
+			uint32 base = si.videoMemSize - frameCount * 4096;
+
+			si.cursorFrameCount = frameCount;
+			for (uint32 i = 0; i < frameCount; i++)
+				si.cursorFrameOffsets[i] = base + i * 4096;
+			si.cursorOffset = si.cursorFrameOffsets[0];
+		}
+		si.maxFrameBufferSize = si.cursorOffset;
 
 		if (si.bAccelerantInUse) {
 			result = B_NOT_ALLOWED;
@@ -141,9 +155,11 @@ CloneAccelerant(void* data)
 }
 
 
-void 
+void
 UninitAccelerant(void)
 {
+	CursorAnimationUninit();
+
 	delete_area(gInfo.modeListArea);
 	gInfo.modeList = NULL;
 

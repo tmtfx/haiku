@@ -8,7 +8,91 @@
 */
 #include <cstdlib>
 #include <cstring>
+#include <math.h>
+#include <OS.h>
 #include "accel.h"
+
+
+// Animazione cursore hardware: stesso schema di kyro/radeon_hd/ATI/Matrox.
+// Condivisa fra le 3 famiglie S3 (Savage/Trio64/ViRGE) perche' SetCursorBitmap
+// stesso e' gia' condiviso - solo il registro di indirizzo superficie viene
+// scritto in modo diverso per famiglia (gInfo.SetCursorFrameAddress).
+namespace {
+
+struct cursor_animation_state {
+	bool		running;
+	bool		terminate;
+	float		speedFactor;
+	bigtime_t	frameInterval;
+	bigtime_t	startDelay;
+	uint32		uploadedFrameCount;
+	uint32		nextUploadFrame;
+	uint32		currentFrame;
+	sem_id		semaphore;
+	thread_id	thread;
+};
+
+cursor_animation_state sCursorAnimation = {
+	false, false, 10.0f, 100000, 0, 1, 0, 0, -1, -1
+};
+
+} // namespace
+
+
+static status_t
+s3_cursor_animation_thread(void*)
+{
+	while (!sCursorAnimation.terminate) {
+		bigtime_t interval = sCursorAnimation.frameInterval;
+		if (sCursorAnimation.currentFrame == 0 && sCursorAnimation.startDelay > 0)
+			interval += sCursorAnimation.startDelay;
+
+		bigtime_t timeout = sCursorAnimation.running ? interval : 500000;
+		status_t status = acquire_sem_etc(sCursorAnimation.semaphore, 1,
+			B_RELATIVE_TIMEOUT | B_CAN_INTERRUPT, timeout);
+		if (sCursorAnimation.terminate)
+			break;
+
+		if (!sCursorAnimation.running || sCursorAnimation.uploadedFrameCount < 2)
+			continue;
+		if (status != B_TIMED_OUT)
+			continue;
+
+		sCursorAnimation.currentFrame++;
+		if (sCursorAnimation.currentFrame >= sCursorAnimation.uploadedFrameCount)
+			sCursorAnimation.currentFrame = 0;
+
+		SharedInfo& si = *gInfo.sharedInfo;
+		if (gInfo.SetCursorFrameAddress != NULL)
+			gInfo.SetCursorFrameAddress(si.cursorFrameOffsets[sCursorAnimation.currentFrame]);
+	}
+
+	return B_OK;
+}
+
+
+static status_t
+s3_ensure_animation_thread(void)
+{
+	if (sCursorAnimation.thread >= B_OK)
+		return B_OK;
+
+	sCursorAnimation.semaphore = create_sem(0, "s3 cursor ani");
+	if (sCursorAnimation.semaphore < B_OK)
+		return sCursorAnimation.semaphore;
+
+	sCursorAnimation.terminate = false;
+	sCursorAnimation.thread = spawn_thread(s3_cursor_animation_thread,
+		"s3 cursor ani", B_DISPLAY_PRIORITY, NULL);
+	if (sCursorAnimation.thread < B_OK) {
+		delete_sem(sCursorAnimation.semaphore);
+		sCursorAnimation.semaphore = -1;
+		return sCursorAnimation.thread;
+	}
+
+	resume_thread(sCursorAnimation.thread);
+	return B_OK;
+}
 
 uint32
 GetCursorBits(void)
@@ -53,7 +137,21 @@ SetCursorBitmap(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
     si.cursorHotX = hot_x;
     si.cursorHotY = hot_y;
 
-    uint8* fbCursor = (uint8*)((addr_t)si.videoMemAddr + si.cursorOffset);
+    if (s3_ensure_animation_thread() != B_OK)
+        return B_ERROR;
+
+    if (!sCursorAnimation.running) {
+        if (sCursorAnimation.nextUploadFrame == 0)
+            sCursorAnimation.uploadedFrameCount = 0;
+        sCursorAnimation.currentFrame = sCursorAnimation.nextUploadFrame;
+    }
+
+    uint32 targetFrame = sCursorAnimation.running
+        ? sCursorAnimation.currentFrame : sCursorAnimation.nextUploadFrame;
+    if (targetFrame >= si.cursorFrameCount)
+        targetFrame = 0;
+
+    uint8* fbCursor = (uint8*)((addr_t)si.videoMemAddr + si.cursorFrameOffsets[targetFrame]);
     if (fbCursor == NULL)
         return B_NO_INIT;
 
@@ -114,25 +212,134 @@ SetCursorBitmap(uint16 width, uint16 height, uint16 hot_x, uint16 hot_y,
         return B_ERROR;
     }
 
-    // 3. SELEZIONE MASCHERE REGISTRI IN BASE AL CHIP
-    // Gestiamo la differenza di maschera che hai giustamente notato tra Trio e le altre
-    if (S3_SAVAGE_FAMILY(si.chipType)) {
-        WriteCrtcReg(0x4d, (0xff & si.cursorOffset / 1024));
-        WriteCrtcReg(0x4c, (0xff00 & si.cursorOffset / 1024) >> 8);
-    } else {
-        // Trio64 legacy
-        WriteCrtcReg(0x4c, (0x0f00 & si.cursorOffset / 1024) >> 8);
-        WriteCrtcReg(0x4d, (0xff & si.cursorOffset / 1024));
-    }
+    // 3. INDIRIZZO SUPERFICIE: dispatch per-famiglia (ordine/maschera dei
+    // registri 0x4c/0x4d differiscono tra Savage, Trio64 e ViRGE - vedi le
+    // rispettive *_SetCursorFrameAddress()).
+    if (gInfo.SetCursorFrameAddress != NULL)
+        gInfo.SetCursorFrameAddress(si.cursorFrameOffsets[targetFrame]);
 
     // Impostazione Palette Stack
-    ReadCrtcReg(0x45);        
+    ReadCrtcReg(0x45);
     WriteCrtcReg(0x4a, 0); WriteCrtcReg(0x4a, 0); WriteCrtcReg(0x4a, 0); // Foreground Nero
 
-    ReadCrtcReg(0x45);        
+    ReadCrtcReg(0x45);
     WriteCrtcReg(0x4b, ~0); WriteCrtcReg(0x4b, ~0); WriteCrtcReg(0x4b, ~0); // Background Bianco
 
+    if (!sCursorAnimation.running) {
+        if (targetFrame + 1 < si.cursorFrameCount)
+            sCursorAnimation.nextUploadFrame = targetFrame + 1;
+        else
+            sCursorAnimation.nextUploadFrame = 0;
+
+        if (sCursorAnimation.uploadedFrameCount < targetFrame + 1)
+            sCursorAnimation.uploadedFrameCount = targetFrame + 1;
+    }
+
     return B_OK;
+}
+
+
+bool
+SupportsCursorAnimation(void)
+{
+	return gInfo.sharedInfo != NULL && gInfo.sharedInfo->cursorFrameCount >= 2;
+}
+
+
+uint32
+CursorSupportedFrames(void)
+{
+	if (!SupportsCursorAnimation())
+		return 0;
+	return gInfo.sharedInfo->cursorFrameCount - 1;
+}
+
+
+status_t
+StartCursorAnimation(void)
+{
+	if (!SupportsCursorAnimation())
+		return B_NOT_SUPPORTED;
+	if (sCursorAnimation.uploadedFrameCount < 2)
+		return B_BAD_VALUE;
+	if (s3_ensure_animation_thread() != B_OK)
+		return B_ERROR;
+
+	SharedInfo& si = *gInfo.sharedInfo;
+	sCursorAnimation.currentFrame = 0;
+	if (gInfo.SetCursorFrameAddress != NULL)
+		gInfo.SetCursorFrameAddress(si.cursorFrameOffsets[0]);
+
+	sCursorAnimation.running = true;
+	if (sCursorAnimation.semaphore >= B_OK)
+		release_sem(sCursorAnimation.semaphore);
+	return B_OK;
+}
+
+
+status_t
+StopCursorAnimation(void)
+{
+	if (!SupportsCursorAnimation())
+		return B_NOT_SUPPORTED;
+
+	sCursorAnimation.running = false;
+	sCursorAnimation.currentFrame = 0;
+	sCursorAnimation.nextUploadFrame = 0;
+
+	SharedInfo& si = *gInfo.sharedInfo;
+	if (gInfo.SetCursorFrameAddress != NULL)
+		gInfo.SetCursorFrameAddress(si.cursorFrameOffsets[0]);
+	return B_OK;
+}
+
+
+status_t
+SetCursorAnimationSpeed(float speedFactor)
+{
+	if (!SupportsCursorAnimation())
+		return B_NOT_SUPPORTED;
+	if (!isfinite(speedFactor) || speedFactor <= 0.0f)
+		return B_BAD_VALUE;
+
+	sCursorAnimation.speedFactor = speedFactor;
+	sCursorAnimation.frameInterval = (bigtime_t)(1000000.0f / speedFactor);
+	if (sCursorAnimation.frameInterval < 5000)
+		sCursorAnimation.frameInterval = 5000;
+	return B_OK;
+}
+
+
+status_t
+SetCursorAnimationStartDelay(uint32 startDelayMs)
+{
+	if (!SupportsCursorAnimation())
+		return B_NOT_SUPPORTED;
+	sCursorAnimation.startDelay = (bigtime_t)startDelayMs * 1000;
+	return B_OK;
+}
+
+
+void
+CursorAnimationUninit(void)
+{
+	if (sCursorAnimation.thread >= B_OK) {
+		sCursorAnimation.terminate = true;
+		if (sCursorAnimation.semaphore >= B_OK)
+			release_sem(sCursorAnimation.semaphore);
+		status_t result;
+		wait_for_thread(sCursorAnimation.thread, &result);
+	}
+	if (sCursorAnimation.semaphore >= B_OK)
+		delete_sem(sCursorAnimation.semaphore);
+
+	sCursorAnimation.running = false;
+	sCursorAnimation.terminate = false;
+	sCursorAnimation.uploadedFrameCount = 1;
+	sCursorAnimation.nextUploadFrame = 0;
+	sCursorAnimation.currentFrame = 0;
+	sCursorAnimation.semaphore = -1;
+	sCursorAnimation.thread = -1;
 }
 
 

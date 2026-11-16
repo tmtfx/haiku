@@ -191,6 +191,8 @@ xgi_init_accelerant(int fd)
 void
 xgi_uninit_accelerant(void)
 {
+	xgi_cursor_ani_uninit();
+
 	if (gInfo.sharedInfo != NULL && !gInfo.isClone) {
 		gInfo.sharedInfo->accelerantInUse = false;
 	}
@@ -342,6 +344,18 @@ get_accelerant_hook(uint32 feature, void* data)
 		case B_GET_CURSOR_BITS:
 			return mmioOk ? (void*)xgi_get_cursor_bits : NULL;
 #endif
+		case B_SUPPORTS_CURSOR_ANI:
+			return mmioOk ? (void*)xgi_supports_cursor_ani : NULL;
+		case B_CURSOR_SUPPORTED_FRAMES:
+			return mmioOk ? (void*)xgi_cursor_supported_frames : NULL;
+		case B_START_CURSOR_ANI:
+			return mmioOk ? (void*)xgi_start_cursor_ani : NULL;
+		case B_STOP_CURSOR_ANI:
+			return mmioOk ? (void*)xgi_stop_cursor_ani : NULL;
+		case B_SET_CURSOR_ANI_SPEED:
+			return mmioOk ? (void*)xgi_set_cursor_ani_speed : NULL;
+		case B_SET_CURSOR_ANI_START_DELAY:
+			return mmioOk ? (void*)xgi_set_cursor_ani_start_delay : NULL;
 
 		/* 2D Acceleration Engine */
 		case B_ACCELERANT_ENGINE_COUNT:

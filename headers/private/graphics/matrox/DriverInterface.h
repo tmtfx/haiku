@@ -20,6 +20,11 @@
 #define DRIVER_PREFIX "matrox" // apsed
 #define DEVICE_FORMAT "%04x_%04x_%02x%02x%02x" // apsed
 
+#define MATROX_MAX_CURSOR_FRAMES 16
+	// Maximum animated hardware cursor frame buffers (G100+ only - pre-G100
+	// cards have no cursor surface-address register, only a serial DAC
+	// push, so they are excluded from animation support)
+
 /*
 	Internal driver state (also for sharing info between driver and accelerant)
 */
@@ -148,6 +153,14 @@ typedef struct {
 		uint16	height;
 		bool	is_visible;	/* Is the cursor currently displayed? */
 	} cursor;
+
+	/* Animated hardware cursor (G100+ only): N fixed 1024-byte slots
+	   reserved at the tail of VRAM, same byte layout as the existing
+	   single-buffer cursor. active_offset is the slot currently driving
+	   CURADDL/CURADDH. */
+	uint32	cursor_frame_count;
+	uint32	cursor_frame_offsets[MATROX_MAX_CURSOR_FRAMES];
+	uint32	cursor_active_offset;
 
   /*colour lookup table*/
 	uint8	color_data[3 * 256];	/* Colour lookup table - as used by DAC */
