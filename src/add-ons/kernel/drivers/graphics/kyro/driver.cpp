@@ -85,7 +85,7 @@ static pci_module_info*	gPCI;
 static kyro_settings	gSettings = {
 	KYRO_ACCELERANT_NAME, // accelerant (filename)
 	true, // hardcursor (hardware cursor)
-	false, // cursorani (animated hardware cursor)
+	true, // cursorani (animated hardware cursor)
 	2 // cursorbits (number of bits supported)
 };
 
