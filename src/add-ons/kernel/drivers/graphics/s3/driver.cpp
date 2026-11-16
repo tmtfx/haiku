@@ -27,6 +27,8 @@
 #include "DriverInterface.h"
 #include <edid_override.h>
 
+#define VESA_EDID_BOOT_INFO "vesa_edid/v1"
+
 
 #undef TRACE
 
@@ -505,6 +507,20 @@ FRAME_BUFFER_BOOT_INFO, NULL);
 	// EDID override from s3.settings ("edid <path>")
 	si.bypassEdid = load_edid_override("s3.settings", &si.edidInfo) == B_OK;
 	si.bHaveEDID = si.bypassEdid;
+
+	if (!si.bypassEdid) {
+		// This card is the primary display: the bootloader may already have
+		// a decoded EDID from VESA/VBE (frame_buffer_console.cpp). Prefer it
+		// over GetEdidFromBIOS() below, which replays the real-mode video
+		// BIOS via the generic "bios" kernel module.
+		edid1_info* bootEdid = (edid1_info*)get_boot_item(VESA_EDID_BOOT_INFO,
+			NULL);
+		if (bootEdid != NULL) {
+			si.edidInfo = *bootEdid;
+			si.bypassEdid = true;
+			si.bHaveEDID = true;
+		}
+	}
 
 	si.vendorID = pciInfo.vendor_id;
 	si.deviceID = pciInfo.device_id;
