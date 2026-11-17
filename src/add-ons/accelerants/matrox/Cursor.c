@@ -174,8 +174,10 @@ static status_t matrox_set_cursor_bitmap_gseries(uint16 width, uint16 height, ui
     int i;
 	uint32 targetFrame;
 
-	if (matrox_ensure_animation_thread() != B_OK)
+	if (matrox_ensure_animation_thread() != B_OK) {
+		debug_printf("MATROX_ACC: animation thread not running!!\n");
 		return B_ERROR;
+	}
 
 	if (!sCursorAnimation.running) {
 		if (sCursorAnimation.nextUploadFrame == 0)
