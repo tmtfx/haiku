@@ -631,6 +631,21 @@ status_t gx00_crtc_cursor_hide()
 status_t gx00_crtc_cursor_set_frame_address(uint32 offset)
 {
 	AQUIRE_BEN(si->cursor.reg_lock);
+
+	/* Same hazard gx00_crtc_cursor_position() already guards against:
+	 * CURADDL/CURADDH are a double-buffered register pair - if a retrace
+	 * copies them into the active side while we're only halfway through
+	 * writing the new offset, the hardware latches a mixed old/new address
+	 * and ends up fetching cursor data from a bogus location (a visible
+	 * glitch, then nothing shown at all). The single static cursor never
+	 * hit this because its address was programmed exactly once; loading an
+	 * animated cursor's N frames calls this back-to-back, right into the
+	 * danger zone. */
+	while (ACCR(STATUS) & 0x08)
+	{
+		snooze(4);
+	}
+
 	/* set cursor bitmap adress ... */
 	DXIW(CURADDL,offset >> 10);
 	DXIW(CURADDH,offset >> 18);
