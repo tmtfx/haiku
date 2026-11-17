@@ -538,6 +538,7 @@ status_t gx00_crtc_cursor_init()
 		gx00_crtc_cursor_set_frame_address(si->cursor_active_offset);
 
 		/*set cursor colour*/
+		AQUIRE_BEN(si->cursor.reg_lock);
 		DXIW(CURCOL0RED,0XFF);
 		DXIW(CURCOL0GREEN,0xFF);
 		DXIW(CURCOL0BLUE,0xFF);
@@ -547,6 +548,7 @@ status_t gx00_crtc_cursor_init()
 		DXIW(CURCOL2RED,0);
 		DXIW(CURCOL2GREEN,0);
 		DXIW(CURCOL2BLUE,0);
+		RELEASE_BEN(si->cursor.reg_lock);
 
 		/*clear all reserved cursor frame slots*/
 		fb = (vuint32 *) ((uint8*)si->framebuffer + curadd);
@@ -598,6 +600,7 @@ status_t gx00_crtc_cursor_init()
 
 status_t gx00_crtc_cursor_show()
 {
+	AQUIRE_BEN(si->cursor.reg_lock);
 	if ((si->ps.card_type < G100) && (si->dm.timing.h_total > 2048))
 	{
 		/* MIL1/2 DAC needs to be told if h_total for the active mode gets above 2048 */
@@ -607,28 +610,34 @@ status_t gx00_crtc_cursor_show()
 	{
 		DXIW(CURCTRL, 0x01);
 	}
+	RELEASE_BEN(si->cursor.reg_lock);
 
 	return B_OK;
 }
 
 status_t gx00_crtc_cursor_hide()
 {
+	AQUIRE_BEN(si->cursor.reg_lock);
 	DXIW(CURCTRL,0);
+	RELEASE_BEN(si->cursor.reg_lock);
 	return B_OK;
 }
 
 /* Reprogram the cursor surface-address register to point at a different
  * reserved frame slot (G100+ only). Used both for the initial upload and,
  * during animation, to flip to the next pre-loaded frame without touching
- * pixel data. */
+ * pixel data. Locks internally - callers must NOT already hold
+ * si->cursor.reg_lock. */
 status_t gx00_crtc_cursor_set_frame_address(uint32 offset)
 {
+	AQUIRE_BEN(si->cursor.reg_lock);
 	/* set cursor bitmap adress ... */
 	DXIW(CURADDL,offset >> 10);
 	DXIW(CURADDH,offset >> 18);
 	/* ... and repeat that: G100 requires other programming order than later cards!?! */
 	DXIW(CURADDL,offset >> 10);
 	DXIW(CURADDH,offset >> 18);
+	RELEASE_BEN(si->cursor.reg_lock);
 
 	return B_OK;
 }

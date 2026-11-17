@@ -169,14 +169,15 @@ status_t INIT_ACCELERANT(int the_fd)
 	si->cursor.y = 0;
 
 	/*
-	Put the frame buffer immediately following the cursor data. We store this
-	info in a frame_buffer_config structure to make it convienient to return
-	to the app_server later.
+	MIL 1/2 cards have a separate buffer for the cursor bitmap inside the
+	DAC, nothing to reserve in VRAM for them. G100+ cards' animated hardware
+	cursor now lives in N slots at the TAIL of VRAM (see
+	gx00_crtc_cursor_init()), not at the front any more, so there is nothing
+	to shift the frame buffer start past here either - the frame buffer
+	starts at VRAM offset 0, and ProposeDisplayMode.c already caps
+	virtual_height so it never grows into that tail reservation.
 	*/
 	pointer_reservation = 0;
-	/* MIL 1/2 cards have a seperate buffer for the cursorbitmap inside the DAC */
-	if ((si->ps.card_type >= G100) && si->settings.hardcursor)
-		pointer_reservation = 1024;
 
 	si->fbc.frame_buffer = (void *)((char *)si->framebuffer+pointer_reservation);
 	si->fbc.frame_buffer_dma = (void *)((char *)si->framebuffer_pci+pointer_reservation);
@@ -193,10 +194,15 @@ status_t INIT_ACCELERANT(int the_fd)
 		si->overlay.myBuffer[cnt].buffer_dma = NULL;
 	}
 	/* make sure overlay unit is 'marked' as being free */
-	si->overlay.myToken = NULL;	
+	si->overlay.myToken = NULL;
 
 	/* note that overlay is not in use (for gx00_bes_move_overlay()) */
 	si->overlay.active = false;
+
+	/* protects CURADDL/CURADDH/CURCTRL access between the cursor animation
+	 * thread and the main accelerant thread - must exist before
+	 * gx00_crtc_cursor_init() runs */
+	INIT_BEN(si->cursor.reg_lock);
 
 	/* initialise various cursor stuff*/
 	gx00_crtc_cursor_init();
@@ -339,6 +345,7 @@ void UNINIT_ACCELERANT(void)
 		/* delete benaphores ONLY if we are the primary accelerant */
 		DELETE_BEN(si->engine.lock);
 		DELETE_BEN(si->overlay.lock);
+		DELETE_BEN(si->cursor.reg_lock);
 
 		/* ensure that INIT_ACCELERANT can be executed again */
 		si->accelerant_in_use = false;

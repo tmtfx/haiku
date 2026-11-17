@@ -190,8 +190,10 @@ static status_t matrox_set_cursor_bitmap_gseries(uint16 width, uint16 height, ui
 	if (dest == NULL) return B_NO_INIT;
 
 	// Avoid flickering
+	AQUIRE_BEN(si->cursor.reg_lock);
 	uint8 curctrl = DXIR(CURCTRL);
 	DXIW(CURCTRL, curctrl & ~0x01);
+	RELEASE_BEN(si->cursor.reg_lock);
 
 
 	// Reset HC to 0 for transparency
@@ -247,7 +249,8 @@ static status_t matrox_set_cursor_bitmap_gseries(uint16 width, uint16 height, ui
         }
     }
 	// Set Hardware Cursor Palette via extended RAMDAC (Macro DXIW)
-	
+	AQUIRE_BEN(si->cursor.reg_lock);
+
 	// Color 0: White
 	DXIW(CURCOL0RED,   0xFF);
 	DXIW(CURCOL0GREEN, 0xFF);
@@ -277,6 +280,7 @@ static status_t matrox_set_cursor_bitmap_gseries(uint16 width, uint16 height, ui
 	}
 
 	DXIW(CURCTRL, curctrl);
+	RELEASE_BEN(si->cursor.reg_lock);
 
 	si->cursor_active_offset = si->cursor_frame_offsets[targetFrame];
 	gx00_crtc_cursor_set_frame_address(si->cursor_active_offset);
