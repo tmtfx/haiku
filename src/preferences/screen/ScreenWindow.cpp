@@ -242,6 +242,28 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 	fLoadEDIDButton = new BButton("loadEDID", B_TRANSLATE("Load EDID"),
 		new BMessage(BUTTON_LOAD_EDID_MSG));
 
+	// Only enable each button if the accelerant actually exposes the
+	// corresponding hook (B_GET_EDID_INFO / B_SET_EDID_INFO).
+	bool supportsGetEDID = false;
+	{
+		BMessenger msgr("application/x-vnd.haiku-app_server");
+		BMessage request('gedc');
+		BMessage reply;
+		if (msgr.IsValid() && msgr.SendMessage(&request, &reply, 200000) == B_OK)
+			reply.FindBool("supports_get_edid", &supportsGetEDID);
+	}
+	fDumpEDIDButton->SetEnabled(supportsGetEDID);
+
+	bool supportsSetEDID = false;
+	{
+		BMessenger msgr("application/x-vnd.haiku-app_server");
+		BMessage request('sedc');
+		BMessage reply;
+		if (msgr.IsValid() && msgr.SendMessage(&request, &reply, 200000) == B_OK)
+			reply.FindBool("supports_set_edid", &supportsSetEDID);
+	}
+	fLoadEDIDButton->SetEnabled(supportsSetEDID);
+
 	groupView->AddChild(BLayoutBuilder::Group<>(B_HORIZONTAL, B_USE_SMALL_SPACING)
 		.Add(fDumpEDIDButton)
 		.Add(fLoadEDIDButton)

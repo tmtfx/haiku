@@ -65,6 +65,8 @@ public:
 
 	virtual status_t			GetEDID(void* info, uint32 size, uint32* version);
 	virtual status_t			SetEDID(const void* info, uint32 size, uint32 version);
+	virtual bool				SupportsGetEDID() const;
+	virtual bool				SupportsSetEDID() const;
 
 	virtual status_t			GetAccelerantPath(BString& path);
 	virtual status_t			GetDriverPath(BString& path);

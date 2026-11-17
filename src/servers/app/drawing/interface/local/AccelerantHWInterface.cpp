@@ -1254,6 +1254,20 @@ AccelerantHWInterface::SetEDID(const void* info, uint32 size, uint32 version)
 }
 
 
+bool
+AccelerantHWInterface::SupportsGetEDID() const
+{
+	return fAccGetEDIDInfo != NULL;
+}
+
+
+bool
+AccelerantHWInterface::SupportsSetEDID() const
+{
+	return fAccSetEDIDInfo != NULL;
+}
+
+
 status_t
 AccelerantHWInterface::GetAccelerantPath(BString& string)
 {
