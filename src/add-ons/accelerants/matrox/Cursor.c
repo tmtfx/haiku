@@ -481,6 +481,37 @@ status_t SET_CURSOR_BITMAP(uint16 width, uint16 height, uint16 hotX, uint16 hotY
 	if (width > 64 || height > 64)
 		return B_ERROR;
 
+	{
+		/* Sample a handful of pixels to compare what the static cursor path
+		 * gets vs what animation frames get - register programming has been
+		 * ruled out three times over, so the next suspect is the pixel DATA
+		 * itself (colorSpace, bytesPerRow, actual alpha/RGB content). */
+		uint32 opaqueCount = 0;
+		uint32 sampleCount = 0;
+		uint8 sampleB = 0, sampleG = 0, sampleR = 0, sampleA = 0;
+		if (bitmapData != NULL && width > 0 && height > 0) {
+			const uint8* center = bitmapData + (height / 2) * bytesPerRow + (width / 2) * 4;
+			sampleB = center[0];
+			sampleG = center[1];
+			sampleR = center[2];
+			sampleA = center[3];
+			for (uint32 yy = 0; yy < height; yy++) {
+				const uint8* row = bitmapData + yy * bytesPerRow;
+				for (uint32 xx = 0; xx < width; xx++) {
+					if (row[xx * 4 + 3] >= 100) {
+						opaqueCount++;
+					}
+					sampleCount++;
+				}
+			}
+		}
+		debug_printf("MATROX_CUR: SET_CURSOR_BITMAP pixel-data: colorSpace=0x%" B_PRIx32
+			" bytesPerRow=%u centerPixel(BGRA)=%u,%u,%u,%u opaquePixels=%" B_PRIu32
+			"/%" B_PRIu32 "\n",
+			(uint32)colorSpace, bytesPerRow, sampleB, sampleG, sampleR, sampleA,
+			opaqueCount, sampleCount);
+	}
+
 	(void)colorSpace;
 
 	si->cursor.hot_x = hotX;
