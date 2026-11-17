@@ -76,6 +76,7 @@
 #include <vesa_info.h>
 
 #include "DriverInterface.h"
+#include <edid_override.h>
 
 #ifdef IS_PIRATI_BUILD
 #include "xgi_logo2.h"
@@ -635,9 +636,15 @@ init_device(DeviceInfo& device)
 
 	fill_boot_mode(*device.sharedInfo);
 
-	/* Check for bootloader EDID */
-	edid1_info* bootEdid = (edid1_info*)get_boot_item(VESA_EDID_BOOT_INFO, NULL);
-	if (bootEdid != NULL) {
+	/* EDID override from xgi.settings, else check for bootloader EDID */
+	device.sharedInfo->bypassEdid = load_edid_override("xgi.settings",
+		&device.sharedInfo->edidInfo) == B_OK;
+	edid1_info* bootEdid = device.sharedInfo->bypassEdid ? NULL
+		: (edid1_info*)get_boot_item(VESA_EDID_BOOT_INFO, NULL);
+	if (device.sharedInfo->bypassEdid) {
+		device.sharedInfo->hasEdid = true;
+		XGI_TRACE("init_device: using EDID override from xgi.settings\n");
+	} else if (bootEdid != NULL) {
 		memcpy(&device.sharedInfo->edidInfo, bootEdid, sizeof(edid1_info));
 		device.sharedInfo->hasEdid = true;
 		XGI_TRACE("init_device: bootloader EDID found\n");

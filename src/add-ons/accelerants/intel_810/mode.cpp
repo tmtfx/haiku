@@ -89,7 +89,9 @@ CreateModeList(bool (*checkMode)(const display_mode* mode))
 
 	// Obtain EDID info which is needed for for building the mode list.
 
-	si.bHaveEDID = false;
+	// An EDID override (intel_810.settings "edid" or B_SET_EDID_INFO) is kept
+	// and no attempt is made to read the EDID from the video BIOS.
+	si.bHaveEDID = si.bypassEdid;
 
 	if (!si.bHaveEDID) {
 		edid1_raw rawEdid;	// raw EDID info to obtain
@@ -100,6 +102,10 @@ CreateModeList(bool (*checkMode)(const display_mode* mode))
 				TRACE("CreateModeList(); EDID version %d.%d out of range\n",
 					rawEdid.version.version, rawEdid.version.revision);
 			} else {
+				// Only the 128 byte block 0 is read from the video BIOS: the
+				// extension blocks are not available, so don't let edid_decode()
+				// read (and decode) the memory past it.
+				rawEdid.num_sections = 0;
 				edid_decode(&si.edidInfo, &rawEdid); // decode & save EDID info
 				si.bHaveEDID = true;
 			}
@@ -344,6 +350,8 @@ SetEdidInfo(void* info, size_t size, uint32 _version)
 
 	memcpy(&si.edidInfo, info, sizeof(struct edid1_info));
 	si.bHaveEDID = true;
+	// keep it: CreateModeList() must not replace it with DDC/BIOS data
+	si.bypassEdid = true;
 
 	if (gInfo.modeListArea >= 0)
 		delete_area(gInfo.modeListArea);

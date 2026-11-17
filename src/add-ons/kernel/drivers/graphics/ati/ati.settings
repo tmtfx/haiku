@@ -1,0 +1,10 @@
+# Settings file for the ATI Rage/Mach64 driver
+#
+# This file should be moved to ~/config/settings/kernel/drivers/ati.settings
+
+# EDID override: load the EDID from a file saved with the "Dump EDID" button
+# of the Screen preferences instead of reading it from the monitor (DDC),
+# the video BIOS or the boot loader. Useful when the card/monitor combination
+# cannot provide an EDID. The file must be an edid1_info dumped by Screen,
+# not a raw 128 byte EDID block. Remove or comment out to disable.
+#edid /boot/home/config/non-packaged/settings/edid/dumped_edid.bin

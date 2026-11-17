@@ -178,6 +178,9 @@ struct intel_arc_shared_info {
 	uint8			dpcd_sink_count;
 	uint8			dpcd_max_link_rate;
 	edid1_info		boot_edid;
+	bool			bypass_edid;
+		// boot_edid was loaded from intel_arc.settings "edid": don't read
+		// the EDID through DDC/AUX (DPCD is still read)
 	frame_buffer_config fbc;
 	
 	// -------------------------------------------------------------------------

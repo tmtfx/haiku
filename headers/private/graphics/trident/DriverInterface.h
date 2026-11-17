@@ -140,6 +140,8 @@ struct SharedInfo {
 
 	edid1_info	edidInfo;
 	bool		bHaveEDID;
+	bool		bypassEdid;	// edidInfo is an override (trident.settings
+						// "edid" or B_SET_EDID_INFO): don't probe I2C/BIOS
 
 	Benaphore	engineLock;
 

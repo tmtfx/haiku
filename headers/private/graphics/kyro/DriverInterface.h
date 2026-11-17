@@ -91,6 +91,7 @@ struct SharedInfo {
 	edid1_info		edidInfo;
 	edid1_raw		edidRaw;
 	bool			hasEdid;
+	bool			bypassEdid;	// edidInfo loaded from kyro.settings "edid"
 	kyro_settings	settings;
 
 	bool		accelerantInUse;

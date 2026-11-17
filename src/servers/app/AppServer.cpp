@@ -282,6 +282,38 @@ AppServer::MessageReceived(BMessage* message)
 			break;
 		}
 
+		case 'gedc':
+		{
+			bool has = false;
+			BAutolock locker(gScreenManager);
+			if (gScreenManager && gScreenManager->CountScreens() > 0) {
+				Screen* s = gScreenManager->ScreenAt(0);
+				if (s && s->HWInterface())
+					has = s->HWInterface()->SupportsGetEDID();
+			}
+
+			BMessage reply;
+			reply.AddBool("supports_get_edid", has);
+			message->SendReply(&reply);
+			break;
+		}
+
+		case 'sedc':
+		{
+			bool has = false;
+			BAutolock locker(gScreenManager);
+			if (gScreenManager && gScreenManager->CountScreens() > 0) {
+				Screen* s = gScreenManager->ScreenAt(0);
+				if (s && s->HWInterface())
+					has = s->HWInterface()->SupportsSetEDID();
+			}
+
+			BMessage reply;
+			reply.AddBool("supports_set_edid", has);
+			message->SendReply(&reply);
+			break;
+		}
+
 		case 'gedi':
 		{
 			status_t status = B_NOT_SUPPORTED;

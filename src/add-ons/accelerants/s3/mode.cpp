@@ -231,9 +231,11 @@ CreateModeList( bool (*checkMode)(const display_mode* mode),
 {
     SharedInfo& si = *gInfo.sharedInfo;
 
-    si.bHaveEDID = false;
+    // An EDID override (s3.settings "edid" or B_SET_EDID_INFO) is kept and
+    // neither DDC nor the video BIOS are probed.
+    si.bHaveEDID = si.bypassEdid;
 
-    if (si.displayType != MT_LCD) {
+    if (si.displayType != MT_LCD && !si.bypassEdid) {
         if (getEdid != NULL)
             si.bHaveEDID = getEdid(si.edidInfo);
 
@@ -247,6 +249,10 @@ CreateModeList( bool (*checkMode)(const display_mode* mode),
                     TRACE("CreateModeList(); EDID version %d.%d out of range\n",
                         ged.rawEdid.version.version, ged.rawEdid.version.revision);
                 } else {
+                    // Only the 128 byte block 0 is read from the video BIOS: the
+                    // extension blocks are not available, so don't let edid_decode()
+                    // read (and decode) the memory past it.
+                    ged.rawEdid.num_sections = 0;
                     edid_decode(&si.edidInfo, &ged.rawEdid);
                     si.bHaveEDID = true;
                 }
@@ -637,6 +643,8 @@ SetEdidInfo(void* info, size_t size, uint32 _version)
 
 	memcpy(&si.edidInfo, info, sizeof(struct edid1_info));
 	si.bHaveEDID = true;
+	// keep it: CreateModeList() must not replace it with DDC/BIOS data
+	si.bypassEdid = true;
 
 	if (gInfo.modeListArea >= 0)
 		delete_area(gInfo.modeListArea);

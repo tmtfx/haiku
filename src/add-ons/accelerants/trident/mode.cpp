@@ -141,10 +141,13 @@ CreateModeList(void)
 {
 	SharedInfo& si = *gInfo.sharedInfo;
 
-	si.bHaveEDID = false;
+	// An EDID override (trident.settings or B_SET_EDID_INFO) is kept as is
+	si.bHaveEDID = si.bypassEdid;
 
-	// Try reading via I2C dynamically first!
-	if (GetEdidInfoI2C(&si.edidInfo)) {
+	if (si.bypassEdid) {
+		TRACE("CreateModeList(): Using EDID override, skipping I2C/BIOS\n");
+	} else if (GetEdidInfoI2C(&si.edidInfo)) {
+		// Try reading via I2C dynamically first!
 		si.bHaveEDID = true;
 		TRACE("CreateModeList(): Successfully retrieved EDID via I2C\n");
 	} else {
@@ -153,6 +156,10 @@ CreateModeList(void)
 		edid1_raw rawEdid;
 		if (ioctl(gInfo.deviceFileDesc, TRIDENT_GET_EDID, &rawEdid, sizeof(rawEdid)) == B_OK) {
 			if (rawEdid.version.version == 1 && rawEdid.version.revision <= 4) {
+				// Only the 128 byte block 0 is read from the video BIOS: the
+				// extension blocks are not available, so don't let edid_decode()
+				// read (and decode) the memory past it.
+				rawEdid.num_sections = 0;
 				edid_decode(&si.edidInfo, &rawEdid);
 				si.bHaveEDID = true;
 			}
@@ -797,9 +804,11 @@ GetEdidInfo(void* info, size_t size, uint32* _version)
 	if (size < sizeof(struct edid1_info))
 		return B_BUFFER_OVERFLOW;
 
-	// Try reading via I2C dynamically first!
+	// Try reading via I2C dynamically first (unless an override is active)!
 	edid1_info edid;
-	if (GetEdidInfoI2C(&edid)) {
+	if (si.bypassEdid) {
+		TRACE("GetEdidInfo(): Returning EDID override\n");
+	} else if (GetEdidInfoI2C(&edid)) {
 		si.edidInfo = edid;
 		si.bHaveEDID = true;
 		TRACE("GetEdidInfo(): Successfully retrieved EDID dynamically via I2C\n");
@@ -828,6 +837,8 @@ SetEdidInfo(void* info, size_t size, uint32 _version)
 
 	memcpy(&si.edidInfo, info, sizeof(struct edid1_info));
 	si.bHaveEDID = true;
+	// CreateModeList() and GetEdidInfo() must not replace it with I2C data
+	si.bypassEdid = true;
 
 	if (gInfo.modeListArea >= 0)
 		delete_area(gInfo.modeListArea);

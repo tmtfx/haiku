@@ -364,6 +364,16 @@ detect_displays()
 
 		// We found a valid / attached display
 
+		if (displayIndex == 0 && gInfo->shared_info->bypass_edid) {
+			// EDID override (radeon_hd.settings): connector detection is
+			// still done through DDC, only the EDID content is replaced.
+			TRACE("%s: connector(%" B_PRIu32 "): using EDID override\n",
+				__func__, id);
+			memcpy(&gDisplay[displayIndex]->edidData,
+				&gInfo->shared_info->edid_info, sizeof(edid1_info));
+			gInfo->shared_info->has_edid = true;
+		}
+
 		gDisplay[displayIndex]->connectorIndex = id;
 			// Populate physical connector index from gConnector
 

@@ -482,6 +482,9 @@ struct intel_shared_info {
 
 	edid1_info		vesa_edid_info;
 	bool			has_vesa_edid_info;
+	bool			bypass_edid;
+		// vesa_edid_info was loaded from the "intel_extreme" settings file
+		// ("edid <path>"): use it instead of the EDID read from the ports
 
 	bool			internal_crt_support;
 	uint32			device_config_count;

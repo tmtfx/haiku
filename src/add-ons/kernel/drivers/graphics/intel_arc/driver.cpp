@@ -29,6 +29,7 @@
 #include <vesa_info.h>
 
 #include <driver_settings.h>
+#include <edid_override.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -1210,8 +1211,15 @@ init_device(intel_arc_info& info)
 		}
 	}
 
-	edid1_info* edidInfo = (edid1_info*)get_boot_item(VESA_EDID_BOOT_INFO, NULL);
-	if (edidInfo != NULL) {
+	// EDID override from intel_arc.settings ("edid <path>"), it replaces the
+	// boot loader EDID
+	info.shared_info->bypass_edid = load_edid_override("intel_arc.settings",
+		&info.shared_info->boot_edid) == B_OK;
+	edid1_info* edidInfo = info.shared_info->bypass_edid ? NULL
+		: (edid1_info*)get_boot_item(VESA_EDID_BOOT_INFO, NULL);
+	if (info.shared_info->bypass_edid)
+		info.shared_info->has_boot_edid = true;
+	else if (edidInfo != NULL) {
 		info.shared_info->has_boot_edid = true;
 		memcpy(&info.shared_info->boot_edid, edidInfo, sizeof(edid1_info));
 	}

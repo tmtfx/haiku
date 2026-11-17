@@ -151,7 +151,12 @@ typedef struct {
 	uint8	bus;
 	uint8	device;
 	uint8	function;
-	edid1_raw vesa_edid_raw;
+	/* EDID from the boot loader (already decoded) or from the video BIOS
+	 * (decoded by the driver): the accelerant must NOT edid_decode() it */
+	edid1_info vesa_edid_info;
+	/* EDID override loaded from the "edid" key of sm750.settings */
+	bool	bypassEdid;
+	edid1_info bypassedEdid;
 	char	device_path[B_PATH_NAME_LENGTH];
 
 	/* Mappature Memoria */
@@ -288,7 +293,6 @@ typedef struct {
 	area_id			mode_list_area;
 	edid1_info		edid_panel_info;
 	edid1_info		edid_crt_info;
-	edid1_info		edid_vesa_info;
 	bool	has_edid_panel;	// Trovato EDID su canale Panel
 	bool	has_edid_crt;		// Trovato EDID su canale CRT
 	bool		is_clone;			/* Vero se è un clone */

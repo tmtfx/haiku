@@ -19,6 +19,7 @@
 #include <frame_buffer_console.h>
 
 #include "DriverInterface.h"
+#include <edid_override.h>
 
 #ifdef IS_PIRATI_BUILD
 #include "ati_logo.h"
@@ -38,6 +39,7 @@
 #define ROUND_TO_PAGE_SIZE(x) (((x) + (B_PAGE_SIZE) - 1) & ~((B_PAGE_SIZE) - 1))
 
 #define VESA_MODES_BOOT_INFO "vesa_modes/v1"
+#define VESA_EDID_BOOT_INFO "vesa_edid/v1"
 
 #define SKD_HANDLER_INSTALLED 0x80000000
 #define MAX_DEVICES		4
@@ -906,6 +908,24 @@ InitDevice(DeviceInfo& di)
 	}
 
 	pci_info& pciInfo = di.pciInfo;
+
+	// EDID override from ati.settings ("edid <path>")
+	si.bypassEdid = load_edid_override("ati.settings", &si.edidInfo) == B_OK;
+	si.bHaveEDID = si.bypassEdid;
+
+	if (!si.bypassEdid) {
+		// This card is the primary display: the bootloader may already have
+		// a decoded EDID from VESA/VBE (frame_buffer_console.cpp). Prefer it
+		// over GetEdidFromBIOS() below, which replays the real-mode video
+		// BIOS via the generic "bios" kernel module.
+		edid1_info* bootEdid = (edid1_info*)get_boot_item(VESA_EDID_BOOT_INFO,
+			NULL);
+		if (bootEdid != NULL) {
+			si.edidInfo = *bootEdid;
+			si.bypassEdid = true;
+			si.bHaveEDID = true;
+		}
+	}
 
 	si.vendorID = pciInfo.vendor_id;
 	si.deviceID = pciInfo.device_id;

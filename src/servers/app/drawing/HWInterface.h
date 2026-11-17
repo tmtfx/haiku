@@ -121,6 +121,10 @@ public:
 									{ return B_NOT_SUPPORTED; }
 	virtual status_t			SetEDID(const void* info, uint32 size, uint32 version)
 									{ return B_NOT_SUPPORTED; }
+	// Query whether the accelerant exposes the B_GET_EDID_INFO/
+	// B_SET_EDID_INFO hooks, without actually calling them
+	virtual bool				SupportsGetEDID() const { return false; }
+	virtual bool				SupportsSetEDID() const { return false; }
 
 	virtual status_t			GetAccelerantPath(BString& path);
 	virtual status_t			GetDriverPath(BString& path);

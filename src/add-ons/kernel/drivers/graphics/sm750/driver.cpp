@@ -294,11 +294,12 @@ open_device(const char *name, uint32 flags, void **cookie)
         
         
         // Shared Info
+        const size_t sharedSize
+            = (sizeof(shared_info) + B_PAGE_SIZE - 1) & ~(B_PAGE_SIZE - 1);
         di->shared_area = create_area("sm750 shared info", (void **)&(di->si), 
-            B_ANY_KERNEL_ADDRESS, B_PAGE_SIZE * 2 , B_FULL_LOCK, B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA | B_CLONEABLE_AREA);
-        // due to the edid vesa shared info has been widened to B_PAGE_SIZE * 2
+            B_ANY_KERNEL_ADDRESS, sharedSize, B_FULL_LOCK, B_KERNEL_READ_AREA | B_KERNEL_WRITE_AREA | B_CLONEABLE_AREA);
         if (di->shared_area < 0) return di->shared_area;
-        memset(di->si, 0, B_PAGE_SIZE * 2);
+        memset(di->si, 0, sharedSize);
         strncpy(di->si->device_path, name, B_PATH_NAME_LENGTH);
         load_settings();
         memcpy(&di->si->settings, &current_settings, sizeof(sm750_settings));

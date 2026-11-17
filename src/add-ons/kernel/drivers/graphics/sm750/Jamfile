@@ -12,6 +12,7 @@ UsePrivateKernelHeaders ;
 KernelAddon sm750 :
 	driver.cpp
 	init.c
+	decode_edid.c
 	:
 	libgraphicscommon.a
 ;
@@ -19,3 +20,8 @@ KernelAddon sm750 :
 SEARCH on [ FGristFiles
 		kernel_cpp.cpp 
 	] = [ FDirName $(HAIKU_TOP) src system kernel util ] ;
+
+# edid_decode() for the raw EDID read from the video BIOS (same as the
+# boot loader does)
+SEARCH on [ FGristFiles decode_edid.c ]
+	= [ FDirName $(HAIKU_TOP) src add-ons accelerants common ] ;

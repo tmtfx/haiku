@@ -136,6 +136,8 @@ struct SharedInfo {
 
 	edid1_info	edidInfo;
 	bool		bHaveEDID;		// true = EDID info from device is in edidInfo
+	bool		bypassEdid;		// edidInfo is an override (3dfx.settings "edid"
+								// or B_SET_EDID_INFO): don't probe DDC/BIOS
 
 	Benaphore	engineLock;		// for access to the acceleration engine
 	Benaphore	overlayLock;	// for overlay operations
