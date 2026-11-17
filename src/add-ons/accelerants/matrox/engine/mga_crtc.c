@@ -659,12 +659,26 @@ status_t gx00_crtc_cursor_set_frame_address(uint32 offset)
 		snooze(4);
 	}
 
-	/* set cursor bitmap adress ... */
-	DXIW(CURADDL,offset >> 10);
-	DXIW(CURADDH,offset >> 18);
-	/* ... and repeat that: G100 requires other programming order than later cards!?! */
-	DXIW(CURADDL,offset >> 10);
-	DXIW(CURADDH,offset >> 18);
+	/* Every upload that worked (static cursor, every single switch) always
+	 * also touched CURCTRL right around the address write - disable before,
+	 * restore after - as the existing "avoid flickering" dance in
+	 * matrox_set_cursor_bitmap_gseries() already does. Animation ticks were
+	 * the ONLY caller that ever changed CURADDL/CURADDH without ever
+	 * touching CURCTRL at all. Mirror that same proven dance here too, so a
+	 * tick's address change gets "noticed" the same way an upload's does. */
+	{
+		uint8 curctrl = DXIR(CURCTRL);
+		DXIW(CURCTRL, curctrl & ~0x01);
+
+		/* set cursor bitmap adress ... */
+		DXIW(CURADDL,offset >> 10);
+		DXIW(CURADDH,offset >> 18);
+		/* ... and repeat that: G100 requires other programming order than later cards!?! */
+		DXIW(CURADDL,offset >> 10);
+		DXIW(CURADDH,offset >> 18);
+
+		DXIW(CURCTRL, curctrl);
+	}
 
 	readAddL = DXIR(CURADDL);
 	readAddH = DXIR(CURADDH);
