@@ -2546,6 +2546,13 @@ ServerWindow::_DispatchViewDrawingMessage(int32 code,
 			transform.Apply(&info.endPoint);
 			drawingEngine->StrokeLine(info.startPoint, info.endPoint);
 
+			{
+				BRect bounds(info.startPoint, info.startPoint);
+				bounds = bounds | BRect(info.endPoint, info.endPoint);
+				BRegion dirty(bounds);
+				_NotifyCompositorIfNeeded(dirty);
+			}
+
 			// We update the pen here because many DrawingEngine calls which
 			// do not update the pen position actually call StrokeLine
 
@@ -2580,6 +2587,13 @@ ServerWindow::_DispatchViewDrawingMessage(int32 code,
 			transform.Apply(&info.startPoint);
 			transform.Apply(&info.endPoint);
 			drawingEngine->StrokeLine(info.startPoint, info.endPoint, *gradient);
+
+			{
+				BRect bounds(info.startPoint, info.startPoint);
+				bounds = bounds | BRect(info.endPoint, info.endPoint);
+				BRegion dirty(bounds);
+				_NotifyCompositorIfNeeded(dirty);
+			}
 
 			// We update the pen here because many DrawingEngine calls which
 			// do not update the pen position actually call StrokeLine
@@ -2632,6 +2646,10 @@ ServerWindow::_DispatchViewDrawingMessage(int32 code,
 
 			fCurrentView->PenToScreenTransform().Apply(&rect);
 			drawingEngine->StrokeRect(rect);
+			{
+				BRegion dirty(rect);
+				_NotifyCompositorIfNeeded(dirty);
+			}
 			break;
 		}
 		case AS_FILL_RECT:
@@ -2677,6 +2695,10 @@ ServerWindow::_DispatchViewDrawingMessage(int32 code,
 			transform.Apply(gradient);
 			drawingEngine->StrokeRect(rect, *gradient);
 			delete gradient;
+			{
+				BRegion dirty(rect);
+				_NotifyCompositorIfNeeded(dirty);
+			}
 			break;
 		}
 		case AS_FILL_RECT_GRADIENT:
@@ -2698,6 +2720,10 @@ ServerWindow::_DispatchViewDrawingMessage(int32 code,
 			transform.Apply(gradient);
 			drawingEngine->FillRect(rect, *gradient);
 			delete gradient;
+			{
+				BRegion dirty(rect);
+				_NotifyCompositorIfNeeded(dirty);
+			}
 			break;
 		}
 		case AS_VIEW_DRAW_BITMAP:
@@ -2760,6 +2786,10 @@ ServerWindow::_DispatchViewDrawingMessage(int32 code,
 
 			fCurrentView->PenToScreenTransform().Apply(&r);
 			drawingEngine->DrawArc(r, angle, span, code == AS_FILL_ARC);
+			{
+				BRegion dirty(r);
+				_NotifyCompositorIfNeeded(dirty);
+			}
 			break;
 		}
 		case AS_STROKE_ARC_GRADIENT:
@@ -2782,6 +2812,10 @@ ServerWindow::_DispatchViewDrawingMessage(int32 code,
 			transform.Apply(gradient);
 			drawingEngine->DrawArc(r, angle, span, code == AS_FILL_ARC_GRADIENT, *gradient);
 			delete gradient;
+			{
+				BRegion dirty(r);
+				_NotifyCompositorIfNeeded(dirty);
+			}
 			break;
 		}
 		case AS_STROKE_BEZIER:
@@ -2802,6 +2836,13 @@ ServerWindow::_DispatchViewDrawingMessage(int32 code,
 				break;
 
 			drawingEngine->DrawBezier(pts, code == AS_FILL_BEZIER);
+			{
+				BRect bounds(pts[0], pts[0]);
+				for (int32 i = 1; i < 4; i++)
+					bounds = bounds | BRect(pts[i], pts[i]);
+				BRegion dirty(bounds);
+				_NotifyCompositorIfNeeded(dirty);
+			}
 			break;
 		}
 		case AS_STROKE_BEZIER_GRADIENT:
@@ -2823,6 +2864,13 @@ ServerWindow::_DispatchViewDrawingMessage(int32 code,
 			transform.Apply(gradient);
 			drawingEngine->DrawBezier(pts, code == AS_FILL_BEZIER_GRADIENT, *gradient);
 			delete gradient;
+			{
+				BRect bounds(pts[0], pts[0]);
+				for (int32 i = 1; i < 4; i++)
+					bounds = bounds | BRect(pts[i], pts[i]);
+				BRegion dirty(bounds);
+				_NotifyCompositorIfNeeded(dirty);
+			}
 			break;
 		}
 		case AS_STROKE_ELLIPSE:
@@ -2837,6 +2885,10 @@ ServerWindow::_DispatchViewDrawingMessage(int32 code,
 
 			fCurrentView->PenToScreenTransform().Apply(&rect);
 			drawingEngine->DrawEllipse(rect, code == AS_FILL_ELLIPSE);
+			{
+				BRegion dirty(rect);
+				_NotifyCompositorIfNeeded(dirty);
+			}
 			break;
 		}
 		case AS_STROKE_ELLIPSE_GRADIENT:
@@ -2856,6 +2908,10 @@ ServerWindow::_DispatchViewDrawingMessage(int32 code,
 			transform.Apply(gradient);
 			drawingEngine->DrawEllipse(rect, code == AS_FILL_ELLIPSE_GRADIENT, *gradient);
 			delete gradient;
+			{
+				BRegion dirty(rect);
+				_NotifyCompositorIfNeeded(dirty);
+			}
 			break;
 		}
 		case AS_STROKE_ROUNDRECT:
@@ -2876,6 +2932,10 @@ ServerWindow::_DispatchViewDrawingMessage(int32 code,
 			float scale = fCurrentView->CurrentState()->CombinedScale();
 			drawingEngine->DrawRoundRect(rect, xRadius * scale, yRadius * scale,
 				code == AS_FILL_ROUNDRECT);
+			{
+				BRegion dirty(rect);
+				_NotifyCompositorIfNeeded(dirty);
+			}
 			break;
 		}
 		case AS_STROKE_ROUNDRECT_GRADIENT:
@@ -2899,6 +2959,10 @@ ServerWindow::_DispatchViewDrawingMessage(int32 code,
 			drawingEngine->DrawRoundRect(rect, xrad, yrad, code == AS_FILL_ROUNDRECT_GRADIENT,
 				*gradient);
 			delete gradient;
+			{
+				BRegion dirty(rect);
+				_NotifyCompositorIfNeeded(dirty);
+			}
 			break;
 		}
 		case AS_STROKE_TRIANGLE:
@@ -2922,6 +2986,10 @@ ServerWindow::_DispatchViewDrawingMessage(int32 code,
 
 			transform.Apply(&rect);
 			drawingEngine->DrawTriangle(pts, rect, code == AS_FILL_TRIANGLE);
+			{
+				BRegion dirty(rect);
+				_NotifyCompositorIfNeeded(dirty);
+			}
 			break;
 		}
 		case AS_STROKE_TRIANGLE_GRADIENT:
@@ -2946,6 +3014,10 @@ ServerWindow::_DispatchViewDrawingMessage(int32 code,
 			transform.Apply(gradient);
 			drawingEngine->DrawTriangle(pts, rect, code == AS_FILL_TRIANGLE_GRADIENT, *gradient);
 			delete gradient;
+			{
+				BRegion dirty(rect);
+				_NotifyCompositorIfNeeded(dirty);
+			}
 			break;
 		}
 		case AS_STROKE_POLYGON:
@@ -2973,6 +3045,8 @@ ServerWindow::_DispatchViewDrawingMessage(int32 code,
 
 				drawingEngine->DrawPolygon(pointList, pointCount, polyFrame,
 					code == AS_FILL_POLYGON, isClosed && pointCount > 2);
+				BRegion dirty(polyFrame);
+				_NotifyCompositorIfNeeded(dirty);
 			}
 			delete[] pointList;
 			break;
@@ -3006,6 +3080,8 @@ ServerWindow::_DispatchViewDrawingMessage(int32 code,
 					polyFrame, code == AS_FILL_POLYGON_GRADIENT, isClosed && pointCount > 2,
 					*gradient);
 				delete gradient;
+				BRegion dirty(polyFrame);
+				_NotifyCompositorIfNeeded(dirty);
 			}
 			delete[] pointList;
 			break;
@@ -3043,6 +3119,8 @@ ServerWindow::_DispatchViewDrawingMessage(int32 code,
 				drawingEngine->DrawShape(shapeFrame, opCount, opList, ptCount,
 					ptList, code == AS_FILL_SHAPE, screenOffset,
 					fCurrentView->Scale());
+				BRegion dirty(shapeFrame);
+				_NotifyCompositorIfNeeded(dirty);
 			}
 
 			delete[] opList;
@@ -3085,6 +3163,8 @@ ServerWindow::_DispatchViewDrawingMessage(int32 code,
 					ptCount, ptList, code == AS_FILL_SHAPE_GRADIENT, *gradient, screenOffset,
 					fCurrentView->Scale());
 				delete gradient;
+				BRegion dirty(shapeFrame);
+				_NotifyCompositorIfNeeded(dirty);
 			}
 
 			delete[] opList;
@@ -3130,6 +3210,10 @@ ServerWindow::_DispatchViewDrawingMessage(int32 code,
 			transform.Apply(gradient);
 			drawingEngine->FillRegion(region, *gradient);
 			delete gradient;
+			{
+				BRegion dirty(region);
+				_NotifyCompositorIfNeeded(dirty);
+			}
 			break;
 		}
 		case AS_STROKE_LINEARRAY:
@@ -3168,14 +3252,22 @@ ServerWindow::_DispatchViewDrawingMessage(int32 code,
 			// Convert to screen coords and draw
 			const SimpleTransform transform =
 				fCurrentView->PenToScreenTransform();
+			BRect bounds(lineData[0].startPoint, lineData[0].startPoint);
 			for (int32 i = 0; i < lineCount; i++) {
 				transform.Apply(&lineData[i].startPoint);
 				transform.Apply(&lineData[i].endPoint);
+				bounds = bounds | BRect(lineData[i].startPoint, lineData[i].startPoint);
+				bounds = bounds | BRect(lineData[i].endPoint, lineData[i].endPoint);
 			}
 			drawingEngine->StrokeLineArray(lineCount, lineData);
 
 			if (lineData != lineDataStackBuffer)
 				delete[] lineData;
+
+			{
+				BRegion dirty(bounds);
+				_NotifyCompositorIfNeeded(dirty);
+			}
 			break;
 		}
 		case AS_DRAW_STRING:
@@ -3216,6 +3308,14 @@ ServerWindow::_DispatchViewDrawingMessage(int32 code,
 			fCurrentView->ScreenToPenTransform().Apply(&penLocation);
 			fCurrentView->CurrentState()->SetPenLocation(penLocation);
 
+			// A precise dirty rect would need font metrics (StringWidth,
+			// ascent/descent); use the whole window content instead --
+			// text drawing is infrequent enough that this is cheap, and
+			// it can't get the bounds wrong.
+			{
+				BRegion dirty(fWindow->Frame());
+				_NotifyCompositorIfNeeded(dirty);
+			}
 			break;
 		}
 		case AS_DRAW_STRING_WITH_OFFSETS:
@@ -3260,6 +3360,10 @@ ServerWindow::_DispatchViewDrawingMessage(int32 code,
 			fCurrentView->ScreenToPenTransform().Apply(&penLocation);
 			fCurrentView->CurrentState()->SetPenLocation(penLocation);
 
+			{
+				BRegion dirty(fWindow->Frame());
+				_NotifyCompositorIfNeeded(dirty);
+			}
 			break;
 		}
 
@@ -4562,6 +4666,21 @@ ServerWindow::_UpdateCurrentDrawingRegion()
 		fWindow->GetEffectiveDrawingRegion(fCurrentView, fCurrentDrawingRegion);
 		fCurrentDrawingRegionValid = true;
 	}
+}
+
+
+void
+ServerWindow::_NotifyCompositorIfNeeded(BRegion& dirty)
+{
+	if (!fWindow->HasBackingStore() || fWindow->InUpdate()
+		|| fWindow->Feel() == kMenuWindowFeel)
+		return;
+
+	BRegion content;
+	fWindow->GetContentRegion(&content);
+	dirty.IntersectWith(&content);
+	if (dirty.CountRects() > 0)
+		fDesktop->CompositeDirtyRegion(dirty);
 }
 
 

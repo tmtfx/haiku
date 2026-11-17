@@ -3773,10 +3773,13 @@ Desktop::_HideWindow(Window* window)
 	_SetBackground(background);
 	_WindowChanged(window);
 
-	if (fCompositor2DEnabled)
-		CompositeDirtyRegion(dirty);
-	else
-		MarkDirty(dirty);
+	// MarkDirty() triggers a real client redraw first (_TriggerWindowRedrawing)
+	// and only then recomposites if the compositor is active -- calling
+	// CompositeDirtyRegion() directly here would just re-blend whatever is
+	// already in the exposed windows' backing stores, which may never have
+	// held real content there (e.g. a window that's been fully covered by
+	// this one since before it ever got to draw).
+	MarkDirty(dirty);
 }
 
 

@@ -140,6 +140,12 @@ private:
 			void				_UpdateDrawState(View* view);
 			void				_UpdateCurrentDrawingRegion();
 
+			// Tells the compositor to recomposite `dirty` if this window
+			// has a backing store -- needed after any drawing call that
+			// doesn't already do this itself (most of
+			// _DispatchViewDrawingMessage()'s opcodes don't).
+			void				_NotifyCompositorIfNeeded(BRegion& dirty);
+
 			bool				_MessageNeedsAllWindowsLocked(
 									uint32 code) const;
 
