@@ -534,6 +534,13 @@ status_t gx00_crtc_cursor_init()
 			si->cursor_frame_offsets[j] = curadd + j * 1024;
 		si->cursor_active_offset = si->cursor_frame_offsets[0];
 
+		debug_printf("MATROX_CUR: gx00_crtc_cursor_init() memory_size=%" B_PRIu32
+			"MB vramBytes=0x%" B_PRIx64 " frameCount=%" B_PRIu32
+			" curadd(base)=0x%08" B_PRIx32 " slot0=0x%08" B_PRIx32
+			" slotLast=0x%08" B_PRIx32 "\n",
+			si->ps.memory_size, vramBytes, frameCount, curadd,
+			si->cursor_frame_offsets[0], si->cursor_frame_offsets[frameCount - 1]);
+
 		/* set cursor bitmap adress ... */
 		gx00_crtc_cursor_set_frame_address(si->cursor_active_offset);
 
@@ -611,6 +618,7 @@ status_t gx00_crtc_cursor_show()
 		DXIW(CURCTRL, 0x01);
 	}
 	RELEASE_BEN(si->cursor.reg_lock);
+	debug_printf("MATROX_CUR: gx00_crtc_cursor_show() wrote CURCTRL\n");
 
 	return B_OK;
 }
@@ -620,6 +628,7 @@ status_t gx00_crtc_cursor_hide()
 	AQUIRE_BEN(si->cursor.reg_lock);
 	DXIW(CURCTRL,0);
 	RELEASE_BEN(si->cursor.reg_lock);
+	debug_printf("MATROX_CUR: gx00_crtc_cursor_hide() wrote CURCTRL=0\n");
 	return B_OK;
 }
 
@@ -630,6 +639,9 @@ status_t gx00_crtc_cursor_hide()
  * si->cursor.reg_lock. */
 status_t gx00_crtc_cursor_set_frame_address(uint32 offset)
 {
+	int32 waitIterations = 0;
+	uint8 readAddL, readAddH;
+
 	AQUIRE_BEN(si->cursor.reg_lock);
 
 	/* Same hazard gx00_crtc_cursor_position() already guards against:
@@ -643,6 +655,7 @@ status_t gx00_crtc_cursor_set_frame_address(uint32 offset)
 	 * danger zone. */
 	while (ACCR(STATUS) & 0x08)
 	{
+		waitIterations++;
 		snooze(4);
 	}
 
@@ -652,7 +665,16 @@ status_t gx00_crtc_cursor_set_frame_address(uint32 offset)
 	/* ... and repeat that: G100 requires other programming order than later cards!?! */
 	DXIW(CURADDL,offset >> 10);
 	DXIW(CURADDH,offset >> 18);
+
+	readAddL = DXIR(CURADDL);
+	readAddH = DXIR(CURADDH);
 	RELEASE_BEN(si->cursor.reg_lock);
+
+	debug_printf("MATROX_CUR: set_frame_address offset=0x%08x "
+		"wantAddL=0x%02x wantAddH=0x%02x readbackAddL=0x%02x readbackAddH=0x%02x "
+		"retraceWaitIters=%" B_PRId32 "\n",
+		offset, (offset >> 10) & 0xFF, (offset >> 18) & 0xFF,
+		readAddL, readAddH, waitIterations);
 
 	return B_OK;
 }

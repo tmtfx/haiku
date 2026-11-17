@@ -74,6 +74,8 @@ matrox_cursor_animation_thread(void* cookie)
 			sCursorAnimation.currentFrame = 0;
 
 		si->cursor_active_offset = si->cursor_frame_offsets[sCursorAnimation.currentFrame];
+		debug_printf("MATROX_CUR: animation thread tick -> currentFrame=%u offset=0x%08x\n",
+			sCursorAnimation.currentFrame, si->cursor_active_offset);
 		gx00_crtc_cursor_set_frame_address(si->cursor_active_offset);
 	}
 
@@ -186,12 +188,21 @@ static status_t matrox_set_cursor_bitmap_gseries(uint16 width, uint16 height, ui
 	if (targetFrame >= si->cursor_frame_count)
 		targetFrame = 0;
 
+	debug_printf("MATROX_CUR: SET_CURSOR_BITMAP enter: %ux%u running=%d "
+		"targetFrame=%u nextUploadFrame=%u uploadedFrameCount=%u "
+		"cursor_frame_count=%u offset=0x%08x is_visible=%d\n",
+		width, height, sCursorAnimation.running, targetFrame,
+		sCursorAnimation.nextUploadFrame, sCursorAnimation.uploadedFrameCount,
+		si->cursor_frame_count, si->cursor_frame_offsets[targetFrame],
+		si->cursor.is_visible);
+
     dest = (vuint8*) si->framebuffer + si->cursor_frame_offsets[targetFrame];
 	if (dest == NULL) return B_NO_INIT;
 
 	// Avoid flickering
 	AQUIRE_BEN(si->cursor.reg_lock);
 	uint8 curctrl = DXIR(CURCTRL);
+	debug_printf("MATROX_CUR: SET_CURSOR_BITMAP curctrl before disable=0x%02x\n", curctrl);
 	DXIW(CURCTRL, curctrl & ~0x01);
 	RELEASE_BEN(si->cursor.reg_lock);
 
@@ -281,9 +292,29 @@ static status_t matrox_set_cursor_bitmap_gseries(uint16 width, uint16 height, ui
 
 	DXIW(CURCTRL, curctrl);
 	RELEASE_BEN(si->cursor.reg_lock);
+	debug_printf("MATROX_CUR: SET_CURSOR_BITMAP curctrl written=0x%02x (is_visible=%d)\n",
+		curctrl, si->cursor.is_visible);
 
-	si->cursor_active_offset = si->cursor_frame_offsets[targetFrame];
-	gx00_crtc_cursor_set_frame_address(si->cursor_active_offset);
+	/* Only point the hardware at this slot if it's actually the one that
+	 * should be on screen right now: frame 0 while a fresh N-frame upload
+	 * burst is in progress (so the cursor shows SOMETHING immediately and
+	 * consistently, same as the old single-buffer behaviour), or whatever
+	 * frame the animation thread is currently displaying if a reupload
+	 * happens mid-playback. Frames 1..N-1 of a fresh burst are left purely
+	 * as VRAM content for now - the address register is deliberately left
+	 * alone for them, so we are not hammering CURADDL/CURADDH back-to-back
+	 * for every single frame of the burst (suspect #2, after the retrace
+	 * wait that didn't fix it, for the glitch-then-vanish reported on G450). */
+	if (sCursorAnimation.running || targetFrame == 0) {
+		si->cursor_active_offset = si->cursor_frame_offsets[targetFrame];
+		debug_printf("MATROX_CUR: SET_CURSOR_BITMAP -> programming address for "
+			"targetFrame=%u offset=0x%08x\n", targetFrame, si->cursor_active_offset);
+		gx00_crtc_cursor_set_frame_address(si->cursor_active_offset);
+	} else {
+		debug_printf("MATROX_CUR: SET_CURSOR_BITMAP -> skipping address "
+			"reprogram for intermediate targetFrame=%u (leaving address at "
+			"frame 0 until animation actually starts)\n", targetFrame);
+	}
 
 	if (!sCursorAnimation.running) {
 		if (targetFrame + 1 < si->cursor_frame_count)
@@ -424,8 +455,9 @@ void MOVE_CURSOR(uint16 x, uint16 y)
 	gx00_crtc_cursor_position(x,y);
 }
 
-void SHOW_CURSOR(bool is_visible) 
+void SHOW_CURSOR(bool is_visible)
 {
+	debug_printf("MATROX_CUR: SHOW_CURSOR(%d)\n", is_visible);
 	/* record for our info */
 	si->cursor.is_visible = is_visible;
 
@@ -497,6 +529,8 @@ CURSOR_SUPPORTED_FRAMES(void)
 status_t
 START_CURSOR_ANI(void)
 {
+	debug_printf("MATROX_CUR: START_CURSOR_ANI() uploadedFrameCount=%u\n",
+		sCursorAnimation.uploadedFrameCount);
 	if (!SUPPORTS_CURSOR_ANI())
 		return B_NOT_SUPPORTED;
 	if (sCursorAnimation.uploadedFrameCount < 2)
@@ -511,6 +545,7 @@ START_CURSOR_ANI(void)
 	sCursorAnimation.running = true;
 	if (sCursorAnimation.semaphore >= B_OK)
 		release_sem(sCursorAnimation.semaphore);
+	debug_printf("MATROX_CUR: START_CURSOR_ANI() done, running=true\n");
 	return B_OK;
 }
 
@@ -518,6 +553,7 @@ START_CURSOR_ANI(void)
 status_t
 STOP_CURSOR_ANI(void)
 {
+	debug_printf("MATROX_CUR: STOP_CURSOR_ANI()\n");
 	if (!SUPPORTS_CURSOR_ANI())
 		return B_NOT_SUPPORTED;
 
