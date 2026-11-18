@@ -168,20 +168,6 @@ status_t INIT_ACCELERANT(int the_fd)
 	si->cursor.x = 0;
 	si->cursor.y = 0;
 
-	/*
-	MIL 1/2 cards have a separate buffer for the cursor bitmap inside the
-	DAC, nothing to reserve in VRAM for them. G100+ cards' animated hardware
-	cursor now lives in N slots at the TAIL of VRAM (see
-	gx00_crtc_cursor_init()), not at the front any more, so there is nothing
-	to shift the frame buffer start past here either - the frame buffer
-	starts at VRAM offset 0, and ProposeDisplayMode.c already caps
-	virtual_height so it never grows into that tail reservation.
-	*/
-	pointer_reservation = 0;
-
-	si->fbc.frame_buffer = (void *)((char *)si->framebuffer+pointer_reservation);
-	si->fbc.frame_buffer_dma = (void *)((char *)si->framebuffer_pci+pointer_reservation);
-
 	/* count of issued parameters or commands */
 	si->engine.last_idle = si->engine.count = 0;
 	INIT_BEN(si->engine.lock);
@@ -204,8 +190,26 @@ status_t INIT_ACCELERANT(int the_fd)
 	 * gx00_crtc_cursor_init() runs */
 	INIT_BEN(si->cursor.reg_lock);
 
-	/* initialise various cursor stuff*/
+	/* initialise various cursor stuff - this fills in si->cursor_frame_count */
 	gx00_crtc_cursor_init();
+
+	/*
+	MIL 1/2 cards have a separate buffer for the cursor bitmap inside the
+	DAC, nothing to reserve in VRAM for them. G100+ cards' hardware cursor
+	lives in si->cursor_frame_count 1024-byte slots at the START of VRAM
+	(see gx00_crtc_cursor_init()) - XCURADDL/XCURADDH are only a 14-bit
+	field (address bits 23:10), so the cursor can only ever be addressed
+	within the first 16MB of VRAM, which placing it at offset 0 guarantees
+	regardless of how much VRAM the card actually has. The frame buffer
+	starts right after this reservation; ProposeDisplayMode.c caps
+	virtual_height so it never grows back into it.
+	*/
+	pointer_reservation = 0;
+	if (si->ps.card_type >= G100)
+		pointer_reservation = si->cursor_frame_count * 1024;
+
+	si->fbc.frame_buffer = (void *)((char *)si->framebuffer+pointer_reservation);
+	si->fbc.frame_buffer_dma = (void *)((char *)si->framebuffer_pci+pointer_reservation);
 
 	/* ensure cursor state */
 	SHOW_CURSOR(false);
