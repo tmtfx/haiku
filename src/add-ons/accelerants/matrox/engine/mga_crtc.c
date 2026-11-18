@@ -518,16 +518,21 @@ status_t gx00_crtc_cursor_init()
 		uint32 curadd;
 
 		/* Reserve as many 1024-byte slots as fit (up to
-		 * MATROX_MAX_CURSOR_FRAMES) at the TAIL of VRAM for the animated
-		 * hardware cursor - NOT at offset 0, which overlaps the start of
-		 * the scanned-out framebuffer. ProposeDisplayMode.c already
-		 * reserves this same tail region (pointer_reservation) when
-		 * capping how large a mode's framebuffer may grow. */
+		 * MATROX_MAX_CURSOR_FRAMES) at the START of VRAM for the animated
+		 * hardware cursor, same as the original single-frame driver did -
+		 * NOT at the tail. XCURADDH/XCURADDL together are only a 14-bit
+		 * field (address bits 23:10), so the cursor can only ever be
+		 * addressed within the first 16MB of VRAM; placing it at offset 0
+		 * keeps it there regardless of how much VRAM the card actually has
+		 * (tail placement breaks silently on any card with >16MB). The
+		 * frame buffer is shifted past this reservation in
+		 * InitAccelerant.c, and ProposeDisplayMode.c caps virtual_height so
+		 * it never grows past the available remainder. */
 		frameCount = MATROX_MAX_CURSOR_FRAMES;
 		while (frameCount > 1 && vramBytes < (uint64)frameCount * 1024)
 			frameCount--;
 
-		curadd = (uint32)(vramBytes - (uint64)frameCount * 1024);
+		curadd = 0;
 
 		si->cursor_frame_count = frameCount;
 		for (j = 0; j < frameCount; j++)

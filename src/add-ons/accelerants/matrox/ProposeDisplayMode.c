@@ -254,9 +254,10 @@ status_t PROPOSE_DISPLAY_MODE(display_mode *target, const display_mode *low, con
 	/* checkout space needed for hardcursor (if any) */
 	pointer_reservation = 0;
 	/* MIL 1/2 cards have a seperate buffer for the cursorbitmap inside the DAC.
-	 * G100+ reserve cursor_frame_count 1024-byte slots at the tail of VRAM
+	 * G100+ reserve cursor_frame_count 1024-byte slots at the START of VRAM
 	 * (1 slot normally, more if an animated cursor's frames are loaded) -
-	 * see gx00_crtc_cursor_init(). */
+	 * see gx00_crtc_cursor_init(). Must stay at the start: XCURADDL/XCURADDH
+	 * are only a 14-bit field, addressing just the first 16MB of VRAM. */
 	if ((si->ps.card_type >= G100) && si->settings.hardcursor) {
 		pointer_reservation = si->cursor_frame_count > 0
 			? si->cursor_frame_count * 1024 : 1024;

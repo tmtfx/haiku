@@ -482,7 +482,7 @@ status_t SET_CURSOR_BITMAP(uint16 width, uint16 height, uint16 hotX, uint16 hotY
 		// SERIES G (G100 - G550) - 2 bit - RGB palette
 		// ============================================
 		
-		// NOTE: Hardware cursor is in a reserved tail region of VRAM
+		// NOTE: Hardware cursor is in a reserved region at the start of VRAM
 		return matrox_set_cursor_bitmap_gseries(width, height, bytesPerRow, bitmapData);
 	}
 }
