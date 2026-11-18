@@ -280,16 +280,14 @@ static status_t matrox_set_cursor_bitmap_gseries(uint16 width, uint16 height, ui
 	DXIW(CURCOL2BLUE,  0x88);
 
 	// FINAL CONFIGURATION
-	// Set cursor in True Color 64x64 mode.
-	// Bit 0: Enable Hardware Crusror
-	// Bit 1-3: Cursor mode. `0x04` means "3 colors+transparency 64x64" mode.
-	
-	curctrl &= ~0x0E; // Clear old modes
-	curctrl |= 0x04;  // Set True Color 64x64 mode
-	
-	// if it had to be visible, enable keeping bit 0
+	// XCURCTRL (DAC index 06h) per MGA-G200 datasheet, p.3-322: curmode is a
+	// single 3-bit field at <2:0>, not a separate enable bit + mode bits.
+	// '000' = cursor disabled, '001' = three-color cursor (enabled). There is
+	// no standalone enable bit - disabling IS curmode 000.
+	curctrl &= ~0x07; // Clear curmode<2:0> - disabled by default
+
 	if (si->cursor.is_visible) {
-		curctrl |= 0x01;
+		curctrl |= 0x01; // curmode = '001': three-color cursor, enabled
 	}
 
 	DXIW(CURCTRL, curctrl);
