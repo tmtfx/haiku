@@ -152,6 +152,15 @@ typedef struct {
 		uint16	width;		/* Width and height of the cursor shape (always 16!) */
 		uint16	height;
 		bool	is_visible;	/* Is the cursor currently displayed? */
+
+		/* Protects every DXIW/DXIR sequence that touches cursor registers
+		 * (CURADDL/CURADDH/CURCTRL). These go through the shared, non-atomic
+		 * PALWTADD+X_DATAREG index/data port (see DXIW in mga_macros.h) -
+		 * without this lock, the animated-cursor background thread flipping
+		 * CURADDL/CURADDH can interleave with the main thread doing the same
+		 * or touching CURCTRL (e.g. SHOW_CURSOR), corrupting whichever
+		 * register each thread actually meant to write. */
+		benaphore reg_lock;
 	} cursor;
 
 	/* Animated hardware cursor (G100+ only): N fixed 1024-byte slots

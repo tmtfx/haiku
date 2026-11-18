@@ -172,8 +172,10 @@ static status_t matrox_set_cursor_bitmap_gseries(uint16 width, uint16 height, ui
     int i;
 	uint32 targetFrame;
 
-	if (matrox_ensure_animation_thread() != B_OK)
+	if (matrox_ensure_animation_thread() != B_OK) {
+		debug_printf("MATROX_ACC: animation thread not running!!\n");
 		return B_ERROR;
+	}
 
 	if (!sCursorAnimation.running) {
 		if (sCursorAnimation.nextUploadFrame == 0)
@@ -190,8 +192,10 @@ static status_t matrox_set_cursor_bitmap_gseries(uint16 width, uint16 height, ui
 	if (dest == NULL) return B_NO_INIT;
 
 	// Avoid flickering
+	AQUIRE_BEN(si->cursor.reg_lock);
 	uint8 curctrl = DXIR(CURCTRL);
 	DXIW(CURCTRL, curctrl & ~0x01);
+	RELEASE_BEN(si->cursor.reg_lock);
 
 
 	// Reset HC to 0 for transparency
@@ -247,7 +251,8 @@ static status_t matrox_set_cursor_bitmap_gseries(uint16 width, uint16 height, ui
         }
     }
 	// Set Hardware Cursor Palette via extended RAMDAC (Macro DXIW)
-	
+	AQUIRE_BEN(si->cursor.reg_lock);
+
 	// Color 0: White
 	DXIW(CURCOL0RED,   0xFF);
 	DXIW(CURCOL0GREEN, 0xFF);
@@ -264,22 +269,33 @@ static status_t matrox_set_cursor_bitmap_gseries(uint16 width, uint16 height, ui
 	DXIW(CURCOL2BLUE,  0x88);
 
 	// FINAL CONFIGURATION
-	// Set cursor in True Color 64x64 mode.
-	// Bit 0: Enable Hardware Crusror
-	// Bit 1-3: Cursor mode. `0x04` means "3 colors+transparency 64x64" mode.
-	
-	curctrl &= ~0x0E; // Clear old modes
-	curctrl |= 0x04;  // Set True Color 64x64 mode
-	
-	// if it had to be visible, enable keeping bit 0
+	// XCURCTRL (DAC index 06h) per MGA-G200 datasheet, p.3-322: curmode is a
+	// single 3-bit field at <2:0>, not a separate enable bit + mode bits.
+	// '000' = cursor disabled, '001' = three-color cursor (enabled). There is
+	// no standalone enable bit - disabling IS curmode 000.
+	curctrl &= ~0x07; // Clear curmode<2:0> - disabled by default
+
 	if (si->cursor.is_visible) {
-		curctrl |= 0x01;
+		curctrl |= 0x01; // curmode = '001': three-color cursor, enabled
 	}
 
 	DXIW(CURCTRL, curctrl);
+	RELEASE_BEN(si->cursor.reg_lock);
 
-	si->cursor_active_offset = si->cursor_frame_offsets[targetFrame];
-	gx00_crtc_cursor_set_frame_address(si->cursor_active_offset);
+	/* Only point the hardware at this slot if it's actually the one that
+	 * should be on screen right now: frame 0 while a fresh N-frame upload
+	 * burst is in progress (so the cursor shows SOMETHING immediately and
+	 * consistently, same as the old single-buffer behaviour), or whatever
+	 * frame the animation thread is currently displaying if a reupload
+	 * happens mid-playback. Frames 1..N-1 of a fresh burst are left purely
+	 * as VRAM content for now - the address register is deliberately left
+	 * alone for them, so we are not hammering CURADDL/CURADDH back-to-back
+	 * for every single frame of the burst (suspect #2, after the retrace
+	 * wait that didn't fix it, for the glitch-then-vanish reported on G450). */
+	if (sCursorAnimation.running || targetFrame == 0) {
+		si->cursor_active_offset = si->cursor_frame_offsets[targetFrame];
+		gx00_crtc_cursor_set_frame_address(si->cursor_active_offset);
+	}
 
 	if (!sCursorAnimation.running) {
 		if (targetFrame + 1 < si->cursor_frame_count)
@@ -420,7 +436,7 @@ void MOVE_CURSOR(uint16 x, uint16 y)
 	gx00_crtc_cursor_position(x,y);
 }
 
-void SHOW_CURSOR(bool is_visible) 
+void SHOW_CURSOR(bool is_visible)
 {
 	/* record for our info */
 	si->cursor.is_visible = is_visible;
