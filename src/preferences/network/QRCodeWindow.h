@@ -5,14 +5,42 @@
 #ifndef QR_CODE_WINDOW_H
 #define QR_CODE_WINDOW_H
 
+#include <string.h>
+
 #include <Bitmap.h>
 #include <Button.h>
 #include <LayoutBuilder.h>
+#include <String.h>
 #include <StringView.h>
 #include <View.h>
 #include <Window.h>
 
 #include "qrcodegen.hpp" // Libreria MIT di Project Nayuki
+
+// Esegue l'escape dei caratteri speciali richiesti dal formato "WIFI:" QR
+// (vedi https://en.wikipedia.org/wiki/QR_code#Joining_a_Wi%E2%80%91Fi_network):
+// backslash, punto e virgola, virgola e due punti vanno precedute da '\'.
+static BString
+EscapeWifiQrField(const char* text)
+{
+	BString escaped;
+	for (const char* p = text; *p != '\0'; p++) {
+		switch (*p) {
+			case '\\':
+			case ';':
+			case ',':
+			case ':':
+			case '"':
+				escaped.Append('\\', 1);
+				// fall through
+			default:
+				escaped.Append(*p, 1);
+				break;
+		}
+	}
+	return escaped;
+}
+
 
 class QRCodeView : public BView {
 public:
@@ -77,15 +105,28 @@ public:
 			B_TITLED_WINDOW_LOOK, B_NORMAL_WINDOW_FEEL,
 			B_NOT_RESIZABLE | B_NOT_ZOOMABLE | B_AUTO_UPDATE_SIZE_LIMITS)
 	{
-		// Formato standard Wi-Fi QR code
+		// Formato standard Wi-Fi QR code, con escaping di SSID e password
+		BString escapedSsid = EscapeWifiQrField(ssid);
 		BString qrText;
-		qrText.SetToFormat("WIFI:S:%s;T:%s;P:%s;;", ssid, authType, password);
+		bool isOpenNetwork = strcmp(authType, "nopass") == 0;
+		if (isOpenNetwork) {
+			qrText.SetToFormat("WIFI:S:%s;T:nopass;;", escapedSsid.String());
+		} else {
+			BString escapedPassword = EscapeWifiQrField(password);
+			qrText.SetToFormat("WIFI:S:%s;T:%s;P:%s;;", escapedSsid.String(),
+				authType, escapedPassword.String());
+		}
 
 		QRCodeView* qrView = new QRCodeView(qrText.String());
-		
-		BString passwordText;
-		passwordText.SetToFormat("Password: %s", password);
-		BStringView* passLabel = new BStringView("pass_label", passwordText.String());
+
+		BStringView* passLabel = NULL;
+		if (isOpenNetwork) {
+			passLabel = new BStringView("pass_label", "Rete aperta (senza password)");
+		} else {
+			BString passwordText;
+			passwordText.SetToFormat("Password: %s", password);
+			passLabel = new BStringView("pass_label", passwordText.String());
+		}
 		passLabel->SetAlignment(B_ALIGN_CENTER);
 
 		BButton* closeButton = new BButton("close", "Chiudi", new BMessage(B_QUIT_REQUESTED));

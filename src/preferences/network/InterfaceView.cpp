@@ -198,6 +198,27 @@ InterfaceView::MessageReceived(BMessage* message)
 	
 			if (markedItem != NULL) {
 				const char* ssid = markedItem->Network().name;
+				uint32 authMode = markedItem->Network().authentication_mode;
+
+				if (authMode == B_NETWORK_AUTHENTICATION_EAP) {
+					BAlert* alert = new BAlert(B_TRANSLATE("Rete non supportata"),
+						B_TRANSLATE("Le reti con autenticazione EAP (enterprise) "
+							"non possono essere condivise tramite codice QR."),
+						B_TRANSLATE("OK"));
+					alert->Go();
+					break;
+				}
+
+				if (authMode == B_NETWORK_AUTHENTICATION_NONE) {
+					// Rete aperta: nessuna password da recuperare
+					QRCodeWindow* win = new QRCodeWindow(ssid, "", "nopass");
+					win->Show();
+					break;
+				}
+
+				const char* authType = "WPA";
+				if (authMode == B_NETWORK_AUTHENTICATION_WEP)
+					authType = "WEP";
 
 				BKeyStore keyStore;
 				BPasswordKey key;
@@ -207,14 +228,14 @@ InterfaceView::MessageReceived(BMessage* message)
 					ssid, key);
 
 				if (status == B_OK) {
-					QRCodeWindow* win = new QRCodeWindow(ssid, key.Password(), "WPA");
+					QRCodeWindow* win = new QRCodeWindow(ssid, key.Password(), authType);
 					win->Show();
 				} else {
 					BString errorMsg;
 					errorMsg.SetToFormat(
 						B_TRANSLATE("Impossibile recuperare la password per la rete '%s': %s"),
 						ssid, strerror(status));
-			
+
 					BAlert* alert = new BAlert(B_TRANSLATE("Errore KeyStore"),
 						errorMsg.String(), B_TRANSLATE("OK"));
 					alert->Go();
