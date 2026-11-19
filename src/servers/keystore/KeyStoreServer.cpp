@@ -69,6 +69,7 @@ static const uint32 kFlagLockKeyring				= 0x2000;
 static const uint32 kFlagEnumerateApplications		= 0x4000;
 static const uint32 kFlagRemoveApplications			= 0x8000;
 static const uint32 kFlagFingerprintUnlock			= 0x10000;
+static const uint32 kFlagForgetPassword				= 0x20000;
 
 static const uint32 kDefaultAppFlags = kFlagGetKey | kFlagEnumerateKeys
 	| kFlagAddKey | kFlagRemoveKey | kFlagAddKeyring | kFlagRemoveKeyring
@@ -755,6 +756,8 @@ KeyStoreServer::_AccessFlagsFor(uint32 command) const
 		case KEY_STORE_DISABLE_FINGERPRINT_UNLOCK:
 		case KEY_STORE_LIST_REMOVABLE_VOLUMES:
 			return kFlagFingerprintUnlock;
+		case KEY_STORE_FORGET_PASSWORD:
+			return kFlagForgetPassword;
 	}
 
 	return 0;
@@ -1415,7 +1418,7 @@ static const uint32 kFingerprintStickMagic = 0x4650574B; // 'FPWK'
 // fine, a dot-prefixed one doesn't) - and FAT32 is a very common format
 // for off-the-shelf USB sticks, so this would have broken the feature for
 // most real-world "chiavette".
-static const char* kFingerprintStickMarkerName = "haiku_fingerprint_escrow";
+static const char* kFingerprintStickMarkerName = "fingerprint_escrow";
 
 
 status_t
