@@ -1410,7 +1410,12 @@ KeyStoreServer::_GetOrAskSessionPassword()
 
 
 static const uint32 kFingerprintStickMagic = 0x4650574B; // 'FPWK'
-static const char* kFingerprintStickMarkerName = ".haiku_fingerprint_escrow";
+// NOT dot-prefixed: Haiku's FAT driver returns B_UNSUPPORTED when creating
+// a file whose name starts with '.' (confirmed live - a plain name works
+// fine, a dot-prefixed one doesn't) - and FAT32 is a very common format
+// for off-the-shelf USB sticks, so this would have broken the feature for
+// most real-world "chiavette".
+static const char* kFingerprintStickMarkerName = "haiku_fingerprint_escrow";
 
 
 status_t
