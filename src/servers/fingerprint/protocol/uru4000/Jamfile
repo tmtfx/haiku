@@ -1,0 +1,8 @@
+SubDir HAIKU_TOP src servers fingerprint protocol uru4000 ;
+
+local sources =
+	Uru4000Device.cpp ;
+
+StaticLibrary libfpuru4000.a :
+	$(sources)
+;

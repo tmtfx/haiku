@@ -18,7 +18,9 @@
 #include <Debug.h>
 #include <File.h>
 #include <FindDirectory.h>
+#include <Messenger.h>
 #include <Path.h>
+#include <Roster.h>
 #include <Screen.h>
 #include <StorageDefs.h>
 #include <SupportDefs.h>
@@ -29,6 +31,7 @@
 #include <syslog.h>
 
 #include "ScreenSaverShared.h"
+#include "../../servers/fingerprint/defs.h"
 
 const static uint32 kMsgTurnOffScreen = 'tofs';
 const static uint32 kMsgSuspendScreen = 'suss';
@@ -49,7 +52,9 @@ ScreenBlanker::ScreenBlanker()
 	fResumeRunner(NULL),
 	fStandByScreenRunner(NULL),
 	fSuspendScreenRunner(NULL),
-	fTurnOffScreenRunner(NULL)
+	fTurnOffScreenRunner(NULL),
+	fFingerprintConfigured(false),
+	fFingerprintBusy(false)
 {
 	fBlankTime = system_time();
 }
@@ -73,6 +78,8 @@ ScreenBlanker::ReadyToRun()
 	BScreen screen(B_MAIN_SCREEN_ID);
 	fWindow = new ScreenSaverWindow(screen.Frame(), fTestSaver);
 	fPasswordWindow = new PasswordWindow();
+	_CheckFingerprintConfigured();
+	_UpdateFingerprintButton();
 
 	BView* view = fWindow->ChildAt(0);
 	fSaverRunner = new ScreenSaverRunner(fWindow, view, fSettings);
@@ -233,6 +240,99 @@ ScreenBlanker::ArgvReceived(int argc, char** argv)
 
 
 void
+ScreenBlanker::_CheckFingerprintConfigured()
+{
+	fFingerprintConfigured = false;
+
+	if (!be_roster->IsRunning(FINGERPRINT_SERVER_SIGNATURE))
+		return;
+
+	BMessenger server(FINGERPRINT_SERVER_SIGNATURE);
+	if (!server.IsValid())
+		return;
+
+	BMessage enabledRequest(B_FP_GET_SCREENSAVER_UNLOCK), enabledReply;
+	if (server.SendMessage(&enabledRequest, &enabledReply) != B_OK)
+		return;
+	bool enabled = false;
+	enabledReply.FindBool("enabled", &enabled);
+	if (!enabled)
+		return;
+
+	BMessage listRequest(B_FP_LIST), listReply;
+	if (server.SendMessage(&listRequest, &listReply) != B_OK)
+		return;
+
+	fFingerprintConfigured = listReply.HasInt32("fingerId");
+}
+
+
+void
+ScreenBlanker::_UpdateFingerprintButton()
+{
+	fPasswordWindow->SetFingerprintAvailable(
+		fFingerprintConfigured && !fFingerprintBusy);
+}
+
+
+void
+ScreenBlanker::_StartFingerprintVerify()
+{
+	if (fFingerprintBusy)
+		return;
+
+	fFingerprintBusy = true;
+	_UpdateFingerprintButton();
+
+	thread_id thread = spawn_thread(_FingerprintThreadEntry,
+		"screen_blanker_fp_verify", B_NORMAL_PRIORITY, this);
+	resume_thread(thread);
+}
+
+
+status_t
+ScreenBlanker::_FingerprintThreadEntry(void* data)
+{
+	ScreenBlanker* app = (ScreenBlanker*)data;
+
+	BMessenger server(FINGERPRINT_SERVER_SIGNATURE);
+	BMessage request(B_FP_VERIFY_START), reply;
+	status_t status = server.SendMessage(&request, &reply);
+
+	BMessage result(kMsgFingerprintResult);
+	int32 error = B_ERROR;
+	if (status == B_OK)
+		reply.FindInt32("error", &error);
+	else
+		error = status;
+	result.AddInt32("error", error);
+
+	app->PostMessage(&result);
+	return B_OK;
+}
+
+
+void
+ScreenBlanker::_CancelFingerprintVerify()
+{
+	if (!fFingerprintBusy)
+		return;
+
+	// Best-effort only: a VERIFY_START already blocked inside the sensor's
+	// wait-for-finger call cannot actually be interrupted this way (see
+	// B_FP_VERIFY_CANCEL's documentation in defs.h) - this just covers the
+	// narrow window before that blocking wait begins. Either way, the
+	// worker thread started by _StartFingerprintVerify() will eventually
+	// finish on its own (finger placed, reader unplugged, or
+	// fingerprint_server restarted) and its kMsgFingerprintResult will
+	// simply be ignored if we're not showing the password window anymore.
+	BMessenger server(FINGERPRINT_SERVER_SIGNATURE);
+	BMessage cancel(B_FP_VERIFY_CANCEL);
+	server.SendMessage(&cancel);
+}
+
+
+void
 ScreenBlanker::MessageReceived(BMessage* message)
 {
 	switch (message->what) {
@@ -247,14 +347,40 @@ ScreenBlanker::MessageReceived(BMessage* message)
 				_QueueResumeScreenSaver();
 			} else  {
 				PRINT(("Quitting!\n"));
+				_CancelFingerprintVerify();
 				_Shutdown();
 				Quit();
 			}
 			break;
 		}
 
+		case kMsgFingerprintStart:
+		{
+			_StartFingerprintVerify();
+			break;
+		}
+
+		case kMsgFingerprintResult:
+		{
+			fFingerprintBusy = false;
+
+			int32 error = B_ERROR;
+			message->FindInt32("error", &error);
+			if (error == B_OK) {
+				PRINT(("Fingerprint match, quitting!\n"));
+				_Shutdown();
+				Quit();
+			} else {
+				beep();
+				_UpdateFingerprintButton();
+			}
+			break;
+		}
+
 		case kMsgResumeSaver:
 		{
+			_CancelFingerprintVerify();
+
 			if (fWindow->Lock()) {
 				// ensure that our window and application are active before calling HideCursor()
 				fWindow->Activate();

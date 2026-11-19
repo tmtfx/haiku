@@ -1,0 +1,69 @@
+NBIS (NIST Biometric Image Software) - vendored subset
+=======================================================
+
+What this is
+-------------
+Just the two libraries fingerprint_server needs for real minutiae-based
+matching (replacing the earlier placeholder correlation matcher):
+
+  mindtct/  - minutiae extraction from a raw 8-bit grayscale fingerprint
+              image (entry point: get_minutiae(), mindtct/getmin.c)
+  bozorth3/ - minutiae-set matching, producing an integer match score
+              (entry points: bozorth_probe_init()/bozorth_to_gallery(),
+              bozorth3/bz_drvrs.c)
+
+Both are U.S. government work, public domain (see the license header at
+the top of every vendored .c/.h file) - no licensing restriction on use,
+modification, or redistribution.
+
+Where this came from
+----------------------
+Pristine upstream NBIS source, as mirrored at
+https://github.com/lessandro/nbis (a straight mirror of NIST's own NBIS
+distribution - not libfprint's copy, which has been modified to depend on
+GLib allocators and libfprint's own GObject-based minutiae/print data
+model via a replaced fpi-minutiae.h; this vendored copy intentionally
+avoids both of those couplings and is plain, dependency-free ANSI C).
+
+Exact source paths pulled from that mirror:
+  mindtct/src/lib/mindtct/*.c   -> mindtct/
+  mindtct/include/{lfs,log,morph,mytime}.h -> include/
+  bozorth3/src/lib/bozorth3/*.c -> bozorth3/
+  bozorth3/include/{bozorth,bz_array}.h    -> include/
+  commonnbis/include/{defs,usebsd}.h       -> include/
+
+What was deliberately NOT vendored
+------------------------------------
+mindtct's isempty.c, mytime.c, results.c, to_type9.c, update.c, and the
+bozorth3 CLI binary's own main() (a different file at
+bozorth3/src/bin/bozorth3/bozorth3.c upstream, not the same-named library
+file under src/lib/ that *is* vendored here) - none of these are needed
+to call get_minutiae()/bozorth_to_gallery() from fingerprint_server.
+
+Patches applied (in include/lfs.h and include/log.h, see the files
+themselves for the exact diffs - intentionally kept as small, in-place
+edits rather than separate .patch files, since there are only a few)
+-----------------------------------------------------------------------
+1. lfs.h: removed `#include <an2k.h>` - that header (and the RECORD/
+   FIELD/ANSI_NIST types it provides) is only needed by
+   to_type9.c/update.c, which aren't vendored here. Their extern
+   declarations in lfs.h were removed too (they'd fail to compile
+   without an2k.h's types).
+2. lfs.h: added `#include <stdlib.h>` and `#include <string.h>` -
+   needed for malloc/free/realloc/memcpy/memset, which several mindtct
+   files call without including them directly (relying on an implicit
+   declaration, which newer GCC treats as an error/warning depending on
+   the function).
+3. log.h: added `#include <string.h>` for the same reason as #2 - a
+   couple of mindtct files only include log.h, not lfs.h.
+
+No other files were modified. Compiles cleanly as plain C (gcc -Wall)
+with these two patches - the only warnings are a handful of
+unused-variable/misleading-indentation notices in upstream code,
+suppressed via SubDirCcFlags in the Jamfile rather than touched here.
+
+Updating this vendored copy later
+------------------------------------
+Re-fetch the same file list from the same mirror (or any pristine NBIS
+source - this is not libfprint-specific), then re-apply the two lfs.h
+patches above by hand (they're small and self-explanatory in context).

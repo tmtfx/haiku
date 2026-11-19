@@ -15,6 +15,10 @@
 
 
 const static int32 kMsgUnlock = 'ULMS';
+const static int32 kMsgFingerprintStart = 'ULFs';
+
+
+class BButton;
 
 
 class PasswordWindow : public BWindow {
@@ -23,9 +27,11 @@ class PasswordWindow : public BWindow {
 
 		const char *Password() { return fPassword->Text(); }
 		void SetPassword(const char* text);
+		void SetFingerprintAvailable(bool available);
 
 	private:
 		BTextControl *fPassword;
+		BButton *fFingerprintButton;
 };
 
 #endif // PASSWORDWINDOW_H

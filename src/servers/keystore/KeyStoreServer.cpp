@@ -15,10 +15,17 @@
 
 #include <Directory.h>
 #include <Entry.h>
+#include <File.h>
 #include <FindDirectory.h>
+#include <Message.h>
+#include <Messenger.h>
 #include <Path.h>
 #include <Roster.h>
 #include <String.h>
+#include <Volume.h>
+#include <VolumeRoster.h>
+
+#include "../fingerprint/defs.h"
 
 #include <new>
 #include <string.h>
@@ -61,6 +68,8 @@ static const uint32 kFlagQueryLockState				= 0x1000;
 static const uint32 kFlagLockKeyring				= 0x2000;
 static const uint32 kFlagEnumerateApplications		= 0x4000;
 static const uint32 kFlagRemoveApplications			= 0x8000;
+static const uint32 kFlagFingerprintUnlock			= 0x10000;
+static const uint32 kFlagForgetPassword				= 0x20000;
 
 static const uint32 kDefaultAppFlags = kFlagGetKey | kFlagEnumerateKeys
 	| kFlagAddKey | kFlagRemoveKey | kFlagAddKeyring | kFlagRemoveKeyring
@@ -575,6 +584,46 @@ KeyStoreServer::MessageReceived(BMessage* message)
 			break;
 		}
 
+		case KEY_STORE_ENABLE_FINGERPRINT_UNLOCK:
+		{
+			if (!fHasSessionPassword || !fSessionPasswordValidated) {
+				result = _GetOrAskSessionPassword();
+				if (result != B_OK)
+					break;
+			}
+
+			int32 sequence[4];
+			bool haveSequence = true;
+			for (int32 i = 0; i < 4; i++) {
+				if (message->FindInt32("sequence", i, &sequence[i]) != B_OK) {
+					haveSequence = false;
+					break;
+				}
+			}
+
+			int32 stickDevice;
+			if (!haveSequence
+				|| message->FindInt32("device", &stickDevice) != B_OK) {
+				result = B_BAD_VALUE;
+				break;
+			}
+
+			result = _EnableFingerprintUnlock(sequence, (dev_t)stickDevice);
+			break;
+		}
+
+		case KEY_STORE_DISABLE_FINGERPRINT_UNLOCK:
+		{
+			result = _DisableFingerprintUnlock();
+			break;
+		}
+
+		case KEY_STORE_LIST_REMOVABLE_VOLUMES:
+		{
+			result = _ListRemovableVolumes(reply);
+			break;
+		}
+
 		case 0:
 		{
 			// Just the error case from above.
@@ -703,6 +752,12 @@ KeyStoreServer::_AccessFlagsFor(uint32 command) const
 			return kFlagEnumerateApplications;
 		case KEY_STORE_REMOVE_APPLICATION:
 			return kFlagRemoveApplications;
+		case KEY_STORE_ENABLE_FINGERPRINT_UNLOCK:
+		case KEY_STORE_DISABLE_FINGERPRINT_UNLOCK:
+		case KEY_STORE_LIST_REMOVABLE_VOLUMES:
+			return kFlagFingerprintUnlock;
+		case KEY_STORE_FORGET_PASSWORD:
+			return kFlagForgetPassword;
 	}
 
 	return 0;
@@ -1076,6 +1131,187 @@ KeyStoreServer::_GetOrAskSessionPassword()
 			debug_printf("Keystore Server: BCrypto InitCheck failed\n");
 	}
 	
+	// Try fingerprint unlock before falling back to the typed-password
+	// window. This never bypasses the shadow-hash check below - it only
+	// supplies a candidate password string to it, exactly like a typed
+	// one. See "Fase 1e (revisionata)" in the project plan for the full
+	// security rationale: K lives only in fingerprint_server (gated on a
+	// live, ordered 4-finger match), AES(K, password) lives only on a
+	// user-chosen removable USB stick found via _FindFingerprintStick() -
+	// never both on the same medium. If the stick isn't reachable right
+	// now, this whole block is a no-op and falls straight through to the
+	// password window below, silently, as decided with the user.
+	BString fingerprintCandidate;
+	bool haveFingerprintCandidate = false;
+	{
+		BPath markerPath;
+		if (_FindFingerprintStick(markerPath) == B_OK) {
+			BFile escrowFile(markerPath.Path(), B_READ_ONLY);
+			if (escrowFile.InitCheck() == B_OK) {
+				uint32 magic = 0;
+				uint8 stickId[16];
+				uint8 iv[16];
+				uint32 cipherLen32 = 0;
+				size_t off = 0;
+				escrowFile.ReadAt(off, &magic, sizeof(magic));
+				off += sizeof(magic);
+				escrowFile.ReadAt(off, stickId, sizeof(stickId));
+				off += sizeof(stickId);
+				escrowFile.ReadAt(off, iv, sizeof(iv));
+				off += sizeof(iv);
+				escrowFile.ReadAt(off, &cipherLen32, sizeof(cipherLen32));
+				off += sizeof(cipherLen32);
+
+				if (magic == 0x4650574B /* 'FPWK' */ && cipherLen32 > 0
+					&& cipherLen32 < 1024 * 1024) {
+					uint8* cipher = new(std::nothrow) uint8[cipherLen32];
+					if (cipher != NULL
+						&& escrowFile.ReadAt(off, cipher, cipherLen32)
+							== (ssize_t)cipherLen32) {
+						BMessenger fpServer(FINGERPRINT_SERVER_SIGNATURE);
+						BMessage verifyRequest(B_FP_SEQUENCE_VERIFY_START);
+						BMessage verifyReply;
+						status_t verifyStatus = fpServer.IsValid()
+							? fpServer.SendMessage(&verifyRequest, &verifyReply)
+							: B_NO_INIT;
+
+						int32 verifyError = B_ERROR;
+						verifyReply.FindInt32("error", &verifyError);
+
+						if (verifyStatus == B_OK && verifyError == B_NO_INIT) {
+							// fingerprint_server has no active sequence
+							// escrow at all - most likely it got
+							// invalidated there (e.g. a finger that was
+							// part of the sequence got deleted). Our side
+							// is now orphaned too: clean it up so the
+							// preflet/next attempt doesn't keep finding a
+							// stale, unusable marker.
+							BEntry(markerPath.Path()).Remove();
+							_ClearStickId();
+						} else if (verifyStatus == B_OK && verifyError == B_OK) {
+							BMessage escrowRequest(B_FP_GET_ESCROW);
+							BMessage escrowReply;
+							if (fpServer.SendMessage(&escrowRequest, &escrowReply)
+									== B_OK) {
+								int32 escrowError = B_ERROR;
+								const uint8* key = NULL;
+								ssize_t keyLen = 0;
+								escrowReply.FindInt32("error", &escrowError);
+								escrowReply.FindData("key", B_RAW_TYPE,
+									(const void**)&key, &keyLen);
+
+								if (escrowError == B_OK && keyLen == 32) {
+									uint8 keyBuf[32];
+									memcpy(keyBuf, key, 32);
+
+#if 0
+									/*
+									 * TODO: Ripristinare questa implementazione una volta corretto
+									 * il supporto ad AES_CBC in BCrypto.
+									 */
+									BCrypto crypto;
+									crypto.SetAlgorithm(B_CRYPTO_AES);
+									crypto.SetMode(B_CRYPTO_MODE_CBC);
+									crypto.SetPadding(true, B_CRYPTO_PKCS7);
+
+									size_t plainBufSize = cipherLen32;
+									uint8* plain = new(std::nothrow)
+										uint8[plainBufSize];
+									if (plain != NULL) {
+										ssize_t plainLen = crypto.Decrypt(keyBuf,
+											32, iv, sizeof(iv), cipher,
+											cipherLen32, plain, plainBufSize);
+										secure_memzero_server(keyBuf,
+											sizeof(keyBuf));
+										if (plainLen >= 0) {
+											fingerprintCandidate.SetTo(
+												(const char*)plain, plainLen);
+											haveFingerprintCandidate = true;
+										}
+										secure_memzero_server(plain,
+											plainBufSize);
+										delete[] plain;
+									}
+#endif
+									// Decifratura AES-256-CBC con OpenSSL EVP
+									size_t plainBufSize = cipherLen32;
+									uint8* plain = new(std::nothrow) uint8[plainBufSize];
+									if (plain != NULL) {
+										EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+										int len = 0;
+										int plainLen = 0;
+										bool decryptOk = false;
+
+										if (ctx != NULL
+											&& EVP_DecryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, keyBuf, iv) == 1) {
+											EVP_CIPHER_CTX_set_padding(ctx, 1);
+											if (EVP_DecryptUpdate(ctx, plain, &len, cipher, (int)cipherLen32) == 1) {
+												plainLen = len;
+												if (EVP_DecryptFinal_ex(ctx, plain + len, &len) == 1) {
+													plainLen += len;
+													decryptOk = true;
+												}
+											}
+										}
+
+										if (ctx != NULL)
+											EVP_CIPHER_CTX_free(ctx);
+
+										secure_memzero_server(keyBuf, sizeof(keyBuf));
+
+										if (decryptOk && plainLen >= 0) {
+											fingerprintCandidate.SetTo((const char*)plain, plainLen);
+											haveFingerprintCandidate = true;
+										}
+
+										secure_memzero_server(plain, plainBufSize);
+										delete[] plain;
+									} else {
+										secure_memzero_server(keyBuf, sizeof(keyBuf));
+									}
+								}
+							}
+						}
+					}
+					delete[] cipher;
+				}
+			}
+		}
+	}
+
+	if (haveFingerprintCandidate) {
+		const char* passw = fingerprintCandidate.String();
+		size_t passLen = fingerprintCandidate.Length();
+		size_t inputLen = passLen + 16;
+		uint8* input = new(std::nothrow) uint8[inputLen];
+		if (input != NULL) {
+			memcpy(input, passw, passLen);
+			memcpy(input + passLen, shadowSalt, 16);
+
+			BCrypto fpCrypto;
+			uint8 fpHash[64];
+			bool matched = fpCrypto.InitCheck() == B_OK
+				&& fpCrypto.Digest(B_CRYPTO_BLAKE2B, input, inputLen, fpHash)
+					== B_OK
+				&& memcmp(fpHash, shadowHash, 64) == 0;
+			secure_memzero_server(input, inputLen);
+			delete[] input;
+
+			if (matched) {
+				fSessionPassword = fingerprintCandidate;
+				fHasSessionPassword = true;
+				fSessionPasswordValidated = true;
+				secure_memzero_server((void*)fingerprintCandidate.String(),
+					fingerprintCandidate.Length());
+				return B_OK;
+			}
+		}
+		// Stale escrow (e.g. master password changed since enabling
+		// fingerprint unlock) or decode failure - fall through to the
+		// typed-password window below, same as if fingerprint unlock
+		// had never been enabled.
+	}
+
 	MasterPasswordRequestWindow* window
 		= new(std::nothrow) MasterPasswordRequestWindow();
 	if (window == NULL) {
@@ -1175,6 +1411,441 @@ KeyStoreServer::_GetOrAskSessionPassword()
 	//return B_OK;
 }
 
+
+static const uint32 kFingerprintStickMagic = 0x4650574B; // 'FPWK'
+// NOT dot-prefixed: Haiku's FAT driver returns B_UNSUPPORTED when creating
+// a file whose name starts with '.' (confirmed live - a plain name works
+// fine, a dot-prefixed one doesn't) - and FAT32 is a very common format
+// for off-the-shelf USB sticks, so this would have broken the feature for
+// most real-world "chiavette".
+static const char* kFingerprintStickMarkerName = "fingerprint_escrow";
+
+
+status_t
+KeyStoreServer::_StickIdPath(BPath& outPath)
+{
+	status_t status = find_directory(B_USER_SETTINGS_DIRECTORY, &outPath);
+	if (status != B_OK)
+		return status;
+
+	outPath.Append("keystore_server");
+	status = create_directory(outPath.Path(), 0700);
+	if (status != B_OK && status != B_FILE_EXISTS)
+		return status;
+
+	outPath.Append("fingerprint_stick_id");
+	return B_OK;
+}
+
+
+status_t
+KeyStoreServer::_SaveStickId(const uint8* stickId)
+{
+	BPath path;
+	status_t status = _StickIdPath(path);
+	if (status != B_OK)
+		return status;
+
+	BFile file(path.Path(), B_WRITE_ONLY | B_CREATE_FILE | B_ERASE_FILE);
+	status = file.InitCheck();
+	if (status != B_OK)
+		return status;
+
+	file.SetPermissions(0600);
+	ssize_t written = file.Write(stickId, 16);
+	if (written < 0)
+		return (status_t)written;
+	return written == 16 ? B_OK : B_IO_ERROR;
+}
+
+
+status_t
+KeyStoreServer::_LoadStickId(uint8* outStickId)
+{
+	BPath path;
+	status_t status = _StickIdPath(path);
+	if (status != B_OK)
+		return status;
+
+	BFile file(path.Path(), B_READ_ONLY);
+	status = file.InitCheck();
+	if (status != B_OK)
+		return status;
+
+	ssize_t readBytes = file.Read(outStickId, 16);
+	if (readBytes < 0)
+		return (status_t)readBytes;
+	return readBytes == 16 ? B_OK : B_IO_ERROR;
+}
+
+
+status_t
+KeyStoreServer::_ClearStickId()
+{
+	BPath path;
+	status_t status = _StickIdPath(path);
+	if (status != B_OK)
+		return status;
+
+	BEntry entry(path.Path());
+	if (!entry.Exists())
+		return B_OK;
+	return entry.Remove();
+}
+
+
+status_t
+KeyStoreServer::_ListRemovableVolumes(BMessage& reply)
+{
+	BVolumeRoster roster;
+	BVolume bootVolume;
+	roster.GetBootVolume(&bootVolume);
+
+	BVolume volume;
+	roster.Rewind();
+	while (roster.GetNextVolume(&volume) == B_OK) {
+		if (volume.Device() == bootVolume.Device())
+			continue;
+		if (!volume.IsRemovable())
+			continue;
+
+		char name[B_FILE_NAME_LENGTH];
+		if (volume.GetName(name) != B_OK)
+			continue;
+
+		reply.AddString("name", name);
+		reply.AddInt32("device", (int32)volume.Device());
+	}
+
+	return B_OK;
+}
+
+
+status_t
+KeyStoreServer::_FindFingerprintStick(BPath& outMarkerPath)
+{
+	uint8 expectedStickId[16];
+	status_t status = _LoadStickId(expectedStickId);
+	if (status != B_OK)
+		return status; // not configured
+
+	BVolumeRoster roster;
+	BVolume bootVolume;
+	roster.GetBootVolume(&bootVolume);
+
+	BVolume volume;
+	roster.Rewind();
+	while (roster.GetNextVolume(&volume) == B_OK) {
+		if (volume.Device() == bootVolume.Device())
+			continue;
+		if (!volume.IsRemovable())
+			continue;
+
+		BDirectory root;
+		if (volume.GetRootDirectory(&root) != B_OK)
+			continue;
+
+		BEntry rootEntry;
+		BPath markerPath;
+		if (root.GetEntry(&rootEntry) != B_OK
+			|| rootEntry.GetPath(&markerPath) != B_OK) {
+			continue;
+		}
+		markerPath.Append(kFingerprintStickMarkerName);
+
+		BFile file(markerPath.Path(), B_READ_ONLY);
+		if (file.InitCheck() != B_OK)
+			continue;
+
+		uint32 magic = 0;
+		uint8 stickId[16];
+		if (file.ReadAt(0, &magic, sizeof(magic)) != (ssize_t)sizeof(magic)
+			|| magic != kFingerprintStickMagic
+			|| file.ReadAt(sizeof(magic), stickId, sizeof(stickId))
+				!= (ssize_t)sizeof(stickId)) {
+			continue;
+		}
+
+		if (memcmp(stickId, expectedStickId, sizeof(stickId)) == 0) {
+			outMarkerPath = markerPath;
+			return B_OK;
+		}
+	}
+
+	return B_ENTRY_NOT_FOUND; // stick not currently reachable
+}
+
+
+#if 0
+/*
+ * TODO: Ripristinare questa implementazione una volta corretto il supporto ad AES_CBC in BCrypto.
+ */
+status_t
+KeyStoreServer::_EnableFingerprintUnlock(const int32* sequence,
+	dev_t stickDevice)
+{
+	// Only reachable with an already-unlocked, validated session (checked
+	// by the caller) - fSessionPassword holds the plaintext master
+	// password at this point.
+	BVolume stickVolume(stickDevice);
+	BDirectory stickRoot;
+	BEntry stickRootEntry;
+	BPath markerPath;
+	if (stickVolume.InitCheck() != B_OK
+		|| stickVolume.GetRootDirectory(&stickRoot) != B_OK
+		|| stickRoot.GetEntry(&stickRootEntry) != B_OK
+		|| stickRootEntry.GetPath(&markerPath) != B_OK) {
+		return B_BAD_VALUE;
+	}
+	markerPath.Append(kFingerprintStickMarkerName);
+
+	uint8 key[32];
+	uint8 iv[16];
+	uint8 stickId[16];
+	BCrypto crypto;
+	if (crypto.InitCheck() != B_OK)
+		return B_ERROR;
+	if (crypto.GetRandomBytes(key, sizeof(key)) != B_OK
+		|| crypto.GetRandomBytes(iv, sizeof(iv)) != B_OK
+		|| crypto.GetRandomBytes(stickId, sizeof(stickId)) != B_OK) {
+		return B_ERROR;
+	}
+
+	crypto.SetAlgorithm(B_CRYPTO_AES);
+	crypto.SetMode(B_CRYPTO_MODE_CBC);
+	crypto.SetPadding(true, B_CRYPTO_PKCS7);
+
+	const uint8* plainPtr = (const uint8*)fSessionPassword.String();
+	size_t plainLen = (size_t)fSessionPassword.Length();
+
+	size_t cipherBufSize = crypto.GetOutputSize(plainLen, B_CRYPTO_ENCRYPT);
+	uint8* cipher = new(std::nothrow) uint8[cipherBufSize];
+	if (cipher == NULL) {
+		secure_memzero_server(key, sizeof(key));
+		return B_NO_MEMORY;
+	}
+
+	ssize_t cipherLen = crypto.Encrypt(key, sizeof(key), iv, sizeof(iv),
+		plainPtr, plainLen, cipher, cipherBufSize);
+	if (cipherLen < 0) {
+		secure_memzero_server(key, sizeof(key));
+		delete[] cipher;
+		return B_ERROR;
+	}
+
+	BFile file(markerPath.Path(), B_WRITE_ONLY | B_CREATE_FILE | B_ERASE_FILE);
+	status_t status = file.InitCheck();
+	if (status == B_OK) {
+		file.SetPermissions(0600);
+		uint32 cipherLen32 = (uint32)cipherLen;
+		size_t off = 0;
+		file.WriteAt(off, &kFingerprintStickMagic, sizeof(kFingerprintStickMagic));
+		off += sizeof(kFingerprintStickMagic);
+		file.WriteAt(off, stickId, sizeof(stickId));
+		off += sizeof(stickId);
+		file.WriteAt(off, iv, sizeof(iv));
+		off += sizeof(iv);
+		file.WriteAt(off, &cipherLen32, sizeof(cipherLen32));
+		off += sizeof(cipherLen32);
+		file.WriteAt(off, cipher, cipherLen);
+	}
+
+	delete[] cipher;
+
+	if (status != B_OK) {
+		secure_memzero_server(key, sizeof(key));
+		return status;
+	}
+
+	status = _SaveStickId(stickId);
+	if (status != B_OK) {
+		secure_memzero_server(key, sizeof(key));
+		BEntry(markerPath.Path()).Remove();
+		return status;
+	}
+
+	// Hand K and the ordered sequence to fingerprint_server. It never sees
+	// the master password or the stick - only this opaque 32-byte key.
+	BMessenger fpServer(FINGERPRINT_SERVER_SIGNATURE);
+	if (!fpServer.IsValid()) {
+		secure_memzero_server(key, sizeof(key));
+		BEntry(markerPath.Path()).Remove();
+		_ClearStickId();
+		return B_NO_INIT;
+	}
+
+	BMessage request(B_FP_SET_SEQUENCE_ESCROW);
+	for (int32 i = 0; i < 4; i++)
+		request.AddInt32("sequence", sequence[i]);
+	request.AddData("key", B_RAW_TYPE, key, sizeof(key));
+	secure_memzero_server(key, sizeof(key));
+
+	BMessage reply;
+	status = fpServer.SendMessage(&request, &reply);
+	int32 fpError = B_ERROR;
+	reply.FindInt32("error", &fpError);
+	if (status != B_OK || fpError != B_OK) {
+		BEntry(markerPath.Path()).Remove();
+		_ClearStickId();
+		return status != B_OK ? status : fpError;
+	}
+
+	return B_OK;
+}
+#endif
+
+
+status_t
+KeyStoreServer::_EnableFingerprintUnlock(const int32* sequence,
+	dev_t stickDevice)
+{
+	// Only reachable with an already-unlocked, validated session (checked
+	// by the caller) - fSessionPassword holds the plaintext master
+	// password at this point.
+	BVolume stickVolume(stickDevice);
+	BDirectory stickRoot;
+	BEntry stickRootEntry;
+	BPath markerPath;
+	if (stickVolume.InitCheck() != B_OK
+		|| stickVolume.GetRootDirectory(&stickRoot) != B_OK
+		|| stickRoot.GetEntry(&stickRootEntry) != B_OK
+		|| stickRootEntry.GetPath(&markerPath) != B_OK) {
+		return B_BAD_VALUE;
+	}
+	markerPath.Append(kFingerprintStickMarkerName);
+
+	uint8 key[32];
+	uint8 iv[16];
+	uint8 stickId[16];
+	BCrypto crypto;
+	if (crypto.InitCheck() != B_OK)
+		return B_ERROR;
+	if (crypto.GetRandomBytes(key, sizeof(key)) != B_OK
+		|| crypto.GetRandomBytes(iv, sizeof(iv)) != B_OK
+		|| crypto.GetRandomBytes(stickId, sizeof(stickId)) != B_OK) {
+		return B_ERROR;
+	}
+
+	const unsigned char* plainPtr = (const unsigned char*)fSessionPassword.String();
+	int plainLen = fSessionPassword.Length();
+
+	// Dimensione massima buffer di cifratura OpenSSL AES-256-CBC con padding PKCS7
+	size_t cipherBufSize = plainLen + 16;
+	uint8* cipher = new(std::nothrow) uint8[cipherBufSize];
+	if (cipher == NULL) {
+		secure_memzero_server(key, sizeof(key));
+		return B_NO_MEMORY;
+	}
+
+	EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+	if (ctx == NULL) {
+		secure_memzero_server(key, sizeof(key));
+		delete[] cipher;
+		return B_NO_MEMORY;
+	}
+
+	int len = 0;
+	int cipherLen = 0;
+	bool encryptOk = false;
+
+	if (EVP_EncryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, key, iv) == 1) {
+		EVP_CIPHER_CTX_set_padding(ctx, 1);
+		if (EVP_EncryptUpdate(ctx, cipher, &len, plainPtr, plainLen) == 1) {
+			cipherLen = len;
+			if (EVP_EncryptFinal_ex(ctx, cipher + len, &len) == 1) {
+				cipherLen += len;
+				encryptOk = true;
+			}
+		}
+	}
+
+	EVP_CIPHER_CTX_free(ctx);
+
+	if (!encryptOk) {
+		secure_memzero_server(key, sizeof(key));
+		delete[] cipher;
+		return B_ERROR;
+	}
+
+	BFile file(markerPath.Path(), B_WRITE_ONLY | B_CREATE_FILE | B_ERASE_FILE);
+	status_t status = file.InitCheck();
+	if (status == B_OK) {
+		file.SetPermissions(0600);
+		uint32 cipherLen32 = (uint32)cipherLen;
+		size_t off = 0;
+		file.WriteAt(off, &kFingerprintStickMagic, sizeof(kFingerprintStickMagic));
+		off += sizeof(kFingerprintStickMagic);
+		file.WriteAt(off, stickId, sizeof(stickId));
+		off += sizeof(stickId);
+		file.WriteAt(off, iv, sizeof(iv));
+		off += sizeof(iv);
+		file.WriteAt(off, &cipherLen32, sizeof(cipherLen32));
+		off += sizeof(cipherLen32);
+		file.WriteAt(off, cipher, cipherLen);
+	}
+
+	delete[] cipher;
+
+	if (status != B_OK) {
+		secure_memzero_server(key, sizeof(key));
+		return status;
+	}
+
+	status = _SaveStickId(stickId);
+	if (status != B_OK) {
+		secure_memzero_server(key, sizeof(key));
+		BEntry(markerPath.Path()).Remove();
+		return status;
+	}
+
+	// Hand K and the ordered sequence to fingerprint_server. It never sees
+	// the master password or the stick - only this opaque 32-byte key.
+	BMessenger fpServer(FINGERPRINT_SERVER_SIGNATURE);
+	if (!fpServer.IsValid()) {
+		secure_memzero_server(key, sizeof(key));
+		BEntry(markerPath.Path()).Remove();
+		_ClearStickId();
+		return B_NO_INIT;
+	}
+
+	BMessage request(B_FP_SET_SEQUENCE_ESCROW);
+	for (int32 i = 0; i < 4; i++)
+		request.AddInt32("sequence", sequence[i]);
+	request.AddData("key", B_RAW_TYPE, key, sizeof(key));
+	secure_memzero_server(key, sizeof(key));
+
+	BMessage reply;
+	status = fpServer.SendMessage(&request, &reply);
+	int32 fpError = B_ERROR;
+	reply.FindInt32("error", &fpError);
+	if (status != B_OK || fpError != B_OK) {
+		BEntry(markerPath.Path()).Remove();
+		_ClearStickId();
+		return status != B_OK ? status : fpError;
+	}
+
+	return B_OK;
+}
+
+
+status_t
+KeyStoreServer::_DisableFingerprintUnlock()
+{
+	BPath markerPath;
+	if (_FindFingerprintStick(markerPath) == B_OK)
+		BEntry(markerPath.Path()).Remove(); // best-effort
+
+	_ClearStickId();
+
+	BMessenger fpServer(FINGERPRINT_SERVER_SIGNATURE);
+	if (fpServer.IsValid()) {
+		BMessage request(B_FP_CLEAR_SEQUENCE_ESCROW);
+		BMessage reply;
+		fpServer.SendMessage(&request, &reply); // best-effort
+	}
+
+	return B_OK;
+}
 
 
 status_t

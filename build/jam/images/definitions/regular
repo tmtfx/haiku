@@ -86,6 +86,7 @@ SYSTEM_PREFERENCES += [ FFilterByBuildFeatures
 	Bluetooth
 	DataTranslations
 	E-mail
+	Fingerprint
 	KeyStore
 	Media
 	Printers
@@ -161,6 +162,7 @@ rule HaikuImageGetPrivateSystemLibs
 
 SYSTEM_SERVERS += [ FFilterByBuildFeatures
 	ai_server
+	fingerprint_server
 	mail_daemon
 	media_addon_server
 	media_server

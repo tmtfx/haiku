@@ -46,6 +46,14 @@ enum {
 
 	// Session password management
 	KEY_STORE_FORGET_PASSWORD				= 'KFgP',
+
+	// Fingerprint-unlock escrow management (requires an already-unlocked
+	// session, since only the server holds the plaintext master password)
+	KEY_STORE_ENABLE_FINGERPRINT_UNLOCK		= 'KfpE',
+	KEY_STORE_DISABLE_FINGERPRINT_UNLOCK		= 'KfpD',
+	// Lists mounted removable, non-boot volumes so a client can pick which
+	// one to dedicate as the fingerprint-unlock escrow stick.
+	KEY_STORE_LIST_REMOVABLE_VOLUMES			= 'KfpV',
 };
 
 

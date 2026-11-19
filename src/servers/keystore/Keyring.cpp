@@ -13,6 +13,8 @@
 #include <crypto/BCrypto.h>
 #include <crypto/BCryptoDefs.h>
 
+#include <openssl/evp.h>
+
 static inline void secure_memzero(void* ptr, size_t len)
 {
 	volatile unsigned char *p = (volatile unsigned char *)ptr;
@@ -534,6 +536,10 @@ Keyring::Compare(const BString* name, const Keyring* keyring)
 }
 
 
+#if 0
+/*
+ * TODO: Ripristinare questa implementazione una volta corretto il supporto ad AES_CBC in BCrypto.
+ */
 status_t
 Keyring::_EncryptToFlatBuffer()
 {
@@ -753,5 +759,259 @@ Keyring::_DecryptFromFlatBuffer()
 		return result;
 	}
 
+	fModified = false;
+	fUnlocked = true;
+	return B_OK;
+}
+#endif
+
+
+status_t
+Keyring::_EncryptToFlatBuffer()
+{
+	if (!fModified)
+		return B_OK;
+
+	if (!fUnlocked)
+		return B_NOT_ALLOWED;
+
+	BMessage container;
+	status_t result = container.AddMessage("data", &fData);
+	if (result != B_OK)
+		return result;
+
+	result = container.AddMessage("applications", &fApplications);
+	if (result != B_OK)
+		return result;
+
+	fFlatBuffer.SetSize(0);
+	fFlatBuffer.Seek(0, SEEK_SET);
+
+	result = container.Flatten(&fFlatBuffer);
+	if (result != B_OK)
+		return result;
+
+	if (fHasUnlockKey) {
+		// Encrypt with OpenSSL: SHA-256 key derivation + AES-256-CBC-PKCS7
+		// Format: magic(4) version(4) salt(16) iv(16) len(4) cipherdata
+		const uint8_t* pwdData = NULL;
+		ssize_t pwdLen = 0;
+		if (fUnlockKey.FindData("data", B_RAW_TYPE, (const void**)&pwdData,
+				&pwdLen) != B_OK || pwdLen <= 0) {
+			return B_BAD_DATA;
+		}
+
+		BCrypto crypto;
+		if (crypto.InitCheck() != B_OK)
+			return B_ERROR;
+
+		// Generate random salt and IV
+		uint8_t salt[16], iv[16];
+		if (crypto.GetRandomBytes(salt, sizeof(salt)) != B_OK
+				|| crypto.GetRandomBytes(iv, sizeof(iv)) != B_OK) {
+			return B_ERROR;
+		}
+
+		// Derive 32-byte AES-256 key
+		uint8_t key[32];
+		result = derive_key(pwdData, (size_t)pwdLen, salt, sizeof(salt), key);
+		if (result != B_OK)
+			return result;
+
+		// Encrypt plain data with OpenSSL AES-256-CBC-PKCS7
+		size_t plainLen = (size_t)fFlatBuffer.BufferLength();
+		const uint8_t* plainPtr = (const uint8_t*)fFlatBuffer.Buffer();
+
+		size_t cipherBufSize = plainLen + 16;
+		uint8_t* cipher = new(std::nothrow) uint8_t[cipherBufSize];
+		if (cipher == NULL) {
+			secure_memzero(key, sizeof(key));
+			return B_NO_MEMORY;
+		}
+
+		EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+		if (ctx == NULL) {
+			secure_memzero(key, sizeof(key));
+			delete[] cipher;
+			return B_NO_MEMORY;
+		}
+
+		int len = 0;
+		int cipherLen = 0;
+		bool encryptOk = false;
+
+		if (EVP_EncryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, key, iv) == 1) {
+			EVP_CIPHER_CTX_set_padding(ctx, 1);
+			if (EVP_EncryptUpdate(ctx, cipher, &len, plainPtr, (int)plainLen) == 1) {
+				cipherLen = len;
+				if (EVP_EncryptFinal_ex(ctx, cipher + len, &len) == 1) {
+					cipherLen += len;
+					encryptOk = true;
+				}
+			}
+		}
+
+		EVP_CIPHER_CTX_free(ctx);
+		secure_memzero(key, sizeof(key));
+
+		if (!encryptOk) {
+			secure_memzero(cipher, cipherBufSize);
+			delete[] cipher;
+			return B_ERROR;
+		}
+
+		// Serialise header + ciphertext into fFlatBuffer
+		uint32 magic   = 0x4B534543; // 'KSEC'
+		uint32 version = 2;          // v2 = BCrypto-based KDF
+		uint32 cipherLen32 = (uint32)cipherLen;
+
+		size_t off = 0;
+		fFlatBuffer.SetSize(0);
+		fFlatBuffer.Seek(0, SEEK_SET);
+		fFlatBuffer.WriteAt(off, &magic,       sizeof(magic));       off += sizeof(magic);
+		fFlatBuffer.WriteAt(off, &version,     sizeof(version));     off += sizeof(version);
+		fFlatBuffer.WriteAt(off, salt,         sizeof(salt));        off += sizeof(salt);
+		fFlatBuffer.WriteAt(off, iv,           sizeof(iv));          off += sizeof(iv);
+		fFlatBuffer.WriteAt(off, &cipherLen32, sizeof(cipherLen32)); off += sizeof(cipherLen32);
+		fFlatBuffer.WriteAt(off, cipher,       cipherLen);
+
+		secure_memzero(cipher, cipherBufSize);
+		delete[] cipher;
+	}
+
+	fModified = false;
+	return B_OK;
+}
+
+
+status_t
+Keyring::_DecryptFromFlatBuffer()
+{
+	if (fFlatBuffer.BufferLength() == 0)
+		return B_OK;
+
+	if (fHasUnlockKey) {
+		// Parse header: magic(4) version(4) salt(16) iv(16) len(4) cipherdata
+		const size_t kHeaderSize = 4 + 4 + 16 + 16 + 4;
+		if (fFlatBuffer.BufferLength() < kHeaderSize)
+			return B_BAD_DATA;
+
+		uint32 magic = 0, version = 0;
+		size_t off = 0;
+		fFlatBuffer.ReadAt(off, &magic,   sizeof(magic));   off += sizeof(magic);
+		fFlatBuffer.ReadAt(off, &version, sizeof(version)); off += sizeof(version);
+
+		if (magic != 0x4B534543) // 'KSEC'
+			return B_BAD_DATA;
+		if (version != 2) // only v2 (BCrypto-based) supported
+			return B_BAD_DATA;
+
+		uint8_t salt[16], iv[16];
+		fFlatBuffer.ReadAt(off, salt, sizeof(salt)); off += sizeof(salt);
+		fFlatBuffer.ReadAt(off, iv,   sizeof(iv));   off += sizeof(iv);
+
+		uint32 cipherLen32 = 0;
+		fFlatBuffer.ReadAt(off, &cipherLen32, sizeof(cipherLen32));
+		off += sizeof(cipherLen32);
+
+		if (fFlatBuffer.BufferLength() < off + cipherLen32)
+			return B_BAD_DATA;
+
+		uint8_t* cipher = new(std::nothrow) uint8_t[cipherLen32];
+		if (cipher == NULL)
+			return B_NO_MEMORY;
+		fFlatBuffer.ReadAt(off, cipher, cipherLen32);
+
+		// Retrieve stored password
+		const uint8_t* pwdData = NULL;
+		ssize_t pwdLen = 0;
+		if (fUnlockKey.FindData("data", B_RAW_TYPE, (const void**)&pwdData,
+				&pwdLen) != B_OK || pwdLen <= 0) {
+			secure_memzero(cipher, cipherLen32);
+			delete[] cipher;
+			return B_BAD_DATA;
+		}
+
+		// Re-derive AES-256 key
+		uint8_t key[32];
+		status_t err = derive_key(pwdData, (size_t)pwdLen,
+			salt, sizeof(salt), key);
+		if (err != B_OK) {
+			secure_memzero(cipher, cipherLen32);
+			delete[] cipher;
+			return err;
+		}
+
+		// Decrypt AES-256-CBC-PKCS7 with OpenSSL EVP
+		uint8_t* plain = new(std::nothrow) uint8_t[cipherLen32];
+		if (plain == NULL) {
+			secure_memzero(key, sizeof(key));
+			secure_memzero(cipher, cipherLen32);
+			delete[] cipher;
+			return B_NO_MEMORY;
+		}
+
+		EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+		if (ctx == NULL) {
+			secure_memzero(key, sizeof(key));
+			secure_memzero(cipher, cipherLen32);
+			delete[] cipher;
+			delete[] plain;
+			return B_NO_MEMORY;
+		}
+
+		int len = 0;
+		int plainLen = 0;
+		bool decryptOk = false;
+
+		if (EVP_DecryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, key, iv) == 1) {
+			EVP_CIPHER_CTX_set_padding(ctx, 1);
+			if (EVP_DecryptUpdate(ctx, plain, &len, cipher, (int)cipherLen32) == 1) {
+				plainLen = len;
+				if (EVP_DecryptFinal_ex(ctx, plain + len, &len) == 1) {
+					plainLen += len;
+					decryptOk = true;
+				}
+			}
+		}
+
+		EVP_CIPHER_CTX_free(ctx);
+		secure_memzero(key, sizeof(key));
+		secure_memzero(cipher, cipherLen32);
+		delete[] cipher;
+
+		if (!decryptOk || plainLen < 0) {
+			secure_memzero(plain, cipherLen32);
+			delete[] plain;
+			return B_BAD_DATA;
+		}
+
+		// Replace fFlatBuffer with decrypted plaintext for normal unflatten
+		fFlatBuffer.SetSize(0);
+		fFlatBuffer.Seek(0, SEEK_SET);
+		fFlatBuffer.WriteAt(0, plain, plainLen);
+
+		secure_memzero(plain, cipherLen32);
+		delete[] plain;
+	}
+
+	BMessage container;
+	fFlatBuffer.Seek(0, SEEK_SET);
+	status_t result = container.Unflatten(&fFlatBuffer);
+	if (result != B_OK)
+		return result;
+
+	result = container.FindMessage("data", &fData);
+	if (result != B_OK)
+		return result;
+
+	result = container.FindMessage("applications", &fApplications);
+	if (result != B_OK) {
+		fData.MakeEmpty();
+		return result;
+	}
+
+	fModified = false;
+	fUnlocked = true;
 	return B_OK;
 }

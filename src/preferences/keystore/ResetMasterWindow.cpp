@@ -11,9 +11,13 @@
 #include <Path.h>
 #include <File.h>
 #include <Directory.h>
+#include <Entry.h>
 #include <KeyStore.h>
 #include <Alert.h>
 #include <Catalog.h>
+#include <Message.h>
+#include <Messenger.h>
+#include "../../../headers/private/app/KeyStoreDefs.h"
 #include <openssl/evp.h>
 #include <openssl/x509.h>
 #include <openssl/rsa.h>
@@ -231,6 +235,26 @@ status_t ResetMasterWindow::_WriteMasterPasswordShadow(uint8* outSalt)
 
     err = shadow.Flatten(&shadowFile);
     //fprintf(stderr, "[DEBUG SHADOW-WRITE] === FINE _WriteMasterPasswordShadow (Esito: %s) ===\n\n", (err == B_OK ? "OK" : "ERR"));
+
+    if (err == B_OK) {
+        // The master password just changed, so any fingerprint escrow
+        // wrapping the OLD password must be invalidated now - otherwise a
+        // stale fingerprint match would keep releasing a password that no
+        // longer matches the new shadow hash (harmless - KeyStoreServer
+        // falls back to the typed-password prompt either way - but the
+        // sequence-escrow in fingerprint_server and the marker on the USB
+        // stick are now pointless and should not linger). This reuses
+        // KeyStoreServer's own disable path (best-effort: clears its local
+        // stick-id record, removes the stick's marker file if currently
+        // reachable, clears fingerprint_server's sequence-escrow) rather
+        // than duplicating the removable-volume scan here.
+        BMessenger keyStore(BPrivate::kKeyStoreServerSignature);
+        if (keyStore.IsValid()) {
+            BMessage request(BPrivate::KEY_STORE_DISABLE_FINGERPRINT_UNLOCK);
+            BMessage reply;
+            keyStore.SendMessage(&request, &reply);
+        }
+    }
 
     return err;
 }
