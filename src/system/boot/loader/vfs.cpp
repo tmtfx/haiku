@@ -656,6 +656,8 @@ register_boot_file_system(BootVolume& bootVolume)
 
 	gBootParams.SetInt64(BOOT_VOLUME_PARTITION_OFFSET,
 		partition->offset);
+	gBootParams.SetInt64(BOOT_VOLUME_PARTITION_SIZE,
+		partition->size);
 
 	if (bootVolume.IsPackaged()) {
 		gBootParams.SetBool(BOOT_VOLUME_PACKAGED, true);

@@ -8393,6 +8393,21 @@ _kern_read_fs_info(dev_t device, struct fs_info* info)
 
 
 status_t
+_kern_get_file_map(int fd, off_t offset, size_t size, struct file_io_vec* vecs,
+	size_t* _count)
+{
+	struct vnode* vnode;
+	status_t status = vfs_get_vnode_from_fd(fd, true, &vnode);
+	if (status != B_OK)
+		return status;
+
+	status = vfs_get_file_map(vnode, offset, size, vecs, _count);
+	put_vnode(vnode);
+	return status;
+}
+
+
+status_t
 _kern_write_fs_info(dev_t device, const struct fs_info* info, int mask)
 {
 	if (info == NULL)
@@ -9093,6 +9108,47 @@ _user_read_fs_info(dev_t device, struct fs_info* userInfo)
 		return B_BAD_ADDRESS;
 
 	return B_OK;
+}
+
+
+status_t
+_user_get_file_map(int fd, off_t offset, size_t size,
+	struct file_io_vec* userVecs, size_t* _userCount)
+{
+	if (userVecs == NULL || _userCount == NULL)
+		return B_BAD_VALUE;
+
+	if (!IS_USER_ADDRESS(userVecs) || !IS_USER_ADDRESS(_userCount))
+		return B_BAD_ADDRESS;
+
+	size_t count;
+	if (user_memcpy(&count, _userCount, sizeof(count)) != B_OK)
+		return B_BAD_ADDRESS;
+
+	if (count == 0 || count > IOV_MAX)
+		return B_BAD_VALUE;
+
+	BStackOrHeapArray<file_io_vec, 16> vecs(count);
+	if (!vecs.IsValid())
+		return B_NO_MEMORY;
+
+	struct vnode* vnode;
+	status_t status = vfs_get_vnode_from_fd(fd, false, &vnode);
+	if (status != B_OK)
+		return status;
+
+	status = vfs_get_file_map(vnode, offset, size, vecs, &count);
+	put_vnode(vnode);
+
+	if (status != B_OK && status != B_BUFFER_OVERFLOW)
+		return status;
+
+	if (user_memcpy(userVecs, vecs, count * sizeof(file_io_vec)) != B_OK
+		|| user_memcpy(_userCount, &count, sizeof(count)) != B_OK) {
+		return B_BAD_ADDRESS;
+	}
+
+	return status;
 }
 
 

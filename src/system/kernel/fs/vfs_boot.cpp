@@ -421,6 +421,64 @@ get_boot_partitions(KMessage& bootVolume, PartitionStack& partitions)
 		strict = false;
 	}
 
+	if (partitions.IsEmpty()) {
+		// No real partition matches the boot offset -- this can happen when
+		// booting from a file nested inside another partition's filesystem
+		// (the "boot from file" feature): stage1/stage2 found and read it
+		// via a flat block offset on the real disk, exactly as they would a
+		// normal partition, so BOOT_VOLUME_PARTITION_OFFSET is already
+		// correct -- there's just no real partition-table entry describing
+		// it, since it isn't one. Construct one directly at that offset on
+		// each candidate boot disk, and let the normal disk/filesystem
+		// identification code (the same code path used for every real
+		// partition, including reading and validating the BFS superblock)
+		// confirm there's actually a recognizable filesystem there before
+		// trusting it.
+		off_t bootPartitionOffset = bootVolume.GetInt64(
+			BOOT_VOLUME_PARTITION_OFFSET, -1);
+		// The loader determines this the same way it determines the
+		// offset: from the BFS superblock of the volume it actually
+		// mounted, not from any partition-table entry (there isn't one).
+		// Prefer it over "everything to the end of the disk" when
+		// available, so this synthetic partition's declared bounds match
+		// the real nested volume as closely as the information we have
+		// allows, instead of being needlessly oversized.
+		off_t bootPartitionSize = bootVolume.GetInt64(
+			BOOT_VOLUME_PARTITION_SIZE, -1);
+		if (bootPartitionOffset >= 0) {
+			int32 cookie = 0;
+			KDiskDevice* device;
+			while ((device = manager->NextDevice(&cookie)) != NULL) {
+				if (!bootMethod->IsBootDevice(device, false))
+					continue;
+				if (bootPartitionOffset >= device->Size())
+					continue;
+
+				off_t maxSize = device->Size() - bootPartitionOffset;
+				off_t size = bootPartitionSize > 0
+						&& bootPartitionSize <= maxSize
+					? bootPartitionSize : maxSize;
+
+				KPartition* child = NULL;
+				status_t error = device->CreateChild(-1, -1,
+					bootPartitionOffset, size, &child);
+				if (error != B_OK)
+					continue;
+
+				if (manager->ScanPartition(child) == B_OK
+					&& child->ContainsFileSystem()) {
+					dprintf("get_boot_partitions(): found boot volume "
+						"nested in a file at offset %" B_PRIdOFF
+						" on disk\n", bootPartitionOffset);
+					partitions.Push(child);
+					break;
+				}
+
+				device->RemoveChild(child);
+			}
+		}
+	}
+
 	// sort partition list (e.g.. when booting from CD, CDs should come first in
 	// the list)
 	if (!bootVolume.GetBool(BOOT_VOLUME_USER_SELECTED, false))

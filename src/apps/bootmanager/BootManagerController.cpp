@@ -68,6 +68,35 @@ BootManagerController::~BootManagerController()
 
 
 void
+BootManagerController::SetInstallerTarget(const char* diskPath,
+	const char* filePath, off_t partitionOffsetInFile)
+{
+	if (diskPath != NULL && diskPath[0] != '\0') {
+		if (fSettings.ReplaceString("disk", diskPath) != B_OK)
+			fSettings.AddString("disk", diskPath);
+	}
+
+	if (filePath != NULL && filePath[0] != '\0') {
+		BPath path(filePath);
+
+		BMessage file;
+		file.AddBool("show", true);
+		file.AddString("name", path.Leaf());
+		file.AddString("path", filePath);
+		file.AddInt64("partitionOffset", partitionOffsetInFile);
+
+		fSettings.RemoveName("bootFile");
+		fSettings.AddMessage("bootFile", &file);
+
+		// Default to booting the file we were handed, since it is the
+		// one Installer just installed to.
+		fSettings.RemoveName("defaultBootFile");
+		fSettings.AddInt32("defaultBootFile", 0);
+	}
+}
+
+
+void
 BootManagerController::Previous(WizardView* wizard)
 {
 	if (CurrentState() != kStateEntry)
@@ -197,6 +226,22 @@ BootManagerController::_WriteBootMenu()
 		return false;
 
 	fWriteBootMenuStatus = fBootMenu->Install(*fBootDrive, fSettings);
+
+	if (fWriteBootMenuStatus == B_NOT_SUPPORTED) {
+		// A "boot from file" entry is fragmented on its host filesystem --
+		// nothing was written to disk (the check happens before any write),
+		// so this is not the generic installation-failed case.
+		BAlert* error = new BAlert("error", B_TRANSLATE("One of the files "
+				"selected to boot from is fragmented on its filesystem and "
+				"cannot be booted directly. Recreate the file in one "
+				"operation on free space, then try again. The boot menu "
+				"was not modified."),
+			B_TRANSLATE_COMMENT("OK", "Button"), NULL, NULL, B_WIDTH_AS_USUAL,
+			B_WARNING_ALERT);
+		error->Go();
+		return false;
+	}
+
 	return true;
 }
 

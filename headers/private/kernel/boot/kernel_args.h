@@ -35,6 +35,7 @@
 #define BOOT_VOLUME_PACKAGED			"packaged"
 #define BOOT_VOLUME_PACKAGES_STATE		"packages state"
 #define BOOT_VOLUME_PARTITION_OFFSET	"partition offset"
+#define BOOT_VOLUME_PARTITION_SIZE		"partition size"
 #define BOOT_VOLUME_DISK_IDENTIFIER		"disk identifier"
 
 // boot methods

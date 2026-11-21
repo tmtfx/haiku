@@ -52,6 +52,8 @@ public:
 
 			status_t			RegisterFileDiskDevice(const char* fileName);
 			status_t			UnRegisterFileDiskDevice(const char* fileName);
+			status_t			CreateFileDiskDevice(const char* fileName,
+									off_t size);
 	static	int32				SaveDiskImage(void* data);
 	static	int32				WriteDiskImage(void* data);
 
@@ -135,11 +137,13 @@ private:
 			BMenuItem*			fOpenDiskProbeContextMenuItem;
 			BPopUpMenu*			fContextMenu;
 
+			BMenuItem*			fCreateImageMenuItem;
 			BMenuItem*			fRegisterMenuItem;
 			BMenuItem*			fUnRegisterMenuItem;
 			BMenuItem*			fSaveMenuItem;
 			BMenuItem*			fWriteMenuItem;
 
+			BFilePanel*			fCreateImageFilePanel;
 			BFilePanel*			fRegisterFilePanel;
 			BFilePanel*			fWriteImageFilePanel;
 			BFilePanel*			fReadImageFilePanel;

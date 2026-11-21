@@ -26,6 +26,7 @@ struct dirent;
 struct event_wait_info;
 struct fd_info;
 struct fd_set;
+struct file_io_vec;
 struct fs_info;
 struct iovec;
 struct loadavg;
@@ -260,6 +261,8 @@ extern dev_t		_kern_mount(const char *path, const char *device,
 						size_t argsLength);
 extern status_t		_kern_unmount(const char *path, uint32 flags);
 extern status_t		_kern_read_fs_info(dev_t device, struct fs_info *info);
+extern status_t		_kern_get_file_map(int fd, off_t offset, size_t size,
+							struct file_io_vec *vecs, size_t *_count);
 extern status_t		_kern_write_fs_info(dev_t device, const struct fs_info *info,
 						int mask);
 extern dev_t		_kern_next_device(int32 *_cookie);

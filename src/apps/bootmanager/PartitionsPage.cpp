@@ -14,10 +14,17 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <Button.h>
 #include <Catalog.h>
 #include <CheckBox.h>
 #include <ControlLook.h>
+#include <DiskDevice.h>
+#include <DiskDeviceRoster.h>
+#include <DiskDeviceVisitor.h>
+#include <FilePanel.h>
 #include <LayoutBuilder.h>
+#include <Partition.h>
+#include <Path.h>
 #include <RadioButton.h>
 #include <ScrollView.h>
 #include <SeparatorView.h>
@@ -35,18 +42,135 @@
 
 const uint32 kMessageShow = 'show';
 const uint32 kMessageName = 'name';
+const uint32 kMessageChooseFile = 'bffl';
+const uint32 kMessageRemoveFile = 'rmfl';
+
+
+// Finds the first "real" (non-partition-map) partition inside a
+// file-disk-device -- the one DriveSetup's normal Initialize/Create flow
+// actually formats and that makebootable writes a boot block into. Used
+// to resolve a manually-picked "boot from file" image's inner partition
+// offset the same way InstallerWindow::_LaunchBootManager() does for an
+// Installer-driven install.
+class BootablePartitionFinder : public BDiskDeviceVisitor {
+public:
+	BootablePartitionFinder()
+		:
+		fOffset(0),
+		fFound(false)
+	{
+	}
+
+	virtual bool Visit(BDiskDevice* device)
+	{
+		return false;
+	}
+
+	virtual bool Visit(BPartition* partition, int32 level)
+	{
+		if (partition->ContainsPartitioningSystem())
+			return false;
+
+		fOffset = partition->Offset();
+		fFound = true;
+		return true;
+			// stop at the first one; "boot from file" only supports a
+			// single bootable partition per image
+	}
+
+	bool Found() const { return fFound; }
+	off_t Offset() const { return fOffset; }
+
+private:
+	off_t	fOffset;
+	bool	fFound;
+};
 
 
 PartitionsPage::PartitionsPage(BMessage* settings, const char* name)
 	:
-	WizardPageView(settings, name)
+	WizardPageView(settings, name),
+	fFilePanel(NULL)
 {
 	_BuildUI();
+
+	fFilePanel = new BFilePanel(B_OPEN_PANEL);
 }
 
 
 PartitionsPage::~PartitionsPage()
 {
+	delete fFilePanel;
+}
+
+
+void
+PartitionsPage::AttachedToWindow()
+{
+	WizardPageView::AttachedToWindow();
+
+	fChooseFileButton->SetTarget(this);
+	fRemoveFileButton->SetTarget(this);
+	fFilePanel->SetTarget(BMessenger(this));
+}
+
+
+void
+PartitionsPage::MessageReceived(BMessage* message)
+{
+	switch (message->what) {
+		case kMessageChooseFile:
+			fFilePanel->Show();
+			break;
+
+		case B_REFS_RECEIVED:
+		{
+			entry_ref ref;
+			if (message->FindRef("refs", &ref) == B_OK) {
+				BPath path(&ref);
+
+				// If this file is already registered as a file-disk-device
+				// (e.g. created via DriveSetup's "Create disk image...")
+				// and has its own inner partition table, resolve the
+				// actual bootable BFS partition's offset within it.
+				// Otherwise, assume the whole file is directly one BFS
+				// volume (offset 0).
+				off_t partitionOffset = 0;
+				BDiskDeviceRoster fileRoster;
+				BDiskDevice fileDevice;
+				if (fileRoster.GetFileDeviceForPath(path.Path(), &fileDevice)
+						== B_OK) {
+					BootablePartitionFinder finder;
+					fileDevice.VisitEachDescendant(&finder);
+					if (finder.Found())
+						partitionOffset = finder.Offset();
+				}
+
+				BMessage file;
+				file.AddBool("show", true);
+				file.AddString("name", ref.name);
+				file.AddString("path", path.Path());
+				file.AddInt64("partitionOffset", partitionOffset);
+
+				fSettings->RemoveName("bootFile");
+				fSettings->AddMessage("bootFile", &file);
+				fSettings->RemoveName("defaultBootFile");
+
+				_UpdateFileView();
+			}
+			break;
+		}
+
+		case kMessageRemoveFile:
+			fSettings->RemoveName("bootFile");
+			fSettings->RemoveName("defaultBootFile");
+			_UpdateFileView();
+			break;
+
+		default:
+			WizardPageView::MessageReceived(message);
+			break;
+	}
 }
 
 
@@ -106,11 +230,40 @@ PartitionsPage::_BuildUI()
 	BScrollView* scrollView = new BScrollView("scrollView", viewPort, 0,
 		false, true);
 
+	fChooseFileButton = new BButton("chooseFile",
+		B_TRANSLATE("Boot from file" B_UTF8_ELLIPSIS),
+		new BMessage(kMessageChooseFile));
+	fRemoveFileButton = new BButton("removeFile", B_TRANSLATE("Remove"),
+		new BMessage(kMessageRemoveFile));
+	fFileView = new BStringView("fileView", "");
+	fFileView->SetExplicitAlignment(
+		BAlignment(B_ALIGN_LEFT, B_ALIGN_VERTICAL_UNSET));
+
 	SetLayout(new BGroupLayout(B_VERTICAL));
 
 	BLayoutBuilder::Group<>((BGroupLayout*)GetLayout())
 		.Add(fDescription)
-		.Add(scrollView, 10.0);
+		.Add(scrollView, 10.0)
+		.AddGroup(B_HORIZONTAL)
+			.Add(fChooseFileButton)
+			.Add(fRemoveFileButton)
+			.Add(fFileView, 1.0)
+		.End();
+
+	_UpdateFileView();
+}
+
+
+void
+PartitionsPage::_UpdateFileView()
+{
+	BMessage file;
+	BString path;
+	if (fSettings->FindMessage("bootFile", 0, &file) == B_OK)
+		file.FindString("path", &path);
+
+	fFileView->SetText(path.String());
+	fRemoveFileButton->SetEnabled(path.Length() > 0);
 }
 
 

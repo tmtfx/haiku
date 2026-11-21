@@ -9,8 +9,13 @@
 
 #include "InstallerWindow.h"
 
+#include <errno.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <strings.h>
+#include <sys/stat.h>
+
+#include <fs_info.h>
 
 #include <Alert.h>
 #include <Application.h>
@@ -88,6 +93,28 @@ const uint32 MASTER_PASSWORD_SAVE   = 'MPSV';
 const uint32 kGoToMP2 = 'GTP2';
 const uint32 kGoToSave = 'GTBS';
 const uint32 BENCHMARK_DONE = 'BMDN';
+
+
+// Temporary diagnostic logging for the "boot from file" feature, while
+// it's still being debugged on real hardware. Appends to the same fixed
+// path LegacyBootMenu.cpp's _LogFileBootDebug() uses, so both ends of the
+// chain land in one file. Remove once this feature is confirmed working
+// end-to-end.
+static void
+_LogFileBootDebug(const char* format, ...)
+{
+	FILE* log = fopen("/boot/home/bootman-debug.log", "a");
+	if (log == NULL)
+		return;
+
+	va_list args;
+	va_start(args, format);
+	vfprintf(log, format, args);
+	va_end(args);
+
+	fflush(log);
+	fclose(log);
+}
 const uint32 ACC_COMP_CHKBX_CHANGED = 'BMCB';
 
 class PasswordTC : public BTextControl {
@@ -234,6 +261,7 @@ InstallerWindow::InstallerWindow()
     fEncouragedToSetupPartitions(false),
     fDriveSetupLaunched(false),
     fBootManagerLaunched(false),
+    fBootManagerAutoLaunched(false),
     fInstallStatus(kReadyForInstall),
     fWorkerThread(new WorkerThread(this)),
     fCardLayout(NULL),
@@ -608,6 +636,7 @@ InstallerWindow::MessageReceived(BMessage *msg)
 					fWorkerThread->SetPackagesList(list);
 					fWorkerThread->SetSpaceRequired(size);
 					fInstallStatus = kInstalling;
+					fBootManagerAutoLaunched = false;
 					fWorkerThread->StartInstall(srcItem->ID(),
 						targetItem->ID());
 					fBeginButton->SetLabel(B_TRANSLATE("Stop"));
@@ -717,6 +746,15 @@ InstallerWindow::MessageReceived(BMessage *msg)
 
 			_SetCopyEngineCancelSemaphore(-1);
 
+			// This message is also re-posted (see the B_SOME_APP_QUIT
+			// handling below) purely to refresh the status text/button
+			// state after BootManager or DriveSetup closes post-install.
+			// Only show the master-password/graphics-acceleration overlay
+			// the first time, when the install has actually just
+			// finished -- not on every such refresh, or it reappears in
+			// a loop every time the user closes BootManager.
+			bool installJustFinished = (fInstallStatus != kFinished);
+
 			PartitionMenuItem* dstItem
 				= (PartitionMenuItem*)fDestMenu->FindMarked();
 
@@ -755,7 +793,7 @@ InstallerWindow::MessageReceived(BMessage *msg)
 			//fPasswordLayoutItem->SetVisible(true);
 			// --- Cambio Schermata Pulito Nativo ---
             // Invece di ResizeTo e Show manuali, diciamo al layout di mostrare la carta 1
-            if (fCardLayout != NULL) {
+            if (fCardLayout != NULL && installJustFinished) {
                 fCardLayout->SetVisibleItem(1);
                 fBeginButton->SetEnabled(false);
                 fMasterPassword1->MakeFocus(true);
@@ -902,6 +940,40 @@ InstallerWindow::MessageReceived(BMessage *msg)
 			if (fCardLayout != NULL) {
 				fCardLayout->SetVisibleItem((int32)0);
 				fBeginButton->SetEnabled(true);
+			}
+
+			// A "boot from file" install only works through Boot Manager
+			// (see the "boot from file" feature) -- there is no plain
+			// partition boot sector for it to be chainloaded from. Kick
+			// off Boot Manager now, already targeting the right disk and
+			// file, once the whole post-install flow (master password,
+			// graphics acceleration) is out of the way. Guarded so it
+			// fires exactly once per install, no matter how many times
+			// this message is otherwise handled. Ordinary partition
+			// installs are unaffected: they keep relying on the "Set up
+			// boot menu..." Tools menu item, same as before.
+			_LogFileBootDebug("BENCHMARK_DONE: fBootManagerAutoLaunched=%d\n",
+				(int)fBootManagerAutoLaunched);
+			if (!fBootManagerAutoLaunched) {
+				PartitionMenuItem* dstItem
+					= (PartitionMenuItem*)fDestMenu->FindMarked();
+				_LogFileBootDebug("  dstItem=%p id=%" B_PRId32 "\n", dstItem,
+					dstItem != NULL ? dstItem->ID() : -1);
+				if (dstItem != NULL) {
+					BDiskDeviceRoster roster;
+					BDiskDevice device;
+					BPartition* partition;
+					bool found = roster.GetPartitionWithID(dstItem->ID(),
+							&device, &partition) == B_OK
+						|| roster.GetDeviceWithID(dstItem->ID(), &device)
+							== B_OK;
+					_LogFileBootDebug("  found=%d device.IsFile()=%d\n",
+						(int)found, found ? (int)device.IsFile() : -1);
+					if (found && device.IsFile()) {
+						fBootManagerAutoLaunched = true;
+						_LaunchBootManager();
+					}
+				}
 			}
 			break;
 		}
@@ -1727,11 +1799,116 @@ InstallerWindow::_LaunchDriveSetup()
 void
 InstallerWindow::_LaunchBootManager()
 {
-	// TODO: Currently BootManager always tries to install to the "first"
-	// harddisk. If/when it later supports being installed to a certain
-	// harddisk, we would have to pass it the disk that contains the target
-	// partition here.
-	if (be_roster->Launch(kBootManagerSignature) != B_OK) {
+	// Resolve the current install target so BootManager can be told which
+	// disk to install its boot menu on, instead of defaulting to "the
+	// first harddisk". When the target is a file-backed disk image (our
+	// "boot from file" feature), also resolve the real file path, the
+	// physical disk that actually hosts it (where the BIOS boot code
+	// lives, not the virtual file device itself), and -- crucially -- the
+	// byte offset of the actual BFS partition WITHIN that file: DriveSetup
+	// normally gives a registered file-disk-device its own inner
+	// partition table (e.g. "Intel"), so dstItem's partition does not
+	// start at the file's byte 0, and BootManager needs to know exactly
+	// where it does start to patch and chainload to the right place.
+	BString diskPath;
+	BString filePath;
+	BString partitionOffsetString;
+
+	PartitionMenuItem* dstItem = (PartitionMenuItem*)fDestMenu->FindMarked();
+	_LogFileBootDebug("_LaunchBootManager: dstItem=%p id=%" B_PRId32 "\n",
+		dstItem, dstItem != NULL ? dstItem->ID() : -1);
+
+	if (dstItem != NULL) {
+		BDiskDeviceRoster roster;
+		BDiskDevice device;
+		BPartition* partition;
+		status_t partStatus = roster.GetPartitionWithID(dstItem->ID(),
+			&device, &partition);
+		bool found = partStatus == B_OK;
+		if (!found)
+			found = roster.GetDeviceWithID(dstItem->ID(), &device) == B_OK;
+
+		_LogFileBootDebug("  GetPartitionWithID status=%" B_PRId32
+			" (%s) found=%d device.IsFile()=%d\n", partStatus,
+			strerror(partStatus), (int)found, found ? (int)device.IsFile() : -1);
+
+		if (found && device.IsFile()) {
+			BPath imagePath;
+			status_t filePathStatus = device.GetFilePath(&imagePath);
+			_LogFileBootDebug("  GetFilePath status=%" B_PRId32 " (%s) "
+				"path=\"%s\"\n", filePathStatus, strerror(filePathStatus),
+				imagePath.Path());
+			if (filePathStatus == B_OK) {
+				filePath = imagePath.Path();
+				partitionOffsetString.SetToFormat("%lld",
+					(long long)(partition != NULL ? partition->Offset() : 0));
+				_LogFileBootDebug("  inner partition Offset()=%s\n",
+					partitionOffsetString.String());
+
+				// BDiskDeviceRoster::GetPartitionForPath() needs a
+				// partition's raw device path -- it does a plain string
+				// match against each registered partition's own
+				// GetPath(), it does NOT resolve "the partition
+				// containing this filesystem path" the way its name
+				// suggests. Resolve the actual device path hosting this
+				// file first (same pattern makebootable.cpp uses for a
+				// directory argument: fs_stat_dev() on the file's
+				// st_dev).
+				struct stat imageStat;
+				status_t statStatus = stat(imagePath.Path(), &imageStat) == 0
+					? B_OK : errno;
+				fs_info hostInfo;
+				status_t hostStatus = statStatus == B_OK
+					? fs_stat_dev(imageStat.st_dev, &hostInfo) : statStatus;
+				_LogFileBootDebug("  stat status=%" B_PRId32 " fs_stat_dev "
+					"status=%" B_PRId32 " (%s) device_name=\"%s\"\n",
+					statStatus, hostStatus, strerror(hostStatus),
+					hostStatus == B_OK ? hostInfo.device_name : "");
+
+				BDiskDeviceRoster hostRoster;
+				BDiskDevice hostDevice;
+				BPartition* hostPartition;
+				if (hostStatus == B_OK) {
+					hostStatus = hostRoster.GetPartitionForPath(
+						hostInfo.device_name, &hostDevice, &hostPartition);
+				}
+				_LogFileBootDebug("  GetPartitionForPath status=%" B_PRId32
+					" (%s)\n", hostStatus, strerror(hostStatus));
+				if (hostStatus == B_OK) {
+					BPath hostPath;
+					if (hostDevice.GetPath(&hostPath) == B_OK)
+						diskPath = hostPath.Path();
+				}
+			}
+		} else if (found) {
+			BPath path;
+			if (device.GetPath(&path) == B_OK)
+				diskPath = path.Path();
+		}
+	}
+
+	const char* args[3];
+	int argc = 0;
+	if (diskPath.Length() > 0) {
+		args[argc++] = diskPath.String();
+		if (filePath.Length() > 0) {
+			args[argc++] = filePath.String();
+			args[argc++] = partitionOffsetString.String();
+		}
+	}
+
+	_LogFileBootDebug("  Launching BootManager with argc=%d diskPath=\"%s\" "
+		"filePath=\"%s\" partitionOffset=\"%s\"\n", argc, diskPath.String(),
+		filePath.String(), partitionOffsetString.String());
+
+	status_t status = argc > 0
+		? be_roster->Launch(kBootManagerSignature, argc, args)
+		: be_roster->Launch(kBootManagerSignature);
+
+	_LogFileBootDebug("  be_roster->Launch status=%" B_PRId32 " (%s)\n",
+		status, strerror(status));
+
+	if (status != B_OK) {
 		// Try really hard to launch it. It's very likely that this fails,
 		// when we run from the CD and there is only an incomplete mime
 		// database for example...
@@ -1742,7 +1919,11 @@ InstallerWindow::_LaunchBootManager()
 		}
 		BEntry entry(path.Path());
 		entry_ref ref;
-		if (entry.GetRef(&ref) != B_OK || be_roster->Launch(&ref) != B_OK) {
+		status = entry.GetRef(&ref) == B_OK
+			? (argc > 0 ? be_roster->Launch(&ref, argc, args)
+				: be_roster->Launch(&ref))
+			: B_ENTRY_NOT_FOUND;
+		if (status != B_OK) {
 			BAlert* alert = new BAlert(
 				B_TRANSLATE("Failed to launch BootManager"),
 				B_TRANSLATE("BootManager, the application to configure the "
@@ -1897,9 +2078,10 @@ InstallerWindow::_UpdateControls()
 		label = B_TRANSLATE("Write boot sector");
 	fMakeBootableItem->SetEnabled(dstItem != NULL);
 	fMakeBootableItem->SetLabel(label.String());
-// TODO: Once bootman support writing to specific disks, enable this, since
-// we would pass it the disk which contains the target partition.
-//	fLaunchBootManagerItem->SetEnabled(dstItem != NULL);
+	// _LaunchBootManager() now resolves and passes the target disk (and,
+	// for a file-backed target, the image file) to BootManager, so this is
+	// no longer blocked on bootman always installing to the first harddisk.
+	fLaunchBootManagerItem->SetEnabled(dstItem != NULL);
 
 	if (!fEncouragedToSetupPartitions && !foundOneSuitableTarget) {
 		// Focus the users attention on the DriveSetup button

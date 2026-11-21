@@ -12,9 +12,12 @@
 #include "WizardPageView.h"
 
 
+class BButton;
+class BFilePanel;
 class BGridView;
 class BTextView;
 class BScrollView;
+class BStringView;
 
 
 class PartitionsPage : public WizardPageView {
@@ -22,6 +25,9 @@ public:
 								PartitionsPage(BMessage* settings,
 									const char* name);
 	virtual						~PartitionsPage();
+
+	virtual	void				AttachedToWindow();
+	virtual	void				MessageReceived(BMessage* message);
 
 	virtual	void				PageCompleted();
 
@@ -31,10 +37,16 @@ private:
 			void				_CreateSizeText(int64 size, BString* text);
 			BMessage*			_CreateControlMessage(uint32 what,
 									int32 partitionIndex);
+			void				_UpdateFileView();
 
 private:
 			BTextView*			fDescription;
 			BGridView*			fPartitions;
+
+			BButton*			fChooseFileButton;
+			BButton*			fRemoveFileButton;
+			BStringView*		fFileView;
+			BFilePanel*			fFilePanel;
 };
 
 

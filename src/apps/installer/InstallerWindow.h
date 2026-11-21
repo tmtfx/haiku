@@ -114,6 +114,7 @@ private:
 
 			bool				fDriveSetupLaunched;
 			bool				fBootManagerLaunched;
+			bool				fBootManagerAutoLaunched;
 			InstallStatus		fInstallStatus;
 
 			WorkerThread*		fWorkerThread;

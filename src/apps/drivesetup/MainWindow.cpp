@@ -20,6 +20,7 @@
 #include <Alert.h>
 #include <AppFileInfo.h>
 #include <Application.h>
+#include <Button.h>
 #include <Catalog.h>
 #include <ColumnListView.h>
 #include <ColumnTypes.h>
@@ -30,6 +31,7 @@
 #include <DiskDeviceVisitor.h>
 #include <DiskDeviceTypes.h>
 #include <DiskSystem.h>
+#include <File.h>
 #include <IconUtils.h>
 #include <LayoutBuilder.h>
 #include <Locale.h>
@@ -42,8 +44,10 @@
 #include <Roster.h>
 #include <Screen.h>
 #include <ScrollBar.h>
+#include <TextControl.h>
 #include <Volume.h>
 #include <VolumeRoster.h>
+#include <Window.h>
 
 #include <fs_volume.h>
 #include <tracker_private.h>
@@ -74,6 +78,7 @@ enum {
 	MSG_OPEN_DISKPROBE			= 'opdp',
 	MSG_SURFACE_TEST			= 'sfct',
 	MSG_RESCAN					= 'rscn',
+	MSG_CREATE_IMAGE			= 'crim',
 	MSG_REGISTER				= 'regi',
 	MSG_UNREGISTER				= 'unrg',
 	MSG_SAVE					= 'save',
@@ -81,6 +86,112 @@ enum {
 	MSG_COMPLETE				= 'comp',
 
 	MSG_PARTITION_ROW_SELECTED	= 'prsl',
+};
+
+
+enum {
+	MSG_IMAGE_SIZE_OK			= 'isok',
+	MSG_IMAGE_SIZE_CANCEL		= 'iscn',
+};
+
+
+// Minimal modal dialog asking for the size (in MiB) of a new disk image
+// file. Modeled on AbstractParametersPanel's blocking Go()/semaphore
+// pattern, without needing its disk-system parameter editor machinery.
+class CreateImageSizePanel : public BWindow {
+public:
+	CreateImageSizePanel(BWindow* parent)
+		:
+		BWindow(BRect(300.0, 200.0, 600.0, 280.0), B_TRANSLATE("Disk image size"),
+			B_MODAL_WINDOW_LOOK, B_MODAL_SUBSET_WINDOW_FEEL,
+			B_ASYNCHRONOUS_CONTROLS | B_AUTO_UPDATE_SIZE_LIMITS | B_CLOSE_ON_ESCAPE),
+		fReturnStatus(B_CANCELED),
+		fExitSemaphore(create_sem(0, "CreateImageSizePanel exit"))
+	{
+		fSizeControl = new BTextControl(B_TRANSLATE("Size (MiB):"), "2048",
+			NULL);
+
+		BButton* cancelButton = new BButton(B_TRANSLATE("Cancel"),
+			new BMessage(MSG_IMAGE_SIZE_CANCEL));
+		fOkButton = new BButton(B_TRANSLATE("Create"),
+			new BMessage(MSG_IMAGE_SIZE_OK));
+		fOkButton->MakeDefault(true);
+
+		BLayoutBuilder::Group<>(this, B_VERTICAL, B_USE_DEFAULT_SPACING)
+			.SetInsets(B_USE_WINDOW_SPACING)
+			.Add(fSizeControl)
+			.AddGroup(B_HORIZONTAL)
+				.AddGlue()
+				.Add(cancelButton)
+				.Add(fOkButton)
+			.End();
+
+		AddToSubset(parent);
+	}
+
+	~CreateImageSizePanel()
+	{
+		delete_sem(fExitSemaphore);
+	}
+
+	virtual bool QuitRequested()
+	{
+		release_sem(fExitSemaphore);
+		return false;
+	}
+
+	virtual void MessageReceived(BMessage* message)
+	{
+		switch (message->what) {
+			case MSG_IMAGE_SIZE_CANCEL:
+				fReturnStatus = B_CANCELED;
+				release_sem(fExitSemaphore);
+				break;
+
+			case MSG_IMAGE_SIZE_OK:
+			{
+				off_t megabytes = atoll(fSizeControl->Text());
+				if (megabytes <= 0) {
+					BAlert* alert = new BAlert("error", B_TRANSLATE(
+						"Please enter a size in MiB greater than zero."),
+						B_TRANSLATE("OK"));
+					alert->Go();
+					break;
+				}
+				fSize = megabytes * 1024 * 1024;
+				fReturnStatus = B_OK;
+				release_sem(fExitSemaphore);
+				break;
+			}
+
+			default:
+				BWindow::MessageReceived(message);
+				break;
+		}
+	}
+
+	status_t Go(off_t& size)
+	{
+		Show();
+
+		while (acquire_sem(fExitSemaphore) == B_INTERRUPTED) {
+		}
+
+		size = fSize;
+		status_t status = fReturnStatus;
+
+		if (Lock())
+			Quit();
+
+		return status;
+	}
+
+private:
+	BTextControl*	fSizeControl;
+	BButton*		fOkButton;
+	status_t		fReturnStatus;
+	off_t			fSize;
+	sem_id			fExitSemaphore;
 };
 
 
@@ -253,6 +364,9 @@ MainWindow::MainWindow()
 	fMountAllMenuItem = new BMenuItem(B_TRANSLATE("Mount all"),
 		new BMessage(MSG_MOUNT_ALL), 'M', B_SHIFT_KEY);
 
+	fCreateImageMenuItem = new BMenuItem(
+		B_TRANSLATE("Create disk image" B_UTF8_ELLIPSIS),
+		new BMessage(MSG_CREATE_IMAGE));
 	fRegisterMenuItem = new BMenuItem(
 		B_TRANSLATE("Register disk image" B_UTF8_ELLIPSIS),
 		new BMessage(MSG_REGISTER));
@@ -308,6 +422,7 @@ MainWindow::MainWindow()
 	// Disk image menu
 	fDiskImageMenu = new BMenu(B_TRANSLATE("Disk image"));
 
+	fDiskImageMenu->AddItem(fCreateImageMenuItem);
 	fDiskImageMenu->AddItem(fRegisterMenuItem);
 	fDiskImageMenu->AddItem(fUnRegisterMenuItem);
 
@@ -365,6 +480,7 @@ MainWindow::MainWindow()
 	fListView->SetTarget(this);
 	fListView->MakeFocus(true);
 
+	fCreateImageFilePanel = NULL;
 	fRegisterFilePanel = NULL;
 	fWriteImageFilePanel = NULL;
 	fReadImageFilePanel = NULL;
@@ -516,6 +632,42 @@ MainWindow::MessageReceived(BMessage* message)
 			break;
 		}
 
+		case MSG_CREATE_IMAGE:
+		{
+			entry_ref directoryRef;
+			const char* name;
+			if (message->FindRef("directory", &directoryRef) == B_OK
+				&& message->FindString("name", &name) == B_OK) {
+				BEntry directory(&directoryRef);
+				BPath path;
+				directory.GetPath(&path);
+				path.Append(name);
+
+				off_t size;
+				CreateImageSizePanel* sizePanel
+					= new CreateImageSizePanel(this);
+				if (sizePanel->Go(size) == B_OK)
+					CreateFileDiskDevice(path.Path(), size);
+				break;
+			}
+
+			if (fCreateImageFilePanel == NULL) {
+				fCreateImageFilePanel = new(std::nothrow) BFilePanel(
+					B_SAVE_PANEL, new BMessenger(this), NULL, B_FILE_NODE,
+					false, new BMessage(MSG_CREATE_IMAGE), NULL, true);
+				BString title(B_TRANSLATE("%appname%: Create disk image"));
+				title.ReplaceFirst("%appname%", B_TRANSLATE_SYSTEM_NAME("DriveSetup"));
+				fCreateImageFilePanel->Window()->SetTitle(title);
+				fCreateImageFilePanel->SetButtonLabel(B_DEFAULT_BUTTON,
+					B_TRANSLATE("Create"));
+			}
+
+			if (fCreateImageFilePanel != NULL) {
+				fCreateImageFilePanel->SetSaveText("DISKIMAGE.IMG");
+				fCreateImageFilePanel->Show();
+			}
+			break;
+		}
 		case MSG_REGISTER:
 		{
 			entry_ref entryRef;
@@ -808,6 +960,32 @@ MainWindow::RegisterFileDiskDevice(const char* fileName)
 	fNotification->Send();
 
 	return B_OK;
+}
+
+
+status_t
+MainWindow::CreateFileDiskDevice(const char* fileName, off_t size)
+{
+	// Allocate the whole file in one shot (best-effort contiguity on the
+	// host filesystem -- not a guarantee; Boot Manager verifies the actual
+	// on-disk layout at install time).
+	BFile file(fileName, B_READ_WRITE | B_CREATE_FILE | B_ERASE_FILE);
+	status_t status = file.InitCheck();
+	if (status != B_OK) {
+		FileErrorAlert(B_TRANSLATE("Failed to create '%s'."), fileName,
+			B_STOP_ALERT);
+		return status;
+	}
+
+	status = file.SetSize(size);
+	if (status != B_OK) {
+		FileErrorAlert(B_TRANSLATE("Failed to allocate '%s'."), fileName,
+			B_STOP_ALERT);
+		return status;
+	}
+	file.Unset();
+
+	return RegisterFileDiskDevice(fileName);
 }
 
 
