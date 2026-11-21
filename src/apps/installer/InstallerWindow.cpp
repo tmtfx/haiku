@@ -453,9 +453,11 @@ InstallerWindow::InstallerWindow()
         B_TRANSLATE("CPU & Memory throughput:"));
     fCpuStatusBar->SetMaxValue(10000.0);
 
-    fGpuStatusBar = new BStatusBar("gpuBar",
-        B_TRANSLATE("2D GPU Acceleration & Bus:"));
-    fGpuStatusBar->SetMaxValue(100.0);
+    fGpuSupportLabel = new BStringView("gpuSupportLabel",
+        B_TRANSLATE("2D acceleration support"));
+    fGpuSupportIcon = new BStringView("gpuSupportIcon", "");
+    BFont iconFont(be_bold_font);
+    fGpuSupportIcon->SetFont(&iconFont);
 
     fBenchResultView = new BStringView("benchResult", "");
     BFont boldFont(be_bold_font);
@@ -495,7 +497,11 @@ InstallerWindow::InstallerWindow()
             .AddGlue()
             .AddGroup(B_VERTICAL, B_USE_ITEM_SPACING)
                 .Add(fCpuStatusBar)
-                .Add(fGpuStatusBar)
+                .AddGroup(B_HORIZONTAL, B_USE_SMALL_SPACING)
+                    .Add(fGpuSupportLabel)
+                    .Add(fGpuSupportIcon)
+                    .AddGlue()
+                .End()
                 .AddStrut(B_USE_ITEM_SPACING)
                 .Add(fBenchResultView)
                 .AddStrut(B_USE_ITEM_SPACING)
@@ -1022,16 +1028,18 @@ InstallerWindow::_RunBenchmark()
 			reply.FindBool("has_set_cursor_bitmap", &hasHWCur);
 	}
 
-	fGpuStatusBar->Reset();
 	if (has2D) {
-		fGpuStatusBar->Update(100.0,
-			B_TRANSLATE("Supported (Screen-to-Screen Blit)"), "");
+		fGpuSupportIcon->SetHighColor(ui_color(B_SUCCESS_COLOR));
+		fGpuSupportIcon->SetText(B_TRANSLATE_COMMENT("\xE2\x9C\x93",
+			"Checkmark icon shown when 2D acceleration is supported"));
 		fBench2DCheckbox->SetEnabled(true);
 	} else {
-		fGpuStatusBar->Update(0.0,
-			B_TRANSLATE("Not supported (Generic VESA / Framebuffer)"), "");
+		fGpuSupportIcon->SetHighColor(ui_color(B_FAILURE_COLOR));
+		fGpuSupportIcon->SetText(B_TRANSLATE_COMMENT("\xE2\x9C\x97",
+			"Cross icon shown when 2D acceleration is not supported"));
 		fBench2DCheckbox->SetEnabled(false);
 	}
+	fGpuSupportIcon->Invalidate();
 	// se ho HWCursor 
 	if (hasHWCur) {
 		fCompositCheckbox->SetEnabled(true);

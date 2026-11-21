@@ -103,7 +103,8 @@ private:
 
 			BGroupView*			fBenchmarkView;
 			BStatusBar*			fCpuStatusBar;
-			BStatusBar*			fGpuStatusBar;
+			BStringView*		fGpuSupportLabel;
+			BStringView*		fGpuSupportIcon;
 			BStringView*		fBenchResultView;
 			BCheckBox*			fBench2DCheckbox;
 			BCheckBox*			fCompositCheckbox;
