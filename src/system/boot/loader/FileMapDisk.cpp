@@ -146,20 +146,13 @@ FileMapDisk *
 FileMapDisk::FindAnyFileMapDisk(Directory *volume)
 {
 	TRACE(("FileMapDisk::FindAnyFileMapDisk(%p)\n", volume));
-	Node *node;
 	status_t error;
 
 	if (volume == NULL)
 		return NULL;
 
 	//XXX: check lower/mixed case as well
-	Node *dirnode;
-	Directory *dir;
-	dirnode = volume->Lookup(FMAP_FOLDER_NAME, true);
-	if (dirnode == NULL || !S_ISDIR(dirnode->Type()))
-		return NULL;
-	dir = (Directory *)dirnode;
-	node = dir->Lookup(FMAP_IMAGE_NAME, true);
+	Node *node = volume->Lookup(FMAP_IMAGE_NAME, true);
 	if (node == NULL)
 		return NULL;
 

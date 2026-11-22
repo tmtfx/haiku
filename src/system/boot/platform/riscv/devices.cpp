@@ -161,6 +161,13 @@ platform_get_boot_partitions(struct stage2_args* args, Node* bootDevice,
 }
 
 
+bool
+platform_file_boot_requested(void)
+{
+	return false;
+}
+
+
 status_t
 platform_register_boot_device(Node* device, disk_identifier* defaultDiskID)
 {

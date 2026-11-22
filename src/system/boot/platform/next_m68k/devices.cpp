@@ -44,6 +44,13 @@ platform_get_boot_partitions(struct stage2_args *args, Node *device,
 }
 
 
+bool
+platform_file_boot_requested(void)
+{
+	return false;
+}
+
+
 status_t
 platform_add_block_devices(stage2_args *args, NodeList *devicesList)
 {

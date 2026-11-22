@@ -13,7 +13,11 @@
 #include <new>
 
 #include <errno.h>
+#include <fcntl.h>
 #include <stdio.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include <Catalog.h>
 #include <DataIO.h>
@@ -27,6 +31,8 @@
 #include <Path.h>
 #include <String.h>
 #include <UTF8.h>
+
+#include <fs_info.h>
 
 #include "BootDrive.h"
 #include "BootLoader.h"
@@ -375,6 +381,11 @@ LegacyBootMenu::Install(const BootDrive& drive, BMessage& settings)
 	if (settings.FindInt32("defaultPartition", &defaultPartitionIndex) != B_OK)
 		return B_BAD_VALUE;
 
+	// Optional: if present and >= 0, a "bootFile" entry is the default
+	// instead of a "partition" entry.
+	int32 defaultBootFileIndex = -1;
+	settings.FindInt32("defaultBootFile", &defaultBootFileIndex);
+
 	int32 timeout;
 	if (settings.FindInt32("timeout", &timeout) != B_OK)
 		return B_BAD_VALUE;
@@ -414,11 +425,25 @@ LegacyBootMenu::Install(const BootDrive& drive, BMessage& settings)
 		partition.FindBool("show", &show);
 		if (!show)
 			continue;
-		if (index == defaultPartitionIndex)
+		if (defaultBootFileIndex < 0 && index == defaultPartitionIndex)
 			defaultMenuEntry = menuEntries;
 
 		menuEntries ++;
 	}
+
+	BMessage file;
+	for (index = 0; settings.FindMessage("bootFile", index, &file) == B_OK;
+			index ++) {
+		bool show;
+		file.FindBool("show", &show);
+		if (!show)
+			continue;
+		if (defaultBootFileIndex >= 0 && index == defaultBootFileIndex)
+			defaultMenuEntry = menuEntries;
+
+		menuEntries ++;
+	}
+
 	newBootLoader.WriteInt16(menuEntries);
 	newBootLoader.WriteInt16(defaultMenuEntry);
 	newBootLoader.WriteInt16(timeout);
@@ -445,6 +470,36 @@ LegacyBootMenu::Install(const BootDrive& drive, BMessage& settings)
 		newBootLoader.WriteString(biosName.String());
 		newBootLoader.WriteInt8(drive);
 		newBootLoader.WriteInt64(offset / kBlockSize);
+		newBootLoader.WriteInt8(0);	// BootLoaderAddress.isFile
+	}
+
+	for (index = 0; settings.FindMessage("bootFile", index, &file) == B_OK;
+			index ++) {
+		bool show;
+		BString name;
+		BString path;
+		file.FindBool("show", &show);
+		file.FindString("name", &name);
+		file.FindString("path", &path);
+		if (!show)
+			continue;
+
+		int8 fileDrive;
+		off_t fileOffsetBlocks;
+		status_t status = _ResolveFileBootLocation(path.String(),
+			drive.Path(), fileDrive, fileOffsetBlocks);
+		if (status != B_OK) {
+			close(fd);
+			return status;
+		}
+
+		BString biosName;
+		_ConvertToBIOSText(name.String(), biosName);
+
+		newBootLoader.WriteString(biosName.String());
+		newBootLoader.WriteInt8(fileDrive);
+		newBootLoader.WriteInt64(fileOffsetBlocks);
+		newBootLoader.WriteInt8(1);	// BootLoaderAddress.isFile
 	}
 
 	if (!newBootLoader.Align(kBlockSize)) {
@@ -617,6 +672,79 @@ LegacyBootMenu::_GetBIOSDrive(const char* device, int8& drive)
 	status_t status = ioctl(fd, B_GET_BIOS_DRIVE_ID, &drive, 1);
 	close(fd);
 	return status;
+}
+
+
+/*!	Resolves a "boot from file" entry's chainload target.
+
+	Unlike a first implementation attempt, this does NOT chainload into the
+	image file's own boot sector: the file's physical fragmentation on its
+	host filesystem (BFS always reserves journal space, even on an empty
+	volume, so even a "contiguous" file is rarely one single run once past
+	a few hundred MiB) made that unreliable in practice. Instead, this
+	entry chainloads into the HOST partition's own, completely unmodified
+	stage1 -- exactly the LBA a normal partition entry for that same
+	partition would use. The loader (stage2), not stage1, is responsible
+	for noticing the FILE_BOOT_FLAG_ADDRESS flag bootman.S left behind and
+	looking for the nested image file itself, using ordinary filesystem
+	I/O that doesn't care about fragmentation.
+
+	So this is really just "resolve the BIOS drive and LBA of the
+	partition that hosts \a path", identical to what the ordinary
+	"partition" entry path does for a BPartition it already has in hand.
+*/
+status_t
+LegacyBootMenu::_ResolveFileBootLocation(const char* path,
+	const char* bootDrivePath, int8& drive, off_t& offsetBlocks)
+{
+	struct stat fileStat;
+	if (stat(path, &fileStat) != 0)
+		return errno;
+
+	// BDiskDeviceRoster::GetPartitionForPath() needs a partition's raw
+	// device path (e.g. "/dev/disk/.../N") -- it does a plain string
+	// match against each registered partition's own GetPath(), it does
+	// NOT resolve "the partition containing this filesystem path" the
+	// way its name suggests. Resolve the actual device path hosting this
+	// file first, the same way makebootable.cpp does for a directory
+	// argument (fs_stat_dev() on the file's st_dev).
+	fs_info hostInfo;
+	status_t status = fs_stat_dev(fileStat.st_dev, &hostInfo);
+	if (status != B_OK)
+		return status;
+
+	BDiskDeviceRoster roster;
+	BDiskDevice device;
+	BPartition* partition;
+	status = roster.GetPartitionForPath(hostInfo.device_name, &device,
+		&partition);
+	if (status != B_OK)
+		return status;
+
+	BPath devicePath;
+	status = device.GetPath(&devicePath);
+	if (status != B_OK)
+		return status;
+
+	// Mirror PartitionRecorder::Visit()'s existing, working behavior
+	// exactly: for a partition (real or, here, host-of-a-file) that lives
+	// on the disk Boot Manager is itself installing to, _GetBIOSDrive()
+	// is never called at all -- drive is left at the sentinel value 0,
+	// which bootman.S's chainload apparently needs for that case (this
+	// ioctl is not reliable for that disk; the normal partition path
+	// above has always deliberately skipped it, not just an oversight
+	// found here).
+	if (bootDrivePath != NULL && devicePath == bootDrivePath) {
+		drive = 0;
+	} else {
+		status = _GetBIOSDrive(devicePath.Path(), drive);
+		if (status != B_OK)
+			return status;
+	}
+
+	offsetBlocks = partition->Offset() / kBlockSize;
+
+	return B_OK;
 }
 
 

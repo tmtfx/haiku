@@ -19,7 +19,8 @@ class WizardView;
 
 class BootManagerWindow : public BWindow {
 public:
-								BootManagerWindow();
+								BootManagerWindow(const char* diskPath = NULL,
+									const char* filePath = NULL);
 	virtual						~BootManagerWindow();
 
 	virtual	void				MessageReceived(BMessage* message);

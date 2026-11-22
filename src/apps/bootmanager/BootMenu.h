@@ -25,6 +25,26 @@ class BootDrive;
 		"type" String (short name of file system: bfs, dos)
 		"path" String (path to partition in /dev/...)
 		"size" long (size of partition in bytes)
+
+	"bootFile" array of BMessage (a bootable disk image file, living on any
+	writable filesystem, that is added to the boot menu like a partition;
+	see LegacyBootMenu::Install()). Named "bootFile", not "file", because
+	"file" is already used elsewhere in this settings message for the MBR
+	backup file path (see BootManagerController.h):
+		"show" bool (flag if entry should be added to boot menu)
+		"name" String (the name as shown in boot menu)
+		"path" String (path to the image file; this is the only durable
+			key kept across runs -- the file's HOST PARTITION's drive and
+			LBA are re-resolved from this path every time Install() runs,
+			since the file may move between runs. The written menu entry
+			chainloads into that host partition's own, unmodified stage1,
+			with a marker byte (BootLoaderAddress.isFile in bootman.S) set
+			so the loader knows to look for this nested file itself,
+			rather than booting the host partition normally)
+
+	"defaultBootFile" long, optional (index into the "bootFile" array
+	designating the default boot menu entry; when present and >= 0, it
+	takes precedence over "defaultPartition")
 */
 
 

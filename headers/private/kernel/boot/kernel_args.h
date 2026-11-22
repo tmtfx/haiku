@@ -35,7 +35,15 @@
 #define BOOT_VOLUME_PACKAGED			"packaged"
 #define BOOT_VOLUME_PACKAGES_STATE		"packages state"
 #define BOOT_VOLUME_PARTITION_OFFSET	"partition offset"
+#define BOOT_VOLUME_PARTITION_SIZE		"partition size"
 #define BOOT_VOLUME_DISK_IDENTIFIER		"disk identifier"
+// True if the loader booted a nested "boot from file" image instead of
+// the host partition's own volume (see bootman.S/FileMapDisk). When set,
+// BOOT_VOLUME_PARTITION_OFFSET/_SIZE describe the HOST partition on the
+// real disk, not the image's own inner partition -- the kernel must look
+// for the same nested image inside that host partition itself, the same
+// way the loader did, not mount the host partition's own filesystem.
+#define BOOT_VOLUME_FILE_BOOT_IMAGE		"file boot image"
 
 // boot methods
 enum {

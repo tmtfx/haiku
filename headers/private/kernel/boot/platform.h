@@ -61,6 +61,12 @@ extern status_t platform_add_boot_device(struct stage2_args *args, NodeList *dev
 extern status_t platform_add_block_devices(struct stage2_args *args, NodeList *devicesList);
 extern status_t platform_get_boot_partitions(struct stage2_args *args, Node *bootDevice,
 					NodeList *partitions, NodeList *bootPartitions);
+// True if, before chainloading to this boot block, something (Boot
+// Manager's bootman.S) asked to boot a nested "boot from file" image
+// instead of the host partition's own normal boot volume -- see
+// FileMapDisk and get_boot_file_system()'s use of this. Platforms with
+// no such mechanism (anything but bios_ia32) always return false.
+extern bool platform_file_boot_requested(void);
 extern status_t platform_register_boot_device(Node *device, disk_identifier *defaultDiskID);
 extern void platform_cleanup_devices();
 extern void platform_load_ucode(BootVolume& volume);

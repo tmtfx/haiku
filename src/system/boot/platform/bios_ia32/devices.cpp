@@ -26,6 +26,7 @@
 extern uint8 gBootedFromImage;
 extern uint8 gBootDriveID;
 extern uint32 gBootPartitionOffset;
+extern uint8 gFileBootRequested;
 
 // int 0x13 definitions
 #define BIOS_RESET_DISK_SYSTEM			0x0000
@@ -744,6 +745,13 @@ platform_get_boot_partitions(struct stage2_args *args, Node *bootDevice,
 	}
 
 	return B_ENTRY_NOT_FOUND;
+}
+
+
+bool
+platform_file_boot_requested(void)
+{
+	return gFileBootRequested != 0;
 }
 
 

@@ -109,7 +109,9 @@ Partition::Partition(int fd)
 	:
 	fParent(NULL),
 	fIsFileSystem(false),
-	fIsPartitioningSystem(false)
+	fIsPartitioningSystem(false),
+	fIsFileMapDiskImage(false),
+	fFileSystem(NULL)
 {
 	TRACE(("%p Partition::Partition\n", this));
 
@@ -240,6 +242,7 @@ Partition::AddChild()
 		return NULL;
 
 	child->SetParent(this);
+	child->SetIsFileMapDiskImage(fIsFileMapDiskImage);
 	child_count++;
 	fChildren.Add(child);
 
@@ -264,6 +267,7 @@ Partition::_Mount(file_system_module_info *module, Directory **_fileSystem)
 		this->content_type = module->pretty_name;
 
 		fIsFileSystem = true;
+		fFileSystem = fileSystem;
 
 #ifdef BOOT_SUPPORT_FILE_MAP_DISK
 		static int fileMapDiskDepth = 0;
@@ -274,7 +278,7 @@ Partition::_Mount(file_system_module_info *module, Directory **_fileSystem)
 			if (disk) {
 				TRACE(("%p Partition::_Mount: found FileMapDisk\n", this));
 				disk->RegisterFileMapBootItem();
-				add_partitions_for(disk, true, false);
+				add_partitions_for(disk, true, false, true);
 			}
 		}
 		fileMapDiskDepth--;
@@ -290,6 +294,15 @@ Partition::_Mount(file_system_module_info *module, Directory **_fileSystem)
 status_t
 Partition::Mount(Directory **_fileSystem, bool isBootDevice)
 {
+	if (fIsFileSystem) {
+		// already mounted (e.g. by Partition::_Mount()'s FileMapDisk hook,
+		// as a side effect of mounting our parent) -- don't mount a
+		// second, redundant Directory for the same underlying device.
+		if (_fileSystem)
+			*_fileSystem = fFileSystem;
+		return B_OK;
+	}
+
 	if (isBootDevice && gBootParams.GetBool(BOOT_VOLUME_BOOTED_FROM_IMAGE,
 			false)) {
 		return _Mount(&gTarFileSystemModule, _fileSystem);
@@ -441,12 +454,14 @@ Partition::Scan(bool mountFileSystems, bool isBootDevice)
 	All created partitions are added to the gPartitions list.
 */
 status_t
-add_partitions_for(int fd, bool mountFileSystems, bool isBootDevice)
+add_partitions_for(int fd, bool mountFileSystems, bool isBootDevice,
+	bool isFileMapDiskImage)
 {
 	TRACE(("add_partitions_for(fd = %d, mountFS = %s)\n", fd,
 		mountFileSystems ? "yes" : "no"));
 
 	Partition *partition = new(nothrow) Partition(fd);
+	partition->SetIsFileMapDiskImage(isFileMapDiskImage);
 
 	// set some magic/default values
 	partition->block_size = 512;
@@ -474,7 +489,8 @@ add_partitions_for(int fd, bool mountFileSystems, bool isBootDevice)
 
 
 status_t
-add_partitions_for(Node *device, bool mountFileSystems, bool isBootDevice)
+add_partitions_for(Node *device, bool mountFileSystems, bool isBootDevice,
+	bool isFileMapDiskImage)
 {
 	TRACE(("add_partitions_for(%p, mountFS = %s)\n", device,
 		mountFileSystems ? "yes" : "no"));
@@ -483,7 +499,8 @@ add_partitions_for(Node *device, bool mountFileSystems, bool isBootDevice)
 	if (fd < B_OK)
 		return fd;
 
-	status_t status = add_partitions_for(fd, mountFileSystems, isBootDevice);
+	status_t status = add_partitions_for(fd, mountFileSystems, isBootDevice,
+		isFileMapDiskImage);
 	if (status < B_OK)
 		dprintf("add_partitions_for(%d) failed: %" B_PRIx32 "\n", fd, status);
 

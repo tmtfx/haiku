@@ -36,6 +36,14 @@ public:
 
 	virtual	void				Previous(WizardView* wizard);
 
+			// Pre-selects the disk to install the boot menu on, and,
+			// optionally, adds a "boot from file" entry for the given
+			// image file. Used when launched from Installer with a known
+			// install target instead of letting the user pick one in
+			// DrivesPage. Must be called before Initialize().
+			void				SetInstallerTarget(const char* diskPath,
+									const char* filePath);
+
 protected:
 	virtual	int32				InitialState();
 	virtual	int32				NextState(int32 state);

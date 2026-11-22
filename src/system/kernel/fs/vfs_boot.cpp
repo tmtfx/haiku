@@ -43,6 +43,11 @@
 
 typedef Stack<KPartition *> PartitionStack;
 
+// Must match FMAP_IMAGE_NAME in headers/private/kernel/boot/FileMapDisk.h
+// (that header is loader-only and can't be included directly from kernel
+// code -- see BOOT_VOLUME_FILE_BOOT_IMAGE).
+#define kFileBootImageName "DISKIMAGE.IMG"
+
 static struct {
 	const char *path;
 	const char *target;
@@ -421,6 +426,64 @@ get_boot_partitions(KMessage& bootVolume, PartitionStack& partitions)
 		strict = false;
 	}
 
+	if (partitions.IsEmpty()) {
+		// No real partition matches the boot offset -- this can happen when
+		// booting from a file nested inside another partition's filesystem
+		// (the "boot from file" feature): stage1/stage2 found and read it
+		// via a flat block offset on the real disk, exactly as they would a
+		// normal partition, so BOOT_VOLUME_PARTITION_OFFSET is already
+		// correct -- there's just no real partition-table entry describing
+		// it, since it isn't one. Construct one directly at that offset on
+		// each candidate boot disk, and let the normal disk/filesystem
+		// identification code (the same code path used for every real
+		// partition, including reading and validating the BFS superblock)
+		// confirm there's actually a recognizable filesystem there before
+		// trusting it.
+		off_t bootPartitionOffset = bootVolume.GetInt64(
+			BOOT_VOLUME_PARTITION_OFFSET, -1);
+		// The loader determines this the same way it determines the
+		// offset: from the BFS superblock of the volume it actually
+		// mounted, not from any partition-table entry (there isn't one).
+		// Prefer it over "everything to the end of the disk" when
+		// available, so this synthetic partition's declared bounds match
+		// the real nested volume as closely as the information we have
+		// allows, instead of being needlessly oversized.
+		off_t bootPartitionSize = bootVolume.GetInt64(
+			BOOT_VOLUME_PARTITION_SIZE, -1);
+		if (bootPartitionOffset >= 0) {
+			int32 cookie = 0;
+			KDiskDevice* device;
+			while ((device = manager->NextDevice(&cookie)) != NULL) {
+				if (!bootMethod->IsBootDevice(device, false))
+					continue;
+				if (bootPartitionOffset >= device->Size())
+					continue;
+
+				off_t maxSize = device->Size() - bootPartitionOffset;
+				off_t size = bootPartitionSize > 0
+						&& bootPartitionSize <= maxSize
+					? bootPartitionSize : maxSize;
+
+				KPartition* child = NULL;
+				status_t error = device->CreateChild(-1, -1,
+					bootPartitionOffset, size, &child);
+				if (error != B_OK)
+					continue;
+
+				if (manager->ScanPartition(child) == B_OK
+					&& child->ContainsFileSystem()) {
+					dprintf("get_boot_partitions(): found boot volume "
+						"nested in a file at offset %" B_PRIdOFF
+						" on disk\n", bootPartitionOffset);
+					partitions.Push(child);
+					break;
+				}
+
+				device->RemoveChild(child);
+			}
+		}
+	}
+
 	// sort partition list (e.g.. when booting from CD, CDs should come first in
 	// the list)
 	if (!bootVolume.GetBool(BOOT_VOLUME_USER_SELECTED, false))
@@ -483,6 +546,20 @@ vfs_mount_boot_file_system(kernel_args* args)
 
 	dev_t bootDevice = -1;
 
+	bool fileBootImage = bootVolume.GetBool(BOOT_VOLUME_FILE_BOOT_IMAGE, false);
+	// When booting a nested "boot from file" image, the HOST partition
+	// Boot Manager chainloaded to is mounted at a separate, internal
+	// mount point instead of /boot, and stays mounted there permanently
+	// (not just long enough to find the image): the virtual file-disk
+	// device created below keeps reading/writing the image through this
+	// same mount for as long as the system runs, so unmounting it here
+	// (as an earlier version of this code did) made that device's own
+	// backing file busy and broke the subsequent "boot_host" -> "boot"
+	// hand-off (`fs_unmount(): inode ... is still referenced`).
+	const char* hostMountPoint = fileBootImage ? "/boot_host" : "/boot";
+	if (fileBootImage)
+		_kern_create_dir(-1, hostMountPoint, 0755);
+
 	KPartition* bootPartition;
 	while (partitions.Pop(&bootPartition)) {
 		KPath path;
@@ -502,16 +579,83 @@ vfs_mount_boot_file_system(kernel_args* args)
 
 		TRACE(("trying to mount boot partition: %s\n", path.Path()));
 
-		bootDevice = _kern_mount("/boot", path.Path(), fsName, 0, NULL, 0);
+		bootDevice = _kern_mount(hostMountPoint, path.Path(), fsName, 0, NULL,
+			0);
 		if (bootDevice >= 0) {
 			dprintf("Mounted boot partition: %s\n", path.Path());
-			gReadOnlyBootDevice = readOnly;
+			if (!fileBootImage)
+				gReadOnlyBootDevice = readOnly;
 			break;
 		}
 	}
 
 	if (bootDevice < B_OK)
 		panic("could not mount boot device!\n");
+
+	if (fileBootImage) {
+		// What we just mounted at hostMountPoint is only the HOST
+		// partition Boot Manager chainloaded to -- the real Haiku
+		// installation is nested inside a "boot from file" image at its
+		// root (see bootman.S, FileMapDisk, and get_boot_file_system()'s
+		// loader-side equivalent of what follows). Register that file as
+		// a virtual disk device (the same mechanism DriveSetup's
+		// "Register" menu item uses), scan it for its own inner bootable
+		// partition, and mount THAT at /boot -- the host stays mounted
+		// at hostMountPoint, never at /boot itself.
+		KPath imagePath;
+		imagePath.SetTo(hostMountPoint);
+		imagePath.Append(kFileBootImageName);
+
+		KDiskDeviceManager* manager = KDiskDeviceManager::Default();
+		bool newlyCreated;
+		partition_id fileDeviceID = manager->CreateFileDevice(
+			imagePath.Path(), &newlyCreated);
+
+		struct FindBootablePartition : KPartitionVisitor {
+			virtual bool VisitPre(KPartition* partition)
+			{
+				if (!partition->ContainsFileSystem())
+					return false;
+				fFound = partition;
+				return true;
+			}
+			KPartition* fFound = NULL;
+		} visitor;
+
+		if (fileDeviceID >= 0) {
+			if (KPartition* fileDevice
+					= manager->RegisterPartition(fileDeviceID)) {
+				if (fileDevice->ContainsFileSystem()) {
+					// the image has no inner partition table of its own --
+					// it's directly one BFS volume
+					visitor.fFound = fileDevice;
+				} else {
+					fileDevice->VisitEachDescendant(&visitor);
+				}
+			}
+		}
+
+		KPath innerPath;
+		if (visitor.fFound == NULL
+			|| visitor.fFound->GetPath(&innerPath) != B_OK) {
+			panic("vfs_mount_boot_file_system(): could not find the "
+				"nested \"boot from file\" image (%s) inside the host "
+				"partition!\n", kFileBootImageName);
+		}
+
+		bool readOnly = visitor.fFound->IsReadOnly()
+			&& strcmp(visitor.fFound->ContentType(), kPartitionTypeBFS) == 0;
+
+		dprintf("Mounting /boot from nested \"boot from file\" image: %s\n",
+			innerPath.Path());
+		bootDevice = _kern_mount("/boot", innerPath.Path(),
+			readOnly ? "bfs:write_overlay" : NULL, 0, NULL, 0);
+		if (bootDevice < B_OK) {
+			panic("vfs_mount_boot_file_system(): could not mount the "
+				"nested \"boot from file\" image!\n");
+		}
+		gReadOnlyBootDevice = readOnly;
+	}
 
 	// create link for the name of the boot device
 

@@ -132,6 +132,13 @@ platform_get_boot_partitions(struct stage2_args *args, Node *device,
 }
 
 
+bool
+platform_file_boot_requested(void)
+{
+	return false;
+}
+
+
 void
 platform_cleanup_devices()
 {

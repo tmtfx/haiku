@@ -68,6 +68,34 @@ BootManagerController::~BootManagerController()
 
 
 void
+BootManagerController::SetInstallerTarget(const char* diskPath,
+	const char* filePath)
+{
+	if (diskPath != NULL && diskPath[0] != '\0') {
+		if (fSettings.ReplaceString("disk", diskPath) != B_OK)
+			fSettings.AddString("disk", diskPath);
+	}
+
+	if (filePath != NULL && filePath[0] != '\0') {
+		BPath path(filePath);
+
+		BMessage file;
+		file.AddBool("show", true);
+		file.AddString("name", path.Leaf());
+		file.AddString("path", filePath);
+
+		fSettings.RemoveName("bootFile");
+		fSettings.AddMessage("bootFile", &file);
+
+		// Default to booting the file we were handed, since it is the
+		// one Installer just installed to.
+		fSettings.RemoveName("defaultBootFile");
+		fSettings.AddInt32("defaultBootFile", 0);
+	}
+}
+
+
+void
 BootManagerController::Previous(WizardView* wizard)
 {
 	if (CurrentState() != kStateEntry)
@@ -197,6 +225,7 @@ BootManagerController::_WriteBootMenu()
 		return false;
 
 	fWriteBootMenuStatus = fBootMenu->Install(*fBootDrive, fSettings);
+
 	return true;
 }
 

@@ -42,6 +42,15 @@ class Partition : public Node, public partition_data {
 
 		int FD() const { return fFD; }
 
+		// True for a partition found inside a "boot from file" image
+		// (FileMapDisk), or for any of its children -- see
+		// Partition::_Mount()'s FileMapDisk hook and
+		// get_boot_file_system()'s use of this to find the nested
+		// volume Boot Manager asked to boot instead of its host.
+		bool IsFileMapDiskImage() const { return fIsFileMapDiskImage; }
+		void SetIsFileMapDiskImage(bool isFileMapDiskImage)
+			{ fIsFileMapDiskImage = isFileMapDiskImage; }
+
 	private:
 		status_t _Mount(file_system_module_info *module, Directory **_fileSystem);
 
@@ -49,8 +58,10 @@ class Partition : public Node, public partition_data {
 		NodeList	fChildren;
 		Partition	*fParent;
 		bool		fIsFileSystem, fIsPartitioningSystem;
+		bool		fIsFileMapDiskImage;
 		const char	*fModuleName;
 		off_t		fBlockForChecksum;
+		Directory	*fFileSystem;
 };
 
 }	// namespace boot
