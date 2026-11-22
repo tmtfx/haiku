@@ -20,8 +20,7 @@ class WizardView;
 class BootManagerWindow : public BWindow {
 public:
 								BootManagerWindow(const char* diskPath = NULL,
-									const char* filePath = NULL,
-									off_t partitionOffsetInFile = 0);
+									const char* filePath = NULL);
 	virtual						~BootManagerWindow();
 
 	virtual	void				MessageReceived(BMessage* message);

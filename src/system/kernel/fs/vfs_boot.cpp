@@ -43,6 +43,11 @@
 
 typedef Stack<KPartition *> PartitionStack;
 
+// Must match FMAP_IMAGE_NAME in headers/private/kernel/boot/FileMapDisk.h
+// (that header is loader-only and can't be included directly from kernel
+// code -- see BOOT_VOLUME_FILE_BOOT_IMAGE).
+#define kFileBootImageName "DISKIMAGE.IMG"
+
 static struct {
 	const char *path;
 	const char *target;
@@ -570,6 +575,66 @@ vfs_mount_boot_file_system(kernel_args* args)
 
 	if (bootDevice < B_OK)
 		panic("could not mount boot device!\n");
+
+	if (bootVolume.GetBool(BOOT_VOLUME_FILE_BOOT_IMAGE, false)) {
+		// What we just mounted at /boot is only the HOST partition Boot
+		// Manager chainloaded to -- the real Haiku installation is nested
+		// inside a "boot from file" image at its root (see bootman.S,
+		// FileMapDisk, and get_boot_file_system()'s loader-side
+		// equivalent of what follows). Register that file as a virtual
+		// disk device (the same mechanism DriveSetup's "Register" menu
+		// item uses), scan it for its own inner bootable partition, and
+		// switch /boot to that instead of the host's own filesystem.
+		KPath imagePath;
+		imagePath.SetTo("/boot");
+		imagePath.Append(kFileBootImageName);
+
+		KDiskDeviceManager* manager = KDiskDeviceManager::Default();
+		bool newlyCreated;
+		partition_id fileDeviceID = manager->CreateFileDevice(
+			imagePath.Path(), &newlyCreated);
+
+		struct FindBootablePartition : KPartitionVisitor {
+			virtual bool VisitPre(KPartition* partition)
+			{
+				if (!partition->ContainsFileSystem())
+					return false;
+				fFound = partition;
+				return true;
+			}
+			KPartition* fFound = NULL;
+		} visitor;
+
+		if (fileDeviceID >= 0) {
+			if (KPartition* fileDevice
+					= manager->RegisterPartition(fileDeviceID)) {
+				if (fileDevice->ContainsFileSystem()) {
+					// the image has no inner partition table of its own --
+					// it's directly one BFS volume
+					visitor.fFound = fileDevice;
+				} else {
+					fileDevice->VisitEachDescendant(&visitor);
+				}
+			}
+		}
+
+		KPath innerPath;
+		if (visitor.fFound == NULL
+			|| visitor.fFound->GetPath(&innerPath) != B_OK
+			|| _kern_unmount("/boot", 0) != B_OK) {
+			panic("vfs_mount_boot_file_system(): could not find the "
+				"nested \"boot from file\" image (%s) inside the host "
+				"partition!\n", kFileBootImageName);
+		}
+
+		dprintf("Switching /boot to nested \"boot from file\" image: %s\n",
+			innerPath.Path());
+		bootDevice = _kern_mount("/boot", innerPath.Path(), NULL, 0, NULL, 0);
+		if (bootDevice < B_OK) {
+			panic("vfs_mount_boot_file_system(): could not mount the "
+				"nested \"boot from file\" image!\n");
+		}
+	}
 
 	// create link for the name of the boot device
 

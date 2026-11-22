@@ -249,6 +249,20 @@ floppy_end:
 
 bfs_start:
 	cld						// set the data, and extra segment to our code start
+
+	// Read the "boot from nested file" flag, if any, that bootman.S may
+	// have left at a fixed physical address before chainloading here
+	// (see bootman.S's FILE_BOOT_FLAG_ADDRESS / BootLoaderAddress.isFile
+	// -- stage1, between bootman.S and here, never touches it, so it
+	// survives unmodified). Must happen now, directly, with segment 0
+	// addressing this physical address while still in real mode, and
+	// into a scratch register (bx) that isn't part of the dl/eax
+	// handoff from stage1 captured just below -- clobbering al/ax/eax
+	// here would corrupt gBootPartitionOffset.
+	xorw	%bx, %bx
+	movw	%bx, %es
+	movb	%es:0x0600, %bl
+
 	pushw	$0x1000
 	pop		%ds
 	push	%ds
@@ -260,6 +274,8 @@ bfs_start:
 	.byte	0x67
 	.byte	0x66
 	movl	%eax, gBootPartitionOffset - 0x10000
+	.byte	0x67
+	movb	%bl, gFileBootRequested - 0x10000
 	.code16
 
 	xor		%ax, %ax		// set up stack at 0x0000:0x9000
@@ -440,6 +456,9 @@ GLOBAL(gBootPartitionOffset):
 
 GLOBAL(gMultiBootInfo):
 	.long	0
+
+GLOBAL(gFileBootRequested):
+	.byte	0
 
 .org 1024
 

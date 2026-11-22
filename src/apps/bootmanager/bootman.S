@@ -10,6 +10,15 @@
 
 %assign BOOT_BLOCK_START_ADDRESS	0x7c00
 
+; Physical address (segment 0) where bootman writes a one-byte flag just
+; before chainloading to a selected entry's own stage1. Stage1 itself is
+; never modified and knows nothing about it; the loader (stage2, C++)
+; reads it very early to decide whether to boot the host partition
+; normally or look for a nested "boot from file" image instead. It must
+; be a fixed location outside both bootman's own code/data and anything
+; the target stage1 loads at 0x7c00, since either can clobber the other.
+%assign FILE_BOOT_FLAG_ADDRESS		0x0600
+
 %assign MBR_SIGNATURE				0xAA55
 
 ; BIOS calls
@@ -248,6 +257,12 @@ endstruc
 struc	BootLoaderAddress
 	.device			resb	1			; hard drive number
 	.offset			nstruc	quadword	; LBA of start start sector
+	.isFile			resb	1			; non-zero: this entry is a nested
+										; "boot from file" image on the
+										; host partition above, not the
+										; host partition's own normal
+										; boot -- device/offset still
+										; identify the HOST partition
 endstruc
 
 ; use code available in stage 1
@@ -543,6 +558,22 @@ bootSelectedPartition:
 	call	showCursor
 
 	call	getSelectedBootLoaderAddress
+
+	; Tell the loader (not stage1, which is unmodified) whether this
+	; entry is a nested "boot from file" image. Must be copied to a
+	; fixed low address now: stage1's own 512-byte load at 0x7c00 will
+	; clobber bootman's own code/data (including this entry) before
+	; the loader ever gets a chance to look at it.
+	push	si
+	add		si, BootLoaderAddress.isFile
+	mov		al, [si]
+	pop		si
+	push	es
+	xor		bx, bx
+	mov		es, bx
+	mov		byte [es:FILE_BOOT_FLAG_ADDRESS], al
+	pop		es
+
 	lodsb										; Set boot drive
 	mov		dl, al
 

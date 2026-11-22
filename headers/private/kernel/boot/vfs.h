@@ -180,8 +180,10 @@ extern Node* get_node_from(int fd);
 extern Directory* directory_from(DIR* dir);
 	// does not return a reference
 
-extern status_t add_partitions_for(int fd, bool mountFileSystems, bool isBootDevice = false);
-extern status_t add_partitions_for(Node *device, bool mountFileSystems, bool isBootDevice = false);
+extern status_t add_partitions_for(int fd, bool mountFileSystems,
+	bool isBootDevice = false, bool isFileMapDiskImage = false);
+extern status_t add_partitions_for(Node *device, bool mountFileSystems,
+	bool isBootDevice = false, bool isFileMapDiskImage = false);
 
 #endif	/* __cplusplus */
 

@@ -9,10 +9,16 @@
 #include <boot/vfs.h>
 #include <boot/partitions.h>
 
-#define FMAP_FOLDER_NAME "BEOS"
-#define FMAP_IMAGE_NAME "IMAGE.BE"
-//#define FMAP_FOLDER_NAME "HAIKU"
-//#define FMAP_IMAGE_NAME "IMAGE.BFS"
+// Fixed name "boot from file" images must have at the root of their host
+// partition to be discovered automatically (via FindAnyFileMapDisk(),
+// used both by Partition::_Mount()'s FileMapDisk hook -- for the
+// interactive volume-picker fallback -- and by get_boot_file_system()'s
+// Boot-Manager-triggered override). Generic/not BeOS-specific, since any
+// filesystem Haiku can write to is a valid host, not just a BeOS/Haiku
+// one. A file at a different name or location still works, just not
+// automatically: it can still be selected manually from the interactive
+// "hold space" boot menu via a normal partition entry on its own host.
+#define FMAP_IMAGE_NAME "DISKIMAGE.IMG"
 
 #define FMAP_MAX_RUNS 128
 

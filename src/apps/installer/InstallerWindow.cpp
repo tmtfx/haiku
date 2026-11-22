@@ -1802,17 +1802,14 @@ InstallerWindow::_LaunchBootManager()
 	// Resolve the current install target so BootManager can be told which
 	// disk to install its boot menu on, instead of defaulting to "the
 	// first harddisk". When the target is a file-backed disk image (our
-	// "boot from file" feature), also resolve the real file path, the
+	// "boot from file" feature), also resolve the real file path and the
 	// physical disk that actually hosts it (where the BIOS boot code
-	// lives, not the virtual file device itself), and -- crucially -- the
-	// byte offset of the actual BFS partition WITHIN that file: DriveSetup
-	// normally gives a registered file-disk-device its own inner
-	// partition table (e.g. "Intel"), so dstItem's partition does not
-	// start at the file's byte 0, and BootManager needs to know exactly
-	// where it does start to patch and chainload to the right place.
+	// lives, not the virtual file device itself) -- BootManager resolves
+	// everything else about the file itself (host partition's own drive
+	// and LBA) on its own, the same way it already does for an ordinary
+	// partition entry; see LegacyBootMenu::_ResolveFileBootLocation().
 	BString diskPath;
 	BString filePath;
-	BString partitionOffsetString;
 
 	PartitionMenuItem* dstItem = (PartitionMenuItem*)fDestMenu->FindMarked();
 	_LogFileBootDebug("_LaunchBootManager: dstItem=%p id=%" B_PRId32 "\n",
@@ -1840,10 +1837,6 @@ InstallerWindow::_LaunchBootManager()
 				imagePath.Path());
 			if (filePathStatus == B_OK) {
 				filePath = imagePath.Path();
-				partitionOffsetString.SetToFormat("%lld",
-					(long long)(partition != NULL ? partition->Offset() : 0));
-				_LogFileBootDebug("  inner partition Offset()=%s\n",
-					partitionOffsetString.String());
 
 				// BDiskDeviceRoster::GetPartitionForPath() needs a
 				// partition's raw device path -- it does a plain string
@@ -1887,19 +1880,16 @@ InstallerWindow::_LaunchBootManager()
 		}
 	}
 
-	const char* args[3];
+	const char* args[2];
 	int argc = 0;
 	if (diskPath.Length() > 0) {
 		args[argc++] = diskPath.String();
-		if (filePath.Length() > 0) {
+		if (filePath.Length() > 0)
 			args[argc++] = filePath.String();
-			args[argc++] = partitionOffsetString.String();
-		}
 	}
 
 	_LogFileBootDebug("  Launching BootManager with argc=%d diskPath=\"%s\" "
-		"filePath=\"%s\" partitionOffset=\"%s\"\n", argc, diskPath.String(),
-		filePath.String(), partitionOffsetString.String());
+		"filePath=\"%s\"\n", argc, diskPath.String(), filePath.String());
 
 	status_t status = argc > 0
 		? be_roster->Launch(kBootManagerSignature, argc, args)

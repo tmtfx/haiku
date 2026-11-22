@@ -69,7 +69,7 @@ BootManagerController::~BootManagerController()
 
 void
 BootManagerController::SetInstallerTarget(const char* diskPath,
-	const char* filePath, off_t partitionOffsetInFile)
+	const char* filePath)
 {
 	if (diskPath != NULL && diskPath[0] != '\0') {
 		if (fSettings.ReplaceString("disk", diskPath) != B_OK)
@@ -83,7 +83,6 @@ BootManagerController::SetInstallerTarget(const char* diskPath,
 		file.AddBool("show", true);
 		file.AddString("name", path.Leaf());
 		file.AddString("path", filePath);
-		file.AddInt64("partitionOffset", partitionOffsetInFile);
 
 		fSettings.RemoveName("bootFile");
 		fSettings.AddMessage("bootFile", &file);

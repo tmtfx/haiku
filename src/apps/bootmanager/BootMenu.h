@@ -34,18 +34,13 @@ class BootDrive;
 		"show" bool (flag if entry should be added to boot menu)
 		"name" String (the name as shown in boot menu)
 		"path" String (path to the image file; this is the only durable
-			key kept across runs -- the file's on-disk LBA is re-resolved
-			from this path every time Install() runs, since the file may
-			move or be rewritten between runs)
-		"partitionOffset" long long, optional (byte offset, within the
-			image file itself, of the actual bootable BFS partition;
-			defaults to 0, meaning the whole file is directly one BFS
-			volume. Must be set to the inner partition's own offset when
-			the file was instead given its own inner partition table --
-			e.g. "Intel" -- with the BFS partition created inside it, the
-			normal result of partitioning a registered file-disk-device
-			in DriveSetup like any other disk; see
-			LegacyBootMenu::_ResolveFileBootLocation())
+			key kept across runs -- the file's HOST PARTITION's drive and
+			LBA are re-resolved from this path every time Install() runs,
+			since the file may move between runs. The written menu entry
+			chainloads into that host partition's own, unmodified stage1,
+			with a marker byte (BootLoaderAddress.isFile in bootman.S) set
+			so the loader knows to look for this nested file itself,
+			rather than booting the host partition normally)
 
 	"defaultBootFile" long, optional (index into the "bootFile" array
 	designating the default boot menu entry; when present and >= 0, it

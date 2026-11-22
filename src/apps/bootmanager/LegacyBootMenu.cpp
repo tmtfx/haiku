@@ -34,8 +34,6 @@
 #include <UTF8.h>
 
 #include <fs_info.h>
-#include <fs_interface.h>
-#include <syscalls.h>
 
 #include "BootDrive.h"
 #include "BootLoader.h"
@@ -119,11 +117,6 @@ static const uint32 kNumberOfBootLoaderBlocks = 4;
 	// MBR including the Haiku boot loader.
 
 static const uint32 kMBRSignature = 0xAA55;
-
-// Offset of the 32-bit little-endian "partition offset" field within a
-// BFS boot block, as embedded by makebootable (see stage1.nasm's
-// PARTITION_OFFSET_OFFSET/kPartitionOffset).
-static const off_t kPartitionOffsetFieldOffset = 506;
 
 // Temporary diagnostic logging for the "boot from file" feature, while
 // it's still being debugged on real hardware. Appends to a fixed, known
@@ -498,6 +491,7 @@ LegacyBootMenu::Install(const BootDrive& drive, BMessage& settings)
 		newBootLoader.WriteString(biosName.String());
 		newBootLoader.WriteInt8(drive);
 		newBootLoader.WriteInt64(offset / kBlockSize);
+		newBootLoader.WriteInt8(0);	// BootLoaderAddress.isFile
 	}
 
 	for (index = 0; settings.FindMessage("bootFile", index, &file) == B_OK;
@@ -505,26 +499,16 @@ LegacyBootMenu::Install(const BootDrive& drive, BMessage& settings)
 		bool show;
 		BString name;
 		BString path;
-		int64 partitionOffsetInFile;
 		file.FindBool("show", &show);
 		file.FindString("name", &name);
 		file.FindString("path", &path);
-		if (file.FindInt64("partitionOffset", &partitionOffsetInFile) != B_OK)
-			partitionOffsetInFile = 0;
 		if (!show)
 			continue;
 
 		int8 fileDrive;
 		off_t fileOffsetBlocks;
 		status_t status = _ResolveFileBootLocation(path.String(),
-			partitionOffsetInFile, fileDrive, fileOffsetBlocks);
-		if (status != B_OK) {
-			close(fd);
-			return status;
-		}
-
-		status = _PatchFileBootSectorOffset(path.String(),
-			partitionOffsetInFile, fileOffsetBlocks);
+			drive.Path(), fileDrive, fileOffsetBlocks);
 		if (status != B_OK) {
 			close(fd);
 			return status;
@@ -536,6 +520,7 @@ LegacyBootMenu::Install(const BootDrive& drive, BMessage& settings)
 		newBootLoader.WriteString(biosName.String());
 		newBootLoader.WriteInt8(fileDrive);
 		newBootLoader.WriteInt64(fileOffsetBlocks);
+		newBootLoader.WriteInt8(1);	// BootLoaderAddress.isFile
 	}
 
 	if (!newBootLoader.Align(kBlockSize)) {
@@ -711,118 +696,36 @@ LegacyBootMenu::_GetBIOSDrive(const char* device, int8& drive)
 }
 
 
-/*!	Resolves a "boot from file" entry's chainload target: the BIOS drive
-	and absolute LBA (in disk blocks) of the actual bootable BFS partition
-	on its host disk.
+/*!	Resolves a "boot from file" entry's chainload target.
 
-	\a partitionOffsetInFile is the byte offset, within the image file
-	itself, where the bootable BFS partition begins. It is 0 only when the
-	whole file was formatted directly as a single BFS volume; when the
-	file was instead given its own inner partition table (e.g. "Intel")
-	with the BFS partition created inside it -- the normal result of
-	registering the file in DriveSetup and partitioning it like any other
-	disk -- byte 0 of the file is that inner partition table, not a BFS
-	boot block, and this offset must point past it to where the BFS
-	partition (and its boot block, written there by makebootable) really
-	starts.
+	Unlike a first implementation attempt, this does NOT chainload into the
+	image file's own boot sector: the file's physical fragmentation on its
+	host filesystem (BFS always reserves journal space, even on an empty
+	volume, so even a "contiguous" file is rarely one single run once past
+	a few hundred MiB) made that unreliable in practice. Instead, this
+	entry chainloads into the HOST partition's own, completely unmodified
+	stage1 -- exactly the LBA a normal partition entry for that same
+	partition would use. The loader (stage2), not stage1, is responsible
+	for noticing the FILE_BOOT_FLAG_ADDRESS flag bootman.S left behind and
+	looking for the nested image file itself, using ordinary filesystem
+	I/O that doesn't care about fragmentation.
 
-	The file must be PHYSICALLY contiguous on its host filesystem -- the
-	same constraint the old BeOS Personal Edition "boot from a file"
-	feature had. This is verified here, not assumed, since the file's
-	physical location can change between runs (it is never cached; this is
-	called fresh on every Install()).
-
-	Note this is checked across potentially many file_io_vec extents, not
-	just one: BFS (and most filesystems) can only represent a run of
-	physically contiguous blocks up to some maximum length per on-disk
-	record (BFS's block_run::length field is 16 bits, capping a single
-	record at MAX_BLOCK_RUN_LENGTH blocks -- a few tens to a few hundred
-	MiB depending on block size). A multi-hundred-MiB disk image that is
-	genuinely contiguous on disk will still be reported as several
-	back-to-back extents for this reason, so requiring exactly one extent
-	would reject nearly every realistically-sized image even when it is
-	perfectly contiguous. What actually matters is that every extent
-	picks up exactly where the previous one left off.
+	So this is really just "resolve the BIOS drive and LBA of the
+	partition that hosts \a path", identical to what the ordinary
+	"partition" entry path does for a BPartition it already has in hand.
 */
 status_t
 LegacyBootMenu::_ResolveFileBootLocation(const char* path,
-	off_t partitionOffsetInFile, int8& drive, off_t& offsetBlocks)
+	const char* bootDrivePath, int8& drive, off_t& offsetBlocks)
 {
-	_LogFileBootDebug("_ResolveFileBootLocation: path=\"%s\" "
-		"partitionOffsetInFile=%" B_PRIdOFF "\n", path, partitionOffsetInFile);
-
-	int fd = open(path, O_RDONLY);
-	if (fd < 0) {
-		_LogFileBootDebug("  open() failed: errno=%d (%s)\n", errno,
-			strerror(errno));
-		return errno;
-	}
+	_LogFileBootDebug("_ResolveFileBootLocation: path=\"%s\"\n", path);
 
 	struct stat fileStat;
-	if (fstat(fd, &fileStat) != 0) {
+	if (stat(path, &fileStat) != 0) {
 		int savedErrno = errno;
-		_LogFileBootDebug("  fstat() failed: errno=%d (%s)\n", savedErrno,
+		_LogFileBootDebug("  stat() failed: errno=%d (%s)\n", savedErrno,
 			strerror(savedErrno));
-		close(fd);
 		return savedErrno;
-	}
-
-	_LogFileBootDebug("  file size=%" B_PRIdOFF "\n", fileStat.st_size);
-
-	if (partitionOffsetInFile < 0 || partitionOffsetInFile >= fileStat.st_size) {
-		_LogFileBootDebug("  partitionOffsetInFile out of range -> "
-			"B_BAD_VALUE\n");
-		close(fd);
-		return B_BAD_VALUE;
-	}
-
-	const size_t kMaxExtents = 1024;
-	file_io_vec* vecs = new(std::nothrow) file_io_vec[kMaxExtents];
-	if (vecs == NULL) {
-		close(fd);
-		return B_NO_MEMORY;
-	}
-
-	size_t count = kMaxExtents;
-	status_t status = _kern_get_file_map(fd, 0, fileStat.st_size, vecs,
-		&count);
-	close(fd);
-
-	_LogFileBootDebug("  _kern_get_file_map: status=%" B_PRId32
-		" (%s) count=%" B_PRIuSIZE "\n", status, strerror(status), count);
-	for (size_t i = 0; i < count && i < 16; i++) {
-		_LogFileBootDebug("    vec[%" B_PRIuSIZE "]: offset=%" B_PRIdOFF
-			" length=%" B_PRIdOFF "\n", i, vecs[i].offset, vecs[i].length);
-	}
-
-	if (status != B_OK && status != B_BUFFER_OVERFLOW) {
-		delete[] vecs;
-		return status;
-	}
-	if (status == B_BUFFER_OVERFLOW) {
-		// Too many extents to even check -- treat as unsupported, same as
-		// genuinely fragmented.
-		_LogFileBootDebug("  too many extents -> B_NOT_SUPPORTED\n");
-		delete[] vecs;
-		return B_NOT_SUPPORTED;
-	}
-
-	bool contiguous = true;
-	for (size_t i = 1; i < count; i++) {
-		if (vecs[i - 1].offset + vecs[i - 1].length != vecs[i].offset) {
-			contiguous = false;
-			break;
-		}
-	}
-
-	off_t fileStartOffset = vecs[0].offset;
-	delete[] vecs;
-
-	if (!contiguous) {
-		// The file is physically fragmented on its host filesystem -- it
-		// cannot be chainloaded directly.
-		_LogFileBootDebug("  extents not contiguous -> B_NOT_SUPPORTED\n");
-		return B_NOT_SUPPORTED;
 	}
 
 	// BDiskDeviceRoster::GetPartitionForPath() needs a partition's raw
@@ -833,7 +736,7 @@ LegacyBootMenu::_ResolveFileBootLocation(const char* path,
 	// file first, the same way makebootable.cpp does for a directory
 	// argument (fs_stat_dev() on the file's st_dev).
 	fs_info hostInfo;
-	status = fs_stat_dev(fileStat.st_dev, &hostInfo);
+	status_t status = fs_stat_dev(fileStat.st_dev, &hostInfo);
 	_LogFileBootDebug("  fs_stat_dev: status=%" B_PRId32 " (%s) "
 		"device_name=\"%s\"\n", status, strerror(status),
 		status == B_OK ? hostInfo.device_name : "");
@@ -861,90 +764,30 @@ LegacyBootMenu::_ResolveFileBootLocation(const char* path,
 	if (status != B_OK)
 		return status;
 
-	status = _GetBIOSDrive(devicePath.Path(), drive);
-	_LogFileBootDebug("  _GetBIOSDrive: status=%" B_PRId32 " (%s) drive=%d\n",
-		status, strerror(status), (int)drive);
-	if (status != B_OK)
-		return status;
-
-	offsetBlocks = (partition->Offset() + fileStartOffset
-		+ partitionOffsetInFile) / kBlockSize;
-
-	_LogFileBootDebug("  RESULT: drive=%d offsetBlocks=%" B_PRIdOFF
-		" (= (hostOffset %" B_PRIdOFF " + fileStartOffset %" B_PRIdOFF
-		" + partitionOffsetInFile %" B_PRIdOFF ") / %" B_PRIu32 ")\n",
-		(int)drive, offsetBlocks, partition->Offset(), fileStartOffset,
-		partitionOffsetInFile, kBlockSize);
-
-	return B_OK;
-}
-
-
-/*!	Patches the "partition offset" field embedded by makebootable in the
-	image file's own boot block (byte kPartitionOffsetFieldOffset, 32-bit
-	little endian -- see stage1.nasm's PARTITION_OFFSET_OFFSET/
-	kPartitionOffset).
-
-	makebootable bakes this field in relative to whatever device it was
-	run against -- for the BFS partition inside a registered
-	file-disk-device, that's an offset relative to the START OF THAT
-	PARTITION within the virtual disk (effectively 0, since the field
-	means "where does my own partition begin"), not an offset on the real
-	physical disk the file happens to live on. stage1 unconditionally adds
-	this value to every block number it computes once chainloaded (see
-	readBlocks in stage1.nasm), so once this code is entered by jumping
-	into the middle of a real disk, the baked-in value must be the BFS
-	partition's real absolute disk offset -- otherwise stage1 reads
-	whatever else happens to sit at that disk offset instead of this
-	file's own BFS structures, silently booting something else entirely.
-	Re-patched every time Install() runs, for the same reason the
-	chainload LBA itself is never cached.
-
-	\a partitionOffsetInFile locates the actual boot sector to patch: when
-	the file has its own inner partition table, the boot sector written
-	by makebootable lives at that offset within the file, not at the
-	file's byte 0 -- see _ResolveFileBootLocation().
-*/
-status_t
-LegacyBootMenu::_PatchFileBootSectorOffset(const char* path,
-	off_t partitionOffsetInFile, off_t offsetBlocks)
-{
-	_LogFileBootDebug("_PatchFileBootSectorOffset: path=\"%s\" "
-		"partitionOffsetInFile=%" B_PRIdOFF " offsetBlocks=%" B_PRIdOFF "\n",
-		path, partitionOffsetInFile, offsetBlocks);
-
-	int fd = open(path, O_RDWR);
-	if (fd < 0) {
-		_LogFileBootDebug("  open() failed: errno=%d (%s)\n", errno,
-			strerror(errno));
-		return errno;
+	// Mirror PartitionRecorder::Visit()'s existing, working behavior
+	// exactly: for a partition (real or, here, host-of-a-file) that lives
+	// on the disk Boot Manager is itself installing to, _GetBIOSDrive()
+	// is never called at all -- drive is left at the sentinel value 0,
+	// which bootman.S's chainload apparently needs for that case (this
+	// ioctl is not reliable for that disk; the normal partition path
+	// above has always deliberately skipped it, not just an oversight
+	// found here).
+	if (bootDrivePath != NULL && devicePath == bootDrivePath) {
+		drive = 0;
+		_LogFileBootDebug("  host device is the boot drive itself -- "
+			"using drive=0 sentinel, skipping _GetBIOSDrive\n");
+	} else {
+		status = _GetBIOSDrive(devicePath.Path(), drive);
+		_LogFileBootDebug("  _GetBIOSDrive: status=%" B_PRId32 " (%s) "
+			"drive=%d\n", status, strerror(status), (int)drive);
+		if (status != B_OK)
+			return status;
 	}
 
-	// Sanity check: read back the boot sector signature at the very end
-	// of the 512-byte sector we're about to patch, and the old value
-	// already there, before writing anything.
-	uint8 signature[2];
-	pread(fd, signature, sizeof(signature), partitionOffsetInFile + 510);
-	uint32 oldValue = 0;
-	pread(fd, &oldValue, sizeof(oldValue),
-		partitionOffsetInFile + kPartitionOffsetFieldOffset);
-	_LogFileBootDebug("  before patch: signature=%02x%02x (expect aa55) "
-		"oldValue=%" B_PRIu32 "\n", signature[1], signature[0], oldValue);
+	offsetBlocks = partition->Offset() / kBlockSize;
 
-	uint32 value = (uint32)offsetBlocks;
-	ssize_t written = pwrite(fd, &value, sizeof(value),
-		partitionOffsetInFile + kPartitionOffsetFieldOffset);
-
-	uint32 verifyValue = 0;
-	pread(fd, &verifyValue, sizeof(verifyValue),
-		partitionOffsetInFile + kPartitionOffsetFieldOffset);
-	_LogFileBootDebug("  wrote %" B_PRIu32 " (written=%" B_PRIdSSIZE
-		"), read back %" B_PRIu32 "\n", value, written, verifyValue);
-
-	close(fd);
-
-	if (written != (ssize_t)sizeof(value))
-		return B_IO_ERROR;
+	_LogFileBootDebug("  RESULT: drive=%d offsetBlocks=%" B_PRIdOFF "\n",
+		(int)drive, offsetBlocks);
 
 	return B_OK;
 }

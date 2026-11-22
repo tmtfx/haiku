@@ -28,7 +28,7 @@
 
 
 BootManagerWindow::BootManagerWindow(const char* diskPath,
-	const char* filePath, off_t partitionOffsetInFile)
+	const char* filePath)
 	:
 	BWindow(BRect(100, 100, 500, 400), B_TRANSLATE_SYSTEM_NAME("BootManager"),
 		B_TITLED_WINDOW, B_ASYNCHRONOUS_CONTROLS | B_NOT_ZOOMABLE)
@@ -44,7 +44,7 @@ BootManagerWindow::BootManagerWindow(const char* diskPath,
 	BLayoutBuilder::Group<>(this)
 		.Add(fWizardView);
 
-	fController.SetInstallerTarget(diskPath, filePath, partitionOffsetInFile);
+	fController.SetInstallerTarget(diskPath, filePath);
 	fController.Initialize(fWizardView);
 	CenterOnScreen();
 

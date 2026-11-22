@@ -38,15 +38,11 @@ public:
 
 			// Pre-selects the disk to install the boot menu on, and,
 			// optionally, adds a "boot from file" entry for the given
-			// image file. partitionOffsetInFile is the byte offset of the
-			// actual bootable BFS partition within that file (0 if the
-			// file itself is directly the BFS volume, with no inner
-			// partition table). Used when launched from Installer with a
-			// known install target instead of letting the user pick one
-			// in DrivesPage. Must be called before Initialize().
+			// image file. Used when launched from Installer with a known
+			// install target instead of letting the user pick one in
+			// DrivesPage. Must be called before Initialize().
 			void				SetInstallerTarget(const char* diskPath,
-									const char* filePath,
-									off_t partitionOffsetInFile = 0);
+									const char* filePath);
 
 protected:
 	virtual	int32				InitialState();

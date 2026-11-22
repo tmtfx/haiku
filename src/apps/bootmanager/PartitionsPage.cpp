@@ -18,12 +18,8 @@
 #include <Catalog.h>
 #include <CheckBox.h>
 #include <ControlLook.h>
-#include <DiskDevice.h>
-#include <DiskDeviceRoster.h>
-#include <DiskDeviceVisitor.h>
 #include <FilePanel.h>
 #include <LayoutBuilder.h>
-#include <Partition.h>
 #include <Path.h>
 #include <RadioButton.h>
 #include <ScrollView.h>
@@ -44,47 +40,6 @@ const uint32 kMessageShow = 'show';
 const uint32 kMessageName = 'name';
 const uint32 kMessageChooseFile = 'bffl';
 const uint32 kMessageRemoveFile = 'rmfl';
-
-
-// Finds the first "real" (non-partition-map) partition inside a
-// file-disk-device -- the one DriveSetup's normal Initialize/Create flow
-// actually formats and that makebootable writes a boot block into. Used
-// to resolve a manually-picked "boot from file" image's inner partition
-// offset the same way InstallerWindow::_LaunchBootManager() does for an
-// Installer-driven install.
-class BootablePartitionFinder : public BDiskDeviceVisitor {
-public:
-	BootablePartitionFinder()
-		:
-		fOffset(0),
-		fFound(false)
-	{
-	}
-
-	virtual bool Visit(BDiskDevice* device)
-	{
-		return false;
-	}
-
-	virtual bool Visit(BPartition* partition, int32 level)
-	{
-		if (partition->ContainsPartitioningSystem())
-			return false;
-
-		fOffset = partition->Offset();
-		fFound = true;
-		return true;
-			// stop at the first one; "boot from file" only supports a
-			// single bootable partition per image
-	}
-
-	bool Found() const { return fFound; }
-	off_t Offset() const { return fOffset; }
-
-private:
-	off_t	fOffset;
-	bool	fFound;
-};
 
 
 PartitionsPage::PartitionsPage(BMessage* settings, const char* name)
@@ -129,28 +84,10 @@ PartitionsPage::MessageReceived(BMessage* message)
 			if (message->FindRef("refs", &ref) == B_OK) {
 				BPath path(&ref);
 
-				// If this file is already registered as a file-disk-device
-				// (e.g. created via DriveSetup's "Create disk image...")
-				// and has its own inner partition table, resolve the
-				// actual bootable BFS partition's offset within it.
-				// Otherwise, assume the whole file is directly one BFS
-				// volume (offset 0).
-				off_t partitionOffset = 0;
-				BDiskDeviceRoster fileRoster;
-				BDiskDevice fileDevice;
-				if (fileRoster.GetFileDeviceForPath(path.Path(), &fileDevice)
-						== B_OK) {
-					BootablePartitionFinder finder;
-					fileDevice.VisitEachDescendant(&finder);
-					if (finder.Found())
-						partitionOffset = finder.Offset();
-				}
-
 				BMessage file;
 				file.AddBool("show", true);
 				file.AddString("name", ref.name);
 				file.AddString("path", path.Path());
-				file.AddInt64("partitionOffset", partitionOffset);
 
 				fSettings->RemoveName("bootFile");
 				fSettings->AddMessage("bootFile", &file);

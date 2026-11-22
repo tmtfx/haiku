@@ -603,6 +603,17 @@ BootVolume::_OpenSystemPackage()
 //	#pragma mark -
 
 
+// Set by get_boot_file_system() when it overrides the boot volume to a
+// nested "boot from file" image: the REAL host partition, on the
+// physical disk, that the image file lives in and that Boot Manager
+// actually chainloaded to. register_boot_file_system() must use this,
+// not re-derive a partition from the (nested) root directory it's
+// handed -- that would give the image's OWN inner partition's offset,
+// which is meaningless to the kernel's later, independent rediscovery of
+// this same host partition on the real disk.
+static Partition* sFileBootHostPartition = NULL;
+
+
 status_t
 vfs_init(stage2_args *args)
 {
@@ -647,11 +658,24 @@ register_boot_file_system(BootVolume& bootVolume)
 	gRoot->AddLink("boot", rootDirectory);
 
 	Partition *partition;
-	status_t status = gRoot->GetPartitionFor(rootDirectory, &partition);
-	if (status != B_OK) {
-		dprintf("register_boot_file_system(): could not locate boot volume in "
-			"root!\n");
-		return status;
+	if (sFileBootHostPartition != NULL) {
+		// We're booting a nested "boot from file" image: rootDirectory is
+		// the image's OWN inner volume, not something on the real disk --
+		// GetPartitionFor() below would resolve to the image's own inner
+		// partition, whose offset is relative to the file, not the disk.
+		// The kernel needs the real HOST partition's offset instead, so
+		// it can find the very same host partition again on its own,
+		// exactly as get_boot_file_system() did here, and (not yet
+		// implemented) look for the same nested image inside it.
+		partition = sFileBootHostPartition;
+		gBootParams.SetBool(BOOT_VOLUME_FILE_BOOT_IMAGE, true);
+	} else {
+		status_t status = gRoot->GetPartitionFor(rootDirectory, &partition);
+		if (status != B_OK) {
+			dprintf("register_boot_file_system(): could not locate boot "
+				"volume in root!\n");
+			return status;
+		}
 	}
 
 	gBootParams.SetInt64(BOOT_VOLUME_PARTITION_OFFSET,
@@ -733,6 +757,36 @@ get_boot_file_system(stage2_args* args, BootVolume& _bootVolume)
 				gPartitions.Remove(partition);
 				delete partition;
 				continue;
+			}
+
+			if (platform_file_boot_requested()) {
+				// Boot Manager asked us to boot a nested "boot from file"
+				// image instead of this (otherwise perfectly normal) host
+				// partition's own boot volume -- see bootman.S's
+				// FILE_BOOT_FLAG_ADDRESS / BootLoaderAddress.isFile.
+				// Mounting the host partition above, via the ordinary
+				// boot path, is exactly what already triggered
+				// Partition::_Mount()'s FileMapDisk hook to discover (and
+				// mount) it, if present; find it here.
+				NodeIterator fileMapIterator = gPartitions.GetIterator();
+				Partition *fileMapPartition;
+				while ((fileMapPartition
+						= (Partition *)fileMapIterator.Next()) != NULL) {
+					if (!fileMapPartition->IsFileMapDiskImage()
+						|| !fileMapPartition->IsFileSystem()) {
+						continue;
+					}
+
+					Directory *nestedFileSystem;
+					if (fileMapPartition->Mount(&nestedFileSystem) == B_OK) {
+						dprintf("get_boot_file_system(): booting nested "
+							"\"boot from file\" image instead of its host "
+							"partition\n");
+						fileSystem = nestedFileSystem;
+						sFileBootHostPartition = partition;
+					}
+					break;
+				}
 			}
 
 			// init the BootVolume

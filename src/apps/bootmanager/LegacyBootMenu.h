@@ -44,11 +44,8 @@ private:
 			status_t			_GetBIOSDrive(const char* device,
 									int8& drive);
 			status_t			_ResolveFileBootLocation(const char* path,
-									off_t partitionOffsetInFile, int8& drive,
+									const char* bootDrivePath, int8& drive,
 									off_t& offsetBlocks);
-			status_t			_PatchFileBootSectorOffset(const char* path,
-									off_t partitionOffsetInFile,
-									off_t offsetBlocks);
 			status_t			_ReadBlocks(int fd, uint8* buffer, size_t size);
 			status_t			_WriteBlocks(int fd, const uint8* buffer,
 									size_t size);
