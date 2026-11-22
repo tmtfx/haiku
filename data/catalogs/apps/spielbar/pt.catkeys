@@ -1,0 +1,57 @@
+1	portuguese	x-vnd.SpielBar	1507420803
+Last used view	SpielBar		Última vista utilizada
+Launch	SpielBar		Iniciar
+Searching…	SpielBar		A procurar…
+Remove from Go	SpielBar		Remover de Ir para
+Hide system apps	SpielBar		Ocultar aplicações do sistema
+Preflets	SpielBar		Preferências
+Open Queries Folder	SpielBar		Abrir pasta de consultas
+Search	SpielBar		Procurar
+Unmount	SpielBar		Desmontar
+Type to filter by name. Use the arrow keys to move through the list, Enter to launch, F10 to open the menu.	SpielBar		Digite para filtrar por nome. Use as setas para percorrer a lista, Enter para iniciar, F10 para abrir o menu.
+Mount	SpielBar		Montar
+Type at least 3 characters to search the disk. Use the arrow keys to move through the list, Enter to launch, F10 to open the menu.	SpielBar		Digite pelo menos 3 caracteres para procurar no disco. Use as setas para percorrer a lista, Enter para iniciar, F10 para abrir o menu.
+Favorites	SpielBar		Favoritos
+Add to favorites	SpielBar		Adicionar aos favoritos
+Search disk…	SpielBar		Procurar no disco…
+Open Go folder…	SpielBar		Abrir pasta Ir para…
+Restart System	SpielBar		Reiniciar o sistema
+Deskbar preferences…	SpielBar		Preferências do Deskbar…
+{0, plural, one{# result} other{# results}}	SpielBar		{0, plural, one{# resultado} other{# resultados}}
+Filter disks…	SpielBar		Filtrar discos…
+Startup view	SpielBar		Vista inicial
+Get Info	SpielBar		Obter informações
+Open Query window…	SpielBar		Abrir janela de consulta…
+{0, plural, one{# item} other{# items}}	SpielBar		{0, plural, one{# item} other{# itens}}
+Apps	SpielBar		Aplicações
+View	SpielBar		Vista
+Not mounted	SpielBar		Não montado
+Disks	SpielBar		Discos
+Power Off	SpielBar		Encerrar
+{0, plural, other{#+ results}}	SpielBar		{0, plural, other{#+ resultados}}
+<empty>	SpielBar		<vazio>
+Reveal origin package	SpielBar		Mostrar pacote de origem
+Add to Go	SpielBar		Adicionar a Ir para
+Save current view as startup	SpielBar		Guardar a vista atual como inicial
+Folders	SpielBar		Pastas
+Filter catalog…	SpielBar		Filtrar catálogo…
+Type at least 3 characters	SpielBar		Digite pelo menos 3 caracteres
+Filter Go…	SpielBar		Filtrar Ir para…
+Settings…	SpielBar		Definições…
+Saved: %view%	SpielBar		Guardado: %view%
+Files	SpielBar		Ficheiros
+Others	SpielBar	Section header	Outros
+Shutdown	SpielBar		Encerrar o sistema
+none	SpielBar		nenhum
+Files	SpielBar	Filter chip	Ficheiros
+Recent	SpielBar	Filter chip and section header	Recentes
+All	SpielBar		Todos
+Default view	SpielBar		Vista predefinida
+Reveal in Tracker	SpielBar		Mostrar no Tracker
+No matches	SpielBar		Sem correspondências
+Mount all	SpielBar		Montar tudo
+Remove from favorites	SpielBar		Remover dos favoritos
+Go	SpielBar		Ir para
+Recent queries…	SpielBar		Consultas recentes…
+Unmount all	SpielBar		Desmontar tudo
+Group by tag	SpielBar		Agrupar por etiqueta

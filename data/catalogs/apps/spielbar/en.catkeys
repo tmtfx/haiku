@@ -1,0 +1,57 @@
+1	english	x-vnd.SpielBar	1507420803
+Last used view	SpielBar		Last used view
+Launch	SpielBar		Launch
+Searching…	SpielBar		Searching…
+Remove from Go	SpielBar		Remove from Go
+Hide system apps	SpielBar		Hide system apps
+Preflets	SpielBar		Preflets
+Open Queries Folder	SpielBar		Open Queries Folder
+Search	SpielBar		Search
+Unmount	SpielBar		Unmount
+Type to filter by name. Use the arrow keys to move through the list, Enter to launch, F10 to open the menu.	SpielBar		Type to filter by name. Use the arrow keys to move through the list, Enter to launch, F10 to open the menu.
+Mount	SpielBar		Mount
+Type at least 3 characters to search the disk. Use the arrow keys to move through the list, Enter to launch, F10 to open the menu.	SpielBar		Type at least 3 characters to search the disk. Use the arrow keys to move through the list, Enter to launch, F10 to open the menu.
+Favorites	SpielBar		Favorites
+Add to favorites	SpielBar		Add to favorites
+Search disk…	SpielBar		Search disk…
+Open Go folder…	SpielBar		Open Go folder…
+Restart System	SpielBar		Restart System
+Deskbar preferences…	SpielBar		Deskbar preferences…
+{0, plural, one{# result} other{# results}}	SpielBar		{0, plural, one{# result} other{# results}}
+Filter disks…	SpielBar		Filter disks…
+Startup view	SpielBar		Startup view
+Get Info	SpielBar		Get Info
+Open Query window…	SpielBar		Open Query window…
+{0, plural, one{# item} other{# items}}	SpielBar		{0, plural, one{# item} other{# items}}
+Apps	SpielBar		Apps
+View	SpielBar		View
+Not mounted	SpielBar		Not mounted
+Disks	SpielBar		Disks
+Power Off	SpielBar		Power Off
+{0, plural, other{#+ results}}	SpielBar		{0, plural, other{#+ results}}
+<empty>	SpielBar		<empty>
+Reveal origin package	SpielBar		Reveal origin package
+Add to Go	SpielBar		Add to Go
+Save current view as startup	SpielBar		Save current view as startup
+Folders	SpielBar		Folders
+Filter catalog…	SpielBar		Filter catalog…
+Type at least 3 characters	SpielBar		Type at least 3 characters
+Filter Go…	SpielBar		Filter Go…
+Settings…	SpielBar		Settings…
+Saved: %view%	SpielBar		Saved: %view%
+Files	SpielBar		Files
+Others	SpielBar	Section header	Others
+Shutdown	SpielBar		Shutdown
+none	SpielBar		none
+Files	SpielBar	Filter chip	Files
+Recent	SpielBar	Filter chip and section header	Recent
+All	SpielBar		All
+Default view	SpielBar		Default view
+Reveal in Tracker	SpielBar		Reveal in Tracker
+No matches	SpielBar		No matches
+Mount all	SpielBar		Mount all
+Remove from favorites	SpielBar		Remove from favorites
+Go	SpielBar		Go
+Recent queries…	SpielBar		Recent queries…
+Unmount all	SpielBar		Unmount all
+Group by tag	SpielBar		Group by tag

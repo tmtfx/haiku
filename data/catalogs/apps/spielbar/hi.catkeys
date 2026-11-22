@@ -1,0 +1,57 @@
+1	hindi	x-vnd.SpielBar	1507420803
+Last used view	SpielBar		पिछली बार इस्तेमाल किया गया दृश्य
+Launch	SpielBar		लॉन्च करें
+Searching…	SpielBar		खोजा जा रहा है…
+Remove from Go	SpielBar		“जाएँ” से हटाएँ
+Hide system apps	SpielBar		सिस्टम ऐप्स छिपाएँ
+Preflets	SpielBar		प्रीफ़्लेट्स
+Open Queries Folder	SpielBar		क्वेरी फ़ोल्डर खोलें
+Search	SpielBar		खोजें
+Unmount	SpielBar		अनमाउंट करें
+Type to filter by name. Use the arrow keys to move through the list, Enter to launch, F10 to open the menu.	SpielBar		नाम से फ़िल्टर करने के लिए टाइप करें। सूची में घूमने के लिए ऐरो कीज़ का उपयोग करें, लॉन्च करने के लिए Enter दबाएँ, मेनू खोलने के लिए F10 दबाएँ।
+Mount	SpielBar		माउंट करें
+Type at least 3 characters to search the disk. Use the arrow keys to move through the list, Enter to launch, F10 to open the menu.	SpielBar		डिस्क खोजने के लिए कम से कम 3 अक्षर टाइप करें। सूची में घूमने के लिए ऐरो कीज़ का उपयोग करें, लॉन्च करने के लिए Enter दबाएँ, मेनू खोलने के लिए F10 दबाएँ।
+Favorites	SpielBar		पसंदीदा
+Add to favorites	SpielBar		पसंदीदा में जोड़ें
+Search disk…	SpielBar		डिस्क खोजें…
+Open Go folder…	SpielBar		“जाएँ” फ़ोल्डर खोलें…
+Restart System	SpielBar		सिस्टम पुनः आरंभ करें
+Deskbar preferences…	SpielBar		Deskbar प्राथमिकताएँ…
+{0, plural, one{# result} other{# results}}	SpielBar		{0, plural, one{# परिणाम} other{# परिणाम}}
+Filter disks…	SpielBar		डिस्क फ़िल्टर करें…
+Startup view	SpielBar		आरंभिक दृश्य
+Get Info	SpielBar		जानकारी प्राप्त करें
+Open Query window…	SpielBar		क्वेरी विंडो खोलें…
+{0, plural, one{# item} other{# items}}	SpielBar		{0, plural, one{# आइटम} other{# आइटम}}
+Apps	SpielBar		ऐप्स
+View	SpielBar		दृश्य
+Not mounted	SpielBar		माउंट नहीं है
+Disks	SpielBar		डिस्क
+Power Off	SpielBar		बंद करें
+{0, plural, other{#+ results}}	SpielBar		{0, plural, other{#+ परिणाम}}
+<empty>	SpielBar		<खाली>
+Reveal origin package	SpielBar		मूल पैकेज दिखाएँ
+Add to Go	SpielBar		“जाएँ” में जोड़ें
+Save current view as startup	SpielBar		वर्तमान दृश्य को आरंभिक दृश्य के रूप में सहेजें
+Folders	SpielBar		फ़ोल्डर
+Filter catalog…	SpielBar		कैटलॉग फ़िल्टर करें…
+Type at least 3 characters	SpielBar		कम से कम 3 अक्षर टाइप करें
+Filter Go…	SpielBar		“जाएँ” फ़िल्टर करें…
+Settings…	SpielBar		सेटिंग्स…
+Saved: %view%	SpielBar		सहेजा गया: %view%
+Files	SpielBar		फ़ाइलें
+Others	SpielBar	Section header	अन्य
+Shutdown	SpielBar		शट डाउन
+none	SpielBar		कोई नहीं
+Files	SpielBar	Filter chip	फ़ाइलें
+Recent	SpielBar	Filter chip and section header	हाल के
+All	SpielBar		सभी
+Default view	SpielBar		डिफ़ॉल्ट दृश्य
+Reveal in Tracker	SpielBar		Tracker में दिखाएँ
+No matches	SpielBar		कोई मिलान नहीं
+Mount all	SpielBar		सभी माउंट करें
+Remove from favorites	SpielBar		पसंदीदा से हटाएँ
+Go	SpielBar		जाएँ
+Recent queries…	SpielBar		हाल की क्वेरीज़…
+Unmount all	SpielBar		सभी अनमाउंट करें
+Group by tag	SpielBar		टैग के अनुसार समूहित करें

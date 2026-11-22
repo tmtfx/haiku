@@ -1,0 +1,57 @@
+1	russian	x-vnd.SpielBar	1507420803
+Last used view	SpielBar		Последний использованный вид
+Launch	SpielBar		Запустить
+Searching…	SpielBar		Поиск…
+Remove from Go	SpielBar		Удалить из «Перейти»
+Hide system apps	SpielBar		Скрыть системные приложения
+Preflets	SpielBar		Настройки
+Open Queries Folder	SpielBar		Открыть папку запросов
+Search	SpielBar		Поиск
+Unmount	SpielBar		Отключить
+Type to filter by name. Use the arrow keys to move through the list, Enter to launch, F10 to open the menu.	SpielBar		Введите текст для фильтрации по имени. Используйте клавиши со стрелками для перемещения по списку, Enter для запуска, F10 для открытия меню.
+Mount	SpielBar		Подключить
+Type at least 3 characters to search the disk. Use the arrow keys to move through the list, Enter to launch, F10 to open the menu.	SpielBar		Введите не менее 3 символов для поиска на диске. Используйте клавиши со стрелками для перемещения по списку, Enter для запуска, F10 для открытия меню.
+Favorites	SpielBar		Избранное
+Add to favorites	SpielBar		Добавить в избранное
+Search disk…	SpielBar		Поиск на диске…
+Open Go folder…	SpielBar		Открыть папку «Перейти»…
+Restart System	SpielBar		Перезагрузить систему
+Deskbar preferences…	SpielBar		Настройки Deskbar…
+{0, plural, one{# result} other{# results}}	SpielBar		{0, plural, one{# результат} few{# результата} many{# результатов} other{# результата}}
+Filter disks…	SpielBar		Фильтр дисков…
+Startup view	SpielBar		Вид при запуске
+Get Info	SpielBar		Информация
+Open Query window…	SpielBar		Открыть окно запроса…
+{0, plural, one{# item} other{# items}}	SpielBar		{0, plural, one{# элемент} few{# элемента} many{# элементов} other{# элемента}}
+Apps	SpielBar		Приложения
+View	SpielBar		Вид
+Not mounted	SpielBar		Не подключён
+Disks	SpielBar		Диски
+Power Off	SpielBar		Выключить
+{0, plural, other{#+ results}}	SpielBar		{0, plural, other{#+ результатов}}
+<empty>	SpielBar		<пусто>
+Reveal origin package	SpielBar		Показать исходный пакет
+Add to Go	SpielBar		Добавить в «Перейти»
+Save current view as startup	SpielBar		Сохранить текущий вид как начальный
+Folders	SpielBar		Папки
+Filter catalog…	SpielBar		Фильтр каталога…
+Type at least 3 characters	SpielBar		Введите не менее 3 символов
+Filter Go…	SpielBar		Фильтр «Перейти»…
+Settings…	SpielBar		Настройки…
+Saved: %view%	SpielBar		Сохранено: %view%
+Files	SpielBar		Файлы
+Others	SpielBar	Section header	Другие
+Shutdown	SpielBar		Выключение системы
+none	SpielBar		нет
+Files	SpielBar	Filter chip	Файлы
+Recent	SpielBar	Filter chip and section header	Недавние
+All	SpielBar		Все
+Default view	SpielBar		Вид по умолчанию
+Reveal in Tracker	SpielBar		Показать в Tracker
+No matches	SpielBar		Нет совпадений
+Mount all	SpielBar		Подключить все
+Remove from favorites	SpielBar		Удалить из избранного
+Go	SpielBar		Перейти
+Recent queries…	SpielBar		Недавние запросы…
+Unmount all	SpielBar		Отключить все
+Group by tag	SpielBar		Группировать по метке

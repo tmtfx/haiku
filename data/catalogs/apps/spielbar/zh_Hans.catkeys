@@ -1,0 +1,57 @@
+1	chinese (simplified)	x-vnd.SpielBar	1507420803
+Last used view	SpielBar		上次使用的视图
+Launch	SpielBar		启动
+Searching…	SpielBar		正在搜索…
+Remove from Go	SpielBar		从“前往”中移除
+Hide system apps	SpielBar		隐藏系统应用
+Preflets	SpielBar		偏好设置
+Open Queries Folder	SpielBar		打开查询文件夹
+Search	SpielBar		搜索
+Unmount	SpielBar		卸载
+Type to filter by name. Use the arrow keys to move through the list, Enter to launch, F10 to open the menu.	SpielBar		输入以按名称筛选。使用方向键浏览列表，按 Enter 启动，按 F10 打开菜单。
+Mount	SpielBar		挂载
+Type at least 3 characters to search the disk. Use the arrow keys to move through the list, Enter to launch, F10 to open the menu.	SpielBar		输入至少 3 个字符以搜索磁盘。使用方向键浏览列表，按 Enter 启动，按 F10 打开菜单。
+Favorites	SpielBar		收藏
+Add to favorites	SpielBar		添加到收藏
+Search disk…	SpielBar		搜索磁盘…
+Open Go folder…	SpielBar		打开“前往”文件夹…
+Restart System	SpielBar		重新启动系统
+Deskbar preferences…	SpielBar		Deskbar 偏好设置…
+{0, plural, one{# result} other{# results}}	SpielBar		{0, plural, other{# 个结果}}
+Filter disks…	SpielBar		筛选磁盘…
+Startup view	SpielBar		启动时的视图
+Get Info	SpielBar		获取信息
+Open Query window…	SpielBar		打开查询窗口…
+{0, plural, one{# item} other{# items}}	SpielBar		{0, plural, other{# 个项目}}
+Apps	SpielBar		应用程序
+View	SpielBar		视图
+Not mounted	SpielBar		未挂载
+Disks	SpielBar		磁盘
+Power Off	SpielBar		关机
+{0, plural, other{#+ results}}	SpielBar		{0, plural, other{# 个以上的结果}}
+<empty>	SpielBar		<空>
+Reveal origin package	SpielBar		显示来源软件包
+Add to Go	SpielBar		添加到“前往”
+Save current view as startup	SpielBar		将当前视图保存为启动视图
+Folders	SpielBar		文件夹
+Filter catalog…	SpielBar		筛选目录…
+Type at least 3 characters	SpielBar		至少输入 3 个字符
+Filter Go…	SpielBar		筛选“前往”…
+Settings…	SpielBar		设置…
+Saved: %view%	SpielBar		已保存：%view%
+Files	SpielBar		文件
+Others	SpielBar	Section header	其他
+Shutdown	SpielBar		关闭系统
+none	SpielBar		无
+Files	SpielBar	Filter chip	文件
+Recent	SpielBar	Filter chip and section header	最近
+All	SpielBar		全部
+Default view	SpielBar		默认视图
+Reveal in Tracker	SpielBar		在 Tracker 中显示
+No matches	SpielBar		无匹配项
+Mount all	SpielBar		挂载全部
+Remove from favorites	SpielBar		从收藏中移除
+Go	SpielBar		前往
+Recent queries…	SpielBar		最近的查询…
+Unmount all	SpielBar		卸载全部
+Group by tag	SpielBar		按标签分组

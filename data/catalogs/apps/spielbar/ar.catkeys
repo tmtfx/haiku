@@ -1,0 +1,57 @@
+1	arabic	x-vnd.SpielBar	1507420803
+Last used view	SpielBar		آخر عرض مستخدم
+Launch	SpielBar		تشغيل
+Searching…	SpielBar		جارٍ البحث…
+Remove from Go	SpielBar		إزالة من “انتقال”
+Hide system apps	SpielBar		إخفاء تطبيقات النظام
+Preflets	SpielBar		التفضيلات
+Open Queries Folder	SpielBar		فتح مجلد الاستفسارات
+Search	SpielBar		بحث
+Unmount	SpielBar		إلغاء التركيب
+Type to filter by name. Use the arrow keys to move through the list, Enter to launch, F10 to open the menu.	SpielBar		اكتب للتصفية بالاسم. استخدم مفاتيح الأسهم للتنقل في القائمة، Enter للتشغيل، F10 لفتح القائمة.
+Mount	SpielBar		تركيب
+Type at least 3 characters to search the disk. Use the arrow keys to move through the list, Enter to launch, F10 to open the menu.	SpielBar		اكتب 3 أحرف على الأقل للبحث في القرص. استخدم مفاتيح الأسهم للتنقل في القائمة، Enter للتشغيل، F10 لفتح القائمة.
+Favorites	SpielBar		المفضلة
+Add to favorites	SpielBar		إضافة إلى المفضلة
+Search disk…	SpielBar		بحث في القرص…
+Open Go folder…	SpielBar		فتح مجلد “انتقال”…
+Restart System	SpielBar		إعادة تشغيل النظام
+Deskbar preferences…	SpielBar		تفضيلات Deskbar…
+{0, plural, one{# result} other{# results}}	SpielBar		{0, plural, zero{لا نتائج} one{نتيجة واحدة} two{نتيجتان} few{# نتائج} many{# نتيجة} other{# نتيجة}}
+Filter disks…	SpielBar		تصفية الأقراص…
+Startup view	SpielBar		عرض بدء التشغيل
+Get Info	SpielBar		الحصول على معلومات
+Open Query window…	SpielBar		فتح نافذة الاستفسار…
+{0, plural, one{# item} other{# items}}	SpielBar		{0, plural, zero{لا عناصر} one{عنصر واحد} two{عنصران} few{# عناصر} many{# عنصرًا} other{# عنصر}}
+Apps	SpielBar		التطبيقات
+View	SpielBar		عرض
+Not mounted	SpielBar		غير مثبَّت
+Disks	SpielBar		الأقراص
+Power Off	SpielBar		إيقاف التشغيل
+{0, plural, other{#+ results}}	SpielBar		{0, plural, other{أكثر من #+ نتيجة}}
+<empty>	SpielBar		<فارغ>
+Reveal origin package	SpielBar		إظهار الحزمة الأصلية
+Add to Go	SpielBar		إضافة إلى “انتقال”
+Save current view as startup	SpielBar		حفظ العرض الحالي كعرض بدء التشغيل
+Folders	SpielBar		المجلدات
+Filter catalog…	SpielBar		تصفية الفهرس…
+Type at least 3 characters	SpielBar		اكتب 3 أحرف على الأقل
+Filter Go…	SpielBar		تصفية “انتقال”…
+Settings…	SpielBar		الإعدادات…
+Saved: %view%	SpielBar		تم الحفظ: %view%
+Files	SpielBar		الملفات
+Others	SpielBar	Section header	أخرى
+Shutdown	SpielBar		إيقاف تشغيل النظام
+none	SpielBar		بلا
+Files	SpielBar	Filter chip	الملفات
+Recent	SpielBar	Filter chip and section header	الأخيرة
+All	SpielBar		الكل
+Default view	SpielBar		العرض الافتراضي
+Reveal in Tracker	SpielBar		إظهار في Tracker
+No matches	SpielBar		لا تطابقات
+Mount all	SpielBar		تركيب الكل
+Remove from favorites	SpielBar		إزالة من المفضلة
+Go	SpielBar		انتقال
+Recent queries…	SpielBar		الاستفسارات الأخيرة…
+Unmount all	SpielBar		إلغاء تركيب الكل
+Group by tag	SpielBar		التجميع حسب الوسم

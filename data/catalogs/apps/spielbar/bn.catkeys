@@ -1,0 +1,57 @@
+1	bengali	x-vnd.SpielBar	1507420803
+Last used view	SpielBar		সর্বশেষ ব্যবহৃত ভিউ
+Launch	SpielBar		চালু করুন
+Searching…	SpielBar		খোঁজা হচ্ছে…
+Remove from Go	SpielBar		“যান” থেকে সরান
+Hide system apps	SpielBar		সিস্টেম অ্যাপ লুকান
+Preflets	SpielBar		প্রিফ্লেট
+Open Queries Folder	SpielBar		কোয়েরি ফোল্ডার খুলুন
+Search	SpielBar		খুঁজুন
+Unmount	SpielBar		আনমাউন্ট করুন
+Type to filter by name. Use the arrow keys to move through the list, Enter to launch, F10 to open the menu.	SpielBar		নাম দিয়ে ফিল্টার করতে টাইপ করুন। তালিকায় যেতে অ্যারো কী ব্যবহার করুন, চালু করতে Enter চাপুন, মেনু খুলতে F10 চাপুন।
+Mount	SpielBar		মাউন্ট করুন
+Type at least 3 characters to search the disk. Use the arrow keys to move through the list, Enter to launch, F10 to open the menu.	SpielBar		ডিস্ক খুঁজতে অন্তত ৩টি অক্ষর টাইপ করুন। তালিকায় যেতে অ্যারো কী ব্যবহার করুন, চালু করতে Enter চাপুন, মেনু খুলতে F10 চাপুন।
+Favorites	SpielBar		পছন্দসমূহ
+Add to favorites	SpielBar		পছন্দে যুক্ত করুন
+Search disk…	SpielBar		ডিস্ক খুঁজুন…
+Open Go folder…	SpielBar		“যান” ফোল্ডার খুলুন…
+Restart System	SpielBar		সিস্টেম পুনরায় চালু করুন
+Deskbar preferences…	SpielBar		Deskbar পছন্দসমূহ…
+{0, plural, one{# result} other{# results}}	SpielBar		{0, plural, one{# ফলাফল} other{# ফলাফল}}
+Filter disks…	SpielBar		ডিস্ক ফিল্টার করুন…
+Startup view	SpielBar		শুরুর ভিউ
+Get Info	SpielBar		তথ্য দেখুন
+Open Query window…	SpielBar		কোয়েরি উইন্ডো খুলুন…
+{0, plural, one{# item} other{# items}}	SpielBar		{0, plural, one{# আইটেম} other{# আইটেম}}
+Apps	SpielBar		অ্যাপস
+View	SpielBar		ভিউ
+Not mounted	SpielBar		মাউন্ট করা নেই
+Disks	SpielBar		ডিস্ক
+Power Off	SpielBar		বন্ধ করুন
+{0, plural, other{#+ results}}	SpielBar		{0, plural, other{#+ ফলাফল}}
+<empty>	SpielBar		<খালি>
+Reveal origin package	SpielBar		মূল প্যাকেজ দেখান
+Add to Go	SpielBar		“যান”-এ যুক্ত করুন
+Save current view as startup	SpielBar		বর্তমান ভিউ শুরুর ভিউ হিসেবে সংরক্ষণ করুন
+Folders	SpielBar		ফোল্ডার
+Filter catalog…	SpielBar		ক্যাটালগ ফিল্টার করুন…
+Type at least 3 characters	SpielBar		অন্তত ৩টি অক্ষর টাইপ করুন
+Filter Go…	SpielBar		“যান” ফিল্টার করুন…
+Settings…	SpielBar		সেটিংস…
+Saved: %view%	SpielBar		সংরক্ষিত: %view%
+Files	SpielBar		ফাইল
+Others	SpielBar	Section header	অন্যান্য
+Shutdown	SpielBar		শাটডাউন
+none	SpielBar		কোনোটি না
+Files	SpielBar	Filter chip	ফাইল
+Recent	SpielBar	Filter chip and section header	সাম্প্রতিক
+All	SpielBar		সব
+Default view	SpielBar		ডিফল্ট ভিউ
+Reveal in Tracker	SpielBar		Tracker-এ দেখান
+No matches	SpielBar		কোনো মিল নেই
+Mount all	SpielBar		সব মাউন্ট করুন
+Remove from favorites	SpielBar		পছন্দ থেকে সরান
+Go	SpielBar		যান
+Recent queries…	SpielBar		সাম্প্রতিক কোয়েরি…
+Unmount all	SpielBar		সব আনমাউন্ট করুন
+Group by tag	SpielBar		ট্যাগ অনুযায়ী দলবদ্ধ করুন

@@ -1,0 +1,57 @@
+1	urdu	x-vnd.SpielBar	1507420803
+Last used view	SpielBar		آخری استعمال شدہ منظر
+Launch	SpielBar		لانچ کریں
+Searching…	SpielBar		تلاش کیا جا رہا ہے…
+Remove from Go	SpielBar		“جائیں” سے ہٹائیں
+Hide system apps	SpielBar		سسٹم ایپس چھپائیں
+Preflets	SpielBar		ترجیحات
+Open Queries Folder	SpielBar		کوئری فولڈر کھولیں
+Search	SpielBar		تلاش کریں
+Unmount	SpielBar		ان ماؤنٹ کریں
+Type to filter by name. Use the arrow keys to move through the list, Enter to launch, F10 to open the menu.	SpielBar		نام سے فلٹر کرنے کے لیے ٹائپ کریں۔ فہرست میں جانے کے لیے ایرو کیز استعمال کریں، لانچ کرنے کے لیے Enter دبائیں، مینو کھولنے کے لیے F10 دبائیں۔
+Mount	SpielBar		ماؤنٹ کریں
+Type at least 3 characters to search the disk. Use the arrow keys to move through the list, Enter to launch, F10 to open the menu.	SpielBar		ڈسک تلاش کرنے کے لیے کم از کم 3 حروف ٹائپ کریں۔ فہرست میں جانے کے لیے ایرو کیز استعمال کریں، لانچ کرنے کے لیے Enter دبائیں، مینو کھولنے کے لیے F10 دبائیں۔
+Favorites	SpielBar		پسندیدہ
+Add to favorites	SpielBar		پسندیدہ میں شامل کریں
+Search disk…	SpielBar		ڈسک تلاش کریں…
+Open Go folder…	SpielBar		“جائیں” فولڈر کھولیں…
+Restart System	SpielBar		سسٹم دوبارہ شروع کریں
+Deskbar preferences…	SpielBar		Deskbar ترجیحات…
+{0, plural, one{# result} other{# results}}	SpielBar		{0, plural, one{# نتیجہ} other{# نتائج}}
+Filter disks…	SpielBar		ڈسکیں فلٹر کریں…
+Startup view	SpielBar		آغاز کا منظر
+Get Info	SpielBar		معلومات حاصل کریں
+Open Query window…	SpielBar		کوئری ونڈو کھولیں…
+{0, plural, one{# item} other{# items}}	SpielBar		{0, plural, one{# آئٹم} other{# آئٹمز}}
+Apps	SpielBar		ایپس
+View	SpielBar		منظر
+Not mounted	SpielBar		ماؤنٹ نہیں
+Disks	SpielBar		ڈسکیں
+Power Off	SpielBar		بند کریں
+{0, plural, other{#+ results}}	SpielBar		{0, plural, other{#+ نتائج}}
+<empty>	SpielBar		<خالی>
+Reveal origin package	SpielBar		اصل پیکج ظاہر کریں
+Add to Go	SpielBar		“جائیں” میں شامل کریں
+Save current view as startup	SpielBar		موجودہ منظر کو آغاز کے طور پر محفوظ کریں
+Folders	SpielBar		فولڈرز
+Filter catalog…	SpielBar		کیٹلاگ فلٹر کریں…
+Type at least 3 characters	SpielBar		کم از کم 3 حروف ٹائپ کریں
+Filter Go…	SpielBar		“جائیں” فلٹر کریں…
+Settings…	SpielBar		ترتیبات…
+Saved: %view%	SpielBar		محفوظ شدہ: %view%
+Files	SpielBar		فائلیں
+Others	SpielBar	Section header	دیگر
+Shutdown	SpielBar		سسٹم بند کریں
+none	SpielBar		کوئی نہیں
+Files	SpielBar	Filter chip	فائلیں
+Recent	SpielBar	Filter chip and section header	حالیہ
+All	SpielBar		سب
+Default view	SpielBar		طے شدہ منظر
+Reveal in Tracker	SpielBar		Tracker میں دکھائیں
+No matches	SpielBar		کوئی مطابقت نہیں
+Mount all	SpielBar		سب ماؤنٹ کریں
+Remove from favorites	SpielBar		پسندیدہ سے ہٹائیں
+Go	SpielBar		جائیں
+Recent queries…	SpielBar		حالیہ کوئریز…
+Unmount all	SpielBar		سب ان ماؤنٹ کریں
+Group by tag	SpielBar		ٹیگ کے مطابق گروپ کریں

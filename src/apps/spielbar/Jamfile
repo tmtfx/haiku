@@ -2,14 +2,41 @@ SubDir HAIKU_TOP src apps spielbar ;
 
 UsePrivateHeaders storage app ;
 
-Application SpielBar : 
-	App.cpp
+Application SpielBar :
+	Collation.cpp
+	DeskbarLayout.cpp
+	DeskbarWindow.cpp
+	DeskbarWindowCatalog.cpp
+	DeskbarWindowInput.cpp
+	DeskbarWindowLayout.cpp
+	DeskbarWindowSearch.cpp
+	DeskbarWindowVolumes.cpp
+	Emblems.cpp
+	Formatting.cpp
+	IconSupport.cpp
+	ItemFactory.cpp
+	ListItems.cpp
+	MimeCatalog.cpp
+	SearchQuery.cpp
+	SettingsStore.cpp
+	SpielBarApp.cpp
+	ThemeColors.cpp
+	TrackerBridge.cpp
+	UiMetrics.cpp
+	VolumeIcons.cpp
 	: be localestub [ TargetLibsupc++ ]
-	: App.rdef
+	: SpielBar.rdef
 	;
 
 DoCatalogs SpielBar :
 	x-vnd.SpielBar
 	:
-	App.cpp
+	DeskbarWindow.cpp
+	DeskbarWindowCatalog.cpp
+	DeskbarWindowInput.cpp
+	DeskbarWindowLayout.cpp
+	DeskbarWindowSearch.cpp
+	DeskbarWindowVolumes.cpp
+	Formatting.cpp
+	ToolbarButtons.h
 ;

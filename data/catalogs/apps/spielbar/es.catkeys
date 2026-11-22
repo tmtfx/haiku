@@ -1,0 +1,57 @@
+1	spanish; castilian	x-vnd.SpielBar	1507420803
+Last used view	SpielBar		Última vista usada
+Launch	SpielBar		Iniciar
+Searching…	SpielBar		Buscando…
+Remove from Go	SpielBar		Quitar de Ir a
+Hide system apps	SpielBar		Ocultar aplicaciones del sistema
+Preflets	SpielBar		Preferencias
+Open Queries Folder	SpielBar		Abrir carpeta de consultas
+Search	SpielBar		Buscar
+Unmount	SpielBar		Desmontar
+Type to filter by name. Use the arrow keys to move through the list, Enter to launch, F10 to open the menu.	SpielBar		Escriba para filtrar por nombre. Use las flechas para recorrer la lista, Intro para iniciar, F10 para abrir el menú.
+Mount	SpielBar		Montar
+Type at least 3 characters to search the disk. Use the arrow keys to move through the list, Enter to launch, F10 to open the menu.	SpielBar		Escriba al menos 3 caracteres para buscar en el disco. Use las flechas para recorrer la lista, Intro para iniciar, F10 para abrir el menú.
+Favorites	SpielBar		Favoritos
+Add to favorites	SpielBar		Añadir a favoritos
+Search disk…	SpielBar		Buscar en el disco…
+Open Go folder…	SpielBar		Abrir carpeta de Ir a…
+Restart System	SpielBar		Reiniciar el sistema
+Deskbar preferences…	SpielBar		Preferencias de Deskbar…
+{0, plural, one{# result} other{# results}}	SpielBar		{0, plural, one{# resultado} other{# resultados}}
+Filter disks…	SpielBar		Filtrar discos…
+Startup view	SpielBar		Vista de inicio
+Get Info	SpielBar		Obtener información
+Open Query window…	SpielBar		Abrir ventana de consulta…
+{0, plural, one{# item} other{# items}}	SpielBar		{0, plural, one{# elemento} other{# elementos}}
+Apps	SpielBar		Aplicaciones
+View	SpielBar		Vista
+Not mounted	SpielBar		No montado
+Disks	SpielBar		Discos
+Power Off	SpielBar		Apagar
+{0, plural, other{#+ results}}	SpielBar		{0, plural, other{#+ resultados}}
+<empty>	SpielBar		<vacío>
+Reveal origin package	SpielBar		Mostrar paquete de origen
+Add to Go	SpielBar		Añadir a Ir a
+Save current view as startup	SpielBar		Guardar la vista actual como inicio
+Folders	SpielBar		Carpetas
+Filter catalog…	SpielBar		Filtrar catálogo…
+Type at least 3 characters	SpielBar		Escriba al menos 3 caracteres
+Filter Go…	SpielBar		Filtrar Ir a…
+Settings…	SpielBar		Ajustes…
+Saved: %view%	SpielBar		Guardado: %view%
+Files	SpielBar		Archivos
+Others	SpielBar	Section header	Otros
+Shutdown	SpielBar		Apagar el sistema
+none	SpielBar		ninguno
+Files	SpielBar	Filter chip	Archivos
+Recent	SpielBar	Filter chip and section header	Recientes
+All	SpielBar		Todos
+Default view	SpielBar		Vista predeterminada
+Reveal in Tracker	SpielBar		Mostrar en Tracker
+No matches	SpielBar		Sin coincidencias
+Mount all	SpielBar		Montar todo
+Remove from favorites	SpielBar		Quitar de favoritos
+Go	SpielBar		Ir a
+Recent queries…	SpielBar		Consultas recientes…
+Unmount all	SpielBar		Desmontar todo
+Group by tag	SpielBar		Agrupar por etiqueta
