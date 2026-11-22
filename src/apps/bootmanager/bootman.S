@@ -160,7 +160,7 @@
 %assign MODIFIER_INSERT_KEY				0x80
 
 ; String constants with their length
-%define TITLE							'Haiku Boot Manager'
+%define TITLE							'Boot Manager'
 %strlen TITLE_LENGTH					TITLE
 %define SELECT_OS_MESSAGE				'Select an OS from the menu'
 %strlen SELECT_OS_MESSAGE_LENGTH		SELECT_OS_MESSAGE
