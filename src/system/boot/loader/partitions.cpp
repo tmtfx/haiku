@@ -275,10 +275,15 @@ Partition::_Mount(file_system_module_info *module, Directory **_fileSystem)
 		if (!fileMapDiskDepth++) {
 			// see if it contains an image file we could mount in turn
 			FileMapDisk *disk = FileMapDisk::FindAnyFileMapDisk(fileSystem);
+			dprintf("%p Partition::_Mount: FindAnyFileMapDisk() = %p\n",
+				this, disk);
 			if (disk) {
 				TRACE(("%p Partition::_Mount: found FileMapDisk\n", this));
 				disk->RegisterFileMapBootItem();
-				add_partitions_for(disk, true, false, true);
+				status_t addStatus = add_partitions_for(disk, true, false,
+					true);
+				dprintf("%p Partition::_Mount: add_partitions_for(disk) = "
+					"%" B_PRId32 "\n", this, addStatus);
 			}
 		}
 		fileMapDiskDepth--;
