@@ -14,7 +14,6 @@
 
 #include <errno.h>
 #include <fcntl.h>
-#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -117,26 +116,6 @@ static const uint32 kNumberOfBootLoaderBlocks = 4;
 	// MBR including the Haiku boot loader.
 
 static const uint32 kMBRSignature = 0xAA55;
-
-// Temporary diagnostic logging for the "boot from file" feature, while
-// it's still being debugged on real hardware. Appends to a fixed, known
-// path so the user can read it back after a test. Remove once this
-// feature is confirmed working end-to-end.
-static void
-_LogFileBootDebug(const char* format, ...)
-{
-	FILE* log = fopen("/boot/home/bootman-debug.log", "a");
-	if (log == NULL)
-		return;
-
-	va_list args;
-	va_start(args, format);
-	vfprintf(log, format, args);
-	va_end(args);
-
-	fflush(log);
-	fclose(log);
-}
 
 static const int32 kMaxBootMenuItemLength = 70;
 
@@ -718,15 +697,9 @@ status_t
 LegacyBootMenu::_ResolveFileBootLocation(const char* path,
 	const char* bootDrivePath, int8& drive, off_t& offsetBlocks)
 {
-	_LogFileBootDebug("_ResolveFileBootLocation: path=\"%s\"\n", path);
-
 	struct stat fileStat;
-	if (stat(path, &fileStat) != 0) {
-		int savedErrno = errno;
-		_LogFileBootDebug("  stat() failed: errno=%d (%s)\n", savedErrno,
-			strerror(savedErrno));
-		return savedErrno;
-	}
+	if (stat(path, &fileStat) != 0)
+		return errno;
 
 	// BDiskDeviceRoster::GetPartitionForPath() needs a partition's raw
 	// device path (e.g. "/dev/disk/.../N") -- it does a plain string
@@ -737,9 +710,6 @@ LegacyBootMenu::_ResolveFileBootLocation(const char* path,
 	// argument (fs_stat_dev() on the file's st_dev).
 	fs_info hostInfo;
 	status_t status = fs_stat_dev(fileStat.st_dev, &hostInfo);
-	_LogFileBootDebug("  fs_stat_dev: status=%" B_PRId32 " (%s) "
-		"device_name=\"%s\"\n", status, strerror(status),
-		status == B_OK ? hostInfo.device_name : "");
 	if (status != B_OK)
 		return status;
 
@@ -748,19 +718,11 @@ LegacyBootMenu::_ResolveFileBootLocation(const char* path,
 	BPartition* partition;
 	status = roster.GetPartitionForPath(hostInfo.device_name, &device,
 		&partition);
-	_LogFileBootDebug("  GetPartitionForPath: status=%" B_PRId32 " (%s)\n",
-		status, strerror(status));
 	if (status != B_OK)
 		return status;
 
-	_LogFileBootDebug("  host partition: Offset()=%" B_PRIdOFF
-		" Size()=%" B_PRIdOFF " ContentName()=\"%s\"\n", partition->Offset(),
-		partition->Size(), partition->ContentName());
-
 	BPath devicePath;
 	status = device.GetPath(&devicePath);
-	_LogFileBootDebug("  host device.GetPath(): status=%" B_PRId32
-		" (%s) path=\"%s\"\n", status, strerror(status), devicePath.Path());
 	if (status != B_OK)
 		return status;
 
@@ -774,20 +736,13 @@ LegacyBootMenu::_ResolveFileBootLocation(const char* path,
 	// found here).
 	if (bootDrivePath != NULL && devicePath == bootDrivePath) {
 		drive = 0;
-		_LogFileBootDebug("  host device is the boot drive itself -- "
-			"using drive=0 sentinel, skipping _GetBIOSDrive\n");
 	} else {
 		status = _GetBIOSDrive(devicePath.Path(), drive);
-		_LogFileBootDebug("  _GetBIOSDrive: status=%" B_PRId32 " (%s) "
-			"drive=%d\n", status, strerror(status), (int)drive);
 		if (status != B_OK)
 			return status;
 	}
 
 	offsetBlocks = partition->Offset() / kBlockSize;
-
-	_LogFileBootDebug("  RESULT: drive=%d offsetBlocks=%" B_PRIdOFF "\n",
-		(int)drive, offsetBlocks);
 
 	return B_OK;
 }

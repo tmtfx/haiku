@@ -18,9 +18,7 @@
 
 ; 1 enables more informative error strings, that shouldn't be seen by the
 ; normal user, though.
-; TEMPORARILY set to 1 for "boot from file" debugging (2026-11-23) -- revert
-; to 0 before this feature is considered done.
-%assign	DEBUG						1
+%assign	DEBUG						0
 
 
 ; address/offset definitions

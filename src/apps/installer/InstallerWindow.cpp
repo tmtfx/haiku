@@ -10,7 +10,6 @@
 #include "InstallerWindow.h"
 
 #include <errno.h>
-#include <stdarg.h>
 #include <stdio.h>
 #include <strings.h>
 #include <sys/stat.h>
@@ -95,26 +94,6 @@ const uint32 kGoToSave = 'GTBS';
 const uint32 BENCHMARK_DONE = 'BMDN';
 
 
-// Temporary diagnostic logging for the "boot from file" feature, while
-// it's still being debugged on real hardware. Appends to the same fixed
-// path LegacyBootMenu.cpp's _LogFileBootDebug() uses, so both ends of the
-// chain land in one file. Remove once this feature is confirmed working
-// end-to-end.
-static void
-_LogFileBootDebug(const char* format, ...)
-{
-	FILE* log = fopen("/boot/home/bootman-debug.log", "a");
-	if (log == NULL)
-		return;
-
-	va_list args;
-	va_start(args, format);
-	vfprintf(log, format, args);
-	va_end(args);
-
-	fflush(log);
-	fclose(log);
-}
 const uint32 ACC_COMP_CHKBX_CHANGED = 'BMCB';
 
 class PasswordTC : public BTextControl {
@@ -952,13 +931,9 @@ InstallerWindow::MessageReceived(BMessage *msg)
 			// this message is otherwise handled. Ordinary partition
 			// installs are unaffected: they keep relying on the "Set up
 			// boot menu..." Tools menu item, same as before.
-			_LogFileBootDebug("BENCHMARK_DONE: fBootManagerAutoLaunched=%d\n",
-				(int)fBootManagerAutoLaunched);
 			if (!fBootManagerAutoLaunched) {
 				PartitionMenuItem* dstItem
 					= (PartitionMenuItem*)fDestMenu->FindMarked();
-				_LogFileBootDebug("  dstItem=%p id=%" B_PRId32 "\n", dstItem,
-					dstItem != NULL ? dstItem->ID() : -1);
 				if (dstItem != NULL) {
 					BDiskDeviceRoster roster;
 					BDiskDevice device;
@@ -967,8 +942,6 @@ InstallerWindow::MessageReceived(BMessage *msg)
 							&device, &partition) == B_OK
 						|| roster.GetDeviceWithID(dstItem->ID(), &device)
 							== B_OK;
-					_LogFileBootDebug("  found=%d device.IsFile()=%d\n",
-						(int)found, found ? (int)device.IsFile() : -1);
 					if (found && device.IsFile()) {
 						fBootManagerAutoLaunched = true;
 						_LaunchBootManager();
@@ -1812,30 +1785,18 @@ InstallerWindow::_LaunchBootManager()
 	BString filePath;
 
 	PartitionMenuItem* dstItem = (PartitionMenuItem*)fDestMenu->FindMarked();
-	_LogFileBootDebug("_LaunchBootManager: dstItem=%p id=%" B_PRId32 "\n",
-		dstItem, dstItem != NULL ? dstItem->ID() : -1);
 
 	if (dstItem != NULL) {
 		BDiskDeviceRoster roster;
 		BDiskDevice device;
 		BPartition* partition;
-		status_t partStatus = roster.GetPartitionWithID(dstItem->ID(),
-			&device, &partition);
-		bool found = partStatus == B_OK;
-		if (!found)
-			found = roster.GetDeviceWithID(dstItem->ID(), &device) == B_OK;
-
-		_LogFileBootDebug("  GetPartitionWithID status=%" B_PRId32
-			" (%s) found=%d device.IsFile()=%d\n", partStatus,
-			strerror(partStatus), (int)found, found ? (int)device.IsFile() : -1);
+		bool found = roster.GetPartitionWithID(dstItem->ID(),
+				&device, &partition) == B_OK
+			|| roster.GetDeviceWithID(dstItem->ID(), &device) == B_OK;
 
 		if (found && device.IsFile()) {
 			BPath imagePath;
-			status_t filePathStatus = device.GetFilePath(&imagePath);
-			_LogFileBootDebug("  GetFilePath status=%" B_PRId32 " (%s) "
-				"path=\"%s\"\n", filePathStatus, strerror(filePathStatus),
-				imagePath.Path());
-			if (filePathStatus == B_OK) {
+			if (device.GetFilePath(&imagePath) == B_OK) {
 				filePath = imagePath.Path();
 
 				// BDiskDeviceRoster::GetPartitionForPath() needs a
@@ -1848,15 +1809,11 @@ InstallerWindow::_LaunchBootManager()
 				// directory argument: fs_stat_dev() on the file's
 				// st_dev).
 				struct stat imageStat;
-				status_t statStatus = stat(imagePath.Path(), &imageStat) == 0
+				status_t hostStatus = stat(imagePath.Path(), &imageStat) == 0
 					? B_OK : errno;
 				fs_info hostInfo;
-				status_t hostStatus = statStatus == B_OK
-					? fs_stat_dev(imageStat.st_dev, &hostInfo) : statStatus;
-				_LogFileBootDebug("  stat status=%" B_PRId32 " fs_stat_dev "
-					"status=%" B_PRId32 " (%s) device_name=\"%s\"\n",
-					statStatus, hostStatus, strerror(hostStatus),
-					hostStatus == B_OK ? hostInfo.device_name : "");
+				if (hostStatus == B_OK)
+					hostStatus = fs_stat_dev(imageStat.st_dev, &hostInfo);
 
 				BDiskDeviceRoster hostRoster;
 				BDiskDevice hostDevice;
@@ -1865,8 +1822,6 @@ InstallerWindow::_LaunchBootManager()
 					hostStatus = hostRoster.GetPartitionForPath(
 						hostInfo.device_name, &hostDevice, &hostPartition);
 				}
-				_LogFileBootDebug("  GetPartitionForPath status=%" B_PRId32
-					" (%s)\n", hostStatus, strerror(hostStatus));
 				if (hostStatus == B_OK) {
 					BPath hostPath;
 					if (hostDevice.GetPath(&hostPath) == B_OK)
@@ -1888,15 +1843,9 @@ InstallerWindow::_LaunchBootManager()
 			args[argc++] = filePath.String();
 	}
 
-	_LogFileBootDebug("  Launching BootManager with argc=%d diskPath=\"%s\" "
-		"filePath=\"%s\"\n", argc, diskPath.String(), filePath.String());
-
 	status_t status = argc > 0
 		? be_roster->Launch(kBootManagerSignature, argc, args)
 		: be_roster->Launch(kBootManagerSignature);
-
-	_LogFileBootDebug("  be_roster->Launch status=%" B_PRId32 " (%s)\n",
-		status, strerror(status));
 
 	if (status != B_OK) {
 		// Try really hard to launch it. It's very likely that this fails,

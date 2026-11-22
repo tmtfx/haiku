@@ -168,8 +168,6 @@ status_t	_user_unmount(const char *path, uint32 flags);
 status_t	_user_read_fs_info(dev_t device, struct fs_info *info);
 status_t	_user_write_fs_info(dev_t device, const struct fs_info *info,
 				int mask);
-status_t	_user_get_file_map(int fd, off_t offset, size_t size,
-				struct file_io_vec *vecs, size_t *_count);
 dev_t		_user_next_device(int32 *_cookie);
 status_t	_user_sync(void);
 status_t	_user_get_next_fd_info(team_id team, uint32 *cookie,

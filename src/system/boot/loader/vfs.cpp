@@ -759,9 +759,6 @@ get_boot_file_system(stage2_args* args, BootVolume& _bootVolume)
 				continue;
 			}
 
-			dprintf("get_boot_file_system(): platform_file_boot_requested() "
-				"= %s\n", platform_file_boot_requested() ? "true" : "false");
-
 			if (platform_file_boot_requested()) {
 				// Boot Manager asked us to boot a nested "boot from file"
 				// image instead of this (otherwise perfectly normal) host
@@ -771,42 +768,21 @@ get_boot_file_system(stage2_args* args, BootVolume& _bootVolume)
 				// boot path, is exactly what already triggered
 				// Partition::_Mount()'s FileMapDisk hook to discover (and
 				// mount) it, if present; find it here.
-				bool foundFileMapPartition = false;
 				NodeIterator fileMapIterator = gPartitions.GetIterator();
 				Partition *fileMapPartition;
 				while ((fileMapPartition
 						= (Partition *)fileMapIterator.Next()) != NULL) {
-					dprintf("get_boot_file_system(): candidate partition %p "
-						"IsFileMapDiskImage()=%d IsFileSystem()=%d\n",
-						fileMapPartition,
-						fileMapPartition->IsFileMapDiskImage(),
-						fileMapPartition->IsFileSystem());
 					if (!fileMapPartition->IsFileMapDiskImage()
 						|| !fileMapPartition->IsFileSystem()) {
 						continue;
 					}
 
-					foundFileMapPartition = true;
 					Directory *nestedFileSystem;
-					status_t mountStatus
-						= fileMapPartition->Mount(&nestedFileSystem);
-					dprintf("get_boot_file_system(): fileMapPartition->Mount()"
-						" = %" B_PRId32 "\n", mountStatus);
-					if (mountStatus == B_OK) {
-						dprintf("get_boot_file_system(): booting nested "
-							"\"boot from file\" image instead of its host "
-							"partition\n");
+					if (fileMapPartition->Mount(&nestedFileSystem) == B_OK) {
 						fileSystem = nestedFileSystem;
 						sFileBootHostPartition = partition;
 					}
 					break;
-				}
-
-				if (!foundFileMapPartition) {
-					dprintf("get_boot_file_system(): no FileMapDiskImage "
-						"partition found in gPartitions -- did "
-						"Partition::_Mount()'s FileMapDisk hook not find "
-						"DISKIMAGE.IMG at the host volume's root?\n");
 				}
 			}
 

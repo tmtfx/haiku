@@ -606,22 +606,14 @@ vfs_mount_boot_file_system(kernel_args* args)
 		imagePath.SetTo(hostMountPoint);
 		imagePath.Append(kFileBootImageName);
 
-		dprintf("vfs_mount_boot_file_system(): looking for nested image at "
-			"%s\n", imagePath.Path());
-
 		KDiskDeviceManager* manager = KDiskDeviceManager::Default();
 		bool newlyCreated;
 		partition_id fileDeviceID = manager->CreateFileDevice(
 			imagePath.Path(), &newlyCreated);
-		dprintf("vfs_mount_boot_file_system(): CreateFileDevice() = %"
-			B_PRId32 " (newlyCreated=%d)\n", fileDeviceID, newlyCreated);
 
 		struct FindBootablePartition : KPartitionVisitor {
 			virtual bool VisitPre(KPartition* partition)
 			{
-				dprintf("vfs_mount_boot_file_system(): visiting %p "
-					"ContainsFileSystem()=%d\n", partition,
-					partition->ContainsFileSystem());
 				if (!partition->ContainsFileSystem())
 					return false;
 				fFound = partition;
@@ -633,9 +625,6 @@ vfs_mount_boot_file_system(kernel_args* args)
 		if (fileDeviceID >= 0) {
 			if (KPartition* fileDevice
 					= manager->RegisterPartition(fileDeviceID)) {
-				dprintf("vfs_mount_boot_file_system(): fileDevice=%p "
-					"ContainsFileSystem()=%d\n", fileDevice,
-					fileDevice->ContainsFileSystem());
 				if (fileDevice->ContainsFileSystem()) {
 					// the image has no inner partition table of its own --
 					// it's directly one BFS volume
@@ -643,15 +632,8 @@ vfs_mount_boot_file_system(kernel_args* args)
 				} else {
 					fileDevice->VisitEachDescendant(&visitor);
 				}
-			} else {
-				dprintf("vfs_mount_boot_file_system(): "
-					"RegisterPartition(%" B_PRId32 ") failed\n",
-					fileDeviceID);
 			}
 		}
-
-		dprintf("vfs_mount_boot_file_system(): visitor.fFound = %p\n",
-			visitor.fFound);
 
 		KPath innerPath;
 		if (visitor.fFound == NULL

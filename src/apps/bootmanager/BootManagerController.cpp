@@ -226,21 +226,6 @@ BootManagerController::_WriteBootMenu()
 
 	fWriteBootMenuStatus = fBootMenu->Install(*fBootDrive, fSettings);
 
-	if (fWriteBootMenuStatus == B_NOT_SUPPORTED) {
-		// A "boot from file" entry is fragmented on its host filesystem --
-		// nothing was written to disk (the check happens before any write),
-		// so this is not the generic installation-failed case.
-		BAlert* error = new BAlert("error", B_TRANSLATE("One of the files "
-				"selected to boot from is fragmented on its filesystem and "
-				"cannot be booted directly. Recreate the file in one "
-				"operation on free space, then try again. The boot menu "
-				"was not modified."),
-			B_TRANSLATE_COMMENT("OK", "Button"), NULL, NULL, B_WIDTH_AS_USUAL,
-			B_WARNING_ALERT);
-		error->Go();
-		return false;
-	}
-
 	return true;
 }
 
