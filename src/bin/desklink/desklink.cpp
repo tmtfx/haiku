@@ -94,6 +94,7 @@ EscapeShellArgument(const char* arg, BString& outStr)
 		outStr << c;
 	}
 }
+
 int
 main(int argc, char **argv)
 {

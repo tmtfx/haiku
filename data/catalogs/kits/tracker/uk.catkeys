@@ -1,4 +1,4 @@
-1	ukrainian	x-vnd.Haiku-libtracker	1752805840
+1	ukrainian	x-vnd.Haiku-libtracker	2176037616
 Created	ContainerWindow		Cтворений
 Icon	AttributesView		Значок
 Open and make preferred	OpenWithWindow		Відкрити і зробити пріоритетним
@@ -57,7 +57,6 @@ Identify	ContainerWindow		Визначити
 Create link	ContainerWindow		Створити посилання
 starts with	FindPanel		почати з
 Replace	FSUtils		Замінити
-At %func \nfind_directory() failed. \nReason: %error	TrackerInitialState		У функції %func \nзбій find_directory(). \nПричина: %error
 ?+* follows nothing.	libtracker		?+* не слід нічого.
 Include Trash	FindPanel		Включити у пошук Смітник
 Rectangle	AttributesView		Прямокутник
@@ -289,7 +288,6 @@ Execute	FilePermissionsView		Виконати
 no	AttributesView		ні
 Show volumes on Desktop	SettingsView		Показувати томи на робочому столі
 Recent folders	ContainerWindow		Недавні папки
-Error deleting items: %error	FSUtils		Помилка видалення елементів: %error
 Desktop	Model		Робочий стіл
 Select all	ContainerWindow		Вибрати все
 {0, plural, other{#/%total %filter}}	CountView	Number of selected items from a filtered set: \"10/30 view\"	{0, plural, other{#/%total %filter}}
@@ -499,3 +497,5 @@ Name	ContainerWindow		Назва
 Preferred for %type	OpenWithWindow		Насамперед для %type
 Free space color	SettingsView		Колір вільного місця
 OK	FSUtils		ОК
+At %func \nfind_directory() failed. \nReason: %error	TrackerInitialState		У функції %func \nзбій find_directory(). \nПричина: %error
+Error deleting items: %error	FSUtils		Помилка видалення елементів: %error

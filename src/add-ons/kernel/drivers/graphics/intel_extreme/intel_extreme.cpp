@@ -1043,4 +1043,3 @@ intel_extreme_uninit(intel_info &info)
 	delete_area(info.registers_area);
 	delete_area(info.shared_area);
 }
-
