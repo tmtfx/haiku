@@ -15,6 +15,7 @@
 
 #include <Window.h>
 
+#include <String.h>
 #include <StringList.h>
 #include <edid.h>
 
@@ -90,11 +91,20 @@ private:
 			ScreenSettings*	fSettings;
 			// Which GPU/screen index this window's per-card controls
 			// target (gScreenManager::ScreenAt() order -- see
-			// MULTIGPU_PLAN.md Fase F). Fixed at 0 until the planned
-			// per-GPU BTabView rewrite exists; every per-card
-			// ScreenSettings/'hsbm'/'h2da'/etc call already threads this
-			// through so that rewrite only needs to stop hardcoding it.
+			// MULTIGPU_PLAN.md Fase F). Always 0: this window's full
+			// control set (combine/swap/laptop-panel/TV-standard/Apply-
+			// Revert-undo) is the primary GPU's tab; every other screen
+			// gets a GPUSettingsView tab instead.
 			int32			fScreenIndex;
+			// Multi-GPU: the key ScreenSettings' per-GPU preferences are
+			// persisted under for this screen -- its PCI BDF if
+			// resolvable, else a fallback "idx<N>" (see
+			// gpu_settings_key() and MULTIGPU_PLAN.md EDID section: this
+			// is deliberately NOT the same thing as fScreenIndex, which
+			// only addresses the currently-running HWInterface and isn't
+			// stable across a reboot that changes /dev/graphics/*
+			// enumeration order).
+			BString			fScreenKey;
 			bool			fIsVesa;
 			bool			fBootWorkspaceApplied;
 			bool			fHasCursorAnimationCapability;

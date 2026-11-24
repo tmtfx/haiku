@@ -25,11 +25,11 @@ static const char* kSettingsFileName = "Screen_data";
 
 
 BString
-ScreenSettings::_Key(const char* base, int32 screen)
+ScreenSettings::_Key(const char* base, const BString& key)
 {
-	BString key(base);
-	key << screen;
-	return key;
+	BString result(base);
+	result << key;
+	return result;
 }
 
 
@@ -74,10 +74,10 @@ ScreenSettings::_Load()
 		fCompositor2DEnabled = compositor;
 
 	fPerScreen = stored;
-		// per-screen keys (hwcursor0, accel2d0, ...) live right alongside
-		// the two globals above; harmless to keep them all in one message
-		// since _Key() names never collide with "window_offset"/
-		// "compositor2d".
+		// per-screen keys (hwcursor<bdf>, accel2d<bdf>, ...) live right
+		// alongside the two globals above; harmless to keep them all in
+		// one message since _Key() names never collide with
+		// "window_offset"/"compositor2d".
 }
 
 
@@ -181,156 +181,162 @@ ScreenSettings::SetEdidUnset(const BString& bdf, bool unset)
 
 
 bool
-ScreenSettings::HardwareCursorEnabled(int32 screen) const
+ScreenSettings::HardwareCursorEnabled(const BString& key) const
 {
 	bool enabled = false;
-	fPerScreen.FindBool(_Key("hwcursor", screen), &enabled);
+	fPerScreen.FindBool(_Key("hwcursor", key), &enabled);
 	return enabled;
 }
 
 
 void
-ScreenSettings::SetHardwareCursorEnabled(int32 screen, bool enabled)
+ScreenSettings::SetHardwareCursorEnabled(const BString& key,
+	int32 screenIndex, bool enabled)
 {
-	BString key = _Key("hwcursor", screen);
-	fPerScreen.RemoveName(key);
-	fPerScreen.AddBool(key, enabled);
+	BString fullKey = _Key("hwcursor", key);
+	fPerScreen.RemoveName(fullKey);
+	fPerScreen.AddBool(fullKey, enabled);
 	_Save();
 
 	BMessage msg(AS_SET_HW_CUR_BITMAP_ENABLED);
 	msg.AddBool("enable", enabled);
-	msg.AddInt32("screen", screen);
+	msg.AddInt32("screen", screenIndex);
 	BMessenger appServerMessenger("application/x-vnd.Haiku-app_server");
 	appServerMessenger.SendMessage(&msg);
 }
 
 
 bool
-ScreenSettings::Acceleration2DEnabled(int32 screen) const
+ScreenSettings::Acceleration2DEnabled(const BString& key) const
 {
 	bool enabled = false;
-	fPerScreen.FindBool(_Key("accel2d", screen), &enabled);
+	fPerScreen.FindBool(_Key("accel2d", key), &enabled);
 	return enabled;
 }
 
 
 void
-ScreenSettings::SetAcceleration2DEnabled(int32 screen, bool enabled)
+ScreenSettings::SetAcceleration2DEnabled(const BString& key,
+	int32 screenIndex, bool enabled)
 {
-	BString key = _Key("accel2d", screen);
-	fPerScreen.RemoveName(key);
-	fPerScreen.AddBool(key, enabled);
+	BString fullKey = _Key("accel2d", key);
+	fPerScreen.RemoveName(fullKey);
+	fPerScreen.AddBool(fullKey, enabled);
 	_Save();
 
 	BMessage msg(AS_SET_2D_ACCELERATION_ENABLED);
 	msg.AddBool("enable", enabled);
-	msg.AddInt32("screen", screen);
+	msg.AddInt32("screen", screenIndex);
 	BMessenger appServerMessenger("application/x-vnd.Haiku-app_server");
 	appServerMessenger.SendMessage(&msg);
 }
 
 
 bool
-ScreenSettings::Visual2DDebugEnabled(int32 screen) const
+ScreenSettings::Visual2DDebugEnabled(const BString& key) const
 {
 	bool enabled = false;
-	fPerScreen.FindBool(_Key("debug2d", screen), &enabled);
+	fPerScreen.FindBool(_Key("debug2d", key), &enabled);
 	return enabled;
 }
 
 
 void
-ScreenSettings::SetVisual2DDebugEnabled(int32 screen, bool enabled)
+ScreenSettings::SetVisual2DDebugEnabled(const BString& key,
+	int32 screenIndex, bool enabled)
 {
-	BString key = _Key("debug2d", screen);
-	fPerScreen.RemoveName(key);
-	fPerScreen.AddBool(key, enabled);
+	BString fullKey = _Key("debug2d", key);
+	fPerScreen.RemoveName(fullKey);
+	fPerScreen.AddBool(fullKey, enabled);
 	_Save();
 
 	BMessage msg(AS_SET_2D_DEBUG_ENABLED);
 	msg.AddBool("enable", enabled);
-	msg.AddInt32("screen", screen);
+	msg.AddInt32("screen", screenIndex);
 	BMessenger appServerMessenger("application/x-vnd.Haiku-app_server");
 	appServerMessenger.SendMessage(&msg);
 }
 
 
 bool
-ScreenSettings::CursorAnimationEnabled(int32 screen) const
+ScreenSettings::CursorAnimationEnabled(const BString& key) const
 {
 	bool enabled = false;
-	fPerScreen.FindBool(_Key("cursorani", screen), &enabled);
+	fPerScreen.FindBool(_Key("cursorani", key), &enabled);
 	return enabled;
 }
 
 
 int32
-ScreenSettings::CursorAnimationSpeedPercent(int32 screen) const
+ScreenSettings::CursorAnimationSpeedPercent(const BString& key) const
 {
 	int32 percent = 100;
-	fPerScreen.FindInt32(_Key("cursoranispeed", screen), &percent);
+	fPerScreen.FindInt32(_Key("cursoranispeed", key), &percent);
 	return percent;
 }
 
 
 int32
-ScreenSettings::CursorAnimationIdleDelayMs(int32 screen) const
+ScreenSettings::CursorAnimationIdleDelayMs(const BString& key) const
 {
 	int32 delay = 0;
-	fPerScreen.FindInt32(_Key("cursoranidelay", screen), &delay);
+	fPerScreen.FindInt32(_Key("cursoranidelay", key), &delay);
 	return delay;
 }
 
 
 static void
-_SendCursorAnimationSettings(int32 screen, bool enabled, int32 speedPercent,
-	int32 idleDelayMs)
+_SendCursorAnimationSettings(int32 screenIndex, bool enabled,
+	int32 speedPercent, int32 idleDelayMs)
 {
 	BMessage msg(AS_SET_CURSOR_ANI_SETTINGS);
 	msg.AddBool("enable", enabled);
 	msg.AddInt32("speed_percent", speedPercent);
 	msg.AddInt32("idle_delay_ms", idleDelayMs);
-	msg.AddInt32("screen", screen);
+	msg.AddInt32("screen", screenIndex);
 	BMessenger appServerMessenger("application/x-vnd.Haiku-app_server");
 	appServerMessenger.SendMessage(&msg);
 }
 
 
 void
-ScreenSettings::SetCursorAnimationEnabled(int32 screen, bool enabled)
+ScreenSettings::SetCursorAnimationEnabled(const BString& key,
+	int32 screenIndex, bool enabled)
 {
-	BString key = _Key("cursorani", screen);
-	fPerScreen.RemoveName(key);
-	fPerScreen.AddBool(key, enabled);
+	BString fullKey = _Key("cursorani", key);
+	fPerScreen.RemoveName(fullKey);
+	fPerScreen.AddBool(fullKey, enabled);
 	_Save();
-	_SendCursorAnimationSettings(screen, enabled,
-		CursorAnimationSpeedPercent(screen), CursorAnimationIdleDelayMs(screen));
+	_SendCursorAnimationSettings(screenIndex, enabled,
+		CursorAnimationSpeedPercent(key), CursorAnimationIdleDelayMs(key));
 }
 
 
 void
-ScreenSettings::SetCursorAnimationSpeedPercent(int32 screen, int32 percent)
+ScreenSettings::SetCursorAnimationSpeedPercent(const BString& key,
+	int32 screenIndex, int32 percent)
 {
 	if (percent < 10)
 		percent = 10;
-	BString key = _Key("cursoranispeed", screen);
-	fPerScreen.RemoveName(key);
-	fPerScreen.AddInt32(key, percent);
+	BString fullKey = _Key("cursoranispeed", key);
+	fPerScreen.RemoveName(fullKey);
+	fPerScreen.AddInt32(fullKey, percent);
 	_Save();
-	_SendCursorAnimationSettings(screen, CursorAnimationEnabled(screen), percent,
-		CursorAnimationIdleDelayMs(screen));
+	_SendCursorAnimationSettings(screenIndex, CursorAnimationEnabled(key),
+		percent, CursorAnimationIdleDelayMs(key));
 }
 
 
 void
-ScreenSettings::SetCursorAnimationIdleDelayMs(int32 screen, int32 delayMs)
+ScreenSettings::SetCursorAnimationIdleDelayMs(const BString& key,
+	int32 screenIndex, int32 delayMs)
 {
 	if (delayMs < 0)
 		delayMs = 0;
-	BString key = _Key("cursoranidelay", screen);
-	fPerScreen.RemoveName(key);
-	fPerScreen.AddInt32(key, delayMs);
+	BString fullKey = _Key("cursoranidelay", key);
+	fPerScreen.RemoveName(fullKey);
+	fPerScreen.AddInt32(fullKey, delayMs);
 	_Save();
-	_SendCursorAnimationSettings(screen, CursorAnimationEnabled(screen),
-		CursorAnimationSpeedPercent(screen), delayMs);
+	_SendCursorAnimationSettings(screenIndex, CursorAnimationEnabled(key),
+		CursorAnimationSpeedPercent(key), delayMs);
 }

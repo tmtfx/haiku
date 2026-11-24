@@ -17,12 +17,25 @@
 #include <StringList.h>
 
 
-// Settings persisted for the Screen preflet. Most settings are per-GPU
-// (identified by the same "screen" index used by the 'gedi'/'sedi'
-// app_server messages, i.e. gScreenManager->ScreenAt(index)); see
-// MULTIGPU_PLAN.md Fase F. The compositor is the one exception: it is a
-// single Desktop-wide switch (see Fase D/E), so it has no per-screen
-// variant.
+// Settings persisted for the Screen preflet. Most settings are per-GPU,
+// keyed by PCI BDF (see "key" parameters below) rather than by the
+// 'gedi'/'sedi'-style "screen" index used for *live* app_server
+// messages -- see MULTIGPU_PLAN.md Fase F / EDID section. The two are
+// deliberately different: the screen index only identifies which
+// currently-running HWInterface instance to notify (meaningless once
+// the system reboots and /dev/graphics/* enumeration order may differ,
+// e.g. after adding/removing a card), while the BDF key is what
+// actually persists correctly across reboots, matching GpuOrder() and
+// EdidUnset()'s own convention. The compositor is the one setting with
+// neither: it is a single Desktop-wide switch (see Fase D/E), not
+// per-GPU at all.
+//
+// Every setter below therefore takes both a \a key (the BDF to persist
+// under, or a caller-chosen fallback such as "idx0" for a card with no
+// resolvable PCI location -- e.g. virtio -- see the gpu_settings_key()
+// helper duplicated in ScreenWindow.cpp/GPUSettingsView.cpp/
+// ScreenManager.cpp) and a \a screenIndex (which *currently* open
+// HWInterface instance, if any, to notify live).
 //
 // Stored as a flattened BMessage (Screen_data) instead of the old fixed-
 // field-order binary blob, since the set of per-GPU entries is now
@@ -60,35 +73,41 @@ class ScreenSettings {
 		void SetEdidUnset(const BString& bdf, bool unset);
 
 		// hardware cursor preference
-		bool HardwareCursorEnabled(int32 screen) const;
-		void SetHardwareCursorEnabled(int32 screen, bool enabled);
+		bool HardwareCursorEnabled(const BString& key) const;
+		void SetHardwareCursorEnabled(const BString& key, int32 screenIndex,
+			bool enabled);
 
 		// 2d acceleration preference
-		bool Acceleration2DEnabled(int32 screen) const;
-		void SetAcceleration2DEnabled(int32 screen, bool enabled);
+		bool Acceleration2DEnabled(const BString& key) const;
+		void SetAcceleration2DEnabled(const BString& key, int32 screenIndex,
+			bool enabled);
 
 		// 2d visual debug preference
-		bool Visual2DDebugEnabled(int32 screen) const;
-		void SetVisual2DDebugEnabled(int32 screen, bool enabled);
+		bool Visual2DDebugEnabled(const BString& key) const;
+		void SetVisual2DDebugEnabled(const BString& key, int32 screenIndex,
+			bool enabled);
 
 		// animated cursor preferences
-		bool CursorAnimationEnabled(int32 screen) const;
-		void SetCursorAnimationEnabled(int32 screen, bool enabled);
-		int32 CursorAnimationSpeedPercent(int32 screen) const;
-		void SetCursorAnimationSpeedPercent(int32 screen, int32 percent);
-		int32 CursorAnimationIdleDelayMs(int32 screen) const;
-		void SetCursorAnimationIdleDelayMs(int32 screen, int32 delayMs);
+		bool CursorAnimationEnabled(const BString& key) const;
+		void SetCursorAnimationEnabled(const BString& key, int32 screenIndex,
+			bool enabled);
+		int32 CursorAnimationSpeedPercent(const BString& key) const;
+		void SetCursorAnimationSpeedPercent(const BString& key,
+			int32 screenIndex, int32 percent);
+		int32 CursorAnimationIdleDelayMs(const BString& key) const;
+		void SetCursorAnimationIdleDelayMs(const BString& key,
+			int32 screenIndex, int32 delayMs);
 
 	private:
 		void _Load();
 		void _Save() const;
-		static BString _Key(const char* base, int32 screen);
+		static BString _Key(const char* base, const BString& key);
 
 		BRect fWindowFrame;
 		bool fCompositor2DEnabled;
 		BMessage fPerScreen;
 			// flat key/value store, keys built by _Key(), e.g.
-			// "hwcursor0", "accel2d1", "cursoranidelay3", ...
+			// "hwcursor001200", "accel2d_idx1", "cursoranidelay001200", ...
 };
 
 #endif	// SCREEN_SETTINGS_H

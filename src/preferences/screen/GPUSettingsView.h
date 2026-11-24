@@ -58,6 +58,16 @@ private:
 			BWindow*		fWindow;
 			int32			fScreenIndex;
 			BString			fBdf;
+			// Multi-GPU: the key ScreenSettings' per-GPU preferences
+			// persist under for this screen -- fBdf if resolvable, else
+			// a fallback "idx<N>" (see MULTIGPU_PLAN.md EDID section).
+			// Deliberately NOT the same thing as fBdf alone: GpuOrder()/
+			// EdidUnset() only ever match by real BDF (a card with no
+			// resolvable PCI location can't meaningfully be "the
+			// configured primary" or individually "unset" across
+			// reboots), but per-card preferences still need *some*
+			// stable-within-a-session key even for such a card.
+			BString			fScreenKey;
 			ScreenSettings*	fSettings;
 			ScreenMode		fScreenMode;
 

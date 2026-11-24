@@ -66,6 +66,11 @@ GPUSettingsView::GPUSettingsView(const char* name, BWindow* window,
 			reply.FindString("bdf", &fBdf);
 	}
 
+	if (!fBdf.IsEmpty())
+		fScreenKey = fBdf;
+	else
+		fScreenKey.SetToFormat("idx%" B_PRId32, fScreenIndex);
+
 	accelerant_device_info info;
 	BString deviceLabel;
 	if (fScreenMode.GetDeviceInfo(info) == B_OK && info.name[0] != '\0')
@@ -136,14 +141,14 @@ GPUSettingsView::GPUSettingsView(const char* name, BWindow* window,
 		B_TRANSLATE("Enable hardware cursor bitmap"),
 		new BMessage(TOGGLE_HARDWARE_CURSOR_MSG));
 	fHardwareCursorCheckbox->SetValue(fHasSetCursorBitmap
-			&& fSettings->HardwareCursorEnabled(fScreenIndex)
+			&& fSettings->HardwareCursorEnabled(fScreenKey)
 		? B_CONTROL_ON : B_CONTROL_OFF);
 
 	f2DAccelerationCheckbox = new BCheckBox("2d_acceleration",
 		B_TRANSLATE("Enable 2D hardware acceleration"),
 		new BMessage(TOGGLE_2D_ACCELERATION_MSG));
 	f2DAccelerationCheckbox->SetValue(fHas2DAcceleration
-			&& fSettings->Acceleration2DEnabled(fScreenIndex)
+			&& fSettings->Acceleration2DEnabled(fScreenKey)
 		? B_CONTROL_ON : B_CONTROL_OFF);
 
 	f2DDebugCheckbox = new BCheckBox("2d_debug",
@@ -151,7 +156,7 @@ GPUSettingsView::GPUSettingsView(const char* name, BWindow* window,
 		new BMessage(TOGGLE_2D_DEBUG_MSG));
 	f2DDebugCheckbox->SetValue(fHas2DAcceleration
 			&& f2DAccelerationCheckbox->Value() == B_CONTROL_ON
-			&& fSettings->Visual2DDebugEnabled(fScreenIndex)
+			&& fSettings->Visual2DDebugEnabled(fScreenKey)
 		? B_CONTROL_ON : B_CONTROL_OFF);
 
 	BBox* screenBox = new BBox("screen box");
@@ -353,20 +358,23 @@ GPUSettingsView::MessageReceived(BMessage* message)
 		case TOGGLE_HARDWARE_CURSOR_MSG:
 		{
 			bool enabled = fHardwareCursorCheckbox->Value() == B_CONTROL_ON;
-			fSettings->SetHardwareCursorEnabled(fScreenIndex, enabled);
+			fSettings->SetHardwareCursorEnabled(fScreenKey, fScreenIndex,
+				enabled);
 			break;
 		}
 
 		case TOGGLE_2D_ACCELERATION_MSG:
 		{
 			bool enabled = f2DAccelerationCheckbox->Value() == B_CONTROL_ON;
-			fSettings->SetAcceleration2DEnabled(fScreenIndex, enabled);
+			fSettings->SetAcceleration2DEnabled(fScreenKey, fScreenIndex,
+				enabled);
 			if (enabled) {
 				f2DDebugCheckbox->SetEnabled(_QueryHasEDID());
 			} else {
 				f2DDebugCheckbox->SetValue(B_CONTROL_OFF);
 				f2DDebugCheckbox->SetEnabled(false);
-				fSettings->SetVisual2DDebugEnabled(fScreenIndex, false);
+				fSettings->SetVisual2DDebugEnabled(fScreenKey, fScreenIndex,
+					false);
 			}
 			break;
 		}
@@ -374,7 +382,8 @@ GPUSettingsView::MessageReceived(BMessage* message)
 		case TOGGLE_2D_DEBUG_MSG:
 		{
 			bool enabled = f2DDebugCheckbox->Value() == B_CONTROL_ON;
-			fSettings->SetVisual2DDebugEnabled(fScreenIndex, enabled);
+			fSettings->SetVisual2DDebugEnabled(fScreenKey, fScreenIndex,
+				enabled);
 			break;
 		}
 

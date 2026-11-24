@@ -179,6 +179,34 @@ gpu_device_name(BMessenger& appServerMessenger, int32 index)
 }
 
 
+// Multi-GPU: the key ScreenSettings' per-GPU preferences persist under
+// for a screen -- its PCI BDF (queried via 'gbdf') if resolvable, else
+// a fallback "idx<N>" that at least works within a single boot session
+// (cards with no resolvable PCI location, e.g. virtio, have no better
+// stable identity available -- see MULTIGPU_PLAN.md EDID section).
+// Duplicated near-identically in GPUSettingsView.cpp and
+// ScreenManager.cpp's apply_user_graphics_settings(), same convention.
+static BString
+gpu_settings_key(BMessenger& appServerMessenger, int32 screenIndex)
+{
+	BMessage request('gbdf');
+	request.AddInt32("screen", screenIndex);
+	BMessage reply;
+	BString bdf;
+	if (appServerMessenger.IsValid()
+		&& appServerMessenger.SendMessage(&request, &reply, 200000) == B_OK) {
+		reply.FindString("bdf", &bdf);
+	}
+
+	if (!bdf.IsEmpty())
+		return bdf;
+
+	BString key("idx");
+	key << screenIndex;
+	return key;
+}
+
+
 static const char*
 screen_errors(status_t status)
 {
@@ -214,6 +242,11 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 	fLoadFilePanel(NULL)
 {
 	BScreen screen(this);
+
+	{
+		BMessenger appServerMessenger("application/x-vnd.haiku-app_server");
+		fScreenKey = gpu_settings_key(appServerMessenger, fScreenIndex);
+	}
 
 	accelerant_device_info info;
 	if (screen.GetDeviceInfo(&info) == B_OK
@@ -558,7 +591,7 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 	}
 	fHasCursorAnimationCapability = hasCursorAnimation;
 	fHardwareCursorCheckbox->SetEnabled(hasSetCursorBitmap);
-	if (fSettings->HardwareCursorEnabled(fScreenIndex) && hasSetCursorBitmap)
+	if (fSettings->HardwareCursorEnabled(fScreenKey) && hasSetCursorBitmap)
 		fHardwareCursorCheckbox->SetValue(B_CONTROL_ON);
 	else
 		fHardwareCursorCheckbox->SetValue(B_CONTROL_OFF);
@@ -571,14 +604,14 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 		&& fHardwareCursorCheckbox->Value() == B_CONTROL_ON;
 	fCursorAnimationCheckbox->SetEnabled(canEnableCursorAnimation);
 	fCursorAnimationCheckbox->SetValue(canEnableCursorAnimation
-		&& fSettings->CursorAnimationEnabled(fScreenIndex)
+		&& fSettings->CursorAnimationEnabled(fScreenKey)
 		? B_CONTROL_ON : B_CONTROL_OFF);
 
 	fCursorAnimationSpeedSlider = new BSlider("cursor_ani_speed",
 		B_TRANSLATE("Cursor animation speed (%):"),
 		new BMessage(SLIDER_CURSOR_ANIMATION_SPEED_MSG), 25, 400, B_HORIZONTAL);
 	fCursorAnimationSpeedSlider->SetValue(
-		fSettings->CursorAnimationSpeedPercent(fScreenIndex));
+		fSettings->CursorAnimationSpeedPercent(fScreenKey));
 	fCursorAnimationSpeedSlider->SetEnabled(canEnableCursorAnimation
 		&& fCursorAnimationCheckbox->Value() == B_CONTROL_ON);
 
@@ -586,7 +619,7 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 		B_TRANSLATE("Cursor animation idle delay (ms):"),
 		new BMessage(SLIDER_CURSOR_ANIMATION_IDLE_MSG), 0, 15000, B_HORIZONTAL);
 	fCursorAnimationIdleSlider->SetValue(
-		fSettings->CursorAnimationIdleDelayMs(fScreenIndex));
+		fSettings->CursorAnimationIdleDelayMs(fScreenKey));
 	fCursorAnimationIdleSlider->SetEnabled(canEnableCursorAnimation
 		&& fCursorAnimationCheckbox->Value() == B_CONTROL_ON);
 
@@ -604,7 +637,7 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 		}
 	}
 	f2DAccelerationCheckbox->SetEnabled(has2DAcceleration);
-	if (has2DAcceleration && fSettings->Acceleration2DEnabled(fScreenIndex))
+	if (has2DAcceleration && fSettings->Acceleration2DEnabled(fScreenKey))
 		f2DAccelerationCheckbox->SetValue(B_CONTROL_ON);
 	else
 		f2DAccelerationCheckbox->SetValue(B_CONTROL_OFF);
@@ -615,7 +648,7 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 
 	bool canEnableDebug = has2DAcceleration && (f2DAccelerationCheckbox->Value() == B_CONTROL_ON);
 	f2DDebugCheckbox->SetEnabled(canEnableDebug);
-	if (canEnableDebug && fSettings->Visual2DDebugEnabled(fScreenIndex))
+	if (canEnableDebug && fSettings->Visual2DDebugEnabled(fScreenKey))
 		f2DDebugCheckbox->SetValue(B_CONTROL_ON);
 	else
 		f2DDebugCheckbox->SetValue(B_CONTROL_OFF);
@@ -1674,7 +1707,8 @@ ScreenWindow::MessageReceived(BMessage* message)
 		case TOGGLE_HARDWARE_CURSOR_MSG:
 		{
 			bool enabled = fHardwareCursorCheckbox->Value() == B_CONTROL_ON;
-			fSettings->SetHardwareCursorEnabled(fScreenIndex, enabled);
+			fSettings->SetHardwareCursorEnabled(fScreenKey, fScreenIndex,
+				enabled);
 
 			bool canEnableCursorAnimation = enabled
 				&& fHasCursorAnimationCapability;
@@ -1683,10 +1717,11 @@ ScreenWindow::MessageReceived(BMessage* message)
 				fCursorAnimationCheckbox->SetValue(B_CONTROL_OFF);
 				fCursorAnimationSpeedSlider->SetEnabled(false);
 				fCursorAnimationIdleSlider->SetEnabled(false);
-				fSettings->SetCursorAnimationEnabled(fScreenIndex, false);
+				fSettings->SetCursorAnimationEnabled(fScreenKey, fScreenIndex,
+					false);
 			} else {
 				fCursorAnimationCheckbox->SetValue(
-					fSettings->CursorAnimationEnabled(fScreenIndex)
+					fSettings->CursorAnimationEnabled(fScreenKey)
 						? B_CONTROL_ON : B_CONTROL_OFF);
 				fCursorAnimationSpeedSlider->SetEnabled(
 					fCursorAnimationCheckbox->Value() == B_CONTROL_ON);
@@ -1707,7 +1742,8 @@ ScreenWindow::MessageReceived(BMessage* message)
 		case TOGGLE_CURSOR_ANIMATION_MSG:
 		{
 			bool enabled = fCursorAnimationCheckbox->Value() == B_CONTROL_ON;
-			fSettings->SetCursorAnimationEnabled(fScreenIndex, enabled);
+			fSettings->SetCursorAnimationEnabled(fScreenKey, fScreenIndex,
+				enabled);
 			fCursorAnimationSpeedSlider->SetEnabled(enabled);
 			fCursorAnimationIdleSlider->SetEnabled(enabled);
 			break;
@@ -1715,14 +1751,14 @@ ScreenWindow::MessageReceived(BMessage* message)
 
 		case SLIDER_CURSOR_ANIMATION_SPEED_MSG:
 		{
-			fSettings->SetCursorAnimationSpeedPercent(fScreenIndex,
+			fSettings->SetCursorAnimationSpeedPercent(fScreenKey, fScreenIndex,
 				fCursorAnimationSpeedSlider->Value());
 			break;
 		}
 
 		case SLIDER_CURSOR_ANIMATION_IDLE_MSG:
 		{
-			fSettings->SetCursorAnimationIdleDelayMs(fScreenIndex,
+			fSettings->SetCursorAnimationIdleDelayMs(fScreenKey, fScreenIndex,
 				fCursorAnimationIdleSlider->Value());
 			break;
 		}
@@ -1730,14 +1766,16 @@ ScreenWindow::MessageReceived(BMessage* message)
 		case TOGGLE_2D_ACCELERATION_MSG:
 		{
 			bool enabled = f2DAccelerationCheckbox->Value() == B_CONTROL_ON;
-			fSettings->SetAcceleration2DEnabled(fScreenIndex, enabled);
+			fSettings->SetAcceleration2DEnabled(fScreenKey, fScreenIndex,
+				enabled);
 
 			if (enabled) {
 				f2DDebugCheckbox->SetEnabled(true);
 			} else {
 				f2DDebugCheckbox->SetValue(B_CONTROL_OFF);
 				f2DDebugCheckbox->SetEnabled(false);
-				fSettings->SetVisual2DDebugEnabled(fScreenIndex, false);
+				fSettings->SetVisual2DDebugEnabled(fScreenKey, fScreenIndex,
+					false);
 			}
 
 			break;
@@ -1746,7 +1784,8 @@ ScreenWindow::MessageReceived(BMessage* message)
 		case TOGGLE_2D_DEBUG_MSG:
 		{
 			bool enabled = f2DDebugCheckbox->Value() == B_CONTROL_ON;
-			fSettings->SetVisual2DDebugEnabled(fScreenIndex, enabled);
+			fSettings->SetVisual2DDebugEnabled(fScreenKey, fScreenIndex,
+				enabled);
 			break;
 		}
 

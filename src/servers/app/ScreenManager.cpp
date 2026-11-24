@@ -29,6 +29,7 @@
 #include <SupportDefs.h>
 
 #include <new>
+#include <stdio.h>
 #include <string.h>
 
 using std::nothrow;
@@ -269,9 +270,33 @@ ScreenManager::_ScanDrivers()
 	be assigned).
 */
 static BString
-settings_key(const char* base, int32 screenIndex)
+settings_key(const char* base, const BString& key)
 {
-	BString key(base);
+	BString result(base);
+	result << key;
+	return result;
+}
+
+
+/*!	The key ScreenSettings' per-GPU preferences persist under for this
+	screen -- its PCI BDF if resolvable, else a fallback "idx<N>" that at
+	least works within a single boot session (cards with no resolvable
+	PCI location, e.g. virtio, have no better stable identity available
+	-- see MULTIGPU_PLAN.md EDID section). Duplicated near-identically in
+	ScreenWindow.cpp's and GPUSettingsView.cpp's own gpu_settings_key().
+*/
+static BString
+gpu_settings_key(AccelerantHWInterface* accelerant, int32 screenIndex)
+{
+	uint8 bus, device, function;
+	if (accelerant != NULL
+		&& accelerant->GetPciLocation(&bus, &device, &function) == B_OK) {
+		char bdf[7];
+		snprintf(bdf, sizeof(bdf), "%02x%02x%02x", bus, device, function);
+		return bdf;
+	}
+
+	BString key("idx");
 	key << screenIndex;
 	return key;
 }
@@ -298,25 +323,27 @@ apply_user_graphics_settings(HWInterface* interface, int32 screenIndex)
 	if (settings.Unflatten(&file) != B_OK)
 		return;
 
+	BString key = gpu_settings_key(accelerant, screenIndex);
+
 	bool hw = true;
-	if (settings.FindBool(settings_key("hwcursor", screenIndex), &hw) == B_OK)
+	if (settings.FindBool(settings_key("hwcursor", key), &hw) == B_OK)
 		accelerant->SetUserHardwareCursor(hw);
 
 	bool acc = false;
-	if (settings.FindBool(settings_key("accel2d", screenIndex), &acc) == B_OK)
+	if (settings.FindBool(settings_key("accel2d", key), &acc) == B_OK)
 		accelerant->SetUser2DAcceleration(acc);
 
 	bool dbg = false;
-	if (settings.FindBool(settings_key("debug2d", screenIndex), &dbg) == B_OK)
+	if (settings.FindBool(settings_key("debug2d", key), &dbg) == B_OK)
 		accelerant->SetUserDebugLed(dbg);
 
 	bool cursorAnimation = false;
-	settings.FindBool(settings_key("cursorani", screenIndex), &cursorAnimation);
+	settings.FindBool(settings_key("cursorani", key), &cursorAnimation);
 	int32 animationSpeed = 100;
-	settings.FindInt32(settings_key("cursoranispeed", screenIndex),
+	settings.FindInt32(settings_key("cursoranispeed", key),
 		&animationSpeed);
 	int32 animationIdleDelayMs = 0;
-	settings.FindInt32(settings_key("cursoranidelay", screenIndex),
+	settings.FindInt32(settings_key("cursoranidelay", key),
 		&animationIdleDelayMs);
 	accelerant->SetUserCursorAnimationSettings(cursorAnimation,
 		max_c(0.1f, animationSpeed / 100.0f),
