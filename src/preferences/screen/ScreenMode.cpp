@@ -186,12 +186,29 @@ screen_mode::SetTo(const display_mode& mode)
 ScreenMode::ScreenMode(BWindow* window)
 	:
 	fWindow(window),
+	fScreenIndex(-1),
 	fUpdatedModes(false)
 {
-	BScreen screen(window);
+	BScreen screen = _Screen();
 	if (screen.GetModeList(&fModeList, &fModeCount) == B_OK) {
 		// sort modes by resolution and refresh to make
 		// the resolution and refresh menu look nicer
+		qsort(fModeList, fModeCount, sizeof(display_mode), compare_mode);
+	} else {
+		fModeList = NULL;
+		fModeCount = 0;
+	}
+}
+
+
+ScreenMode::ScreenMode(BWindow* window, int32 screenIndex)
+	:
+	fWindow(window),
+	fScreenIndex(screenIndex),
+	fUpdatedModes(false)
+{
+	BScreen screen = _Screen();
+	if (screen.GetModeList(&fModeList, &fModeCount) == B_OK) {
 		qsort(fModeList, fModeCount, sizeof(display_mode), compare_mode);
 	} else {
 		fModeList = NULL;
@@ -206,6 +223,19 @@ ScreenMode::~ScreenMode()
 }
 
 
+BScreen
+ScreenMode::_Screen() const
+{
+	if (fScreenIndex >= 0) {
+		screen_id id;
+		id.id = fScreenIndex;
+		return BScreen(id);
+	}
+
+	return BScreen(fWindow);
+}
+
+
 status_t
 ScreenMode::UpdateModeList()
 {
@@ -213,7 +243,7 @@ ScreenMode::UpdateModeList()
 	fModeList = NULL;
 	fModeCount = 0;
 
-	BScreen screen(fWindow);
+	BScreen screen = _Screen();
 	status_t status = screen.GetModeList(&fModeList, &fModeCount);
 	if (status == B_OK && fModeList != NULL && fModeCount > 0)
 		qsort(fModeList, fModeCount, sizeof(display_mode), compare_mode);
@@ -228,7 +258,7 @@ ScreenMode::Set(const screen_mode& mode, int32 workspace)
 	if (!fUpdatedModes)
 		UpdateOriginalModes();
 
-	BScreen screen(fWindow);
+	BScreen screen = _Screen();
 
 	if (workspace == ~0)
 		workspace = current_workspace();
@@ -250,7 +280,7 @@ status_t
 ScreenMode::Get(screen_mode& mode, int32 workspace) const
 {
 	display_mode displayMode;
-	BScreen screen(fWindow);
+	BScreen screen = _Screen();
 
 	if (workspace == ~0)
 		workspace = current_workspace();
@@ -293,7 +323,7 @@ ScreenMode::Set(const display_mode& mode, int32 workspace)
 	if (!fUpdatedModes)
 		UpdateOriginalModes();
 
-	BScreen screen(fWindow);
+	BScreen screen = _Screen();
 
 	if (workspace == ~0)
 		workspace = current_workspace();
@@ -308,7 +338,7 @@ ScreenMode::Set(const display_mode& mode, int32 workspace)
 status_t
 ScreenMode::Get(display_mode& mode, int32 workspace) const
 {
-	BScreen screen(fWindow);
+	BScreen screen = _Screen();
 
 	if (workspace == ~0)
 		workspace = current_workspace();
@@ -332,7 +362,7 @@ ScreenMode::Revert()
 		if (Get(current, workspace) == B_OK && fOriginal[workspace] == current)
 			continue;
 
-		BScreen screen(fWindow);
+		BScreen screen = _Screen();
 
 		// TODO: our app_server doesn't fully support workspaces, yet
 		if (workspace == current_workspace()) {
@@ -354,7 +384,7 @@ ScreenMode::Revert()
 void
 ScreenMode::UpdateOriginalModes()
 {
-	BScreen screen(fWindow);
+	BScreen screen = _Screen();
 	for (int32 workspace = 0; workspace < count_workspaces(); workspace++) {
 		if (screen.GetMode(workspace, &fOriginalDisplayMode[workspace])
 				== B_OK) {
@@ -380,7 +410,7 @@ ScreenMode::GetRefreshLimits(const screen_mode& mode, float& min, float& max)
 	if (!_GetDisplayMode(mode, displayMode))
 		return B_ERROR;
 
-	BScreen screen(fWindow);
+	BScreen screen = _Screen();
 	if (screen.GetPixelClockLimits(&displayMode, &minClock, &maxClock) < B_OK)
 		return B_ERROR;
 
@@ -412,7 +442,7 @@ ScreenMode::GetManufacturerFromID(const char* id) const
 status_t
 ScreenMode::GetMonitorInfo(monitor_info& info, float* _diagonalInches)
 {
-	BScreen screen(fWindow);
+	BScreen screen = _Screen();
 	status_t status = screen.GetMonitorInfo(&info);
 	if (status != B_OK)
 		return status;
@@ -452,7 +482,7 @@ ScreenMode::GetMonitorInfo(monitor_info& info, float* _diagonalInches)
 status_t
 ScreenMode::GetDeviceInfo(accelerant_device_info& info)
 {
-	BScreen screen(fWindow);
+	BScreen screen = _Screen();
 	return screen.GetDeviceInfo(&info);
 }
 

@@ -12,13 +12,15 @@
 #define MONITOR_VIEW_H
 
 
+#include <Screen.h>
 #include <View.h>
 
 
 class MonitorView : public BView {
 public:
 							MonitorView(BRect frame, const char* name,
-								int32 screenWidth, int32 screenHeight);
+								int32 screenWidth, int32 screenHeight,
+								int32 screenIndex = -1);
 	virtual					~MonitorView();
 
 	virtual	void			AttachedToWindow();
@@ -32,6 +34,14 @@ public:
 private:
 			BRect			_MonitorBounds();
 			void			_UpdateDPI();
+			BScreen			_Screen() const;
+
+			// Multi-GPU (MULTIGPU_PLAN.md Fase F): -1 means "whichever
+			// screen Window() currently sits on" (legacy, single-GPU
+			// behavior, still used by the primary GPU's tab); >= 0 pins
+			// this view to that exact screen regardless of which one the
+			// window itself is on (needed for every other GPU's tab).
+			int32			fScreenIndex;
 
 			rgb_color		fBackgroundColor;
 			rgb_color		fDesktopColor;

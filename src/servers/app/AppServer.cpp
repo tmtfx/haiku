@@ -13,6 +13,7 @@
 
 #include "AppServer.h"
 
+#include <stdio.h>
 #include <syslog.h>
 
 #include <AutoDeleter.h>
@@ -20,6 +21,10 @@
 #include <PortLink.h>
 #include <RosterPrivate.h>
 #include <Autolock.h>
+#include <File.h>
+#include <FindDirectory.h>
+#include <Path.h>
+#include <String.h>
 
 #include "AccelerantHWInterface.h"
 #include "Screen.h"
@@ -150,11 +155,14 @@ AppServer::MessageReceived(BMessage* message)
 		case AS_SET_HW_CUR_BITMAP_ENABLED:
 		{
 			bool enable;
+			int32 screenIndex = 0;
+			message->FindInt32("screen", &screenIndex);
 			if (message->FindBool("enable", &enable) == B_OK) {
 				BAutolock locker(gScreenManager);
-				if (gScreenManager && gScreenManager->CountScreens() > 0) {
-					Screen* s = gScreenManager->ScreenAt(0);
-			
+				if (gScreenManager && screenIndex >= 0
+					&& screenIndex < gScreenManager->CountScreens()) {
+					Screen* s = gScreenManager->ScreenAt(screenIndex);
+
 					if (s != NULL && s->HWInterface() != NULL) {
 						AccelerantHWInterface* interface = dynamic_cast<AccelerantHWInterface*>(s->HWInterface());
 				
@@ -173,12 +181,15 @@ AppServer::MessageReceived(BMessage* message)
 			bool enable;
 			int32 speedPercent;
 			int32 idleDelayMs;
+			int32 screenIndex = 0;
+			message->FindInt32("screen", &screenIndex);
 			if (message->FindBool("enable", &enable) == B_OK
 				&& message->FindInt32("speed_percent", &speedPercent) == B_OK
 				&& message->FindInt32("idle_delay_ms", &idleDelayMs) == B_OK) {
 				BAutolock locker(gScreenManager);
-				if (gScreenManager && gScreenManager->CountScreens() > 0) {
-					Screen* s = gScreenManager->ScreenAt(0);
+				if (gScreenManager && screenIndex >= 0
+					&& screenIndex < gScreenManager->CountScreens()) {
+					Screen* s = gScreenManager->ScreenAt(screenIndex);
 
 					if (s != NULL && s->HWInterface() != NULL) {
 						AccelerantHWInterface* interface
@@ -201,10 +212,13 @@ AppServer::MessageReceived(BMessage* message)
 		case AS_SET_2D_ACCELERATION_ENABLED:
 		{
 			bool enable;
+			int32 screenIndex = 0;
+			message->FindInt32("screen", &screenIndex);
 			if (message->FindBool("enable", &enable) == B_OK) {
 				BAutolock locker(gScreenManager);
-				if (gScreenManager && gScreenManager->CountScreens() > 0) {
-					Screen* s = gScreenManager->ScreenAt(0);
+				if (gScreenManager && screenIndex >= 0
+					&& screenIndex < gScreenManager->CountScreens()) {
+					Screen* s = gScreenManager->ScreenAt(screenIndex);
 
 					if (s != NULL && s->HWInterface() != NULL) {
 						AccelerantHWInterface* interface = dynamic_cast<AccelerantHWInterface*>(s->HWInterface());
@@ -234,10 +248,13 @@ AppServer::MessageReceived(BMessage* message)
 		case AS_SET_2D_DEBUG_ENABLED:
         {
             bool enable;
+            int32 screenIndex = 0;
+            message->FindInt32("screen", &screenIndex);
             if (message->FindBool("enable", &enable) == B_OK) {
                 BAutolock locker(gScreenManager);
-                if (gScreenManager && gScreenManager->CountScreens() > 0) {
-                    Screen* s = gScreenManager->ScreenAt(0);
+                if (gScreenManager && screenIndex >= 0
+                    && screenIndex < gScreenManager->CountScreens()) {
+                    Screen* s = gScreenManager->ScreenAt(screenIndex);
 
                     if (s != NULL && s->HWInterface() != NULL) {
                         AccelerantHWInterface* interface = dynamic_cast<AccelerantHWInterface*>(s->HWInterface());
@@ -253,9 +270,12 @@ AppServer::MessageReceived(BMessage* message)
 		case 'hsbm':
 		{
 			bool has = false;
+			int32 screenIndex = 0;
+			message->FindInt32("screen", &screenIndex);
 			BAutolock locker(gScreenManager);
-			if (gScreenManager && gScreenManager->CountScreens() > 0) {
-				Screen* s = gScreenManager->ScreenAt(0);
+			if (gScreenManager && screenIndex >= 0
+				&& screenIndex < gScreenManager->CountScreens()) {
+				Screen* s = gScreenManager->ScreenAt(screenIndex);
 				if (s && s->HWInterface())
 					has = s->HWInterface()->HasSetCursorBitmap();
 			}
@@ -269,9 +289,12 @@ AppServer::MessageReceived(BMessage* message)
 		case 'h2da':
 		{
 			bool has = false;
+			int32 screenIndex = 0;
+			message->FindInt32("screen", &screenIndex);
 			BAutolock locker(gScreenManager);
-			if (gScreenManager && gScreenManager->CountScreens() > 0) {
-				Screen* s = gScreenManager->ScreenAt(0);
+			if (gScreenManager && screenIndex >= 0
+				&& screenIndex < gScreenManager->CountScreens()) {
+				Screen* s = gScreenManager->ScreenAt(screenIndex);
 				if (s && s->HWInterface())
 					has = s->HWInterface()->Has2DAcceleration();
 			}
@@ -285,9 +308,12 @@ AppServer::MessageReceived(BMessage* message)
 		case 'gedc':
 		{
 			bool has = false;
+			int32 screenIndex = 0;
+			message->FindInt32("screen", &screenIndex);
 			BAutolock locker(gScreenManager);
-			if (gScreenManager && gScreenManager->CountScreens() > 0) {
-				Screen* s = gScreenManager->ScreenAt(0);
+			if (gScreenManager && screenIndex >= 0
+				&& screenIndex < gScreenManager->CountScreens()) {
+				Screen* s = gScreenManager->ScreenAt(screenIndex);
 				if (s && s->HWInterface())
 					has = s->HWInterface()->SupportsGetEDID();
 			}
@@ -301,9 +327,12 @@ AppServer::MessageReceived(BMessage* message)
 		case 'sedc':
 		{
 			bool has = false;
+			int32 screenIndex = 0;
+			message->FindInt32("screen", &screenIndex);
 			BAutolock locker(gScreenManager);
-			if (gScreenManager && gScreenManager->CountScreens() > 0) {
-				Screen* s = gScreenManager->ScreenAt(0);
+			if (gScreenManager && screenIndex >= 0
+				&& screenIndex < gScreenManager->CountScreens()) {
+				Screen* s = gScreenManager->ScreenAt(screenIndex);
 				if (s && s->HWInterface())
 					has = s->HWInterface()->SupportsSetEDID();
 			}
@@ -368,6 +397,18 @@ AppServer::MessageReceived(BMessage* message)
 				}
 			}
 
+			if (status == B_OK) {
+				// Multi-GPU: this screen's eligibility for a workspace row
+				// (and its DPMS state) depends on whether it has a usable
+				// EDID -- recompute now that it just changed.
+				BAutolock locker(fDesktopLock);
+				for (int32 i = 0; i < fDesktops.CountItems(); i++) {
+					Desktop* desktop = fDesktops.ItemAt(i);
+					if (desktop != NULL)
+						desktop->GpuConfigurationChanged();
+				}
+			}
+
 			BMessage reply;
 			reply.AddInt32("status", status);
 			message->SendReply(&reply);
@@ -377,15 +418,180 @@ AppServer::MessageReceived(BMessage* message)
 		case 'hcai':
 		{
 			bool has = false;
+			int32 screenIndex = 0;
+			message->FindInt32("screen", &screenIndex);
 			BAutolock locker(gScreenManager);
-			if (gScreenManager && gScreenManager->CountScreens() > 0) {
-				Screen* s = gScreenManager->ScreenAt(0);
+			if (gScreenManager && screenIndex >= 0
+				&& screenIndex < gScreenManager->CountScreens()) {
+				Screen* s = gScreenManager->ScreenAt(screenIndex);
 				if (s && s->HWInterface())
 					has = s->HWInterface()->HasAnimatedCursorSupport();
 			}
 
 			BMessage reply;
 			reply.AddBool("has_cursor_animation", has);
+			message->SendReply(&reply);
+			break;
+		}
+
+		case AS_GPU_CONFIG_CHANGED:
+		{
+			// Multi-GPU (MULTIGPU_PLAN.md Fase A/EDID): the preflet just
+			// changed something in Screen_data that affects
+			// activeGpuList -- the manual GPU order/primary, or a
+			// screen's "EDID unset" override. Nothing is attached to
+			// this message; Desktop re-reads Screen_data from disk and
+			// recomputes, exactly like the EDID-change path below.
+			BAutolock locker(fDesktopLock);
+			for (int32 i = 0; i < fDesktops.CountItems(); i++) {
+				Desktop* desktop = fDesktops.ItemAt(i);
+				if (desktop != NULL)
+					desktop->GpuConfigurationChanged();
+			}
+			break;
+		}
+
+		case 'cnts':
+		{
+			// Multi-GPU: how many screens (one per detected graphics card,
+			// see MULTIGPU_PLAN.md Fase C) the Screen preflet should show
+			// a tab for.
+			int32 count = 0;
+			{
+				BAutolock locker(gScreenManager);
+				if (gScreenManager != NULL)
+					count = gScreenManager->CountScreens();
+			}
+
+			BMessage reply;
+			reply.AddInt32("count", count);
+			message->SendReply(&reply);
+			break;
+		}
+
+		case 'devn':
+		{
+			// Multi-GPU: a human-recognizable name for one screen's card,
+			// for the Screen preflet's per-GPU tab label.
+			BString name;
+			int32 screenIndex = 0;
+			message->FindInt32("screen", &screenIndex);
+
+			BAutolock locker(gScreenManager);
+			if (gScreenManager && screenIndex >= 0
+				&& screenIndex < gScreenManager->CountScreens()) {
+				Screen* s = gScreenManager->ScreenAt(screenIndex);
+				accelerant_device_info info;
+				if (s != NULL && s->HWInterface() != NULL
+					&& s->HWInterface()->GetDeviceInfo(&info) == B_OK
+					&& info.name[0] != '\0') {
+					name = info.name;
+				}
+			}
+
+			BMessage reply;
+			reply.AddString("name", name);
+			message->SendReply(&reply);
+			break;
+		}
+
+		case 'gbdf':
+		{
+			// Multi-GPU: this screen's PCI bus/device/function as a
+			// "bbddff" hex string, same convention as
+			// AccelerantHWInterface::GetPciLocation(). Used by the
+			// Screen preflet to persist the user-configured GPU order
+			// (see MULTIGPU_PLAN.md Fase A) -- empty if this screen's
+			// card doesn't expose a PCI location (e.g. virtio, or vesa/
+			// framebuffer fallback).
+			BString bdf;
+			int32 screenIndex = 0;
+			message->FindInt32("screen", &screenIndex);
+
+			BAutolock locker(gScreenManager);
+			if (gScreenManager && screenIndex >= 0
+				&& screenIndex < gScreenManager->CountScreens()) {
+				Screen* s = gScreenManager->ScreenAt(screenIndex);
+				AccelerantHWInterface* accelerant = s != NULL
+					? dynamic_cast<AccelerantHWInterface*>(s->HWInterface())
+					: NULL;
+				uint8 bus, device, function;
+				if (accelerant != NULL
+					&& accelerant->GetPciLocation(&bus, &device, &function)
+						== B_OK) {
+					char buffer[7];
+					snprintf(buffer, sizeof(buffer), "%02x%02x%02x", bus,
+						device, function);
+					bdf = buffer;
+				}
+			}
+
+			BMessage reply;
+			reply.AddString("bdf", bdf);
+			message->SendReply(&reply);
+			break;
+		}
+
+		case 'hedi':
+		{
+			// Multi-GPU: whether this screen effectively has a usable
+			// EDID right now -- the driver actually reports one via
+			// GetEDID() (DDC, boot item, or .settings override) AND the
+			// user hasn't forced it off via the Screen preflet's "Unset
+			// EDID" button (see MULTIGPU_PLAN.md, EDID section). Mirrors
+			// Desktop::_UpdateActiveGpuScreens()'s own check exactly, so
+			// the preflet can gate a GPU's controls (resolution, cursor,
+			// 2D, ...) the same way Desktop gates DPMS/row-eligibility.
+			bool hasEDID = false;
+			int32 screenIndex = 0;
+			message->FindInt32("screen", &screenIndex);
+
+			BAutolock locker(gScreenManager);
+			if (gScreenManager && screenIndex >= 0
+				&& screenIndex < gScreenManager->CountScreens()) {
+				Screen* s = gScreenManager->ScreenAt(screenIndex);
+				if (s != NULL && s->HWInterface() != NULL) {
+					edid1_info edid;
+					uint32 version = 0;
+					hasEDID = s->HWInterface()->GetEDID(&edid, sizeof(edid),
+						&version) == B_OK;
+				}
+
+				if (hasEDID) {
+					AccelerantHWInterface* accelerant = s != NULL
+						? dynamic_cast<AccelerantHWInterface*>(
+							s->HWInterface())
+						: NULL;
+					uint8 bus, device, function;
+					if (accelerant != NULL
+						&& accelerant->GetPciLocation(&bus, &device,
+							&function) == B_OK) {
+						char bdf[7];
+						snprintf(bdf, sizeof(bdf), "%02x%02x%02x", bus,
+							device, function);
+
+						BPath path;
+						BMessage stored;
+						if (find_directory(B_USER_SETTINGS_DIRECTORY, &path)
+								== B_OK) {
+							path.Append("Screen_data");
+							BFile file(path.Path(), B_READ_ONLY);
+							if (file.InitCheck() == B_OK
+								&& stored.Unflatten(&file) == B_OK) {
+								BString key("edidunset_");
+								key << bdf;
+								bool unset = false;
+								stored.FindBool(key, &unset);
+								if (unset)
+									hasEDID = false;
+							}
+						}
+					}
+				}
+			}
+
+			BMessage reply;
+			reply.AddBool("has_edid", hasEDID);
 			message->SendReply(&reply);
 			break;
 		}

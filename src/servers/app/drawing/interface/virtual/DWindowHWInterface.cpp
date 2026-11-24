@@ -350,9 +350,9 @@ DWindowHWInterface::~DWindowHWInterface()
 
 
 status_t
-DWindowHWInterface::Initialize()
+DWindowHWInterface::Initialize(const char* devicePath)
 {
-	status_t ret = HWInterface::Initialize();
+	status_t ret = HWInterface::Initialize(devicePath);
 
 	if (ret >= B_OK) {
 		for (int32 i = 1; fCardFD != B_ENTRY_NOT_FOUND; i++) {

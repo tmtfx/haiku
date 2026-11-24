@@ -29,7 +29,7 @@ public:
 									RemoteHWInterface(const char* target);
 virtual								~RemoteHWInterface();
 
-virtual	status_t					Initialize();
+virtual	status_t					Initialize(const char* devicePath = NULL);
 virtual	status_t					Shutdown();
 
 virtual	DrawingEngine*				CreateDrawingEngine();

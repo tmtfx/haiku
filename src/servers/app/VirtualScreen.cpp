@@ -171,6 +171,24 @@ VirtualScreen::RemoveScreen(Screen* screen)
 
 
 void
+VirtualScreen::SetActiveScreen(Screen* screen)
+{
+	if (screen == NULL || fHWInterface == screen->HWInterface())
+		return;
+
+	for (int32 i = 0; i < fScreenList.CountItems(); i++) {
+		screen_item* item = fScreenList.ItemAt(i);
+		if (item->screen == screen) {
+			fDrawingEngine = screen->GetDrawingEngine();
+			fHWInterface = screen->HWInterface();
+			fFrame = item->frame;
+			return;
+		}
+	}
+}
+
+
+void
 VirtualScreen::UpdateFrame()
 {
 	int32 virtualWidth = 0, virtualHeight = 0;
@@ -215,10 +233,17 @@ VirtualScreen::ScreenAt(int32 index) const
 Screen*
 VirtualScreen::ScreenByID(int32 id) const
 {
+	// NOTE: used to also match any lookup where id == B_MAIN_SCREEN_ID.id
+	// regardless of the actual screen found, back when there was only
+	// ever one screen to find. With multiple screens that's wrong -- it
+	// made any id-0 lookup (i.e. every ordinary BScreen(B_MAIN_SCREEN_ID)
+	// call from any app) silently return whichever screen happened to be
+	// last in fScreenList instead of the one whose own ID is actually 0.
+	// See MULTIGPU_PLAN.md Fase D/F.
 	for (int32 i = fScreenList.CountItems(); i-- > 0;) {
 		screen_item* item = fScreenList.ItemAt(i);
 
-		if (item->screen->ID() == id || id == B_MAIN_SCREEN_ID.id)
+		if (item->screen->ID() == id)
 			return item->screen;
 	}
 

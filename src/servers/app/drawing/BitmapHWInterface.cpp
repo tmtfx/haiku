@@ -37,9 +37,9 @@ BitmapHWInterface::~BitmapHWInterface()
 
 
 status_t
-BitmapHWInterface::Initialize()
+BitmapHWInterface::Initialize(const char* devicePath)
 {
-	status_t ret = HWInterface::Initialize();
+	status_t ret = HWInterface::Initialize(devicePath);
 	if (ret < B_OK)
 		return ret;
 

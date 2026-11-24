@@ -28,6 +28,7 @@
 #include <Debug.h>
 #include <debugger.h>
 #include <DirectWindow.h>
+#include <edid.h>
 #include <Entry.h>
 #include <File.h>
 #include <FindDirectory.h>
@@ -37,6 +38,7 @@
 #include <PthreadMutexLocker.h>
 #include <Region.h>
 #include <Roster.h>
+#include <StringList.h>
 
 #include <PrivateScreen.h>
 #include <ServerProtocol.h>
@@ -44,6 +46,7 @@
 #include <ViewPrivate.h>
 #include <WindowInfo.h>
 
+#include "AccelerantHWInterface.h"
 #include "AppServer.h"
 #include "ClickTarget.h"
 #include "DecorManager.h"
@@ -531,6 +534,8 @@ Desktop::Init()
 
 	HWInterface()->SetDPMSMode(B_DPMS_ON);
 
+	_UpdateActiveGpuScreens();
+
 	// Restore brightness
 	{
 		Screen* screen = fVirtualScreen.ScreenAt(0);
@@ -544,21 +549,19 @@ Desktop::Init()
 			HWInterface()->SetBrightness(stored->brightness);
 	}
 
-	// Restore 2D compositor preference
+	// Restore 2D compositor preference. Screen_data is a flattened BMessage
+	// (see ScreenSettings.cpp / MULTIGPU_PLAN.md Fase F); the compositor
+	// is a single Desktop-wide switch, so unlike the per-screen keys it
+	// has no index suffix.
 	{
 		BPath path;
 		if (find_directory(B_USER_SETTINGS_DIRECTORY, &path) == B_OK) {
 			path.Append("Screen_data");
 			BFile file(path.Path(), B_READ_ONLY);
-			if (file.InitCheck() == B_OK) {
-				BPoint offset;
-				file.Read(&offset, sizeof(BPoint));
-				bool hw = true;
-				file.Read(&hw, sizeof(bool));
-				bool acc = false;
-				file.Read(&acc, sizeof(bool));
+			BMessage stored;
+			if (file.InitCheck() == B_OK && stored.Unflatten(&file) == B_OK) {
 				bool comp = false;
-				if (file.Read(&comp, sizeof(bool)) == (ssize_t)sizeof(bool) && comp) {
+				if (stored.FindBool("compositor2d", &comp) == B_OK && comp) {
 					// Mirror the Screen preflet's own gate for enabling
 					// the compositor checkbox in the first place
 					// (ScreenWindow.cpp: hasSetCursorBitmap &&
@@ -568,9 +571,31 @@ Desktop::Init()
 					// Desktop::SetCompositor2DEnabled) -- the compositor
 					// itself blends in software and doesn't use 2D
 					// hardware acceleration, so that check never
-					// reflected a real requirement.
-					if (HWInterface()->HasSetCursorBitmap() && hw)
+					// reflected a real requirement. With multi-GPU, the
+					// compositor is still a single Desktop-wide switch
+					// (see MULTIGPU_PLAN.md), so it only restores as
+					// enabled if every currently active GPU -- not just
+					// one -- both supports the hardware cursor and has
+					// the user's "hardware cursor" preference enabled
+					// (checked per screen ID, defaulting to enabled, same
+					// as ScreenManager's apply_user_graphics_settings()).
+					bool allPreferHardwareCursor = true;
+					for (int32 i = 0; i < fActiveGpuScreens.CountItems();
+							i++) {
+						bool prefersHW = true;
+						BString key("hwcursor");
+						key << fActiveGpuScreens.ItemAt(i)->ID();
+						stored.FindBool(key, &prefersHW);
+						if (!prefersHW) {
+							allPreferHardwareCursor = false;
+							break;
+						}
+					}
+
+					if (AllActiveGpusHaveHardwareCursor()
+							&& allPreferHardwareCursor) {
 						fCompositor2DEnabled = true;
+					}
 				}
 			}
 		}
@@ -1007,12 +1032,20 @@ Desktop::RevertScreenModes(uint32 workspaces)
 status_t
 Desktop::SetBrightness(int32 id, float brightness)
 {
-	status_t result = HWInterface()->SetBrightness(brightness);
+	// Multi-GPU: target the specific screen \a id refers to, not whichever
+	// one happens to be active for the current workspace (see
+	// MULTIGPU_PLAN.md Fase D/F) -- otherwise a brightness change issued
+	// for one GPU's tab could silently land on a different GPU's hardware
+	// while still being recorded under the requested id's configuration.
+	::HWInterface* interface = fVirtualScreen.ScreenByID(id) != NULL
+		? fVirtualScreen.ScreenByID(id)->HWInterface() : HWInterface();
+
+	status_t result = interface->SetBrightness(brightness);
 
 	if (result == B_OK) {
 		screen_configuration* current = fWorkspaces[0].CurrentScreenConfiguration().GetByID(id);
 		if (current != NULL) {
-			HWInterface()->GetBrightness(&brightness);
+			interface->GetBrightness(&brightness);
 			current->brightness = brightness;
 
 			// Save brightness for next boot
@@ -2276,6 +2309,16 @@ void
 Desktop::SetCompositor2DEnabled(bool enable)
 {
 	if (fCompositor2DEnabled == enable)
+		return;
+
+	// Multi-GPU: the compositor is a single Desktop-wide switch (Fase E),
+	// so it may only be turned on if every currently active GPU supports
+	// the hardware cursor -- this used to be enforced only by the Screen
+	// preflet disabling its checkbox and by the boot-restore path in
+	// Init(), never by the live toggle itself, so a client that skipped
+	// the preflet's own check (or a stale/wrong client-side check -- see
+	// MULTIGPU_PLAN.md) could force it on incorrectly.
+	if (enable && !AllActiveGpusHaveHardwareCursor())
 		return;
 
 	if (!LockAllWindows())
@@ -4317,6 +4360,182 @@ Desktop::_SetCurrentWorkspaceConfiguration()
 		if ((changedScreens & (1 << i)) != 0)
 			_ScreenChanged(fVirtualScreen.ScreenAt(i));
 	}
+
+	// Multi-GPU: fVirtualScreen.SetConfiguration() above just released and
+	// re-acquired every screen and ran AddScreen() for each of them again,
+	// which leaves whichever one happens to be last in that list as
+	// "active" (see MULTIGPU_PLAN.md Fase D) -- override that here with
+	// the screen this workspace's row is actually assigned to.
+	if (fActiveGpuScreens.CountItems() > 0) {
+		int32 columns = 1;
+		if (fSettings.IsSet())
+			columns = fSettings->WorkspacesColumns();
+		if (columns < 1)
+			columns = 1;
+
+		int32 row = fCurrentWorkspace / columns;
+		Screen* rowScreen
+			= fActiveGpuScreens.ItemAt(row % fActiveGpuScreens.CountItems());
+		fVirtualScreen.SetActiveScreen(rowScreen);
+	}
+}
+
+
+/*!	Rebuilds the list of screens eligible for a workspace row (those with a
+	usable EDID -- runtime SetEDID or driver .settings override, see
+	MULTIGPU_PLAN.md Fase D) and puts every other screen in B_DPMS_OFF.
+	A screen that has EDID keeps B_DPMS_ON even when its row isn't the one
+	currently visible -- it's just not compositing right now, same as any
+	real idle-but-powered monitor.
+
+	TODO (Fase A): until boot-time primary detection exists, the "primary
+	first" ordering this list is supposed to have degrades to plain
+	discovery order -- same behavior as today's single-GPU case either way.
+*/
+/*!	Reads the user-configured GPU order/primary from Screen_data (set via
+	the Screen preflet's "Workspaces" tab -- see MULTIGPU_PLAN.md Fase A).
+	Returns the BDF strings ("bbddff" hex, same convention as
+	AccelerantHWInterface::GetPciLocation()) in the order the user wants,
+	first entry being the primary. Empty if nothing has been configured
+	yet (every screen then just keeps discovery order, same as before
+	multi-GPU support existed).
+*/
+static bool
+read_screen_data(BMessage& stored)
+{
+	BPath path;
+	if (find_directory(B_USER_SETTINGS_DIRECTORY, &path) != B_OK)
+		return false;
+
+	path.Append("Screen_data");
+	BFile file(path.Path(), B_READ_ONLY);
+	return file.InitCheck() == B_OK && stored.Unflatten(&file) == B_OK;
+}
+
+
+static BStringList
+read_configured_gpu_order(const BMessage& stored)
+{
+	BStringList order;
+	BString bdf;
+	for (int32 i = 0; stored.FindString("gpu_order", i, &bdf) == B_OK; i++)
+		order.Add(bdf);
+	return order;
+}
+
+
+/*!	User override (the Screen preflet's "Unset EDID" button, secondary
+	GPUs only) forcing \a bdf to be treated as EDID-less regardless of
+	what the driver actually reports -- see MULTIGPU_PLAN.md, EDID
+	section.
+*/
+static bool
+is_edid_unset(const BMessage& stored, const BString& bdf)
+{
+	if (bdf.IsEmpty())
+		return false;
+
+	BString key("edidunset_");
+	key << bdf;
+	bool unset = false;
+	stored.FindBool(key, &unset);
+	return unset;
+}
+
+
+/*!	Best-effort PCI BDF ("bbddff" hex) for \a screen, empty if its
+	HWInterface isn't an AccelerantHWInterface or doesn't expose one (see
+	AccelerantHWInterface::GetPciLocation()).
+*/
+static BString
+screen_bdf(Screen* screen)
+{
+	AccelerantHWInterface* accelerant
+		= dynamic_cast<AccelerantHWInterface*>(screen->HWInterface());
+	uint8 bus, device, function;
+	if (accelerant == NULL
+		|| accelerant->GetPciLocation(&bus, &device, &function) != B_OK) {
+		return BString();
+	}
+
+	char bdf[7];
+	snprintf(bdf, sizeof(bdf), "%02x%02x%02x", bus, device, function);
+	return bdf;
+}
+
+
+void
+Desktop::_UpdateActiveGpuScreens()
+{
+	fActiveGpuScreens.MakeEmpty();
+
+	BMessage stored;
+	bool haveStored = read_screen_data(stored);
+
+	ScreenList candidates;
+	BStringList candidateBdfs;
+	for (int32 i = 0; i < fVirtualScreen.CountScreens(); i++) {
+		Screen* screen = fVirtualScreen.ScreenAt(i);
+		if (screen == NULL || screen->HWInterface() == NULL)
+			continue;
+
+		BString bdf = screen_bdf(screen);
+
+		edid1_info edid;
+		uint32 version = 0;
+		bool hasEDID = screen->HWInterface()->GetEDID(&edid, sizeof(edid),
+			&version) == B_OK;
+		if (hasEDID && haveStored && is_edid_unset(stored, bdf))
+			hasEDID = false;
+
+		screen->HWInterface()->SetDPMSMode(
+			hasEDID ? B_DPMS_ON : B_DPMS_OFF);
+
+		if (hasEDID) {
+			candidates.AddItem(screen);
+			candidateBdfs.Add(bdf);
+		}
+	}
+
+	// Apply the user-configured order, if any: listed screens first (in
+	// the order given, primary == first), then every screen not in the
+	// list keeps its relative discovery-order position.
+	BStringList order = haveStored ? read_configured_gpu_order(stored)
+		: BStringList();
+	for (int32 i = 0; i < order.CountStrings(); i++) {
+		if (order.StringAt(i).IsEmpty())
+			continue;
+
+		int32 j = candidateBdfs.IndexOf(order.StringAt(i));
+		if (j < 0)
+			continue;
+
+		fActiveGpuScreens.AddItem(candidates.ItemAt(j));
+		candidates.RemoveItemAt(j);
+		candidateBdfs.Remove(j, 1);
+	}
+	for (int32 j = 0; j < candidates.CountItems(); j++)
+		fActiveGpuScreens.AddItem(candidates.ItemAt(j));
+}
+
+
+bool
+Desktop::AllActiveGpusHaveHardwareCursor() const
+{
+	for (int32 i = 0; i < fActiveGpuScreens.CountItems(); i++) {
+		::HWInterface* interface = fActiveGpuScreens.ItemAt(i)->HWInterface();
+		if (interface == NULL || !interface->HasSetCursorBitmap())
+			return false;
+	}
+	return true;
+}
+
+
+void
+Desktop::GpuConfigurationChanged()
+{
+	AutoWriteLocker _(fScreenLock);
+	_UpdateActiveGpuScreens();
 }
 
 

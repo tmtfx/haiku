@@ -26,7 +26,7 @@ public:
 								Screen();
 	virtual						~Screen();
 
-			status_t			Initialize();
+			status_t			Initialize(const char* devicePath = NULL);
 			void				Shutdown();
 
 			int32				ID() const { return fID; }

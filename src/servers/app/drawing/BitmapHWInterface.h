@@ -24,7 +24,7 @@ public:
 								BitmapHWInterface(ServerBitmap* bitmap);
 	virtual						~BitmapHWInterface();
 
-	virtual	status_t			Initialize();
+	virtual	status_t			Initialize(const char* devicePath = NULL);
 	virtual	status_t			Shutdown();
 
 	// overwrite all the meaningless functions with empty code

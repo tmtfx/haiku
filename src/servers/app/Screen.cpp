@@ -65,13 +65,13 @@ Screen::~Screen()
 	As long as the mode list is not empty, this method will always succeed.
 */
 status_t
-Screen::Initialize()
+Screen::Initialize(const char* devicePath)
 {
 	status_t status = B_NO_INIT;
 
 	if (fHWInterface.IsSet()) {
 		// init the graphics hardware
-		status = fHWInterface->Initialize();
+		status = fHWInterface->Initialize(devicePath);
 	}
 
 	return status;

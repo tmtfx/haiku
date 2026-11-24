@@ -43,20 +43,27 @@
 #include <SpaceLayoutItem.h>
 #include <Spinner.h>
 #include <String.h>
+#include <StringList.h>
 #include <StringView.h>
+#include <TabView.h>
 #include <Window.h>
 
 #include <InterfacePrivate.h>
 #include <CheckBox.h>
 #include <FilePanel.h>
+#include <ListItem.h>
+#include <ListView.h>
+#include <ScrollView.h>
 #include <edid.h>
 
 #include "AlertWindow.h"
 #include "Constants.h"
 #include "RefreshWindow.h"
+#include "GPUSettingsView.h"
 #include "MonitorView.h"
 #include "ScreenSettings.h"
 #include "Utility.h"
+#include "WorkspaceGridView.h"
 
 /* Note, this headers defines a *private* interface to the Radeon accelerant.
  * It's a solution that works with the current BeOS interface that Haiku
@@ -153,6 +160,25 @@ refresh_rate_to_string(float refresh, BString &string,
 }
 
 
+// Multi-GPU (MULTIGPU_PLAN.md Fase F): human-recognizable name for a
+// screen's card, used as its tab label in the preflet.
+static BString
+gpu_device_name(BMessenger& appServerMessenger, int32 index)
+{
+	BMessage request('devn');
+	request.AddInt32("screen", index);
+	BMessage reply;
+	BString name;
+	if (appServerMessenger.IsValid()
+		&& appServerMessenger.SendMessage(&request, &reply, 200000) == B_OK) {
+		reply.FindString("name", &name);
+	}
+	if (name.IsEmpty())
+		name.SetToFormat(B_TRANSLATE("GPU %" B_PRId32), index);
+	return name;
+}
+
+
 static const char*
 screen_errors(status_t status)
 {
@@ -175,6 +201,7 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 	BWindow(settings->WindowFrame(), B_TRANSLATE_SYSTEM_NAME("Screen"),
 		B_TITLED_WINDOW, B_NOT_RESIZABLE | B_NOT_ZOOMABLE
 			| B_AUTO_UPDATE_SIZE_LIMITS, B_ALL_WORKSPACES),
+	fScreenIndex(0),
 	fIsVesa(false),
 	fBootWorkspaceApplied(false),
 		fHasCursorAnimationCapability(false),
@@ -249,6 +276,7 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 	{
 		BMessenger msgr("application/x-vnd.haiku-app_server");
 		BMessage request('gedc');
+		request.AddInt32("screen", fScreenIndex);
 		BMessage reply;
 		if (msgr.IsValid() && msgr.SendMessage(&request, &reply, 200000) == B_OK)
 			reply.FindBool("supports_get_edid", &supportsGetEDID);
@@ -259,6 +287,7 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 	{
 		BMessenger msgr("application/x-vnd.haiku-app_server");
 		BMessage request('sedc');
+		request.AddInt32("screen", fScreenIndex);
 		BMessage reply;
 		if (msgr.IsValid() && msgr.SendMessage(&request, &reply, 200000) == B_OK)
 			reply.FindBool("supports_set_edid", &supportsSetEDID);
@@ -329,13 +358,6 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 				.End()
 			.End()
 		.View());
-
-	// put workspaces slider in a vertical group with a half space above so
-	// if hidden you won't see the extra space.
-	BView* workspacesView = BLayoutBuilder::Group<>(B_VERTICAL, 0)
-		.AddStrut(B_USE_HALF_ITEM_SPACING)
-		.Add(workspacesBox)
-		.View();
 
 	// box on the right with screen resolution, etc.
 
@@ -520,12 +542,14 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 	{
 		BMessenger msgr("application/x-vnd.haiku-app_server");
 		BMessage request('hsbm');
+		request.AddInt32("screen", fScreenIndex);
 		BMessage reply;
 		if (msgr.IsValid() && msgr.SendMessage(&request, &reply, 200000) == B_OK) {
 			reply.FindBool("has_set_cursor_bitmap", &hasSetCursorBitmap);
 		}
 
 		BMessage requestAni('hcai');
+		requestAni.AddInt32("screen", fScreenIndex);
 		BMessage replyAni;
 		if (msgr.IsValid()
 			&& msgr.SendMessage(&requestAni, &replyAni, 200000) == B_OK) {
@@ -534,7 +558,7 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 	}
 	fHasCursorAnimationCapability = hasCursorAnimation;
 	fHardwareCursorCheckbox->SetEnabled(hasSetCursorBitmap);
-	if (fSettings->HardwareCursorEnabled() && hasSetCursorBitmap)
+	if (fSettings->HardwareCursorEnabled(fScreenIndex) && hasSetCursorBitmap)
 		fHardwareCursorCheckbox->SetValue(B_CONTROL_ON);
 	else
 		fHardwareCursorCheckbox->SetValue(B_CONTROL_OFF);
@@ -547,20 +571,22 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 		&& fHardwareCursorCheckbox->Value() == B_CONTROL_ON;
 	fCursorAnimationCheckbox->SetEnabled(canEnableCursorAnimation);
 	fCursorAnimationCheckbox->SetValue(canEnableCursorAnimation
-		&& fSettings->CursorAnimationEnabled()
+		&& fSettings->CursorAnimationEnabled(fScreenIndex)
 		? B_CONTROL_ON : B_CONTROL_OFF);
 
 	fCursorAnimationSpeedSlider = new BSlider("cursor_ani_speed",
 		B_TRANSLATE("Cursor animation speed (%):"),
 		new BMessage(SLIDER_CURSOR_ANIMATION_SPEED_MSG), 25, 400, B_HORIZONTAL);
-	fCursorAnimationSpeedSlider->SetValue(fSettings->CursorAnimationSpeedPercent());
+	fCursorAnimationSpeedSlider->SetValue(
+		fSettings->CursorAnimationSpeedPercent(fScreenIndex));
 	fCursorAnimationSpeedSlider->SetEnabled(canEnableCursorAnimation
 		&& fCursorAnimationCheckbox->Value() == B_CONTROL_ON);
 
 	fCursorAnimationIdleSlider = new BSlider("cursor_ani_idle",
 		B_TRANSLATE("Cursor animation idle delay (ms):"),
 		new BMessage(SLIDER_CURSOR_ANIMATION_IDLE_MSG), 0, 15000, B_HORIZONTAL);
-	fCursorAnimationIdleSlider->SetValue(fSettings->CursorAnimationIdleDelayMs());
+	fCursorAnimationIdleSlider->SetValue(
+		fSettings->CursorAnimationIdleDelayMs(fScreenIndex));
 	fCursorAnimationIdleSlider->SetEnabled(canEnableCursorAnimation
 		&& fCursorAnimationCheckbox->Value() == B_CONTROL_ON);
 
@@ -571,35 +597,43 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 	{
 		BMessenger msgr("application/x-vnd.haiku-app_server");
 		BMessage request('h2da');
+		request.AddInt32("screen", fScreenIndex);
 		BMessage reply;
 		if (msgr.IsValid() && msgr.SendMessage(&request, &reply, 200000) == B_OK) {
 			reply.FindBool("has_2d_acceleration", &has2DAcceleration);
 		}
 	}
 	f2DAccelerationCheckbox->SetEnabled(has2DAcceleration);
-	if (has2DAcceleration && fSettings->Acceleration2DEnabled())
+	if (has2DAcceleration && fSettings->Acceleration2DEnabled(fScreenIndex))
 		f2DAccelerationCheckbox->SetValue(B_CONTROL_ON);
 	else
 		f2DAccelerationCheckbox->SetValue(B_CONTROL_OFF);
-	
-	f2DDebugCheckbox = new BCheckBox("2d_debug", 
+
+	f2DDebugCheckbox = new BCheckBox("2d_debug",
 		B_TRANSLATE("Enable 2D debug indicator"),
 		new BMessage(TOGGLE_2D_DEBUG_MSG));
-	
+
 	bool canEnableDebug = has2DAcceleration && (f2DAccelerationCheckbox->Value() == B_CONTROL_ON);
 	f2DDebugCheckbox->SetEnabled(canEnableDebug);
-	if (canEnableDebug && fSettings->Visual2DDebugEnabled())
+	if (canEnableDebug && fSettings->Visual2DDebugEnabled(fScreenIndex))
 		f2DDebugCheckbox->SetValue(B_CONTROL_ON);
 	else
 		f2DDebugCheckbox->SetValue(B_CONTROL_OFF);
 
 	f2DCompositorCheckbox = new BCheckBox("2d_compositor",
-		B_TRANSLATE("Enable 2D compositor (requires hardware cursor bitmap)"),
+		B_TRANSLATE("Enable 2D compositor (requires hardware cursor bitmap "
+			"on every active GPU)"),
 		new BMessage(TOGGLE_2D_COMPOSITOR_MSG));
 
-	//bool canEnableCompositor = hasSetCursorBitmap && (fHardwareCursorCheckbox->Value() == B_CONTROL_ON);
-	f2DCompositorCheckbox->SetEnabled(hasSetCursorBitmap && fHardwareCursorCheckbox->Value() == B_CONTROL_ON);//supportsHardwareCursor
-	if (hasSetCursorBitmap && fSettings->Compositor2DEnabled())
+	// Multi-GPU: the compositor is a single Desktop-wide switch (Fase E),
+	// so enabling it requires hardware-cursor support on every currently
+	// active GPU, not just this one -- mirrors Desktop::
+	// AllActiveGpusHaveHardwareCursor()'s own gate (also enforced
+	// server-side now in SetCompositor2DEnabled(), see MULTIGPU_PLAN.md).
+	bool canEnableCompositor = _AllActiveGpusHaveHardwareCursor()
+		&& fHardwareCursorCheckbox->Value() == B_CONTROL_ON;
+	f2DCompositorCheckbox->SetEnabled(canEnableCompositor);
+	if (canEnableCompositor && fSettings->Compositor2DEnabled())
 		f2DCompositorCheckbox->SetValue(B_CONTROL_ON);
 	else
 		f2DCompositorCheckbox->SetValue(B_CONTROL_OFF);
@@ -732,7 +766,10 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 		.AddGlue()
 		.View()
 	);
-	outerControlsView->AddChild(f2DCompositorCheckbox);
+	// f2DCompositorCheckbox intentionally NOT added here: it's a single
+	// Desktop-wide switch, not a per-GPU control (see MULTIGPU_PLAN.md
+	// Fase E), so it lives in the "Workspaces" tab instead -- built
+	// further down, once that tab's page view is assembled.
 
 	// TODO: we don't support getting the screen's preferred settings
 	/* fDefaultsButton = new BButton(buttonRect, "DefaultsButton", "Defaults",
@@ -751,18 +788,113 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 		new BMessage(BUTTON_REVERT_MSG));
 	fRevertButton->SetEnabled(false);
 
-	BLayoutBuilder::Group<>(this, B_VERTICAL, B_USE_DEFAULT_SPACING)
-		.AddGroup(B_HORIZONTAL)
-			.AddGroup(B_VERTICAL, 0, 1)
-				.AddStrut(floorf(controlsBox->TopBorderOffset()
-					- fScreenBox->TopBorderOffset()))
-				.Add(fScreenBox)
-				.Add(workspacesView)
-				.End()
-			.AddGroup(B_VERTICAL, 0, 1)
-				.Add(controlsBox, 2)
-				.End()
+	// Multi-GPU (MULTIGPU_PLAN.md Fase F): "Workspaces" tab (rows/columns +
+	// grouped monitor-grid preview + the Desktop-wide compositor
+	// checkbox), then one tab per detected GPU. Screen index 0 keeps this
+	// window's own original two-column layout (fScreenBox + controlsBox)
+	// exactly as before multi-GPU support existed; every other screen
+	// gets a GPUSettingsView instead (a simpler, apply-immediately
+	// subset -- see that class for why it doesn't try to replicate this
+	// window's Apply/Revert/undo staging per GPU).
+
+	fWorkspaceGridView = new WorkspaceGridView("workspace grid");
+
+	// Multi-GPU (MULTIGPU_PLAN.md Fase A, user-configured variant): no
+	// automatic primary-GPU detection (that would need a new kernel
+	// syscall -- deliberately avoided). The user picks the order/primary
+	// here instead; Desktop::_UpdateActiveGpuScreens() applies whatever
+	// is persisted via ScreenSettings::SetGpuOrder(). Populated by
+	// _RebuildGpuOrderListView(), called once below after the whole
+	// window (and app_server's reply to the 'cnts'/'devn'/'gbdf' queries
+	// it depends on) is ready.
+	BBox* gpuOrderBox = new BBox("gpu order box");
+	gpuOrderBox->SetLabel(B_TRANSLATE("GPU order (first = primary)"));
+
+	fGpuOrderListView = new BListView("gpu order list",
+		B_SINGLE_SELECTION_LIST);
+	BScrollView* gpuOrderScroll = new BScrollView("gpu order scroll",
+		fGpuOrderListView, 0, false, true);
+
+	fGpuOrderUpButton = new BButton("gpu order up", B_TRANSLATE("Move up"),
+		new BMessage(MOVE_GPU_UP_MSG));
+	fGpuOrderDownButton = new BButton("gpu order down",
+		B_TRANSLATE("Move down"), new BMessage(MOVE_GPU_DOWN_MSG));
+
+	gpuOrderBox->AddChild(BLayoutBuilder::Group<>(B_HORIZONTAL,
+			B_USE_SMALL_SPACING)
+		.Add(gpuOrderScroll)
+		.AddGroup(B_VERTICAL, B_USE_SMALL_SPACING)
+			.Add(fGpuOrderUpButton)
+			.Add(fGpuOrderDownButton)
+			.AddGlue()
 			.End()
+		.SetInsets(B_USE_DEFAULT_SPACING)
+		.View());
+
+	BView* workspacesPage = BLayoutBuilder::Group<>(B_VERTICAL,
+			B_USE_DEFAULT_SPACING)
+		.Add(workspacesBox)
+		.Add(fWorkspaceGridView)
+		.Add(gpuOrderBox)
+		.Add(f2DCompositorCheckbox)
+		.AddGlue()
+		.SetInsets(B_USE_WINDOW_SPACING)
+		.View();
+
+	BView* screenPage = BLayoutBuilder::Group<>(B_HORIZONTAL,
+			B_USE_DEFAULT_SPACING)
+		.AddGroup(B_VERTICAL, 0, 1)
+			.AddStrut(floorf(controlsBox->TopBorderOffset()
+				- fScreenBox->TopBorderOffset()))
+			.Add(fScreenBox)
+			.AddGlue()
+			.End()
+		.AddGroup(B_VERTICAL, 0, 1)
+			.Add(controlsBox, 2)
+			.End()
+		.SetInsets(B_USE_WINDOW_SPACING)
+		.View();
+
+	BMessenger appServerMessenger("application/x-vnd.haiku-app_server");
+
+	fTabView = new BTabView("tabs", B_WIDTH_FROM_WIDEST);
+
+	// BTab::SetLabel() is a no-op until the tab has a view (fView == NULL
+	// guard in TabView.cpp), which only happens once AddTab() calls
+	// SetView() -- so SetLabel() must come AFTER AddTab(), not before.
+	BTab* workspacesTab = new BTab();
+	fTabView->AddTab(workspacesPage, workspacesTab);
+	workspacesTab->SetLabel(B_TRANSLATE("Workspaces"));
+
+	BTab* screenTab = new BTab();
+	fTabView->AddTab(screenPage, screenTab);
+	screenTab->SetLabel(gpu_device_name(appServerMessenger, 0));
+
+	int32 gpuCount = 1;
+	{
+		BMessage request('cnts');
+		BMessage reply;
+		if (appServerMessenger.IsValid()
+			&& appServerMessenger.SendMessage(&request, &reply, 200000)
+				== B_OK) {
+			reply.FindInt32("count", &gpuCount);
+		}
+	}
+
+	for (int32 i = 1; i < gpuCount; i++) {
+		BString name = gpu_device_name(appServerMessenger, i);
+		GPUSettingsView* gpuView = new GPUSettingsView(name, this, i,
+			fSettings);
+		BTab* tab = new BTab();
+		fTabView->AddTab(gpuView, tab);
+		tab->SetLabel(name);
+	}
+
+	_UpdateWorkspaceGridView();
+	_RebuildGpuOrderListView();
+
+	BLayoutBuilder::Group<>(this, B_VERTICAL, B_USE_DEFAULT_SPACING)
+		.Add(fTabView)
 		.AddGroup(B_HORIZONTAL, B_USE_DEFAULT_SPACING)
 			.Add(fRevertButton)
 			.AddGlue()
@@ -771,6 +903,7 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 
 	_UpdateControls();
 	_UpdateMonitor();
+	_RefreshEdidGatedControls();
 
 	MoveOnScreen();
 }
@@ -1150,6 +1283,139 @@ ScreenWindow::_UpdateWorkspaceButtons()
 }
 
 
+/*!	Queries app_server for every detected screen's name and PCI BDF, then
+	applies the user-configured order from ScreenSettings::GpuOrder() (see
+	MULTIGPU_PLAN.md Fase A) the exact same way Desktop::
+	_UpdateActiveGpuScreens() does server-side: configured entries first
+	(primary == index 0), then every screen not in the configured list
+	appended in discovery order. Keeping both places' logic in lock-step
+	is what makes the "Workspaces" tab's preview and GPU-order list
+	actually match what app_server will do.
+*/
+void
+ScreenWindow::_GetEffectiveGpuOrder(BStringList& names, BStringList& bdfs) const
+{
+	names.MakeEmpty();
+	bdfs.MakeEmpty();
+
+	BMessenger msgr("application/x-vnd.haiku-app_server");
+
+	int32 gpuCount = 0;
+	{
+		BMessage request('cnts');
+		BMessage reply;
+		if (msgr.IsValid()
+			&& msgr.SendMessage(&request, &reply, 200000) == B_OK) {
+			reply.FindInt32("count", &gpuCount);
+		}
+	}
+
+	BStringList discoveredNames, discoveredBdfs;
+	for (int32 i = 0; i < gpuCount; i++) {
+		BString name;
+		BMessage nameRequest('devn');
+		nameRequest.AddInt32("screen", i);
+		BMessage nameReply;
+		if (msgr.SendMessage(&nameRequest, &nameReply, 200000) == B_OK)
+			nameReply.FindString("name", &name);
+		if (name.IsEmpty())
+			name.SetToFormat(B_TRANSLATE("GPU %" B_PRId32), i);
+		discoveredNames.Add(name);
+
+		BString bdf;
+		BMessage bdfRequest('gbdf');
+		bdfRequest.AddInt32("screen", i);
+		BMessage bdfReply;
+		if (msgr.SendMessage(&bdfRequest, &bdfReply, 200000) == B_OK)
+			bdfReply.FindString("bdf", &bdf);
+		discoveredBdfs.Add(bdf);
+	}
+
+	BStringList configuredOrder = fSettings->GpuOrder();
+
+	for (int32 i = 0; i < configuredOrder.CountStrings(); i++) {
+		const BString& wanted = configuredOrder.StringAt(i);
+		if (wanted.IsEmpty() || bdfs.HasString(wanted))
+			continue;
+
+		int32 j = discoveredBdfs.IndexOf(wanted);
+		if (j < 0)
+			continue;
+
+		names.Add(discoveredNames.StringAt(j));
+		bdfs.Add(discoveredBdfs.StringAt(j));
+	}
+	for (int32 j = 0; j < discoveredBdfs.CountStrings(); j++) {
+		const BString& bdf = discoveredBdfs.StringAt(j);
+		if (bdf.IsEmpty() || !bdfs.HasString(bdf)) {
+			names.Add(discoveredNames.StringAt(j));
+			bdfs.Add(bdf);
+		}
+	}
+}
+
+
+void
+ScreenWindow::_UpdateWorkspaceGridView()
+{
+	if (fWorkspaceGridView == NULL)
+		return;
+
+	uint32 columns, rows;
+	BPrivate::get_workspaces_layout(&columns, &rows);
+
+	BStringList names, bdfs;
+	_GetEffectiveGpuOrder(names, bdfs);
+
+	fWorkspaceGridView->SetGridLayout(columns, rows, names);
+}
+
+
+void
+ScreenWindow::_RebuildGpuOrderListView()
+{
+	if (fGpuOrderListView == NULL)
+		return;
+
+	BStringList names, bdfs;
+	_GetEffectiveGpuOrder(names, bdfs);
+
+	fGpuOrderListView->MakeEmpty();
+	fGpuOrderBdfs.MakeEmpty();
+
+	for (int32 i = 0; i < names.CountStrings(); i++) {
+		fGpuOrderListView->AddItem(new BStringItem(names.StringAt(i)));
+		fGpuOrderBdfs.Add(bdfs.StringAt(i));
+	}
+}
+
+
+void
+ScreenWindow::_MoveSelectedGpu(int32 delta)
+{
+	if (fGpuOrderListView == NULL)
+		return;
+
+	int32 selected = fGpuOrderListView->CurrentSelection();
+	int32 target = selected + delta;
+	if (selected < 0 || target < 0
+		|| target >= fGpuOrderListView->CountItems()) {
+		return;
+	}
+
+	BListItem* item = fGpuOrderListView->RemoveItem(selected);
+	fGpuOrderListView->AddItem(item, target);
+	fGpuOrderListView->Select(target);
+
+	BString bdf = fGpuOrderBdfs.StringAt(selected);
+	fGpuOrderBdfs.Remove(selected, 1);
+	fGpuOrderBdfs.Add(bdf, target);
+
+	fSettings->SetGpuOrder(fGpuOrderBdfs);
+	_UpdateWorkspaceGridView();
+}
+
+
 void
 ScreenWindow::ScreenChanged(BRect frame, color_space mode)
 {
@@ -1194,6 +1460,7 @@ ScreenWindow::MessageReceived(BMessage* message)
 			fRowsControl->SetValue(rows);
 				// enables/disables up/down arrows
 			_CheckApplyEnabled();
+			_UpdateWorkspaceGridView();
 
 			break;
 		}
@@ -1210,8 +1477,17 @@ ScreenWindow::MessageReceived(BMessage* message)
 			fColumnsControl->SetValue(columns);
 				// enables/disables up/down arrows
 			_CheckApplyEnabled();
+			_UpdateWorkspaceGridView();
 			break;
 		}
+
+		case MOVE_GPU_UP_MSG:
+			_MoveSelectedGpu(-1);
+			break;
+
+		case MOVE_GPU_DOWN_MSG:
+			_MoveSelectedGpu(1);
+			break;
 
 		case POP_RESOLUTION_MSG:
 		{
@@ -1361,6 +1637,7 @@ ScreenWindow::MessageReceived(BMessage* message)
 			BPrivate::set_workspaces_layout(fOriginalWorkspacesColumns,
 				fOriginalWorkspacesRows);
 			_UpdateWorkspaceButtons();
+			_UpdateWorkspaceGridView();
 
 			fScreenMode.Revert();
 
@@ -1397,7 +1674,7 @@ ScreenWindow::MessageReceived(BMessage* message)
 		case TOGGLE_HARDWARE_CURSOR_MSG:
 		{
 			bool enabled = fHardwareCursorCheckbox->Value() == B_CONTROL_ON;
-			fSettings->SetHardwareCursorEnabled(enabled);
+			fSettings->SetHardwareCursorEnabled(fScreenIndex, enabled);
 
 			bool canEnableCursorAnimation = enabled
 				&& fHasCursorAnimationCapability;
@@ -1406,19 +1683,20 @@ ScreenWindow::MessageReceived(BMessage* message)
 				fCursorAnimationCheckbox->SetValue(B_CONTROL_OFF);
 				fCursorAnimationSpeedSlider->SetEnabled(false);
 				fCursorAnimationIdleSlider->SetEnabled(false);
-				fSettings->SetCursorAnimationEnabled(false);
+				fSettings->SetCursorAnimationEnabled(fScreenIndex, false);
 			} else {
 				fCursorAnimationCheckbox->SetValue(
-					fSettings->CursorAnimationEnabled() ? B_CONTROL_ON : B_CONTROL_OFF);
+					fSettings->CursorAnimationEnabled(fScreenIndex)
+						? B_CONTROL_ON : B_CONTROL_OFF);
 				fCursorAnimationSpeedSlider->SetEnabled(
 					fCursorAnimationCheckbox->Value() == B_CONTROL_ON);
 				fCursorAnimationIdleSlider->SetEnabled(
 					fCursorAnimationCheckbox->Value() == B_CONTROL_ON);
 			}
 			
-			if (enabled)
+			if (enabled && _AllActiveGpusHaveHardwareCursor()) {
 				f2DCompositorCheckbox->SetEnabled(true);
-			else {
+			} else {
 				f2DCompositorCheckbox->SetValue(B_CONTROL_OFF);
 				f2DCompositorCheckbox->SetEnabled(false);
 				fSettings->SetCompositor2DEnabled(false);
@@ -1429,7 +1707,7 @@ ScreenWindow::MessageReceived(BMessage* message)
 		case TOGGLE_CURSOR_ANIMATION_MSG:
 		{
 			bool enabled = fCursorAnimationCheckbox->Value() == B_CONTROL_ON;
-			fSettings->SetCursorAnimationEnabled(enabled);
+			fSettings->SetCursorAnimationEnabled(fScreenIndex, enabled);
 			fCursorAnimationSpeedSlider->SetEnabled(enabled);
 			fCursorAnimationIdleSlider->SetEnabled(enabled);
 			break;
@@ -1437,14 +1715,14 @@ ScreenWindow::MessageReceived(BMessage* message)
 
 		case SLIDER_CURSOR_ANIMATION_SPEED_MSG:
 		{
-			fSettings->SetCursorAnimationSpeedPercent(
+			fSettings->SetCursorAnimationSpeedPercent(fScreenIndex,
 				fCursorAnimationSpeedSlider->Value());
 			break;
 		}
 
 		case SLIDER_CURSOR_ANIMATION_IDLE_MSG:
 		{
-			fSettings->SetCursorAnimationIdleDelayMs(
+			fSettings->SetCursorAnimationIdleDelayMs(fScreenIndex,
 				fCursorAnimationIdleSlider->Value());
 			break;
 		}
@@ -1452,23 +1730,23 @@ ScreenWindow::MessageReceived(BMessage* message)
 		case TOGGLE_2D_ACCELERATION_MSG:
 		{
 			bool enabled = f2DAccelerationCheckbox->Value() == B_CONTROL_ON;
-			fSettings->SetAcceleration2DEnabled(enabled);
-			
+			fSettings->SetAcceleration2DEnabled(fScreenIndex, enabled);
+
 			if (enabled) {
 				f2DDebugCheckbox->SetEnabled(true);
 			} else {
 				f2DDebugCheckbox->SetValue(B_CONTROL_OFF);
 				f2DDebugCheckbox->SetEnabled(false);
-				fSettings->SetVisual2DDebugEnabled(false);
+				fSettings->SetVisual2DDebugEnabled(fScreenIndex, false);
 			}
 
 			break;
 		}
-		
+
 		case TOGGLE_2D_DEBUG_MSG:
 		{
 			bool enabled = f2DDebugCheckbox->Value() == B_CONTROL_ON;
-			fSettings->SetVisual2DDebugEnabled(enabled);
+			fSettings->SetVisual2DDebugEnabled(fScreenIndex, enabled);
 			break;
 		}
 
@@ -1529,6 +1807,7 @@ ScreenWindow::_DumpEDID(const entry_ref* dirRef, const char* name)
 {
 	BMessenger msgr("application/x-vnd.haiku-app_server");
 	BMessage request('gedi');
+	request.AddInt32("screen", fScreenIndex);
 	BMessage reply;
 	if (!msgr.IsValid() || msgr.SendMessage(&request, &reply, 200000) != B_OK) {
 		BAlert* alert = new BAlert(B_TRANSLATE("Error"),
@@ -1623,6 +1902,7 @@ ScreenWindow::_LoadEDID(const entry_ref* ref)
 	BMessage request('sedi');
 	request.AddData("edid", B_RAW_TYPE, &edid, sizeof(edid));
 	request.AddInt32("version", 1);
+	request.AddInt32("screen", fScreenIndex);
 	BMessage reply;
 	if (!msgr.IsValid() || msgr.SendMessage(&request, &reply, 200000) != B_OK) {
 		BAlert* alert = new BAlert(B_TRANSLATE("Error"),
@@ -1643,11 +1923,6 @@ ScreenWindow::_LoadEDID(const entry_ref* ref)
 		return;
 	}
 
-	BAlert* alert = new BAlert(B_TRANSLATE("Load EDID"),
-		B_TRANSLATE("EDID successfully loaded into graphics driver."),
-		B_TRANSLATE("OK"), NULL, NULL, B_WIDTH_AS_USUAL, B_INFO_ALERT);
-	alert->Go();
-
 	fScreenMode.UpdateModeList();
 	_BuildSupportedColorSpaces();
 	_CheckResolutionMenu();
@@ -1656,6 +1931,186 @@ ScreenWindow::_LoadEDID(const entry_ref* ref)
 	_UpdateControls();
 	_UpdateMonitor();
 	_UpdateActiveMode();
+	_RefreshEdidGatedControls();
+
+	_OfferToSaveStableEdid(edid);
+		// its own BAlert covers "EDID successfully loaded", no need for
+		// a second one here
+}
+
+
+/*!	See GPUSettingsView::_QueryHasEDID() -- same 'hedi' query, factored
+	per-window since ScreenWindow's screen-0 tab doesn't share a class
+	with GPUSettingsView's secondary-GPU tabs.
+*/
+bool
+ScreenWindow::_QueryHasEDID(int32 screenIndex) const
+{
+	bool hasEDID = false;
+	BMessenger msgr("application/x-vnd.haiku-app_server");
+	BMessage request('hedi');
+	request.AddInt32("screen", screenIndex);
+	BMessage reply;
+	if (msgr.IsValid() && msgr.SendMessage(&request, &reply, 200000) == B_OK)
+		reply.FindBool("has_edid", &hasEDID);
+	return hasEDID;
+}
+
+
+/*!	Mirrors Desktop::AllActiveGpusHaveHardwareCursor() client-side, for
+	gating the "Enable 2D compositor" checkbox -- see MULTIGPU_PLAN.md
+	Fase E. "Active" here means effective-EDID (_QueryHasEDID()), same
+	definition Desktop uses for activeGpuList.
+*/
+bool
+ScreenWindow::_AllActiveGpusHaveHardwareCursor() const
+{
+	BMessenger msgr("application/x-vnd.haiku-app_server");
+
+	int32 gpuCount = 0;
+	BMessage request('cnts');
+	BMessage reply;
+	if (msgr.IsValid() && msgr.SendMessage(&request, &reply, 200000) == B_OK)
+		reply.FindInt32("count", &gpuCount);
+
+	for (int32 i = 0; i < gpuCount; i++) {
+		if (!_QueryHasEDID(i))
+			continue;
+
+		bool hasSetCursorBitmap = false;
+		BMessage request2('hsbm');
+		request2.AddInt32("screen", i);
+		BMessage reply2;
+		if (msgr.SendMessage(&request2, &reply2, 200000) == B_OK)
+			reply2.FindBool("has_set_cursor_bitmap", &hasSetCursorBitmap);
+
+		if (!hasSetCursorBitmap)
+			return false;
+	}
+
+	return true;
+}
+
+
+/*!	Without an EDID, the driver has no idea what modes/cursor/2D behavior
+	are actually safe, so every control that depends on that is disabled
+	until one is assigned -- see MULTIGPU_PLAN.md EDID section. Mirrors
+	GPUSettingsView::_RefreshEdidGatedControls() for this window's own
+	screen-0 controls (resolution/colors/refresh/combine/swap/laptop-
+	panel/TV-standard/brightness/cursor/2D); Dump/Load EDID stay enabled
+	regardless (that's how you assign one in the first place).
+*/
+void
+ScreenWindow::_RefreshEdidGatedControls()
+{
+	bool hasEDID = _QueryHasEDID(fScreenIndex);
+
+	fResolutionField->SetEnabled(hasEDID);
+	fColorsField->SetEnabled(hasEDID);
+	fRefreshField->SetEnabled(hasEDID);
+	fCombineField->SetEnabled(hasEDID);
+	fSwapDisplaysField->SetEnabled(hasEDID);
+	fUseLaptopPanelField->SetEnabled(hasEDID);
+	fTVStandardField->SetEnabled(hasEDID);
+	fBrightnessSlider->SetEnabled(hasEDID);
+
+	bool hasSetCursorBitmap = false;
+	{
+		BMessenger msgr("application/x-vnd.haiku-app_server");
+		BMessage request('hsbm');
+		request.AddInt32("screen", fScreenIndex);
+		BMessage reply;
+		if (msgr.IsValid() && msgr.SendMessage(&request, &reply, 200000) == B_OK)
+			reply.FindBool("has_set_cursor_bitmap", &hasSetCursorBitmap);
+	}
+	fHardwareCursorCheckbox->SetEnabled(hasEDID && hasSetCursorBitmap);
+	if (!hasEDID) {
+		fCursorAnimationCheckbox->SetEnabled(false);
+		fCursorAnimationSpeedSlider->SetEnabled(false);
+		fCursorAnimationIdleSlider->SetEnabled(false);
+	}
+
+	bool has2DAcceleration = false;
+	{
+		BMessenger msgr("application/x-vnd.haiku-app_server");
+		BMessage request('h2da');
+		request.AddInt32("screen", fScreenIndex);
+		BMessage reply;
+		if (msgr.IsValid() && msgr.SendMessage(&request, &reply, 200000) == B_OK)
+			reply.FindBool("has_2d_acceleration", &has2DAcceleration);
+	}
+	f2DAccelerationCheckbox->SetEnabled(hasEDID && has2DAcceleration);
+	if (!hasEDID) {
+		f2DDebugCheckbox->SetEnabled(false);
+	} else {
+		f2DDebugCheckbox->SetEnabled(has2DAcceleration
+			&& f2DAccelerationCheckbox->Value() == B_CONTROL_ON);
+	}
+
+	bool canEnableCompositor = hasEDID && _AllActiveGpusHaveHardwareCursor()
+		&& fHardwareCursorCheckbox->Value() == B_CONTROL_ON;
+	f2DCompositorCheckbox->SetEnabled(canEnableCompositor);
+}
+
+
+/*!	See GPUSettingsView::_OfferToSaveStableEdid() -- identical design,
+	just this window's own screen (fScreenIndex, almost always 0).
+*/
+void
+ScreenWindow::_OfferToSaveStableEdid(const edid1_info& edid)
+{
+	BAlert* offer = new BAlert(B_TRANSLATE("Load EDID"),
+		B_TRANSLATE("EDID successfully loaded for this session. "
+			"Make it permanent (load automatically on every boot)?"),
+		B_TRANSLATE("Just this session"), B_TRANSLATE("Make permanent"),
+		NULL, B_WIDTH_AS_USUAL, B_IDEA_ALERT);
+	if (offer->Go() != 1)
+		return;
+
+	BString bdf;
+	{
+		BMessenger msgr("application/x-vnd.haiku-app_server");
+		BMessage request('gbdf');
+		request.AddInt32("screen", fScreenIndex);
+		BMessage reply;
+		if (msgr.IsValid() && msgr.SendMessage(&request, &reply, 200000) == B_OK)
+			reply.FindString("bdf", &bdf);
+	}
+
+	BPath path;
+	if (find_directory(B_USER_SETTINGS_DIRECTORY, &path) != B_OK)
+		return;
+	path.Append("edid");
+	create_directory(path.Path(), 0755);
+
+	BString fileName(bdf.IsEmpty() ? "default" : bdf.String());
+	fileName << ".bin";
+	path.Append(fileName.String());
+
+	BFile file(path.Path(), B_WRITE_ONLY | B_CREATE_FILE | B_ERASE_FILE);
+	if (file.InitCheck() != B_OK
+		|| file.Write(&edid, sizeof(edid)) != (ssize_t)sizeof(edid)) {
+		BAlert* errAlert = new BAlert(B_TRANSLATE("Error"),
+			B_TRANSLATE("Could not save the EDID file."),
+			B_TRANSLATE("OK"), NULL, NULL, B_WIDTH_AS_USUAL, B_STOP_ALERT);
+		errAlert->Go();
+		return;
+	}
+
+	BString message(B_TRANSLATE(
+		"Saved to:\n\t%path%\n\n"
+		"To load it automatically on every boot, add this line to this "
+		"card's driver .settings file, under:\n\t"
+		"~/config/settings/kernel/drivers/\n"
+		"(named after the driver module -- conventions vary, e.g. "
+		"\"intel_extreme\" or \"radeon_hd.settings\"):\n\n"
+		"\tedid %path%"));
+	message.ReplaceAll("%path%", path.Path());
+
+	BAlert* doneAlert = new BAlert(B_TRANSLATE("Load EDID"),
+		message.String(), B_TRANSLATE("OK"), NULL, NULL, B_WIDTH_AS_USUAL,
+		B_INFO_ALERT);
+	doneAlert->Go();
 }
 
 

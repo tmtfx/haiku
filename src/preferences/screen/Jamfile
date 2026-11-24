@@ -12,6 +12,7 @@ UsePrivateHeaders app interface preferences ;
 
 Application Screen :
 	AlertWindow.cpp
+	GPUSettingsView.cpp
 	MonitorView.cpp
 	multimon.cpp
 	RefreshSlider.cpp
@@ -21,6 +22,7 @@ Application Screen :
 	ScreenSettings.cpp
 	ScreenWindow.cpp
 	Utility.cpp
+	WorkspaceGridView.cpp
 	: be tracker [ TargetLibstdc++ ] [ TargetLibsupc++ ] localestub libaccelerantscommon.a
 	: Screen.rdef
 	;

@@ -79,7 +79,12 @@ public:
 			void				UnlockExclusiveAccess() { WriteUnlock(); }
 
 	// You need to WriteLock
-	virtual	status_t			Initialize();
+	// \a devicePath, when not NULL, requests opening that exact graphics
+	// device instead of scanning for the first one that works (used to
+	// bind a specific instance to a specific card when more than one is
+	// present; ignored by interfaces that have no concept of a local
+	// graphics device path).
+	virtual	status_t			Initialize(const char* devicePath = NULL);
 	virtual	status_t			Shutdown() = 0;
 
 	// allocating a DrawingEngine attached to this HWInterface

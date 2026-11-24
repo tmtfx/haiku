@@ -15,6 +15,7 @@
 #include "HWInterface.h"
 
 #include <AutoDeleter.h>
+#include <String.h>
 #include <image.h>
 #include <video_overlay.h>
 
@@ -31,7 +32,7 @@ public:
 	virtual bool HasSetCursorBitmap() const;
 	virtual bool HasAnimatedCursorSupport() const;
 	virtual bool Has2DAcceleration() const;
-	virtual	status_t			Initialize();
+	virtual	status_t			Initialize(const char* devicePath = NULL);
 	virtual	status_t			Shutdown();
 
 	virtual	status_t			SetMode(const display_mode& mode);
@@ -71,6 +72,13 @@ public:
 
 	virtual status_t			GetAccelerantPath(BString& path);
 	virtual status_t			GetDriverPath(BString& path);
+
+	// Best-effort PCI bus/device/function of the open card, parsed from
+	// its /dev/graphics/* device path (the naming convention used by
+	// every driver except virtio). Returns B_NOT_SUPPORTED if the path
+	// doesn't end in the expected 6 hex digit BDF suffix.
+	virtual status_t			GetPciLocation(uint8* bus, uint8* device,
+										uint8* function);
 
 	// query for available hardware acceleration
 	virtual	uint32				AvailableHWAcceleration() const;
@@ -152,6 +160,7 @@ private:
 			bigtime_t			_RetraceTimeout() const;
 
 private:
+			BString				fDevicePath;
 			int					fCardFD;
 			image_id			fAccelerantImage;
 			GetAccelerantHook	fAccelerantHook;

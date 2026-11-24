@@ -19,6 +19,7 @@
 
 #include <new>
 
+#include <ctype.h>
 #include <dirent.h>
 #include <edid.h>
 #include <driver_settings.h>
@@ -348,73 +349,58 @@ AccelerantHWInterface::Has2DAcceleration() const
 }
 
 
-/*!	Opens the first available graphics device and initializes it.
+/*!	Opens the graphics device at \a devicePath and initializes it, or (when
+	\a devicePath is NULL) scans for and opens the first available graphics
+	device, same as before multi-GPU support existed. ScreenManager uses the
+	explicit-path form to bind one interface instance to one specific card
+	when more than one is present; the no-path form remains the fallback
+	used when there is exactly one card (or none at all, in which case VESA/
+	framebuffer is used, as always).
 
 	\return B_OK on success or an appropriate error message on failure.
 */
 status_t
-AccelerantHWInterface::Initialize()
+AccelerantHWInterface::Initialize(const char* devicePath)
 {
-	status_t ret = HWInterface::Initialize();
+	status_t ret = HWInterface::Initialize(devicePath);
 
 	if (!fRectParams || !fBlitParams)
 		return B_NO_MEMORY;
 
 	if (ret >= B_OK) {
-		for (int32 i = 0; fCardFD != B_ENTRY_NOT_FOUND; i++) {
-			fCardFD = _OpenGraphicsDevice(i);
-			if (fCardFD < 0) {
-				ATRACE(("Failed to open graphics device\n"));
-				continue;
+		if (devicePath != NULL) {
+			fDevicePath = devicePath;
+			fCardFD = open(devicePath, B_READ_WRITE);
+			if (fCardFD >= 0 && _OpenAccelerant(fCardFD) != B_OK) {
+				close(fCardFD);
+				fCardFD = B_ENTRY_NOT_FOUND;
 			}
-
-			if (_OpenAccelerant(fCardFD) == B_OK)
-				break;
-
-			close(fCardFD);
-			// _OpenAccelerant() failed, try to open next graphics card
-		}
-
-		// Read user preference for hardware cursor from user settings Screen_data
-		{
-			BPath path;
-			if (find_directory(B_USER_SETTINGS_DIRECTORY, &path) == B_OK) {
-				path.Append("Screen_data");
-				BFile file(path.Path(), B_READ_ONLY);
-				if (file.InitCheck() == B_OK) {
-					// skip offset
-					BPoint offset;
-					file.Read(&offset, sizeof(BPoint));
-					bool hw = true;
-					if (file.Read(&hw, sizeof(bool)) == (ssize_t)sizeof(bool))
-						fUserEnableHardwareCursor = hw;
-					bool acc = false;
-					if (file.Read(&acc, sizeof(bool)) == (ssize_t)sizeof(bool))
-						fUserEnable2DAcceleration = acc;
-					bool comp = false;
-					file.Read(&comp, sizeof(bool));
-					bool dbg = false;
-					file.Read(&dbg, sizeof(bool));
-					bool cursorAnimation = false;
-					if (file.Read(&cursorAnimation, sizeof(bool))
-							== (ssize_t)sizeof(bool)) {
-						fUserEnableCursorAnimation = cursorAnimation;
-					}
-					int32 animationSpeed = 100;
-					if (file.Read(&animationSpeed, sizeof(int32))
-							== (ssize_t)sizeof(int32)) {
-						fUserCursorAnimationSpeedFactor
-							= max_c(0.1f, animationSpeed / 100.0f);
-					}
-					int32 animationIdleDelayMs = 0;
-					if (file.Read(&animationIdleDelayMs, sizeof(int32))
-							== (ssize_t)sizeof(int32)) {
-						fUserCursorAnimationIdleDelayMs
-							= max_c((int32)0, animationIdleDelayMs);
-					}
+		} else {
+			for (int32 i = 0; fCardFD != B_ENTRY_NOT_FOUND; i++) {
+				fCardFD = _OpenGraphicsDevice(i);
+				if (fCardFD < 0) {
+					ATRACE(("Failed to open graphics device\n"));
+					continue;
 				}
+
+				if (_OpenAccelerant(fCardFD) == B_OK)
+					break;
+
+				close(fCardFD);
+				// _OpenAccelerant() failed, try to open next graphics card
 			}
+			// fDevicePath intentionally left unset here: GetPciLocation()
+			// queries the live GetDriverPath() instead, which is accurate
+			// for the VESA/framebuffer fallback cases too.
 		}
+
+		// Per-card user preferences (hardware cursor, 2D accel, cursor
+		// animation) are no longer read here: at this point in
+		// Initialize(), this instance doesn't know which screen index
+		// ScreenManager is about to assign it yet, and Screen_data is now
+		// keyed per screen index (see MULTIGPU_PLAN.md Fase F). They are
+		// applied right after, by ScreenManager::_AddHWInterface(), once
+		// screen->ID() is known.
 
 		return fCardFD >= 0 ? B_OK : fCardFD;
 	}
@@ -1402,6 +1388,45 @@ AccelerantHWInterface::GetDriverPath(BString& string)
 
 	getCloneInfo((void*)path);
 	string.SetTo(path);
+	return B_OK;
+}
+
+
+/*!	Best-effort PCI bus/device/function of the open card.
+
+	Every graphics driver except virtio names its /dev/graphics device
+	path with the bus/device/function encoded as the trailing 6 hex
+	digits (e.g. ".../intel_extreme_00:02:0" with separators stripped, or
+	the DEVICE_FORMAT "%04x_%04x_%02x%02x%02x" convention used by matrox,
+	nvidia, ati, s3, and others) -- see MULTIGPU_PLAN.md Fase C. virtio
+	names its devices with a plain incrementing index instead, so this
+	returns B_NOT_SUPPORTED for it (and for vesa/framebuffer, which have
+	no fixed PCI identity at all).
+*/
+status_t
+AccelerantHWInterface::GetPciLocation(uint8* bus, uint8* device, uint8* function)
+{
+	BString path;
+	if (GetDriverPath(path) != B_OK)
+		return B_NOT_SUPPORTED;
+
+	int32 length = path.Length();
+	if (length < 6)
+		return B_NOT_SUPPORTED;
+
+	const char* suffix = path.String() + length - 6;
+	for (int32 i = 0; i < 6; i++) {
+		if (!isxdigit((unsigned char)suffix[i]))
+			return B_NOT_SUPPORTED;
+	}
+
+	unsigned int b, d, f;
+	if (sscanf(suffix, "%02x%02x%02x", &b, &d, &f) != 3)
+		return B_NOT_SUPPORTED;
+
+	*bus = (uint8)b;
+	*device = (uint8)d;
+	*function = (uint8)f;
 	return B_OK;
 }
 

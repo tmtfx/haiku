@@ -15,6 +15,9 @@
 
 #include <Window.h>
 
+#include <StringList.h>
+#include <edid.h>
+
 #include "ScreenMode.h"
 
 
@@ -27,9 +30,14 @@ class BStringView;
 class BCheckBox;
 class BFilePanel;
 
+class BButton;
+class BListView;
+class BTabView;
+
 class RefreshWindow;
 class MonitorView;
 class ScreenSettings;
+class WorkspaceGridView;
 
 
 class ScreenWindow : public BWindow {
@@ -62,14 +70,31 @@ private:
 
 			void			_Apply();
 
+			void			_UpdateWorkspaceGridView();
+			void			_GetEffectiveGpuOrder(BStringList& names,
+								BStringList& bdfs) const;
+			void			_RebuildGpuOrderListView();
+			void			_MoveSelectedGpu(int32 delta);
+
 			void			_DumpEDID(const entry_ref* dirRef, const char* name);
 			void			_LoadEDID(const entry_ref* ref);
+			void			_OfferToSaveStableEdid(const edid1_info& edid);
+			bool			_QueryHasEDID(int32 screenIndex) const;
+			void			_RefreshEdidGatedControls();
+			bool			_AllActiveGpusHaveHardwareCursor() const;
 
 			status_t		_WriteVesaModeFile(const screen_mode& mode) const;
 			bool			_IsVesa() const { return fIsVesa; }
 
 private:
 			ScreenSettings*	fSettings;
+			// Which GPU/screen index this window's per-card controls
+			// target (gScreenManager::ScreenAt() order -- see
+			// MULTIGPU_PLAN.md Fase F). Fixed at 0 until the planned
+			// per-GPU BTabView rewrite exists; every per-card
+			// ScreenSettings/'hsbm'/'h2da'/etc call already threads this
+			// through so that rewrite only needs to stop hardcoding it.
+			int32			fScreenIndex;
 			bool			fIsVesa;
 			bool			fBootWorkspaceApplied;
 			bool			fHasCursorAnimationCapability;
@@ -78,6 +103,28 @@ private:
 			BStringView*	fDeviceInfo;
 			MonitorView*	fMonitorView;
 			BMenuItem*		fAllWorkspacesItem;
+
+			// Multi-GPU (MULTIGPU_PLAN.md Fase F): the "Workspaces" tab
+			// (rows/columns + grouped monitor-grid preview + the
+			// Desktop-wide compositor checkbox) and one tab per detected
+			// GPU (gScreenManager::ScreenAt() order). This window's own,
+			// original controls below (fScreenBox, fResolutionField,
+			// etc.) now live in the tab for screen index 0 only; every
+			// other screen gets a simpler GPUSettingsView tab (see that
+			// class) instead of a full duplicate of this window's
+			// Apply/Revert/undo machinery.
+			BTabView*			fTabView;
+			WorkspaceGridView*	fWorkspaceGridView;
+
+			// Multi-GPU (MULTIGPU_PLAN.md Fase A, user-configured
+			// variant): lets the user pick which GPU is primary and the
+			// order of the rest, persisted via ScreenSettings::
+			// SetGpuOrder(). fGpuOrderBdfs is kept parallel to
+			// fGpuOrderListView's rows (same index = same GPU).
+			BListView*			fGpuOrderListView;
+			BButton*			fGpuOrderUpButton;
+			BButton*			fGpuOrderDownButton;
+			BStringList			fGpuOrderBdfs;
 
 			BSpinner*		fColumnsControl;
 			BSpinner*		fRowsControl;

@@ -59,6 +59,7 @@
 #include "InputManager.h"
 #include "OffscreenServerWindow.h"
 #include "Screen.h"
+#include "ScreenManager.h"
 #include "ServerBitmap.h"
 #include "ServerConfig.h"
 #include "ServerCursor.h"
@@ -495,6 +496,32 @@ void
 ServerApp::_GetLooperName(char* name, size_t length)
 {
 	snprintf(name, length, "a:%" B_PRId32 ":%s", ClientTeam(), SignatureLeaf());
+}
+
+
+/*!	Multi-GPU: resolves a BScreen screen_id to that specific screen's own
+	HWInterface, via gScreenManager rather than always fDesktop->HWInterface()
+	(which is only ever the single screen currently backing the active
+	workspace -- see MULTIGPU_PLAN.md Fase D/F). Several BPrivate::
+	ScreenProtocol messages below used to ignore the id they were handed
+	entirely (marked "We aren't using the screen_id for now..."); they now
+	use this so a Screen preflet tab for a non-active GPU gets correct
+	answers instead of the active GPU's.
+
+	Falls back to \a fallback (typically fDesktop->HWInterface()) if \a id
+	doesn't resolve to a known screen, so an invalid/stale id degrades
+	gracefully instead of returning NULL outright.
+*/
+static HWInterface*
+get_hw_interface_for_screen(int32 id, HWInterface* fallback)
+{
+	BAutolock locker(gScreenManager);
+	if (gScreenManager == NULL)
+		return fallback;
+
+	Screen* screen = gScreenManager->ScreenAt(id);
+	return screen != NULL && screen->HWInterface() != NULL
+		? screen->HWInterface() : fallback;
 }
 
 
@@ -3046,11 +3073,15 @@ ServerApp::_DispatchMessage(int32 code, BPrivate::LinkReceiver& link)
 			// 1) int32 screen
 
 			int32 id;
-			if (link.Read<int32>(&id) == B_OK
-				&& id == B_MAIN_SCREEN_ID.id)
-				fLink.StartMessage(B_OK);
-			else
-				fLink.StartMessage(B_ERROR);
+			bool valid = false;
+			if (link.Read<int32>(&id) == B_OK) {
+				// Multi-GPU: any currently known screen index is valid,
+				// not just the main one (see MULTIGPU_PLAN.md Fase F).
+				BAutolock locker(gScreenManager);
+				valid = gScreenManager != NULL && id >= 0
+					&& id < gScreenManager->CountScreens();
+			}
+			fLink.StartMessage(valid ? B_OK : B_ERROR);
 
 			fLink.Flush();
 			break;
@@ -3064,8 +3095,21 @@ ServerApp::_DispatchMessage(int32 code, BPrivate::LinkReceiver& link)
 			int32 id;
 			link.Read<int32>(&id);
 
-			// TODO: for now, just say we're the last one
-			fLink.StartMessage(B_ENTRY_NOT_FOUND);
+			// Multi-GPU: id+1 is the next screen if it exists (see
+			// MULTIGPU_PLAN.md Fase F) -- used to be hardcoded to "we're
+			// the last one" since there was never more than one screen.
+			status_t status = B_ENTRY_NOT_FOUND;
+			{
+				BAutolock locker(gScreenManager);
+				if (gScreenManager != NULL && id + 1 >= 0
+					&& id + 1 < gScreenManager->CountScreens()) {
+					status = B_OK;
+				}
+			}
+
+			fLink.StartMessage(status);
+			if (status == B_OK)
+				fLink.Attach<int32>(id + 1);
 			fLink.Flush();
 			break;
 		}
@@ -3193,8 +3237,9 @@ ServerApp::_DispatchMessage(int32 code, BPrivate::LinkReceiver& link)
 			link.Read<display_mode>(&target);
 			link.Read<display_mode>(&low);
 			link.Read<display_mode>(&high);
-			status_t status = fDesktop->HWInterface()->ProposeMode(&target,
-				&low, &high);
+			HWInterface* interface
+				= get_hw_interface_for_screen(id, fDesktop->HWInterface());
+			status_t status = interface->ProposeMode(&target, &low, &high);
 
 			// ProposeMode() returns B_BAD_VALUE to hint that the candidate is
 			// not within the given limits (but is supported)
@@ -3213,12 +3258,12 @@ ServerApp::_DispatchMessage(int32 code, BPrivate::LinkReceiver& link)
 		{
 			int32 id;
 			link.Read<int32>(&id);
-			// TODO: use this screen id
 
+			HWInterface* interface
+				= get_hw_interface_for_screen(id, fDesktop->HWInterface());
 			display_mode* modeList;
 			uint32 count;
-			status_t status = fDesktop->HWInterface()->GetModeList(&modeList,
-				&count);
+			status_t status = interface->GetModeList(&modeList, &count);
 			if (status == B_OK) {
 				fLink.StartMessage(B_OK);
 				fLink.Attach<uint32>(count);
@@ -3310,14 +3355,14 @@ ServerApp::_DispatchMessage(int32 code, BPrivate::LinkReceiver& link)
 		{
 			STRACE(("ServerApp %s: get accelerant info\n", Signature()));
 
-			// We aren't using the screen_id for now...
 			int32 id;
 			link.Read<int32>(&id);
 
+			HWInterface* interface
+				= get_hw_interface_for_screen(id, fDesktop->HWInterface());
 			accelerant_device_info accelerantInfo;
 			// TODO: I wonder if there should be a "desktop" lock...
-			status_t status
-				= fDesktop->HWInterface()->GetDeviceInfo(&accelerantInfo);
+			status_t status = interface->GetDeviceInfo(&accelerantInfo);
 			if (status == B_OK) {
 				fLink.StartMessage(B_OK);
 				fLink.Attach<accelerant_device_info>(accelerantInfo);
@@ -3332,13 +3377,14 @@ ServerApp::_DispatchMessage(int32 code, BPrivate::LinkReceiver& link)
 		{
 			STRACE(("ServerApp %s: get monitor info\n", Signature()));
 
-			// We aren't using the screen_id for now...
 			int32 id;
 			link.Read<int32>(&id);
 
+			HWInterface* interface
+				= get_hw_interface_for_screen(id, fDesktop->HWInterface());
 			monitor_info info;
 			// TODO: I wonder if there should be a "desktop" lock...
-			status_t status = fDesktop->HWInterface()->GetMonitorInfo(&info);
+			status_t status = interface->GetMonitorInfo(&info);
 			if (status == B_OK) {
 				fLink.StartMessage(B_OK);
 				fLink.Attach<monitor_info>(info);
@@ -3353,12 +3399,13 @@ ServerApp::_DispatchMessage(int32 code, BPrivate::LinkReceiver& link)
 		{
 			STRACE(("ServerApp %s: get retrace semaphore\n", Signature()));
 
-			// We aren't using the screen_id for now...
 			int32 id;
 			link.Read<int32>(&id);
 
+			HWInterface* interface
+				= get_hw_interface_for_screen(id, fDesktop->HWInterface());
 			fLink.StartMessage(B_OK);
-			fLink.Attach<sem_id>(fDesktop->HWInterface()->RetraceSemaphore());
+			fLink.Attach<sem_id>(interface->RetraceSemaphore());
 			fLink.Flush();
 			break;
 		}
@@ -3367,13 +3414,13 @@ ServerApp::_DispatchMessage(int32 code, BPrivate::LinkReceiver& link)
 		{
 			STRACE(("ServerApp %s: get timing constraints\n", Signature()));
 
-			// We aren't using the screen_id for now...
 			int32 id;
 			link.Read<int32>(&id);
 
+			HWInterface* interface
+				= get_hw_interface_for_screen(id, fDesktop->HWInterface());
 			display_timing_constraints constraints;
-			status_t status = fDesktop->HWInterface()->GetTimingConstraints(
-				&constraints);
+			status_t status = interface->GetTimingConstraints(&constraints);
 			if (status == B_OK) {
 				fLink.StartMessage(B_OK);
 				fLink.Attach<display_timing_constraints>(constraints);
@@ -3387,15 +3434,16 @@ ServerApp::_DispatchMessage(int32 code, BPrivate::LinkReceiver& link)
 		case AS_GET_PIXEL_CLOCK_LIMITS:
 		{
 			STRACE(("ServerApp %s: get pixel clock limits\n", Signature()));
-			// We aren't using the screen_id for now...
 			int32 id;
 			link.Read<int32>(&id);
 			display_mode mode;
 			link.Read<display_mode>(&mode);
 
+			HWInterface* interface
+				= get_hw_interface_for_screen(id, fDesktop->HWInterface());
 			uint32 low, high;
-			status_t status = fDesktop->HWInterface()->GetPixelClockLimits(&mode,
-				&low, &high);
+			status_t status = interface->GetPixelClockLimits(&mode, &low,
+				&high);
 			if (status == B_OK) {
 				fLink.StartMessage(B_OK);
 				fLink.Attach<uint32>(low);
@@ -3416,7 +3464,9 @@ ServerApp::_DispatchMessage(int32 code, BPrivate::LinkReceiver& link)
 			uint32 mode;
 			link.Read<uint32>(&mode);
 
-			status_t status = fDesktop->HWInterface()->SetDPMSMode(mode);
+			HWInterface* interface
+				= get_hw_interface_for_screen(id, fDesktop->HWInterface());
+			status_t status = interface->SetDPMSMode(mode);
 			fLink.StartMessage(status);
 
 			fLink.Flush();
@@ -3430,7 +3480,9 @@ ServerApp::_DispatchMessage(int32 code, BPrivate::LinkReceiver& link)
 			int32 id;
 			link.Read<int32>(&id);
 
-			uint32 state = fDesktop->HWInterface()->DPMSMode();
+			HWInterface* interface
+				= get_hw_interface_for_screen(id, fDesktop->HWInterface());
+			uint32 state = interface->DPMSMode();
 			fLink.StartMessage(B_OK);
 			fLink.Attach<uint32>(state);
 			fLink.Flush();
@@ -3443,7 +3495,9 @@ ServerApp::_DispatchMessage(int32 code, BPrivate::LinkReceiver& link)
 			int32 id;
 			link.Read<int32>(&id);
 
-			uint32 capabilities = fDesktop->HWInterface()->DPMSCapabilities();
+			HWInterface* interface
+				= get_hw_interface_for_screen(id, fDesktop->HWInterface());
+			uint32 capabilities = interface->DPMSCapabilities();
 			fLink.StartMessage(B_OK);
 			fLink.Attach<uint32>(capabilities);
 			fLink.Flush();

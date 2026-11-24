@@ -25,16 +25,34 @@
 #define B_TRANSLATION_CONTEXT "Monitor View"
 
 
-MonitorView::MonitorView(BRect rect, const char *name, int32 width, int32 height)
+MonitorView::MonitorView(BRect rect, const char *name, int32 width,
+	int32 height, int32 screenIndex)
 	: BView(rect, name, B_FOLLOW_ALL, B_WILL_DRAW | B_FULL_UPDATE_ON_RESIZE),
+	fScreenIndex(screenIndex),
 	fMaxWidth(1920),
 	fMaxHeight(1200),
 	fWidth(width),
 	fHeight(height),
 	fDPI(0)
 {
-	BScreen screen(B_MAIN_SCREEN_ID);
+	BScreen screen = _Screen();
 	fDesktopColor = screen.DesktopColor(current_workspace());
+}
+
+
+BScreen
+MonitorView::_Screen() const
+{
+	if (fScreenIndex >= 0) {
+		screen_id id;
+		id.id = fScreenIndex;
+		return BScreen(id);
+	}
+
+	// Window() is only valid once attached; the constructor calls this
+	// before that, same as the original code did (which used
+	// B_MAIN_SCREEN_ID there for exactly that reason).
+	return Window() != NULL ? BScreen(Window()) : BScreen(B_MAIN_SCREEN_ID);
 }
 
 
@@ -170,7 +188,7 @@ MonitorView::MessageReceived(BMessage* message)
 
 		case UPDATE_DESKTOP_COLOR_MSG:
 		{
-			BScreen screen(Window());
+			BScreen screen = _Screen();
 			rgb_color color = screen.DesktopColor(current_workspace());
 			if (color != fDesktopColor) {
 				fDesktopColor = color;
@@ -221,7 +239,7 @@ MonitorView::_UpdateDPI()
 {
 	fDPI = 0;
 
-	BScreen screen(Window());
+	BScreen screen = _Screen();
 	monitor_info info;
 	if (screen.GetMonitorInfo(&info) != B_OK)
 		return;

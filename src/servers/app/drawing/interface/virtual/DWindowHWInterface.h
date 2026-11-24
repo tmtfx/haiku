@@ -28,7 +28,7 @@ public:
 								DWindowHWInterface();
 	virtual						~DWindowHWInterface();
 
-	virtual	status_t			Initialize();
+	virtual	status_t			Initialize(const char* devicePath = NULL);
 	virtual	status_t			Shutdown();
 
 	virtual	status_t			SetMode(const display_mode& mode);

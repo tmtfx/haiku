@@ -426,7 +426,7 @@ ViewHWInterface::~ViewHWInterface()
 
 
 status_t
-ViewHWInterface::Initialize()
+ViewHWInterface::Initialize(const char* devicePath)
 {
 	return B_OK;
 }

@@ -63,7 +63,7 @@ HWInterface::~HWInterface()
 
 
 status_t
-HWInterface::Initialize()
+HWInterface::Initialize(const char* devicePath)
 {
 	return MultiLocker::InitCheck();
 }

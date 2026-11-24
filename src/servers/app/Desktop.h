@@ -148,6 +148,24 @@ public:
 			void				SetCompositor2DEnabled(bool enabled);
 			void				CompositeDirtyRegion(BRegion& dirtyRegion);
 
+			// Multi-GPU: the screens currently eligible for a workspace
+			// row (i.e. they have a usable EDID), in row-assignment order
+			// (primary first -- see MULTIGPU_PLAN.md Fase D; until Fase A
+			// lands, "primary" is just whichever screen was discovered
+			// first, same as today's single-GPU behavior). A screen not
+			// in this list is held in B_DPMS_OFF.
+			const ScreenList&	ActiveGpuScreens() const
+									{ return fActiveGpuScreens; }
+			bool				AllActiveGpusHaveHardwareCursor() const;
+
+			// Call after anything that can change which screens belong
+			// in activeGpuList or their order: a screen's EDID changing
+			// at runtime (the Screen preflet's Load EDID round trip), or
+			// the user changing the manually-configured GPU order/primary
+			// (see MULTIGPU_PLAN.md Fase A) -- both just mean "re-read
+			// Screen_data and recompute".
+			void				GpuConfigurationChanged();
+
 			void				RebuildAndRedrawAfterWindowChange(
 									Window* window, BRegion& dirty);
 									// the window lock must be held when calling
@@ -329,6 +347,7 @@ private:
 
 			void				_ScreenChanged(Screen* screen);
 			void				_SetCurrentWorkspaceConfiguration();
+			void				_UpdateActiveGpuScreens();
 			void				_SetWorkspace(int32 index,
 									bool moveFocusWindow = false);
 
@@ -391,6 +410,7 @@ private:
 
 			BMessage			fPendingColors;
 			bool				fCompositor2DEnabled;
+			ScreenList			fActiveGpuScreens;
 };
 
 #endif	// DESKTOP_H

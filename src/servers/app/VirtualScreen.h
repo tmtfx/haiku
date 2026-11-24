@@ -44,6 +44,15 @@ public:
 									ScreenConfigurations& currentConfigurations);
 			status_t			RemoveScreen(Screen* screen);
 
+				// Repoints DrawingEngine()/HWInterface()/Frame() at
+				// \a screen (which must already be in this VirtualScreen,
+				// e.g. via AddScreen()), without touching fScreenList or
+				// re-running mode selection. Used when switching to a
+				// workspace whose row is owned by a different GPU than
+				// the previously active workspace -- see
+				// Desktop::_SetCurrentWorkspaceConfiguration().
+				void				SetActiveScreen(Screen* screen);
+
 			void				UpdateFrame();
 			BRect				Frame() const;
 

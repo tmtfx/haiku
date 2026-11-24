@@ -17,10 +17,19 @@
 #include "RemoteHWInterface.h"
 
 #include <Autolock.h>
+#include <Directory.h>
 #include <Entry.h>
+#include <File.h>
+#include <FindDirectory.h>
+#include <Message.h>
 #include <NodeMonitor.h>
+#include <Path.h>
+#include <String.h>
+#include <StringList.h>
+#include <SupportDefs.h>
 
 #include <new>
+#include <string.h>
 
 using std::nothrow;
 
@@ -189,32 +198,135 @@ ScreenManager::ScreenChanged(Screen* screen)
 }
 
 
+#ifndef HAIKU_TARGET_PLATFORM_LIBBE_TEST
+/*!	Recursively collects every graphics device path under \a directory,
+	skipping the generic VESA/framebuffer fallback drivers (those are only
+	used when no real card could be found at all, same as before multi-GPU
+	support existed). Mirrors AccelerantHWInterface::_RecursiveScan(), but
+	collects every match instead of stopping at a given index -- needed
+	here so we know up front how many real cards exist and can open one
+	AccelerantHWInterface per card.
+*/
+static void
+collect_graphics_device_paths(const char* directory, BStringList& paths)
+{
+	BEntry entry;
+	BDirectory dir(directory);
+	while (dir.GetNextEntry(&entry) == B_OK) {
+		BPath path;
+		entry.GetPath(&path);
+		if (!strcmp(path.Path(), "/dev/graphics/vesa")
+			|| !strcmp(path.Path(), "/dev/graphics/framebuffer")) {
+			continue;
+		}
+
+		if (entry.IsDirectory())
+			collect_graphics_device_paths(path.Path(), paths);
+		else
+			paths.Add(path.Path());
+	}
+}
+#endif
+
+
 void
 ScreenManager::_ScanDrivers()
 {
-	HWInterface* interface = NULL;
-
-	// Eventually we will loop through drivers until
-	// one can't initialize in order to support multiple monitors.
-	// For now, we'll just load one and be done with it.
-
 	// ToDo: to make monitoring the driver directory useful, we need more
 	//	power and data here, and should do the scanning on our own
 
 #ifndef HAIKU_TARGET_PLATFORM_LIBBE_TEST
-	bool initDrivers = true;
-	while (initDrivers) {
-		interface = new AccelerantHWInterface();
+	BStringList devicePaths;
+	collect_graphics_device_paths("/dev/graphics/", devicePaths);
 
-		_AddHWInterface(interface);
-		initDrivers = false;
+	if (devicePaths.CountStrings() == 0) {
+		// No real card found -- fall back to exactly the old single-GPU
+		// behavior (AccelerantHWInterface itself falls back further to
+		// VESA/framebuffer when it finds nothing either).
+		_AddHWInterface(new AccelerantHWInterface());
+		return;
+	}
+
+	// One AccelerantHWInterface per distinct card. Fase D/E (Desktop's
+	// activeGpuList) decides later which of these actually get used for a
+	// workspace row, based on which ones have a usable EDID.
+	for (int32 i = 0; i < devicePaths.CountStrings(); i++) {
+		_AddHWInterface(new AccelerantHWInterface(),
+			devicePaths.StringAt(i).String());
 	}
 #endif
 }
 
 
+#ifndef HAIKU_TARGET_PLATFORM_LIBBE_TEST
+/*!	Applies this user's stored hardware-cursor/2D-acceleration/cursor-
+	animation preference for screen index \a screenIndex, read from
+	Screen_data (now a flattened BMessage, keyed per screen index -- see
+	ScreenSettings.cpp's _Key() and MULTIGPU_PLAN.md Fase F). Called right
+	after a Screen successfully wraps \a interface, i.e. as soon as its
+	final screen index is known (AccelerantHWInterface::Initialize() runs
+	too early for this -- it has no way to know what index it's about to
+	be assigned).
+*/
+static BString
+settings_key(const char* base, int32 screenIndex)
+{
+	BString key(base);
+	key << screenIndex;
+	return key;
+}
+
+
+static void
+apply_user_graphics_settings(HWInterface* interface, int32 screenIndex)
+{
+	AccelerantHWInterface* accelerant
+		= dynamic_cast<AccelerantHWInterface*>(interface);
+	if (accelerant == NULL)
+		return;
+
+	BPath path;
+	if (find_directory(B_USER_SETTINGS_DIRECTORY, &path) != B_OK)
+		return;
+
+	path.Append("Screen_data");
+	BFile file(path.Path(), B_READ_ONLY);
+	if (file.InitCheck() != B_OK)
+		return;
+
+	BMessage settings;
+	if (settings.Unflatten(&file) != B_OK)
+		return;
+
+	bool hw = true;
+	if (settings.FindBool(settings_key("hwcursor", screenIndex), &hw) == B_OK)
+		accelerant->SetUserHardwareCursor(hw);
+
+	bool acc = false;
+	if (settings.FindBool(settings_key("accel2d", screenIndex), &acc) == B_OK)
+		accelerant->SetUser2DAcceleration(acc);
+
+	bool dbg = false;
+	if (settings.FindBool(settings_key("debug2d", screenIndex), &dbg) == B_OK)
+		accelerant->SetUserDebugLed(dbg);
+
+	bool cursorAnimation = false;
+	settings.FindBool(settings_key("cursorani", screenIndex), &cursorAnimation);
+	int32 animationSpeed = 100;
+	settings.FindInt32(settings_key("cursoranispeed", screenIndex),
+		&animationSpeed);
+	int32 animationIdleDelayMs = 0;
+	settings.FindInt32(settings_key("cursoranidelay", screenIndex),
+		&animationIdleDelayMs);
+	accelerant->SetUserCursorAnimationSettings(cursorAnimation,
+		max_c(0.1f, animationSpeed / 100.0f),
+		(uint32)max_c((int32)0, animationIdleDelayMs));
+}
+#endif
+
+
 ScreenManager::screen_item*
-ScreenManager::_AddHWInterface(HWInterface* interface)
+ScreenManager::_AddHWInterface(HWInterface* interface, const char* devicePath)
 {
 	ObjectDeleter<Screen> screen(
 		new(nothrow) Screen(interface, fScreenList.CountItems()));
@@ -225,7 +337,11 @@ ScreenManager::_AddHWInterface(HWInterface* interface)
 
 	// The interface is now owned by the screen
 
-	if (screen->Initialize() >= B_OK) {
+	if (screen->Initialize(devicePath) >= B_OK) {
+#ifndef HAIKU_TARGET_PLATFORM_LIBBE_TEST
+		apply_user_graphics_settings(interface, screen->ID());
+#endif
+
 		screen_item* item = new(nothrow) screen_item;
 
 		if (item != NULL) {

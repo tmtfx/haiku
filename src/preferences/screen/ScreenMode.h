@@ -39,6 +39,17 @@ struct screen_mode {
 class ScreenMode {
 public:
 								ScreenMode(BWindow* window);
+								// Multi-GPU (see MULTIGPU_PLAN.md Fase F):
+								// targets screen index \a screenIndex's
+								// own BScreen directly, instead of
+								// "whichever screen \a window currently
+								// sits on" -- needed because the per-GPU
+								// tabs must each control a specific card
+								// regardless of which one the (single)
+								// preflet window happens to be displayed
+								// on.
+								ScreenMode(BWindow* window,
+									int32 screenIndex);
 								~ScreenMode();
 
 			status_t			Set(const screen_mode& mode,
@@ -74,9 +85,14 @@ public:
 private:
 			bool				_GetDisplayMode(const screen_mode& mode,
 									display_mode& displayMode);
+			BScreen				_Screen() const;
 
 private:
 			BWindow*			fWindow;
+			int32				fScreenIndex;
+				// -1 means "use fWindow's current screen" (legacy,
+				// single-GPU behavior); >= 0 means "always use this exact
+				// screen index" (see MULTIGPU_PLAN.md Fase F).
 			display_mode*		fModeList;
 			uint32				fModeCount;
 

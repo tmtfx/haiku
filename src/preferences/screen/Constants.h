@@ -25,6 +25,7 @@ static const uint32 BUTTON_KEEP_MSG = 'bkep';
 static const uint32 BUTTON_UNDO_MSG = 'bund';
 static const uint32 BUTTON_DUMP_EDID_MSG = 'dmpE';
 static const uint32 BUTTON_LOAD_EDID_MSG = 'lodE';
+static const uint32 BUTTON_UNSET_EDID_MSG = 'unsE';
 static const uint32 POP_RESOLUTION_MSG = 'pres';
 static const uint32 POP_COLORS_MSG = 'pclr';
 static const uint32 POP_REFRESH_MSG = 'prfr';
@@ -52,6 +53,8 @@ static const uint32 SLIDER_CURSOR_ANIMATION_IDLE_MSG = 'scai';
 static const uint32 TOGGLE_2D_ACCELERATION_MSG = 't2da';
 static const uint32 TOGGLE_2D_DEBUG_MSG = 't2db';
 static const uint32 TOGGLE_2D_COMPOSITOR_MSG = 't2dc';
+static const uint32 MOVE_GPU_UP_MSG = 'mgpu';
+static const uint32 MOVE_GPU_DOWN_MSG = 'mgpd';
 
 // Constants
 extern const char* kBackgroundsSignature;

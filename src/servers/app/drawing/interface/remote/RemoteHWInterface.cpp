@@ -136,7 +136,7 @@ RemoteHWInterface::~RemoteHWInterface()
 
 
 status_t
-RemoteHWInterface::Initialize()
+RemoteHWInterface::Initialize(const char* devicePath)
 {
 	return fInitStatus;
 }
