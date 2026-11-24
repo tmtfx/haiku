@@ -4464,6 +4464,38 @@ screen_bdf(Screen* screen)
 }
 
 
+/*!	The BDF of the screen that should be treated as primary -- the
+	configured GPU order's first entry, if it actually matches one of
+	\a discoveredBdfs; empty otherwise, meaning "fall back to whichever
+	screen was discovered first" (today's/original single-GPU behavior,
+	also what happens before the user ever configures an order, or if a
+	configured primary card was since removed).
+*/
+static BString
+determine_primary_bdf(const BStringList& order, const BStringList& discoveredBdfs)
+{
+	if (order.CountStrings() == 0 || order.StringAt(0).IsEmpty())
+		return BString();
+
+	if (discoveredBdfs.HasString(order.StringAt(0)))
+		return order.StringAt(0);
+
+	return BString();
+}
+
+
+/*!	Rebuilds activeGpuList (see MULTIGPU_PLAN.md Fase D/EDID). The
+	primary GPU is always treated as in use, DPMS_ON, and eligible for
+	row 0 -- regardless of whether it has a usable EDID. Only secondary
+	GPUs are gated on EDID presence (driver-reported, or forced off via
+	the preflet's "Unset EDID"). This matters on real hardware: some
+	drivers (e.g. this fork's matrox) don't implement GetEDID() at all
+	and instead query the monitor's valid modes over DDC internally --
+	that card still obviously has a working, in-use display, so gating
+	it the same way as an EDID-less *secondary* (which really might have
+	no monitor attached) would be wrong, and if it's the only GPU in the
+	system, would wrongly DPMS it off entirely.
+*/
 void
 Desktop::_UpdateActiveGpuScreens()
 {
@@ -4471,22 +4503,40 @@ Desktop::_UpdateActiveGpuScreens()
 
 	BMessage stored;
 	bool haveStored = read_screen_data(stored);
+	BStringList order = haveStored ? read_configured_gpu_order(stored)
+		: BStringList();
 
-	ScreenList candidates;
-	BStringList candidateBdfs;
+	ScreenList allScreens;
+	BStringList allBdfs;
 	for (int32 i = 0; i < fVirtualScreen.CountScreens(); i++) {
 		Screen* screen = fVirtualScreen.ScreenAt(i);
 		if (screen == NULL || screen->HWInterface() == NULL)
 			continue;
+		allScreens.AddItem(screen);
+		allBdfs.Add(screen_bdf(screen));
+	}
 
-		BString bdf = screen_bdf(screen);
+	BString primaryBdf = determine_primary_bdf(order, allBdfs);
+	bool primaryIsFallback = primaryBdf.IsEmpty();
 
-		edid1_info edid;
-		uint32 version = 0;
-		bool hasEDID = screen->HWInterface()->GetEDID(&edid, sizeof(edid),
-			&version) == B_OK;
-		if (hasEDID && haveStored && is_edid_unset(stored, bdf))
-			hasEDID = false;
+	ScreenList candidates;
+	BStringList candidateBdfs;
+	for (int32 i = 0; i < allScreens.CountItems(); i++) {
+		Screen* screen = allScreens.ItemAt(i);
+		const BString& bdf = allBdfs.StringAt(i);
+		bool isPrimary = primaryIsFallback ? (i == 0) : (bdf == primaryBdf);
+
+		bool hasEDID;
+		if (isPrimary) {
+			hasEDID = true;
+		} else {
+			edid1_info edid;
+			uint32 version = 0;
+			hasEDID = screen->HWInterface()->GetEDID(&edid, sizeof(edid),
+				&version) == B_OK;
+			if (hasEDID && haveStored && is_edid_unset(stored, bdf))
+				hasEDID = false;
+		}
 
 		screen->HWInterface()->SetDPMSMode(
 			hasEDID ? B_DPMS_ON : B_DPMS_OFF);
@@ -4500,8 +4550,6 @@ Desktop::_UpdateActiveGpuScreens()
 	// Apply the user-configured order, if any: listed screens first (in
 	// the order given, primary == first), then every screen not in the
 	// list keeps its relative discovery-order position.
-	BStringList order = haveStored ? read_configured_gpu_order(stored)
-		: BStringList();
 	for (int32 i = 0; i < order.CountStrings(); i++) {
 		if (order.StringAt(i).IsEmpty())
 			continue;

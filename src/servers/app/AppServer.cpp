@@ -116,6 +116,72 @@ AppServer::~AppServer()
 }
 
 
+/*!	Best-effort PCI BDF ("bbddff" hex) for \a screen, empty if its
+	HWInterface isn't an AccelerantHWInterface or doesn't expose one (see
+	AccelerantHWInterface::GetPciLocation()). Mirrors Desktop.cpp's own
+	screen_bdf() -- same convention, different translation unit.
+*/
+static BString
+get_screen_bdf(Screen* screen)
+{
+	AccelerantHWInterface* accelerant = screen != NULL
+		? dynamic_cast<AccelerantHWInterface*>(screen->HWInterface()) : NULL;
+	uint8 bus, device, function;
+	if (accelerant == NULL
+		|| accelerant->GetPciLocation(&bus, &device, &function) != B_OK) {
+		return BString();
+	}
+
+	char bdf[7];
+	snprintf(bdf, sizeof(bdf), "%02x%02x%02x", bus, device, function);
+	return bdf;
+}
+
+
+/*!	Mirrors Desktop::_UpdateActiveGpuScreens()'s primary-GPU
+	determination (MULTIGPU_PLAN.md EDID section) so the 'hedi' query
+	below agrees with what Desktop actually does: the configured GPU
+	order's first entry if it matches a currently discovered screen,
+	otherwise whichever screen was discovered first (index 0). Assumes
+	gScreenManager is already locked by the caller.
+*/
+static bool
+is_primary_screen(int32 screenIndex)
+{
+	if (gScreenManager == NULL || screenIndex < 0
+		|| screenIndex >= gScreenManager->CountScreens()) {
+		return false;
+	}
+
+	BString configuredPrimaryBdf;
+	BPath path;
+	if (find_directory(B_USER_SETTINGS_DIRECTORY, &path) == B_OK) {
+		path.Append("Screen_data");
+		BFile file(path.Path(), B_READ_ONLY);
+		BMessage stored;
+		if (file.InitCheck() == B_OK && stored.Unflatten(&file) == B_OK)
+			stored.FindString("gpu_order", 0, &configuredPrimaryBdf);
+	}
+
+	if (!configuredPrimaryBdf.IsEmpty()) {
+		bool matchesSome = false;
+		for (int32 i = 0; i < gScreenManager->CountScreens(); i++) {
+			if (get_screen_bdf(gScreenManager->ScreenAt(i))
+					== configuredPrimaryBdf) {
+				matchesSome = true;
+				break;
+			}
+		}
+		if (matchesSome) {
+			return get_screen_bdf(gScreenManager->ScreenAt(screenIndex))
+				== configuredPrimaryBdf;
+		}
+	}
+
+	return screenIndex == 0;
+}
+
+
 void
 AppServer::MessageReceived(BMessage* message)
 {
@@ -535,13 +601,20 @@ AppServer::MessageReceived(BMessage* message)
 		case 'hedi':
 		{
 			// Multi-GPU: whether this screen effectively has a usable
-			// EDID right now -- the driver actually reports one via
-			// GetEDID() (DDC, boot item, or .settings override) AND the
-			// user hasn't forced it off via the Screen preflet's "Unset
-			// EDID" button (see MULTIGPU_PLAN.md, EDID section). Mirrors
+			// EDID right now. The primary GPU is always reported as
+			// having one, regardless of what the driver actually says
+			// (see is_primary_screen() below and MULTIGPU_PLAN.md's EDID
+			// section -- some drivers, e.g. this fork's matrox, have no
+			// GetEDID() support at all while still working fine via
+			// their own DDC-based mode detection, and the primary is
+			// always assumed to be in active use). Secondary GPUs are
+			// gated: the driver must actually report one via GetEDID()
+			// (DDC, boot item, or .settings override) AND the user must
+			// not have forced it off via "Unset EDID". Mirrors
 			// Desktop::_UpdateActiveGpuScreens()'s own check exactly, so
-			// the preflet can gate a GPU's controls (resolution, cursor,
-			// 2D, ...) the same way Desktop gates DPMS/row-eligibility.
+			// the preflet gates a secondary GPU's controls (resolution,
+			// cursor, 2D, ...) the same way Desktop gates DPMS/row-
+			// eligibility.
 			bool hasEDID = false;
 			int32 screenIndex = 0;
 			message->FindInt32("screen", &screenIndex);
@@ -549,27 +622,19 @@ AppServer::MessageReceived(BMessage* message)
 			BAutolock locker(gScreenManager);
 			if (gScreenManager && screenIndex >= 0
 				&& screenIndex < gScreenManager->CountScreens()) {
-				Screen* s = gScreenManager->ScreenAt(screenIndex);
-				if (s != NULL && s->HWInterface() != NULL) {
-					edid1_info edid;
-					uint32 version = 0;
-					hasEDID = s->HWInterface()->GetEDID(&edid, sizeof(edid),
-						&version) == B_OK;
-				}
+				if (is_primary_screen(screenIndex)) {
+					hasEDID = true;
+				} else {
+					Screen* s = gScreenManager->ScreenAt(screenIndex);
+					if (s != NULL && s->HWInterface() != NULL) {
+						edid1_info edid;
+						uint32 version = 0;
+						hasEDID = s->HWInterface()->GetEDID(&edid,
+							sizeof(edid), &version) == B_OK;
+					}
 
-				if (hasEDID) {
-					AccelerantHWInterface* accelerant = s != NULL
-						? dynamic_cast<AccelerantHWInterface*>(
-							s->HWInterface())
-						: NULL;
-					uint8 bus, device, function;
-					if (accelerant != NULL
-						&& accelerant->GetPciLocation(&bus, &device,
-							&function) == B_OK) {
-						char bdf[7];
-						snprintf(bdf, sizeof(bdf), "%02x%02x%02x", bus,
-							device, function);
-
+					BString bdf = get_screen_bdf(s);
+					if (hasEDID && !bdf.IsEmpty()) {
 						BPath path;
 						BMessage stored;
 						if (find_directory(B_USER_SETTINGS_DIRECTORY, &path)
