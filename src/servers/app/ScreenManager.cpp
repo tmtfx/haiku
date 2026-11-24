@@ -27,6 +27,7 @@
 #include <String.h>
 #include <StringList.h>
 #include <SupportDefs.h>
+#include <syslog.h>
 
 #include <new>
 #include <stdio.h>
@@ -230,6 +231,13 @@ collect_graphics_device_paths(const char* directory, BStringList& paths)
 #endif
 
 
+#ifndef HAIKU_TARGET_PLATFORM_LIBBE_TEST
+// Declared (not static) in AccelerantHWInterface.cpp, no header prototype
+// exists since it was only ever called from within that same file before.
+extern bool use_fail_safe_video_mode();
+#endif
+
+
 void
 ScreenManager::_ScanDrivers()
 {
@@ -237,24 +245,56 @@ ScreenManager::_ScanDrivers()
 	//	power and data here, and should do the scanning on our own
 
 #ifndef HAIKU_TARGET_PLATFORM_LIBBE_TEST
-	BStringList devicePaths;
-	collect_graphics_device_paths("/dev/graphics/", devicePaths);
+	// Multi-GPU: respect the boot-time "fail-safe video mode" safemode
+	// option exactly like the pre-multi-GPU single-card path always did
+	// (AccelerantHWInterface::_OpenGraphicsDevice() checks the same flag)
+	// -- collect_graphics_device_paths() below bypasses that check
+	// entirely since it does its own directory walk and opens explicit
+	// paths, so without this, requesting fail-safe video at boot was
+	// silently ignored for any secondary/real driver (confirmed on real
+	// hardware: sm750 kept loading instead of falling back to VESA).
+	if (!use_fail_safe_video_mode()) {
+		BStringList devicePaths;
+		collect_graphics_device_paths("/dev/graphics/", devicePaths);
 
-	if (devicePaths.CountStrings() == 0) {
-		// No real card found -- fall back to exactly the old single-GPU
-		// behavior (AccelerantHWInterface itself falls back further to
-		// VESA/framebuffer when it finds nothing either).
-		_AddHWInterface(new AccelerantHWInterface());
-		return;
+		// Multi-GPU: app_server normally logs nothing to syslog at all
+		// (every ATRACE/STRACE call is compiled out in release builds),
+		// which made this code path impossible to diagnose from a real
+		// hardware test's syslog -- log unconditionally via syslog()
+		// (not compiled out) until this has seen enough real multi-GPU
+		// hardware to be trusted blind.
+		syslog(LOG_INFO, "Multi-GPU: found %" B_PRId32 " graphics device(s)"
+			" under /dev/graphics/", devicePaths.CountStrings());
+		for (int32 i = 0; i < devicePaths.CountStrings(); i++) {
+			syslog(LOG_INFO, "Multi-GPU:   [%" B_PRId32 "] %s", i,
+				devicePaths.StringAt(i).String());
+		}
+
+		if (devicePaths.CountStrings() > 0) {
+			// One AccelerantHWInterface per distinct card. Fase D/E
+			// (Desktop's activeGpuList) decides later which of these
+			// actually get used for a workspace row, based on which
+			// ones have a usable EDID.
+			for (int32 i = 0; i < devicePaths.CountStrings(); i++) {
+				syslog(LOG_INFO, "Multi-GPU: opening [%" B_PRId32 "] %s ...",
+					i, devicePaths.StringAt(i).String());
+				screen_item* item = _AddHWInterface(new AccelerantHWInterface(),
+					devicePaths.StringAt(i).String());
+				syslog(LOG_INFO, "Multi-GPU: opening [%" B_PRId32 "] %s: %s",
+					i, devicePaths.StringAt(i).String(),
+					item != NULL ? "OK" : "FAILED");
+			}
+			return;
+		}
+	} else {
+		syslog(LOG_INFO, "Multi-GPU: fail-safe video mode requested, "
+			"skipping real-driver enumeration entirely");
 	}
 
-	// One AccelerantHWInterface per distinct card. Fase D/E (Desktop's
-	// activeGpuList) decides later which of these actually get used for a
-	// workspace row, based on which ones have a usable EDID.
-	for (int32 i = 0; i < devicePaths.CountStrings(); i++) {
-		_AddHWInterface(new AccelerantHWInterface(),
-			devicePaths.StringAt(i).String());
-	}
+	// Fail-safe video mode requested, or no real card found -- fall back
+	// to exactly the old single-GPU behavior (AccelerantHWInterface
+	// itself falls back further to VESA/framebuffer either way).
+	_AddHWInterface(new AccelerantHWInterface());
 #endif
 }
 
@@ -364,7 +404,13 @@ ScreenManager::_AddHWInterface(HWInterface* interface, const char* devicePath)
 
 	// The interface is now owned by the screen
 
-	if (screen->Initialize(devicePath) >= B_OK) {
+	syslog(LOG_INFO, "Multi-GPU: Screen::Initialize(%s) starting...",
+		devicePath != NULL ? devicePath : "(scan)");
+	status_t initStatus = screen->Initialize(devicePath);
+	syslog(LOG_INFO, "Multi-GPU: Screen::Initialize(%s) returned %" B_PRId32,
+		devicePath != NULL ? devicePath : "(scan)", (int32)initStatus);
+
+	if (initStatus >= B_OK) {
 #ifndef HAIKU_TARGET_PLATFORM_LIBBE_TEST
 		apply_user_graphics_settings(interface, screen->ID());
 #endif

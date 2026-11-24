@@ -2,6 +2,16 @@
 
 Ramo: `MultiGPU` (repo `/boot/home/Progjets/haiku`). Documento di progetto completo: contesto, decisioni prese, stato del codice verificato, piano a fasi, rischi trovati durante la validazione, file critici, strategia di verifica.
 
+## Primo test su hardware multi-GPU reale (S3+ATI dietro bridge PCIe→PCI, poi SM750+ATI)
+
+**Risultato**: crash (blocco, non panic) al momento del passaggio all'accelerante, sia con S3+ATI dietro il bridge TI XIO2000A/XIO2200A con 2 PCI 32-bit collegate, sia con SM750 (da sola o con ATI). Con una sola scheda "normale" il boot resta pulito.
+
+**Trovato durante l'investigazione — bug reale, corretto**: la modalità boot "fail-safe video" (bypass driver reali, forza VESA/framebuffer) veniva **completamente ignorata** dalla nuova logica multi-GPU. `ScreenManager::_ScanDrivers()` enumera ed apre direttamente i path reali (`collect_graphics_device_paths()` + `Initialize(devicePath)`), un percorso che non passa mai per `AccelerantHWInterface::_OpenGraphicsDevice()` — l'unico punto che controllava `use_fail_safe_video_mode()`. Risultato: anche chiedendo il fail-safe da boot, SM750 veniva comunque caricato. **Corretto**: `_ScanDrivers()` controlla ora il flag *prima* di enumerare, saltando del tutto l'enumerazione multi-GPU se richiesto (fallback esattamente al percorso singolo-schermo di sempre). Questo dà anche una via di fuga pratica per i test futuri: boot in fail-safe per escludere una scheda sospetta senza doverla scollegare.
+
+**Diagnosi del crash — limite trovato**: app_server non scrive **mai** nulla nel syslog (zero occorrenze in tutta la storia dei log, con qualunque configurazione) — `ATRACE`/`STRACE` sono no-op in build release. Il log del kernel confirma che SM750 si carica correttamente a livello driver (VRAM allocata, fallback VESA per l'EDID, nessun PANIC/KDL in nessun punto del file) ma non dà nessuna visibilità su cosa succeda **dentro** app_server al momento critico. **Aggiunta diagnostica**: `syslog()` (non compilato via, a differenza di ATRACE) in `ScreenManager::_ScanDrivers()`/`_AddHWInterface()` e nel ramo a path esplicito di `AccelerantHWInterface::Initialize()` — elenco dispositivi trovati, apertura di ciascuno, risultato di `open()`/`_OpenAccelerant()` per ciascuno. Se il prossimo test si blocca di nuovo, l'ultima riga arrivata su disco in `/boot/system/var/log/syslog` dovrebbe restringere il problema a una fase precisa (enumerazione, apertura del device, o dentro l'hook `InitAccelerant` del driver). **Avvertenza**: se il blocco è un vero lock-up hardware (non solo un hang software), anche questi log potrebbero non arrivare su disco in tempo — non è una garanzia assoluta, ma è il massimo di visibilità ottenibile senza strumentazione a livello kernel.
+
+**Non ancora determinato**: se il crash sia causato dalla nuova logica multi-GPU in sé, o sia un problema preesistente di SM750/del bridge PCIe→PCI esposto per la prima volta ora che viene davvero aperto un driver "secondario". Da chiarire al prossimo test (con la diagnostica attiva, e idealmente verificando se SM750 da sola funzionava con il codice *pre*-multi-GPU).
+
 ## Stato di implementazione (aggiornato dopo la sessione di codifica)
 
 **Implementate e build-verificate (`app_server` + `Screen` compilano senza errori):**

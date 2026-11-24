@@ -369,11 +369,28 @@ AccelerantHWInterface::Initialize(const char* devicePath)
 
 	if (ret >= B_OK) {
 		if (devicePath != NULL) {
+			// Multi-GPU: diagnostic-only logging via syslog() (not
+			// compiled out like ATRACE) while this explicit-path branch
+			// is still unproven on diverse real hardware -- if a boot
+			// freezes right around here, the LAST of these three lines
+			// to make it to disk narrows down whether it's open() or
+			// the accelerant's own init (_OpenAccelerant() calls into
+			// the driver's InitAccelerant hook) that hung.
+			syslog(LOG_INFO, "Multi-GPU: open(%s) ...", devicePath);
 			fDevicePath = devicePath;
 			fCardFD = open(devicePath, B_READ_WRITE);
-			if (fCardFD >= 0 && _OpenAccelerant(fCardFD) != B_OK) {
-				close(fCardFD);
-				fCardFD = B_ENTRY_NOT_FOUND;
+			syslog(LOG_INFO, "Multi-GPU: open(%s) -> fd %d", devicePath,
+				fCardFD);
+			if (fCardFD >= 0) {
+				syslog(LOG_INFO, "Multi-GPU: _OpenAccelerant(%s) ...",
+					devicePath);
+				status_t accelStatus = _OpenAccelerant(fCardFD);
+				syslog(LOG_INFO, "Multi-GPU: _OpenAccelerant(%s) -> %"
+					B_PRId32, devicePath, (int32)accelStatus);
+				if (accelStatus != B_OK) {
+					close(fCardFD);
+					fCardFD = B_ENTRY_NOT_FOUND;
+				}
 			}
 		} else {
 			for (int32 i = 0; fCardFD != B_ENTRY_NOT_FOUND; i++) {
