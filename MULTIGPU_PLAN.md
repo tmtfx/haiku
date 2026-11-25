@@ -62,6 +62,18 @@ if (fAccelerantHook != NULL)
 
 **Fix applicato**: in tutti e tre i percorsi di fallimento di `_OpenAccelerant()`, azzerare esplicitamente `fAccelerantHook = NULL` (e, nel terzo caso, anche `fAccelerantImage = -1`, mancante pure quello — altrimenti un successivo `Shutdown()` farebbe un doppio `unload_add_on()` sullo stesso add-on id). Build (`app_server`) verificata pulita. File toccato: solo `AccelerantHWInterface.cpp`.
 
+## Quinto test: niente più crash, ma la ATI non appare in preflet (RISOLTO — vero limite dell'accelerante trovato e completato)
+
+Con il fix precedente il crash è sparito, ma la ATI resta assente dalla preflet Screen. L'utente ha giustamente fatto notare che non è un problema di preflet: `'cnts'` (gestito in `AppServer.cpp`, ritorna `gScreenManager->CountScreens()`) riflette solo le `Screen` effettivamente aggiunte a `fScreenList` da `_AddHWInterface()` — se l'accelerant di una scheda non si apre, quella scheda non diventa mai una `Screen` e quindi non può comparire come tab, indipendentemente da qualunque logica della preflet stessa.
+
+**Diagnosi (syslog di questa stessa macchina, `/boot/system/var/log/syslog`, righe 1786-1859)**: confermato che il fix della ROM BAR ha funzionato — `open(/dev/graphics/1002_4752_0B0400) -> fd 3` (prima falliva con fd -1). Il problema si è solo spostato un passo più avanti: `_OpenAccelerant(...) -> -1`. Il log del kernel mostra esattamente dove: `ati: Mach64_Init()` → `ati: Unsupported XCLK source: 5.` → `ati: Leave InitAccelerant(), result: 0xFFFFFFFF`.
+
+**Causa reale**: `Mach64_InitDSPParams()` in `src/add-ons/accelerants/ati/mach64_init.cpp` legge i 3 bit bassi del registro `PLL_XCLK_CNTL` (0-7) e li decodifica con uno `switch` che gestiva solo i codici 0-4, rifiutando (`return false` → `InitAccelerant()` fallisce) qualunque altro valore come "non supportato". Su questa Rage XL reale il registro restituisce `5`. **Verificato contro una fonte esterna autorevole** prima di toccare altro codice sui registri (come da prassi di questo progetto): il driver Linux fbdev `mach64_ct.c` usa la tabella `aty_postdividers[8] = {1,2,4,8,3,5,6,12}` per gli stessi 8 codici — cioè i codici 5/6/7 sono divisori reali validi (5, 6, 12), non casi non supportati. Incrociato anche con **come questo stesso codice Haiku usa i due campi risultanti** più a valle (`SetDSPRegisters()` in `mach64_mode.cpp`: `xClkRefDivider` come moltiplicatore diretto, `xClkPostDivider` come shift di potenza di 2) — esattamente lo schema già usato dal caso 4 esistente (divisore 3 = `xClkRefDivider=3` × 2^`xClkPostDivider=0`). I codici mancanti si decompongono nello stesso schema senza ambiguità: 5 = 5×2⁰, 6 = 3×2¹, 12 = 3×2².
+
+**Fix applicato**: aggiunti i case 5/6/7 allo switch con la decomposizione sopra (commento che cita la fonte Linux e il confronto con l'uso downstream, per futura verifica). Il ramo `default:` resta come rete di sicurezza inraggiungibile (il valore è già mascherato a 0-7). Build (`ati.accelerant`) verificata pulita. File toccato: solo `src/add-ons/accelerants/ati/mach64_init.cpp`.
+
+**Da verificare al prossimo boot reale**: che `InitAccelerant()` ora riesca per la ATI, che compaia come tab in preflet, e soprattutto che la modalità video risultante sia corretta (il valore del clock/divisore influisce sui timing effettivi mandati al RAMDAC — non solo "si apre", ma "il segnale video è giusto").
+
 ## Stato di implementazione (aggiornato dopo la sessione di codifica)
 
 **Implementate e build-verificate (`app_server` + `Screen` compilano senza errori):**
