@@ -179,7 +179,7 @@ const overlay_buffer *ALLOCATE_OVERLAY_BUFFER(color_space cs, uint16 width, uint
 		 * card base: 		- screen memory,
 		 * free space:      - used for overlay,
 		 * card top:        - hardware cursor bitmap (if used) */
-		adress2 = (((uint32)((uint8*)si->fbc.frame_buffer)) +	/* cursor not yet included here */
+		adress2 = (((uint32)(addr_t)((uint8*)si->fbc.frame_buffer)) +	/* cursor not yet included here */
 			(si->fbc.bytes_per_row * si->dm.virtual_height));	/* size in bytes of screen(s) */
 		LOG(4,("Overlay: first free cardRAM virtual adress $%08x\n", adress2));
 
@@ -189,7 +189,7 @@ const overlay_buffer *ALLOCATE_OVERLAY_BUFFER(color_space cs, uint16 width, uint
 			si->overlay.myBuffer[offset].bytes_per_row * si->overlay.myBuffer[offset].height;
 
 		/* calculate virtual memory adress that would be needed for a new bitmap */
-		adress = (((uint32)((uint8*)si->framebuffer)) + (si->ps.memory_size * 1024));
+		adress = (((uint32)(addr_t)((uint8*)si->framebuffer)) + (si->ps.memory_size * 1024));
 		/* take cursor into account (if it exists) */
 		if(si->settings.hardcursor) adress -= si->ps.curmem_size;
 		LOG(4,("Overlay: last free cardRAM virtual adress $%08x\n", (adress - 1)));
@@ -203,7 +203,7 @@ const overlay_buffer *ALLOCATE_OVERLAY_BUFFER(color_space cs, uint16 width, uint
 
 		/* Check if we need to modify the buffers starting adress and thus the size */
 		/* calculate 'would be' cardRAM offset */
-		temp32 = (adress - ((uint32)((vuint32 *)si->framebuffer)));
+		temp32 = (adress - ((uint32)(addr_t)((vuint32 *)si->framebuffer)));
 		/* check if it is aligned */
 		if (temp32 != (temp32 & 0xfffffff0))
 		{
@@ -273,10 +273,10 @@ const overlay_buffer *ALLOCATE_OVERLAY_BUFFER(color_space cs, uint16 width, uint
 			return NULL;
 		}
 		/* continue buffer setup */		
-		si->overlay.myBuffer[offset].buffer = (void *) adress;
+		si->overlay.myBuffer[offset].buffer = (void *)(addr_t) adress;
 
 		/* calculate physical memory adress (for dma use) */
-		adress = (((uint32)((uint8*)si->framebuffer_pci)) + (si->ps.memory_size * 1024));
+		adress = (((uint32)(addr_t)((uint8*)si->framebuffer_pci)) + (si->ps.memory_size * 1024));
 		/* take cursor into account (if it exists) */
 		if(si->settings.hardcursor) adress -= si->ps.curmem_size;
 		for (cnt = 0; cnt <= offset; cnt++)
@@ -284,11 +284,11 @@ const overlay_buffer *ALLOCATE_OVERLAY_BUFFER(color_space cs, uint16 width, uint
 			adress -= si->overlay.myBufInfo[cnt].size;
 		}
 		/* this adress is already aligned to the scaler's requirements (via the already modified sizes) */
-		si->overlay.myBuffer[offset].buffer_dma = (void *) adress;
+		si->overlay.myBuffer[offset].buffer_dma = (void *)(addr_t) adress;
 
 		LOG(4,("Overlay: New buffer: addr $%08x, dma_addr $%08x, color space $%08x\n",
-			(uint32)((uint8*)si->overlay.myBuffer[offset].buffer),
-			(uint32)((uint8*)si->overlay.myBuffer[offset].buffer_dma), cs));
+			(uint32)(addr_t)((uint8*)si->overlay.myBuffer[offset].buffer),
+			(uint32)(addr_t)((uint8*)si->overlay.myBuffer[offset].buffer_dma), cs));
 		LOG(4,("Overlay: New buffer's size is $%08x\n", si->overlay.myBufInfo[offset].size));
 			
 		/* release the shared benaphore */

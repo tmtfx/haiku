@@ -30,6 +30,7 @@
 
 /* The private interface between the accelerant and the kernel driver. */
 #include "DriverInterface.h"
+#include <boot_primary_ownership.h>
 #include "nm_macros.h"
 
 #define get_pci(o, s) (*pci_bus->read_pci_config)(pcii->bus, pcii->device, pcii->function, (o), (s))
@@ -542,7 +543,7 @@ static status_t map_device(device_info *di)
 	}
 
 	/* remember the DMA address of the frame buffer for BDirectWindow?? purposes */
-	si->framebuffer_pci = (void *) di->pcii.u.h0.base_registers_pci[frame_buffer];
+	si->framebuffer_pci = (void *)(addr_t) di->pcii.u.h0.base_registers_pci[frame_buffer];
 
 	// remember settings for use here and in accelerant
 	si->settings = current_settings;
@@ -953,6 +954,13 @@ control_hook (void* dev, uint32 msg, void *buf, size_t len) {
 				drv_program_bes_ISA(bes_isa);
   				result = B_OK;
    			}
+		} break;
+		case NM_IS_BOOT_PRIMARY: {
+			bool isPrimary;
+			if (len != sizeof(bool))
+				return B_BAD_DATA;
+			isPrimary = boot_framebuffer_belongs_to_this_device(&di->pcii);
+			result = user_memcpy(buf, &isPrimary, sizeof(bool));
 		} break;
 	}
 	return result;

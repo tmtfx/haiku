@@ -66,7 +66,11 @@ enum {
 	NM_RUN_INTERRUPTS,
 	NM_ISA_OUT,
 	NM_ISA_IN,
-	NM_PGM_BES
+	NM_PGM_BES,
+	// Multi-GPU: whether this device owns the boot loader's
+	// FRAME_BUFFER_BOOT_INFO (see headers/private/graphics/common/
+	// boot_primary_ownership.h and MULTIGPU_PLAN.md). Returns a bool.
+	NM_IS_BOOT_PRIMARY
 };
 
 /* max. number of overlay buffers */

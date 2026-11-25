@@ -23,3 +23,13 @@ status_t GET_ACCELERANT_DEVICE_INFO(accelerant_device_info * adi)
 
 	return B_OK;
 }
+
+/* Multi-GPU: see boot_primary_hook.h -- only the kernel driver can call
+ * get_boot_item(), so ask it via NM_IS_BOOT_PRIMARY. */
+bool IS_BOOT_PRIMARY_PIRATI(void)
+{
+	bool isPrimary = false;
+	if (ioctl(fd, NM_IS_BOOT_PRIMARY, &isPrimary, sizeof(isPrimary)) != B_OK)
+		return false;
+	return isPrimary;
+}
