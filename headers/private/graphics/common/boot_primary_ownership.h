@@ -6,6 +6,11 @@
 #define _BOOT_PRIMARY_OWNERSHIP_H
 
 
+#include <PCI.h>
+#include <boot_item.h>
+#include <frame_buffer_console.h>
+
+
 /*!	Multi-GPU: shared by every graphics KERNEL driver (not the
 	accelerant side -- get_boot_item() is kernel-only, which is exactly
 	why this needs to live here instead of in boot_primary_hook.h, the
@@ -33,10 +38,10 @@
 	fallback when the user hasn't manually configured a GPU order (see
 	MULTIGPU_PLAN.md).
 
-	Requires the caller to already have <PCI.h>, <boot_item.h>, and
-	<frame_buffer_console.h> included (not included here, to avoid
-	pulling kernel-only headers into any file that doesn't already need
-	them).
+	Self-sufficient: pulls in <PCI.h>/<boot_item.h>/<frame_buffer_
+	console.h> itself rather than requiring a particular include order
+	from the caller (a driver that happened to include this before
+	<PCI.h> would otherwise fail with "'pci_info' does not name a type").
 */
 static inline bool
 boot_framebuffer_belongs_to_this_device(const pci_info& pciInfo)

@@ -25,6 +25,10 @@ enum {
 	KYRO_GET_PRIVATE_DATA = B_DEVICE_OP_CODES_END + 1,
 	KYRO_DEVICE_NAME,
 	KYRO_GET_EDID,
+	// Multi-GPU: whether this device owns the boot loader's
+	// FRAME_BUFFER_BOOT_INFO (see headers/private/graphics/common/
+	// boot_primary_ownership.h and MULTIGPU_PLAN.md). Returns a bool.
+	KYRO_IS_BOOT_PRIMARY,
 };
 
 
