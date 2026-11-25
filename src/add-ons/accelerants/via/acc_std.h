@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <sys/ioctl.h>
 #include "DriverInterface.h"
+#include <boot_primary_hook.h>
 #include "globals.h"
 //apsed #include "extern.h"
 #include "proto.h"

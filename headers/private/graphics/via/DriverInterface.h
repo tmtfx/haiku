@@ -76,7 +76,11 @@ enum {
 	ENG_GET_NTH_AGP_INFO,
 	ENG_ENABLE_AGP,
 	ENG_ISA_OUT,
-	ENG_ISA_IN
+	ENG_ISA_IN,
+	// Multi-GPU: whether this device owns the boot loader's
+	// FRAME_BUFFER_BOOT_INFO (see headers/private/graphics/common/
+	// boot_primary_ownership.h and MULTIGPU_PLAN.md). Returns a bool.
+	ENG_IS_BOOT_PRIMARY
 };
 
 /* max. number of overlay buffers */

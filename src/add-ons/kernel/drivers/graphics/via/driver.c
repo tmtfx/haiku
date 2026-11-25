@@ -38,6 +38,7 @@
 
 /* The private interface between the accelerant and the kernel driver. */
 #include "DriverInterface.h"
+#include <boot_primary_ownership.h>
 #include "macros.h"
 
 #define get_pci(o, s) (*pci_bus->read_pci_config)(pcii->bus, pcii->device, pcii->function, (o), (s))
@@ -1189,7 +1190,15 @@ control_hook (void* dev, uint32 msg, void *buf, size_t len) {
 				RELEASE_BEN(pd->kernel);
    			}
 		} break;
-		
+
+		case ENG_IS_BOOT_PRIMARY: {
+			bool isPrimary;
+			if (len != sizeof(bool))
+				return B_BAD_DATA;
+			isPrimary = boot_framebuffer_belongs_to_this_device(&di->pcii);
+			result = user_memcpy(buf, &isPrimary, sizeof(bool));
+		} break;
+
 		default:
             if (enableDebug) dprintf(LOG_PREFIX "ioctl: UNKNOWN IOCTL command received = 0x%08" B_PRIx32 "\n", msg);
             break;

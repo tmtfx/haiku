@@ -3,6 +3,8 @@ SubDir HAIKU_TOP src add-ons kernel drivers graphics via ;
 UsePrivateHeaders graphics ;
 UsePrivateSystemHeaders ;
 UsePrivateHeaders [ FDirName graphics via ] ;
+UsePrivateHeaders [ FDirName graphics common ] ;
+UsePrivateKernelHeaders ;
 
 KernelAddon via :
 	driver.c
