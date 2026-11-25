@@ -55,6 +55,16 @@ public:
 	inline	::HWInterface*		HWInterface() const
 									{ return fHWInterface.Get(); }
 
+		//! Multi-GPU: which workspace this screen is currently showing,
+		//! independently of which workspace currently has keyboard/mouse
+		//! focus (Desktop::CurrentWorkspace()). -1 until a workspace has
+		//! actually been displayed on it. See MULTIGPU_PLAN.md,
+		//! "rendering simultaneo".
+	inline	int32				DisplayedWorkspace() const
+									{ return fDisplayedWorkspace; }
+	inline	void				SetDisplayedWorkspace(int32 workspace)
+									{ fDisplayedWorkspace = workspace; }
+
 private:
 			int32				_FindBestMode(const display_mode* modeList,
 									uint32 count, uint16 width, uint16 height,
@@ -65,6 +75,7 @@ private:
 								fHWInterface;
 			ObjectDeleter<DrawingEngine>
 								fDriver;
+			int32				fDisplayedWorkspace;
 };
 
 #endif	/* SCREEN_H */

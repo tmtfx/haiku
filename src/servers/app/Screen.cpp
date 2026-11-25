@@ -43,14 +43,16 @@ Screen::Screen(::HWInterface *interface, int32 id)
 	:
 	fID(id),
 	fHWInterface(interface),
-	fDriver(interface != NULL ? interface->CreateDrawingEngine() : NULL)
+	fDriver(interface != NULL ? interface->CreateDrawingEngine() : NULL),
+	fDisplayedWorkspace(-1)
 {
 }
 
 
 Screen::Screen()
 	:
-	fID(-1)
+	fID(-1),
+	fDisplayedWorkspace(-1)
 {
 }
 

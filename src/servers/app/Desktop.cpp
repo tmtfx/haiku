@@ -2806,7 +2806,27 @@ Desktop::MarkDirty(BRegion& dirtyRegion, BRegion& exposeRegion)
 		return;
 
 	if (LockAllWindows()) {
-		_TriggerWindowRedrawing(dirtyRegion, exposeRegion);
+		// Multi-GPU: redraw against every active screen's own currently
+		// displayed workspace, not just fCurrentWorkspace (the one with
+		// keyboard/mouse focus) -- so a window on a screen that doesn't
+		// have focus right now still gets its invalidates processed and
+		// stays live. fCurrentWorkspace is always included, exactly as
+		// before, in case no screen has displayed it yet (e.g. very
+		// early during Init()). See MULTIGPU_PLAN.md, "rendering
+		// simultaneo".
+		bool triggeredCurrent = false;
+		for (int32 i = 0; i < fActiveGpuScreens.CountItems(); i++) {
+			Screen* screen = fActiveGpuScreens.ItemAt(i);
+			int32 workspace = screen != NULL
+				? screen->DisplayedWorkspace() : -1;
+			if (workspace < 0)
+				continue;
+			if (workspace == fCurrentWorkspace)
+				triggeredCurrent = true;
+			_TriggerWindowRedrawing(workspace, dirtyRegion, exposeRegion);
+		}
+		if (!triggeredCurrent)
+			_TriggerWindowRedrawing(fCurrentWorkspace, dirtyRegion, exposeRegion);
 
 		if (fCompositor2DEnabled)
 			CompositeDirtyRegion(dirtyRegion);
@@ -4114,9 +4134,25 @@ Desktop::_RebuildClippingForAllWindows(BRegion& stillAvailableOnScreen)
 void
 Desktop::_TriggerWindowRedrawing(BRegion& dirtyRegion, BRegion& exposeRegion)
 {
+	_TriggerWindowRedrawing(fCurrentWorkspace, dirtyRegion, exposeRegion);
+}
+
+
+/*!	Multi-GPU: same as the no-\a workspace overload, but against an
+	arbitrary workspace's own window list rather than always
+	fCurrentWorkspace (the one with keyboard/mouse focus). Used by
+	MarkDirty() to also redraw whichever workspace each other active GPU
+	screen happens to be displaying right now, so a window there keeps
+	updating live even while focus sits on a different screen. See
+	MULTIGPU_PLAN.md, "rendering simultaneo".
+*/
+void
+Desktop::_TriggerWindowRedrawing(int32 workspace, BRegion& dirtyRegion,
+	BRegion& exposeRegion)
+{
 	// send redraw messages to all windows intersecting the dirty region
-	for (Window* window = CurrentWindows().LastWindow(); window != NULL;
-			window = window->PreviousWindow(fCurrentWorkspace)) {
+	for (Window* window = _Windows(workspace).LastWindow(); window != NULL;
+			window = window->PreviousWindow(workspace)) {
 		if (!window->IsHidden()
 			&& dirtyRegion.Intersects(window->VisibleRegion().Frame()))
 			window->ProcessDirtyRegion(dirtyRegion, exposeRegion);
@@ -4350,15 +4386,46 @@ Desktop::_SetCurrentWorkspaceConfiguration()
 
 	AutoWriteLocker _(fScreenLock);
 
+	// Multi-GPU: SetConfiguration() below reconfigures every screen, not
+	// just the one this workspace actually belongs to (it has to -- it's
+	// the same call stock Haiku always made, from back when there was
+	// only ever one screen). Figure out up front which screen SHOULD end
+	// up active for this workspace, so the changedScreens loop right
+	// after can tell "this is the screen we actually care about" apart
+	// from "some other screen's mode got silently reapplied as a side
+	// effect." See the comment below for why that distinction matters.
+	Screen* targetScreen = _ScreenForWorkspace(fCurrentWorkspace);
+	::HWInterface* previousActive = fVirtualScreen.HWInterface();
+
 	uint32 changedScreens;
 	fVirtualScreen.SetConfiguration(*this,
 		fWorkspaces[fCurrentWorkspace].StoredScreenConfiguration(),
 		fWorkspaces[fCurrentWorkspace].CurrentScreenConfiguration(),
 		&changedScreens);
 
+	// Multi-GPU: _ScreenChanged() below updates fScreenRegion -- a single,
+	// shared BRegion that every window's clipping/visibility on the
+	// current workspace is computed against. In a single-screen world
+	// that's exactly right (there's only one screen it could mean).
+	// With more than one screen reconfigured by the SetConfiguration()
+	// call above, a screen OTHER than the one this workspace actually
+	// belongs to can still flip its own changedScreens bit (its stored-
+	// or-fallback mode for this workspace index can differ from whatever
+	// mode it happened to be left in before, independently of whether
+	// anyone is even looking at it) -- calling _ScreenChanged() for it
+	// would clobber fScreenRegion with the WRONG screen's frame, and
+	// every window on this workspace would get clipped against it. Only
+	// ever let the screen this workspace actually belongs to drive
+	// fScreenRegion/clipping/redraw. See MULTIGPU_PLAN.md.
+	bool targetScreenChanged = false;
 	for (int32 i = 0; changedScreens != 0; i++, changedScreens /= 2) {
-		if ((changedScreens & (1 << i)) != 0)
-			_ScreenChanged(fVirtualScreen.ScreenAt(i));
+		if ((changedScreens & (1 << i)) == 0)
+			continue;
+		Screen* screen = fVirtualScreen.ScreenAt(i);
+		if (screen != targetScreen)
+			continue;
+		targetScreenChanged = true;
+		_ScreenChanged(screen);
 	}
 
 	// Multi-GPU: fVirtualScreen.SetConfiguration() above just released and
@@ -4367,6 +4434,16 @@ Desktop::_SetCurrentWorkspaceConfiguration()
 	// "active" (see MULTIGPU_PLAN.md Fase D) -- override that here with
 	// the screen this workspace's row is actually assigned to.
 	_UpdateActiveScreenForCurrentWorkspace();
+
+	// If the active screen just switched to a different physical screen,
+	// but that screen's own mode happened not to register as "changed"
+	// (e.g. it's kept the very same mode across workspaces), the loop
+	// above never ran _ScreenChanged() for it -- fScreenRegion/clipping
+	// still need refreshing for whatever screen is active now.
+	if (!targetScreenChanged && targetScreen != NULL
+		&& fVirtualScreen.HWInterface() != previousActive) {
+		_ScreenChanged(targetScreen);
+	}
 }
 
 
@@ -4385,8 +4462,24 @@ Desktop::_SetCurrentWorkspaceConfiguration()
 void
 Desktop::_UpdateActiveScreenForCurrentWorkspace()
 {
-	if (fActiveGpuScreens.CountItems() == 0)
+	Screen* rowScreen = _ScreenForWorkspace(fCurrentWorkspace);
+	if (rowScreen == NULL)
 		return;
+
+	fVirtualScreen.SetActiveScreen(rowScreen);
+}
+
+
+/*!	Which GPU screen owns \a workspace's row -- same cyclic row % N
+	formula as _UpdateActiveScreenForCurrentWorkspace(), exposed so
+	_SetWorkspace() can tell whether two workspaces belong to the same
+	screen or not. NULL if there's no active GPU screen at all.
+*/
+Screen*
+Desktop::_ScreenForWorkspace(int32 workspace) const
+{
+	if (fActiveGpuScreens.CountItems() == 0)
+		return NULL;
 
 	int32 columns = 1;
 	if (fSettings.IsSet())
@@ -4394,10 +4487,8 @@ Desktop::_UpdateActiveScreenForCurrentWorkspace()
 	if (columns < 1)
 		columns = 1;
 
-	int32 row = fCurrentWorkspace / columns;
-	Screen* rowScreen
-		= fActiveGpuScreens.ItemAt(row % fActiveGpuScreens.CountItems());
-	fVirtualScreen.SetActiveScreen(rowScreen);
+	int32 row = workspace / columns;
+	return fActiveGpuScreens.ItemAt(row % fActiveGpuScreens.CountItems());
 }
 
 
@@ -4725,10 +4816,25 @@ Desktop::_SetWorkspace(int32 index, bool moveFocusWindow)
 
 	BRegion dirty;
 
+	// Multi-GPU: if the workspace we're leaving and the one we're
+	// switching to belong to the same screen, this is a plain,
+	// single-screen workspace switch and the loop below behaves exactly
+	// as stock Haiku always has (hide every window left behind). If they
+	// belong to different screens, the old workspace's own screen keeps
+	// displaying it live and untouched -- its windows must not be
+	// hidden, deactivated, or have direct frame buffer access stopped,
+	// since from their point of view nothing happened. See
+	// MULTIGPU_PLAN.md, "rendering simultaneo".
+	bool sameScreen = _ScreenForWorkspace(previousIndex)
+		== _ScreenForWorkspace(index);
+
 	for (Window* window = CurrentWindows().FirstWindow();
 			window != NULL; window = window->NextWindow(previousIndex)) {
 		// store current position in Workspace anchor
 		window->Anchor(previousIndex).position = window->Frame().LeftTop();
+
+		if (!sameScreen)
+			continue;
 
 		if (!window->IsHidden()
 			&& window->ServerWindow()->IsDirectlyAccessing())
@@ -4749,6 +4855,14 @@ Desktop::_SetWorkspace(int32 index, bool moveFocusWindow)
 
 	fPreviousWorkspace = fCurrentWorkspace;
 	fCurrentWorkspace = index;
+
+	// Multi-GPU: record that the screen owning the new workspace is now
+	// actually displaying it -- used by MarkDirty() to keep every active
+	// screen's own workspace live, not just this one. See
+	// MULTIGPU_PLAN.md, "rendering simultaneo".
+	Screen* newScreen = _ScreenForWorkspace(index);
+	if (newScreen != NULL)
+		newScreen->SetDisplayedWorkspace(index);
 
 	// Change the display modes, if needed
 	_SetCurrentWorkspaceConfiguration();

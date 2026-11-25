@@ -338,6 +338,8 @@ private:
 									BRegion& stillAvailableOnScreen);
 			void				_TriggerWindowRedrawing(
 									BRegion& dirtyRegion, BRegion& exposeRegion);
+			void				_TriggerWindowRedrawing(int32 workspace,
+									BRegion& dirtyRegion, BRegion& exposeRegion);
 			void				_SetBackground(BRegion& background);
 
 			status_t			_ActivateApp(team_id team);
@@ -349,6 +351,7 @@ private:
 			void				_SetCurrentWorkspaceConfiguration();
 			void				_UpdateActiveGpuScreens();
 			void				_UpdateActiveScreenForCurrentWorkspace();
+			Screen*				_ScreenForWorkspace(int32 workspace) const;
 			void				_SetWorkspace(int32 index,
 									bool moveFocusWindow = false);
 
