@@ -217,9 +217,20 @@ static void draw_logo(DeviceInfo *di, display_mode* dm) {
     if (startX < 0) startX = 0;
     if (startY < 0) startY = 0;
 
+    // screenWidth/screenHeight/bytesPerRow come from dm/si->fbc, which on
+    // a multi-GPU boot were themselves sized against
+    // FRAME_BUFFER_BOOT_INFO -- the boot loader's chosen primary card,
+    // not necessarily this device. fb/fb_size are this device's own
+    // mapped VRAM BAR. If that borrowed geometry doesn't actually fit
+    // this card's own, smaller VRAM, fbIndex can run past fb_size and
+    // corrupt whatever kernel memory follows the mapped area.
+    uint32 fbCapacityWords = fb_size / 4;
+
     for (uint32 y = 0; y < logoH && (startY + (int32)y) < (int32)screenHeight; y++) {
         for (uint32 x = 0; x < logoW && (startX + (int32)x) < (int32)screenWidth; x++) {
             uint32 fbIndex = (uint32)((startY + (int32)y) * (int32)fbPitch + (startX + (int32)x));
+            if (fbIndex >= fbCapacityWords)
+                continue;
             fb[fbIndex] = sm750_logo[y * logoW + x];
         }
     }

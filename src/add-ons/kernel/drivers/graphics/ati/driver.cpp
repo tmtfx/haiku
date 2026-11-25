@@ -303,12 +303,26 @@ static void draw_ati_logo_safe(DeviceInfo& di, struct frame_buffer_boot_info *bi
     if (startX < 0) startX = 0;
     if (startY < 0) startY = 0;
 
+    // screenWidth/screenHeight/bytesPerRow above come from the boot
+    // loader's FRAME_BUFFER_BOOT_INFO, which describes whichever single
+    // card the boot loader actually used -- on a multi-GPU boot that is
+    // NOT necessarily this device. fb/fb_size, in contrast, are this
+    // device's own mapped VRAM BAR. Clipping against the borrowed
+    // screenWidth/screenHeight (done above) is not enough on its own: if
+    // this card's own VRAM BAR turns out smaller than what that borrowed
+    // geometry implies, fbIndex can still run past fb_size and corrupt
+    // whatever kernel memory follows the mapped area. Guard every write
+    // against the area we actually mapped, not just the borrowed bounds.
+    uint32 fbCapacityWords = fb_size / 4;
+
     // Ciclo di copia pixel corazzato contro i fuori-confine di memoria
     for (uint32 y = 0; y < logoH && (startY + (int32)y) < (int32)screenHeight; y++) {
         for (uint32 x = 0; x < logoW && (startX + (int32)x) < (int32)screenWidth; x++) {
             uint32 fbIndex = (uint32)((startY + (int32)y) * (int32)fbPitch + (startX + (int32)x));
+            if (fbIndex >= fbCapacityWords)
+                continue;
             uint32 logoIndex = y * logoW + x;
-            
+
             fb[fbIndex] = logo_data[logoIndex];
         }
     }
@@ -909,7 +923,7 @@ InitDevice(DeviceInfo& di)
 		dprintf("ati: frame buffer boot info - Impossibile ricavare info boot FB\n");
 		enable_logo = false;
 	}
-	
+
 #endif
 
 	// Create the area for shared info with NO user-space read or write
