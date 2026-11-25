@@ -186,9 +186,18 @@ gpu_device_name(BMessenger& appServerMessenger, int32 index)
 // via the 'prim' query so the preflet always gives ITS full-featured
 // tab to the same screen Desktop treats as primary, instead of
 // hardcoding screen index 0 regardless of configured order).
+// Self-contained (builds its own BMessenger) so it can run from this
+// window's member initializer list, before the constructor body -- and
+// therefore before fScreenMode/fUndoScreenMode are constructed. Those
+// need the real primary's index already, not a placeholder patched in
+// afterward: fScreenMode(this) alone (no index) resolves to BScreen(
+// fWindow), Be API's "main screen" (screen_id 0, a pre-multi-GPU
+// concept unrelated to which card is the real primary), not to
+// whichever screen this window is actually supposed to represent.
 static int32
-primary_screen_index(BMessenger& appServerMessenger)
+primary_screen_index()
 {
+	BMessenger appServerMessenger("application/x-vnd.haiku-app_server");
 	BMessage request('prim');
 	BMessage reply;
 	int32 index = 0;
@@ -250,28 +259,37 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 	BWindow(settings->WindowFrame(), B_TRANSLATE_SYSTEM_NAME("Screen"),
 		B_TITLED_WINDOW, B_NOT_RESIZABLE | B_NOT_ZOOMABLE
 			| B_AUTO_UPDATE_SIZE_LIMITS, B_ALL_WORKSPACES),
-	fScreenIndex(0),
+	// This window's own full-featured tab always targets the effective
+	// primary GPU, not gScreenManager index 0 -- those only coincide
+	// when no GPU order has been configured yet, or when the primary
+	// happens to also be the one discovered first (see
+	// primary_screen_index() and MULTIGPU_PLAN.md Fase F). Must be
+	// resolved here, in the initializer list, before fScreenMode/
+	// fUndoScreenMode are constructed below -- not in the constructor
+	// body, which runs too late for them to pick it up.
+	fScreenIndex(primary_screen_index()),
 	fIsVesa(false),
 	fBootWorkspaceApplied(false),
 		fHasCursorAnimationCapability(false),
 	fUserSelectedColorSpace(NULL),
 	fOtherRefresh(NULL),
-	fScreenMode(this),
-	fUndoScreenMode(this),
+	fScreenMode(this, fScreenIndex),
+	fUndoScreenMode(this, fScreenIndex),
 	fModified(false),
 	fDumpFilePanel(NULL),
 	fLoadFilePanel(NULL)
 {
-	BScreen screen(this);
+	// Multi-GPU: BScreen(this) alone (Be API's "main screen", screen_id
+	// 0) is NOT the same thing as "the screen this window represents" --
+	// see the fScreenIndex comment above. Every other query below that
+	// needs to target the exact same screen as fScreenMode uses this
+	// screen_id, not BScreen(this).
+	screen_id screenId;
+	screenId.id = fScreenIndex;
+	BScreen screen(screenId);
 
 	{
 		BMessenger appServerMessenger("application/x-vnd.haiku-app_server");
-		// This window's own full-featured tab always targets the
-		// effective primary GPU, not gScreenManager index 0 -- those
-		// only coincide when no GPU order has been configured yet, or
-		// when the primary happens to also be the one discovered first
-		// (see primary_screen_index() and MULTIGPU_PLAN.md Fase F).
-		fScreenIndex = primary_screen_index(appServerMessenger);
 		fScreenKey = gpu_settings_key(appServerMessenger, fScreenIndex);
 	}
 
@@ -1706,7 +1724,9 @@ ScreenWindow::MessageReceived(BMessage* message)
 
 			fScreenMode.Revert();
 
-			BScreen screen(this);
+			screen_id screenId;
+			screenId.id = fScreenIndex;
+			BScreen screen(screenId);
 			screen.SetBrightness(fOriginalBrightness);
 			fBrightnessSlider->SetValue(fOriginalBrightness * 255);
 
@@ -1730,7 +1750,9 @@ ScreenWindow::MessageReceived(BMessage* message)
 
 		case SLIDER_BRIGHTNESS_MSG:
 		{
-			BScreen screen(this);
+			screen_id screenId;
+			screenId.id = fScreenIndex;
+			BScreen screen(screenId);
 			screen.SetBrightness(message->FindInt32("be:value") / 255.f);
 			_CheckApplyEnabled();
 			break;
@@ -2258,7 +2280,9 @@ ScreenWindow::_CheckApplyEnabled()
 	uint32 rows;
 	BPrivate::get_workspaces_layout(&columns, &rows);
 
-	BScreen screen(this);
+	screen_id screenId;
+	screenId.id = fScreenIndex;
+	BScreen screen(screenId);
 	float brightness = -1;
 	screen.GetBrightness(&brightness);
 
@@ -2375,7 +2399,9 @@ ScreenWindow::_Apply()
 		// thus we know to be working; it can differ from
 		// the mode selected by user due to hardware limitation
 		display_mode newMode;
-		BScreen screen(this);
+		screen_id screenId;
+		screenId.id = fScreenIndex;
+		BScreen screen(screenId);
 		screen.GetMode(&newMode);
 
 		if (fAllWorkspacesItem->IsMarked()) {
