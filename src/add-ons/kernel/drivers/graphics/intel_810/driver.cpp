@@ -16,6 +16,8 @@
 #include <string.h>
 #include <graphic_driver.h>
 #include <boot_item.h>
+#include <frame_buffer_console.h>
+#include <boot_primary_ownership.h>
 
 #include "DriverInterface.h"
 #include <edid_override.h>
@@ -682,6 +684,16 @@ device_ioctl(void* dev, uint32 msg, void* buffer, size_t bufferLength)
 			if (status == B_OK)
 				user_memcpy((edid1_raw*)buffer, &rawEdid, sizeof(rawEdid));
 			return status;
+		}
+
+		case INTEL_IS_BOOT_PRIMARY:
+		{
+			if (bufferLength != sizeof(bool))
+				return B_BAD_DATA;
+
+			bool isPrimary = boot_framebuffer_belongs_to_this_device(
+				di.pciInfo);
+			return user_memcpy(buffer, &isPrimary, sizeof(bool));
 		}
 	}
 

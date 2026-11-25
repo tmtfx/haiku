@@ -14,6 +14,8 @@
 #include <graphic_driver.h>
 #ifdef __HAIKU__
 #include <boot_item.h>
+#include <frame_buffer_console.h>
+#include <boot_primary_ownership.h>
 #endif	// __HAIKU__
 
 #include "DriverInterface.h"
@@ -570,6 +572,16 @@ device_ioctl(void* dev, uint32 msg, void* buffer, size_t bufferLength)
 			}
 			break;
 		}
+
+		case TDFX_IS_BOOT_PRIMARY:
+#ifdef __HAIKU__
+			if (bufferLength != sizeof(bool))
+				return B_BAD_DATA;
+#endif
+
+			*((bool*)buffer) = boot_framebuffer_belongs_to_this_device(
+				di.pciInfo);
+			return B_OK;
 	}
 
 	return B_DEV_INVALID_IOCTL;

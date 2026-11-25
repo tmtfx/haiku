@@ -57,6 +57,10 @@ enum {
 	INTEL_GET_SHARED_DATA = B_DEVICE_OP_CODES_END + 234,
 	INTEL_DEVICE_NAME,
 	INTEL_GET_EDID,
+	// Multi-GPU: whether this device owns the boot loader's
+	// FRAME_BUFFER_BOOT_INFO (see headers/private/graphics/common/
+	// boot_primary_ownership.h and MULTIGPU_PLAN.md). Returns a bool.
+	INTEL_IS_BOOT_PRIMARY,
 };
 
 

@@ -130,6 +130,7 @@ status_t CloneAccelerant(void* data);
 void	 UninitAccelerant(void);
 status_t GetAccelerantDeviceInfo(accelerant_device_info* adi);
 sem_id	 AccelerantRetraceSemaphore(void);
+bool	 IsBootPrimary(void);
 
 // Mode Hook Declarations
 uint32	 AccelerantModeCount(void);
