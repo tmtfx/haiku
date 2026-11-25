@@ -4484,6 +4484,39 @@ determine_primary_bdf(const BStringList& order, const BStringList& discoveredBdf
 }
 
 
+/*!	Last-resort auto-detected primary BDF, used only when
+	determine_primary_bdf() above found no configured order: asks each
+	screen's accelerant (via the optional B_IS_BOOT_PRIMARY_PIRATI hook,
+	see boot_primary_hook.h) whether IT is the one the boot loader
+	actually used. Empty if no screen answers (its accelerant doesn't
+	implement the hook) or more than one claims to be primary (should
+	never happen in practice; treated as ambiguous rather than
+	guessing) -- callers fall back further to index 0 in that case,
+	same as before this existed.
+*/
+static BString
+auto_detected_primary_bdf(const ScreenList& screens, const BStringList& bdfs)
+{
+	BString found;
+	for (int32 i = 0; i < screens.CountItems(); i++) {
+		Screen* screen = screens.ItemAt(i);
+		AccelerantHWInterface* accelerant = screen != NULL
+			? dynamic_cast<AccelerantHWInterface*>(screen->HWInterface())
+			: NULL;
+		if (accelerant == NULL)
+			continue;
+
+		bool isPrimary = false;
+		if (accelerant->IsBootPrimary(&isPrimary) == B_OK && isPrimary) {
+			if (!found.IsEmpty())
+				return BString();		// more than one claims primary
+			found = bdfs.StringAt(i);
+		}
+	}
+	return found;
+}
+
+
 /*!	Rebuilds activeGpuList (see MULTIGPU_PLAN.md Fase D/EDID). The
 	primary GPU is always treated as in use, DPMS_ON, and eligible for
 	row 0 -- regardless of whether it has a usable EDID. Only secondary
@@ -4517,6 +4550,8 @@ Desktop::_UpdateActiveGpuScreens()
 	}
 
 	BString primaryBdf = determine_primary_bdf(order, allBdfs);
+	if (primaryBdf.IsEmpty())
+		primaryBdf = auto_detected_primary_bdf(allScreens, allBdfs);
 	bool primaryIsFallback = primaryBdf.IsEmpty();
 
 	ScreenList candidates;

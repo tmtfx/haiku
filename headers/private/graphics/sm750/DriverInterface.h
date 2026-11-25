@@ -107,7 +107,13 @@ enum {
 	ENG_GET_PCI,
 	ENG_SET_PCI,
 	ENG_DEVICE_NAME,
-	ENG_RUN_INTERRUPTS
+	ENG_RUN_INTERRUPTS,
+	// Multi-GPU: whether this device owns the boot loader's
+	// FRAME_BUFFER_BOOT_INFO (see MULTIGPU_PLAN.md and the ati driver's
+	// identical ATI_IS_BOOT_PRIMARY/boot_framebuffer_belongs_to_this_
+	// device()) -- only get_boot_item() in kernel space can answer this,
+	// so the accelerant asks via this ioctl. Returns a single bool.
+	ENG_IS_BOOT_PRIMARY
 };
 
 /* Max overlay buffers per SM750 */

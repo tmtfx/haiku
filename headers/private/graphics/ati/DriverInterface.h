@@ -62,7 +62,13 @@ enum {
 	ATI_DEVICE_NAME,
 	ATI_GET_EDID,
 	ATI_RUN_INTERRUPTS,
-	ATI_SET_VESA_DISPLAY_MODE
+	ATI_SET_VESA_DISPLAY_MODE,
+	// Multi-GPU: whether this device owns the boot loader's
+	// FRAME_BUFFER_BOOT_INFO (see driver.cpp's
+	// boot_framebuffer_belongs_to_this_device() and MULTIGPU_PLAN.md) --
+	// only get_boot_item() in kernel space can answer this, so the
+	// accelerant asks via this ioctl. Returns a single bool.
+	ATI_IS_BOOT_PRIMARY
 };
 
 

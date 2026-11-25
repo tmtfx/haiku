@@ -620,6 +620,8 @@ AccelerantHWInterface::_SetupDefaultHooks()
 	fAccGetMonitorInfo
 		= (get_monitor_info)fAccelerantHook(B_GET_MONITOR_INFO, NULL);
 	fAccGetEDIDInfo = (get_edid_info)fAccelerantHook(B_GET_EDID_INFO, NULL);
+	fAccIsBootPrimary = (is_boot_primary)fAccelerantHook(
+		B_IS_BOOT_PRIMARY_PIRATI, NULL);
 
 	// cursor
 	fAccSetCursorShape
@@ -1378,6 +1380,26 @@ bool
 AccelerantHWInterface::SupportsGetEDID() const
 {
 	return fAccGetEDIDInfo != NULL;
+}
+
+
+/*!	Multi-GPU: whether this card's accelerant can tell us it's the real
+	boot-primary (see boot_primary_hook.h). B_UNSUPPORTED (not just
+	"false") when the accelerant doesn't implement the optional hook at
+	all -- callers must treat "unsupported" and "supported but false" as
+	different things (see AppServer.cpp's is_primary_screen(), which
+	only uses this as a last-resort fallback).
+*/
+status_t
+AccelerantHWInterface::IsBootPrimary(bool* isPrimary)
+{
+	AutoReadLocker _(this);
+
+	if (fAccIsBootPrimary == NULL)
+		return B_UNSUPPORTED;
+
+	*isPrimary = fAccIsBootPrimary();
+	return B_OK;
 }
 
 

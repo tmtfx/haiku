@@ -14,6 +14,8 @@
 #include <stdio.h>
 
 #include <driver_settings.h>
+#include <boot_item.h>
+#include <frame_buffer_console.h>
 
 //#include <util/kernel_cpp.h>
 #include <vm/vm.h>
@@ -345,6 +347,38 @@ open_device(const char *name, uint32 flags, void **cookie)
     return B_OK;
 }
 
+/*!	Whether \a pciInfo's own memory BARs contain the boot loader's
+	FRAME_BUFFER_BOOT_INFO physical framebuffer address -- i.e. whether
+	this device is the one the boot loader actually used (the real boot-
+	primary card). Identical logic to the ati driver's
+	boot_framebuffer_belongs_to_this_device() (see MULTIGPU_PLAN.md) --
+	duplicated here rather than shared, since the two drivers don't
+	otherwise share any code.
+*/
+static bool
+boot_framebuffer_belongs_to_this_device(const pci_info& pciInfo)
+{
+	struct frame_buffer_boot_info* bi = (struct frame_buffer_boot_info*)
+		get_boot_item(FRAME_BUFFER_BOOT_INFO, NULL);
+	if (bi == NULL)
+		return false;
+
+	for (int i = 0; i < 6; i++) {
+		uint32 base = pciInfo.u.h0.base_registers[i];
+		uint32 size = pciInfo.u.h0.base_register_sizes[i];
+		if (base == 0 || size == 0)
+			continue;
+		if ((pciInfo.u.h0.base_register_flags[i] & PCI_address_space) != 0)
+			continue;		// I/O space BAR, not memory
+		if (bi->physical_frame_buffer >= base
+				&& bi->physical_frame_buffer < base + size) {
+			return true;
+		}
+	}
+	return false;
+}
+
+
 /* --- control_device --- */
 static status_t
 control_device(void *cookie, uint32 op, void *arg, size_t len)
@@ -359,9 +393,14 @@ control_device(void *cookie, uint32 op, void *arg, size_t len)
             return user_memcpy(arg, &gpd, sizeof(gpd));
         }
         case B_GET_ACCELERANT_SIGNATURE:
-            if (user_strlcpy((char *)arg, "sm750.accelerant", len) < B_OK) 
+            if (user_strlcpy((char *)arg, "sm750.accelerant", len) < B_OK)
                 return B_BAD_ADDRESS;
             return B_OK;
+        case ENG_IS_BOOT_PRIMARY: {
+            if (len != sizeof(bool)) return B_BAD_VALUE;
+            bool isPrimary = boot_framebuffer_belongs_to_this_device(di->pci);
+            return user_memcpy(arg, &isPrimary, sizeof(bool));
+        }
     }
     return B_DEV_INVALID_IOCTL;
 }

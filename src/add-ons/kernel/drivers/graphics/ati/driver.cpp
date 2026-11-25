@@ -1422,6 +1422,16 @@ device_ioctl(void* dev, uint32 msg, void* buffer, size_t bufferLength)
 
 			return B_OK;
 		}
+
+		case ATI_IS_BOOT_PRIMARY:
+		{
+			if (bufferLength != sizeof(bool))
+				return B_BAD_DATA;
+
+			bool isPrimary = boot_framebuffer_belongs_to_this_device(
+				di.pciInfo);
+			return user_memcpy(buffer, &isPrimary, sizeof(bool));
+		}
 	}
 
 	return B_DEV_INVALID_IOCTL;

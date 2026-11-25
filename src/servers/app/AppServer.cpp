@@ -138,11 +138,47 @@ get_screen_bdf(Screen* screen)
 }
 
 
+/*!	Last-resort auto-detected primary, used only when the user hasn't
+	configured a GPU order: asks each screen's accelerant (via the
+	optional B_IS_BOOT_PRIMARY_PIRATI hook, see boot_primary_hook.h)
+	whether IT is the one the boot loader actually used. Returns -1 if
+	no screen answers (accelerant doesn't implement the hook) or more
+	than one claims to be primary (should never happen; treated as
+	ambiguous rather than guessing). Assumes gScreenManager is already
+	locked by the caller.
+*/
+static int32
+auto_detected_primary_index()
+{
+	if (gScreenManager == NULL)
+		return -1;
+
+	int32 found = -1;
+	for (int32 i = 0; i < gScreenManager->CountScreens(); i++) {
+		Screen* s = gScreenManager->ScreenAt(i);
+		AccelerantHWInterface* accelerant = s != NULL
+			? dynamic_cast<AccelerantHWInterface*>(s->HWInterface()) : NULL;
+		if (accelerant == NULL)
+			continue;
+
+		bool isPrimary = false;
+		if (accelerant->IsBootPrimary(&isPrimary) == B_OK && isPrimary) {
+			if (found >= 0)
+				return -1;		// more than one claims primary -- ambiguous
+			found = i;
+		}
+	}
+	return found;
+}
+
+
 /*!	Mirrors Desktop::_UpdateActiveGpuScreens()'s primary-GPU
 	determination (MULTIGPU_PLAN.md EDID section) so the 'hedi' query
 	below agrees with what Desktop actually does: the configured GPU
-	order's first entry if it matches a currently discovered screen,
-	otherwise whichever screen was discovered first (index 0). Assumes
+	order's first entry if it matches a currently discovered screen;
+	otherwise the auto-detected boot-primary if exactly one screen's
+	accelerant can answer that; otherwise whichever screen was
+	discovered first (index 0, the final, last-resort fallback). Assumes
 	gScreenManager is already locked by the caller.
 */
 static bool
@@ -177,6 +213,10 @@ is_primary_screen(int32 screenIndex)
 				== configuredPrimaryBdf;
 		}
 	}
+
+	int32 autoIndex = auto_detected_primary_index();
+	if (autoIndex >= 0)
+		return screenIndex == autoIndex;
 
 	return screenIndex == 0;
 }

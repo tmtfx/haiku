@@ -19,6 +19,8 @@
 #include <image.h>
 #include <video_overlay.h>
 
+#include <boot_primary_hook.h>
+
 
 class AccelerantBuffer;
 class RenderingBuffer;
@@ -69,6 +71,11 @@ public:
 	virtual status_t			SetEDID(const void* info, uint32 size, uint32 version);
 	virtual bool				SupportsGetEDID() const;
 	virtual bool				SupportsSetEDID() const;
+
+	// Multi-GPU: B_UNSUPPORTED if this accelerant doesn't implement the
+	// optional B_IS_BOOT_PRIMARY_PIRATI hook at all (see
+	// boot_primary_hook.h), B_OK + *isPrimary otherwise.
+	virtual status_t			IsBootPrimary(bool* isPrimary);
 
 	virtual status_t			GetAccelerantPath(BString& path);
 	virtual status_t			GetDriverPath(BString& path);
@@ -184,6 +191,7 @@ private:
 			get_preferred_display_mode fAccGetPreferredDisplayMode;
 			get_monitor_info		fAccGetMonitorInfo;
 			get_edid_info			fAccGetEDIDInfo;
+			is_boot_primary			fAccIsBootPrimary;
 			screen_to_screen_blit	fAccScreenBlit;
 			fill_rectangle			fAccFillRect;
 			set_cursor_shape		fAccSetCursorShape;
