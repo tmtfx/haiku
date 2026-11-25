@@ -112,6 +112,23 @@ Build verificata pulita per `ati`, `ati.accelerant`, `sm750`, `sm750.accelerant`
 
 **Da verificare al prossimo boot reale**: che con `Screen_data` ancora vuoto, la preflet mostri ora SM750 come primaria senza bisogno di alcuna configurazione manuale.
 
+## Ottavo giro: rollout di `IS_BOOT_PRIMARY` a tutti gli altri driver grafici
+
+L'utente ha chiesto di estendere il meccanismo appena implementato (ioctl per-driver + hook `B_IS_BOOT_PRIMARY_PIRATI`) a **tutti** i driver grafici del tree, non solo `ati`/`sm750`, così sono tutti pronti per la gestione primaria/secondaria. Fatto per tutti i 18 driver con un vero dispositivo PCI/`pci_info` (`ati`, `sm750`, `3dfx`, `ast`, `intel_810`, `kyro`, `s3`, `trident`, `xgi`, `intel_extreme`, `radeon_hd`, `intel_arc`, `matrox`, `neomagic`, `nvidia`, `via`, `et6x00`, `radeon`). Esclusi deliberatamente: `framebuffer`/`vesa` (driver di fallback puro, mai candidati multi-GPU — già esclusi dalla scansione), `virtio` (nessuno schema BDF/PCI stabile, già una nota esistente del progetto), `skeleton` (il suo accelerant non è nemmeno nella build).
+
+**Refactoring preliminare necessario**: `boot_framebuffer_belongs_to_this_device()` prendeva un riferimento C++ (`const pci_info&`) — non compila su `matrox`/`neomagic`/`nvidia`/`via`/`et6x00` (file `.c`, compilati come C puro, non C++). Cambiata la firma per prendere un puntatore (`const pci_info*`), compatibile con entrambi i linguaggi; aggiornati i 12 call site già esistenti di conseguenza.
+
+**Pattern per famiglia di driver** (stesso schema logico, nomi/convenzioni diverse per famiglia — vedi i commit per i dettagli esatti di ciascuno):
+- **Famiglia "ati"** (`3dfx`, `ast`, `intel_810`, `kyro`, `s3`, `trident`, `xgi`): `DeviceInfo`/`device_info` con `pci_info` embedded, dispatch ioctl `device_ioctl`/`control_hook`/`ast_control`, hook C++ dedicato per-funzione.
+- **Driver moderni a puntatore** (`intel_extreme`, `radeon_hd`, `intel_arc`): array `gDeviceInfo[]`, `pci_info` raggiunto tramite puntatore.
+- **Famiglia "matrox"** (`matrox`, `neomagic`, `nvidia`, `via`, `et6x00`, `radeon` vecchio): dispatch accelerant guidato da macro (`HOOK(x)` → `case B_##x: return (void*)x`) — la funzione deve chiamarsi letteralmente `IS_BOOT_PRIMARY_PIRATI` (tutto maiuscolo, senza prefisso) perché la macro funzioni invariata; globale `fd`/`ai->fd` invece di `gInfo.fd`.
+
+**Problemi trovati e risolti durante il rollout** (tutti pre-esistenti, non introdotti da questa sessione — scoperti perché questi driver probabilmente non venivano compilati in questa toolchain da tempo):
+- Diversi Jamfile (kernel e/o accelerant) mancavano di `UsePrivateHeaders [ FDirName graphics common ]` e/o `UsePrivateKernelHeaders` del tutto (`matrox`, `neomagic`, `nvidia`, `via`, `et6x00`, `radeon`, `ast` accelerant) — aggiunti dove mancanti.
+- `neomagic`: bit-rot a 64-bit preesistente — un cast puntatore→`void*` nel driver kernel e **sei** cast puntatore↔intero a 32 bit in `Overlay.c` (mai aggiornati per x86_64). Corretti con lo stesso idioma `(void*)(addr_t)x` / `(uint32)(addr_t)x` già usato altrove nel tree (es. `sm750/init.c`) — pura correzione di cast, nessun cambiamento nel comportamento reale (gli indirizzi PCI reali rientrano comodamente in 32 bit).
+
+Build verificata pulita per tutti i 18 driver (kernel + accelerant) insieme, più `app_server` e `Screen`.
+
 **Ancora aperto**: la richiesta dell'utente di mostrare, al posto di (o accanto a) "Mostra informazioni", il nome del monitor decodificato dall'EDID (`monitor_info::name`, già letto da `ScreenWindow::_UpdateMonitor()` per il box in alto — da capire se la stessa stringa vada duplicata/spostata nel punto giusto). Non ancora implementato.
 
 **Refactoring richiesto dall'utente, subito dopo**: `boot_framebuffer_belongs_to_this_device()` era duplicata identica in `ati/driver.cpp` e `sm750/driver.cpp` — l'utente ha giustamente notato che, dovendo essere riusata da ogni driver futuro, andava centralizzata. Spostata in un nuovo header header-only, `headers/private/graphics/common/boot_primary_ownership.h` (funzione `static inline`, stesso pattern già stabilito da `edid_override.h` in questa stessa directory — nessuna modifica ai Jamfile necessaria, entrambi i driver avevano già `UsePrivateHeaders [ FDirName graphics common ]`). Tenuta **deliberatamente separata** da `boot_primary_hook.h`: quest'ultimo è incluso anche lato userspace (accelerant, app_server) per la costante dell'hook/il typedef, mentre questa funzione chiama `get_boot_item()` (kernel-only) — mescolarle nello stesso header avrebbe rotto la build userspace. `ati/driver.cpp` e `sm750/driver.cpp` ora includono solo l'header condiviso, zero logica duplicata. Build verificata pulita per entrambi.
