@@ -36,6 +36,7 @@ void *get_accelerant_hook(uint32 feature, void *data) {
 	HOOK(GET_ACCELERANT_CLONE_INFO);
 	HOOK(UNINIT_ACCELERANT);
 	HOOK(GET_ACCELERANT_DEVICE_INFO);
+	HOOK(IS_BOOT_PRIMARY_PIRATI);
 
 ///     HOOK(ACCELERANT_RETRACE_SEMAPHORE); /* Not implemented. Would be useful to have it implemented. */
 

@@ -48,7 +48,11 @@ enum {
     ET6000_SET_PCI,
     ET6000_DEVICE_NAME,
     ET6000_PROPOSE_DISPLAY_MODE,
-    ET6000_SET_DISPLAY_MODE
+    ET6000_SET_DISPLAY_MODE,
+    // Multi-GPU: whether this device owns the boot loader's
+    // FRAME_BUFFER_BOOT_INFO (see headers/private/graphics/common/
+    // boot_primary_ownership.h and MULTIGPU_PLAN.md). Returns a bool.
+    ET6000_IS_BOOT_PRIMARY
 };
 /*****************************************************************************/
 typedef struct {

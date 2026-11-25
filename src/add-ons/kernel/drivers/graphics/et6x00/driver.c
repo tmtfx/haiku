@@ -21,6 +21,7 @@
 
 /* The private interface between the accelerant and the kernel driver. */
 #include "DriverInterface.h"
+#include <boot_primary_ownership.h>
 
 #include "setmode.h"
 #include "acl.h"
@@ -706,6 +707,14 @@ status_t result = B_DEV_INVALID_IOCTL;
             if (dm.magic == ET6000_PRIVATE_DATA_MAGIC) {
                 result = et6000SetMode(&dm.mode, dm.pciConfigSpace);
             }
+        } break;
+
+        case ET6000_IS_BOOT_PRIMARY: {
+            bool isPrimary;
+            if (len != sizeof(bool))
+                return B_BAD_DATA;
+            isPrimary = boot_framebuffer_belongs_to_this_device(&di->pcii);
+            result = user_memcpy(buf, &isPrimary, sizeof(bool));
         } break;
     }
     return result;

@@ -7,6 +7,7 @@
 #define _ET6000GLOBALDATA_H_
 
 #include "DriverInterface.h"
+#include <boot_primary_hook.h>
 
 
 /*****************************************************************************/

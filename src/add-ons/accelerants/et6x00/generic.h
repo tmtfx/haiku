@@ -7,6 +7,7 @@
 #define _ET6000GENERIC_H_
 
 #include <Accelerant.h>
+#include <boot_primary_hook.h>
 
 
 /*****************************************************************************/
@@ -16,6 +17,7 @@ void GET_ACCELERANT_CLONE_INFO(void *data);
 status_t CLONE_ACCELERANT(void *data);
 void UNINIT_ACCELERANT(void);
 status_t GET_ACCELERANT_DEVICE_INFO(accelerant_device_info *adi);
+bool IS_BOOT_PRIMARY_PIRATI(void);
 
 uint32 ACCELERANT_MODE_COUNT(void);
 status_t GET_MODE_LIST(display_mode *dm);
