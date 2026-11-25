@@ -26,6 +26,7 @@ void spin(bigtime_t delay);
 status_t radeon_init_accelerant(int fd);
 void radeon_uninit_accelerant(void);
 status_t radeon_get_accelerant_device_info(accelerant_device_info* di);
+bool radeon_is_boot_primary(void);
 
 // modes & constraints
 uint32 radeon_accelerant_mode_count(void);

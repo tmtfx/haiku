@@ -22,6 +22,7 @@ status_t	intel_arc_clone_accelerant(void* info);
 void		intel_arc_uninit_accelerant(void);
 status_t	intel_arc_get_accelerant_device_info(accelerant_device_info* info);
 sem_id		intel_arc_accelerant_retrace_semaphore(void);
+bool		intel_arc_is_boot_primary(void);
 uint32		intel_arc_dpms_capabilities(void);
 uint32		intel_arc_dpms_mode(void);
 status_t	intel_arc_set_dpms_mode(uint32 mode);

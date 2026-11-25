@@ -11,6 +11,8 @@
 #include "accelerant.h"
 #include "accelerant_protos.h"
 
+#include <boot_primary_hook.h>
+
 
 extern "C" void*
 get_accelerant_hook(uint32 feature, void* data)
@@ -32,6 +34,8 @@ get_accelerant_hook(uint32 feature, void* data)
 		*/
 		case B_GET_ACCELERANT_DEVICE_INFO:
 			return (void*)radeon_get_accelerant_device_info;
+		case B_IS_BOOT_PRIMARY_PIRATI:
+			return (void*)radeon_is_boot_primary;
 
 		/* DPMS */
 		case B_DPMS_CAPABILITIES:

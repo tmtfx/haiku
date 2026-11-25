@@ -546,7 +546,11 @@ enum {
 	INTEL_ALLOCATE_GRAPHICS_MEMORY,
 	INTEL_FREE_GRAPHICS_MEMORY,
 	INTEL_GET_BRIGHTNESS_LEGACY,
-	INTEL_SET_BRIGHTNESS_LEGACY
+	INTEL_SET_BRIGHTNESS_LEGACY,
+	// Multi-GPU: whether this device owns the boot loader's
+	// FRAME_BUFFER_BOOT_INFO (see headers/private/graphics/common/
+	// boot_primary_ownership.h and MULTIGPU_PLAN.md). Returns a bool.
+	INTEL_IS_BOOT_PRIMARY
 };
 
 // retrieve the area_id of the kernel/accelerant shared info

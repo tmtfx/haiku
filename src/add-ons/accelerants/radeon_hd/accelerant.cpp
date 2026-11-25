@@ -381,3 +381,18 @@ radeon_get_accelerant_device_info(accelerant_device_info* di)
 	di->memory = gInfo->shared_info->graphics_memory_size;
 	return B_OK;
 }
+
+
+bool
+radeon_is_boot_primary(void)
+{
+	// Multi-GPU: see boot_primary_hook.h -- only the kernel driver can
+	// call get_boot_item(), so ask it via RADEON_IS_BOOT_PRIMARY.
+	bool isPrimary = false;
+	if (ioctl(gInfo->device, RADEON_IS_BOOT_PRIMARY, &isPrimary,
+			sizeof(isPrimary)) != B_OK) {
+		return false;
+	}
+
+	return isPrimary;
+}

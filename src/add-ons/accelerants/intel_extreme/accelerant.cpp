@@ -663,3 +663,18 @@ intel_accelerant_retrace_semaphore()
 	CALLED();
 	return gInfo->shared_info->vblank_sem;
 }
+
+
+bool
+intel_is_boot_primary(void)
+{
+	// Multi-GPU: see boot_primary_hook.h -- only the kernel driver can
+	// call get_boot_item(), so ask it via INTEL_IS_BOOT_PRIMARY.
+	bool isPrimary = false;
+	if (ioctl(gInfo->device, INTEL_IS_BOOT_PRIMARY, &isPrimary,
+			sizeof(isPrimary)) != B_OK) {
+		return false;
+	}
+
+	return isPrimary;
+}

@@ -10,6 +10,8 @@
 #include "accelerant_protos.h"
 #include "accelerant.h"
 
+#include <boot_primary_hook.h>
+
 
 extern "C" void*
 get_accelerant_hook(uint32 feature, void* data)
@@ -30,6 +32,8 @@ get_accelerant_hook(uint32 feature, void* data)
 			return (void*)intel_get_accelerant_device_info;
 		case B_ACCELERANT_RETRACE_SEMAPHORE:
 			return (void*)intel_accelerant_retrace_semaphore;
+		case B_IS_BOOT_PRIMARY_PIRATI:
+			return (void*)intel_is_boot_primary;
 
 		/* mode configuration */
 		case B_ACCELERANT_MODE_COUNT:
