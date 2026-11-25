@@ -4397,7 +4397,35 @@ Desktop::_UpdateActiveScreenForCurrentWorkspace()
 	int32 row = fCurrentWorkspace / columns;
 	Screen* rowScreen
 		= fActiveGpuScreens.ItemAt(row % fActiveGpuScreens.CountItems());
+
+	::HWInterface* previousHWInterface = fVirtualScreen.HWInterface();
 	fVirtualScreen.SetActiveScreen(rowScreen);
+	::HWInterface* newHWInterface = fVirtualScreen.HWInterface();
+
+	if (newHWInterface == previousHWInterface)
+		return;
+
+	// Multi-GPU: the active screen just changed to a different physical
+	// GPU. Every direct-mode window (no backing store -- i.e. whenever
+	// the compositor is off, which it already is whenever any active
+	// GPU lacks a hardware cursor) has its DrawingEngine permanently
+	// bound to whichever HWInterface was active at window-creation time
+	// (ServerWindow::MakeWindow()) or the last Free/AllocateBackingStore()
+	// call -- GetDrawingEngine() does not dynamically re-resolve
+	// HWInterface() on its own. Left unrebound, existing windows keep
+	// drawing into the screen that's no longer the one actually visible:
+	// confirmed on real hardware as windows intermittently failing to
+	// render after switching to a row mapped to a different GPU and back.
+	for (Window* window = fAllWindows.FirstWindow(); window != NULL;
+			window = window->NextWindow(kAllWindowList)) {
+		if (!window->HasBackingStore() && window->GetDrawingEngine() != NULL) {
+			window->GetDrawingEngine()->SetHWInterface(newHWInterface);
+			window->GetDrawingEngine()->SetWindowOrigin(0, 0);
+		}
+	}
+
+	BRegion dirty(fVirtualScreen.Frame());
+	MarkDirty(dirty);
 }
 
 
