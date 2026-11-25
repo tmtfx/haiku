@@ -17,6 +17,7 @@
 #include <graphic_driver.h>
 #include <boot_item.h>
 #include <frame_buffer_console.h>
+#include <boot_primary_ownership.h>
 
 #include "DriverInterface.h"
 #include <edid_override.h>
@@ -895,42 +896,6 @@ InitInterruptHandler(DeviceInfo& di)
 		delete_sem(si.vertBlankSem);
 		si.vertBlankSem = -1;
 	}
-}
-
-
-/*!	Whether \a pciInfo's own memory BARs contain the boot loader's
-	FRAME_BUFFER_BOOT_INFO physical framebuffer address -- i.e. whether
-	this device is the one the boot loader actually used (the real boot-
-	primary card). FRAME_BUFFER_BOOT_INFO/VESA_EDID_BOOT_INFO describe
-	exactly ONE boot framebuffer/monitor; on a multi-GPU boot, every
-	card's InitDevice() sees the same boot items regardless of which one
-	owns them. Used to gate inheriting the boot loader's EDID below --
-	without this check, a secondary card would otherwise claim the
-	primary's monitor's EDID as its own (confirmed on real hardware: an
-	ATI Rage XL wrongly inherited an SM750-attached monitor's EDID this
-	way when SM750, not the ATI, was the actual boot-primary).
-*/
-static bool
-boot_framebuffer_belongs_to_this_device(const pci_info& pciInfo)
-{
-	struct frame_buffer_boot_info* bi = (struct frame_buffer_boot_info*)
-		get_boot_item(FRAME_BUFFER_BOOT_INFO, NULL);
-	if (bi == NULL)
-		return false;
-
-	for (int i = 0; i < 6; i++) {
-		uint32 base = pciInfo.u.h0.base_registers[i];
-		uint32 size = pciInfo.u.h0.base_register_sizes[i];
-		if (base == 0 || size == 0)
-			continue;
-		if ((pciInfo.u.h0.base_register_flags[i] & PCI_address_space) != 0)
-			continue;		// I/O space BAR, not memory
-		if (bi->physical_frame_buffer >= base
-				&& bi->physical_frame_buffer < base + size) {
-			return true;
-		}
-	}
-	return false;
 }
 
 

@@ -114,6 +114,8 @@ Build verificata pulita per `ati`, `ati.accelerant`, `sm750`, `sm750.accelerant`
 
 **Ancora aperto**: la richiesta dell'utente di mostrare, al posto di (o accanto a) "Mostra informazioni", il nome del monitor decodificato dall'EDID (`monitor_info::name`, già letto da `ScreenWindow::_UpdateMonitor()` per il box in alto — da capire se la stessa stringa vada duplicata/spostata nel punto giusto). Non ancora implementato.
 
+**Refactoring richiesto dall'utente, subito dopo**: `boot_framebuffer_belongs_to_this_device()` era duplicata identica in `ati/driver.cpp` e `sm750/driver.cpp` — l'utente ha giustamente notato che, dovendo essere riusata da ogni driver futuro, andava centralizzata. Spostata in un nuovo header header-only, `headers/private/graphics/common/boot_primary_ownership.h` (funzione `static inline`, stesso pattern già stabilito da `edid_override.h` in questa stessa directory — nessuna modifica ai Jamfile necessaria, entrambi i driver avevano già `UsePrivateHeaders [ FDirName graphics common ]`). Tenuta **deliberatamente separata** da `boot_primary_hook.h`: quest'ultimo è incluso anche lato userspace (accelerant, app_server) per la costante dell'hook/il typedef, mentre questa funzione chiama `get_boot_item()` (kernel-only) — mescolarle nello stesso header avrebbe rotto la build userspace. `ati/driver.cpp` e `sm750/driver.cpp` ora includono solo l'header condiviso, zero logica duplicata. Build verificata pulita per entrambi.
+
 ## Stato di implementazione (aggiornato dopo la sessione di codifica)
 
 **Implementate e build-verificate (`app_server` + `Screen` compilano senza errori):**
