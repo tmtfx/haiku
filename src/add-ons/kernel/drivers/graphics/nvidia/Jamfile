@@ -4,6 +4,7 @@ UsePrivateHeaders graphics ;
 UsePrivateSystemHeaders ;
 UsePrivateHeaders [ FDirName graphics nvidia ] ;
 UsePrivateHeaders [ FDirName graphics common ] ;
+UsePrivateKernelHeaders ;
 
 KernelAddon nvidia :
 	driver.c

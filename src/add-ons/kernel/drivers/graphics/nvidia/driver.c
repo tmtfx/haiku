@@ -10,6 +10,7 @@
 
 #include "AGP.h"
 #include "DriverInterface.h"
+#include <boot_primary_ownership.h>
 #include "nv_macros.h"
 
 #include <graphic_driver.h>
@@ -1375,6 +1376,15 @@ control_hook(void* dev, uint32 msg, void *buf, size_t len)
 				/* end of critical section */
 				RELEASE_BEN(pd->kernel);
    			}
+			break;
+		}
+
+		case NV_IS_BOOT_PRIMARY: {
+			bool isPrimary;
+			if (len != sizeof(bool))
+				return B_BAD_DATA;
+			isPrimary = boot_framebuffer_belongs_to_this_device(&di->pcii);
+			result = user_memcpy(buf, &isPrimary, sizeof(bool));
 			break;
 		}
 	}

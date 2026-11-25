@@ -92,7 +92,11 @@ enum {
 	NV_GET_NTH_AGP_INFO,
 	NV_ENABLE_AGP,
 	NV_ISA_OUT,
-	NV_ISA_IN
+	NV_ISA_IN,
+	// Multi-GPU: whether this device owns the boot loader's
+	// FRAME_BUFFER_BOOT_INFO (see headers/private/graphics/common/
+	// boot_primary_ownership.h and MULTIGPU_PLAN.md). Returns a bool.
+	NV_IS_BOOT_PRIMARY
 };
 
 /* card_type in order of date of NV chip design */

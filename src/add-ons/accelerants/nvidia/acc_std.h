@@ -17,6 +17,7 @@
 
 /* Nvidia driver */
 #include "DriverInterface.h"
+#include <boot_primary_hook.h>
 #include "nv_globals.h"
 #include "nv_proto.h"
 #include "be_driver_proto.h"
