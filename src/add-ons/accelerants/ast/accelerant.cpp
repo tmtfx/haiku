@@ -36,6 +36,8 @@
 #include "accelerant.h"
 #include "ast_regs.h"
 
+#include <boot_primary_hook.h>
+
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -293,6 +295,24 @@ ast_get_accelerant_device_info(accelerant_device_info* info)
 }
 
 
+// ===== Multi-GPU: B_IS_BOOT_PRIMARY_PIRATI (see boot_primary_hook.h) =====
+
+extern "C" bool
+ast_is_boot_primary(void)
+{
+	// Only the kernel driver can call get_boot_item(), so ask it via
+	// AST_IS_BOOT_PRIMARY.
+	bool isPrimary = false;
+	if (gInfo == NULL
+		|| ioctl(gInfo->deviceFd, AST_IS_BOOT_PRIMARY, &isPrimary,
+			sizeof(isPrimary)) != B_OK) {
+		return false;
+	}
+
+	return isPrimary;
+}
+
+
 // ===== Mode list — Phase 4.0: 5 hardcoded 4:3 VESA modes =====
 //
 // One Haiku display_mode entry per kModeList[] entry in mode.cpp. They
@@ -524,6 +544,8 @@ get_accelerant_hook(uint32 feature, void* /*data*/)
 			return (void*)ast_clone_accelerant;
 		case B_GET_ACCELERANT_DEVICE_INFO:
 			return (void*)ast_get_accelerant_device_info;
+		case B_IS_BOOT_PRIMARY_PIRATI:
+			return (void*)ast_is_boot_primary;
 
 		case B_ACCELERANT_MODE_COUNT:
 			return (void*)ast_accelerant_mode_count;

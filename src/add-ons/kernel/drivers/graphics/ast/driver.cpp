@@ -38,6 +38,8 @@
 #include <PCI.h>
 #include <graphic_driver.h>
 
+#include <boot_primary_ownership.h>
+
 #include "DriverInterface.h"
 
 
@@ -552,6 +554,18 @@ ast_control(void* cookie, uint32 op, void* arg, size_t length)
 					*(volatile uint32*)(device->registers + offset + 8),
 					*(volatile uint32*)(device->registers + offset + 12));
 			}
+			return B_OK;
+		}
+
+		case AST_IS_BOOT_PRIMARY:
+		{
+			if (length != sizeof(bool))
+				return B_BAD_VALUE;
+
+			bool isPrimary = boot_framebuffer_belongs_to_this_device(
+				device->pciInfo);
+			if (user_memcpy(arg, &isPrimary, sizeof(bool)) < B_OK)
+				return B_BAD_ADDRESS;
 			return B_OK;
 		}
 

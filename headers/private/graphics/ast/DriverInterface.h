@@ -46,6 +46,10 @@
 enum {
 	AST_GET_PRIVATE_DATA = B_DEVICE_OP_CODES_END + 1,
 	AST_DUMP_REGISTERS,
+	// Multi-GPU: whether this device owns the boot loader's
+	// FRAME_BUFFER_BOOT_INFO (see headers/private/graphics/common/
+	// boot_primary_ownership.h and MULTIGPU_PLAN.md). Returns a bool.
+	AST_IS_BOOT_PRIMARY,
 };
 
 

@@ -63,6 +63,7 @@
 
 #include <boot_item.h>
 #include <frame_buffer_console.h>
+#include <boot_primary_ownership.h>
 #include <Drivers.h>
 #include <KernelExport.h>
 #include <PCI.h>
@@ -901,6 +902,14 @@ device_ioctl(void* cookie, uint32 msg, void* buf, size_t len)
 				return B_BAD_VALUE;
 		out8(pio.value, pio.port);
 			return B_OK;
+		}
+
+		case XGI_IS_BOOT_PRIMARY: {
+			if (len != sizeof(bool))
+				return B_BAD_DATA;
+			bool isPrimary = boot_framebuffer_belongs_to_this_device(
+				device->pciInfo);
+			return user_memcpy(buf, &isPrimary, sizeof(bool));
 		}
 
 		default:

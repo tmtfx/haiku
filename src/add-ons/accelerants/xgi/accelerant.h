@@ -293,6 +293,7 @@ ssize_t		xgi_accelerant_clone_info_size(void);
 void		xgi_get_accelerant_clone_info(void* data);
 status_t	xgi_get_accelerant_device_info(accelerant_device_info* adi);
 sem_id		xgi_accelerant_retrace_semaphore(void);
+bool		xgi_is_boot_primary(void);
 
 /* Prototypes - DisplayModes.cpp */
 uint32		xgi_accelerant_mode_count(void);
