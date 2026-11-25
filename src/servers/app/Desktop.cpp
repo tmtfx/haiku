@@ -4366,18 +4366,38 @@ Desktop::_SetCurrentWorkspaceConfiguration()
 	// which leaves whichever one happens to be last in that list as
 	// "active" (see MULTIGPU_PLAN.md Fase D) -- override that here with
 	// the screen this workspace's row is actually assigned to.
-	if (fActiveGpuScreens.CountItems() > 0) {
-		int32 columns = 1;
-		if (fSettings.IsSet())
-			columns = fSettings->WorkspacesColumns();
-		if (columns < 1)
-			columns = 1;
+	_UpdateActiveScreenForCurrentWorkspace();
+}
 
-		int32 row = fCurrentWorkspace / columns;
-		Screen* rowScreen
-			= fActiveGpuScreens.ItemAt(row % fActiveGpuScreens.CountItems());
-		fVirtualScreen.SetActiveScreen(rowScreen);
-	}
+
+/*!	Re-points the single active screen (see MULTIGPU_PLAN.md Fase D) at
+	whichever GPU the current workspace's row is assigned to, based on
+	fActiveGpuScreens as it stands right now. Called both after
+	_SetCurrentWorkspaceConfiguration()'s full screen reconfiguration
+	above, and directly from GpuConfigurationChanged(): without the
+	latter, loading an EDID onto (or reordering) a secondary GPU updated
+	fActiveGpuScreens correctly but never actually re-pointed the still-
+	live VirtualScreen, so the newly eligible screen stayed dark until
+	the user happened to switch workspaces away and back (or rebooted).
+	Caller must hold fScreenLock (and, if windows might be reading the
+	active screen concurrently, fWindowLock -- see GpuConfigurationChanged()).
+*/
+void
+Desktop::_UpdateActiveScreenForCurrentWorkspace()
+{
+	if (fActiveGpuScreens.CountItems() == 0)
+		return;
+
+	int32 columns = 1;
+	if (fSettings.IsSet())
+		columns = fSettings->WorkspacesColumns();
+	if (columns < 1)
+		columns = 1;
+
+	int32 row = fCurrentWorkspace / columns;
+	Screen* rowScreen
+		= fActiveGpuScreens.ItemAt(row % fActiveGpuScreens.CountItems());
+	fVirtualScreen.SetActiveScreen(rowScreen);
 }
 
 
@@ -4617,8 +4637,22 @@ Desktop::AllActiveGpusHaveHardwareCursor() const
 void
 Desktop::GpuConfigurationChanged()
 {
+	// fWindowLock first, fScreenLock second -- same nesting order
+	// _SetCurrentWorkspaceConfiguration() already requires from its
+	// callers, since _UpdateActiveScreenForCurrentWorkspace() below can
+	// repoint the screen windows are actively drawing into.
+	AutoWriteLocker windowLocker(fWindowLock);
 	AutoWriteLocker _(fScreenLock);
 	_UpdateActiveGpuScreens();
+
+	// Without this, fActiveGpuScreens above gets recomputed correctly
+	// (e.g. a secondary GPU's just-loaded EDID makes it eligible), but
+	// the still-live VirtualScreen -- what's actually driving the
+	// current workspace right now -- never finds out: it would stay
+	// pointed at whatever it already was until the next workspace
+	// switch (or a reboot) happened to call this same update as a side
+	// effect. See _UpdateActiveScreenForCurrentWorkspace()'s comment.
+	_UpdateActiveScreenForCurrentWorkspace();
 }
 
 

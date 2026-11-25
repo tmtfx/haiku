@@ -73,9 +73,17 @@ GPUSettingsView::GPUSettingsView(const char* name, BWindow* window,
 
 	accelerant_device_info info;
 	BString deviceLabel;
-	if (fScreenMode.GetDeviceInfo(info) == B_OK && info.name[0] != '\0')
-		deviceLabel = info.name;
-	else
+	if (fScreenMode.GetDeviceInfo(info) == B_OK
+			&& (info.name[0] != '\0' || info.chipset[0] != '\0')) {
+		// Same combining logic as ScreenWindow::_UpdateMonitor() for the
+		// primary tab -- info.name alone is often just a generic driver
+		// name ("ATI chipset"), the real card identification is in
+		// info.chipset ("3D RAGE XL, PCI").
+		if (info.name[0] != '\0' && info.chipset[0] != '\0')
+			deviceLabel.SetToFormat("%s (%s)", info.name, info.chipset);
+		else
+			deviceLabel = info.name[0] != '\0' ? info.name : info.chipset;
+	} else
 		deviceLabel.SetToFormat(B_TRANSLATE("GPU %" B_PRId32), fScreenIndex);
 	fDeviceInfo = new BStringView("device info", deviceLabel);
 	fDeviceInfo->SetAlignment(B_ALIGN_CENTER);
@@ -159,9 +167,9 @@ GPUSettingsView::GPUSettingsView(const char* name, BWindow* window,
 			&& fSettings->Visual2DDebugEnabled(fScreenKey)
 		? B_CONTROL_ON : B_CONTROL_OFF);
 
-	BBox* screenBox = new BBox("screen box");
+	fScreenBox = new BBox("screen box");
 	BGroupView* screenGroup = new BGroupView(B_VERTICAL, B_USE_SMALL_SPACING);
-	screenBox->AddChild(screenGroup);
+	fScreenBox->AddChild(screenGroup);
 	screenGroup->GroupLayout()->SetInsets(B_USE_DEFAULT_SPACING,
 		B_USE_DEFAULT_SPACING, B_USE_DEFAULT_SPACING, B_USE_DEFAULT_SPACING);
 	screenGroup->AddChild(fDeviceInfo);
@@ -176,7 +184,7 @@ GPUSettingsView::GPUSettingsView(const char* name, BWindow* window,
 
 	BLayoutBuilder::Group<>(this, B_HORIZONTAL, B_USE_DEFAULT_SPACING)
 		.AddGroup(B_VERTICAL, 0, 1)
-			.Add(screenBox)
+			.Add(fScreenBox)
 			.AddGlue()
 			.End()
 		.AddGroup(B_VERTICAL, B_USE_DEFAULT_SPACING, 1)
@@ -234,6 +242,31 @@ GPUSettingsView::_RefreshEdidGatedControls()
 		&& f2DAccelerationCheckbox->Value() == B_CONTROL_ON);
 
 	fUnsetEDIDButton->SetEnabled(hasEDID);
+
+	_UpdateMonitor();
+}
+
+
+/*!	Sets fScreenBox's label to the monitor name decoded from EDID (vendor
+	+ name + diagonal size), same as ScreenWindow::_UpdateMonitor() does
+	for the primary tab's fScreenBox -- without this, a monitor's actual
+	name never appears here even after a successful EDID load, unlike on
+	the primary tab. Falls back to a generic label when there's no EDID
+	(or no monitor section in it) to decode yet.
+*/
+void
+GPUSettingsView::_UpdateMonitor()
+{
+	monitor_info info;
+	float diagonalInches;
+	if (fScreenMode.GetMonitorInfo(info, &diagonalInches) == B_OK) {
+		char text[512];
+		snprintf(text, sizeof(text), "%s%s%s %g\"", info.vendor,
+			info.name[0] ? " " : "", info.name, diagonalInches);
+		fScreenBox->SetLabel(text);
+	} else {
+		fScreenBox->SetLabel(B_TRANSLATE("Display info"));
+	}
 }
 
 

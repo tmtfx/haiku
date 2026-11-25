@@ -348,6 +348,7 @@ private:
 			void				_ScreenChanged(Screen* screen);
 			void				_SetCurrentWorkspaceConfiguration();
 			void				_UpdateActiveGpuScreens();
+			void				_UpdateActiveScreenForCurrentWorkspace();
 			void				_SetWorkspace(int32 index,
 									bool moveFocusWindow = false);
 

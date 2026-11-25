@@ -1428,6 +1428,28 @@ ScreenWindow::_GetEffectiveGpuOrder(BStringList& names, BStringList& bdfs) const
 		names.Add(discoveredNames.StringAt(j));
 		bdfs.Add(discoveredBdfs.StringAt(j));
 	}
+
+	// Multi-GPU: no configured order placed anyone yet -- fall back to
+	// the same auto-detected boot primary ('prim', see boot_primary_
+	// hook.h) that is_primary_screen()/_UpdateActiveGpuScreens() already
+	// use, instead of falling straight through to raw discovery order
+	// below. Without this, this list (and the Workspaces tab's preview)
+	// would disagree with which screen actually got the preflet's own
+	// full-featured tab (see primary_screen_index() above).
+	if (names.CountStrings() == 0) {
+		BMessage primRequest('prim');
+		BMessage primReply;
+		if (msgr.SendMessage(&primRequest, &primReply, 200000) == B_OK) {
+			int32 primaryIndex = 0;
+			if (primReply.FindInt32("index", &primaryIndex) == B_OK
+					&& primaryIndex >= 0
+					&& primaryIndex < discoveredBdfs.CountStrings()) {
+				names.Add(discoveredNames.StringAt(primaryIndex));
+				bdfs.Add(discoveredBdfs.StringAt(primaryIndex));
+			}
+		}
+	}
+
 	for (int32 j = 0; j < discoveredBdfs.CountStrings(); j++) {
 		const BString& bdf = discoveredBdfs.StringAt(j);
 		if (bdf.IsEmpty() || !bdfs.HasString(bdf)) {

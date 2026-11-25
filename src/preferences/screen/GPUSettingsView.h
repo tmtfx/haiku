@@ -54,6 +54,7 @@ private:
 			bool			_QueryHasEDID() const;
 			void			_RefreshEdidGatedControls();
 			void			_OfferToSaveStableEdid(const edid1_info& edid);
+			void			_UpdateMonitor();
 
 			BWindow*		fWindow;
 			int32			fScreenIndex;
@@ -79,6 +80,7 @@ private:
 			bool			fHasSetCursorBitmap;
 			bool			fHas2DAcceleration;
 
+			BBox*			fScreenBox;
 			BStringView*	fDeviceInfo;
 			MonitorView*	fMonitorView;
 
