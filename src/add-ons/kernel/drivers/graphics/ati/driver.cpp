@@ -490,20 +490,49 @@ Mach64_GetBiosParameters(DeviceInfo& di, uint8& clockType)
 	si.panelX = 0;
 	si.panelY = 0;
 
-	// Map the ROM area.  The Mach64 chips do not assign a ROM address in the
-	// PCI info;  thus, access the ROM via the ISA legacy memory map.
+	// Map the ROM area.  Prefer the card's own PCI expansion ROM BAR when
+	// the PCI bus manager assigned it one: the ISA legacy shadow below
+	// only ever contains the boot-primary VGA's ROM (shadowed there by
+	// firmware POST), so for any other card it silently reads whichever
+	// ROM happens to be shadowed there instead -- wrong BIOS, wrong clock
+	// table, wrong clockType (same issue and the same fallback already
+	// exist in the nvidia driver).
 
-	uint8* romAddr;
-	area_id romArea = map_physical_memory("ATI Mach64 ROM",
+	uint8* romAddr = NULL;
+	area_id romArea = -1;
+	uint32 romBasePci = di.pciInfo.u.h0.rom_base_pci;
+
+	if (romBasePci != 0) {
+		uint32 romBaseReg = GetPCI(di.pciInfo, PCI_rom_base, 4);
+		SetPCI(di.pciInfo, PCI_rom_base, 4, romBaseReg | 1);
+			// enable ROM decode, per the PCI spec
+
+		romArea = map_physical_memory("ATI Mach64 PCI ROM", romBasePci,
+			di.pciInfo.u.h0.rom_size, B_ANY_KERNEL_ADDRESS,
+			B_KERNEL_READ_AREA, (void**)&romAddr);
+
+		if (romArea >= 0 && (BIOS8(0) != 0x55 || BIOS8(1) != 0xaa)) {
+			// Nothing valid mapped there after all; fall back below.
+			delete_area(romArea);
+			romArea = -1;
+		}
+
+		SetPCI(di.pciInfo, PCI_rom_base, 4, romBaseReg);
+			// restore the original decode state
+	}
+
+	if (romArea < 0) {
+		romArea = map_physical_memory("ATI Mach64 ROM",
 #if defined(__x86__) || defined(__x86_64__)
-		0x000c0000,
+			0x000c0000,
 #else
-		di.pciInfo.u.h0.rom_base,
+			di.pciInfo.u.h0.rom_base,
 #endif
-		M64_BIOS_SIZE,
-		B_ANY_KERNEL_ADDRESS,
-		B_KERNEL_READ_AREA,
-		(void**)&(romAddr));
+			M64_BIOS_SIZE,
+			B_ANY_KERNEL_ADDRESS,
+			B_KERNEL_READ_AREA,
+			(void**)&(romAddr));
+	}
 
 	if (romArea < 0) {
 		TRACE("Mach64_GetBiosParameters(), ROM mapping error: %" B_PRId32 "\n",
