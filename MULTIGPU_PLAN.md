@@ -36,6 +36,32 @@ Dopo il fix della ROM BAR sopra, l'utente ha ritestato con entrambe le schede co
 
 **Chiarimento concettuale per l'utente** (accelerante vs app_server): non sono processi separati. L'accelerant add-on (`.accelerant`, es. `sm750.accelerant`) è una libreria condivisa che app_server stesso carica via `dlopen`/`get_image_symbol` dentro il **proprio** processo/team (`AccelerantHWInterface::_OpenAccelerant()`) — non esiste un confine temporale netto "finisce l'accelerante, parte app_server": sono lo stesso team da quel momento in poi. Lo splash screen invece non ha nulla a che fare con l'accelerante: è disegnato nel **driver kernel** (`device_open()`), molto prima che app_server (un processo userspace, avviato solo a fine boot del kernel) esista. Quindi se il KDL compare "prima" dello splash con due schede, la sequenza più probabile è: i driver kernel provano a disegnare lo splash (e qui avviene la corruzione di memoria, silenziosa in quel momento), il boot continua, e il crash/KDL si manifesta solo più tardi quando qualcos'altro (qui, app_server) tocca la memoria kernel corrotta — da cui l'impressione ingannevole di un ordine "invertito".
 
+## Quarto test: stesso crash dopo il fix precedente — causa reale trovata dal backtrace KDL (RISOLTO)
+
+Il fix della scrittura fuori-bound non ha cambiato nulla. L'utente non è riuscito a salvare il `.report` (illeggibile anche via foto), ma ha fotografato il KDL e il suo backtrace (`bt` nel thread 210/266 "app_server"), che questa volta è leggibilissimo e conclusivo:
+
+```
+0  AccelerantHWInterface::Shutdown() + 0x68
+1  Screen::~Screen() + 0x1a
+2  Screen::~Screen() + 0xc
+3  ScreenManager::_AddHWInterface(HWInterface*, char const*) + 0x196
+4  ScreenManager::_ScanDrivers() + 0x152
+5  ScreenManager::ScreenManager() + 0x64
+6  AppServer::AppServer(int*) + 0x102
+7  main + 0x2b
+```
+
+Crash reale dentro `AccelerantHWInterface::Shutdown()`, chiamato dal distruttore di `Screen`, chiamato a sua volta da `_AddHWInterface()` — cioè: una `Screen` appena creata per una delle due schede viene **distrutta immediatamente** (perché il suo `Initialize()` è fallito) e il suo `Shutdown()` crasha.
+
+**Causa trovata in `AccelerantHWInterface::_OpenAccelerant()`** (`AccelerantHWInterface.cpp`): nei tre percorsi di fallimento (symbol `B_ACCELERANT_ENTRY_POINT` non trovato; `InitAccelerant()` fallisce; `_SetupDefaultHooks()` fallisce), il codice fa sempre `unload_add_on(fAccelerantImage)` ma **non azzerava `fAccelerantHook`** (e nel terzo caso nemmeno `fAccelerantImage`). `fAccelerantHook` resta quindi un puntatore a funzione **pendente**, dentro un add-on appena scaricato dalla memoria. Poco dopo, `Initialize()` ritorna fallimento per quella `Screen`, `_AddHWInterface()` la distrugge subito (`ObjectDeleter` esce da scope), e `Screen::~Screen()` chiama `Shutdown()`, che fa:
+```cpp
+if (fAccelerantHook != NULL)
+    fAccelerantHook(B_UNINIT_ACCELERANT, NULL);   // salto in memoria non più mappata
+```
+— da cui il crash. Bug preesistente (non introdotto da questa sessione), ma mai raggiungibile prima: nel vecchio percorso a singola scheda (`Initialize(NULL)`), un fallimento di `_OpenAccelerant()` faceva solo `close(fCardFD)` e la scansione **continuava** col device successivo nello stesso ciclo, senza mai distruggere la `Screen` a metà — si arrivava a questo bug solo se *anche* il fallback VESA/framebuffer falliva (praticamente mai). Il nuovo percorso multi-GPU a path esplicito, introdotto in questa sessione, prova **una sola volta** ciascun device e **distrugge subito** la `Screen` se fallisce — rendendo questo vecchio bug raggiungibile ogni volta che l'accelerant di una scheda secondaria fallisce la propria inizializzazione per qualunque motivo hardware-specifico (assolutamente comune, non un caso raro).
+
+**Fix applicato**: in tutti e tre i percorsi di fallimento di `_OpenAccelerant()`, azzerare esplicitamente `fAccelerantHook = NULL` (e, nel terzo caso, anche `fAccelerantImage = -1`, mancante pure quello — altrimenti un successivo `Shutdown()` farebbe un doppio `unload_add_on()` sullo stesso add-on id). Build (`app_server`) verificata pulita. File toccato: solo `AccelerantHWInterface.cpp`.
+
 ## Stato di implementazione (aggiornato dopo la sessione di codifica)
 
 **Implementate e build-verificate (`app_server` + `Screen` compilano senza errori):**

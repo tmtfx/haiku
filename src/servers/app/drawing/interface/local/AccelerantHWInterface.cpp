@@ -538,6 +538,7 @@ AccelerantHWInterface::_OpenAccelerant(int device)
 				ATRACE(("unable to get B_ACCELERANT_ENTRY_POINT\n"));
 				unload_add_on(fAccelerantImage);
 				fAccelerantImage = -1;
+				fAccelerantHook = NULL;
 				return B_ERROR;
 			}
 
@@ -546,8 +547,15 @@ AccelerantHWInterface::_OpenAccelerant(int device)
 				B_INIT_ACCELERANT, NULL);
 			if (!initAccelerant || initAccelerant(device) != B_OK) {
 				ATRACE(("InitAccelerant unsuccessful\n"));
+				// fAccelerantHook now points into an add-on we're about to
+				// unload -- must not survive past this point. Left dangling
+				// here, a later Shutdown() (e.g. this Screen gets destroyed
+				// right after a failed Initialize(), in the multi-GPU
+				// per-device path) calls straight into unmapped memory via
+				// "if (fAccelerantHook != NULL) fAccelerantHook(...)".
 				unload_add_on(fAccelerantImage);
 				fAccelerantImage = -1;
+				fAccelerantHook = NULL;
 				return B_ERROR;
 			}
 
@@ -568,6 +576,8 @@ AccelerantHWInterface::_OpenAccelerant(int device)
 			uninitAccelerant();
 
 		unload_add_on(fAccelerantImage);
+		fAccelerantImage = -1;
+		fAccelerantHook = NULL;
 		return B_ERROR;
 	}
 
