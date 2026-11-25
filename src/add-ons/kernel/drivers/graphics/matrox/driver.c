@@ -19,6 +19,7 @@
 
 #include <boot_item.h>
 #include <frame_buffer_console.h>
+#include <boot_primary_ownership.h>
 
 /* this is for the standardized portion of the driver API */
 /* currently only one operation is defined: B_GET_ACCELERANT_SIGNATURE */
@@ -1131,6 +1132,17 @@ control_hook (void* dev, uint32 msg, void *buf, size_t len) {
 				}
 				result = B_OK;
 			}
+		} break;
+
+		/* Multi-GPU: whether this device owns the boot loader's
+		 * FRAME_BUFFER_BOOT_INFO (see headers/private/graphics/common/
+		 * boot_primary_ownership.h and MULTIGPU_PLAN.md). */
+		case GX00_IS_BOOT_PRIMARY: {
+			bool isPrimary;
+			if (len != sizeof(bool))
+				return B_BAD_DATA;
+			isPrimary = boot_framebuffer_belongs_to_this_device(&di->pcii);
+			result = user_memcpy(buf, &isPrimary, sizeof(bool));
 		} break;
 	}
 	return result;

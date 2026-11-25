@@ -908,7 +908,7 @@ device_ioctl(void* cookie, uint32 msg, void* buf, size_t len)
 			if (len != sizeof(bool))
 				return B_BAD_DATA;
 			bool isPrimary = boot_framebuffer_belongs_to_this_device(
-				device->pciInfo);
+				&device->pciInfo);
 			return user_memcpy(buf, &isPrimary, sizeof(bool));
 		}
 

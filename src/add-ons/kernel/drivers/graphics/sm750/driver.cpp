@@ -367,7 +367,7 @@ control_device(void *cookie, uint32 op, void *arg, size_t len)
             return B_OK;
         case ENG_IS_BOOT_PRIMARY: {
             if (len != sizeof(bool)) return B_BAD_VALUE;
-            bool isPrimary = boot_framebuffer_belongs_to_this_device(di->pci);
+            bool isPrimary = boot_framebuffer_belongs_to_this_device(&di->pci);
             return user_memcpy(arg, &isPrimary, sizeof(bool));
         }
     }

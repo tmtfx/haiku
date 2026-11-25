@@ -10,6 +10,7 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include "DriverInterface.h"
+#include <boot_primary_hook.h>
 #include "mga_globals.h"
 //apsed #include "mga_extern.h"
 #include "mga_proto.h"

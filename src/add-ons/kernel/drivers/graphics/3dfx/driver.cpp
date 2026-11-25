@@ -580,7 +580,7 @@ device_ioctl(void* dev, uint32 msg, void* buffer, size_t bufferLength)
 #endif
 
 			*((bool*)buffer) = boot_framebuffer_belongs_to_this_device(
-				di.pciInfo);
+				&di.pciInfo);
 			return B_OK;
 	}
 

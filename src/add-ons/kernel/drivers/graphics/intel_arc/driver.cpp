@@ -1648,7 +1648,7 @@ control_hook(void* cookie, uint32 msg, void* buf, size_t len)
 				return B_BAD_ADDRESS;
 
 			bool isPrimary = boot_framebuffer_belongs_to_this_device(
-				info->pci);
+				&info->pci);
 			return user_memcpy(buf, &isPrimary, sizeof(bool));
 		}
 	}

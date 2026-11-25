@@ -957,7 +957,7 @@ InitDevice(DeviceInfo& di)
 	si.bypassEdid = load_edid_override("ati.settings", &si.edidInfo) == B_OK;
 	si.bHaveEDID = si.bypassEdid;
 
-	if (!si.bypassEdid && boot_framebuffer_belongs_to_this_device(pciInfo)) {
+	if (!si.bypassEdid && boot_framebuffer_belongs_to_this_device(&pciInfo)) {
 		// This card is the actual boot-primary display: the bootloader
 		// may already have a decoded EDID from VESA/VBE (frame_buffer_
 		// console.cpp). Prefer it over GetEdidFromBIOS() below, which
@@ -1394,7 +1394,7 @@ device_ioctl(void* dev, uint32 msg, void* buffer, size_t bufferLength)
 				return B_BAD_DATA;
 
 			bool isPrimary = boot_framebuffer_belongs_to_this_device(
-				di.pciInfo);
+				&di.pciInfo);
 			return user_memcpy(buffer, &isPrimary, sizeof(bool));
 		}
 	}

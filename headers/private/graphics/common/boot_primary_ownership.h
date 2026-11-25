@@ -42,9 +42,13 @@
 	console.h> itself rather than requiring a particular include order
 	from the caller (a driver that happened to include this before
 	<PCI.h> would otherwise fail with "'pci_info' does not name a type").
+
+	Takes a pointer, not a C++ reference: several graphics drivers
+	(e.g. matrox) are plain C (.c, not .cpp), where this header must
+	still compile.
 */
 static inline bool
-boot_framebuffer_belongs_to_this_device(const pci_info& pciInfo)
+boot_framebuffer_belongs_to_this_device(const pci_info* pciInfo)
 {
 	struct frame_buffer_boot_info* bi = (struct frame_buffer_boot_info*)
 		get_boot_item(FRAME_BUFFER_BOOT_INFO, NULL);
@@ -52,11 +56,11 @@ boot_framebuffer_belongs_to_this_device(const pci_info& pciInfo)
 		return false;
 
 	for (int i = 0; i < 6; i++) {
-		uint32 base = pciInfo.u.h0.base_registers[i];
-		uint32 size = pciInfo.u.h0.base_register_sizes[i];
+		uint32 base = pciInfo->u.h0.base_registers[i];
+		uint32 size = pciInfo->u.h0.base_register_sizes[i];
 		if (base == 0 || size == 0)
 			continue;
-		if ((pciInfo.u.h0.base_register_flags[i] & PCI_address_space) != 0)
+		if ((pciInfo->u.h0.base_register_flags[i] & PCI_address_space) != 0)
 			continue;		// I/O space BAR, not memory
 		if (bi->physical_frame_buffer >= base
 				&& bi->physical_frame_buffer < base + size) {

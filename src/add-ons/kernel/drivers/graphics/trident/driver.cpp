@@ -951,7 +951,7 @@ device_ioctl(void* dev, uint32 msg, void* buf, size_t len)
 				return B_BAD_DATA;
 
 			bool isPrimary = boot_framebuffer_belongs_to_this_device(
-				di.pciInfo);
+				&di.pciInfo);
 			return user_memcpy(buf, &isPrimary, sizeof(bool));
 		}
 	}

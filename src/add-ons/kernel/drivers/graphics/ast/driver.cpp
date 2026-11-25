@@ -563,7 +563,7 @@ ast_control(void* cookie, uint32 op, void* arg, size_t length)
 				return B_BAD_VALUE;
 
 			bool isPrimary = boot_framebuffer_belongs_to_this_device(
-				device->pciInfo);
+				&device->pciInfo);
 			if (user_memcpy(arg, &isPrimary, sizeof(bool)) < B_OK)
 				return B_BAD_ADDRESS;
 			return B_OK;

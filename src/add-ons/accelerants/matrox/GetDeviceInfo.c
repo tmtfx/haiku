@@ -8,7 +8,7 @@
 #include "acc_std.h"
 
 /* Get some info about the device */
-status_t GET_ACCELERANT_DEVICE_INFO(accelerant_device_info * adi) 
+status_t GET_ACCELERANT_DEVICE_INFO(accelerant_device_info * adi)
 {
 	LOG(4,("GET_ACCELERANT_DEVICE_INFO: returning info\n"));
 
@@ -22,4 +22,14 @@ status_t GET_ACCELERANT_DEVICE_INFO(accelerant_device_info * adi)
 	adi->dac_speed = si->ps.max_dac1_clock;
 
 	return B_OK;
+}
+
+/* Multi-GPU: see boot_primary_hook.h -- only the kernel driver can call
+ * get_boot_item(), so ask it via GX00_IS_BOOT_PRIMARY. */
+bool IS_BOOT_PRIMARY_PIRATI(void)
+{
+	bool isPrimary = false;
+	if (ioctl(fd, GX00_IS_BOOT_PRIMARY, &isPrimary, sizeof(isPrimary)) != B_OK)
+		return false;
+	return isPrimary;
 }

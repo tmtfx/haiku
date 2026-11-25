@@ -5,6 +5,7 @@ SubDirC++Flags -DIS_PIRATI_BUILD ;
 
 UsePrivateHeaders graphics ;
 UsePrivateHeaders [ FDirName graphics matrox ] ;
+UsePrivateHeaders [ FDirName graphics common ] ;
 UseHeaders [ FDirName $(SUBDIR) engine ] ;
 
 Addon matrox.accelerant :

@@ -16,6 +16,7 @@ status_t CLONE_ACCELERANT(void *data);
 void UNINIT_ACCELERANT(void);
 status_t GET_ACCELERANT_DEVICE_INFO(accelerant_device_info *adi);
 sem_id ACCELERANT_RETRACE_SEMAPHORE(void);
+bool IS_BOOT_PRIMARY_PIRATI(void);
 
 uint32 ACCELERANT_MODE_COUNT(void);
 status_t GET_MODE_LIST(display_mode *dm);
