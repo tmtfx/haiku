@@ -6,6 +6,7 @@
 */
 
 #include "radeon_driver.h"
+#include <boot_primary_ownership.h>
 
 #include <OS.h>
 #include <malloc.h>
@@ -501,8 +502,18 @@ control_hook(void *dev, uint32 msg, void *buf, size_t len)
 			break;
 #endif
 #endif
+
+		case RADEON_IS_BOOT_PRIMARY:
+		{
+			bool isPrimary;
+			if (len != sizeof(bool))
+				return B_BAD_DATA;
+			isPrimary = boot_framebuffer_belongs_to_this_device(&di->pcii);
+			result = user_memcpy(buf, &isPrimary, sizeof(bool));
+			break;
+		}
 	}
-	
+
 	if( result == B_DEV_INVALID_IOCTL )
 		SHOW_ERROR( 3, "Invalid ioctl call: code=0x%" B_PRIx32, msg );
 		

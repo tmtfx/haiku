@@ -46,8 +46,13 @@ enum {
 	RADEON_FINDVIPDEVICE,
 	RADEON_VIPRESET,
 
-	RADEON_WAIT_FOR_CAP_IRQ,	
+	RADEON_WAIT_FOR_CAP_IRQ,
 	RADEON_DMACOPY,
+
+	// Multi-GPU: whether this device owns the boot loader's
+	// FRAME_BUFFER_BOOT_INFO (see headers/private/graphics/common/
+	// boot_primary_ownership.h and MULTIGPU_PLAN.md). Returns a bool.
+	RADEON_IS_BOOT_PRIMARY,
 };
 
 
