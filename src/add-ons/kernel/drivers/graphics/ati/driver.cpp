@@ -898,6 +898,42 @@ InitInterruptHandler(DeviceInfo& di)
 }
 
 
+/*!	Whether \a pciInfo's own memory BARs contain the boot loader's
+	FRAME_BUFFER_BOOT_INFO physical framebuffer address -- i.e. whether
+	this device is the one the boot loader actually used (the real boot-
+	primary card). FRAME_BUFFER_BOOT_INFO/VESA_EDID_BOOT_INFO describe
+	exactly ONE boot framebuffer/monitor; on a multi-GPU boot, every
+	card's InitDevice() sees the same boot items regardless of which one
+	owns them. Used to gate inheriting the boot loader's EDID below --
+	without this check, a secondary card would otherwise claim the
+	primary's monitor's EDID as its own (confirmed on real hardware: an
+	ATI Rage XL wrongly inherited an SM750-attached monitor's EDID this
+	way when SM750, not the ATI, was the actual boot-primary).
+*/
+static bool
+boot_framebuffer_belongs_to_this_device(const pci_info& pciInfo)
+{
+	struct frame_buffer_boot_info* bi = (struct frame_buffer_boot_info*)
+		get_boot_item(FRAME_BUFFER_BOOT_INFO, NULL);
+	if (bi == NULL)
+		return false;
+
+	for (int i = 0; i < 6; i++) {
+		uint32 base = pciInfo.u.h0.base_registers[i];
+		uint32 size = pciInfo.u.h0.base_register_sizes[i];
+		if (base == 0 || size == 0)
+			continue;
+		if ((pciInfo.u.h0.base_register_flags[i] & PCI_address_space) != 0)
+			continue;		// I/O space BAR, not memory
+		if (bi->physical_frame_buffer >= base
+				&& bi->physical_frame_buffer < base + size) {
+			return true;
+		}
+	}
+	return false;
+}
+
+
 static status_t
 InitDevice(DeviceInfo& di)
 {
@@ -956,11 +992,15 @@ InitDevice(DeviceInfo& di)
 	si.bypassEdid = load_edid_override("ati.settings", &si.edidInfo) == B_OK;
 	si.bHaveEDID = si.bypassEdid;
 
-	if (!si.bypassEdid) {
-		// This card is the primary display: the bootloader may already have
-		// a decoded EDID from VESA/VBE (frame_buffer_console.cpp). Prefer it
-		// over GetEdidFromBIOS() below, which replays the real-mode video
-		// BIOS via the generic "bios" kernel module.
+	if (!si.bypassEdid && boot_framebuffer_belongs_to_this_device(pciInfo)) {
+		// This card is the actual boot-primary display: the bootloader
+		// may already have a decoded EDID from VESA/VBE (frame_buffer_
+		// console.cpp). Prefer it over GetEdidFromBIOS() below, which
+		// replays the real-mode video BIOS via the generic "bios" kernel
+		// module. On a secondary card the boot item belongs to whichever
+		// card the boot loader actually used, not this one -- skip it
+		// and fall through to this card's own GetEdidFromBIOS()/DDC path
+		// instead.
 		edid1_info* bootEdid = (edid1_info*)get_boot_item(VESA_EDID_BOOT_INFO,
 			NULL);
 		if (bootEdid != NULL) {

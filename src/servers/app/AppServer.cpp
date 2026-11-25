@@ -535,6 +535,33 @@ AppServer::MessageReceived(BMessage* message)
 			break;
 		}
 
+		case 'prim':
+		{
+			// Multi-GPU: which screen index the preflet should give its
+			// full-featured tab to -- the same one is_primary_screen()
+			// (and therefore Desktop::_UpdateActiveGpuScreens()) treats
+			// as primary, so the preflet never disagrees with what's
+			// actually driving the current workspace's row 0.
+			int32 index = 0;
+			{
+				BAutolock locker(gScreenManager);
+				if (gScreenManager != NULL) {
+					for (int32 i = 0; i < gScreenManager->CountScreens();
+							i++) {
+						if (is_primary_screen(i)) {
+							index = i;
+							break;
+						}
+					}
+				}
+			}
+
+			BMessage reply;
+			reply.AddInt32("index", index);
+			message->SendReply(&reply);
+			break;
+		}
+
 		case 'devn':
 		{
 			// Multi-GPU: a human-recognizable name for one screen's card,

@@ -179,6 +179,27 @@ gpu_device_name(BMessenger& appServerMessenger, int32 index)
 }
 
 
+// Multi-GPU: which gScreenManager::ScreenAt() index is the effective
+// primary (configured GPU order's first entry if it matches a
+// currently discovered screen, else whichever screen was discovered
+// first -- see AppServer.cpp's is_primary_screen(), which this mirrors
+// via the 'prim' query so the preflet always gives ITS full-featured
+// tab to the same screen Desktop treats as primary, instead of
+// hardcoding screen index 0 regardless of configured order).
+static int32
+primary_screen_index(BMessenger& appServerMessenger)
+{
+	BMessage request('prim');
+	BMessage reply;
+	int32 index = 0;
+	if (appServerMessenger.IsValid()
+		&& appServerMessenger.SendMessage(&request, &reply, 200000) == B_OK) {
+		reply.FindInt32("index", &index);
+	}
+	return index;
+}
+
+
 // Multi-GPU: the key ScreenSettings' per-GPU preferences persist under
 // for a screen -- its PCI BDF (queried via 'gbdf') if resolvable, else
 // a fallback "idx<N>" that at least works within a single boot session
@@ -245,6 +266,12 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 
 	{
 		BMessenger appServerMessenger("application/x-vnd.haiku-app_server");
+		// This window's own full-featured tab always targets the
+		// effective primary GPU, not gScreenManager index 0 -- those
+		// only coincide when no GPU order has been configured yet, or
+		// when the primary happens to also be the one discovered first
+		// (see primary_screen_index() and MULTIGPU_PLAN.md Fase F).
+		fScreenIndex = primary_screen_index(appServerMessenger);
 		fScreenKey = gpu_settings_key(appServerMessenger, fScreenIndex);
 	}
 
@@ -901,7 +928,7 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 
 	BTab* screenTab = new BTab();
 	fTabView->AddTab(screenPage, screenTab);
-	screenTab->SetLabel(gpu_device_name(appServerMessenger, 0));
+	screenTab->SetLabel(gpu_device_name(appServerMessenger, fScreenIndex));
 
 	int32 gpuCount = 1;
 	{
@@ -914,7 +941,12 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 		}
 	}
 
-	for (int32 i = 1; i < gpuCount; i++) {
+	// Every OTHER detected screen gets the simplified GPUSettingsView tab
+	// -- "other" meaning "not fScreenIndex" (the effective primary, see
+	// primary_screen_index() above), not "not index 0".
+	for (int32 i = 0; i < gpuCount; i++) {
+		if (i == fScreenIndex)
+			continue;
 		BString name = gpu_device_name(appServerMessenger, i);
 		GPUSettingsView* gpuView = new GPUSettingsView(name, this, i,
 			fSettings);

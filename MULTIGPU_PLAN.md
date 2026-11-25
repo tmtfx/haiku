@@ -74,6 +74,30 @@ Con il fix precedente il crash è sparito, ma la ATI resta assente dalla preflet
 
 **Da verificare al prossimo boot reale**: che `InitAccelerant()` ora riesca per la ATI, che compaia come tab in preflet, e soprattutto che la modalità video risultante sia corretta (il valore del clock/divisore influisce sui timing effettivi mandati al RAMDAC — non solo "si apre", ma "il segnale video è giusto").
 
+## Sesto test: ATI appare in preflet, ma risultati sbagliati — tutti riconducibili a Gap #2 (RISOLTO) + un vero bug EDID in più (RISOLTO)
+
+Niente più crash, ATI ora compare in preflet. Quattro osservazioni dell'utente, più una quinta arrivata subito dopo ("sullo schermo collegato alla ATI il monitor è comunque spento"):
+
+1. La ATI viene segnata come primaria (sbagliato: la primaria reale è la SM750, quella che mostra boot/splash/desktop).
+2. La tab della ATI ha tutti i controlli; quella della SM750 (dopo) ne ha solo un sottoinsieme (manca cursore animato, colore, frequenza).
+3. La ATI, essendo (erroneamente) primaria, si è vista assegnare l'EDID del monitor collegato alla SM750 preso dal bootloader; la SM750 invece ha il tasto "Unset" disponibile.
+4. Non chiaro se cambiare l'ordine GPU nella tab globale richieda un riavvio per avere effetto.
+5. Il monitor collegato alla ATI resta spento.
+
+**Causa comune a #1/#2/#3 — Gap #2, già noto e rimandato in questa sessione**: `ScreenWindow.cpp` assegna SEMPRE la tab "completa" (quella con Apply/Revert/risoluzione/colore/frequenza/cursore animato) allo schermo con indice `gScreenManager::ScreenAt(0)` — cioè il primo aperto con successo da `_ScanDrivers()`, che è puro **ordine di scoperta/readdir** (`/dev/graphics/1002_4752_...` viene prima di `/dev/graphics/sm750_...` alfabeticamente), non l'effettiva primaria scelta da `Desktop::_UpdateActiveGpuScreens()`/`determine_primary_bdf()` (che invece rispetta l'ordine configurato dall'utente, con fallback sull'ordine di scoperta solo se non configurato). I due concetti di "primario" (quello di Desktop/DPMS/attivazione riga, e quello hardcoded della preflet) potevano quindi disaccordarsi — ed era esattamente il caso di questo test (nessun ordine configurato ancora, quindi entrambi ricadono sul fallback "indice 0", che però è ATI per puro ordine alfabetico delle directory, non perché sia davvero lei la primaria).
+
+**Fix (Gap #2)**: aggiunto un nuovo messaggio `'prim'` in `AppServer.cpp` (stesso pattern di `'cnts'`/`'devn'`/`'gbdf'`), che espone quale indice schermo `is_primary_screen()` considera primario — la stessa funzione già usata per `'hedi'`, quindi niente logica duplicata una quarta volta. `ScreenWindow.cpp` interroga `'prim'` all'apertura e assegna `fScreenIndex` (già usato ovunque nel file, mai più hardcoded) a quel valore invece di `0`; il loop che crea le tab `GPUSettingsView` ora salta `fScreenIndex` invece di saltare sempre l'indice 0. Risultato: la tab "completa" segue sempre l'effettiva primaria, qualunque sia il suo indice di scoperta.
+
+**Causa di #3 (un bug reale separato, stessa famiglia degli altri tre di questa sessione)**: `InitDevice()` in `ati/driver.cpp` copiava **incondizionatamente** `get_boot_item(VESA_EDID_BOOT_INFO, NULL)` nel proprio `si.edidInfo` ogni volta che `!si.bypassEdid`, con un commento esplicito ma sbagliato ("This card is the primary display") — esattamente la stessa assunzione implicita già corretta per lo splash screen e per la lettura della ROM: VESA_EDID_BOOT_INFO descrive **un'unica** scheda, quella usata realmente dal bootloader, non "qualunque scheda stia eseguendo questo codice". Su una scheda secondaria questo significava rubare l'EDID del monitor collegato alla primaria.
+
+**Fix**: aggiunta `boot_framebuffer_belongs_to_this_device(pciInfo)` (stesso identico controllo BAR-vs-`physical_frame_buffer` già verificato/scartato per lo splash — qui invece è esattamente la domanda giusta da porsi), e l'eredità dell'EDID di boot ora avviene solo se la scheda corrente possiede davvero il framebuffer di boot. Su una secondaria, si ricade correttamente sul percorso già esistente (`GetEdidFromBIOS()`/DDC via l'accelerant), **senza bisogno di toccare l'accelerante**.
+
+**Punto #4 (domanda, non bug)**: NO, non serve riavviare — `ScreenSettings::SetGpuOrder()` scrive su disco **e** manda subito `AS_GPU_CONFIG_CHANGED` ad app_server, che richiama `Desktop::GpuConfigurationChanged()` → `_UpdateActiveGpuScreens()` dal vivo. Quello che *non* si aggiornava dal vivo era solo la UI della preflet stessa (quale tab è "completa" — Gap #2 sopra, risolto): va comunque riaperta la finestra Screen per vedere l'effetto sulle tab (non serve il riavvio del sistema).
+
+**Punto #5 (monitor ATI spento)**: non ancora isolato come bug indipendente — molto probabilmente un sintomo a valle degli stessi bug #1/#3 (primaria sbagliata → `activeGpuList`/DPMS/assegnazione riga→GPU tutti calcolati sulla base dell'ordine sbagliato). Da riverificare dopo questo fix, prima di investigarlo come problema separato.
+
+Build (`ati`, `app_server`, `Screen`) verificata pulita per tutti e tre. File toccati: `src/add-ons/kernel/drivers/graphics/ati/driver.cpp`, `src/servers/app/AppServer.cpp`, `src/preferences/screen/ScreenWindow.cpp`.
+
 ## Stato di implementazione (aggiornato dopo la sessione di codifica)
 
 **Implementate e build-verificate (`app_server` + `Screen` compilano senza errori):**
