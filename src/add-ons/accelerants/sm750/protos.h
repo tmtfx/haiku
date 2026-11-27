@@ -46,6 +46,7 @@ uint32 sm750_accelerant_clone_info_size(void);
 void sm750_get_accelerant_clone_info(void *data);
 status_t sm750_clone_accelerant(void* info);
 status_t sm750_get_accelerant_device_info(accelerant_device_info *adi);
+bool sm750_is_boot_primary(void);
 status_t sm750_get_pixel_clock_limits(display_mode *dm, uint32 *low, uint32 *high);
 uint32 sm750_accelerant_engine_count(void);
 status_t sm750_acquire_engine(uint32 capabilities, uint32 max_priority, sync_token *st, engine_token **et);

@@ -14,6 +14,9 @@
 #include <stdio.h>
 
 #include <driver_settings.h>
+#include <boot_item.h>
+#include <frame_buffer_console.h>
+#include <boot_primary_ownership.h>
 
 //#include <util/kernel_cpp.h>
 #include <vm/vm.h>
@@ -359,9 +362,14 @@ control_device(void *cookie, uint32 op, void *arg, size_t len)
             return user_memcpy(arg, &gpd, sizeof(gpd));
         }
         case B_GET_ACCELERANT_SIGNATURE:
-            if (user_strlcpy((char *)arg, "sm750.accelerant", len) < B_OK) 
+            if (user_strlcpy((char *)arg, "sm750.accelerant", len) < B_OK)
                 return B_BAD_ADDRESS;
             return B_OK;
+        case ENG_IS_BOOT_PRIMARY: {
+            if (len != sizeof(bool)) return B_BAD_VALUE;
+            bool isPrimary = boot_framebuffer_belongs_to_this_device(&di->pci);
+            return user_memcpy(arg, &isPrimary, sizeof(bool));
+        }
     }
     return B_DEV_INVALID_IOCTL;
 }

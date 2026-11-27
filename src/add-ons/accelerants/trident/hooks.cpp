@@ -9,8 +9,10 @@
 
 #include "accel.h"
 
+#include <boot_primary_hook.h>
 
-extern "C" void* 
+
+extern "C" void*
 get_accelerant_hook(uint32 feature, void* data)
 {
 	SharedInfo& si = *gInfo.sharedInfo;
@@ -25,6 +27,7 @@ get_accelerant_hook(uint32 feature, void* data)
 		case B_GET_ACCELERANT_CLONE_INFO:	return (void*)GetAccelerantCloneInfo;
 		case B_GET_ACCELERANT_DEVICE_INFO:	return (void*)GetAccelerantDeviceInfo;
 		case B_ACCELERANT_RETRACE_SEMAPHORE: return (void*)AccelerantRetraceSemaphore;
+		case B_IS_BOOT_PRIMARY_PIRATI:       return (void*)IsBootPrimary;
 
 		// Mode Configuration
 		case B_ACCELERANT_MODE_COUNT:	return (void*)AccelerantModeCount;

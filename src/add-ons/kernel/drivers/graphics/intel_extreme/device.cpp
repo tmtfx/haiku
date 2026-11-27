@@ -12,6 +12,8 @@
 #include "intel_extreme.h"
 #include "utility.h"
 
+#include <boot_primary_ownership.h>
+
 #include <OS.h>
 #include <KernelExport.h>
 #include <Drivers.h>
@@ -356,6 +358,16 @@ device_ioctl(void* data, uint32 op, void* buffer, size_t bufferLength)
 				set_pci_config(info->pci, LEGACY_BACKLIGHT_BRIGHTNESS, 1, brightnessLegacy.lpc);
 			}
 			return B_OK;
+		}
+
+		case INTEL_IS_BOOT_PRIMARY:
+		{
+			if (bufferLength != sizeof(bool))
+				return B_BAD_VALUE;
+
+			bool isPrimary = boot_framebuffer_belongs_to_this_device(
+				info->pci);
+			return user_memcpy(buffer, &isPrimary, sizeof(bool));
 		}
 
 		default:

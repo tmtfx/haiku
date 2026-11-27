@@ -12,6 +12,8 @@
 #include "radeon_hd.h"
 #include "utility.h"
 
+#include <boot_primary_ownership.h>
+
 #include <OS.h>
 #include <KernelExport.h>
 #include <Drivers.h>
@@ -211,6 +213,16 @@ device_ioctl(void* data, uint32 op, void* buffer, size_t bufferLength)
 					bufferLength) < B_OK)
 				return B_BAD_ADDRESS;
 			return B_OK;
+
+		case RADEON_IS_BOOT_PRIMARY:
+		{
+			if (bufferLength != sizeof(bool))
+				return B_BAD_VALUE;
+
+			bool isPrimary = boot_framebuffer_belongs_to_this_device(
+				info->pci);
+			return user_memcpy(buffer, &isPrimary, sizeof(bool));
+		}
 
 		default:
 			TRACE("%s: ioctl() unknown message %" B_PRIu32 " (length = %ld)\n",

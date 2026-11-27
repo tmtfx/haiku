@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <edid.h>
 #include <create_display_modes.h>
+#include <boot_primary_hook.h>
 #include "memory_manager.h"
 #include "DriverInterface.h"
 #include "protos.h"
@@ -467,6 +468,20 @@ sem_id sm750_retrace_semaphore(void)
 }
 
 
+bool sm750_is_boot_primary(void)
+{
+	// Multi-GPU: see boot_primary_hook.h -- only the kernel driver can
+	// call get_boot_item(), so ask it via ENG_IS_BOOT_PRIMARY.
+	bool isPrimary = false;
+	if (ioctl(gInfo->fd, ENG_IS_BOOT_PRIMARY, &isPrimary, sizeof(isPrimary))
+			!= B_OK) {
+		return false;
+	}
+
+	return isPrimary;
+}
+
+
 void sm750_uninit_accelerant(void) {
     sm750_cursor_ani_uninit();
 
@@ -504,8 +519,9 @@ void* get_accelerant_hook(uint32 feature, void* data) {
         case B_UNINIT_ACCELERANT:           return (void*)sm750_uninit_accelerant;
         case B_GET_ACCELERANT_DEVICE_INFO:  return (void*)sm750_get_accelerant_device_info;
         case B_ACCELERANT_RETRACE_SEMAPHORE: return (void *)sm750_retrace_semaphore;
-        
-        
+        case B_IS_BOOT_PRIMARY_PIRATI:       return (void*)sm750_is_boot_primary;
+
+
         /* Display Modes */
         case B_ACCELERANT_MODE_COUNT:       return (void*)sm750_accelerant_mode_count;	//0x100
         case B_GET_MODE_LIST:               return (void*)sm750_get_mode_list;			//0x101

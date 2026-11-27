@@ -21,6 +21,8 @@
 #include "accelerant_protos.h"
 #include "accelerant.h"
 
+#include <boot_primary_hook.h>
+
 #include <compute_display_timing.h>
 #include <create_display_modes.h>
 #include <ddc.h>
@@ -489,6 +491,21 @@ intel_arc_accelerant_retrace_semaphore(void)
 	return B_ERROR;//gInfo->shared_info != NULL ? gInfo->shared_info->vblank_sem : -1;
 }
 
+
+bool
+intel_arc_is_boot_primary(void)
+{
+	// Multi-GPU: see boot_primary_hook.h -- only the kernel driver can
+	// call get_boot_item(), so ask it via INTEL_ARC_IS_BOOT_PRIMARY.
+	bool isPrimary = false;
+	if (ioctl(gInfo->device, INTEL_ARC_IS_BOOT_PRIMARY, &isPrimary,
+			sizeof(isPrimary)) != B_OK) {
+		return false;
+	}
+
+	return isPrimary;
+}
+
 uint32
 intel_arc_accelerant_engine_count(void)
 {
@@ -572,6 +589,8 @@ get_accelerant_hook(uint32 feature, void* /*data*/)
 			return (void*)intel_arc_get_accelerant_device_info;
 		case B_ACCELERANT_RETRACE_SEMAPHORE:
 			return (void*)intel_arc_accelerant_retrace_semaphore;
+		case B_IS_BOOT_PRIMARY_PIRATI:
+			return (void*)intel_arc_is_boot_primary;
 		case B_ACCELERANT_ENGINE_COUNT:
 			return (void*)intel_arc_accelerant_engine_count;
 		case B_ACQUIRE_ENGINE:

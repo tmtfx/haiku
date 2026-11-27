@@ -19,6 +19,7 @@
 
 #include <new>
 
+#include <ctype.h>
 #include <dirent.h>
 #include <edid.h>
 #include <driver_settings.h>
@@ -180,9 +181,18 @@ _Set2DDebugIndicator(AccelerantHWInterface* hw, uint8 r, uint8 g, uint8 b,
 //	#pragma mark - AccelerantHWInterface
 
 
+AccelerantHWInterface::AccelerantHWInterface(const BString& devicePath)
+	:
+	AccelerantHWInterface()
+{
+	fPinnedDevicePath = devicePath;
+}
+
+
 AccelerantHWInterface::AccelerantHWInterface()
 	:
 	HWInterface(),
+	fPinnedDevicePath(),
 	fCardFD(-1),
 	fAccelerantImage(-1),
 	fAccelerantHook(NULL),
@@ -203,6 +213,7 @@ AccelerantHWInterface::AccelerantHWInterface()
 	fAccSyncToToken(NULL),
 	fAccGetTimingConstraints(NULL),
 	fAccProposeDisplayMode(NULL),
+	fAccIsBootPrimary(NULL),
 	fAccScreenBlit(NULL),
 	fAccFillRect(NULL),
 	fAccSetCursorShape(NULL),
@@ -361,18 +372,31 @@ AccelerantHWInterface::Initialize()
 		return B_NO_MEMORY;
 
 	if (ret >= B_OK) {
-		for (int32 i = 0; fCardFD != B_ENTRY_NOT_FOUND; i++) {
-			fCardFD = _OpenGraphicsDevice(i);
-			if (fCardFD < 0) {
-				ATRACE(("Failed to open graphics device\n"));
-				continue;
+		if (fPinnedDevicePath.Length() > 0) {
+			// Pinned to a specific, already-enumerated device path (see
+			// CollectDevicePaths()) - open exactly this one, no scanning
+			// and no vesa/framebuffer fallback. This is what lets
+			// ScreenManager bind one AccelerantHWInterface per physical
+			// graphics card instead of just the first one found.
+			fCardFD = open(fPinnedDevicePath.String(), B_READ_WRITE);
+			if (fCardFD >= 0 && _OpenAccelerant(fCardFD) != B_OK) {
+				close(fCardFD);
+				fCardFD = B_ENTRY_NOT_FOUND;
 			}
+		} else {
+			for (int32 i = 0; fCardFD != B_ENTRY_NOT_FOUND; i++) {
+				fCardFD = _OpenGraphicsDevice(i);
+				if (fCardFD < 0) {
+					ATRACE(("Failed to open graphics device\n"));
+					continue;
+				}
 
-			if (_OpenAccelerant(fCardFD) == B_OK)
-				break;
+				if (_OpenAccelerant(fCardFD) == B_OK)
+					break;
 
-			close(fCardFD);
-			// _OpenAccelerant() failed, try to open next graphics card
+				close(fCardFD);
+				// _OpenAccelerant() failed, try to open next graphics card
+			}
 		}
 
 		// Read user preference for hardware cursor from user settings Screen_data
@@ -419,6 +443,40 @@ AccelerantHWInterface::Initialize()
 		return fCardFD >= 0 ? B_OK : fCardFD;
 	}
 	return ret;
+}
+
+
+static void
+_CollectDevicePathsRecursive(const char* directory, BStringList& paths)
+{
+	BEntry entry;
+	BDirectory dir(directory);
+	while (dir.GetNextEntry(&entry) == B_OK) {
+		BPath path;
+		entry.GetPath(&path);
+		if (!strcmp(path.Path(), "/dev/graphics/vesa")
+			|| !strcmp(path.Path(), "/dev/graphics/framebuffer")) {
+			continue;
+		}
+
+		if (entry.IsDirectory())
+			_CollectDevicePathsRecursive(path.Path(), paths);
+		else
+			paths.Add(path.Path());
+	}
+}
+
+
+/*!	Collects every real graphics device path under /dev/graphics/, excluding
+	the vesa and framebuffer fallback drivers - one entry per physical card
+	that ScreenManager can try to bind an AccelerantHWInterface to.
+*/
+void
+AccelerantHWInterface::CollectDevicePaths(BStringList& paths)
+{
+	paths.MakeEmpty();
+	if (!use_fail_safe_video_mode())
+		_CollectDevicePathsRecursive("/dev/graphics/", paths);
 }
 
 
@@ -607,6 +665,8 @@ AccelerantHWInterface::_SetupDefaultHooks()
 	fAccGetMonitorInfo
 		= (get_monitor_info)fAccelerantHook(B_GET_MONITOR_INFO, NULL);
 	fAccGetEDIDInfo = (get_edid_info)fAccelerantHook(B_GET_EDID_INFO, NULL);
+	fAccIsBootPrimary = (is_boot_primary)fAccelerantHook(
+		B_IS_BOOT_PRIMARY_PIRATI, NULL);
 
 	// cursor
 	fAccSetCursorShape
@@ -1375,6 +1435,25 @@ AccelerantHWInterface::SupportsSetEDID() const
 }
 
 
+/*!	Multi-GPU: whether this card's accelerant can tell us it's the real
+	boot-primary (see boot_primary_hook.h). B_UNSUPPORTED (not just
+	"false") when the accelerant doesn't implement the optional hook at
+	all -- callers must treat "unsupported" and "supported but false" as
+	different things.
+*/
+status_t
+AccelerantHWInterface::IsBootPrimary(bool* isPrimary)
+{
+	AutoReadLocker _(this);
+
+	if (fAccIsBootPrimary == NULL)
+		return B_UNSUPPORTED;
+
+	*isPrimary = fAccIsBootPrimary();
+	return B_OK;
+}
+
+
 status_t
 AccelerantHWInterface::GetAccelerantPath(BString& string)
 {
@@ -1402,6 +1481,44 @@ AccelerantHWInterface::GetDriverPath(BString& string)
 
 	getCloneInfo((void*)path);
 	string.SetTo(path);
+	return B_OK;
+}
+
+
+/*!	Best-effort PCI bus/device/function of the open card.
+
+	Every graphics driver except virtio names its /dev/graphics device
+	path with the bus/device/function encoded as the trailing 6 hex
+	digits (e.g. the DEVICE_FORMAT "%04x_%04x_%02x%02x%02x" convention
+	used by ati, sm750, and others). virtio names its devices with a
+	plain incrementing index instead, so this returns B_NOT_SUPPORTED for
+	it (and for vesa/framebuffer, which have no fixed PCI identity at all).
+*/
+status_t
+AccelerantHWInterface::GetPciLocation(uint8* bus, uint8* device,
+	uint8* function)
+{
+	BString path;
+	if (GetDriverPath(path) != B_OK)
+		return B_NOT_SUPPORTED;
+
+	int32 length = path.Length();
+	if (length < 6)
+		return B_NOT_SUPPORTED;
+
+	const char* suffix = path.String() + length - 6;
+	for (int32 i = 0; i < 6; i++) {
+		if (!isxdigit((unsigned char)suffix[i]))
+			return B_NOT_SUPPORTED;
+	}
+
+	unsigned int b, d, f;
+	if (sscanf(suffix, "%02x%02x%02x", &b, &d, &f) != 3)
+		return B_NOT_SUPPORTED;
+
+	*bus = (uint8)b;
+	*device = (uint8)d;
+	*function = (uint8)f;
 	return B_OK;
 }
 

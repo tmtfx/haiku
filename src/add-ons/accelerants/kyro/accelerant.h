@@ -83,6 +83,7 @@ status_t CloneAccelerant(void* data);
 void UninitAccelerant(void);
 status_t GetAccelerantDeviceInfo(accelerant_device_info* info);
 sem_id AccelerantRetraceSemaphore(void);
+bool IsBootPrimary(void);
 
 
 #endif	// KYRO_ACCELERANT_H

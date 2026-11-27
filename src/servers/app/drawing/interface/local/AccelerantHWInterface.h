@@ -16,7 +16,11 @@
 
 #include <AutoDeleter.h>
 #include <image.h>
+#include <String.h>
+#include <StringList.h>
 #include <video_overlay.h>
+
+#include <boot_primary_hook.h>
 
 
 class AccelerantBuffer;
@@ -26,7 +30,26 @@ class RenderingBuffer;
 class AccelerantHWInterface : public HWInterface {
 public:
 								AccelerantHWInterface();
+									// scans /dev/graphics/ and binds to the
+									// first device with a working accelerant,
+									// falling back to vesa/framebuffer -
+									// unchanged legacy single-GPU behavior
+								AccelerantHWInterface(
+									const BString& devicePath);
+									// binds to exactly this device path, no
+									// scanning and no vesa/framebuffer
+									// fallback - used when the caller (i.e.
+									// ScreenManager) already enumerated the
+									// real graphics devices itself
 	virtual						~AccelerantHWInterface();
+
+				const BString&	DevicePath() const
+									{ return fPinnedDevicePath; }
+
+	// Collects every real graphics device path under /dev/graphics/,
+	// excluding the vesa and framebuffer fallback drivers. Used by
+	// ScreenManager to enumerate all GPUs instead of opening just one.
+	static		void			CollectDevicePaths(BStringList& paths);
 
 	virtual bool HasSetCursorBitmap() const;
 	virtual bool HasAnimatedCursorSupport() const;
@@ -67,10 +90,22 @@ public:
 	virtual status_t			GetEDID(void* info, uint32 size, uint32* version);
 	virtual status_t			SetEDID(const void* info, uint32 size, uint32 version);
 	virtual bool				SupportsGetEDID() const;
+
+	// Multi-GPU: B_UNSUPPORTED if this accelerant doesn't implement the
+	// optional B_IS_BOOT_PRIMARY_PIRATI hook at all (see
+	// boot_primary_hook.h), B_OK + *isPrimary otherwise.
+	virtual status_t			IsBootPrimary(bool* isPrimary);
 	virtual bool				SupportsSetEDID() const;
 
 	virtual status_t			GetAccelerantPath(BString& path);
 	virtual status_t			GetDriverPath(BString& path);
+
+	// Best-effort PCI bus/device/function of the open card, parsed from
+	// its /dev/graphics/* device path (the naming convention used by
+	// every driver except virtio). Returns B_NOT_SUPPORTED if the path
+	// doesn't end in the expected 6 hex digit BDF suffix.
+	virtual status_t			GetPciLocation(uint8* bus, uint8* device,
+										uint8* function);
 
 	// query for available hardware acceleration
 	virtual	uint32				AvailableHWAcceleration() const;
@@ -152,6 +187,7 @@ private:
 			bigtime_t			_RetraceTimeout() const;
 
 private:
+			BString				fPinnedDevicePath;
 			int					fCardFD;
 			image_id			fAccelerantImage;
 			GetAccelerantHook	fAccelerantHook;
@@ -175,6 +211,7 @@ private:
 			get_preferred_display_mode fAccGetPreferredDisplayMode;
 			get_monitor_info		fAccGetMonitorInfo;
 			get_edid_info			fAccGetEDIDInfo;
+			is_boot_primary			fAccIsBootPrimary;
 			screen_to_screen_blit	fAccScreenBlit;
 			fill_rectangle			fAccFillRect;
 			set_cursor_shape		fAccSetCursorShape;

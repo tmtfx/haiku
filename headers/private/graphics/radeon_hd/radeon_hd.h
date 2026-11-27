@@ -274,7 +274,11 @@ enum {
 
 	RADEON_GET_DEVICE_NAME,
 	RADEON_ALLOCATE_GRAPHICS_MEMORY,
-	RADEON_FREE_GRAPHICS_MEMORY
+	RADEON_FREE_GRAPHICS_MEMORY,
+	// Multi-GPU: whether this device owns the boot loader's
+	// FRAME_BUFFER_BOOT_INFO (see headers/private/graphics/common/
+	// boot_primary_ownership.h). Returns a bool.
+	RADEON_IS_BOOT_PRIMARY
 };
 
 // retrieve the area_id of the kernel/accelerant shared info

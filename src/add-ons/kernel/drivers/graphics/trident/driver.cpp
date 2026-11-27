@@ -25,6 +25,7 @@
 
 #include <boot_item.h>
 #include <frame_buffer_console.h>
+#include <boot_primary_ownership.h>
 
 #include "DriverInterface.h"
 #include <edid_override.h>
@@ -942,6 +943,16 @@ device_ioctl(void* dev, uint32 msg, void* buf, size_t len)
 		{
 			EnableMMIO(di);
 			return B_OK;
+		}
+
+		case TRIDENT_IS_BOOT_PRIMARY:
+		{
+			if (len != sizeof(bool))
+				return B_BAD_DATA;
+
+			bool isPrimary = boot_framebuffer_belongs_to_this_device(
+				&di.pciInfo);
+			return user_memcpy(buf, &isPrimary, sizeof(bool));
 		}
 	}
 

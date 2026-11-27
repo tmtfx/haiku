@@ -27,6 +27,7 @@ status_t intel_clone_accelerant(void* data);
 void intel_uninit_accelerant(void);
 status_t intel_get_accelerant_device_info(accelerant_device_info* info);
 sem_id intel_accelerant_retrace_semaphore(void);
+bool intel_is_boot_primary(void);
 
 // modes & constraints
 uint32 intel_accelerant_mode_count(void);

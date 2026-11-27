@@ -107,7 +107,11 @@ enum {
     XGI_DEVICE_NAME,
     XGI_GET_EDID,
     XGI_GET_PIO,
-    XGI_SET_PIO
+    XGI_SET_PIO,
+    // Multi-GPU: whether this device owns the boot loader's
+    // FRAME_BUFFER_BOOT_INFO (see headers/private/graphics/common/
+    // boot_primary_ownership.h). Returns a bool.
+    XGI_IS_BOOT_PRIMARY
 };
 
 struct XgiGetSetPIO {

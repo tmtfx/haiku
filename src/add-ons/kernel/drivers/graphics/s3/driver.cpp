@@ -19,6 +19,7 @@
 
 #include <boot_item.h>
 #include <frame_buffer_console.h>
+#include <boot_primary_ownership.h>
 
 #ifdef IS_PIRATI_BUILD
 #include "s3_logo.h"
@@ -1044,6 +1045,16 @@ device_ioctl(void* dev, uint32 msg, void* buf, size_t len)
 				return B_OK;
 			}
 			break;
+		}
+
+		case S3_IS_BOOT_PRIMARY:
+		{
+			if (len != sizeof(bool))
+				return B_BAD_DATA;
+
+			bool isPrimary = boot_framebuffer_belongs_to_this_device(
+				&di.pciInfo);
+			return user_memcpy(buf, &isPrimary, sizeof(bool));
 		}
 	}
 

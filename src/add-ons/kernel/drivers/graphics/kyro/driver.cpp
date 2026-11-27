@@ -12,6 +12,7 @@
 
 #include <boot_item.h>
 #include <frame_buffer_console.h>
+#include <boot_primary_ownership.h>
 
 #include <Drivers.h>
 #include <KernelExport.h>
@@ -870,6 +871,13 @@ device_ioctl(void* cookie, uint32 msg, void* buf, size_t len)
 				return B_ERROR;
 			return user_memcpy(buf, &device.sharedInfo->edidInfo,
 				sizeof(device.sharedInfo->edidInfo));
+
+		case KYRO_IS_BOOT_PRIMARY:
+		{
+			bool isPrimary = boot_framebuffer_belongs_to_this_device(
+				&device.pciInfo);
+			return user_memcpy(buf, &isPrimary, sizeof(bool));
+		}
 	}
 
 	return B_DEV_INVALID_IOCTL;

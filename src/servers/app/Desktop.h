@@ -47,6 +47,7 @@
 
 
 class BMessage;
+class BStringList;
 
 class DecorAddOn;
 class DrawingEngine;
@@ -147,6 +148,32 @@ public:
 									{ return fCompositor2DEnabled; }
 			void				SetCompositor2DEnabled(bool enabled);
 			void				CompositeDirtyRegion(BRegion& dirtyRegion);
+
+			// Multi-GPU: the screens currently eligible for a workspace
+			// row (i.e. they have a usable EDID, or are the primary --
+			// the primary is always treated as in use regardless of
+			// EDID), in row-assignment order (primary first). A screen
+			// not in this list is held in B_DPMS_OFF.
+			const ScreenList&	ActiveGpuScreens() const
+									{ return fActiveGpuScreens; }
+			bool				AllActiveGpusHaveHardwareCursor() const;
+
+			// Call after anything that can change which screens belong
+			// in ActiveGpuScreens() or their order: a screen's EDID
+			// changing at runtime (the Screen preflet's Load/Unset EDID
+			// round trip), or the user changing the configured GPU
+			// order/primary -- both just mean "re-read the GPU order
+			// settings and recompute".
+			void				GpuConfigurationChanged();
+
+			// Persists the user-configured GPU order (first entry is the
+			// requested primary, BDF-keyed) and/or a per-BDF EDID-unset
+			// override, then recomputes ActiveGpuScreens() to match.
+			// Called by the Screen preflet's GPU-order list and "Unset
+			// EDID" button.
+			void				SetGpuOrder(const BStringList& order);
+			void				SetGpuEdidUnset(const BString& bdf,
+									bool unset);
 
 			void				RebuildAndRedrawAfterWindowChange(
 									Window* window, BRegion& dirty);
@@ -329,6 +356,7 @@ private:
 
 			void				_ScreenChanged(Screen* screen);
 			void				_SetCurrentWorkspaceConfiguration();
+			void				_UpdateActiveGpuScreens();
 			void				_SetWorkspace(int32 index,
 									bool moveFocusWindow = false);
 
@@ -391,6 +419,7 @@ private:
 
 			BMessage			fPendingColors;
 			bool				fCompositor2DEnabled;
+			ScreenList			fActiveGpuScreens;
 };
 
 #endif	// DESKTOP_H

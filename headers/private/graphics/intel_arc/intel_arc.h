@@ -257,7 +257,11 @@ struct intel_arc_shared_info {
 enum {
 	INTEL_ARC_GET_PRIVATE_DATA = B_DEVICE_OP_CODES_END + 1,
 	INTEL_ARC_GET_DEVICE_NAME,
-	INTEL_ARC_CLONE_FRAME_BUFFER
+	INTEL_ARC_CLONE_FRAME_BUFFER,
+	// Multi-GPU: whether this device owns the boot loader's
+	// FRAME_BUFFER_BOOT_INFO (see headers/private/graphics/common/
+	// boot_primary_ownership.h). Returns a bool.
+	INTEL_ARC_IS_BOOT_PRIMARY
 };
 
 

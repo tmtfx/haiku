@@ -19,6 +19,7 @@
 #include <Autolock.h>
 #include <Entry.h>
 #include <NodeMonitor.h>
+#include <StringList.h>
 
 #include <new>
 
@@ -192,22 +193,32 @@ ScreenManager::ScreenChanged(Screen* screen)
 void
 ScreenManager::_ScanDrivers()
 {
-	HWInterface* interface = NULL;
-
-	// Eventually we will loop through drivers until
-	// one can't initialize in order to support multiple monitors.
-	// For now, we'll just load one and be done with it.
-
 	// ToDo: to make monitoring the driver directory useful, we need more
 	//	power and data here, and should do the scanning on our own
 
 #ifndef HAIKU_TARGET_PLATFORM_LIBBE_TEST
-	bool initDrivers = true;
-	while (initDrivers) {
-		interface = new AccelerantHWInterface();
+	// Enumerate every real graphics device (one per physical card) and try
+	// to bind one AccelerantHWInterface to each - this is what lets
+	// multiple GPUs each get their own live Screen/HWInterface/DrawingEngine
+	// instead of only the first one found.
+	BStringList devicePaths;
+	AccelerantHWInterface::CollectDevicePaths(devicePaths);
 
-		_AddHWInterface(interface);
-		initDrivers = false;
+	bool addedAny = false;
+	for (int32 i = 0; i < devicePaths.CountStrings(); i++) {
+		HWInterface* interface
+			= new AccelerantHWInterface(devicePaths.StringAt(i));
+		if (_AddHWInterface(interface) != NULL)
+			addedAny = true;
+	}
+
+	if (!addedAny) {
+		// No usable real graphics device was found at all (or none were
+		// enumerated, e.g. fail-safe video mode) - fall back to the
+		// original single-instance scan, which itself falls back to the
+		// vesa/framebuffer driver. Preserves today's exact behavior for
+		// hardware with no real accelerant.
+		_AddHWInterface(new AccelerantHWInterface());
 	}
 #endif
 }

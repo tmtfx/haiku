@@ -129,6 +129,14 @@ public:
 	virtual status_t			GetAccelerantPath(BString& path);
 	virtual status_t			GetDriverPath(BString& path);
 
+	// Multi-GPU: best-effort PCI bus/device/function of this screen's
+	// card, used to persist per-GPU settings keyed by a stable identity
+	// rather than discovery-order index. B_NOT_SUPPORTED when this
+	// HWInterface has no such concept (remote/offscreen interfaces).
+	virtual status_t			GetPciLocation(uint8* bus, uint8* device,
+										uint8* function)
+										{ return B_NOT_SUPPORTED; }
+
 	// query for available hardware acceleration and perform it
 	// (Initialize() must have been called already)
 	virtual	uint32				AvailableHWAcceleration() const

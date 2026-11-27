@@ -64,6 +64,7 @@ void	 GetAccelerantCloneInfo(void* data);
 status_t CloneAccelerant(void* data);
 void	 UninitAccelerant(void);
 status_t GetAccelerantDeviceInfo(accelerant_device_info* adi);
+bool	 IsBootPrimary(void);
 
 // Mode Configuration
 uint32	 AccelerantModeCount(void);

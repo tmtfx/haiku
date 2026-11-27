@@ -67,6 +67,10 @@ enum {
 	S3_GET_PIO,
 	S3_SET_PIO,
 	S3_RUN_INTERRUPTS,
+	// Multi-GPU: whether this device owns the boot loader's
+	// FRAME_BUFFER_BOOT_INFO (see headers/private/graphics/common/
+	// boot_primary_ownership.h). Returns a bool.
+	S3_IS_BOOT_PRIMARY,
 };
 
 

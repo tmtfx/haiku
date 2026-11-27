@@ -60,7 +60,11 @@ enum {
 	TDFX_GET_SHARED_DATA = B_DEVICE_OP_CODES_END + 123,
 	TDFX_DEVICE_NAME,
 	TDFX_GET_PIO_REG,
-	TDFX_SET_PIO_REG
+	TDFX_SET_PIO_REG,
+	// Multi-GPU: whether this device owns the boot loader's
+	// FRAME_BUFFER_BOOT_INFO (see headers/private/graphics/common/
+	// boot_primary_ownership.h). Returns a bool.
+	TDFX_IS_BOOT_PRIMARY
 };
 
 

@@ -64,6 +64,10 @@ enum {
 	TRIDENT_GET_PIO, // UNUSED
 	TRIDENT_SET_PIO, // UNUSED
 	TRIDENT_ENABLE_MMIO,
+	// Multi-GPU: whether this device owns the boot loader's
+	// FRAME_BUFFER_BOOT_INFO (see headers/private/graphics/common/
+	// boot_primary_ownership.h). Returns a bool.
+	TRIDENT_IS_BOOT_PRIMARY,
 };
 
 

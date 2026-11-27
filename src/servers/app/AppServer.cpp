@@ -368,6 +368,19 @@ AppServer::MessageReceived(BMessage* message)
 				}
 			}
 
+			if (status == B_OK) {
+				// Multi-GPU: a newly-loaded EDID can make this screen
+				// eligible for a workspace row (or change who the
+				// primary is), so recompute every Desktop's active-GPU
+				// list now instead of leaving it stale until reboot.
+				BAutolock locker(fDesktopLock);
+				for (int32 i = 0; i < fDesktops.CountItems(); i++) {
+					Desktop* desktop = fDesktops.ItemAt(i);
+					if (desktop != NULL)
+						desktop->GpuConfigurationChanged();
+				}
+			}
+
 			BMessage reply;
 			reply.AddInt32("status", status);
 			message->SendReply(&reply);

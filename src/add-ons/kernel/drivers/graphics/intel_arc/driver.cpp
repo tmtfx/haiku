@@ -19,6 +19,7 @@
 
 #include <boot_item.h>
 #include <frame_buffer_console.h>
+#include <boot_primary_ownership.h>
 #include <graphic_driver.h>
 #include <KernelExport.h>
 #include <OS.h>
@@ -1639,6 +1640,16 @@ control_hook(void* cookie, uint32 msg, void* buf, size_t len)
 			}
 
 			return user_memcpy(buf, &areaInfo, sizeof(area_info));
+		}
+
+		case INTEL_ARC_IS_BOOT_PRIMARY:
+		{
+			if (!IS_USER_ADDRESS(buf) || len != sizeof(bool))
+				return B_BAD_ADDRESS;
+
+			bool isPrimary = boot_framebuffer_belongs_to_this_device(
+				&info->pci);
+			return user_memcpy(buf, &isPrimary, sizeof(bool));
 		}
 	}
 

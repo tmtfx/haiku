@@ -63,6 +63,8 @@
 
 #include "accelerant.h"
 
+#include <boot_primary_hook.h>
+
 #include <errno.h>
 #include <fcntl.h>
 #include <string.h>
@@ -267,6 +269,22 @@ xgi_accelerant_retrace_semaphore(void)
 	return B_ERROR;
 }
 
+
+bool
+xgi_is_boot_primary(void)
+{
+	// Multi-GPU: see boot_primary_hook.h -- only the kernel driver can
+	// call get_boot_item(), so ask it via XGI_IS_BOOT_PRIMARY.
+	bool isPrimary = false;
+	if (ioctl(gInfo.deviceFD, XGI_IS_BOOT_PRIMARY, &isPrimary,
+			sizeof(isPrimary)) != B_OK) {
+		return false;
+	}
+
+	return isPrimary;
+}
+
+
 extern "C" void*
 get_accelerant_hook(uint32 feature, void* data)
 {
@@ -298,6 +316,8 @@ get_accelerant_hook(uint32 feature, void* data)
 			return (void*)xgi_get_accelerant_device_info;
 		case B_ACCELERANT_RETRACE_SEMAPHORE:
 			return (void*)xgi_accelerant_retrace_semaphore;
+		case B_IS_BOOT_PRIMARY_PIRATI:
+			return (void*)xgi_is_boot_primary;
 
 		/* Display Modes */
 		case B_ACCELERANT_MODE_COUNT:
