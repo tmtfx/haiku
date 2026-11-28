@@ -19,6 +19,7 @@
 
 #include <boot_item.h>
 #include <frame_buffer_console.h>
+#include <boot_primary_ownership.h>
 
 /* this is for the standardized portion of the driver API */
 /* currently only one operation is defined: B_GET_ACCELERANT_SIGNATURE */
@@ -971,8 +972,14 @@ done:
 	/* end of critical section */
 
 #ifdef IS_PIRATI_BUILD
-	if (enable_logo && result == B_OK && bi != NULL) {
-		draw_matrox_logo_safe(di, bi); 
+	/* Multi-GPU: only draw if this device actually owns the boot
+	 * loader's framebuffer -- see the matching guard/comment in
+	 * s3/driver.cpp (same risk: geometry from a different card's mode,
+	 * out-of-bounds write into this card's own, differently-sized VRAM).
+	 */
+	if (enable_logo && result == B_OK && bi != NULL
+		&& boot_framebuffer_belongs_to_this_device(&di->pcii)) {
+		draw_matrox_logo_safe(di, bi);
 		snooze(2000000);
 	}
 #endif

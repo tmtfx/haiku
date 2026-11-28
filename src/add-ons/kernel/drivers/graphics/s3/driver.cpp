@@ -509,11 +509,17 @@ FRAME_BUFFER_BOOT_INFO, NULL);
 	si.bypassEdid = load_edid_override("s3.settings", &si.edidInfo) == B_OK;
 	si.bHaveEDID = si.bypassEdid;
 
-	if (!si.bypassEdid) {
-		// This card is the primary display: the bootloader may already have
-		// a decoded EDID from VESA/VBE (frame_buffer_console.cpp). Prefer it
-		// over GetEdidFromBIOS() below, which replays the real-mode video
-		// BIOS via the generic "bios" kernel module.
+	if (!si.bypassEdid && boot_framebuffer_belongs_to_this_device(&pciInfo)) {
+		// This card is the actual boot-primary display: the bootloader
+		// may already have a decoded EDID from VESA/VBE (frame_buffer_
+		// console.cpp). Prefer it over GetEdidFromBIOS() below, which
+		// replays the real-mode video BIOS via the generic "bios" kernel
+		// module. Multi-GPU: on a secondary card this boot item belongs
+		// to whichever card the boot loader actually used, not this one
+		// -- inheriting it unconditionally steals that other card's
+		// monitor's EDID (confirmed on real hardware for this same
+		// pattern in the ati driver). Falls through to this card's own
+		// GetEdidFromBIOS()/DDC path instead.
 		edid1_info* bootEdid = (edid1_info*)get_boot_item(VESA_EDID_BOOT_INFO,
 			NULL);
 		if (bootEdid != NULL) {
@@ -551,8 +557,17 @@ FRAME_BUFFER_BOOT_INFO, NULL);
 	TRACE("Interrupt assigned:  %s\n", si.bInterruptAssigned ? "yes" : "no");
 
 #ifdef IS_PIRATI_BUILD
-	draw_logo(di);
-	snooze(2000000);
+	// Multi-GPU: only the card the boot loader actually used owns the
+	// FRAME_BUFFER_BOOT_INFO geometry draw_logo() draws with -- for any
+	// other card, bi->width/height/bytes_per_row describe a framebuffer
+	// that isn't this device's own VRAM layout at all, and writing that
+	// many bytes into this device's own (possibly much smaller) mapped
+	// BAR is an out-of-bounds kernel write with no corresponding onscreen
+	// benefit anyway (a non-primary card has no splash to show here).
+	if (boot_framebuffer_belongs_to_this_device(&di.pciInfo)) {
+		draw_logo(di);
+		snooze(2000000);
+	}
 #endif
 
 	return B_OK;

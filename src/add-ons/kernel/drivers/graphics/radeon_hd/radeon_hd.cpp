@@ -31,6 +31,7 @@
 #include <vm/vm.h>
 
 #include <boot_item.h>
+#include <boot_primary_ownership.h>
 #include <frame_buffer_console.h>
 
 #ifdef IS_PIRATI_BUILD
@@ -990,9 +991,14 @@ radeon_hd_init(radeon_info &info)
 		info.id, radeon_thermal_query(info) / 1000);
 
 
-#ifdef IS_PIRATI_BUILD		
+#ifdef IS_PIRATI_BUILD
 	//draw_logo
-	if (enable_logo && bi != NULL) {
+	// Multi-GPU: only draw if this device actually owns the boot
+	// loader's framebuffer -- see the matching guard/comment in
+	// s3/driver.cpp (same risk: geometry from a different card's mode,
+	// out-of-bounds write into this card's own, differently-sized VRAM).
+	if (enable_logo && bi != NULL && info.pci != NULL
+		&& boot_framebuffer_belongs_to_this_device(info.pci)) {
 		draw_radeonhd_logo(info,bi);
 		snooze(2000000);
 	}

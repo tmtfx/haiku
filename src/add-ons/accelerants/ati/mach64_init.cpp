@@ -43,6 +43,33 @@ Mach64_InitDSPParams()
 		params.xClkPostDivider = 0;
 		break;
 
+	case 5:
+	case 6:
+	case 7:
+		// Register codes 0-7 are a lookup table for the real XCLK
+		// divisor, not a plain power of two -- confirmed against
+		// Linux's fbdev mach64 driver (drivers/video/fbdev/aty/
+		// mach64_ct.c): aty_postdividers[8] = {1,2,4,8,3,5,6,12}.
+		// Case 4 above already decomposes code 4's divisor (3) as
+		// xClkRefDivider * 2^xClkPostDivider = 3 * 2^0; SetDSPRegisters()
+		// in mach64_mode.cpp confirms that's exactly how both fields
+		// are consumed downstream (xClkRefDivider as a plain multiplier,
+		// xClkPostDivider as a shift amount). Completing the same
+		// decomposition for the remaining three codes: divisor 5 = 5
+		// x 2^0, divisor 6 = 3 x 2^1, divisor 12 = 3 x 2^2.
+		//
+		// On real hardware, a secondary (never firmware-POSTed) Rage XL
+		// is left at its raw post-reset register value here -- code 5 --
+		// since only the primary's own video BIOS ever programs this
+		// register to one of codes 0-4 during POST. Without this fix,
+		// any such secondary card fails InitAccelerant() outright.
+		switch (params.xClkPostDivider) {
+			case 5: params.xClkRefDivider = 5; params.xClkPostDivider = 0; break;
+			case 6: params.xClkRefDivider = 3; params.xClkPostDivider = 1; break;
+			case 7: params.xClkRefDivider = 3; params.xClkPostDivider = 2; break;
+		}
+		break;
+
 	default:
 		TRACE("Unsupported XCLK source:  %d.\n", params.xClkPostDivider);
 		return false;

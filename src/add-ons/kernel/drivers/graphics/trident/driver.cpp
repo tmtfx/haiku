@@ -509,11 +509,17 @@ InitDevice(DeviceInfo& di)
 	si.bypassEdid = load_edid_override("trident.settings", &si.edidInfo) == B_OK;
 	si.bHaveEDID = si.bypassEdid;
 
-	if (!si.bypassEdid) {
-		// This card is the primary display: the bootloader may already have
-		// a decoded EDID from VESA/VBE (frame_buffer_console.cpp). Prefer it
-		// over GetEdidFromBIOS() below, which replays the real-mode video
-		// BIOS via the generic "bios" kernel module.
+	if (!si.bypassEdid && boot_framebuffer_belongs_to_this_device(&pciInfo)) {
+		// This card is the actual boot-primary display: the bootloader
+		// may already have a decoded EDID from VESA/VBE (frame_buffer_
+		// console.cpp). Prefer it over GetEdidFromBIOS() below, which
+		// replays the real-mode video BIOS via the generic "bios" kernel
+		// module. Multi-GPU: on a secondary card this boot item belongs
+		// to whichever card the boot loader actually used, not this one
+		// -- inheriting it unconditionally steals that other card's
+		// monitor's EDID (confirmed on real hardware for this same
+		// pattern in the ati driver). Falls through to this card's own
+		// GetEdidFromBIOS()/DDC path instead.
 		edid1_info* bootEdid = (edid1_info*)get_boot_item(VESA_EDID_BOOT_INFO,
 			NULL);
 		if (bootEdid != NULL) {
@@ -540,8 +546,14 @@ InitDevice(DeviceInfo& di)
 	InitInterruptHandler(di);
 
 #ifdef IS_PIRATI_BUILD
-	draw_logo(di);
-	snooze(2000000);
+	// Multi-GPU: only draw if this device actually owns the boot
+	// loader's framebuffer -- see the matching guard/comment in
+	// s3/driver.cpp (same risk: geometry from a different card's mode,
+	// out-of-bounds write into this card's own, differently-sized VRAM).
+	if (boot_framebuffer_belongs_to_this_device(&di.pciInfo)) {
+		draw_logo(di);
+		snooze(2000000);
+	}
 #endif
 
 	return B_OK;

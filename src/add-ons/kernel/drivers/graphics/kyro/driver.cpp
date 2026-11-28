@@ -651,8 +651,15 @@ init_device(DeviceInfo& device)
 
 	device.sharedInfo->bypassEdid = load_edid_override("kyro.settings",
 		&device.sharedInfo->edidInfo) == B_OK;
-	edid1_info* bootEdid = device.sharedInfo->bypassEdid ? NULL
-		: (edid1_info*)get_boot_item(VESA_EDID_BOOT_INFO, NULL);
+	// Multi-GPU: only inherit the boot loader's EDID if this device is
+	// the one it actually belongs to -- on a secondary card it belongs
+	// to whichever card the boot loader actually used, and inheriting
+	// it unconditionally steals that other card's monitor's EDID
+	// (confirmed on real hardware for this same pattern in the ati
+	// driver). Falls through to this card's own EDID path otherwise.
+	edid1_info* bootEdid = (device.sharedInfo->bypassEdid
+			|| !boot_framebuffer_belongs_to_this_device(&device.pciInfo))
+		? NULL : (edid1_info*)get_boot_item(VESA_EDID_BOOT_INFO, NULL);
 	if (device.sharedInfo->bypassEdid) {
 		device.sharedInfo->hasEdid = true;
 		KYRO_TRACE("init_device: using EDID override from kyro.settings\n");
@@ -671,8 +678,14 @@ init_device(DeviceInfo& device)
 		device.sharedInfo->cursorOffset, device.sharedInfo->cursorFrameBufferCount,
 		device.sharedInfo->maxPixelClock);
 #ifdef IS_PIRATI_BUILD
-	draw_logo(device);
-	snooze(2000000);
+	// Multi-GPU: only draw if this device actually owns the boot
+	// loader's framebuffer -- see the matching guard/comment in
+	// s3/driver.cpp (same risk: geometry from a different card's mode,
+	// out-of-bounds write into this card's own, differently-sized VRAM).
+	if (boot_framebuffer_belongs_to_this_device(&device.pciInfo)) {
+		draw_logo(device);
+		snooze(2000000);
+	}
 #endif
 
 	return B_OK;

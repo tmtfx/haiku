@@ -567,11 +567,17 @@ void* get_accelerant_hook(uint32 feature, void* data) {
         case B_WAIT_ENGINE_IDLE:            return (void*)sm750_wait_engine_idle;
         case B_GET_SYNC_TOKEN:              return (void*)sm750_get_sync_token;
         case B_SYNC_TO_TOKEN:               return (void*)sm750_sync_to_token;
-        /* 2D engine (accelerazione hardware) */
-        case B_FILL_RECTANGLE:			return (void*)sm750_fill_rectangle;
-	case B_SCREEN_TO_SCREEN_BLIT:		return (void*)sm750_screen_to_screen_blit;
-	case B_INVERT_RECTANGLE:		return (void*)sm750_invert_rectangle;
-	case B_FILL_SPAN:			return (void*)sm750_fill_span;
+        /* 2D engine (accelerazione hardware) -- deliberately disabled: a
+         * real interrupt-handling bug in this card's hardware/driver
+         * hangs the machine when these hooks are enabled. Confirmed on
+         * real hardware in an earlier session; not re-tested here, kept
+         * disabled out of caution now that a second GPU is sharing the
+         * same boot/IRQ environment. Do not re-enable without re-
+         * confirming on real hardware first. */
+        case B_FILL_RECTANGLE:			return NULL; //(void*)sm750_fill_rectangle;
+	case B_SCREEN_TO_SCREEN_BLIT:		return NULL; //(void*)sm750_screen_to_screen_blit;
+	case B_INVERT_RECTANGLE:		return NULL; //(void*)sm750_invert_rectangle;
+	case B_FILL_SPAN:			return NULL; //(void*)sm750_fill_span;
 		
 	/* Overlay */
 	case B_OVERLAY_COUNT:			return (void*)sm750_overlay_count;

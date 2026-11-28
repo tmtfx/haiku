@@ -352,7 +352,16 @@ Window::FreeBackingStore()
 		return;
 
 	if (GetDrawingEngine() != NULL && fDesktop != NULL) {
-		GetDrawingEngine()->SetHWInterface(fDesktop->HWInterface());
+		// Multi-GPU: restore to THIS window's own screen, not the
+		// single Desktop-wide HWInterface() -- which could be a
+		// different GPU than the one this window actually lives on.
+		// Screen() is only unset in the brief window between creation
+		// and the window's first clipping pass; fall back to whichever
+		// screen owns its own workspace in that case.
+		::HWInterface* ownInterface = Screen() != NULL
+			? Screen()->HWInterface()
+			: fDesktop->ScreenForWorkspace(fCurrentWorkspace)->HWInterface();
+		GetDrawingEngine()->SetHWInterface(ownInterface);
 		GetDrawingEngine()->SetWindowOrigin(0, 0);
 	}
 
@@ -745,7 +754,7 @@ Window::CopyContents(BRegion* region, int32 xOffset, int32 yOffset)
 						fPendingUpdateSession->DirtyRegion().Exclude(copyRegion);
 
 					if (HasBackingStore() && fDesktop != NULL)
-						fDesktop->CompositeDirtyRegion(*copyRegion);
+						fDesktop->CompositeDirtyRegion(*copyRegion, fCurrentWorkspace);
 				}
 
 				fRegionPool.Recycle(copyRegion);
@@ -1059,8 +1068,13 @@ Window::MarkDirty(BRegion& regionOnScreen)
 	// this will get write access to the global
 	// region lock, and result in ProcessDirtyRegion()
 	// to be called for any windows affected
+	//
+	// Multi-GPU: route through this window's OWN workspace, not
+	// whichever one happens to be globally focused -- this is what lets
+	// a window keep redrawing itself live on a screen that currently
+	// doesn't have keyboard/mouse focus.
 	if (fDesktop)
-		fDesktop->MarkDirty(regionOnScreen);
+		fDesktop->MarkDirty(regionOnScreen, fCurrentWorkspace);
 }
 
 
@@ -1359,7 +1373,7 @@ Window::SetFocus(bool focus)
 		if (HasBackingStore()) {
 			_DrawBorder();
 		} else {
-			fDesktop->MarkDirty(*dirty);
+			fDesktop->MarkDirty(*dirty, fCurrentWorkspace);
 		}
 		fRegionPool.Recycle(dirty);
 	}
@@ -2089,7 +2103,7 @@ Window::_DrawBorder()
 		engine->SetCopyToFrontEnabled(copyToFrontEnabled);
 		engine->CopyToFront(*dirtyBorderRegion);
 		if (HasBackingStore() && fDesktop != NULL)
-			fDesktop->CompositeDirtyRegion(*dirtyBorderRegion);
+			fDesktop->CompositeDirtyRegion(*dirtyBorderRegion, fCurrentWorkspace);
 
 // TODO: remove this once the DrawState stuff is handled
 // more cleanly. The reason why this is needed is that
@@ -2260,7 +2274,7 @@ Window::EndUpdate()
 
 			fDrawingEngine->CopyToFront(*dirty);
 			if (HasBackingStore() && fDesktop != NULL)
-				fDesktop->CompositeDirtyRegion(*dirty);
+				fDesktop->CompositeDirtyRegion(*dirty, fCurrentWorkspace);
 
 			fRegionPool.Recycle(dirty);
 		}

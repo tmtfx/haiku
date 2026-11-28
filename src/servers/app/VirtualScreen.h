@@ -28,20 +28,37 @@ public:
 			::DrawingEngine*	DrawingEngine() const
 									{ return fDrawingEngine; }
 
-			// TODO: can we have a multiplexing HWInterface as well?
-			//	If not, this would need to be hidden, and only made
-			//	available for the Screen class
+			// Multi-GPU: NOT a multiplexing HWInterface -- deliberately
+			// not attempted (tried once as a per-focused-screen resolver
+			// on Desktop::HWInterface()/GetDrawingEngine() directly; it
+			// broke every unrelated single-screen caller that depends on
+			// this being one stable interface, see
+			// feedback_narrow_fix_blast_radius). What WAS a real bug:
+			// AddScreen() below used to leave this pointing at whichever
+			// screen it happened to iterate last, pure discovery-order
+			// noise with no relation to which GPU is actually the
+			// primary. SetPrimaryInterface() lets Desktop pin this to
+			// the screen it has already determined is primary
+			// (ActiveGpuScreens().ItemAt(0)), right after
+			// _UpdateActiveGpuScreens() computes that -- every existing
+			// caller keeps the exact single-stable-interface contract it
+			// always had, just now consistently pointed at the primary
+			// instead of an arbitrary one.
 			::HWInterface*		HWInterface() const
 									{ return fHWInterface; }
+
+			void				SetPrimaryInterface(Screen* screen);
 
 			status_t			SetConfiguration(Desktop& desktop,
 									const ScreenConfigurations& configurations,
 									ScreenConfigurations& currentConfigurations,
-									uint32* _changedScreens = NULL);
+									uint32* _changedScreens = NULL,
+									Screen* onlyReconfigure = NULL);
 
 			status_t			AddScreen(Screen* screen,
 									const ScreenConfigurations& configurations,
-									ScreenConfigurations& currentConfigurations);
+									ScreenConfigurations& currentConfigurations,
+									bool touchHardware = true);
 			status_t			RemoveScreen(Screen* screen);
 
 			void				UpdateFrame();

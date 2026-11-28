@@ -1216,8 +1216,13 @@ init_device(intel_arc_info& info)
 	// boot loader EDID
 	info.shared_info->bypass_edid = load_edid_override("intel_arc.settings",
 		&info.shared_info->boot_edid) == B_OK;
-	edid1_info* edidInfo = info.shared_info->bypass_edid ? NULL
-		: (edid1_info*)get_boot_item(VESA_EDID_BOOT_INFO, NULL);
+	// Multi-GPU: only inherit the boot loader's EDID if this device is
+	// the one it actually belongs to -- see the matching guard/comment
+	// in kyro/driver.cpp (same risk: stealing another card's monitor's
+	// EDID, confirmed on real hardware for this pattern in ati).
+	edid1_info* edidInfo = (info.shared_info->bypass_edid
+			|| !boot_framebuffer_belongs_to_this_device(&info.pci))
+		? NULL : (edid1_info*)get_boot_item(VESA_EDID_BOOT_INFO, NULL);
 	if (info.shared_info->bypass_edid)
 		info.shared_info->has_boot_edid = true;
 	else if (edidInfo != NULL) {
@@ -1366,8 +1371,14 @@ FRAME_BUFFER_BOOT_INFO, NULL);
 	}
 	
 #ifdef IS_PIRATI_BUILD
-	draw_logo(info);
-	snooze(2000000);
+	// Multi-GPU: only draw if this device actually owns the boot
+	// loader's framebuffer -- see the matching guard/comment in
+	// s3/driver.cpp (same risk: geometry from a different card's mode,
+	// out-of-bounds write into this card's own, differently-sized VRAM).
+	if (boot_framebuffer_belongs_to_this_device(&info.pci)) {
+		draw_logo(info);
+		snooze(2000000);
+	}
 #endif
 
 	sharedKeeper.Detach();

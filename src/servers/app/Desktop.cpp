@@ -622,7 +622,16 @@ Desktop::Init()
 
 	fCursorManager.InitializeCursors(fSettings->DefaultBoldFont().Size() / 12.0f);
 
-	fVirtualScreen.HWInterface()->MoveCursorTo(
+	// Multi-GPU: the cursor belongs to whichever screen the current
+	// workspace is displayed on -- not Desktop::HWInterface() (the
+	// single, stable, NOT focus-resolved interface every unrelated
+	// caller elsewhere depends on, see its own comment), and not
+	// fVirtualScreen.HWInterface() either (only ever the last screen
+	// VirtualScreen::AddScreen() iterated over, unrelated to focus).
+	// This narrow, call-site-local resolution is the fix; it does not
+	// touch the general accessor's behavior for anyone else.
+	::HWInterface* focusedInterface = ScreenForWorkspace(fCurrentWorkspace)->HWInterface();
+	focusedInterface->MoveCursorTo(
 		fVirtualScreen.Frame().Width() / 2,
 		fVirtualScreen.Frame().Height() / 2);
 
@@ -630,7 +639,7 @@ Desktop::Init()
 	gInputManager->AddStream(new InputServerStream);
 #endif
 
-	EventStream* stream = fVirtualScreen.HWInterface()->CreateEventStream();
+	EventStream* stream = focusedInterface->CreateEventStream();
 	if (stream == NULL)
 		stream = gInputManager->GetStream();
 
@@ -639,23 +648,41 @@ Desktop::Init()
 	if (fEventDispatcher.InitCheck() != B_OK)
 		_LaunchInputServer();
 
-	fEventDispatcher.SetHWInterface(fVirtualScreen.HWInterface());
+	fEventDispatcher.SetHWInterface(focusedInterface);
 
 	fEventDispatcher.SetMouseFilter(new MouseFilter(this));
 	fEventDispatcher.SetKeyboardFilter(new KeyboardFilter(this));
 
 	// draw the background
 
-	fScreenRegion = fVirtualScreen.Frame();
+	// Multi-GPU: seed clipping/background for EVERY active screen here,
+	// not just fCurrentWorkspace's (always the primary's row at boot) --
+	// _RebuildClippingForAllWindows()/_SetBackground() default to
+	// fCurrentWorkspace when given none, so a single unparameterized call
+	// only ever initializes the screen that happens to have focus at
+	// this exact moment. Nothing else in Desktop::Init() ever visits a
+	// secondary screen's own row (that only happens if/when the user
+	// actually switches a workspace there), so without this loop a
+	// secondary GPU's framebuffer is never actually drawn to by
+	// app_server at all -- whatever was left in its VRAM before this
+	// point (kernel boot-splash leftovers, raw post-reset garbage) just
+	// stays on screen, looking exactly like "random corruption" while
+	// app_server itself runs perfectly fine and never touches it.
+	for (int32 i = 0; i < fActiveGpuScreens.CountItems(); i++) {
+		Screen* screen = fActiveGpuScreens.ItemAt(i);
+		int32 workspace = screen->DisplayedWorkspace();
+		if (workspace < 0)
+			workspace = fCurrentWorkspace;
 
-	BRegion stillAvailableOnScreen;
-	_RebuildClippingForAllWindows(stillAvailableOnScreen);
-	_SetBackground(stillAvailableOnScreen);
+		BRegion stillAvailableOnScreen;
+		_RebuildClippingForAllWindows(stillAvailableOnScreen, workspace);
+		_SetBackground(stillAvailableOnScreen, screen);
+	}
 
 	SetCursor(NULL);
 		// this will set the default cursor
 
-	fVirtualScreen.HWInterface()->SetCursorVisible(true);
+	focusedInterface->SetCursorVisible(true);
 
 	return B_OK;
 }
@@ -2542,10 +2569,19 @@ BlendSpanRGB15(uint16* dst, const uint32* src, int32 count)
 
 
 void
-Desktop::CompositeDirtyRegion(BRegion& dirtyRegion)
+Desktop::CompositeDirtyRegion(BRegion& dirtyRegion, int32 workspace)
 {
-	RenderingBuffer* drawingBuffer = HWInterface() != NULL
-		? HWInterface()->DrawingBuffer() : NULL;
+	if (workspace < 0)
+		workspace = fCurrentWorkspace;
+	// Multi-GPU: composite against the screen that owns \a workspace,
+	// not always the single Desktop-wide HWInterface() -- otherwise a
+	// window updating itself on a screen other than the focused one
+	// would either be silently skipped or, worse, blended onto the
+	// wrong card's framebuffer.
+	::HWInterface* targetInterface = ScreenForWorkspace(workspace)->HWInterface();
+
+	RenderingBuffer* drawingBuffer = targetInterface != NULL
+		? targetInterface->DrawingBuffer() : NULL;
 	if (drawingBuffer == NULL || drawingBuffer->Bits() == NULL || dirtyRegion.CountRects() == 0)
 		return;
 
@@ -2556,8 +2592,8 @@ Desktop::CompositeDirtyRegion(BRegion& dirtyRegion)
 	color_space dstSpace = drawingBuffer->ColorSpace();
 
 	// Composite all visible windows back-to-front
-	for (Window* window = CurrentWindows().FirstWindow(); window != NULL;
-			window = window->NextWindow(fCurrentWorkspace)) {
+	for (Window* window = _Windows(workspace).FirstWindow(); window != NULL;
+			window = window->NextWindow(workspace)) {
 		if (window->IsHidden() || !window->IsVisible())
 			continue;
 
@@ -2778,22 +2814,21 @@ Desktop::CompositeDirtyRegion(BRegion& dirtyRegion)
 		}
 	}
 
-	if (HWInterface() != NULL)
-		HWInterface()->InvalidateRegion(dirtyRegion);
+	targetInterface->InvalidateRegion(dirtyRegion);
 }
 
 
 void
-Desktop::MarkDirty(BRegion& dirtyRegion, BRegion& exposeRegion)
+Desktop::MarkDirty(BRegion& dirtyRegion, BRegion& exposeRegion, int32 workspace)
 {
 	if (dirtyRegion.CountRects() == 0)
 		return;
 
 	if (LockAllWindows()) {
-		_TriggerWindowRedrawing(dirtyRegion, exposeRegion);
+		_TriggerWindowRedrawing(dirtyRegion, exposeRegion, workspace);
 
 		if (fCompositor2DEnabled)
-			CompositeDirtyRegion(dirtyRegion);
+			CompositeDirtyRegion(dirtyRegion, workspace);
 
 		UnlockAllWindows();
 	}
@@ -2803,8 +2838,25 @@ Desktop::MarkDirty(BRegion& dirtyRegion, BRegion& exposeRegion)
 void
 Desktop::Redraw()
 {
-	BRegion dirty(fVirtualScreen.Frame());
-	MarkDirty(dirty);
+	// Multi-GPU: fVirtualScreen.Frame() is the combined span of every
+	// discovered screen's width added together (stock Haiku's "extended
+	// desktop" semantics from VirtualScreen::UpdateFrame()), not any one
+	// screen's own local, (0,0)-based geometry -- using it as a single
+	// dirty region against whichever one screen MarkDirty()'s default
+	// resolves to would both under-cover that screen's real bounds (if
+	// it's the smaller of the two) and feed every other screen's extra
+	// width/height into clamping math that was never meant to see it.
+	// Mark every active screen dirty with its own frame, against its
+	// own displayed workspace, instead.
+	for (int32 i = 0; i < fActiveGpuScreens.CountItems(); i++) {
+		Screen* screen = fActiveGpuScreens.ItemAt(i);
+		int32 workspace = screen->DisplayedWorkspace();
+		if (workspace < 0)
+			workspace = fCurrentWorkspace;
+
+		BRegion dirty(screen->Frame());
+		MarkDirty(dirty, workspace);
+	}
 }
 
 
@@ -2838,7 +2890,7 @@ Desktop::RedrawBackground()
 		window->ProcessDirtyRegion(redraw);
 	} else {
 		redraw = BackgroundRegion();
-		fBackgroundRegion.MakeEmpty();
+		BackgroundRegion().MakeEmpty();
 		_SetBackground(redraw);
 	}
 
@@ -4045,24 +4097,24 @@ Desktop::_SendFakeMouseMoved(Window* window)
 }
 
 
-Screen*
-Desktop::_DetermineScreenFor(BRect frame)
-{
-	AutoReadLocker _(fScreenLock);
-
-	// TODO: choose the screen depending on where most of the area is
-	return fVirtualScreen.ScreenAt(0);
-}
-
-
 void
-Desktop::_RebuildClippingForAllWindows(BRegion& stillAvailableOnScreen)
+Desktop::_RebuildClippingForAllWindows(BRegion& stillAvailableOnScreen,
+	int32 workspace)
 {
+	if (workspace < 0)
+		workspace = fCurrentWorkspace;
+
+	// Multi-GPU: every window in this loop comes from the same
+	// workspace's own list, so they all belong to the same screen --
+	// look it up once instead of per-window, and seed the available
+	// region from THAT screen's own frame instead of a single
+	// Desktop-wide cache (which could be stale/wrong for any screen
+	// other than whichever last ran _ScreenChanged()).
+	Screen* screen = ScreenForWorkspace(workspace);
+
 	// the available region on screen starts with the entire screen area
 	// each window on the screen will take a portion from that area
-
-	// figure out what the entire screen area is
-	stillAvailableOnScreen = fScreenRegion;
+	stillAvailableOnScreen.Set(screen->Frame());
 
 	// Parallel accumulator for CompositingVisibleRegion(): same idea as
 	// stillAvailableOnScreen, except a window carrying
@@ -4071,15 +4123,15 @@ Desktop::_RebuildClippingForAllWindows(BRegion& stillAvailableOnScreen)
 	// Desktop::CompositeDirtyRegion()'s blend there. Windows without the
 	// flag exclude exactly as for stillAvailableOnScreen, so when no
 	// alpha-compositing window is present the two stay identical.
-	BRegion stillAvailableForCompositing(fScreenRegion);
+	BRegion stillAvailableForCompositing(screen->Frame());
 
 	// set clipping of each window
-	for (Window* window = CurrentWindows().LastWindow(); window != NULL;
-			window = window->PreviousWindow(fCurrentWorkspace)) {
+	for (Window* window = _Windows(workspace).LastWindow(); window != NULL;
+			window = window->PreviousWindow(workspace)) {
 		if (!window->IsHidden()) {
 			window->SetClipping(&stillAvailableOnScreen);
 			window->SetCompositingClipping(&stillAvailableForCompositing);
-			window->SetScreen(_DetermineScreenFor(window->Frame()));
+			window->SetScreen(screen);
 
 			if (window->ServerWindow()->IsDirectlyAccessing()) {
 				window->ServerWindow()->HandleDirectConnection(
@@ -4096,11 +4148,15 @@ Desktop::_RebuildClippingForAllWindows(BRegion& stillAvailableOnScreen)
 
 
 void
-Desktop::_TriggerWindowRedrawing(BRegion& dirtyRegion, BRegion& exposeRegion)
+Desktop::_TriggerWindowRedrawing(BRegion& dirtyRegion, BRegion& exposeRegion,
+	int32 workspace)
 {
+	if (workspace < 0)
+		workspace = fCurrentWorkspace;
+
 	// send redraw messages to all windows intersecting the dirty region
-	for (Window* window = CurrentWindows().LastWindow(); window != NULL;
-			window = window->PreviousWindow(fCurrentWorkspace)) {
+	for (Window* window = _Windows(workspace).LastWindow(); window != NULL;
+			window = window->PreviousWindow(workspace)) {
 		if (!window->IsHidden()
 			&& dirtyRegion.Intersects(window->VisibleRegion().Frame()))
 			window->ProcessDirtyRegion(dirtyRegion, exposeRegion);
@@ -4109,25 +4165,41 @@ Desktop::_TriggerWindowRedrawing(BRegion& dirtyRegion, BRegion& exposeRegion)
 
 
 void
-Desktop::_SetBackground(BRegion& background)
+Desktop::_SetBackground(BRegion& background, Screen* screen)
 {
 	// NOTE: the drawing operation is carried out
 	// in the clipping region rebuild, but it is
 	// ok actually, because it also avoids trails on
 	// moving windows
 
+	if (screen == NULL)
+		screen = ScreenForWorkspace(fCurrentWorkspace);
+
+	int32 workspace = screen->DisplayedWorkspace();
+	if (workspace < 0)
+		workspace = fCurrentWorkspace;
+
+	// Multi-GPU: each screen keeps its own "what's not covered by any
+	// window" staleness cache (Screen::BackgroundRegion()) and its own
+	// DrawingEngine, instead of one shared Desktop-wide region/engine --
+	// otherwise a background-fill meant for one screen could land on
+	// (or be suppressed by the staleness check of) a completely
+	// different screen's framebuffer.
+	BRegion& backgroundRegion = screen->BackgroundRegion();
+
 	// remember the region not covered by any windows
 	// and redraw the dirty background
 	BRegion dirtyBackground(background);
-	dirtyBackground.Exclude(&fBackgroundRegion);
+	dirtyBackground.Exclude(&backgroundRegion);
 	dirtyBackground.IntersectWith(&background);
-	fBackgroundRegion = background;
+	backgroundRegion = background;
 	if (dirtyBackground.Frame().IsValid()) {
-		if (GetDrawingEngine()->LockParallelAccess()) {
-			GetDrawingEngine()->FillRegion(dirtyBackground,
-				fWorkspaces[fCurrentWorkspace].Color());
+		DrawingEngine* engine = screen->GetDrawingEngine();
+		if (engine != NULL && engine->LockParallelAccess()) {
+			engine->FillRegion(dirtyBackground,
+				fWorkspaces[workspace].Color());
 
-			GetDrawingEngine()->UnlockParallelAccess();
+			engine->UnlockParallelAccess();
 		}
 	}
 }
@@ -4146,22 +4218,33 @@ Desktop::RebuildAndRedrawAfterWindowChange(Window* changedWindow,
 	// _RebuildClippingForAllWindows(), but will also
 	// take care about restricting our dirty region.
 
+	// Multi-GPU: operate against changedWindow's OWN workspace/screen,
+	// not fCurrentWorkspace -- changedWindow can legitimately be on a
+	// screen other than the one currently focused (e.g. a window
+	// updating itself on a background monitor), and iterating the
+	// globally-focused workspace's window list in that case would both
+	// miss changedWindow entirely and touch unrelated windows.
+	int32 workspace = changedWindow->CurrentWorkspace();
+	if (workspace < 0)
+		workspace = fCurrentWorkspace;
+	Screen* screen = ScreenForWorkspace(workspace);
+
 	// figure out what the entire screen area is
-	BRegion stillAvailableOnScreen(fScreenRegion);
+	BRegion stillAvailableOnScreen(screen->Frame());
 
 	// see _RebuildClippingForAllWindows() for what this is
-	BRegion stillAvailableForCompositing(fScreenRegion);
+	BRegion stillAvailableForCompositing(screen->Frame());
 
 	// set clipping of each window
-	for (Window* window = CurrentWindows().LastWindow(); window != NULL;
-			window = window->PreviousWindow(fCurrentWorkspace)) {
+	for (Window* window = _Windows(workspace).LastWindow(); window != NULL;
+			window = window->PreviousWindow(workspace)) {
 		if (!window->IsHidden()) {
 			if (window == changedWindow)
 				dirty.IntersectWith(&stillAvailableOnScreen);
 
 			window->SetClipping(&stillAvailableOnScreen);
 			window->SetCompositingClipping(&stillAvailableForCompositing);
-			window->SetScreen(_DetermineScreenFor(window->Frame()));
+			window->SetScreen(screen);
 
 			if (window->ServerWindow()->IsDirectlyAccessing()) {
 				window->ServerWindow()->HandleDirectConnection(
@@ -4175,10 +4258,10 @@ Desktop::RebuildAndRedrawAfterWindowChange(Window* changedWindow,
 		}
 	}
 
-	_SetBackground(stillAvailableOnScreen);
+	_SetBackground(stillAvailableOnScreen, screen);
 	_WindowChanged(changedWindow);
 
-	_TriggerWindowRedrawing(dirty, dirty);
+	_TriggerWindowRedrawing(dirty, dirty, workspace);
 }
 
 
@@ -4247,20 +4330,27 @@ Desktop::_ScreenChanged(Screen* screen)
 	// operating on an all new buffer in memory
 	BRegion dirty(screen->Frame());
 
-	// update our cached screen region
-	fScreenRegion.Set(screen->Frame());
 	gInputManager->UpdateScreenBounds(screen->Frame());
 
-	BRegion background;
-	_RebuildClippingForAllWindows(background);
+	// Multi-GPU: operate against the SPECIFIC screen that changed, not
+	// whichever workspace/screen happens to be globally focused -- a
+	// secondary GPU's mode can change while a different screen has
+	// focus, and this must never touch that other screen's clipping,
+	// background, or window list.
+	int32 workspace = screen->DisplayedWorkspace();
+	if (workspace < 0)
+		workspace = fCurrentWorkspace;
 
-	fBackgroundRegion.MakeEmpty();
+	BRegion background;
+	_RebuildClippingForAllWindows(background, workspace);
+
+	screen->BackgroundRegion().MakeEmpty();
 		// makes sure that the complete background is redrawn
-	_SetBackground(background);
+	_SetBackground(background, screen);
 
 	// figure out dirty region
 	dirty.Exclude(&background);
-	_TriggerWindowRedrawing(dirty, dirty);
+	_TriggerWindowRedrawing(dirty, dirty, workspace);
 
 	// send B_SCREEN_CHANGED to windows on that screen
 	BMessage update(B_SCREEN_CHANGED);
@@ -4334,11 +4424,21 @@ Desktop::_SetCurrentWorkspaceConfiguration()
 
 	AutoWriteLocker _(fScreenLock);
 
+	// Multi-GPU: only the screen this workspace actually belongs to
+	// should have its hardware touched here -- SetConfiguration() below
+	// otherwise unconditionally re-runs SetMode()/SetPreferredMode()/
+	// SetBestMode() on every discovered screen on every single workspace
+	// switch, including ones that have nothing to do with it. Ported
+	// from the old MultiGPU branch (commit 82289e7a47), which found this
+	// to be a plausible source of visible disturbance on real hardware
+	// sharing a bus/bridge, not just wasted work.
+	Screen* targetScreen = ScreenForWorkspace(fCurrentWorkspace);
+
 	uint32 changedScreens;
 	fVirtualScreen.SetConfiguration(*this,
 		fWorkspaces[fCurrentWorkspace].StoredScreenConfiguration(),
 		fWorkspaces[fCurrentWorkspace].CurrentScreenConfiguration(),
-		&changedScreens);
+		&changedScreens, targetScreen);
 
 	for (int32 i = 0; changedScreens != 0; i++, changedScreens /= 2) {
 		if ((changedScreens & (1 << i)) != 0)
@@ -4546,6 +4646,17 @@ Desktop::_UpdateActiveGpuScreens()
 		primaryBdf = auto_detected_primary_bdf(allScreens, allBdfs);
 	bool primaryIsFallback = primaryBdf.IsEmpty();
 
+	// Multi-GPU: this decision (which screens end up DPMS_ON/active vs.
+	// DPMS_OFF/skipped) is exactly the kind of thing that's otherwise
+	// invisible on real hardware -- app_server logs nothing here by
+	// default (ATRACE/STRACE are no-ops in release builds). syslog() is
+	// not compiled out; log unconditionally until this has seen enough
+	// real multi-GPU hardware to be trusted blind, same discipline as
+	// the old MultiGPU branch's own diagnostic-logging commits.
+	syslog(LOG_INFO, "Multi-GPU: _UpdateActiveGpuScreens(): %" B_PRId32
+		" screen(s) discovered, primaryBdf=\"%s\"%s", allScreens.CountItems(),
+		primaryBdf.String(), primaryIsFallback ? " (fallback: index 0)" : "");
+
 	ScreenList candidates;
 	BStringList candidateBdfs;
 	for (int32 i = 0; i < allScreens.CountItems(); i++) {
@@ -4559,14 +4670,24 @@ Desktop::_UpdateActiveGpuScreens()
 		} else {
 			edid1_info edid;
 			uint32 version = 0;
-			hasEDID = screen->HWInterface()->GetEDID(&edid, sizeof(edid),
-				&version) == B_OK;
-			if (hasEDID && haveStored && is_edid_unset(stored, bdf))
+			status_t edidStatus = screen->HWInterface()->GetEDID(&edid,
+				sizeof(edid), &version);
+			hasEDID = edidStatus == B_OK;
+			bool unsetOverride = hasEDID && haveStored
+				&& is_edid_unset(stored, bdf);
+			if (unsetOverride)
 				hasEDID = false;
+			syslog(LOG_INFO, "Multi-GPU:   [%" B_PRId32 "] bdf=\"%s\" "
+				"primary=no GetEDID()=%" B_PRId32 " edid_unset_override=%s"
+				" -> hasEDID=%s", i, bdf.String(), (int32)edidStatus,
+				unsetOverride ? "yes" : "no", hasEDID ? "yes" : "no");
 		}
 
 		screen->HWInterface()->SetDPMSMode(
 			hasEDID ? B_DPMS_ON : B_DPMS_OFF);
+		syslog(LOG_INFO, "Multi-GPU:   [%" B_PRId32 "] bdf=\"%s\" primary=%s"
+			" -> DPMS %s", i, bdf.String(), isPrimary ? "yes" : "no",
+			hasEDID ? "ON" : "OFF");
 
 		if (hasEDID) {
 			candidates.AddItem(screen);
@@ -4589,8 +4710,81 @@ Desktop::_UpdateActiveGpuScreens()
 		candidates.RemoveItemAt(j);
 		candidateBdfs.Remove(j, 1);
 	}
+	// Multi-GPU: the determined primary (primaryBdf, computed above --
+	// configured order's first entry, else auto-detected boot primary,
+	// else discovery index 0) must always end up first in
+	// ActiveGpuScreens(), even with no configured order at all. Without
+	// this, whatever's left in `candidates` here is in raw discovery
+	// order, which has no relation to which GPU is primary -- confirmed
+	// on real hardware: ATI was discovered before SM750, so with no
+	// saved gpu_order file SM750 (the actual, correctly-auto-detected
+	// primary) ended up second, meaning workspace 0 -- where every app,
+	// Tracker's desktop window, and the boot-time cursor all land by
+	// default -- was bound to ATI instead. Insert the primary first if
+	// it's still an unplaced candidate (the configured-order loop above
+	// already placed it if the user's saved order listed it explicitly).
+	if (!primaryBdf.IsEmpty()) {
+		int32 primaryIndex = candidateBdfs.IndexOf(primaryBdf);
+		if (primaryIndex >= 0) {
+			fActiveGpuScreens.AddItem(candidates.ItemAt(primaryIndex));
+			candidates.RemoveItemAt(primaryIndex);
+			candidateBdfs.Remove(primaryIndex, 1);
+		}
+	}
 	for (int32 j = 0; j < candidates.CountItems(); j++)
 		fActiveGpuScreens.AddItem(candidates.ItemAt(j));
+
+	// Multi-GPU: give each active screen its own initial displayed
+	// workspace -- the first workspace of the row it owns (row i, for
+	// screen index i in this list; see ScreenForWorkspace()). Screens
+	// not in this list (DPMS_OFF, no monitor) keep whatever they had.
+	int32 columns = fSettings.IsSet() ? fSettings->WorkspacesColumns() : 1;
+	if (columns < 1)
+		columns = 1;
+	for (int32 i = 0; i < fActiveGpuScreens.CountItems(); i++)
+		fActiveGpuScreens.ItemAt(i)->SetDisplayedWorkspace(i * columns);
+
+	syslog(LOG_INFO, "Multi-GPU: result: %" B_PRId32 " active screen(s),"
+		" columns=%" B_PRId32, fActiveGpuScreens.CountItems(), columns);
+	for (int32 i = 0; i < fActiveGpuScreens.CountItems(); i++) {
+		Screen* screen = fActiveGpuScreens.ItemAt(i);
+		syslog(LOG_INFO, "Multi-GPU:   active[%" B_PRId32 "] bdf=\"%s\""
+			" displayedWorkspace=%" B_PRId32, i, screen_bdf(screen).String(),
+			screen->DisplayedWorkspace());
+	}
+
+	// Multi-GPU: pin VirtualScreen's single legacy interface (the thing
+	// Desktop::HWInterface()/GetDrawingEngine() still forward to, relied
+	// on by every pre-existing, non-multi-GPU-aware caller -- ServerApp's
+	// BScreen-style mode/DPMS/brightness/EDID queries among others) to
+	// the primary we just determined, instead of leaving it on whatever
+	// screen VirtualScreen::AddScreen() happened to iterate last.
+	if (fActiveGpuScreens.CountItems() > 0)
+		fVirtualScreen.SetPrimaryInterface(fActiveGpuScreens.ItemAt(0));
+}
+
+
+/*!	Multi-GPU: which active screen owns \a workspace's row (row =
+	workspace / columns, screen = row % ActiveGpuScreens().CountItems(),
+	cycling if there are more rows than active GPUs). Falls back to
+	fVirtualScreen.ScreenAt(0) when there are no active GPU screens yet
+	(very early boot, before the first _UpdateActiveGpuScreens() call) --
+	same single screen every other code path already assumes at that
+	point. With zero or one active GPU screens (today's single-GPU case),
+	this always returns that same one screen for every workspace.
+*/
+Screen*
+Desktop::ScreenForWorkspace(int32 workspace) const
+{
+	if (fActiveGpuScreens.CountItems() == 0)
+		return fVirtualScreen.ScreenAt(0);
+
+	int32 columns = fSettings.IsSet() ? fSettings->WorkspacesColumns() : 1;
+	if (columns < 1)
+		columns = 1;
+
+	int32 row = workspace / columns;
+	return fActiveGpuScreens.ItemAt(row % fActiveGpuScreens.CountItems());
 }
 
 
@@ -4718,30 +4912,49 @@ Desktop::_SetWorkspace(int32 index, bool moveFocusWindow)
 
 	BRegion dirty;
 
-	for (Window* window = CurrentWindows().FirstWindow();
-			window != NULL; window = window->NextWindow(previousIndex)) {
-		// store current position in Workspace anchor
-		window->Anchor(previousIndex).position = window->Frame().LeftTop();
+	// Multi-GPU: previousIndex and index can belong to entirely
+	// different screens (switching global focus from one GPU's row to
+	// another's) -- in that case previousIndex's screen isn't changing
+	// at all and must be left completely alone: don't deactivate its
+	// windows, don't mark anything dirty, don't clear their current-
+	// workspace membership. Only run this "leaving" bookkeeping when
+	// previousIndex and index actually share the same screen (including
+	// the ordinary single-GPU case, where they always do).
+	Screen* targetScreen = ScreenForWorkspace(index);
+	if (ScreenForWorkspace(previousIndex) == targetScreen) {
+		for (Window* window = CurrentWindows().FirstWindow();
+				window != NULL; window = window->NextWindow(previousIndex)) {
+			// store current position in Workspace anchor
+			window->Anchor(previousIndex).position = window->Frame().LeftTop();
 
-		if (!window->IsHidden()
-			&& window->ServerWindow()->IsDirectlyAccessing())
-			window->ServerWindow()->HandleDirectConnection(B_DIRECT_STOP);
+			if (!window->IsHidden()
+				&& window->ServerWindow()->IsDirectlyAccessing())
+				window->ServerWindow()->HandleDirectConnection(B_DIRECT_STOP);
 
-		window->WorkspaceActivated(previousIndex, false);
+			window->WorkspaceActivated(previousIndex, false);
 
-		if (window->InWorkspace(index))
-			continue;
+			if (window->InWorkspace(index))
+				continue;
 
-		if (!window->IsHidden()) {
-			// this window will no longer be visible
-			dirty.Include(&window->VisibleRegion());
+			if (!window->IsHidden()) {
+				// this window will no longer be visible
+				dirty.Include(&window->VisibleRegion());
+			}
+
+			window->SetCurrentWorkspace(-1);
 		}
-
-		window->SetCurrentWorkspace(-1);
 	}
 
 	fPreviousWorkspace = fCurrentWorkspace;
 	fCurrentWorkspace = index;
+	targetScreen->SetDisplayedWorkspace(index);
+
+	// Multi-GPU: the mouse cursor (EventDispatcher's MoveCursorTo target)
+	// must follow focus to whichever screen now owns the current
+	// workspace -- EventDispatcher caches this pointer and is never asked
+	// to re-resolve it on its own (see EventDispatcher::SetHWInterface()'s
+	// only other caller, in Desktop::Init()).
+	fEventDispatcher.SetHWInterface(targetScreen->HWInterface());
 
 	// Change the display modes, if needed
 	_SetCurrentWorkspaceConfiguration();
@@ -4799,6 +5012,24 @@ Desktop::_SetWorkspace(int32 index, bool moveFocusWindow)
 	_UpdateFronts(false);
 	_UpdateFloating(previousIndex, index,
 		movedMouseEventWindow ? movedWindow : NULL);
+
+	// Multi-GPU: _SetBackground() below only repaints the part of its
+	// given region that Screen::BackgroundRegion() doesn't already
+	// believe is background -- a safe optimization when the compositor
+	// rebuilds the whole picture from each window's own backing bitmap
+	// every frame regardless. Without a compositor (direct rendering
+	// straight onto the physical framebuffer), that assumption breaks
+	// across a workspace switch: an area the OLD workspace's now-hidden
+	// windows were actually still drawn over physically stays exactly as
+	// it was, even though BackgroundRegion() still believes it's already
+	// correctly painted background from some earlier, unrelated
+	// computation -- leaving stale pixels from the previous workspace
+	// visible as "background" in the new one. Force a full background
+	// repaint on every switch when there's no compositor to rebuild the
+	// picture some other way. Ported from the old MultiGPU branch
+	// (commit 82289e7a47).
+	if (!fCompositor2DEnabled)
+		targetScreen->BackgroundRegion().MakeEmpty();
 
 	BRegion stillAvailableOnScreen;
 	_RebuildClippingForAllWindows(stillAvailableOnScreen);

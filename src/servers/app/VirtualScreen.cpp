@@ -51,7 +51,8 @@ VirtualScreen::_Reset()
 
 status_t
 VirtualScreen::SetConfiguration(Desktop& desktop, const ScreenConfigurations& configurations,
-	ScreenConfigurations& currentConfigurations, uint32* _changedScreens)
+	ScreenConfigurations& currentConfigurations, uint32* _changedScreens,
+	Screen* onlyReconfigure)
 {
 	// Remember previous screen modes
 
@@ -90,7 +91,20 @@ VirtualScreen::SetConfiguration(Desktop& desktop, const ScreenConfigurations& co
 	for (int32 i = 0; i < list.CountItems(); i++) {
 		Screen* screen = list.ItemAt(i);
 
-		AddScreen(screen, configurations, currentConfigurations);
+		// Multi-GPU: when the caller only actually cares about one
+		// specific screen (a workspace switch, or any other targeted
+		// reconfiguration -- never the very first, whole-desktop setup,
+		// which still passes onlyReconfigure == NULL and reconfigures
+		// everyone as before), leave every OTHER screen's hardware
+		// completely untouched instead of unconditionally re-running
+		// SetMode()/SetPreferredMode()/SetBestMode() on it too. Ported
+		// from the old MultiGPU branch (commit 82289e7a47): on real
+		// multi-GPU hardware sharing a bus/bridge, re-driving a screen
+		// that isn't even changing is wasteful at best and a plausible
+		// source of visible disturbance to whatever screen actually IS
+		// changing at worst.
+		bool touchHardware = onlyReconfigure == NULL || screen == onlyReconfigure;
+		AddScreen(screen, configurations, currentConfigurations, touchHardware);
 
 		if (!previousModesFailed && _changedScreens != NULL) {
 			// Figure out which screens have changed their mode
@@ -111,7 +125,7 @@ VirtualScreen::SetConfiguration(Desktop& desktop, const ScreenConfigurations& co
 
 status_t
 VirtualScreen::AddScreen(Screen* screen, const ScreenConfigurations& configurations,
-	ScreenConfigurations& currentConfigurations)
+	ScreenConfigurations& currentConfigurations, bool touchHardware)
 {
 	screen_item* item = new(std::nothrow) screen_item;
 	if (item == NULL)
@@ -119,30 +133,40 @@ VirtualScreen::AddScreen(Screen* screen, const ScreenConfigurations& configurati
 
 	item->screen = screen;
 
-	status_t status = B_ERROR;
 	display_mode mode;
-	if (_GetMode(screen, configurations, mode) == B_OK) {
-		// we found settings for this screen, and try to apply them now
-		status = screen->SetMode(mode);
-	}
 
-	if (status != B_OK) {
-		// We found no configuration or it wasn't valid, try to fallback to
-		// sane values
-		status = screen->SetPreferredMode();
-		if (status == B_OK) {
-			screen->GetMode(mode);
+	if (!touchHardware) {
+		// Multi-GPU: this screen isn't the one this reconfiguration is
+		// actually targeting -- just register it with whatever mode it's
+		// already running, without issuing a single SetMode()/
+		// SetPreferredMode()/SetBestMode() hardware call. See the caller
+		// in SetConfiguration() for why.
+		screen->GetMode(mode);
+	} else {
+		status_t status = B_ERROR;
+		if (_GetMode(screen, configurations, mode) == B_OK) {
+			// we found settings for this screen, and try to apply them now
+			status = screen->SetMode(mode);
 		}
-		if (status != B_OK)
-			status = screen->SetBestMode(1024, 768, B_RGB32, 60.f);
-		if (status != B_OK)
-			status = screen->SetBestMode(800, 600, B_RGB32, 60.f, false);
-		if (status != B_OK) {
-			debug_printf("app_server: Failed to set mode: %s\n",
-				strerror(status));
 
-			delete item;
-			return status;
+		if (status != B_OK) {
+			// We found no configuration or it wasn't valid, try to fallback
+			// to sane values
+			status = screen->SetPreferredMode();
+			if (status == B_OK) {
+				screen->GetMode(mode);
+			}
+			if (status != B_OK)
+				status = screen->SetBestMode(1024, 768, B_RGB32, 60.f);
+			if (status != B_OK)
+				status = screen->SetBestMode(800, 600, B_RGB32, 60.f, false);
+			if (status != B_OK) {
+				debug_printf("app_server: Failed to set mode: %s\n",
+					strerror(status));
+
+				delete item;
+				return status;
+			}
 		}
 	}
 
@@ -159,6 +183,22 @@ VirtualScreen::AddScreen(Screen* screen, const ScreenConfigurations& configurati
 	fScreenList.AddItem(item);
 
 	return B_OK;
+}
+
+
+void
+VirtualScreen::SetPrimaryInterface(Screen* screen)
+{
+	// Multi-GPU: see the comment on HWInterface() in the header -- this
+	// does not make fHWInterface/fDrawingEngine multiplex per caller,
+	// it just corrects which ONE screen they consistently point to
+	// (the primary, per Desktop::ActiveGpuScreens(), instead of
+	// whichever AddScreen() call happened to run last).
+	if (screen == NULL)
+		return;
+
+	fDrawingEngine = screen->GetDrawingEngine();
+	fHWInterface = screen->HWInterface();
 }
 
 

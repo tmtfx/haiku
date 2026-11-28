@@ -8,6 +8,7 @@
 #include <string.h>
 #include <SupportDefs.h>
 #include <boot_item.h>
+#include <boot_primary_ownership.h>
 
 #include <frame_buffer_console.h>
 #include <stdlib.h>
@@ -217,9 +218,20 @@ static void draw_logo(DeviceInfo *di, display_mode* dm) {
     if (startX < 0) startX = 0;
     if (startY < 0) startY = 0;
 
+    // screenWidth/screenHeight/bytesPerRow come from dm/si->fbc, which on
+    // a multi-GPU boot were themselves sized against
+    // FRAME_BUFFER_BOOT_INFO -- the boot loader's chosen primary card,
+    // not necessarily this device. fb/fb_size are this device's own
+    // mapped VRAM BAR. If that borrowed geometry doesn't actually fit
+    // this card's own, smaller VRAM, fbIndex can run past fb_size and
+    // corrupt whatever kernel memory follows the mapped area.
+    uint32 fbCapacityWords = fb_size / 4;
+
     for (uint32 y = 0; y < logoH && (startY + (int32)y) < (int32)screenHeight; y++) {
         for (uint32 x = 0; x < logoW && (startX + (int32)x) < (int32)screenWidth; x++) {
             uint32 fbIndex = (uint32)((startY + (int32)y) * (int32)fbPitch + (startX + (int32)x));
+            if (fbIndex >= fbCapacityWords)
+                continue;
             fb[fbIndex] = sm750_logo[y * logoW + x];
         }
     }
@@ -433,7 +445,15 @@ void sm750_init_chip(DeviceInfo *di) {
     bool showLogo = false;
     display_mode *dm = si->card_info.is_panel ? &si->preferred_mode : &si->preferred_mode2;
     struct frame_buffer_boot_info* bi = (struct frame_buffer_boot_info*)get_boot_item(FRAME_BUFFER_BOOT_INFO, NULL);
-    if (bi) {
+    /* Multi-GPU: bi describes whichever card the boot loader actually
+     * used -- if that's not this device, its width/height/depth belong
+     * to a different card's mode entirely and must not be used to seed
+     * this device's own preferred mode or "real framebuffer size". When
+     * this device isn't the boot primary, fall through exactly as if
+     * bi were NULL (same path already exercised when no boot info is
+     * available at all, e.g. safe mode). If this device IS primary
+     * (today's actual hardware), behavior is unchanged. */
+    if (bi && boot_framebuffer_belongs_to_this_device(&di->pci)) {
         uint32 bpp = 32;
         si->real_framebuffer_size = bi->width * bi->height * (bpp / 8);
         

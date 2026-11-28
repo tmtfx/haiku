@@ -15,6 +15,7 @@
 #include <Accelerant.h>
 #include <GraphicsDefs.h>
 #include <Point.h>
+#include <Region.h>
 
 
 class DrawingEngine;
@@ -55,6 +56,23 @@ public:
 	inline	::HWInterface*		HWInterface() const
 									{ return fHWInterface.Get(); }
 
+			// Multi-GPU: which workspace this screen is currently showing
+			// live, independent of whichever workspace has global
+			// keyboard/mouse focus (Desktop::fCurrentWorkspace) -- see
+			// Desktop::ScreenForWorkspace(). -1 means "not currently
+			// assigned a workspace row" (not in Desktop::ActiveGpuScreens()).
+			int32				DisplayedWorkspace() const
+									{ return fDisplayedWorkspace; }
+			void				SetDisplayedWorkspace(int32 workspace)
+									{ fDisplayedWorkspace = workspace; }
+
+			// Multi-GPU: this screen's own "what's not covered by any
+			// window" staleness cache, used by Desktop::_SetBackground()
+			// so each screen tracks its own background independently
+			// instead of sharing one Desktop-wide region.
+			BRegion&			BackgroundRegion()
+									{ return fBackgroundRegion; }
+
 private:
 			int32				_FindBestMode(const display_mode* modeList,
 									uint32 count, uint16 width, uint16 height,
@@ -65,6 +83,8 @@ private:
 								fHWInterface;
 			ObjectDeleter<DrawingEngine>
 								fDriver;
+			int32				fDisplayedWorkspace;
+			BRegion				fBackgroundRegion;
 };
 
 #endif	/* SCREEN_H */

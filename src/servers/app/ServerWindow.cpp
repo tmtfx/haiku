@@ -2629,7 +2629,7 @@ ServerWindow::_DispatchViewDrawingMessage(int32 code,
 				fWindow->GetContentRegion(&content);
 				dirty.IntersectWith(&content);
 				if (dirty.CountRects() > 0)
-					fDesktop->CompositeDirtyRegion(dirty);
+					fDesktop->CompositeDirtyRegion(dirty, fWindow->CurrentWorkspace());
 			}
 			break;
 		}
@@ -2672,7 +2672,7 @@ ServerWindow::_DispatchViewDrawingMessage(int32 code,
 				fWindow->GetContentRegion(&content);
 				dirty.IntersectWith(&content);
 				if (dirty.CountRects() > 0)
-					fDesktop->CompositeDirtyRegion(dirty);
+					fDesktop->CompositeDirtyRegion(dirty, fWindow->CurrentWorkspace());
 			}
 			break;
 		}
@@ -2766,7 +2766,7 @@ ServerWindow::_DispatchViewDrawingMessage(int32 code,
 					fWindow->GetContentRegion(&content);
 					dirty.IntersectWith(&content);
 					if (dirty.CountRects() > 0)
-						fDesktop->CompositeDirtyRegion(dirty);
+						fDesktop->CompositeDirtyRegion(dirty, fWindow->CurrentWorkspace());
 				}
 			}
 			break;
@@ -3188,7 +3188,7 @@ ServerWindow::_DispatchViewDrawingMessage(int32 code,
 				fWindow->GetContentRegion(&content);
 				dirty.IntersectWith(&content);
 				if (dirty.CountRects() > 0)
-					fDesktop->CompositeDirtyRegion(dirty);
+					fDesktop->CompositeDirtyRegion(dirty, fWindow->CurrentWorkspace());
 			}
 			break;
 		}
@@ -4558,10 +4558,17 @@ Window*
 ServerWindow::MakeWindow(BRect frame, const char* name,
 	window_look look, window_feel feel, uint32 flags, uint32 workspace)
 {
-	// The non-offscreen ServerWindow uses the DrawingEngine instance from
-	// the desktop.
+	// Multi-GPU: bind to whichever screen owns the currently-focused
+	// workspace -- a window opens where the user's focus currently is,
+	// not at fDesktop->HWInterface() (the single Desktop-wide interface,
+	// which the multi-screen architecture no longer treats as "the"
+	// screen). Never rebound after this: see Window::AllocateBackingStore()/
+	// FreeBackingStore() for the one safe, unrelated exception (a
+	// temporary offscreen bitmap swap for the 2D compositor).
+	::HWInterface* targetInterface = fDesktop->ScreenForWorkspace(
+		fDesktop->CurrentWorkspace())->HWInterface();
 	::Window* window = new(std::nothrow) ::Window(frame, name, look, feel, flags,
-		workspace, this, fDesktop->HWInterface()->CreateDrawingEngine());
+		workspace, this, targetInterface->CreateDrawingEngine());
 	if (window != NULL && fDesktop->Compositor2DEnabled())
 		window->AllocateBackingStore();
 
@@ -4680,7 +4687,7 @@ ServerWindow::_NotifyCompositorIfNeeded(BRegion& dirty)
 	fWindow->GetContentRegion(&content);
 	dirty.IntersectWith(&content);
 	if (dirty.CountRects() > 0)
-		fDesktop->CompositeDirtyRegion(dirty);
+		fDesktop->CompositeDirtyRegion(dirty, fWindow->CurrentWorkspace());
 }
 
 

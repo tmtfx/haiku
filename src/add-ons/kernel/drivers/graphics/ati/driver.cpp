@@ -304,12 +304,26 @@ static void draw_ati_logo_safe(DeviceInfo& di, struct frame_buffer_boot_info *bi
     if (startX < 0) startX = 0;
     if (startY < 0) startY = 0;
 
+    // screenWidth/screenHeight/bytesPerRow above come from the boot
+    // loader's FRAME_BUFFER_BOOT_INFO, which describes whichever single
+    // card the boot loader actually used -- on a multi-GPU boot that is
+    // NOT necessarily this device. fb/fb_size, in contrast, are this
+    // device's own mapped VRAM BAR. Clipping against the borrowed
+    // screenWidth/screenHeight (done above) is not enough on its own: if
+    // this card's own VRAM BAR turns out smaller than what that borrowed
+    // geometry implies, fbIndex can still run past fb_size and corrupt
+    // whatever kernel memory follows the mapped area. Guard every write
+    // against the area we actually mapped, not just the borrowed bounds.
+    uint32 fbCapacityWords = fb_size / 4;
+
     // Ciclo di copia pixel corazzato contro i fuori-confine di memoria
     for (uint32 y = 0; y < logoH && (startY + (int32)y) < (int32)screenHeight; y++) {
         for (uint32 x = 0; x < logoW && (startX + (int32)x) < (int32)screenWidth; x++) {
             uint32 fbIndex = (uint32)((startY + (int32)y) * (int32)fbPitch + (startX + (int32)x));
+            if (fbIndex >= fbCapacityWords)
+                continue;
             uint32 logoIndex = y * logoW + x;
-            
+
             fb[fbIndex] = logo_data[logoIndex];
         }
     }
@@ -491,20 +505,50 @@ Mach64_GetBiosParameters(DeviceInfo& di, uint8& clockType)
 	si.panelX = 0;
 	si.panelY = 0;
 
-	// Map the ROM area.  The Mach64 chips do not assign a ROM address in the
-	// PCI info;  thus, access the ROM via the ISA legacy memory map.
+	// Map the ROM area.  Prefer the card's own PCI expansion ROM BAR when
+	// the PCI bus manager assigned it one: the ISA legacy shadow below
+	// only ever contains the boot-primary VGA's ROM (shadowed there by
+	// firmware POST), so for any other card -- or on hardware that
+	// simply never shadows this card's ROM there at all -- it silently
+	// reads whichever ROM happens to be shadowed there instead (or
+	// nothing valid at all), producing a bogus clockType. Same issue
+	// and the same fallback already exist in this tree's nvidia driver.
 
-	uint8* romAddr;
-	area_id romArea = map_physical_memory("ATI Mach64 ROM",
+	uint8* romAddr = NULL;
+	area_id romArea = -1;
+	uint32 romBasePci = di.pciInfo.u.h0.rom_base_pci;
+
+	if (romBasePci != 0) {
+		uint32 romBaseReg = GetPCI(di.pciInfo, PCI_rom_base, 4);
+		SetPCI(di.pciInfo, PCI_rom_base, 4, romBaseReg | 1);
+			// enable ROM decode, per the PCI spec
+
+		romArea = map_physical_memory("ATI Mach64 PCI ROM", romBasePci,
+			di.pciInfo.u.h0.rom_size, B_ANY_KERNEL_ADDRESS,
+			B_KERNEL_READ_AREA, (void**)&romAddr);
+
+		if (romArea >= 0 && (BIOS8(0) != 0x55 || BIOS8(1) != 0xaa)) {
+			// Nothing valid mapped there after all; fall back below.
+			delete_area(romArea);
+			romArea = -1;
+		}
+
+		SetPCI(di.pciInfo, PCI_rom_base, 4, romBaseReg);
+			// restore the original decode state
+	}
+
+	if (romArea < 0) {
+		romArea = map_physical_memory("ATI Mach64 ROM",
 #if defined(__x86__) || defined(__x86_64__)
-		0x000c0000,
+			0x000c0000,
 #else
-		di.pciInfo.u.h0.rom_base,
+			di.pciInfo.u.h0.rom_base,
 #endif
-		M64_BIOS_SIZE,
-		B_ANY_KERNEL_ADDRESS,
-		B_KERNEL_READ_AREA,
-		(void**)&(romAddr));
+			M64_BIOS_SIZE,
+			B_ANY_KERNEL_ADDRESS,
+			B_KERNEL_READ_AREA,
+			(void**)&(romAddr));
+	}
 
 	if (romArea < 0) {
 		TRACE("Mach64_GetBiosParameters(), ROM mapping error: %" B_PRId32 "\n",
@@ -914,11 +958,18 @@ InitDevice(DeviceInfo& di)
 	si.bypassEdid = load_edid_override("ati.settings", &si.edidInfo) == B_OK;
 	si.bHaveEDID = si.bypassEdid;
 
-	if (!si.bypassEdid) {
-		// This card is the primary display: the bootloader may already have
-		// a decoded EDID from VESA/VBE (frame_buffer_console.cpp). Prefer it
-		// over GetEdidFromBIOS() below, which replays the real-mode video
-		// BIOS via the generic "bios" kernel module.
+	if (!si.bypassEdid && boot_framebuffer_belongs_to_this_device(&pciInfo)) {
+		// This card is the actual boot-primary display: the bootloader
+		// may already have a decoded EDID from VESA/VBE (frame_buffer_
+		// console.cpp). Prefer it over GetEdidFromBIOS() below, which
+		// replays the real-mode video BIOS via the generic "bios" kernel
+		// module. Multi-GPU: VESA_EDID_BOOT_INFO describes whichever card
+		// the boot loader actually used, not necessarily this one -- on a
+		// secondary card, inheriting it unconditionally steals the
+		// *other* card's monitor's EDID (confirmed on real hardware: an
+		// ATI Rage XL secondary wrongly inherited the SM750 primary's
+		// monitor EDID this way). A secondary card now falls through to
+		// its own GetEdidFromBIOS()/DDC path below instead.
 		edid1_info* bootEdid = (edid1_info*)get_boot_item(VESA_EDID_BOOT_INFO,
 			NULL);
 		if (bootEdid != NULL) {
@@ -980,9 +1031,15 @@ InitDevice(DeviceInfo& di)
 
 	TRACE("Interrupt assigned:  %s\n", si.bInterruptAssigned ? "yes" : "no");
 #ifdef IS_PIRATI_BUILD
-	if (enable_logo && bi != NULL) {
+	// Multi-GPU: only draw if this device actually owns the boot
+	// loader's framebuffer -- bi describes whichever card the boot
+	// loader actually used, and drawing with that geometry into a
+	// different card's own (possibly much smaller) mapped VRAM BAR is
+	// an out-of-bounds kernel write, with no onscreen benefit anyway.
+	if (enable_logo && bi != NULL
+		&& boot_framebuffer_belongs_to_this_device(&pciInfo)) {
 		// Passiamo di (o pd) e il bi recuperato a inizio open_hook
-		draw_ati_logo_safe(di,bi); 
+		draw_ati_logo_safe(di,bi);
 		snooze(2000000);
 	}
 #endif

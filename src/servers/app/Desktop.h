@@ -139,6 +139,19 @@ public:
 
 			const ::VirtualScreen& VirtualScreen() const
 									{ return fVirtualScreen; }
+			// NOTE: deliberately NOT focus-resolved (see
+			// ScreenForWorkspace() for that) -- this stays the single,
+			// stable interface every pre-existing, unrelated caller
+			// (ServerApp's BScreen-style mode/DPMS/brightness/EDID
+			// queries, ServerWindow, etc.) has always assumed is "the"
+			// one interface, exactly as before multi-GPU work started.
+			// Redefining this to resolve per-focused-screen was tried and
+			// reverted: its blast radius extends to every one of those
+			// unrelated callers, not just the cursor-routing bug it was
+			// meant to fix, and broke far more than it repaired on real
+			// hardware. See Desktop::Init()'s cursor lines and
+			// _SetWorkspace()'s fEventDispatcher.SetHWInterface() call
+			// for the narrow, call-site-local fix instead.
 			DrawingEngine*		GetDrawingEngine() const
 									{ return fVirtualScreen.DrawingEngine(); }
 			::HWInterface*		HWInterface() const
@@ -147,7 +160,8 @@ public:
 			bool				Compositor2DEnabled() const
 									{ return fCompositor2DEnabled; }
 			void				SetCompositor2DEnabled(bool enabled);
-			void				CompositeDirtyRegion(BRegion& dirtyRegion);
+			void				CompositeDirtyRegion(BRegion& dirtyRegion,
+									int32 workspace = -1);
 
 			// Multi-GPU: the screens currently eligible for a workspace
 			// row (i.e. they have a usable EDID, or are the primary --
@@ -157,6 +171,13 @@ public:
 			const ScreenList&	ActiveGpuScreens() const
 									{ return fActiveGpuScreens; }
 			bool				AllActiveGpusHaveHardwareCursor() const;
+
+			// Multi-GPU: which active screen a given workspace belongs to
+			// (row = workspace / columns, screen = that row's GPU, cycling
+			// if there are more rows than active GPUs). With zero or one
+			// active GPU screens, always returns the same single screen --
+			// identical to today's behavior.
+			Screen*				ScreenForWorkspace(int32 workspace) const;
 
 			// Call after anything that can change which screens belong
 			// in ActiveGpuScreens() or their order: a screen's EDID
@@ -272,16 +293,28 @@ public:
 									team_id teamID);
 			EventTarget*		FindTarget(BMessenger& messenger);
 
-			void				MarkDirty(BRegion& dirtyRegion, BRegion& exposeRegion);
-			void				MarkDirty(BRegion& region)
-									{ return MarkDirty(region, region); }
+			// Multi-GPU: \a workspace (default -1 = fCurrentWorkspace)
+			// says which screen's own window list/HWInterface this dirty
+			// region belongs to -- lets a window on a screen other than
+			// the focused one keep redrawing itself live. See
+			// Window::MarkDirty(), which passes its own workspace.
+			void				MarkDirty(BRegion& dirtyRegion,
+									BRegion& exposeRegion,
+									int32 workspace = -1);
+			void				MarkDirty(BRegion& region, int32 workspace = -1)
+									{ return MarkDirty(region, region, workspace); }
 			void				Redraw();
 			void				RedrawBackground();
 
 			bool				ReloadDecor(DecorAddOn* oldDecor);
 
+			// Multi-GPU: the focused workspace's own screen's background
+			// staleness cache (see Screen::BackgroundRegion()) -- kept
+			// per-screen now, this just delegates to whichever screen
+			// currently has focus.
 			BRegion&			BackgroundRegion()
-									{ return fBackgroundRegion; }
+									{ return ScreenForWorkspace(
+										fCurrentWorkspace)->BackgroundRegion(); }
 
 			void				MinimizeApplication(team_id team);
 			void				BringApplicationToFront(team_id team);
@@ -342,12 +375,14 @@ private:
 									const Window* lastWindowUnderMouse);
 			void				_SendFakeMouseMoved(Window* window = NULL);
 
-			Screen*				_DetermineScreenFor(BRect frame);
 			void				_RebuildClippingForAllWindows(
-									BRegion& stillAvailableOnScreen);
+									BRegion& stillAvailableOnScreen,
+									int32 workspace = -1);
 			void				_TriggerWindowRedrawing(
-									BRegion& dirtyRegion, BRegion& exposeRegion);
-			void				_SetBackground(BRegion& background);
+									BRegion& dirtyRegion, BRegion& exposeRegion,
+									int32 workspace = -1);
+			void				_SetBackground(BRegion& background,
+									Screen* screen = NULL);
 
 			status_t			_ActivateApp(team_id team);
 
@@ -400,9 +435,6 @@ private:
 			ServerCursorReference fManagementCursor;
 
 			MultiLocker			fWindowLock;
-
-			BRegion				fBackgroundRegion;
-			BRegion				fScreenRegion;
 
 			Window*				fMouseEventWindow;
 			const Window*		fWindowUnderMouse;
